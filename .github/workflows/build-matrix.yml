@@ -1,0 +1,36 @@
+name: Generate Build Matrix
+
+on:
+  workflow_call:
+    outputs:
+      matrix:
+        description: "Build matrix JSON for strategy.matrix"
+        value: ${{ jobs.generate.outputs.matrix }}
+      platforms:
+        description: "Array of enabled platform names"
+        value: ${{ jobs.generate.outputs.platforms }}
+
+jobs:
+  generate:
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      platforms: ${{ steps.matrix.outputs.platforms }}
+    steps:
+      - name: Generate build matrix
+        id: matrix
+        run: |
+          # Build matrix from all targets, filtering by repo variables (default enabled)
+          # Set ENABLE_DARWIN_ARM64, ENABLE_DARWIN_X64, or ENABLE_LINUX_X64 to "false" to disable
+          ALL='[
+            {"os":"macos-latest","platform":"darwin-arm64","var":"${{ vars.ENABLE_DARWIN_ARM64 }}"},
+            {"os":"macos-15-intel","platform":"darwin-x64","var":"${{ vars.ENABLE_DARWIN_X64 }}"},
+            {"os":"blacksmith-2vcpu-ubuntu-2404","platform":"linux-x64","var":"${{ vars.ENABLE_LINUX_X64 }}"}
+          ]'
+          MATRIX=$(echo "$ALL" | jq -c '{include: [.[] | select(.var != "false") | del(.var)]}')
+          PLATFORMS=$(echo "$ALL" | jq -c '[.[] | select(.var != "false") | .platform]')
+
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
+          echo "Generated matrix: $MATRIX"
+          echo "Enabled platforms: $PLATFORMS"

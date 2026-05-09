@@ -1,0 +1,29 @@
+{
+  "name": "@bizimind/channel",
+  "version": "0.1.0",
+  "description": "WebSocket channel client for peer-to-peer communication via relay",
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

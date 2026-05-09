@@ -1,0 +1,36 @@
+{
+  "name": "@bizimind/excalidraw-cli",
+  "version": "0.1.0",
+  "description": "CLI for agents to create, edit, and view Excalidraw diagrams",
+  "bin": {
+    "excalidraw": "./src/cli.ts"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/cli.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun run build.ts",
+    "install-global": "bun run install.ts",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@bizimind/cli-common": "workspace:*",
+    "@excalidraw/element": "0.18.0-4a5c9e9",
+    "@excalidraw/mermaid-to-excalidraw": "^2.2.2",
+    "@excalidraw/utils": "^0.1.2",
+    "@napi-rs/canvas": "^0.1.68",
+    "commander": "^14.0.2",
+    "linkedom": "^0.18.12",
+    "roughjs": "^4.6.6",
+    "svg-path-bbox": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.15.21"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

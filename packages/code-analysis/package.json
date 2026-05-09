@@ -1,0 +1,27 @@
+{
+  "name": "@bizimind/code-analysis",
+  "version": "0.1.1",
+  "description": "Live code visualization CLI — treemaps, graphs, and more",
+  "bin": {
+    "code-analysis": "./src/cli.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun run build.ts",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@bizimind/cli-common": "workspace:*",
+    "commander": "^14.0.2",
+    "dependency-cruiser": "^16.0.0",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.15.21"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

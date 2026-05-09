@@ -1,0 +1,143 @@
+name: Issues Generator
+
+on:
+  workflow_dispatch:
+    inputs:
+      n:
+        description: "Number of issues to generate"
+        required: false
+        default: 1
+        type: number
+      prompt:
+        description: "Custom prompt (skips task type randomization)"
+        required: false
+        type: string
+      task_type:
+        description: "Task type (optional, randomized if not chosen)"
+        required: false
+        type: choice
+        options:
+          - ""
+          - idea
+          - feature
+          - optimization
+          - test
+          - refactor
+          - chore
+          - docs
+          - epic
+
+jobs:
+  setup:
+    name: Setup matrix
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    outputs:
+      matrix: ${{ steps.generate.outputs.matrix }}
+    steps:
+      - name: Generate matrix
+        id: generate
+        run: |
+          N=${{ inputs.n || '1' }}
+          INDICES=$(seq 0 $((N - 1)) | jq -R . | jq -sc .)
+          echo "matrix=$INDICES" >> $GITHUB_OUTPUT
+
+  generate:
+    name: Generate issue ${{ matrix.index }}
+    needs: setup
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        index: ${{ fromJson(needs.setup.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: ./.github/actions/setup-claude
+
+      - name: Generate base prompt and mood
+        id: base
+        env:
+          USER_PROMPT: ${{ inputs.prompt }}
+          TASK_TYPE: ${{ inputs.task_type }}
+        run: |
+          BASE_PROMPT=$(bun run .github/scripts/backlog-filler/randomizer.ts)
+          MOOD_JSON=$(bun run .github/scripts/backlog-filler/select-mood.ts)
+          MOOD=$(echo "$MOOD_JSON" | jq -r '.mood')
+          MOOD_DESC=$(echo "$MOOD_JSON" | jq -r '.desc')
+
+          # Build JSON schema for Haiku response
+          SCHEMA=$(jq -nc '{
+            type: "object",
+            properties: { rewritten_prompt: { type: "string" } },
+            required: ["rewritten_prompt"],
+            additionalProperties: false
+          }')
+
+          echo "mood=$MOOD" >> $GITHUB_OUTPUT
+          echo "mood_desc=$MOOD_DESC" >> $GITHUB_OUTPUT
+          echo "schema=$SCHEMA" >> $GITHUB_OUTPUT
+          echo "base_prompt<<EOF" >> $GITHUB_OUTPUT
+          echo "$BASE_PROMPT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Rewrite prompt with mood (Haiku)
+        id: rewrite
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          # Write prompt to temp file to avoid shell escaping issues
+          PROMPT_FILE=$(mktemp)
+          cat > "$PROMPT_FILE" << 'EOF'
+          Rewrite the following prompt as if you were feeling ${{ steps.base.outputs.mood }}.
+
+          MOOD: ${{ steps.base.outputs.mood }}
+          ${{ steps.base.outputs.mood_desc }}
+
+          INSTRUCTIONS:
+          - Rewrite the prompt to reflect this mood in tone and emphasis
+          - Keep ALL the structural requirements (the gh issue create format, labels, principles section, etc.)
+          - The mood should influence WHAT the agent notices and prioritizes
+          - Do NOT mention the mood explicitly anywhere in the output - it should be implied through phrasing and tone, not stated
+          - Return the rewritten prompt in the rewritten_prompt field
+
+          ORIGINAL PROMPT:
+          ${{ steps.base.outputs.base_prompt }}
+          EOF
+
+          # Call claude CLI directly with full control over args
+          RESULT=$(claude -p \
+            --model haiku \
+            --output-format json \
+            --json-schema '${{ steps.base.outputs.schema }}' \
+            --max-turns 2 \
+            --no-session-persistence \
+            --setting-sources "" \
+            --agents "{}" \
+            < "$PROMPT_FILE")
+
+          rm "$PROMPT_FILE"
+
+          # Extract rewritten_prompt from structured_output
+          REWRITTEN=$(echo "$RESULT" | jq -r '.structured_output.rewritten_prompt')
+
+          echo "rewritten_prompt<<EOF" >> $GITHUB_OUTPUT
+          echo "$REWRITTEN" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Generate and create issue
+        uses: anthropics/claude-code-action@v1
+        with:
+          prompt: ${{ steps.rewrite.outputs.rewritten_prompt }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_tools: "Bash(gh issue create:*)"

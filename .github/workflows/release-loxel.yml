@@ -1,0 +1,262 @@
+name: Release loxel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/loxel/**"
+      - ".github/workflows/release-loxel.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-loxel
+  cancel-in-progress: false
+
+jobs:
+  build-matrix:
+    # Skip if this is a release commit
+    if: "!startsWith(github.event.head_commit.message, 'chore(loxel): release')"
+    uses: ./.github/workflows/build-matrix.yml
+
+  check-and-bump:
+    needs: build-matrix
+    if: ${{ fromJSON(needs.build-matrix.outputs.platforms)[0] != null }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          cd packages/loxel
+          CURRENT=$(jq -r .version package.json)
+          NEW_VERSION=$(bunx semver -i patch "$CURRENT")
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=loxel-v$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json
+          mv tmp.json package.json
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Check if tag already exists (from a previous failed run)
+          if git ls-remote --tags origin | grep -q "refs/tags/${{ steps.bump.outputs.tag }}$"; then
+            echo "::error::Tag ${{ steps.bump.outputs.tag }} already exists. Please delete it manually and re-run."
+            exit 1
+          fi
+
+          git add packages/loxel/package.json
+          git commit -m "chore(loxel): release v${{ steps.bump.outputs.version }}"
+          git tag "${{ steps.bump.outputs.tag }}"
+
+          # Retry loop for push (handles race with other releases)
+          for i in $(seq 1 10); do
+            git pull --rebase origin main
+            if git push origin main; then
+              break
+            fi
+            if [ $i -eq 10 ]; then
+              echo "::error::Failed to push after 10 attempts"
+              exit 1
+            fi
+            echo "Push failed (attempt $i/10), retrying in 3s..."
+            sleep 3
+          done
+
+          git push origin --tags
+
+  # Build frontend once on a cheap Linux runner (platform-independent)
+  build-frontend:
+    needs: check-and-bump
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.check-and-bump.outputs.tag }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build frontend
+        run: bun run --cwd packages/loxel build:ui
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: loxel-renderer
+          path: packages/loxel/dist/
+          retention-days: 1
+
+  # Build server binary per platform (requires native compilation)
+  build:
+    needs: [build-matrix, check-and-bump, build-frontend]
+    strategy:
+      matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    outputs:
+      sha256_darwin-arm64: ${{ steps.sha.outputs.sha256_darwin-arm64 }}
+      sha256_darwin-x64: ${{ steps.sha.outputs.sha256_darwin-x64 }}
+      sha256_linux-x64: ${{ steps.sha.outputs.sha256_linux-x64 }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.check-and-bump.outputs.tag }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build server standalone
+        run: bun run --cwd packages/loxel build:server:standalone
+        env:
+          BUN_NO_CODESIGN_MACHO_BINARY: "1"
+
+      - name: Import signing certificate (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "$LOXEL_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "temp" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "temp" build.keychain
+          security import certificate.p12 -k build.keychain -P "$LOXEL_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "temp" build.keychain
+        env:
+          LOXEL_CERTIFICATE: ${{ secrets.LOXEL_CERTIFICATE }}
+          LOXEL_CERTIFICATE_PWD: ${{ secrets.LOXEL_CERTIFICATE_PWD }}
+
+      - name: Sign binaries (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          codesign --sign "$LOXEL_CODESIGN_IDENTITY" --options runtime --force packages/loxel/build/loxel-server
+          codesign -s - -f packages/loxel/build/yaml-language-server
+          codesign -s - -f packages/loxel/build/docker-language-server
+          codesign -s - -f packages/loxel/build/terraform-ls/terraform-ls
+          codesign -s - -f packages/loxel/build/pyright-langserver
+          codesign -s - -f packages/loxel/build/tsgo-lib/tsgo
+        env:
+          LOXEL_CODESIGN_IDENTITY: ${{ secrets.LOXEL_CODESIGN_IDENTITY }}
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: loxel-renderer
+          path: packages/loxel/dist/
+
+      - name: Package archive
+        id: archive
+        run: |
+          VERSION="${{ needs.check-and-bump.outputs.version }}"
+          PLATFORM="${{ matrix.platform }}"
+          ARCHIVE="loxel-update-${VERSION}-${PLATFORM}.tar.gz"
+
+          mkdir -p staging
+          cp packages/loxel/build/loxel-server staging/
+          cp packages/loxel/build/yaml-language-server staging/
+          cp packages/loxel/build/docker-language-server staging/
+          cp packages/loxel/build/terraform-ls/terraform-ls staging/
+          cp packages/loxel/build/pyright-langserver staging/
+          cp -r packages/loxel/build/typeshed-fallback staging/typeshed-fallback
+          cp -r packages/loxel/build/tsgo-lib staging/tsgo-lib
+          cp -r packages/loxel/dist staging/renderer
+          tar czf "$ARCHIVE" -C staging .
+
+          echo "archive=$ARCHIVE" >> $GITHUB_OUTPUT
+
+      - name: Calculate checksum
+        id: sha
+        run: |
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            SHA256=$(shasum -a 256 "${{ steps.archive.outputs.archive }}" | awk '{print $1}')
+          else
+            SHA256=$(sha256sum "${{ steps.archive.outputs.archive }}" | awk '{print $1}')
+          fi
+          echo "sha256_${{ matrix.platform }}=$SHA256" >> $GITHUB_OUTPUT
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          VERSION="${{ needs.check-and-bump.outputs.version }}"
+          aws s3 cp "${{ steps.archive.outputs.archive }}" \
+            "s3://loxel/loxel/${{ matrix.platform }}/loxel-update-${VERSION}.tar.gz" \
+            --content-type application/gzip
+
+  release:
+    needs: [build-matrix, check-and-bump, build]
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.check-and-bump.outputs.tag }}
+
+      - name: Generate manifest
+        run: |
+          VERSION="${{ needs.check-and-bump.outputs.version }}"
+          PLATFORMS='${{ needs.build-matrix.outputs.platforms }}'
+          BASE="https://loxel.bizimind.io/loxel"
+
+          jq -n \
+            --arg v "$VERSION" \
+            --argjson platforms "$PLATFORMS" \
+            --arg sha_darwin_arm64 "${{ needs.build.outputs.sha256_darwin-arm64 }}" \
+            --arg sha_darwin_x64 "${{ needs.build.outputs.sha256_darwin-x64 }}" \
+            --arg sha_linux_x64 "${{ needs.build.outputs.sha256_linux-x64 }}" \
+            --arg base "$BASE" \
+            '{
+              version: $v,
+              released_at: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
+              binaries: {
+                "darwin-arm64": {url: "\($base)/darwin-arm64/loxel-update-\($v).tar.gz", sha256: $sha_darwin_arm64},
+                "darwin-x64": {url: "\($base)/darwin-x64/loxel-update-\($v).tar.gz", sha256: $sha_darwin_x64},
+                "linux-x64": {url: "\($base)/linux-x64/loxel-update-\($v).tar.gz", sha256: $sha_linux_x64}
+              } | with_entries(select(.key | IN($platforms[])))
+            }' > manifest.json
+          cat manifest.json
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          aws s3 cp manifest.json s3://loxel/loxel/manifest.json --content-type application/json
+
+      - name: Create GitHub Release
+        run: |
+          VERSION="${{ needs.check-and-bump.outputs.version }}"
+          BASE="https://loxel.bizimind.io/loxel"
+          PLATFORMS='${{ needs.build-matrix.outputs.platforms }}'
+
+          # Build download links
+          LINKS=""
+          for platform in $(echo "$PLATFORMS" | jq -r '.[]'); do
+            LINKS="${LINKS}- [${platform}](${BASE}/${platform}/loxel-update-${VERSION}.tar.gz)"$'\n'
+          done
+
+          gh release create "${{ needs.check-and-bump.outputs.tag }}" \
+            --title "loxel ${VERSION}" \
+            --generate-notes \
+            --notes "## Downloads
+
+          ${LINKS}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

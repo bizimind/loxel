@@ -1,0 +1,38 @@
+#!/bin/sh
+
+# Find partially staged files (staged AND have unstaged changes)
+staged=$(git diff --cached --name-only)
+unstaged=$(git diff --name-only)
+
+partially_staged=""
+for file in $staged; do
+  if echo "$unstaged" | grep -qx "$file"; then
+    partially_staged="$partially_staged$file "
+  fi
+done
+
+# Auto-fix formatting
+bun run fmt
+
+# Re-stage formatted files, but be careful with partially staged files
+if [ -n "$partially_staged" ]; then
+  fmt_modified=$(git diff --name-only)
+  skip_restage=false
+
+  for file in $partially_staged; do
+    if echo "$fmt_modified" | grep -qx "$file"; then
+      echo "Warning: Partially staged '$file' was reformatted. Not auto-staging."
+      skip_restage=true
+    fi
+  done
+
+  [ "$skip_restage" = false ] && git update-index --again
+else
+  git update-index --again
+fi
+
+# Run lint (fail on errors)
+bun run lint
+
+# Run typecheck (fail on errors)
+bun run typecheck

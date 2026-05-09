@@ -1,0 +1,119 @@
+name: Issues Deduper
+
+on:
+  #   schedule:
+  #     - cron: "0 6 * * *" # Daily at 6 AM UTC
+  workflow_dispatch:
+
+# Sequential processing - only one dedup run at a time
+concurrency:
+  group: issues-deduper
+  cancel-in-progress: false
+
+jobs:
+  dedupe:
+    name: Check for duplicate issues
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    permissions:
+      contents: write
+      issues: write
+      id-token: write
+    steps:
+      # Checkout main branch first (for scripts and setup-claude action)
+      - name: Checkout main branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: ./.github/actions/setup-claude
+
+      # Checkout issues branch into separate directory
+      - name: Checkout issues branch
+        uses: actions/checkout@v6
+        with:
+          ref: issues
+          path: issues-repo
+          fetch-depth: 1
+
+      - name: Get issues to process
+        id: pending
+        working-directory: issues-repo
+        run: |
+          LAST=$(cat last-processed.txt 2>/dev/null || echo "0")
+          echo "Last processed: $LAST"
+
+          # List issue files, extract numbers, filter > LAST, sort numerically
+          if ls issues/*.md 1>/dev/null 2>&1; then
+            PENDING=$(ls issues/*.md | sed 's/.*\/\([0-9]*\)-.*/\1/' | awk -v last="$LAST" '$1 > last' | sort -n | tr '\n' ' ')
+          else
+            PENDING=""
+          fi
+
+          echo "Pending issues: $PENDING"
+          echo "last=$LAST" >> $GITHUB_OUTPUT
+          echo "pending=$PENDING" >> $GITHUB_OUTPUT
+
+      - name: Process each new issue
+        if: steps.pending.outputs.pending != ''
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd issues-repo
+
+          for ISSUE in ${{ steps.pending.outputs.pending }}; do
+            echo ""
+            echo "=========================================="
+            echo "Processing issue #$ISSUE"
+            echo "=========================================="
+
+            # Check if issue file exists
+            if ! ls issues/${ISSUE}-*.md 1>/dev/null 2>&1; then
+              echo "Issue #$ISSUE file not found, skipping"
+              continue
+            fi
+
+            # Run the check-issue script
+            bun run ../.github/scripts/issues-deduper/check-issue.ts $ISSUE
+
+            # Process the results (take actions on GitHub)
+            bun run ../.github/scripts/issues-deduper/process-results.ts $ISSUE
+
+            # Update last-processed after each successful check
+            echo "$ISSUE" > last-processed.txt
+            echo "Updated last-processed to $ISSUE"
+          done
+
+      - name: Commit progress
+        if: steps.pending.outputs.pending != ''
+        working-directory: issues-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add last-processed.txt
+          git diff --cached --quiet || git commit -m "Update last-processed to $(cat last-processed.txt)"
+
+          # Retry push with rebase on conflict
+          for i in 1 2 3; do
+            if git push; then
+              break
+            fi
+            echo "Push failed, attempt $i. Pulling and retrying..."
+            git pull --rebase
+          done
+
+      - name: Summary
+        run: |
+          echo "## Issues Deduper Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -z "${{ steps.pending.outputs.pending }}" ]; then
+            echo "No new issues to process." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Processed issues: ${{ steps.pending.outputs.pending }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Last processed before run: ${{ steps.pending.outputs.last }}" >> $GITHUB_STEP_SUMMARY

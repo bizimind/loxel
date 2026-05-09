@@ -1,0 +1,23 @@
+{
+  "name": "@bizimind/channel-worker",
+  "version": "0.1.0",
+  "description": "Cloudflare Worker for WebSocket channel relay",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@bizimind/channel": "workspace:*",
+    "@bizimind/logger": "workspace:*",
+    "jose": "^6.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250124.0",
+    "@types/bun": "latest",
+    "wrangler": "^4.61.0"
+  }
+}

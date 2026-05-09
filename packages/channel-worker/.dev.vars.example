@@ -1,0 +1,8 @@
+# Copy this file to .dev.vars for local development
+# .dev.vars is automatically loaded by wrangler dev
+
+# WorkOS Client ID - find it in WorkOS Dashboard → Configuration → API Keys
+WORKOS_CLIENT_ID=client_XXXXXXXXXXXXXXXX
+
+# Note: Axiom logging is configured via Cloudflare Dashboard (Workers Observability → Destinations)
+# not through environment variables. See wrangler.toml [observability.logs] section.

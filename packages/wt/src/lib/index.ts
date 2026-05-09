@@ -1,0 +1,17 @@
+export { planAdd, executeAdd } from "./add.ts";
+export type { AddPlan, AddParams, AddResult, BranchConflict } from "./add.ts";
+export { planRemove, executeRemove } from "./remove.ts";
+export type { RemovePlan, RemoveParams, RemoveResult } from "./remove.ts";
+export type { ProgressHandler } from "./progress.ts";
+export { silentProgress } from "./progress.ts";
+export type { WorktreeStatus } from "../init/detect.ts";
+export type { LoadedConfig } from "../config/loader.ts";
+export { resolveWorktreesDir, listManagedWorktrees } from "./config.ts";
+export type { ManagedWorktree } from "./config.ts";
+export { getWorktreeName } from "../worktree/select.ts";
+export { WT_CONFIG_JSON_SCHEMA } from "../config/json-schema.ts";
+export { detectRepoType, hasUncommittedChanges, getCurrentBranch } from "../init/detect.ts";
+export type { RepoType } from "../init/detect.ts";
+export { initBareRepo, transformToBare, ensureWorktreesDir } from "../init/transform.ts";
+export { generateWtYamlContent, writeWtYaml } from "../init/config.ts";
+export type { InitConfig } from "../init/config.ts";

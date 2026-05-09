@@ -1,0 +1,32 @@
+{
+  "name": "@bizimind/wt",
+  "version": "0.1.50",
+  "description": "CLI for managing git worktrees with port offsetting, unique naming, and hooks",
+  "type": "module",
+  "exports": {
+    ".": "./src/cli.ts",
+    "./lib": "./src/lib/index.ts",
+    "./config/json-schema": "./src/config/json-schema.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build --compile --minify src/cli.ts --outfile dist/wt",
+    "build:config-schema": "bun run src/config/json-schema.ts",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@bizimind/cli-common": "workspace:*",
+    "@inquirer/prompts": "^7.2.1",
+    "commander": "^14.0.2",
+    "yaml": "^2.7.1",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.15.21"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

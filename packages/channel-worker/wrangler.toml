@@ -1,0 +1,31 @@
+name = "channel-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-27"
+
+# Enable the workers.dev subdomain (for testing/fallback)
+workers_dev = true
+
+# Custom domain for production
+routes = [{ pattern = "channels.loxel.bizimind.io", custom_domain = true }]
+
+[durable_objects]
+bindings = [{ name = "CHANNEL_ROOM", class_name = "ChannelRoom" }]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChannelRoom"]
+
+# Enable nodejs_compat for @axiomhq/js support
+compatibility_flags = ["nodejs_compat"]
+
+# Environment variables (required)
+# Set via .dev.vars for local dev, or wrangler secret for production
+# See README.md for configuration instructions
+#
+# Required:
+#   WORKOS_CLIENT_ID - Your WorkOS client ID (e.g., client_01KFZK5YEVD9K22QTC77978XXA)
+#   AXIOM_TOKEN - Axiom API token (set via: wrangler secret put AXIOM_TOKEN)
+
+[vars]
+LOG_LEVEL = "debug"
+AXIOM_DATASET = "loxel"

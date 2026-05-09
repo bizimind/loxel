@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Network Graph</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #0b0b0f;
+        color: #e5e5ea;
+        font:
+          12px/1.3 -apple-system,
+          system-ui,
+          sans-serif;
+        overflow: hidden;
+      }
+      header {
+        padding: 8px 14px;
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 10;
+        background: rgba(11, 11, 15, 0.9);
+        backdrop-filter: blur(4px);
+      }
+      header h1 {
+        font-size: 14px;
+        margin: 0;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .meta {
+        color: #8e8e93;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .threshold-ctrl {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+        color: #8e8e93;
+        white-space: nowrap;
+        margin-left: auto;
+      }
+      .threshold-ctrl button {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        color: #e5e5ea;
+        border-radius: 3px;
+        width: 22px;
+        height: 22px;
+        cursor: pointer;
+        font-size: 15px;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+      }
+      .threshold-ctrl button:hover {
+        background: rgba(255, 255, 255, 0.16);
+      }
+      .threshold-ctrl .val {
+        min-width: 18px;
+        text-align: center;
+        color: #e5e5ea;
+        font-weight: 600;
+        font-size: 13px;
+      }
+      #legend {
+        position: fixed;
+        top: 48px;
+        right: 12px;
+        max-height: calc(100vh - 64px);
+        overflow-y: auto;
+        background: rgba(18, 18, 24, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 6px;
+        padding: 8px 10px;
+        z-index: 10;
+        font-size: 10px;
+        min-width: 150px;
+        max-width: 210px;
+      }
+      #legend h2 {
+        margin: 0 0 6px;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: #636366;
+        font-weight: 600;
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 0;
+        cursor: default;
+      }
+      .legend-item:hover .legend-label {
+        color: #e5e5ea;
+      }
+      .legend-dot {
+        flex-shrink: 0;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+      }
+      .legend-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #aeaeb2;
+        flex: 1;
+      }
+      .legend-count {
+        flex-shrink: 0;
+        color: #48484a;
+        font-size: 9px;
+      }
+      #chart {
+        display: block;
+      }
+      .link {
+        stroke: rgba(255, 255, 255, 0.22);
+        stroke-width: 1;
+      }
+      .link.highlighted {
+        stroke: #ffd60a;
+        stroke-width: 2;
+      }
+      .node circle.body {
+        stroke: rgba(0, 0, 0, 0.6);
+        stroke-width: 1.5;
+        cursor: pointer;
+        transition: filter 100ms;
+      }
+      .node circle.body:hover {
+        filter: brightness(1.35);
+      }
+      .node.selected circle.body {
+        stroke: #ffd60a;
+        stroke-width: 2.5;
+      }
+      .node text {
+        font-size: 9px;
+        fill: #e5e5ea;
+        pointer-events: none;
+        text-anchor: middle;
+        dominant-baseline: auto;
+      }
+      .pip {
+        pointer-events: none;
+        stroke: rgba(0, 0, 0, 0.7);
+        stroke-width: 1;
+      }
+      #tooltip {
+        position: fixed;
+        pointer-events: none;
+        background: rgba(28, 28, 34, 0.96);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #f5f5f7;
+        font:
+          11px/1.4 -apple-system,
+          system-ui,
+          sans-serif;
+        padding: 6px 9px;
+        border-radius: 5px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        max-width: 320px;
+        opacity: 0;
+        transition: opacity 120ms;
+        z-index: 20;
+      }
+      #tooltip.visible {
+        opacity: 1;
+      }
+      #tooltip .name {
+        font-weight: 600;
+      }
+      #tooltip .sub {
+        color: #8e8e93;
+        margin-top: 2px;
+        font-size: 10px;
+      }
+      #tooltip .pip-list {
+        margin-top: 5px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      #tooltip .pip-list-header {
+        color: #636366;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        margin-bottom: 1px;
+      }
+      #tooltip .pip-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 10px;
+      }
+      #tooltip .pip-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1 id="title">Network Graph</h1>
+      <span class="meta" id="meta"></span>
+      <div class="threshold-ctrl">
+        <span>shared if imported &gt;</span>
+        <button id="thresh-down">−</button>
+        <span class="val" id="thresh-val">3</span>
+        <button id="thresh-up">+</button>
+        <span>times</span>
+      </div>
+    </header>
+    <div id="legend"><h2>Shared modules</h2></div>
+    <svg id="chart"></svg>
+    <div id="tooltip">
+      <div class="name" id="tip-name"></div>
+      <div class="sub" id="tip-sub"></div>
+      <div id="tip-pips"></div>
+    </div>
+    <script type="module">
+      import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+
+      const HEADER_H = 40;
+      const PIP_R = 2.5;
+
+      // Distinct palette for shared modules — visible on dark background.
+      const HOT_PALETTE = [
+        "#ff6b6b",
+        "#ffd93d",
+        "#6bcb77",
+        "#4d96ff",
+        "#ff922b",
+        "#cc5de8",
+        "#20c997",
+        "#f783ac",
+        "#74c0fc",
+        "#a9e34b",
+        "#ff8787",
+        "#ffe066",
+        "#8ce99a",
+        "#74b0ff",
+        "#ffa94d",
+        "#da77f2",
+        "#38d9a9",
+        "#f5afe9",
+        "#97d0ff",
+        "#c0eb75",
+      ];
+
+      async function loadJson(url) {
+        const res = await fetch(url).catch(() => null);
+        return res?.ok ? res.json() : null;
+      }
+      async function loadData() {
+        return window.__TREEMAP_DATA__ ?? (await loadJson("/data.json"));
+      }
+
+      function renderFatal(message, detail) {
+        document.body.innerHTML = "";
+        const box = document.createElement("div");
+        box.style.cssText =
+          "padding:32px;max-width:680px;margin:80px auto;font:13px/1.5 -apple-system,system-ui,sans-serif;color:#f5f5f7;background:#1c1c22;border:1px solid #38383f;border-radius:8px";
+        const h = document.createElement("h2");
+        h.style.cssText = "margin:0 0 12px;font-size:15px;color:#ff9f0a";
+        h.textContent = "Network graph: no data to display";
+        const p = document.createElement("p");
+        p.style.cssText = "margin:0 0 8px";
+        p.textContent = message;
+        const pre = document.createElement("pre");
+        pre.style.cssText =
+          "margin:12px 0 0;padding:10px;background:#0b0b0f;border-radius:4px;color:#8e8e93;font-size:11px;white-space:pre-wrap;word-break:break-word";
+        pre.textContent = detail;
+        box.append(h, p, pre);
+        document.body.append(box);
+      }
+
+      const [rawData, configFile] = await Promise.all([loadData(), loadJson("/config.json")]);
+      if (!Array.isArray(rawData) || rawData.length === 0) {
+        renderFatal(
+          "Pipe a JSON array of edge records into vite on stdin, or place `data.json` next to index.html.",
+          'Each record needs `source` and `target` fields.\nExample: [{"source":"src/a.ts","target":"src/b.ts"}]',
+        );
+        throw new Error("network-graph: no data available");
+      }
+
+      const urlParams = new URLSearchParams(location.search);
+      const config = {
+        title: urlParams.get("title") ?? configFile?.title ?? "Network Graph",
+        sourceField: urlParams.get("sourceField") ?? configFile?.sourceField ?? "source",
+        targetField: urlParams.get("targetField") ?? configFile?.targetField ?? "target",
+      };
+
+      document.title = config.title;
+      document.getElementById("title").textContent = config.title;
+
+      // Collect all edges (string IDs throughout — forceLink gets fresh copies).
+      const allEdges = [];
+      const nodeSet = new Set();
+      for (const r of rawData) {
+        const src = String(r[config.sourceField] ?? "");
+        const tgt = String(r[config.targetField] ?? "");
+        if (!src || !tgt) continue;
+        nodeSet.add(src);
+        nodeSet.add(tgt);
+        allEdges.push({ src, tgt });
+      }
+
+      // Threshold control
+      let threshold = parseInt(
+        urlParams.get("threshold") ?? String(configFile?.threshold ?? 3),
+        10,
+      );
+      const threshValEl = document.getElementById("thresh-val");
+      threshValEl.textContent = String(threshold);
+      document.getElementById("thresh-down").addEventListener("click", () => {
+        if (threshold <= 1) return;
+        threshold--;
+        threshValEl.textContent = String(threshold);
+        rebuild();
+      });
+      document.getElementById("thresh-up").addEventListener("click", () => {
+        threshold++;
+        threshValEl.textContent = String(threshold);
+        rebuild();
+      });
+
+      // SVG scaffold — built once, layers cleared on rebuild.
+      let W = window.innerWidth;
+      let H = window.innerHeight - HEADER_H;
+
+      const svg = d3
+        .select("#chart")
+        .attr("width", W)
+        .attr("height", H)
+        .style("margin-top", `${HEADER_H}px`);
+
+      const g = svg.append("g");
+      svg.call(
+        d3
+          .zoom()
+          .scaleExtent([0.05, 8])
+          .on("zoom", (ev) => g.attr("transform", ev.transform)),
+      );
+
+      svg
+        .append("defs")
+        .append("marker")
+        .attr("id", "arrow")
+        .attr("viewBox", "0 -4 8 8")
+        .attr("refX", 0)
+        .attr("refY", 0)
+        .attr("markerWidth", 4)
+        .attr("markerHeight", 4)
+        .attr("orient", "auto")
+        .append("path")
+        .attr("d", "M4,-3L0,0L4,3")
+        .attr("fill", "rgba(255,255,255,0.32)");
+
+      const linkLayer = g.append("g");
+      const nodeLayer = g.append("g");
+
+      const tooltip = document.getElementById("tooltip");
+      const tipName = document.getElementById("tip-name");
+      const tipSub = document.getElementById("tip-sub");
+      const tipPips = document.getElementById("tip-pips");
+      const legendEl = document.getElementById("legend");
+
+      let simulation = null;
+
+      function rebuild() {
+        if (simulation) simulation.stop();
+
+        // --- Compute in-degree ---
+        const inDegree = new Map();
+        for (const { tgt } of allEdges) {
+          inDegree.set(tgt, (inDegree.get(tgt) ?? 0) + 1);
+        }
+
+        // --- Identify shared (hot) nodes, sorted by in-degree desc for stable colors ---
+        const hotMap = new Map(); // nodeId → color
+        let ci = 0;
+        [...inDegree.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([id, deg]) => {
+            if (deg > threshold) hotMap.set(id, HOT_PALETTE[ci++ % HOT_PALETTE.length]);
+          });
+
+        // --- Split edges and build pip map ---
+        // normalEdges: arrows drawn between non-shared targets
+        // pipMap: for each node, which shared modules does it import?
+        const normalEdges = []; // { source: id, target: id } — will be mutated by forceLink
+        const pipMap = new Map(); // nodeId → Map(sharedId → color)
+
+        for (const { src, tgt } of allEdges) {
+          if (hotMap.has(tgt)) {
+            if (!pipMap.has(src)) pipMap.set(src, new Map());
+            pipMap.get(src).set(tgt, hotMap.get(tgt));
+          } else {
+            normalEdges.push({ source: src, target: tgt });
+          }
+        }
+
+        // --- Node sizing ---
+        // Degree counts normal-edge connections; shared nodes use their in-degree.
+        const degree = new Map();
+        for (const { source, target } of normalEdges) {
+          degree.set(source, (degree.get(source) ?? 0) + 1);
+          degree.set(target, (degree.get(target) ?? 0) + 1);
+        }
+        for (const [id] of hotMap) {
+          degree.set(id, inDegree.get(id) ?? 0);
+        }
+        const maxDeg = Math.max(1, ...degree.values());
+        const nodeRadius = (id) =>
+          hotMap.has(id)
+            ? 8 + 24 * Math.sqrt((degree.get(id) ?? 0) / maxDeg)
+            : 6 + 15 * Math.sqrt((degree.get(id) ?? 0) / maxDeg);
+
+        // --- Node data: attach pip list so it travels with the datum ---
+        const nodes = [...nodeSet].map((id) => ({
+          id,
+          pips: pipMap.has(id) ? [...pipMap.get(id).values()] : [],
+          pipIds: pipMap.has(id) ? [...pipMap.get(id).keys()] : [],
+        }));
+
+        // --- Update stats ---
+        document.getElementById("meta").textContent =
+          `${nodes.length.toLocaleString()} nodes · ${allEdges.length.toLocaleString()} edges` +
+          (hotMap.size ? ` · ${hotMap.size} shared` : "");
+
+        // --- Legend ---
+        legendEl.innerHTML = "<h2>Shared modules</h2>";
+        if (hotMap.size === 0) {
+          const empty = document.createElement("div");
+          empty.style.cssText = "color:#48484a;font-size:10px;padding:2px 0";
+          empty.textContent = "None above threshold";
+          legendEl.appendChild(empty);
+        } else {
+          for (const [id, color] of [...hotMap.entries()].sort(
+            (a, b) => (inDegree.get(b[0]) ?? 0) - (inDegree.get(a[0]) ?? 0),
+          )) {
+            const item = document.createElement("div");
+            item.className = "legend-item";
+            const label = id.split("/").pop() ?? id;
+            const dot = document.createElement("span");
+            dot.className = "legend-dot";
+            dot.style.background = color;
+            const lbl = document.createElement("span");
+            lbl.className = "legend-label";
+            lbl.title = id;
+            lbl.textContent = label;
+            const count = document.createElement("span");
+            count.className = "legend-count";
+            count.textContent = String(inDegree.get(id));
+            item.appendChild(dot);
+            item.appendChild(lbl);
+            item.appendChild(count);
+            legendEl.appendChild(item);
+          }
+        }
+
+        // --- Render links ---
+        linkLayer.selectAll("*").remove();
+        const link = linkLayer
+          .selectAll("line")
+          .data(normalEdges)
+          .join("line")
+          .attr("class", "link")
+          .attr("marker-start", "url(#arrow)");
+
+        // --- Render nodes ---
+        nodeLayer.selectAll("*").remove();
+        const node = nodeLayer
+          .selectAll("g.node")
+          .data(nodes, (d) => d.id)
+          .join("g")
+          .attr("class", "node")
+          .call(
+            d3
+              .drag()
+              .on("start", (ev, d) => {
+                if (!ev.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+              })
+              .on("drag", (ev, d) => {
+                d.fx = ev.x;
+                d.fy = ev.y;
+              })
+              .on("end", (ev, d) => {
+                if (!ev.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+              }),
+          );
+
+        node
+          .append("circle")
+          .attr("class", "body")
+          .attr("r", (d) => nodeRadius(d.id))
+          .style("fill", (d) => hotMap.get(d.id) ?? "#8e8e93")
+          .on("mouseover", (ev, d) => {
+            const out = allEdges.filter((e) => e.src === d.id).length;
+            const inn = inDegree.get(d.id) ?? 0;
+            tipName.textContent = d.id.split("/").pop() ?? d.id;
+            tipSub.textContent = `${d.id}  ·  in: ${inn}  out: ${out}`;
+            tipPips.innerHTML = "";
+            if (d.pips.length) {
+              const header = document.createElement("div");
+              header.className = "pip-list";
+              const lbl = document.createElement("div");
+              lbl.className = "pip-list-header";
+              lbl.textContent = "uses shared";
+              header.appendChild(lbl);
+              d.pipIds.forEach((sharedId, i) => {
+                const row = document.createElement("div");
+                row.className = "pip-row";
+                const pipDot = document.createElement("span");
+                pipDot.className = "pip-dot";
+                pipDot.style.background = d.pips[i];
+                const pipLabel = document.createElement("span");
+                pipLabel.textContent = sharedId.split("/").pop() ?? sharedId;
+                row.appendChild(pipDot);
+                row.appendChild(pipLabel);
+                header.appendChild(row);
+              });
+              tipPips.appendChild(header);
+            }
+            tooltip.classList.add("visible");
+            moveTooltip(ev);
+          })
+          .on("mousemove", moveTooltip)
+          .on("mouseout", () => tooltip.classList.remove("visible"));
+
+        node
+          .append("text")
+          .attr("dy", (d) => nodeRadius(d.id) + 11)
+          .text((d) => d.id.split("/").pop() ?? d.id);
+
+        // Pips — one small circle per shared dependency, arranged around the node.
+        node.each(function (d) {
+          if (!d.pips.length) return;
+          const r = nodeRadius(d.id);
+          const grp = d3.select(this);
+          d.pips.forEach((color, i) => {
+            const angle = (i / d.pips.length) * 2 * Math.PI - Math.PI / 2;
+            const dist = Math.max(0, r - PIP_R - 2);
+            grp
+              .append("circle")
+              .attr("class", "pip")
+              .attr("r", PIP_R)
+              .attr("cx", Math.cos(angle) * dist)
+              .attr("cy", Math.sin(angle) * dist)
+              .style("fill", color);
+          });
+        });
+
+        // --- Simulation ---
+        simulation = d3
+          .forceSimulation(nodes)
+          .force(
+            "link",
+            d3
+              .forceLink(normalEdges)
+              .id((d) => d.id)
+              .distance(60)
+              .strength(0.5),
+          )
+          .force(
+            "charge",
+            d3.forceManyBody().strength((d) => (hotMap.has(d.id) ? -260 : -120)),
+          )
+          .force("center", d3.forceCenter(W / 2, H / 2))
+          .force("x", d3.forceX(W / 2).strength(0.04))
+          .force("y", d3.forceY(H / 2).strength(0.04))
+          .force(
+            "collision",
+            d3.forceCollide((d) => nodeRadius(d.id) + 4),
+          );
+
+        simulation.on("tick", () => {
+          link
+            .attr("x1", (d) => {
+              const r = nodeRadius(d.source.id ?? d.source);
+              const dx = d.target.x - d.source.x,
+                dy = d.target.y - d.source.y;
+              const len = Math.sqrt(dx * dx + dy * dy) || 1;
+              return d.source.x + (dx / len) * r;
+            })
+            .attr("y1", (d) => {
+              const r = nodeRadius(d.source.id ?? d.source);
+              const dx = d.target.x - d.source.x,
+                dy = d.target.y - d.source.y;
+              const len = Math.sqrt(dx * dx + dy * dy) || 1;
+              return d.source.y + (dy / len) * r;
+            })
+            .attr("x2", (d) => {
+              const r = nodeRadius(d.target.id ?? d.target);
+              const dx = d.target.x - d.source.x,
+                dy = d.target.y - d.source.y;
+              const len = Math.sqrt(dx * dx + dy * dy) || 1;
+              return d.target.x - (dx / len) * r;
+            })
+            .attr("y2", (d) => {
+              const r = nodeRadius(d.target.id ?? d.target);
+              const dx = d.target.x - d.source.x,
+                dy = d.target.y - d.source.y;
+              const len = Math.sqrt(dx * dx + dy * dy) || 1;
+              return d.target.y - (dy / len) * r;
+            });
+
+          node.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
+        });
+      }
+
+      function moveTooltip(ev) {
+        const pad = 12;
+        const x = Math.min(ev.clientX + pad, window.innerWidth - tooltip.offsetWidth - pad);
+        const y = Math.min(ev.clientY + pad, window.innerHeight - tooltip.offsetHeight - pad);
+        tooltip.style.left = `${x}px`;
+        tooltip.style.top = `${y}px`;
+      }
+
+      rebuild();
+
+      window.addEventListener("resize", () => {
+        W = window.innerWidth;
+        H = window.innerHeight - HEADER_H;
+        svg.attr("width", W).attr("height", H);
+        simulation
+          .force("center", d3.forceCenter(W / 2, H / 2))
+          .force("x", d3.forceX(W / 2).strength(0.04))
+          .force("y", d3.forceY(H / 2).strength(0.04))
+          .alpha(0.3)
+          .restart();
+      });
+    </script>
+  </body>
+</html>

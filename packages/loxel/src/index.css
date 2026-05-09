@@ -1,0 +1,612 @@
+@layer milkdown-vendor, theme, base, components, utilities;
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Inter - variable font (all weights) */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
+}
+
+/* JetBrains Mono - code font */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Bold.woff2") format("woff2");
+}
+
+/* JetBrains Mono NL - No Ligatures variant for terminal use */
+@font-face {
+  font-family: "JetBrains Mono NL";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMonoNL-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "JetBrains Mono NL";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMonoNL-Bold.ttf") format("truetype");
+}
+
+/* Fallback for ⏺ (U+23FA) which is not in JetBrains Mono */
+/* STIX Two Math has this as a text glyph, preventing emoji fallback */
+@font-face {
+  font-family: "JetBrains Mono NL";
+  font-style: normal;
+  font-weight: 400 700;
+  src: local("STIX Two Math"), local("STIXTwoMath");
+  unicode-range: U+23FA;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.147 0.004 49.25);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.147 0.004 49.25);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.147 0.004 49.25);
+  --primary: oklch(0.92 0.04 290);
+  --primary-foreground: oklch(0.147 0.004 49.25);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.97 0.001 106.424);
+  --muted-foreground: oklch(0.553 0.013 58.071);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.923 0.003 48.717);
+  --input: oklch(0.923 0.003 48.717);
+  --ring: oklch(0.709 0.01 56.259);
+  --radius: 0.5rem;
+
+  /* Editor surface (diff panels) */
+  --editor-surface: oklch(0.97 0 0);
+
+  /* Slightly elevated surface — brighter than card, same hue */
+  --surface-muted: oklch(0.96 0 0);
+
+  /* Ref badge colors (light mode) */
+  --ref-head: oklch(0.5 0.18 290);
+  --ref-local: oklch(0.5 0.15 170);
+  --ref-remote: oklch(0.5 0.12 80);
+  --ref-tag: oklch(0.55 0.18 85);
+
+  /* Branch colors for graph */
+  --branch-1: oklch(0.65 0.2 250);
+  --branch-2: oklch(0.65 0.2 150);
+  --branch-3: oklch(0.65 0.2 30);
+  --branch-4: oklch(0.65 0.2 300);
+  --branch-5: oklch(0.65 0.2 200);
+  --branch-6: oklch(0.65 0.2 80);
+
+  /* Tree colors (light mode) */
+  --tree-folder: oklch(0.147 0.004 49.25);
+
+  /* Editor line numbers */
+  --editor-line-number: #8b8685;
+  --editor-line-number-active: #1b1b1f;
+
+  /* Diff colors (light mode) */
+  --diff-modify-bg: #d4e2f7;
+  --diff-modify-gutter: #d4e2f7;
+  --diff-modify-text: #0550ae;
+  --diff-add-bg: #d4f5dc;
+  --diff-add-gutter: #d4f5dc;
+  --diff-add-text: #1a7f37;
+  --diff-del-bg: #f5d4d4;
+  --diff-del-gutter: #f5d4d4;
+  --diff-del-text: #cf222e;
+
+  /* Comment colors (light mode) */
+  --comment-bg: rgba(255, 213, 79, 0.12);
+  --comment-bg-resolved: rgba(128, 128, 128, 0.05);
+  --comment-marker: #e6a817;
+  --comment-stripe: rgba(230, 168, 23, 0.15);
+  --comment-stripe-resolved: rgba(128, 128, 128, 0.15);
+
+  /* Collapse squiggly line colors (light mode) */
+  --diff-collapse-line: #c0c0c0;
+  --diff-collapse-line-hover: #808080;
+
+  /* Terminal ANSI colors (light mode — JetBrains-style) */
+  --term-foreground: #1b1b1f;
+  --term-cursor: #1b1b1f;
+  --term-selection: rgba(0, 0, 0, 0.15);
+  --term-black: #000000;
+  --term-red: #cf222e;
+  --term-green: #1a7f37;
+  --term-yellow: #9a6700;
+  --term-blue: #0550ae;
+  --term-magenta: #8250df;
+  --term-cyan: #1b7c83;
+  --term-white: #6e7781;
+  --term-bright-black: #57606a;
+  --term-bright-red: #a40e26;
+  --term-bright-green: #116329;
+  --term-bright-yellow: #7c4d00;
+  --term-bright-blue: #0349b4;
+  --term-bright-magenta: #6639ba;
+  --term-bright-cyan: #136069;
+  --term-bright-white: #1b1b1f;
+}
+
+.dark {
+  /* JetBrains New UI Dark Theme - exact colors from theme files
+   * https://github.com/artemevsevev/zed-theme-jetbrains */
+
+  /* Surface scale — light → dark */
+  --surface-0: #2d3339; /* elevated elements, buttons on cards */
+  --surface-1: #1d1e22; /* panels, cards */
+  --surface-2: #131313; /* editor */
+  --surface-3: #363337; /* borders */
+  /*--surface-1: #2b2d30; !* panels, cards *!*/
+  /*--surface-2: #1e1f22; !* editor *!*/
+  /*--surface-3: #0e0e0f; !* borders *!*/
+
+  /* Core backgrounds - #191A1C base */
+  --background: #191a1c;
+  --editor-surface: var(--surface-2);
+  --surface-muted: #2d2e33;
+  --foreground: #dfe1e5;
+  --card: var(--surface-1);
+  --card-foreground: #dfe1e5;
+  --popover: var(--surface-1);
+  --popover-foreground: #dfe1e5;
+
+  /* Primary accent - matches selection */
+  --primary: #214283;
+  --primary-foreground: #ffffff;
+
+  /* Secondary/muted */
+  --secondary: var(--surface-1);
+  --secondary-foreground: #dfe1e5;
+  --muted: #1f2024;
+  --muted-foreground: #9da0a8;
+
+  /* Destructive - JetBrains error red */
+  --destructive: #fa6675;
+
+  /* Borders */
+  --border: var(--surface-3);
+  --input: var(--surface-3);
+  --ring: #467ff2;
+
+  /* Ref badge colors - using JetBrains accent palette */
+  --ref-head: #c77dbb;
+  --ref-local: #2fbaa3;
+  --ref-remote: #d5b778;
+  --ref-tag: #6aab73;
+
+  /* Branch colors for graph */
+  --branch-1: #56a8f5;
+  --branch-2: #6aab73;
+  --branch-3: #cf8e6d;
+  --branch-4: #c77dbb;
+  --branch-5: #2aacb8;
+  --branch-6: #d5b778;
+
+  /* Tree colors */
+  --tree-folder: #dfe1e4;
+
+  /* Editor line numbers */
+  --editor-line-number: #9da0a8;
+  --editor-line-number-active: #dfe1e5;
+
+  /* Diff colors - unified gutter and row backgrounds for continuous appearance */
+  --diff-add-bg: #29443699;
+  --diff-add-gutter: #29443699;
+  --diff-add-text: #6aab73;
+  --diff-modify-bg: #2d3c5299;
+  --diff-modify-gutter: #2d3c5299;
+  --diff-modify-text: #56a8f5;
+  --diff-del-bg: #3b2b2b99;
+  --diff-del-gutter: #3b2b2b99;
+  --diff-del-text: #fa6675;
+
+  /* Comment colors (dark mode) */
+  --comment-bg: rgba(255, 213, 79, 0.08);
+  --comment-bg-resolved: rgba(160, 160, 160, 0.04);
+  --comment-marker: #ffd54f80;
+  --comment-stripe: rgba(255, 213, 79, 0.1);
+  --comment-stripe-resolved: rgba(160, 160, 160, 0.12);
+
+  /* Collapse squiggly line colors (dark mode) */
+  --diff-collapse-line: #4e5157;
+  --diff-collapse-line-hover: #9da0a8;
+
+  /* Terminal ANSI colors (dark mode — Darcula console palette, inherited by New UI Dark) */
+  --term-foreground: #a9b7c6;
+  --term-cursor: #ced0d6;
+  --term-selection: rgba(255, 255, 255, 0.18);
+  --term-black: #000000;
+  --term-red: #ff6b68;
+  --term-green: #a8c023;
+  --term-yellow: #d6bf55;
+  --term-blue: #5394ec;
+  --term-magenta: #ae8abe;
+  --term-cyan: #299999;
+  --term-white: #999999;
+  --term-bright-black: #555555;
+  --term-bright-red: #ff8785;
+  --term-bright-green: #a8c023;
+  --term-bright-yellow: #d6bf55;
+  --term-bright-blue: #7eaef1;
+  --term-bright-magenta: #ff99ff;
+  --term-bright-cyan: #6cdada;
+  --term-bright-white: #ffffff;
+}
+
+@theme inline {
+  --text-xs: 13px;
+  --text-xs--line-height: 1.4;
+  --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-editor-surface: var(--editor-surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-ref-head: var(--ref-head);
+  --color-ref-local: var(--ref-local);
+  --color-ref-remote: var(--ref-remote);
+  --color-ref-tag: var(--ref-tag);
+  --color-branch-1: var(--branch-1);
+  --color-branch-2: var(--branch-2);
+  --color-branch-3: var(--branch-3);
+  --color-branch-4: var(--branch-4);
+  --color-branch-5: var(--branch-5);
+  --color-branch-6: var(--branch-6);
+  --color-diff-modify-bg: var(--diff-modify-bg);
+  --color-diff-modify-gutter: var(--diff-modify-gutter);
+  --color-diff-modify-text: var(--diff-modify-text);
+  --color-diff-add-bg: var(--diff-add-bg);
+  --color-diff-add-gutter: var(--diff-add-gutter);
+  --color-diff-add-text: var(--diff-add-text);
+  --color-diff-del-bg: var(--diff-del-bg);
+  --color-diff-del-gutter: var(--diff-del-gutter);
+  --color-diff-del-text: var(--diff-del-text);
+  --color-tree-folder: var(--tree-folder);
+  --color-editor-line-number: var(--editor-line-number);
+  --color-editor-line-number-active: var(--editor-line-number-active);
+  --color-comment-bg: var(--comment-bg);
+  --color-comment-bg-resolved: var(--comment-bg-resolved);
+  --color-comment-marker: var(--comment-marker);
+  /* Fill colors for SVG elements */
+  --fill-diff-add-gutter: var(--diff-add-gutter);
+  --fill-diff-del-gutter: var(--diff-del-gutter);
+  --fill-diff-modify-gutter: var(--diff-modify-gutter);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+}
+
+@utility corner-superellipse {
+  corner-shape: superellipse(1.75);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    text-shadow: 0 0.5px 1px rgb(0 0 0 / 0.1);
+  }
+  html {
+    @apply bg-background font-sans;
+  }
+  * {
+    scrollbar-color: #505258 rgb(54 54 56 / 30%);
+    scrollbar-width: thin;
+  }
+  button:not(:disabled) {
+    @apply cursor-pointer;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    text-shadow: inherit;
+  }
+}
+
+/* Diff viewer styles - using CSS variables for JetBrains theme */
+.diff-line-add {
+  background-color: var(--diff-add-bg);
+}
+.diff-line-del {
+  background-color: var(--diff-del-bg);
+}
+.diff-gutter-add {
+  background-color: var(--diff-add-gutter);
+  color: var(--diff-add-text);
+}
+.diff-gutter-del {
+  background-color: var(--diff-del-gutter);
+  color: var(--diff-del-text);
+}
+.diff-line-modify {
+  background-color: var(--diff-modify-bg);
+}
+.diff-gutter-modify {
+  background-color: var(--diff-modify-gutter);
+  color: var(--diff-modify-text);
+}
+
+/* Suggest widget (auto-complete popover) */
+.monaco-editor .suggest-widget {
+  background-color: var(--surface-1) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.monaco-editor .suggest-details,
+.monaco-editor .parameter-hints-widget {
+  background-color: var(--surface-1) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.monaco-editor .monaco-resizable-hover,
+.monaco-editor .monaco-hover {
+  background-color: var(--surface-1) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row.focused {
+  background-color: var(--primary) !important;
+}
+
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row:hover:not(.focused) {
+  background-color: color-mix(in oklch, var(--primary) 50%, transparent) !important;
+}
+
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row {
+  padding-left: 4px;
+}
+
+/* Ensure inner elements stretch to fill the full row width */
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents {
+  width: 100%;
+}
+
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main {
+  width: 100%;
+}
+
+/* Right-align type info: prevent .right from shrinking and remove max-width cap */
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .right {
+  flex-shrink: 0;
+  max-width: none;
+}
+
+/* Prevent overscroll bounce on Monaco and diff containers */
+.monaco-editor,
+.monaco-editor .overflow-guard {
+  overscroll-behavior: none;
+}
+
+/* Thin spacer for collapsed unchanged regions.
+ * position: relative + z-index lifts the spacer above Monaco's view-lines layer
+ * (which is a sibling of view-zones under lines-content) so DOM clicks reach it. */
+.diff-collapse-spacer {
+  position: relative;
+  z-index: 5;
+  width: 100%;
+  height: 100%;
+  background-color: var(--muted);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.diff-collapse-spacer:hover {
+  background-color: color-mix(in oklch, var(--primary) 50%, transparent);
+}
+
+/* Squiggly line collapse connectors in center gutter */
+.collapse-connector .collapse-squiggly {
+  transition:
+    stroke 0.15s,
+    stroke-width 0.15s;
+}
+
+.collapse-connector:hover .collapse-squiggly {
+  stroke: var(--diff-collapse-line-hover);
+  stroke-width: 2;
+}
+
+.collapse-connector .collapse-label {
+  transition: fill 0.15s;
+}
+
+.collapse-connector:hover .collapse-label {
+  fill: var(--diff-collapse-line-hover);
+}
+
+.collapse-connector .collapse-highlight {
+  fill: var(--diff-collapse-line);
+  transition: opacity 0.15s;
+}
+
+.collapse-connector:hover .collapse-highlight {
+  opacity: 0.08;
+}
+
+/* Comment decorations in Monaco editor — diagonal stripe pattern over diff background */
+.comment-highlight {
+  position: relative;
+}
+.comment-highlight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-color: var(--comment-bg);
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--comment-stripe) 0,
+    var(--comment-stripe) 0.7px,
+    transparent 0,
+    transparent 50%
+  );
+  background-size: 10px 10px;
+}
+.comment-highlight-resolved {
+  position: relative;
+}
+.comment-highlight-resolved::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-color: var(--comment-bg-resolved);
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--comment-stripe-resolved) 0,
+    var(--comment-stripe-resolved) 0.7px,
+    transparent 0,
+    transparent 50%
+  );
+  background-size: 10px 10px;
+}
+
+/* Outdated comment anchor — amber/yellow tint */
+.comment-highlight-outdated {
+  position: relative;
+}
+.comment-highlight-outdated::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-color: oklch(0.82 0.08 85 / 0.12);
+  background-image: repeating-linear-gradient(
+    135deg,
+    oklch(0.75 0.12 85 / 0.2) 0,
+    oklch(0.75 0.12 85 / 0.2) 0.7px,
+    transparent 0,
+    transparent 50%
+  );
+  background-size: 10px 10px;
+}
+
+/* Comment stripe overlay for LineNumbersColumn — rendered in z-20 overlay layer */
+.line-comment-stripe {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--comment-stripe) 0,
+    var(--comment-stripe) 0.7px,
+    transparent 0,
+    transparent 50%
+  );
+  background-size: 10px 10px;
+}
+.line-comment-stripe-resolved {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--comment-stripe-resolved) 0,
+    var(--comment-stripe-resolved) 0.7px,
+    transparent 0,
+    transparent 50%
+  );
+  background-size: 10px 10px;
+}
+
+/* Selection highlight — full-row background for lines being targeted for a comment */
+.comment-selection-highlight {
+  background-color: var(--primary) !important;
+}
+
+/* Custom scrollbar */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted-foreground) transparent;
+}
+
+/* Settings modal: CSS-only scrollspy via scroll-target-group + :target-current */
+.settings-scrollspy {
+  scroll-target-group: auto;
+}
+
+.settings-nav-link:target-current {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: var(--muted-foreground);
+  border-radius: 4px;
+}

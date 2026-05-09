@@ -1,0 +1,13 @@
+{
+  "name": "@bizimind/cc-git-editor",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build:git": "bun build --compile src/git-wrapper.ts --outfile dist/git",
+    "build:agentic-editor": "bun build --compile src/editors/agentic-editor.ts --outfile dist/agentic-editor",
+    "build:continue-rebase": "bun build --compile src/commands/continue-rebase.ts --outfile dist/continue-rebase",
+    "build:apply-staged-edits": "bun build --compile src/commands/apply-staged.ts --outfile dist/apply-staged-edits",
+    "build": "bun run build:git && bun run build:agentic-editor && bun run build:continue-rebase && bun run build:apply-staged-edits",
+    "typecheck": "tsgo --noEmit"
+  }
+}

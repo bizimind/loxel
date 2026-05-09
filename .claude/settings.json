@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bunx *)",
+      "Bash(oxlint:*)",
+      "Bash(docker build:*)",
+      "Bash(docker images:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker inspect:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(docker-compose down:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker-compose build:*)",
+      "Bash(printf:*)",
+      "Bash(env)",
+      "Bash(wget *)",
+      "Read(~/.claude/**)",
+      "Read(~/.local/state/loxel/**)",
+      "Read(~/.local/state/loxel/ccm/**)",
+      "Bash(bunx convex codegen *)",
+      "Bash(bun -e *)",
+      "Bash(axiom query *)"
+    ],
+    "ask": ["Bash(brew install:*)"],
+    "deny": ["Bash(yarn *)", "Bash(eslint *)", "Bash(prettier *)", "Bash(biome *)"]
+  }
+}

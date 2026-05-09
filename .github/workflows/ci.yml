@@ -1,0 +1,234 @@
+name: CI
+
+on:
+  push:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  discover:
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    outputs:
+      lint: ${{ steps.find.outputs.lint }}
+      test: ${{ steps.find.outputs.test }}
+      build: ${{ steps.find.outputs.build }}
+      typecheck: ${{ steps.find.outputs.typecheck }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Find affected packages
+        id: find
+        shell: bash
+        run: |
+          # Determine which packages need to run based on changes since last successful CI
+          echo "::group::Change detection"
+
+          # Get the last successful CI run's commit SHA
+          BRANCH="${GITHUB_REF_NAME}"
+          BASE_SHA=$(gh run list --branch "$BRANCH" --status success --limit 1 --workflow ci.yml --json headSha --jq '.[0].headSha' 2>/dev/null || echo "")
+
+          # If no successful run on current branch and not on main, fall back to main
+          if [ -z "$BASE_SHA" ] && [ "$BRANCH" != "main" ]; then
+            echo "No successful CI run found for branch $BRANCH, falling back to main"
+            BASE_SHA=$(gh run list --branch main --status success --limit 1 --workflow ci.yml --json headSha --jq '.[0].headSha' 2>/dev/null || echo "")
+          fi
+
+          # Per-check-type flags for root config changes
+          RUN_ALL_TEST=false
+          RUN_ALL_BUILD=false
+          RUN_ALL_TYPECHECK=false
+          RUN_ALL_LINT=false
+          CHANGED_FILES=""
+
+          if [ -z "$BASE_SHA" ]; then
+            echo "No successful CI run found - running all packages"
+            RUN_ALL_TEST=true; RUN_ALL_BUILD=true; RUN_ALL_TYPECHECK=true; RUN_ALL_LINT=true
+          elif ! git merge-base --is-ancestor "$BASE_SHA" HEAD 2>/dev/null; then
+            echo "BASE_SHA $BASE_SHA is not reachable from HEAD (force push/rebase) - running all packages"
+            RUN_ALL_TEST=true; RUN_ALL_BUILD=true; RUN_ALL_TYPECHECK=true; RUN_ALL_LINT=true
+          else
+            echo "Comparing against last successful run: $BASE_SHA"
+            CHANGED_FILES=$(git diff --name-only "$BASE_SHA" HEAD)
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
+
+            # Root package.json or lockfile affects all checks
+            if echo "$CHANGED_FILES" | grep -qE "^(package\.json|bun\.lock)$"; then
+              echo "Root package.json or lockfile changed - running all packages"
+              RUN_ALL_TEST=true; RUN_ALL_BUILD=true; RUN_ALL_TYPECHECK=true; RUN_ALL_LINT=true
+            fi
+
+            # TypeScript config affects typecheck only
+            if echo "$CHANGED_FILES" | grep -qE "^tsconfig\.(base\.)?json$"; then
+              echo "TypeScript config changed - typechecking all packages"
+              RUN_ALL_TYPECHECK=true
+            fi
+
+            # Lint/format config affects lint only
+            if echo "$CHANGED_FILES" | grep -qE "^\.(oxlintrc|oxfmtrc)\.jsonc$"; then
+              echo "Lint/format config changed - linting all packages"
+              RUN_ALL_LINT=true
+            fi
+          fi
+
+          # Build dependency graph: find packages that depend on each package
+          # Format: dependents[dep_name]="pkg1 pkg2 pkg3"
+          # Also build a map from package name to directory name for scoped packages
+          declare -A dependents
+          declare -A name_to_dir
+          for pkg_json in packages/*/package.json; do
+            pkg_path=$(dirname "$pkg_json")
+            pkg_dir=$(basename "$pkg_path")
+            pkg_name=$(jq -r '.name' "$pkg_json" 2>/dev/null || echo "$pkg_dir")
+            name_to_dir["$pkg_name"]="$pkg_dir"
+          done
+
+          for pkg_json in packages/*/package.json; do
+            pkg_path=$(dirname "$pkg_json")
+            pkg_dir=$(basename "$pkg_path")
+            # Get workspace:* and path-based dependencies from both dependencies and devDependencies
+            deps=$(jq -r '((.dependencies // {}) + (.devDependencies // {})) | to_entries[] | select(.value | startswith("workspace:") or startswith("../") or startswith("./")) | .key' "$pkg_json" 2>/dev/null || echo "")
+            for dep in $deps; do
+              # Map dependency name to directory name (for scoped packages like @loxel/whisper-cpp)
+              dep_dir="${name_to_dir[$dep]:-$dep}"
+              dependents[$dep_dir]="${dependents[$dep_dir]} $pkg_dir"
+            done
+          done
+
+          # Find directly changed packages
+          declare -A affected
+          # Find packages with changed files
+          if [ -n "$CHANGED_FILES" ]; then
+            for pkg_json in packages/*/package.json; do
+              pkg_path=$(dirname "$pkg_json")
+              pkg_name=$(basename "$pkg_path")
+              if echo "$CHANGED_FILES" | grep -q "^${pkg_path}/"; then
+                affected[$pkg_name]=1
+                echo "Package $pkg_name has direct changes"
+              fi
+            done
+
+            # Expand to include dependents (transitive)
+            changed=true
+            while [ "$changed" = "true" ]; do
+              changed=false
+              for pkg_name in "${!affected[@]}"; do
+                for dependent in ${dependents[$pkg_name]}; do
+                  if [ -z "${affected[$dependent]}" ]; then
+                    affected[$dependent]=1
+                    changed=true
+                    echo "Package $dependent added (depends on $pkg_name)"
+                  fi
+                done
+              done
+            done
+          fi
+
+          echo "Affected packages: ${!affected[*]}"
+          echo "::endgroup::"
+
+          # Find packages with each script, filtered to affected packages or run-all flag
+          find_packages() {
+            local script=$1
+            local run_all=$2
+            local result="["
+            local first=true
+            for pkg_json in packages/*/package.json; do
+              pkg_path=$(dirname "$pkg_json")
+              pkg_name=$(basename "$pkg_path")
+              # Check if package has the script and is either affected or run-all is set
+              if { [ "$run_all" = "true" ] || [ -n "${affected[$pkg_name]}" ]; } && jq -e --arg cmd "$script" '.scripts[$cmd]' "$pkg_json" >/dev/null 2>&1; then
+                if [ "$first" = "true" ]; then
+                  first=false
+                else
+                  result+=","
+                fi
+                result+="{\"path\":\"$pkg_path\",\"name\":\"$pkg_name\"}"
+              fi
+            done
+            result+="]"
+            echo "$result"
+          }
+
+          # Lint: run if any package is affected or lint config changed
+          if [ "$RUN_ALL_LINT" = "true" ] || [ ${#affected[@]} -gt 0 ]; then
+            echo "lint=true" >> $GITHUB_OUTPUT
+          else
+            echo "lint=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "test=$(find_packages test $RUN_ALL_TEST)" >> $GITHUB_OUTPUT
+          echo "build=$(find_packages build $RUN_ALL_BUILD)" >> $GITHUB_OUTPUT
+          echo "typecheck=$(find_packages typecheck $RUN_ALL_TYPECHECK)" >> $GITHUB_OUTPUT
+
+  lint:
+    needs: discover
+    if: needs.discover.outputs.lint == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Check formatting
+        run: bun run fmt:check
+      - name: Run linter
+        run: bun run lint
+
+  test:
+    name: test ${{ matrix.package.name }}
+    needs: discover
+    if: needs.discover.outputs.test != '[]'
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.test) }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Run tests
+        run: bun run --cwd ${{ matrix.package.path }} test
+
+  build:
+    name: build ${{ matrix.package.name }}
+    needs: discover
+    if: needs.discover.outputs.build != '[]'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.build) }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Run build
+        run: bun run --cwd ${{ matrix.package.path }} build
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+  typecheck:
+    name: typecheck ${{ matrix.package.name }}
+    needs: discover
+    if: needs.discover.outputs.typecheck != '[]'
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.typecheck) }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Run typecheck
+        run: bun run --cwd ${{ matrix.package.path }} typecheck

@@ -1,0 +1,165 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "options": { "typeAware": true },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error",
+    "style": "off",
+    "nursery": "error",
+    "restriction": "error",
+  },
+  "plugins": ["oxc", "typescript", "react", "react-perf"],
+  "rules": {
+    // React hooks exhaustive-deps - catch missing dependencies in useEffect/useCallback/useMemo
+    "react/exhaustive-deps": "error",
+    "eslint-plugin-react-hooks/exhaustive-deps": "off",
+
+    // --- Rules newly enabled in oxlint 1.52+ (disabled for incremental adoption) ---
+    // typescript
+    "typescript/ban-types": "error",
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-import-type-side-effects": "error",
+    "typescript/no-require-imports": "error",
+    "typescript/no-unsafe-function-type": "error",
+    "typescript/no-var-requires": "error",
+    "typescript/explicit-function-return-type": "off",
+    "typescript/explicit-module-boundary-types": "off",
+    "typescript/no-non-null-assertion": "off",
+    // eslint
+    "eqeqeq": "error",
+    "no-alert": "error",
+    "no-else-return": "error",
+    "no-empty": "error",
+    "no-eq-null": "error",
+    "no-inner-declarations": "error",
+    "no-new": "error",
+    "no-param-reassign": "error",
+    "no-promise-executor-return": "error",
+    "no-unmodified-loop-condition": "error",
+    "no-unreachable": "error",
+    "no-useless-constructor": "error",
+    "no-useless-return": "error",
+    "radix": "error",
+    "no-lonely-if": "error",
+    "default-case": "error",
+    "class-methods-use-this": "off",
+    "complexity": "off",
+    "max-classes-per-file": "off",
+    "max-depth": "off",
+    "max-lines": "off",
+    "max-lines-per-function": "off",
+    "no-await-in-loop": "off",
+    "no-bitwise": "off",
+    "no-console": "off",
+    "no-dynamic-delete": "off",
+    "no-empty-function": "off",
+    "no-inline-comments": "off",
+    "no-negated-condition": "off",
+    "no-shadow": "off",
+    "no-undef": "off",
+    "no-undefined": "off",
+    "no-use-before-define": "off",
+    "no-void": "off",
+    "no-warning-comments": "off",
+    "preserve-caught-error": "off",
+    "require-await": "off",
+    // oxc
+    "oxc/no-async-await": "off",
+    "oxc/no-optional-chaining": "off",
+    "oxc/no-rest-spread-properties": "off",
+    "oxc/branches-sharing-code": "off",
+    "oxc/no-map-spread": "off",
+    // react
+    "react/react-in-jsx-scope": "off",
+    "react/no-multi-comp": "off",
+    "react/jsx-filename-extension": "off",
+    "react/button-has-type": "off",
+    "react/only-export-components": "off",
+    "react/no-array-index-key": "off",
+    "react/jsx-no-constructed-context-values": "off",
+    "react/no-danger": "off",
+    "react/no-unescaped-entities": "off",
+    "react/no-unknown-property": "off",
+    "react/jsx-no-useless-fragment": "off",
+    // react-perf
+    "react-perf/jsx-no-new-function-as-prop": "off",
+    "react-perf/jsx-no-new-object-as-prop": "off",
+    "react-perf/jsx-no-jsx-as-prop": "off",
+    "react-perf/jsx-no-new-array-as-prop": "off",
+
+    // --- Rules intentionally disabled (not temporarily) ---
+    // no-plusplus: ++/-- are idiomatic and readable in loops and counters; banning them adds noise without safety benefit.
+    "no-plusplus": "off",
+    // no-invalid-void-type: we intentionally use `void` in type positions (e.g. Promise<void>, () => void, Promise.withResolvers<void>()).
+    "typescript/no-invalid-void-type": "off",
+    // no-loop-func: closures capturing loop variables are safe under `let`/`const` (block-scoped); the rule flags valid patterns.
+    "no-loop-func": "off",
+
+    // --- Rules temporarily disabled ---
+    // TODO: revisit in oxlint 1.61.0 — false positives with closure reads and continue-in-loop patterns.
+    // See https://github.com/oxc-project/oxc/issues/21359 (fix merged but may not be in 1.60.0)
+    "no-useless-assignment": "off",
+
+    // --- Type-aware rules (disabled for incremental adoption) ---
+    "typescript/switch-exhaustiveness-check": "error",
+    "typescript/no-redundant-type-constituents": "error",
+    "typescript/unbound-method": "error",
+    "typescript/return-await": "error",
+    "typescript/non-nullable-type-assertion-style": "error",
+    "typescript/no-unnecessary-type-parameters": "error",
+    "typescript/prefer-promise-reject-errors": "error",
+    "typescript/prefer-includes": "error",
+    "typescript/no-duplicate-type-constituents": "error",
+    "typescript/restrict-plus-operands": "error",
+    "typescript/no-unnecessary-type-conversion": "error",
+    "typescript/no-unnecessary-type-arguments": "error",
+    "typescript/no-misused-spread": "error",
+    // Surfaced by enabling `options.typeAware: true`. Enable one at a time and fix violations.
+    // Counts in repo at time of disable (2026-04-19):
+    "typescript/prefer-readonly-parameter-types": "off", // 4511
+    "typescript/strict-boolean-expressions": "off", // 1364
+    "typescript/no-confusing-void-expression": "off", // 644
+    "typescript/no-unsafe-type-assertion": "off", // 542
+    "typescript/no-unnecessary-condition": "off", // 337
+    "typescript/strict-void-return": "off", // 219
+    "typescript/no-floating-promises": "off", // 200
+    "typescript/promise-function-async": "off", // 174
+    "typescript/no-unsafe-member-access": "off", // 173
+    "typescript/no-unsafe-assignment": "off", // 159
+    "typescript/require-await": "off", // 134 (type-aware variant)
+    "typescript/prefer-nullish-coalescing": "off", // 132
+    "typescript/no-misused-promises": "off", // 104
+    "typescript/no-base-to-string": "off", // 100
+    "typescript/no-unsafe-argument": "off", // 84
+    "typescript/consistent-return": "off", // 83
+    "typescript/no-deprecated": "off", // 80
+    "typescript/no-unnecessary-type-assertion": "off", // 61
+    "typescript/use-unknown-in-catch-callback-variable": "off", // 45
+    "typescript/no-unsafe-call": "off", // 45
+    "typescript/prefer-optional-chain": "off", // 33
+    "typescript/no-unnecessary-boolean-literal-compare": "off", // 33
+    "typescript/no-useless-default-assignment": "off", // 31
+    "typescript/no-unsafe-return": "off", // 28
+    "typescript/restrict-template-expressions": "off", // 27
+    "typescript/await-thenable": "off", // 25
+  },
+  "env": { "es2024": true, "node": true },
+  "ignorePatterns": [
+    "**/dist/",
+    "node_modules/",
+    "**/_generated/",
+    "bun.lock",
+    "*.d.ts",
+    "**/*.schema.json",
+  ],
+  "overrides": [
+    { "files": ["packages/wt/**/*.ts"], "rules": { "no-console": "error" } },
+    {
+      "files": ["**/*.cjs"],
+      "rules": { "typescript/no-require-imports": "off", "typescript/no-var-requires": "off" },
+    },
+  ],
+}

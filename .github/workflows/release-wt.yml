@@ -1,0 +1,198 @@
+name: Release wt
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/wt/**"
+      - ".github/workflows/release-wt.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-wt
+  cancel-in-progress: false
+
+jobs:
+  build-matrix:
+    # Skip if this is a release commit
+    if: "!startsWith(github.event.head_commit.message, 'chore(wt): release')"
+    uses: ./.github/workflows/build-matrix.yml
+
+  check-and-bump:
+    needs: build-matrix
+    if: ${{ fromJSON(needs.build-matrix.outputs.platforms)[0] != null }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          cd packages/wt
+          CURRENT=$(jq -r .version package.json)
+          NEW_VERSION=$(bunx semver -i patch "$CURRENT")
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=wt-v$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json
+          mv tmp.json package.json
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Check if tag already exists (from a previous failed run)
+          if git ls-remote --tags origin | grep -q "refs/tags/${{ steps.bump.outputs.tag }}$"; then
+            echo "::error::Tag ${{ steps.bump.outputs.tag }} already exists. Please delete it manually and re-run."
+            exit 1
+          fi
+
+          git add packages/wt/package.json
+          git commit -m "chore(wt): release v${{ steps.bump.outputs.version }}"
+          git tag "${{ steps.bump.outputs.tag }}"
+
+          # Retry loop for push (handles race with other releases)
+          for i in $(seq 1 10); do
+            git pull --rebase origin main
+            if git push origin main; then
+              break
+            fi
+            if [ $i -eq 10 ]; then
+              echo "::error::Failed to push after 10 attempts"
+              exit 1
+            fi
+            echo "Push failed (attempt $i/10), retrying in 3s..."
+            sleep 3
+          done
+
+          git push origin --tags
+
+  build:
+    needs: [build-matrix, check-and-bump]
+    strategy:
+      matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    outputs:
+      sha256_darwin-arm64: ${{ steps.sha.outputs.sha256_darwin-arm64 }}
+      sha256_darwin-x64: ${{ steps.sha.outputs.sha256_darwin-x64 }}
+      sha256_linux-x64: ${{ steps.sha.outputs.sha256_linux-x64 }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.check-and-bump.outputs.tag }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build binary
+        run: bun run --cwd packages/wt build
+        env:
+          BUN_NO_CODESIGN_MACHO_BINARY: "1"
+
+      - name: Sign binary (macOS)
+        if: runner.os == 'macOS'
+        run: codesign -s - -f packages/wt/dist/wt
+
+      - name: Calculate checksum
+        id: sha
+        run: |
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            SHA256=$(shasum -a 256 packages/wt/dist/wt | awk '{print $1}')
+          else
+            SHA256=$(sha256sum packages/wt/dist/wt | awk '{print $1}')
+          fi
+          echo "sha256_${{ matrix.platform }}=$SHA256" >> $GITHUB_OUTPUT
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          aws s3 cp packages/wt/dist/wt "s3://loxel/wt/${{ matrix.platform }}/wt" \
+            --content-type application/octet-stream
+
+  release:
+    needs: [build-matrix, check-and-bump, build]
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.check-and-bump.outputs.tag }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build schema
+        run: |
+          mkdir -p packages/wt/dist
+          bun run --cwd packages/wt build:config-schema > packages/wt/dist/wt.schema.json
+
+      - name: Generate manifest
+        run: |
+          VERSION="${{ needs.check-and-bump.outputs.version }}"
+          PLATFORMS='${{ needs.build-matrix.outputs.platforms }}'
+          BASE="https://loxel.bizimind.io/wt"
+
+          jq -n \
+            --arg v "$VERSION" \
+            --argjson platforms "$PLATFORMS" \
+            --arg sha_darwin_arm64 "${{ needs.build.outputs.sha256_darwin-arm64 }}" \
+            --arg sha_darwin_x64 "${{ needs.build.outputs.sha256_darwin-x64 }}" \
+            --arg sha_linux_x64 "${{ needs.build.outputs.sha256_linux-x64 }}" \
+            --arg base "$BASE" \
+            '{
+              version: $v,
+              released_at: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
+              binaries: {
+                "darwin-arm64": {url: "\($base)/darwin-arm64/wt", sha256: $sha_darwin_arm64},
+                "darwin-x64": {url: "\($base)/darwin-x64/wt", sha256: $sha_darwin_x64},
+                "linux-x64": {url: "\($base)/linux-x64/wt", sha256: $sha_linux_x64}
+              } | with_entries(select(.key | IN($platforms[])))
+            }' > manifest.json
+          cat manifest.json
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          aws s3 cp packages/wt/dist/wt.schema.json s3://loxel/wt/schema.json --content-type application/json
+          aws s3 cp manifest.json s3://loxel/wt/manifest.json --content-type application/json
+
+      - name: Create GitHub Release
+        run: |
+          VERSION="${{ needs.check-and-bump.outputs.version }}"
+          BASE="https://loxel.bizimind.io/wt"
+          PLATFORMS='${{ needs.build-matrix.outputs.platforms }}'
+
+          # Build download links
+          LINKS=""
+          for platform in $(echo "$PLATFORMS" | jq -r '.[]'); do
+            LINKS="${LINKS}- [${platform}](${BASE}/${platform}/wt)"$'\n'
+          done
+
+          gh release create "${{ needs.check-and-bump.outputs.tag }}" \
+            --title "wt ${VERSION}" \
+            --generate-notes \
+            --notes "## Downloads
+
+          ${LINKS}
+          Or install via: \`curl -fsSL https://loxel.bizimind.io/wt/install.sh | bash\`"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

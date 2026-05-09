@@ -1,0 +1,72 @@
+appId: com.bizimind.loxel
+productName: Loxel
+copyright: Copyright © 2025
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist-electron/**/*
+  - "!node_modules/**/*"
+
+extraResources:
+  - from: build/loxel-server
+    to: loxel-server
+  - from: build/yaml-language-server
+    to: yaml-language-server
+  - from: build/docker-language-server
+    to: docker-language-server
+  - from: build/terraform-ls/terraform-ls
+    to: terraform-ls
+  - from: build/pyright-langserver
+    to: pyright-langserver
+  - from: build/typeshed-fallback
+    to: typeshed-fallback
+  - from: build/tsgo-lib
+    to: tsgo-lib
+  - from: dist-electron/renderer
+    to: renderer
+
+asar: true
+
+generateUpdatesFilesForAllChannels: false
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+dmg:
+  writeUpdateInfo: false
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  category: Development
+  artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

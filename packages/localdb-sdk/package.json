@@ -1,0 +1,23 @@
+{
+  "name": "@bizimind/localdb-sdk",
+  "version": "0.1.0",
+  "description": "Local SQLite-backed structured database SDK with Notion-like schema and view management",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.15.21"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

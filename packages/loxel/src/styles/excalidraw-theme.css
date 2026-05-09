@@ -1,0 +1,116 @@
+/* Excalidraw theme overrides — map to git-view's JetBrains-style palette */
+
+/* Light mode */
+.excalidraw {
+  --color-primary: var(--primary);
+  --color-primary-darker: var(--primary);
+  --color-primary-darkest: var(--primary);
+  --color-primary-hover: var(--primary);
+  --color-primary-light: var(--primary);
+  --color-primary-light-darker: var(--primary);
+
+  --island-bg-color: var(--card);
+  --island-bg-color-alt: var(--card);
+  --popup-bg-color: var(--card);
+  --popup-secondary-bg-color: var(--muted);
+  --popup-text-color: var(--foreground);
+  --sidebar-bg-color: var(--card);
+  --default-bg-color: var(--editor-surface);
+  --input-bg-color: var(--background);
+  --input-border-color: var(--border);
+  --input-hover-bg-color: var(--muted);
+
+  --color-on-surface: var(--foreground);
+  --text-primary-color: var(--foreground);
+  --icon-fill-color: var(--foreground);
+
+  --default-border-color: var(--border);
+  --dialog-border-color: var(--border);
+  --sidebar-border-color: var(--border);
+  --color-border-outline: var(--muted-foreground);
+  --color-border-outline-variant: var(--border);
+
+  --color-surface-high: var(--muted);
+  --color-surface-mid: var(--background);
+  --color-surface-low: var(--muted);
+  --color-surface-lowest: var(--background);
+  --color-surface-primary-container: var(--primary);
+  --color-on-primary-container: var(--primary);
+  --color-brand-hover: var(--primary);
+  --color-brand-active: var(--primary);
+
+  --button-hover-bg: var(--muted);
+  --button-active-bg: var(--muted);
+  --button-active-border: var(--primary);
+
+  --focus-highlight-color: var(--ring);
+  --select-highlight-color: var(--primary);
+  --keybinding-color: var(--muted-foreground);
+  --color-selection: var(--primary);
+}
+
+/* Dark mode */
+.excalidraw.theme--dark {
+  --color-primary: var(--primary);
+  --color-primary-darker: var(--primary);
+  --color-primary-darkest: var(--primary);
+  --color-primary-hover: var(--primary);
+  --color-primary-light: var(--primary);
+  --color-primary-light-darker: var(--primary);
+
+  --island-bg-color: var(--surface-1);
+  --island-bg-color-alt: var(--surface-1);
+  --popup-bg-color: var(--surface-1);
+  --popup-secondary-bg-color: var(--background);
+  --popup-text-color: var(--foreground);
+  --sidebar-bg-color: var(--surface-1);
+  --default-bg-color: var(--surface-2);
+  --input-bg-color: var(--surface-2);
+  --input-border-color: var(--border);
+  --input-hover-bg-color: var(--surface-1);
+
+  --color-on-surface: var(--foreground);
+  --text-primary-color: var(--foreground);
+  --icon-fill-color: var(--foreground);
+
+  --default-border-color: var(--border);
+  --dialog-border-color: var(--border);
+  --sidebar-border-color: var(--border);
+  --color-border-outline: var(--muted-foreground);
+  --color-border-outline-variant: var(--border);
+
+  --color-surface-high: #2a2d33;
+  --color-surface-mid: var(--surface-2);
+  --color-surface-low: var(--surface-2);
+  --color-surface-lowest: var(--surface-2);
+  --color-surface-primary-container: #002362;
+  --color-on-primary-container: var(--primary);
+  --color-brand-hover: var(--primary);
+  --color-brand-active: var(--primary);
+
+  --button-hover-bg: #2a2d33;
+  --button-active-bg: #2a2d33;
+  --button-active-border: var(--primary);
+
+  --focus-highlight-color: var(--ring);
+  --select-highlight-color: var(--primary);
+  --keybinding-color: var(--muted-foreground);
+
+  --scrollbar-thumb: var(--muted-foreground);
+  --scrollbar-thumb-hover: var(--foreground);
+  --color-selection: var(--primary);
+}
+
+/* Fix laser pointer / lasso offset when embedded in dockview.
+   Dockview ancestors use transform/contain which create containing blocks for
+   position:fixed. Excalidraw's SVGLayer (position:fixed) renders trail paths
+   in viewport coordinates (including offsetLeft/Top), but the SVG anchors to a
+   dockview ancestor instead of the viewport, causing a double-offset.
+   Fix: make SVGLayer position:absolute covering the container, then use a
+   viewBox on the SVG (set from JS) to map viewport coordinates into the
+   container-relative space. */
+.excalidraw .SVGLayer {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}

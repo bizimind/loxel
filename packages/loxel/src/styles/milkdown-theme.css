@@ -1,0 +1,748 @@
+/*
+ * Milkdown/Crepe theme overrides to match loxel's JetBrains theme.
+ * Crepe's vendor CSS is intentionally layered below Tailwind utilities. Our
+ * variable bridge stays unlayered so the editor still inherits the app theme.
+ */
+
+@import "@milkdown/crepe/theme/common/style.css" layer(milkdown-vendor);
+@import "@milkdown/crepe/theme/classic.css" layer(milkdown-vendor);
+
+/* ── Theme variable overrides ── */
+
+.milkdown {
+  --crepe-color-background: var(--editor-surface);
+  --crepe-color-on-background: var(--foreground);
+  --crepe-color-surface: var(--background);
+  --crepe-color-surface-low: var(--muted);
+  --crepe-color-on-surface: var(--foreground);
+  --crepe-color-on-surface-variant: var(--muted-foreground);
+  --crepe-color-outline: var(--muted-foreground);
+  --crepe-color-primary: var(--primary);
+  --crepe-color-secondary: var(--secondary);
+  --crepe-color-on-secondary: var(--secondary-foreground);
+  --crepe-color-inverse: var(--foreground);
+  --crepe-color-on-inverse: var(--background);
+  --crepe-color-inline-code: var(--primary);
+  --crepe-color-inline-area: color-mix(in srgb, var(--primary), transparent 88%);
+  --crepe-color-hover: color-mix(in oklch, var(--primary) 50%, transparent);
+  --crepe-color-selected: var(--primary);
+  --crepe-font-default:
+    "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --crepe-font-code:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --crepe-font-title: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* Dark mode variable overrides */
+.milkdown.dark {
+  --crepe-color-background: var(--editor-surface);
+  --crepe-color-on-background: var(--foreground);
+  --crepe-color-surface: var(--background);
+  --crepe-color-surface-low: var(--muted);
+  --crepe-color-on-surface: var(--foreground);
+  --crepe-color-on-surface-variant: var(--muted-foreground);
+  --crepe-color-outline: var(--muted-foreground);
+  --crepe-color-primary: var(--primary);
+  --crepe-color-secondary: var(--secondary);
+  --crepe-color-on-secondary: var(--secondary-foreground);
+  --crepe-color-inverse: var(--foreground);
+  --crepe-color-on-inverse: var(--background);
+  --crepe-color-inline-code: #56a8f5;
+  --crepe-color-inline-area: rgba(86, 168, 245, 0.12);
+  --crepe-color-hover: color-mix(in oklch, var(--primary) 50%, transparent);
+  --crepe-color-selected: var(--primary);
+  --crepe-shadow-1: 0px 1px 2px 0px rgba(0, 0, 0, 0.4), 0px 1px 3px 1px rgba(0, 0, 0, 0.2);
+  --crepe-shadow-2: 0px 1px 2px 0px rgba(0, 0, 0, 0.4), 0px 2px 6px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Layout ── */
+
+.milkdown {
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted-foreground) transparent;
+}
+
+.milkdown .ProseMirror {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 48px;
+  caret-color: var(--crepe-color-on-background);
+  --prosemirror-virtual-cursor-color: var(--crepe-color-on-background);
+}
+
+.milkdown .ProseMirror-gapcursor::after {
+  border-top-color: var(--crepe-color-on-background);
+}
+
+.milkdown .crepe-drop-cursor {
+  background-color: var(--crepe-color-on-background);
+}
+
+/* ── Body text color — slightly dimmer than headings ── */
+
+.milkdown .ProseMirror {
+  color: color-mix(in srgb, var(--crepe-color-on-background), transparent 30%);
+}
+
+/* Restore full brightness for headings and bold/strong text */
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3,
+.milkdown .ProseMirror h4,
+.milkdown .ProseMirror h5,
+.milkdown .ProseMirror h6,
+.milkdown .ProseMirror strong {
+  color: var(--crepe-color-on-background);
+}
+
+/* ── Links — explicit color independent of --primary ── */
+
+.milkdown .ProseMirror a {
+  color: #56a8f5;
+}
+
+/* ── Headings — tighter spacing, bolder weight ── */
+
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3,
+.milkdown .ProseMirror h4,
+.milkdown .ProseMirror h5,
+.milkdown .ProseMirror h6 {
+  font-family: var(--crepe-font-default);
+  font-weight: 600;
+}
+
+.milkdown .ProseMirror h1 {
+  font-size: 28px;
+  line-height: 36px;
+  margin-top: 16px;
+  margin-bottom: 12px;
+}
+
+.milkdown .ProseMirror h2 {
+  font-size: 24px;
+  line-height: 32px;
+  margin-top: 14px;
+  margin-bottom: 10px;
+}
+
+.milkdown .ProseMirror h3 {
+  font-size: 20px;
+  line-height: 28px;
+  margin-top: 12px;
+  margin-bottom: 8px;
+}
+
+.milkdown .ProseMirror h4 {
+  font-size: 17px;
+  line-height: 24px;
+  margin-top: 10px;
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+
+.milkdown .ProseMirror h5 {
+  font-size: 15px;
+  line-height: 22px;
+  margin-top: 8px;
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+
+.milkdown .ProseMirror h6 {
+  font-size: 14px;
+  line-height: 20px;
+  margin-top: 8px;
+  margin-bottom: 4px;
+  font-weight: 700;
+  color: var(--crepe-color-on-surface-variant);
+}
+
+/* ── Body text ── */
+
+.milkdown .ProseMirror p {
+  font-size: 15px;
+  line-height: 26px;
+}
+
+/* ── Inline code — subtle, bluish tint ── */
+
+.milkdown .ProseMirror code {
+  color: var(--crepe-color-inline-code);
+  background: var(--crepe-color-inline-area);
+  font-family: var(--crepe-font-code);
+  font-size: 12.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--crepe-color-outline), transparent 70%);
+}
+
+/* ── Lists — brighter glyphs ── */
+
+.milkdown .milkdown-list-item-block li .label-wrapper {
+  color: var(--crepe-color-on-surface-variant);
+}
+
+.milkdown .milkdown-list-item-block li .label-wrapper svg {
+  fill: var(--crepe-color-on-surface-variant);
+}
+
+.milkdown .milkdown-list-item-block li .label-wrapper .label {
+  font-size: 15px;
+  font-family: var(--crepe-font-default);
+}
+
+/* Checkbox styling — match bullet color */
+.milkdown .milkdown-list-item-block li .label-wrapper .unchecked,
+.milkdown .milkdown-list-item-block li .label-wrapper .checked {
+  color: var(--crepe-color-on-surface-variant);
+}
+
+.milkdown .milkdown-list-item-block li .label-wrapper .unchecked svg,
+.milkdown .milkdown-list-item-block li .label-wrapper .checked svg {
+  fill: var(--crepe-color-on-surface-variant);
+}
+
+/* ── Bullet nesting styles: filled ● → hollow ○ → filled ● → … ── */
+
+/* Hide default SVG bullet, replace with pseudo-element */
+.milkdown .label.bullet svg {
+  display: none;
+}
+
+.milkdown .label.bullet::before {
+  content: "●";
+  font-size: 7px;
+  line-height: 24px;
+}
+
+/* Cycle: filled ● → hollow ○, repeating via increasing specificity */
+.milkdown-list-item-block .milkdown-list-item-block .label.bullet::before {
+  content: "○";
+  font-size: 8px;
+}
+.milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .label.bullet::before {
+  content: "●";
+  font-size: 7px;
+}
+.milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .label.bullet::before {
+  content: "○";
+  font-size: 8px;
+}
+.milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .label.bullet::before {
+  content: "●";
+  font-size: 7px;
+}
+.milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .label.bullet::before {
+  content: "○";
+  font-size: 8px;
+}
+.milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .label.bullet::before {
+  content: "●";
+  font-size: 7px;
+}
+.milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .label.bullet::before {
+  content: "○";
+  font-size: 8px;
+}
+.milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .milkdown-list-item-block
+  .label.bullet::before {
+  content: "●";
+  font-size: 7px;
+}
+
+/* ── Ordered list nesting: 1. → a. → i. → 1. → … ── */
+
+/* Counter setup: each <ol> resets; each direct list item increments */
+.milkdown ol {
+  counter-reset: ordered-list;
+}
+
+.milkdown ol > .milkdown-list-item-block {
+  counter-increment: ordered-list;
+}
+
+/* Hide original label text via transparent color, show CSS counter instead */
+.milkdown .milkdown-list-item-block li .label-wrapper .label.ordered {
+  color: transparent;
+  position: relative;
+  overflow: hidden;
+}
+
+.milkdown .milkdown-list-item-block li .label-wrapper .label.ordered::before {
+  position: absolute;
+  right: 0;
+  color: var(--crepe-color-on-surface-variant);
+  font-size: 15px;
+  font-family: var(--crepe-font-default);
+  content: counter(ordered-list, decimal) ".";
+}
+
+/* Cycle: decimal → lower-alpha → lower-roman, repeating via increasing specificity */
+.milkdown ol ol .label.ordered::before {
+  content: counter(ordered-list, lower-alpha) "." !important;
+}
+.milkdown ol ol ol .label.ordered::before {
+  content: counter(ordered-list, lower-roman) "." !important;
+}
+.milkdown ol ol ol ol .label.ordered::before {
+  content: counter(ordered-list, decimal) "." !important;
+}
+.milkdown ol ol ol ol ol .label.ordered::before {
+  content: counter(ordered-list, lower-alpha) "." !important;
+}
+.milkdown ol ol ol ol ol ol .label.ordered::before {
+  content: counter(ordered-list, lower-roman) "." !important;
+}
+.milkdown ol ol ol ol ol ol ol .label.ordered::before {
+  content: counter(ordered-list, decimal) "." !important;
+}
+.milkdown ol ol ol ol ol ol ol ol .label.ordered::before {
+  content: counter(ordered-list, lower-alpha) "." !important;
+}
+.milkdown ol ol ol ol ol ol ol ol ol .label.ordered::before {
+  content: counter(ordered-list, lower-roman) "." !important;
+}
+
+/* ── Code blocks — bordered, rounded, JetBrains-like ── */
+
+.milkdown .milkdown-code-block {
+  background: var(--crepe-color-surface);
+  border: 1px solid color-mix(in srgb, var(--crepe-color-outline), transparent 60%);
+  border-radius: 6px;
+  padding: 12px 16px 16px;
+  margin: 8px 0;
+  overflow: visible;
+}
+
+/* Language picker — constrain height and ensure it floats above content */
+.milkdown .milkdown-code-block .language-picker {
+  z-index: 50;
+}
+
+.milkdown .milkdown-code-block .language-list {
+  height: auto;
+  max-height: min(400px, 50vh);
+}
+
+.milkdown .milkdown-code-block .cm-editor {
+  background: var(--crepe-color-surface);
+  font-family: var(--crepe-font-code);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.milkdown .milkdown-code-block .cm-gutters {
+  background: var(--crepe-color-surface);
+  border-right: none;
+  padding-right: 8px;
+}
+
+.milkdown .milkdown-code-block .cm-gutters .cm-gutterElement {
+  color: var(--editor-line-number);
+  font-size: 12px;
+}
+
+.milkdown .milkdown-code-block .cm-content {
+  font-family: var(--crepe-font-code);
+}
+
+.milkdown .milkdown-code-block .cm-activeLine {
+  background: transparent;
+}
+
+.milkdown .milkdown-code-block .cm-activeLineGutter {
+  background: transparent;
+}
+
+/* Selection */
+.milkdown .milkdown-code-block .cm-selectionBackground {
+  background: var(--crepe-color-selected) !important;
+}
+
+/* CodeMirror cursor color */
+.milkdown .milkdown-code-block .cm-cursor {
+  border-left-color: var(--crepe-color-on-surface);
+}
+
+/* Language button & tools — always visible, subtle */
+.milkdown .milkdown-code-block .tools .language-button {
+  opacity: 0.7;
+  font-family: var(--crepe-font-default);
+  font-size: 11px;
+  background: transparent;
+  color: var(--crepe-color-on-surface-variant);
+  margin-bottom: 6px;
+}
+
+.milkdown .milkdown-code-block .tools .language-button:hover {
+  opacity: 1;
+  background: var(--crepe-color-hover);
+}
+
+.milkdown .milkdown-code-block .tools .tools-button-group button {
+  font-family: var(--crepe-font-default);
+  font-size: 11px;
+}
+
+/* ── Blockquote ── */
+
+.milkdown .ProseMirror blockquote {
+  padding-left: 20px;
+}
+
+.milkdown .ProseMirror blockquote::before {
+  background: var(--crepe-color-primary);
+  opacity: 0.5;
+  width: 3px;
+  border-radius: 2px;
+}
+
+/* ── Horizontal rule ── */
+
+.milkdown .ProseMirror hr {
+  background-color: color-mix(in srgb, var(--crepe-color-outline), transparent 60%);
+  margin: 24px 0;
+}
+
+/* ── Crepe floating UI: align vendor overlays with Loxel dropdown chrome ── */
+
+.milkdown .milkdown-toolbar {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.5);
+}
+
+.milkdown .milkdown-toolbar .toolbar-item {
+  width: 28px;
+  height: 28px;
+  margin: 3px;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.milkdown .milkdown-toolbar .toolbar-item:hover {
+  background: var(--muted);
+}
+
+.milkdown .milkdown-toolbar .toolbar-item:active,
+.milkdown .milkdown-toolbar .toolbar-item.active {
+  background: var(--primary);
+}
+
+.milkdown .milkdown-toolbar .toolbar-item svg {
+  width: 20px;
+  height: 20px;
+  color: var(--muted-foreground);
+  fill: var(--muted-foreground);
+}
+
+.milkdown .milkdown-toolbar .toolbar-item:active svg,
+.milkdown .milkdown-toolbar .toolbar-item.active svg {
+  color: var(--primary-foreground);
+  fill: var(--primary-foreground);
+}
+
+.milkdown .milkdown-toolbar .divider {
+  height: 22px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+
+.milkdown .milkdown-link-preview > .link-preview,
+.milkdown .milkdown-link-edit > .link-edit,
+.milkdown .milkdown-code-block .list-wrapper {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.5);
+}
+
+.milkdown .milkdown-link-preview > .link-preview,
+.milkdown .milkdown-link-edit > .link-edit {
+  height: 34px;
+  align-items: center;
+}
+
+.milkdown .milkdown-link-edit > .link-edit {
+  padding: 4px 10px 4px 12px;
+}
+
+.milkdown .milkdown-link-preview > .link-preview > .link-display,
+.milkdown .milkdown-link-edit > .link-edit > .input-area {
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.milkdown .milkdown-link-edit > .link-edit > .input-area::placeholder {
+  color: var(--muted-foreground);
+}
+
+.milkdown .milkdown-link-preview > .link-preview > .link-icon,
+.milkdown .milkdown-link-preview > .link-preview > .button,
+.milkdown .milkdown-link-edit > .link-edit > .button {
+  border-radius: 6px;
+}
+
+.milkdown .milkdown-link-preview > .link-preview > .link-icon:hover,
+.milkdown .milkdown-link-preview > .link-preview > .button:hover,
+.milkdown .milkdown-link-edit > .link-edit > .button:hover {
+  background: var(--muted);
+}
+
+.milkdown .milkdown-link-preview > .link-preview svg,
+.milkdown .milkdown-link-edit > .link-edit svg {
+  color: var(--muted-foreground);
+  fill: var(--muted-foreground);
+}
+
+.milkdown .milkdown-code-block .language-picker {
+  z-index: 50;
+}
+
+.milkdown .milkdown-code-block .language-button {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.milkdown .milkdown-code-block .language-button:hover {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.milkdown .milkdown-code-block .language-button .expand-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.milkdown .milkdown-code-block .language-button .expand-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.milkdown .milkdown-code-block .list-wrapper {
+  width: 240px;
+  overflow: hidden;
+  padding-top: 0;
+}
+
+.milkdown .milkdown-code-block .search-box {
+  margin: 8px;
+  border: 1px solid var(--input);
+  border-radius: 4px;
+  outline: none;
+  background: var(--surface-2);
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.milkdown .milkdown-code-block .search-box:has(input:focus) {
+  border-color: var(--ring);
+  outline: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ring), transparent 50%);
+}
+
+.milkdown .milkdown-code-block .search-box .search-input,
+.milkdown .milkdown-code-block .search-box input {
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.milkdown .milkdown-code-block .search-box input::placeholder {
+  color: var(--muted-foreground);
+}
+
+.milkdown .milkdown-code-block .language-list-item {
+  padding: 6px 10px;
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.milkdown .milkdown-code-block .language-list-item:hover,
+.milkdown .milkdown-code-block .language-list-item:focus-visible {
+  background: color-mix(in srgb, var(--primary), transparent 50%);
+}
+
+.milkdown .milkdown-block-handle {
+  gap: 4px;
+}
+
+.milkdown .milkdown-block-handle .operation-item {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  padding: 0;
+}
+
+.milkdown .milkdown-block-handle .operation-item:hover {
+  background: var(--muted);
+}
+
+.milkdown .milkdown-block-handle .operation-item.active {
+  background: var(--primary);
+}
+
+.milkdown .milkdown-block-handle .operation-item svg {
+  width: 18px;
+  height: 18px;
+  color: var(--muted-foreground);
+  fill: var(--muted-foreground);
+}
+
+.milkdown .milkdown-block-handle .operation-item.active svg {
+  color: var(--primary-foreground);
+  fill: var(--primary-foreground);
+}
+
+/* ── Slash menu: keep Crepe UI spacing above layered vendor reset ── */
+
+.milkdown .milkdown-slash-menu {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.5);
+}
+
+.milkdown .milkdown-slash-menu .tab-group {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px 0;
+}
+
+.milkdown .milkdown-slash-menu .tab-group ul {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+}
+
+.milkdown .milkdown-slash-menu .tab-group li {
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted-foreground);
+}
+
+.milkdown .milkdown-slash-menu .tab-group li:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.milkdown .milkdown-slash-menu .tab-group li.selected {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.milkdown .milkdown-slash-menu .menu-groups {
+  padding: 4px 8px 8px;
+}
+
+.milkdown .milkdown-slash-menu .menu-group h6 {
+  padding: 6px 8px 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+
+.milkdown .milkdown-slash-menu .menu-group li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 220px;
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: var(--foreground);
+}
+
+.milkdown .milkdown-slash-menu .menu-group li.hover,
+.milkdown .milkdown-slash-menu .menu-group li:hover {
+  background: color-mix(in srgb, var(--primary), transparent 50%);
+}
+
+.milkdown .milkdown-slash-menu .menu-group li.active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.milkdown .milkdown-slash-menu .menu-group li svg {
+  width: 18px;
+  height: 18px;
+  color: var(--muted-foreground);
+  fill: var(--muted-foreground);
+}
+
+.milkdown .milkdown-slash-menu .menu-group li.active svg {
+  color: var(--primary-foreground);
+  fill: var(--primary-foreground);
+}
+
+.milkdown .milkdown-slash-menu .menu-group li > span {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.milkdown .milkdown-slash-menu .menu-group + .menu-group::before {
+  background: var(--border);
+  margin: 4px -8px;
+}
+
+/* ── LocalDb widget: isolate embedded UI from Milkdown's editor typography/reset ── */
+
+.milkdown-localdb-block {
+  display: block;
+  margin: 16px 0;
+}

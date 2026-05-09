@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/cc-git-editor" },
+    { "path": "./packages/cc-tool-guard" },
+    { "path": "./packages/channel" },
+    { "path": "./packages/channel-worker" },
+    { "path": "./packages/cli-common" },
+    { "path": "./packages/coding-agent" },
+    { "path": "./packages/excalidraw" },
+    { "path": "./packages/logger" },
+    { "path": "./packages/loxel" },
+    { "path": "./packages/monaco-lsp-client" },
+    { "path": "./packages/whisper-cpp" },
+    { "path": "./packages/wt" }
+  ]
+}

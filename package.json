@@ -1,0 +1,29 @@
+{
+  "name": "bizimind",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
+    "lint": "oxlint --ignore-pattern '**/deps/**'",
+    "lint:fix": "oxlint --fix --ignore-pattern '**/deps/**'",
+    "fmt": "oxfmt --write .",
+    "fmt:check": "oxfmt --check .",
+    "test": "echo 'You are running `test` at root package. Use `bun test --cwd packages/<package>` instead' && exit 1",
+    "build": "echo 'You are running `build` at root package. Use `bun run --cwd packages/<package> build` instead' && exit 1",
+    "typecheck": "bun run --filter '*' typecheck"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.6.0",
+    "@typescript/native-preview": "7.0.0-dev.20260414.1",
+    "oxfmt": "^0.24.0",
+    "oxlint": "1.60.0",
+    "oxlint-tsgolint": "^0.21.1",
+    "typescript": "^5"
+  },
+  "patchedDependencies": {
+    "@excalidraw/excalidraw@0.18.0": "patches/@excalidraw%2Fexcalidraw@0.18.0.patch"
+  }
+}

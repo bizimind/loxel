@@ -1,0 +1,49 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+bin
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+/logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env
+.env.local
+.env.*.local
+
+# wrangler local secrets
+.dev.vars
+
+# native build output
+build/
+
+# caches
+.eslintcache
+.oxlint_cache
+.cache
+*.tsbuildinfo
+
+# IDEs
+.idea
+.cursor
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# Whisper model files (large, download separately)
+*.bin
+*.mlmodelc
+
+# Treemap skill per-use generated inputs (user writes these per invocation)
+.agents/skills/treemap/resources/data.json
+.agents/skills/treemap/resources/config.json

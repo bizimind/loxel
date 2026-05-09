@@ -1,0 +1,273 @@
+/* JetBrains-style Dockview theme overrides */
+
+/* Light mode */
+.dockview-theme-abyss {
+  /* Core backgrounds */
+  --dv-background-color: oklch(1 0 0);
+  --dv-paneview-header-border-color: oklch(0.923 0.003 48.717);
+  --dv-tabs-and-actions-container-height: 36px;
+
+  /* Group (panel container) colors */
+  --dv-group-view-background-color: oklch(1 0 0);
+  --dv-tabs-and-actions-container-background-color: oklch(0.967 0.001 286.375);
+
+  /* Tab colors */
+  --dv-activegroup-visiblepanel-tab-background-color: oklch(1 0 0);
+  --dv-activegroup-hiddenpanel-tab-background-color: oklch(0.967 0.001 286.375);
+  --dv-inactivegroup-visiblepanel-tab-background-color: oklch(0.97 0.001 106.424);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: oklch(0.967 0.001 286.375);
+  --dv-tab-divider-color: oklch(0.923 0.003 48.717);
+
+  /* Text colors */
+  --dv-activegroup-visiblepanel-tab-color: oklch(0.147 0.004 49.25);
+  --dv-activegroup-hiddenpanel-tab-color: oklch(0.553 0.013 58.071);
+  --dv-inactivegroup-visiblepanel-tab-color: oklch(0.147 0.004 49.25);
+  --dv-inactivegroup-hiddenpanel-tab-color: oklch(0.553 0.013 58.071);
+
+  /* Separators/borders */
+  --dv-separator-border: oklch(0.923 0.003 48.717);
+
+  /* Drag and drop indicators */
+  --dv-drag-over-background-color: oklch(0.95 0.04 290 / 0.3);
+  --dv-drag-over-border-color: oklch(0.5148 0.204 253.06);
+}
+
+/* Dark mode - JetBrains New UI colors */
+.dark .dockview-theme-abyss {
+  --dv-background-color: var(--background);
+  --dv-paneview-header-border-color: var(--surface-3);
+  --dv-tabs-and-actions-container-height: 36px;
+
+  /* Group (panel container) colors */
+  --dv-group-view-background-color: var(--surface-1);
+  --dv-tabs-and-actions-container-background-color: var(--surface-1);
+
+  /* Tab colors */
+  --dv-activegroup-visiblepanel-tab-background-color: var(--surface-1);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--surface-1);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--surface-1);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--surface-1);
+  --dv-tab-divider-color: var(--surface-3);
+
+  /* Text colors */
+  --dv-activegroup-visiblepanel-tab-color: var(--foreground);
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--foreground);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
+
+  /* Separators/borders */
+  --dv-separator-border: var(--surface-3);
+
+  /* Drag and drop indicators - JetBrains blue */
+  --dv-drag-over-background-color: rgb(33 66 131 / 0.3);
+  --dv-drag-over-border-color: #467ff2;
+}
+
+/* Border between tab header and panel content */
+.dockview-theme-abyss .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--surface-3);
+}
+
+/* Custom tab styling for JetBrains look */
+.dockview-theme-abyss .dv-tab {
+  font-size: 12px;
+  padding: 4px 8px 4px 12px;
+  border-radius: 0;
+  max-width: 200px;
+}
+
+/* Allow tab content to shrink and truncate long titles */
+.dockview-theme-abyss .dv-tab .dv-default-tab,
+.dockview-theme-abyss .dv-tab .dv-default-tab-content {
+  min-width: 0;
+}
+
+/* Subtle native scrollbar for tab overflow */
+.dockview-theme-abyss .dv-tabs-container {
+  scrollbar-width: none;
+}
+
+.dockview-theme-abyss .dv-tabs-container::-webkit-scrollbar {
+  height: 2px;
+}
+
+.dockview-theme-abyss .dv-tabs-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dockview-theme-abyss .dv-tabs-container::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border-radius: 1px;
+}
+
+/* Close button: smaller, thicker, hidden until tab hover */
+.dockview-theme-abyss .dv-tab .dv-default-tab .dv-default-tab-action {
+  visibility: visible;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.dockview-theme-abyss .dv-tab .dv-default-tab .dv-default-tab-action svg {
+  width: 8px;
+  height: 8px;
+  stroke-width: 2;
+}
+
+.dockview-theme-abyss .dv-tab:hover .dv-default-tab .dv-default-tab-action {
+  opacity: 0.7;
+}
+
+.dockview-theme-abyss .dv-tab:hover .dv-default-tab .dv-default-tab-action:hover {
+  opacity: 1;
+}
+
+/* Reset close button style on dragging tab (outside theme ancestor) */
+.dv-tab.dv-tab-dragging .dv-default-tab-action,
+.dv-dragged .dv-default-tab-action {
+  background-color: transparent;
+}
+
+.dv-tab.dv-tab-dragging .dv-default-tab-action svg,
+.dv-dragged .dv-default-tab-action svg {
+  width: 8px;
+  height: 8px;
+  stroke-width: 2;
+}
+
+/* Remove focus outline on tabs */
+.dockview-theme-abyss .dv-tab:focus-within::after,
+.dockview-theme-abyss .dv-tab:focus::after {
+  outline: none !important;
+}
+
+/* Active tab bottom border: gray by default, blue only for the group that is
+   directly active. The `>` child combinator between the active group and its
+   own tabs container prevents nested groups from inheriting the blue when an
+   ancestor group (e.g. the outer dockview's center-host) carries
+   `dv-active-group`. */
+.dockview-theme-abyss .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 var(--dv-separator-border);
+}
+
+.dockview-theme-abyss
+  .dv-groupview.dv-active-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 #467ff2;
+}
+
+/* Sash (resize handle) styling */
+.dockview-theme-abyss .dv-resize-container .dv-sash {
+  background-color: transparent;
+  transition: background-color 150ms ease;
+}
+
+.dockview-theme-abyss .dv-resize-container .dv-sash:hover {
+  background-color: var(--dv-separator-border);
+}
+
+.dockview-theme-abyss .dv-resize-container .dv-sash.active {
+  background-color: #467ff2;
+}
+
+/* Panel content fills container */
+.dockview-theme-abyss .dv-groupview .dv-groupview-panel {
+  overflow: hidden;
+}
+
+/* Neutralize CSS properties that create new containing blocks for position:fixed.
+   Without this, Monaco's fixedOverflowWidgets (hover tooltips, peek definition)
+   render offset because position:fixed anchors to these ancestors instead of
+   the viewport. Properties that create containing blocks: transform, will-change
+   (with transform), contain (layout/paint), perspective, filter.
+   See also excalidraw-theme.css for the same class of fix. */
+.dockview-theme-abyss.dv-dockview,
+.dockview-theme-abyss .dv-dockview {
+  contain: none;
+}
+
+.dockview-theme-abyss .dv-render-overlay {
+  contain: none;
+  transform: none;
+  will-change: auto;
+}
+
+.dockview-theme-abyss .dv-pane-container .dv-view,
+.dockview-theme-abyss .dv-split-view-container .dv-view {
+  transform: none;
+  will-change: auto;
+}
+
+/* Watermark (empty state) styling */
+.dockview-theme-abyss .dv-watermark {
+  background-color: var(--dv-background-color);
+}
+
+/* Drop target indicators */
+.dockview-theme-abyss .dv-drop-target-dropzone {
+  background-color: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.dockview-theme-abyss .dv-drop-target-selection {
+  border-radius: 6px;
+  transition:
+    top 250ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    left 250ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    width 250ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    height 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* --- Inner dockview (nested inside panels) --- */
+
+.dockview-inner {
+  --dv-tabs-and-actions-container-height: 22px;
+}
+
+.dockview-inner .dv-tab {
+  font-size: 11px;
+  padding: 0 8px;
+}
+
+/* Hide close buttons on inner dockview tabs */
+.dockview-inner .dv-default-tab-action {
+  display: none !important;
+}
+
+/* Subtle active indicator — no blue highlight for inner tabs */
+.dockview-inner
+  .dv-groupview.dv-active-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 var(--dv-separator-border);
+}
+
+/* Full-width single tab — used for panels with custom header-like tabs (e.g. Branches).
+   Let the tab content dictate height instead of the fixed 22px. */
+.dockview-inner .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab {
+  height: auto;
+}
+
+.dockview-inner .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab .dv-tab {
+  padding: 0;
+  box-shadow: none;
+}
+
+/* Collapsed sidebar — tab header fills full height, content panel is hidden.
+   Applied when the group is narrow enough to be a collapsed sidebar. */
+.dockview-inner
+  .dv-groupview:has(> .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab) {
+  container-type: inline-size;
+}
+
+@container (max-width: 40px) {
+  .dv-tabs-and-actions-container.dv-single-tab.dv-full-width-single-tab {
+    height: 100% !important;
+  }
+
+  .dv-groupview-panel {
+    display: none !important;
+  }
+}

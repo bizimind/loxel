@@ -1,0 +1,29 @@
+{
+  "name": "@bizimind/cli-common",
+  "version": "0.1.0",
+  "description": "Common CLI utilities for bizimind packages",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./errors": "./src/errors.ts",
+    "./output": "./src/output.ts",
+    "./logging": "./src/logging.ts",
+    "./update": "./src/update/index.ts",
+    "./commands": "./src/commands/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@bizimind/logger": "workspace:*",
+    "commander": "^14.0.2",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.15.21"
+  },
+  "peerDependencies": {
+    "bun": ">=1.0.0"
+  }
+}

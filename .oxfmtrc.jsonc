@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": true,
+  "singleQuote": false,
+  "trailingComma": "all",
+  "insertFinalNewline": true,
+  "experimentalTailwindcss": { "functions": ["cn"] },
+  "experimentalSortImports": {},
+  "ignorePatterns": ["bun.lock", "**/*.schema.json", "**/_generated/"],
+  "objectWrap": "collapse",
+}

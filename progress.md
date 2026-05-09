@@ -1,0 +1,102 @@
+# Coding Agent Implementation Progress
+
+## 2026-02-17
+
+- Scaffolded `packages/coding-agent` package and baseline module structure.
+- Implemented core package modules: protocol schemas, session store (persist/resume/fork/rewind/compact), permissions store, prompt assembler/reminders, tool schemas/handlers/registry, model router, orchestrator loop/runtime, CLI commands, and initial tests.
+- Installed dependencies and integrated OpenRouter + AI SDK v6 package types.
+- Added deterministic tests for protocol schemas, session lifecycle, and tool handlers.
+- Validation run completed:
+  - `bun run fmt`
+  - `bun run lint`
+  - `bun run typecheck`
+  - `bun test --cwd packages/coding-agent`
+  - `bun run --cwd packages/coding-agent build`
+- Noted root command behavior:
+  - `bun run typechek` fails (script does not exist in monorepo)
+  - `bun run test` fails by design at root (prints guidance to run package-level tests)
+- Expanded test coverage to 20 passing tests across protocol, sessions, permissions, and tool handlers (including aliases, profile gating, plan transitions, approval persistence, background task lifecycle, rewind snapshot restore, and compaction behavior).
+- Added additional parity-focused implementation updates:
+  - WebSearch now uses AI SDK + OpenRouter provider with web plugin and fallback model support.
+  - EnterPlanMode now auto-creates plan file under session state artifacts and emits plan events.
+  - ExitPlanMode now emits plan-mode exit event on approval.
+  - Orchestrator now emits run step events and persists tool-result messages in session history.
+  - Compaction now writes artifact metadata, tracks files touched, and activates context-compacted reminder condition.
+  - Reminder injection counters are now updated when reminders are included.
+- Expanded tests to 26 passing tests across 6 files, covering permissions, runtime events, prompt reminders, tool aliases/profile/policy flows, session rewind/compaction behavior, and existing protocol/tool functionality.
+- Parity pass updates completed:
+  - Plan lifecycle:
+    - sessions started in `plan` mode now auto-create a random plan file under state artifacts immediately.
+    - `EnterPlanMode` now uses random plan filenames (`<uuid>.md`) instead of timestamp-based naming.
+    - `session.start` now emits `plan.mode.entered` when starting in plan mode.
+  - Progressive disclosure/reminders:
+    - added key-based reminder defaults/cooldowns/max-repeats for `background_task_active`, `context_compacted`, `permission_denied`, and `plan_mode_exited`.
+    - approval denials now activate `permission_denied` reminder state.
+    - successful `ExitPlanMode` now activates post-plan-exit execution reminder state.
+    - prompt assembly now includes `permission_denied` and `plan_mode_exited` reminder injections.
+    - prompt assembly metadata now includes deterministic `cacheKey` (hash-based) for reuse.
+  - Tool behavior parity:
+    - `Bash` truncation now enforces both line-count and byte caps.
+    - `Grep` now supports `output_mode: count`, `files_with_matches`, context flags (`-A/-B/-C`), `type`, and `multiline`.
+    - `WebFetch` now writes truncated full-body artifacts and returns `artifact_path`.
+    - `WebSearch` recency normalization now covers `latest/recent/current/today` and domain filtering now uses URL host matching.
+    - `Task` now blocks permission-broadening child modes while parent is in plan mode.
+    - background `Bash` tasks now run in the session workspace root (not process cwd).
+  - Session persistence:
+    - `message.appended` events now persist full message payload.
+    - `setState` now appends `state.updated` events.
+    - added `SessionStore.replayFromEvents(sessionId)` for deterministic event-log replay checks.
+  - Protocol session-management expansion:
+    - added `session.list`, `session.get`, and `session.persist` request schemas.
+    - runtime now emits `session.listed`, `session.got`, and `session.persisted` events.
+- Final parity pass updates completed:
+  - Capability negotiation/runtime surface:
+    - added `declared_tools` support at `session.start` and persisted session capability state.
+    - model-exposed tools now intersect profile permissions with declared tool capabilities.
+    - runtime tool execution now hard-fails undeclared tools with `TOOL_NOT_AVAILABLE`.
+    - added capability fallback hint injection (including `LS` -> `Glob(\"*\")` guidance path).
+  - Deterministic replay and resume:
+    - added `session.resume.replay_from_events` protocol flag.
+    - runtime resume can now rebuild state from `events.jsonl` replay path.
+    - CLI `session resume` now supports `--replay-from-events`.
+  - Reliability/observability:
+    - added recursive secret redaction hooks for runtime-emitted events and persisted session events.
+    - `run.completed` metrics now include `estimated_cost_usd` (env-driven token pricing knobs).
+    - approval decisions now emit persistent audit events (`approval.decision.recorded`).
+  - Prompt governance:
+    - added prompt render validator with placeholder and unknown-tool reference checks.
+    - prompt assembly now validates base/plan prompt render outputs before use.
+  - Web citation policy:
+    - orchestrator now tracks `WebSearch`/`WebFetch` URLs and enforces a `Sources:` section in final assistant text when web tools are used.
+  - Task semantics improvements:
+    - `Task` now supports resume semantics via existing task ID with stable ID reuse.
+    - task manager now uses static shared in-process registries per artifact directory.
+    - task lookup now supports disk-backed retrieval across tool manager instances.
+    - synthetic background subagent tasks now auto-complete and support cancellation timers.
+- Added tests for:
+  - capabilities normalization/intersection/fallback hints
+  - prompt validation guards
+  - citation enforcement helpers
+  - redaction utility and runtime redaction behavior
+  - declared-tools protocol/session payload behavior
+  - replay-from-events resume behavior
+  - undeclared-tool rejection
+  - task resume semantics + disk-backed `TaskOutput` retrieval
+- Test suite status after final pass:
+  - `packages/coding-agent`: 62 passing, 0 failing tests
+  - Observability:
+    - `run.completed` now includes usage/latency metrics payload (step count, token totals, elapsed ms).
+- Test coverage expanded to 45 passing tests (0 failing), including:
+  - plan session auto-plan-file creation
+  - deterministic event replay reconstruction
+  - plan-step normalization (single `in_progress`)
+  - Task plan-mode inheritance guard
+  - WebFetch truncation artifact path behavior
+  - Grep `files_with_matches` and `count` modes
+  - new reminder behavior and prompt cache-key stability
+- Validation run completed successfully:
+  - `bun run fmt`
+  - `bun run lint`
+  - `bun run --cwd packages/coding-agent typechek`
+  - `bun run --cwd packages/coding-agent test`
+  - `bun run typecheck`
