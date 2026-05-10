@@ -1,0 +1,78 @@
+---
+import Base from "../layouts/Base.astro";
+import DownloadButton from "../components/DownloadButton.tsx";
+
+const MANIFEST_URL = "https://loxel.bizimind.io/loxel/manifest.json";
+
+let version = "0.1.141";
+let binaries: Record<string, string> = {};
+try {
+  const manifest = await fetch(MANIFEST_URL).then((r) => r.json());
+  version = manifest.version ?? version;
+  for (const [platform, info] of Object.entries(manifest.binaries ?? {})) {
+    binaries[platform] = (info as { url: string }).url;
+  }
+} catch {
+  // fall back to hardcoded version, no binary URLs
+}
+---
+
+<Base title="Download" description="Download Loxel for macOS.">
+  <div class="max-w-2xl mx-auto px-4 sm:px-6 py-20 text-center">
+    <h1 class="text-4xl font-bold text-foreground mb-3">Download Loxel</h1>
+    <p class="text-muted-foreground mb-12">Free · macOS · Open Beta</p>
+
+    <div class="bg-card border border-border rounded-xl p-10 mb-10">
+      <DownloadButton client:load version={version} binaries={binaries} />
+    </div>
+
+    <div class="text-left space-y-8">
+      <div>
+        <h2 class="text-lg font-semibold text-foreground mb-3">System requirements</h2>
+        <ul class="text-sm text-muted-foreground space-y-1.5">
+          <li>· macOS 13 Ventura or later</li>
+          <li>· Apple Silicon or Intel</li>
+          <li>· ~200 MB disk space</li>
+        </ul>
+      </div>
+
+      <div>
+        <h2 class="text-lg font-semibold text-foreground mb-3">Installation</h2>
+        <ol class="text-sm text-muted-foreground space-y-1.5 list-decimal list-inside">
+          <li>
+            Open the downloaded <code class="font-mono text-xs px-1 py-0.5 rounded bg-surface-0 text-foreground"
+              >.dmg</code
+            > file
+          </li>
+          <li>Drag <strong class="text-foreground">Loxel</strong> to your Applications folder</li>
+          <li>Launch from Applications or Spotlight</li>
+        </ol>
+        <p class="text-xs text-muted-foreground mt-3">
+          If macOS blocks the app on first launch, right-click → Open, then confirm.
+        </p>
+      </div>
+
+      <div>
+        <h2 class="text-lg font-semibold text-foreground mb-3">Other downloads</h2>
+        <div class="flex gap-4 text-sm flex-wrap">
+          {binaries["darwin-arm64"] && (
+            <a
+              href={binaries["darwin-arm64"]}
+              class="text-accent underline underline-offset-2 hover:opacity-75 transition-opacity"
+            >
+              macOS Apple Silicon (.dmg)
+            </a>
+          )}
+          {binaries["darwin-x64"] && (
+            <a
+              href={binaries["darwin-x64"]}
+              class="text-accent underline underline-offset-2 hover:opacity-75 transition-opacity"
+            >
+              macOS Intel (.dmg)
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+</Base>

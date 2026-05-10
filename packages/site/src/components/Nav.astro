@@ -1,0 +1,52 @@
+---
+const links = [{ href: "/docs/getting-started", label: "Docs" }];
+---
+
+<header class="border-b border-border sticky top-0 z-50 backdrop-blur-sm bg-background/80">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-6">
+      <a href="/" class="flex items-center gap-2 font-semibold text-foreground hover:opacity-80 transition-opacity">
+        <svg width="24" height="24" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="100" height="100" rx="20" fill="#131313" />
+          <path
+            d="M60.1213 30.5563C58.9498 31.7279 58.9498 33.6274 60.1213 34.799L73.5564 48.234C74.7279 49.4056 76.6274 49.4056 77.799 48.234L82.0416 43.9914C83.2132 42.8198 83.2132 40.9203 82.0416 39.7487L77.0919 34.799C75.9203 33.6274 75.9203 31.7279 77.0919 30.5563L82.0416 25.6066C83.2132 24.435 83.2132 22.5355 82.0416 21.3639L77.799 17.1213C76.6274 15.9497 74.7279 15.9497 73.5564 17.1213L60.1213 30.5563Z"
+            fill="#0059FF"
+          ></path>
+          <path
+            d="M41 56C41 58.7614 43.2386 61 46 61H62C64.7614 61 67 63.2386 67 66V80C67 82.7614 64.7614 85 62 85H22C19.2386 85 17 82.7614 17 80V20C17 17.2386 19.2386 15 22 15H36C38.7614 15 41 17.2386 41 20V56Z"
+            fill="white"
+          ></path>
+          <path
+            d="M74.234 30.5563C75.4056 31.7279 75.4056 33.6274 74.234 34.799L60.799 48.234C59.6274 49.4056 57.7279 49.4056 56.5563 48.234L52.3137 43.9914C51.1421 42.8198 51.1421 40.9203 52.3137 39.7487L57.2635 34.799C58.435 33.6274 58.435 31.7279 57.2635 30.5563L52.3137 25.6066C51.1421 24.435 51.1421 22.5355 52.3137 21.3639L56.5563 17.1213C57.7279 15.9497 59.6274 15.9497 60.799 17.1213L74.234 30.5563Z"
+            fill="white"
+          ></path>
+        </svg>
+        Loxel
+      </a>
+
+      <nav class="hidden md:flex items-center gap-6">
+        {
+          links.map(({ href, label }) => (
+            <a href={href} class="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              {label}
+            </a>
+          ))
+        }
+      </nav>
+    </div>
+
+    <a
+      href="https://github.com/bizimind/loxel"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <path
+          d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+        ></path>
+      </svg>
+      GitHub
+    </a>
+  </div>
+</header>

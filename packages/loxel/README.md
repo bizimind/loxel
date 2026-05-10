@@ -1,6 +1,6 @@
 # Loxel
 
-A local-first IDE built for the agentic coding era. Designed around the reality that developers now work across multiple tasks in parallel — with AI agents exploring, writing, and iterating on code — while humans plan, review, and steer.
+An IDE built for the agentic coding era. Designed around the reality that developers now work across multiple tasks in parallel — with AI agents exploring, writing, and iterating on code — while humans plan, review, and steer.
 
 Loxel packages the things critical for agentic work into a single interface: fast project and worktree switching, planning and ideation tools, code review for AI-generated work, integrated terminals for running agents and commands, and an opinionated coding agent harness — all in a flexible, dockable panel system.
 

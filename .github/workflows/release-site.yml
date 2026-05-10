@@ -1,0 +1,38 @@
+name: Release site
+
+on:
+  push:
+    paths:
+      - "packages/site/**"
+      - ".github/workflows/release-site.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build site
+        run: bun run --cwd packages/site build
+
+      - name: Deploy to Cloudflare Pages
+        run: bunx wrangler pages deploy packages/site/dist --project-name loxel --branch ${{ github.ref_name }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

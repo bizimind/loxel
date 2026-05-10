@@ -42,6 +42,7 @@ const electronDragStyle: React.CSSProperties & { WebkitAppRegion: "drag" } = {
 };
 
 export function TopBar() {
+  const isScreenshot = import.meta.env.VITE_SCREENSHOT === "1";
   const windowFocused = useWindowFocused();
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const activeProject = useProjectStore((s) => deriveProject(activeWorktreePath, s.projects));
@@ -59,16 +60,25 @@ export function TopBar() {
   return (
     <div
       className={cn(
-        "border-border flex h-8 shrink-0 items-center gap-2 border-b px-3 text-sm",
+        "border-border relative flex h-8 shrink-0 items-center gap-2 border-b px-3 text-sm",
         windowFocused ? "bg-card" : "bg-surface-muted",
-        isElectron && "pl-20",
+        (isElectron || isScreenshot) && "pl-20",
       )}
       style={isElectron ? electronDragStyle : undefined}
     >
+      {isScreenshot && !isElectron && (
+        <div className="absolute top-1/2 left-3 flex -translate-y-1/2 items-center gap-[6px]">
+          <div className="size-3 rounded-full bg-[#ED6158]" />
+          <div className="size-3 rounded-full bg-[#FCC02E]" />
+          <div className="size-3 rounded-full bg-[#5FC038]" />
+        </div>
+      )}
       {/* Logo + brand */}
       <LoxelLogo className="text-foreground size-4" />
       <span className="text-foreground font-semibold">Loxel</span>
-      {isDev && <span className="text-[10px] font-semibold text-red-300">DEV</span>}
+      {isDev && !isScreenshot && (
+        <span className="text-[10px] font-semibold text-red-300">DEV</span>
+      )}
 
       {activeProject && (
         <>

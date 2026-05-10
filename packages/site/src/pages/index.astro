@@ -1,0 +1,205 @@
+---
+import { Image } from "astro:assets";
+import appScreenshot from "../../public/screenshots/app-screenshot.png";
+import Base from "../layouts/Base.astro";
+import DownloadButton from "../components/DownloadButton.tsx";
+
+const MANIFEST_URL = "https://loxel.bizimind.io/loxel/manifest.json";
+
+let version = "0.1.141";
+let binaries: Record<string, string> = {};
+try {
+  const manifest = await fetch(MANIFEST_URL).then((r) => r.json());
+  version = manifest.version ?? version;
+  for (const [platform, info] of Object.entries(manifest.binaries ?? {})) {
+    binaries[platform] = (info as { url: string }).url;
+  }
+} catch {
+  // fall back to hardcoded version, no binary URLs
+}
+
+const features = [
+  {
+    tab: "worktrees.md",
+    title: "Multi-worktree context switching",
+    description:
+      "Manage multiple repos and branches from a single window. Every context remembers its own layout, open files, and terminal sessions.",
+  },
+  {
+    tab: "review.md",
+    title: "Code review for agent output",
+    description:
+      "Review agent-written code with threaded comments anchored to specific lines. See diffs, leave notes, and merge with confidence.",
+  },
+  {
+    tab: "agent.md",
+    title: "Agent timeline UI",
+    description:
+      "Watch agents work in real time. Replay sessions, inspect every tool call, and step in at any point to redirect or correct.",
+  },
+  {
+    tab: "plan.md",
+    title: "Planning & whiteboarding",
+    description:
+      "Markdown editor and Excalidraw diagrams, saved as plain files alongside your code. Plan before the agent writes a line.",
+  },
+];
+---
+
+<Base title="Loxel" description="The IDE built for developers who work with AI coding agents.">
+  <!-- Hero -->
+  <section class="relative pt-24 pb-20 px-4 sm:px-6 text-center overflow-hidden">
+    <div
+      class="absolute inset-0 pointer-events-none"
+      style="background: radial-gradient(ellipse 80% 50% at 50% -5%, color-mix(in srgb, var(--accent) 10%, transparent), transparent);"
+    >
+    </div>
+
+    <div class="relative max-w-3xl mx-auto">
+      <h1 class="text-6xl sm:text-7xl font-bold leading-tight tracking-tight mb-5 text-balance">
+        <span style="background: linear-gradient(180deg, #ffffff 0%, #8a9ab0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">The IDE for the</span><br />
+        <span style="background: linear-gradient(180deg, #6faaf5 0%, #2d6fd4 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Agentic Coding Era</span>
+      </h1>
+
+      <p class="text-lg text-muted-foreground max-w-xl mx-auto mb-10 text-balance">
+        Design, plan, review, and steer AI agents across parallel workstreams — all from one IDE.
+      </p>
+
+      <!-- Desktop: download buttons -->
+      <div class="hidden sm:flex flex-row items-start justify-center gap-4">
+        <DownloadButton client:load version={version} binaries={binaries} />
+        <a
+          href="https://github.com/bizimind/loxel"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-2 border border-border text-foreground hover:border-muted-foreground font-medium px-5 py-2.5 rounded-md transition-colors text-sm"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            ></path>
+          </svg>
+          View on GitHub
+        </a>
+      </div>
+
+      <!-- Mobile: GitHub link only -->
+      <div class="flex sm:hidden justify-center">
+        <a
+          href="https://github.com/bizimind/loxel"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-2 border border-border text-foreground hover:border-muted-foreground font-medium px-5 py-2.5 rounded-md transition-colors text-sm"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            ></path>
+          </svg>
+          View on GitHub
+        </a>
+      </div>
+    </div>
+
+    <!-- Hero screenshot: desktop single wide image -->
+    <div class="relative mt-16 mx-4 sm:mx-8 lg:mx-16 xl:mx-24 hidden sm:block">
+      <Image src={appScreenshot} alt="Loxel IDE screenshot" class="w-full h-auto block" />
+    </div>
+
+    <!-- Hero screenshot: mobile two overlapping crops -->
+    <div class="mt-12 sm:hidden overflow-hidden -mx-4">
+      <!-- Top image: pushed left so right 55% is visible -->
+      <Image src={appScreenshot} alt="Loxel IDE screenshot" class="block mr-[-100vw] min-w-[200vw]" />
+      <!-- Bottom image: pushed right so left 55% is visible, overlapping top -->
+      <Image src={appScreenshot} alt="Loxel IDE screenshot" class="block ml-[-100vw] min-w-[200vw] mt-[-50vw]" />
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="py-24 px-4 sm:px-6">
+    <div class="max-w-6xl mx-auto">
+      <h2 class="text-4xl font-bold text-center text-foreground mb-3 text-balance">
+        Built for how you actually work
+      </h2>
+      <p class="text-center text-muted-foreground mb-16 max-w-xl mx-auto text-balance">
+        Not a plugin. Not an extension. An IDE designed from scratch around agent workflows.
+      </p>
+
+      <div class="border border-border rounded-xl overflow-hidden shadow-2xl shadow-black/40">
+        <!-- Mobile: 1 col, 4 rows -->
+        <div class="flex flex-col sm:hidden">
+          <div class="flex flex-col bg-surface-2 border-b border-border">
+            <div class="flex items-center bg-surface-1 border-b border-border select-none h-8">
+              <div class="flex items-center gap-1.5 h-full p-3 pt-2.5 text-foreground text-[12px]" style="box-shadow: inset 0 -2px 0 #467ff2;">
+                <img src="/markdown-dark.svg" width="14" height="14" alt="" aria-hidden="true" />
+                how-it-works.md
+              </div>
+            </div>
+            <div class="p-6 flex flex-col gap-2">
+              {
+                features.map((f, i) => (<>
+                  <h3 class="text-lg font-bold text-foreground text-balance">{f.title}</h3>
+                  <p class="text-muted-foreground leading-relaxed text-sm mb-2">{f.description}</p>
+                  </>
+                ))
+              }
+            </div>
+          </div>
+        </div>
+
+        <!-- Desktop: 2 col, 2 rows with uneven widths -->
+        <div class="hidden sm:block">
+          {/* Row 1 — left wider */}
+          <div class="grid border-b border-border" style="grid-template-columns: 3fr 2fr">
+            {
+              features.slice(0, 2).map((f, i) => (
+                <div class={["flex flex-col bg-surface-2", i === 0 ? "border-r border-border" : ""].join(" ")}>
+                  <div class="flex items-center bg-surface-1 border-b border-border select-none" style="height:36px">
+                    <div class="flex items-center gap-1.5 h-full px-3 text-foreground" style="font-size:12px; box-shadow: inset 0 -2px 0 #467ff2;">
+                      <img src="/markdown-dark.svg" width="14" height="14" alt="" aria-hidden="true" />
+                      {f.tab}
+                    </div>
+                  </div>
+                  <div class="p-8 flex flex-col gap-3">
+                    <h3 class="text-xl font-bold text-foreground text-balance">{f.title}</h3>
+                    <p class="text-muted-foreground leading-relaxed">{f.description}</p>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+          {/* Row 2 — right wider */}
+          <div class="grid" style="grid-template-columns: 2fr 3fr">
+            {
+              features.slice(2).map((f, i) => (
+                <div class={["flex flex-col bg-surface-2", i === 0 ? "border-r border-border" : ""].join(" ")}>
+                  <div class="flex items-center bg-surface-1 border-b border-border select-none" style="height:36px">
+                    <div class="flex items-center gap-1.5 h-full px-3 text-foreground" style="font-size:12px; box-shadow: inset 0 -2px 0 #467ff2;">
+                      <img src="/markdown-dark.svg" width="14" height="14" alt="" aria-hidden="true" />
+                      {f.tab}
+                    </div>
+                  </div>
+                  <div class="p-8 flex flex-col gap-3">
+                    <h3 class="text-xl font-bold text-foreground text-balance">{f.title}</h3>
+                    <p class="text-muted-foreground leading-relaxed">{f.description}</p>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA — desktop only -->
+  <section class="hidden sm:block py-20 px-4 sm:px-6 text-center border-t border-border">
+    <div class="max-w-xl mx-auto">
+      <h2 class="text-3xl font-bold text-foreground mb-4 text-balance">Ready to try it?</h2>
+      <p class="text-muted-foreground mb-8 text-balance">
+        Free download. No account required. Runs entirely on your machine.
+      </p>
+      <DownloadButton client:load version={version} binaries={binaries} />
+    </div>
+  </section>
+</Base>

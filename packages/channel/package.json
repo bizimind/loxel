@@ -2,7 +2,7 @@
   "name": "@bizimind/channel",
   "version": "0.1.0",
   "description": "WebSocket channel client for peer-to-peer communication via relay",
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "files": [
     "src"
   ],

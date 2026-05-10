@@ -1,0 +1,152 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* ─── Raw design tokens (CSS custom properties) ───────────────────────────── */
+
+:root {
+  --background: #131313;
+  --foreground: #dfe1e5;
+
+  --surface-0: #2d3339;
+  --surface-1: #1d1e22;
+  --surface-2: #131313;
+  --surface-3: #363337;
+
+  --card: #1d1e22;
+  --card-foreground: #dfe1e5;
+
+  --primary: #214283;
+  --primary-foreground: #ffffff;
+
+  --accent: #467ff2;
+
+  --secondary: #1d1e22;
+  --secondary-foreground: #dfe1e5;
+
+  --muted: #1f2024;
+  --muted-foreground: #9da0a8;
+
+  --destructive: #fa6675;
+
+  --border: #363337;
+  --input: #363337;
+  --ring: #467ff2;
+
+  --radius: 0.5rem;
+}
+
+/* ─── Tailwind theme (generates utility classes) ──────────────────────────── */
+
+@theme inline {
+  --text-xs: 13px;
+  --text-xs--line-height: 1.4;
+
+  --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-accent: var(--accent);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-destructive: var(--destructive);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+/* ─── Base ────────────────────────────────────────────────────────────────── */
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  text-shadow: 0 0.5px 1px rgb(0 0 0 / 0.1);
+}
+
+/* ─── Keyboard shortcut badges ────────────────────────────────────────────── */
+
+/* Reset prose kbd styles on the outer combo wrapper */
+kbd.kbd-combo {
+  all: unset;
+  display: inline-flex;
+  align-items: stretch;
+  font-size: 0.8em;
+  line-height: 1.2;
+  font-family: var(--font-sans);
+  background: var(--surface-0);
+  border: 1px solid color-mix(in srgb, var(--surface-0), black 12%);
+  border-bottom: 3px solid color-mix(in srgb, var(--surface-0), black 25%);
+  border-radius: 5px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* Reset prose kbd styles on inner keys, then apply key styling */
+kbd.kbd-key {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.05em 0.45em;
+  color: var(--foreground);
+  border-right: 1px solid var(--border);
+}
+
+kbd.kbd-key:last-child {
+  border-right: none;
+}
+
+kbd.kbd-key svg {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  stroke-width: 2.5;
+}
+
+/* ─── Prose (docs / blog) ─────────────────────────────────────────────────── */
+
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: #ffffff;
+  --tw-prose-lead: var(--muted-foreground);
+  --tw-prose-links: var(--accent);
+  --tw-prose-bold: #ffffff;
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-code: #dfe1e5;
+  --tw-prose-pre-code: #dfe1e5;
+  --tw-prose-pre-bg: var(--surface-2);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}

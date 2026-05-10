@@ -1,0 +1,26 @@
+---
+const year = new Date().getFullYear();
+---
+
+<footer class="border-t border-border mt-auto">
+  <div
+    class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 flex flex-col sm:flex-row items-center justify-between gap-4"
+  >
+    <div class="flex items-center gap-2 text-sm text-muted-foreground">
+      <span>Loxel by Bizimind</span>
+      <span>·</span>
+      <span>© {year}</span>
+    </div>
+    <nav class="flex items-center gap-5 text-sm text-muted-foreground">
+      <a href="/docs/getting-started" class="hover:text-foreground transition-colors">Docs</a>
+      <a
+        href="https://github.com/bizimind/loxel"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="hover:text-foreground transition-colors"
+      >
+        GitHub
+      </a>
+    </nav>
+  </div>
+</footer>

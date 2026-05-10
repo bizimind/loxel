@@ -2,7 +2,7 @@
   "name": "@bizimind/channel-worker",
   "version": "0.1.0",
   "description": "Cloudflare Worker for WebSocket channel relay",
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {

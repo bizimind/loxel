@@ -37,6 +37,9 @@ build/
 .idea
 .cursor
 
+# Astro generated files
+packages/site/.astro/
+
 # Finder (MacOS) folder config
 .DS_Store
 

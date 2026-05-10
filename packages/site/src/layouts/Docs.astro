@@ -1,0 +1,52 @@
+---
+import Base from "./Base.astro";
+import { getCollection } from "astro:content";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+
+const allDocs = await getCollection("docs");
+const sorted = allDocs.sort((a, b) => a.data.order - b.data.order);
+const currentPath = Astro.url.pathname;
+---
+
+<Base title={title} description={description}>
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 flex gap-12">
+    <aside class="hidden lg:block w-56 flex-shrink-0">
+      <nav class="sticky top-20">
+        <p class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          Documentation
+        </p>
+        <ul class="space-y-0.5">
+          {
+            sorted.map((doc) => {
+              const href = `/docs/${doc.id}`;
+              const active = currentPath === href || currentPath === href + "/";
+              return (
+                <li>
+                  <a
+                    href={href}
+                    class={`block text-sm px-3 py-1.5 rounded-md transition-colors ${
+                      active
+                        ? "bg-primary/15 text-accent font-medium"
+                        : "text-muted-foreground hover:text-foreground hover:bg-surface-0"
+                    }`}
+                  >
+                    {doc.data.title}
+                  </a>
+                </li>
+              );
+            })
+          }
+        </ul>
+      </nav>
+    </aside>
+    <article class="flex-1 min-w-0 prose max-w-3xl">
+      <slot />
+    </article>
+  </div>
+</Base>

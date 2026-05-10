@@ -2,7 +2,7 @@
   "name": "@bizimind/sandbox",
   "version": "0.1.0",
   "description": "Provider-agnostic container sandbox SDK for Apple Containers, Podman, and Docker",
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "files": [
     "src"
   ],

@@ -1,7 +1,7 @@
 {
   "name": "@bizimind/loxel",
   "version": "0.1.142",
-  "description": "Local-first IDE for the agentic coding era",
+  "description": "IDE for the agentic coding era",
   "homepage": "https://github.com/bizimind/loxel",
   "author": {
     "name": "loxel",
@@ -31,7 +31,8 @@
     "sign": "codesign --sign \"$LOXEL_CODESIGN_IDENTITY\" --options runtime build/loxel-server",
     "typecheck": "tsgo --noEmit",
     "preview": "vite preview",
-    "test": "bun test --isolate --preload ./src/test/dom-preload.ts"
+    "test": "bun test --isolate --preload ./src/test/dom-preload.ts",
+    "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.1.0",
@@ -89,6 +90,7 @@
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.9.0",
+    "@playwright/test": "^1.50.0",
     "@tailwindcss/vite": "^4.2.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
