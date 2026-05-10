@@ -1138,4 +1138,4 @@ Future features under consideration:
 
 ## License
 
-[FSL-1.1-ALv2](../../LICENSE) — source available for non-competing use; converts to Apache 2.0 on May 10, 2028.
+[FSL-1.1-ALv2](../../LICENSE) — source available for non-competing use; converts to Apache 2.0 after 2 years.
