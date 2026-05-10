@@ -117,4 +117,4 @@ Requires CMake and a C++ compiler.
 
 ## License
 
-MIT
+[FSL-1.1-ALv2](../../LICENSE) — source available for non-competing use; converts to Apache 2.0 on May 10, 2028.
