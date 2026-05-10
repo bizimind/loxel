@@ -44,4 +44,4 @@ See [CLAUDE.md](CLAUDE.md) for detailed architecture and development workflow do
 
 ## License
 
-MIT
+[FSL-1.1-ALv2](LICENSE) — source available for non-competing use; converts to Apache 2.0 after 2 years.
