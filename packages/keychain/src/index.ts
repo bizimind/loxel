@@ -93,6 +93,9 @@ const kSecReturnData = cfConst(secHandle, "kSecReturnData");
 const kSecMatchLimit = cfConst(secHandle, "kSecMatchLimit");
 const kSecMatchLimitOne = cfConst(secHandle, "kSecMatchLimitOne");
 const kSecValueData = cfConst(secHandle, "kSecValueData");
+const kSecUseDataProtectionKeychain = cfConst(secHandle, "kSecUseDataProtectionKeychain");
+const kSecAttrAccessible = cfConst(secHandle, "kSecAttrAccessible");
+const kSecAttrAccessibleAfterFirstUnlock = cfConst(secHandle, "kSecAttrAccessibleAfterFirstUnlock");
 
 // ─── OSStatus codes ──────────────────────────────────────────────────────────
 
@@ -130,6 +133,7 @@ function makeQueryDict(
   cf.CFDictionarySetValue(dict, kSecClass, kSecClassGenericPassword);
   cf.CFDictionarySetValue(dict, kSecAttrService, svc);
   cf.CFDictionarySetValue(dict, kSecAttrAccount, acct);
+  cf.CFDictionarySetValue(dict, kSecUseDataProtectionKeychain, kCFBooleanTrue);
   return { dict, svc, acct };
 }
 
@@ -183,8 +187,9 @@ export function setSecret(service: string, account: string, secret: Buffer): voi
   let status = sec.SecItemUpdate(q.dict, attrs);
 
   if (status === errSecItemNotFound) {
-    // Item doesn't exist — add it
+    // Item doesn't exist — add it, setting the Data Protection access class
     cf.CFDictionarySetValue(q.dict, kSecValueData, data);
+    cf.CFDictionarySetValue(q.dict, kSecAttrAccessible, kSecAttrAccessibleAfterFirstUnlock);
     status = sec.SecItemAdd(q.dict, null);
   }
 
