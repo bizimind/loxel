@@ -10,15 +10,8 @@
     }
   },
   "scripts": {
-    "build": "cmake-js compile",
-    "rebuild": "cmake-js rebuild",
-    "clean": "cmake-js clean",
+    "build:test-binary": "bun build test-binary/main.ts --compile --outfile dist/keychain-test",
+    "test:compiled": "bun run build:test-binary && ./dist/keychain-test",
     "typecheck": "tsgo --noEmit"
-  },
-  "dependencies": {
-    "node-addon-api": "^8.3.0"
-  },
-  "devDependencies": {
-    "cmake-js": "^7.3.0"
   }
 }
