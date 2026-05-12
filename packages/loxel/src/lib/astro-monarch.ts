@@ -177,12 +177,12 @@ const ASTRO_MONARCH: monaco.languages.IMonarchLanguage = {
     expression: [
       [/\{/, { token: "delimiter.interpolation", next: "@expression" }],
       [/\}/, { token: "delimiter.interpolation", next: "@pop" }],
-      { include: "@tsCommon" },
-      // Allow HTML fragments inside expressions (JSX-like)
+      // HTML tags before tsCommon so `<` isn't consumed by the @symbols operator regex
       [
         /(<)(\/?)([a-zA-Z][\w.:$-]*)/,
         ["delimiter.html", "delimiter.html", { token: "tag", next: "@htmlTag" }],
       ],
+      { include: "@tsCommon" },
     ],
 
     htmlComment: [
