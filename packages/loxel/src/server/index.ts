@@ -25,6 +25,7 @@ import type {
 } from "./server-state";
 
 import { AgentManager } from "./agent-manager";
+import { AstroLspManager } from "./astro-lsp-manager";
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { DockerLspManager } from "./docker-lsp-manager";
@@ -561,6 +562,7 @@ const tsLspManager = new TsLspManager();
 const dockerLspManager = new DockerLspManager();
 const terraformLspManager = new TerraformLspManager();
 const pythonLspManager = new PythonLspManager();
+const astroLspManager = new AstroLspManager();
 
 function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
   switch (msg.type) {
@@ -909,6 +911,14 @@ const server = Bun.serve<WsData>({
       return undefined;
     }
 
+    if (url.pathname === "/ws/astro-lsp") {
+      const wtPath = url.searchParams.get("wt");
+      if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
+      const upgraded = server.upgrade(req, { data: { type: "astro-lsp" as const, wtPath } });
+      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
+      return undefined;
+    }
+
     if (url.pathname === "/ws") {
       const upgraded = server.upgrade(req, { data: { type: "app" as const } });
       if (!upgraded) {
@@ -989,6 +999,10 @@ const server = Bun.serve<WsData>({
         pythonLspManager.createSession(ws, ws.data.wtPath);
         return;
       }
+      if (ws.data?.type === "astro-lsp") {
+        astroLspManager.createSession(ws, ws.data.wtPath);
+        return;
+      }
       if (shuttingDown) {
         ws.close(1001, "Server shutting down");
         return;
@@ -1022,6 +1036,10 @@ const server = Bun.serve<WsData>({
       }
       if (ws.data?.type === "python-lsp") {
         pythonLspManager.destroySession(ws);
+        return;
+      }
+      if (ws.data?.type === "astro-lsp") {
+        astroLspManager.destroySession(ws);
         return;
       }
       unsubscribeAllWorktrees(ws);
@@ -1075,6 +1093,10 @@ const server = Bun.serve<WsData>({
       }
       if (ws.data?.type === "python-lsp") {
         if (typeof message === "string") pythonLspManager.handleMessage(ws, message);
+        return;
+      }
+      if (ws.data?.type === "astro-lsp") {
+        if (typeof message === "string") astroLspManager.handleMessage(ws, message);
         return;
       }
       if (typeof message === "string") {
@@ -1148,6 +1170,7 @@ function shutdown(exitCode = 0) {
   dockerLspManager.destroy();
   terraformLspManager.destroy();
   pythonLspManager.destroy();
+  astroLspManager.destroy();
   perfMonitor.dispose();
   stress.dispose();
   logger.shutdown();

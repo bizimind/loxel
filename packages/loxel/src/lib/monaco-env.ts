@@ -6,6 +6,7 @@ import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 
 import { useWorktreeStore } from "@/store/worktrees";
 
+import { connectAstroLsp, disconnectAstroLsp } from "./astro-lsp-client";
 import { connectDockerLsp, disconnectDockerLsp } from "./docker-lsp-client";
 import { registerHclMonarch } from "./hcl-monarch";
 import { registerMonacoThemes } from "./monaco-theme";
@@ -57,6 +58,8 @@ monaco.languages.register({
   extensions: [".tf", ".tfvars", ".hcl"],
   aliases: ["Terraform", "HCL", "terraform"],
 });
+
+monaco.languages.register({ id: "astro", extensions: [".astro"], aliases: ["Astro", "astro"] });
 
 // docker-bake HCL — served by docker-language-server, not terraform-ls.
 monaco.languages.register({ id: "dockerbake", aliases: ["Docker Bake", "dockerbake"] });
@@ -161,6 +164,13 @@ createLazyLspConnector({
   languageIds: ["python"],
   connect: connectPythonLsp,
   disconnect: disconnectPythonLsp,
+});
+
+// astro-ls: only worktrees with .astro files pay the cost.
+createLazyLspConnector({
+  languageIds: ["astro"],
+  connect: connectAstroLsp,
+  disconnect: disconnectAstroLsp,
 });
 
 // Initialize JSON language service — schemas populated dynamically via json-schema-registry.

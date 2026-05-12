@@ -38,6 +38,7 @@ const BUNDLED_LANGUAGES = [
   "graphql",
   "vue",
   "svelte",
+  "astro",
   "dotenv",
 ] as const;
 
@@ -151,6 +152,7 @@ export const EXT_TO_LANG: Record<string, string> = {
   less: "css",
   vue: "vue",
   svelte: "svelte",
+  astro: "astro",
 
   // Data formats
   json: "json",

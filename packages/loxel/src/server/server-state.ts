@@ -61,4 +61,5 @@ export type WsData =
   | { type: "ts-lsp"; wtPath: string }
   | { type: "docker-lsp"; wtPath: string }
   | { type: "terraform-lsp"; wtPath: string }
-  | { type: "python-lsp"; wtPath: string };
+  | { type: "python-lsp"; wtPath: string }
+  | { type: "astro-lsp"; wtPath: string };

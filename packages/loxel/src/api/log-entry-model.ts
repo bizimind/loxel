@@ -14,6 +14,7 @@ export const LOG_CATEGORIES = [
   "docker-lsp",
   "terraform-lsp",
   "python-lsp",
+  "astro-lsp",
   "schema-service",
   "update",
   "worktrees",
