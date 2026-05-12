@@ -8,7 +8,6 @@ import * as monaco from "monaco-editor";
  */
 const ASTRO_MONARCH: monaco.languages.IMonarchLanguage = {
   defaultToken: "",
-  tokenPostfix: ".astro",
 
   keywords: [
     "break",
