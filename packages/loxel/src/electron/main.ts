@@ -396,10 +396,9 @@ function handlePendingUpdateSync(): void {
     // Extract archive (use execFileSync to avoid shell injection)
     execFileSync("tar", ["xzf", archivePath, "-C", targetDir]);
 
-    // Sign binaries on macOS
+    // Sign helper binaries on macOS. loxel-server is signed in CI with keychain entitlements.
     if (process.platform === "darwin") {
       const signTargets = [
-        path.join(targetDir, "loxel-server"),
         path.join(targetDir, "yaml-language-server"),
         path.join(targetDir, "docker-language-server"),
         path.join(targetDir, "terraform-ls"),

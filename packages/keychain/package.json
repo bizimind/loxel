@@ -10,8 +10,6 @@
     }
   },
   "scripts": {
-    "build:test-binary": "bun build test-binary/main.ts --compile --outfile dist/keychain-test && codesign --remove-signature dist/keychain-test && codesign -s - --entitlements test-binary/entitlements.plist dist/keychain-test",
-    "test:compiled": "bun run build:test-binary && ./dist/keychain-test",
     "typecheck": "tsgo --noEmit"
   }
 }
