@@ -1,3 +1,4 @@
+import { decryptWithKey, encryptWithKey } from "@bizimind/keychain";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,8 +17,6 @@ export async function loadOrCreateKey(): Promise<Buffer> {
   if (process.env.LOXEL_DEV === "1") {
     return DEV_KEY;
   }
-
-  const { decryptWithKey, encryptWithKey } = await import("@bizimind/keychain");
 
   if (existsSync(WRAPPED_DEK_PATH)) {
     const key = decryptWithKey(KEY_ENCRYPTION_KEY, readFileSync(WRAPPED_DEK_PATH));
