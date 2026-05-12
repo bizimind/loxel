@@ -31,6 +31,7 @@ jobs:
   setup:
     name: Setup matrix
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 1
     outputs:
       matrix: ${{ steps.generate.outputs.matrix }}
     steps:
@@ -45,6 +46,7 @@ jobs:
     name: Generate issue ${{ matrix.index }}
     needs: setup
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
     permissions:
       contents: read
       issues: write
