@@ -12,6 +12,7 @@ import type { ActionId } from "@/store/keybindings/action-registry";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
+import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
 import { findAdjacentCenterGroup } from "@/store/layout-actions";
 import { getCenterPanelDef, getCreateEventForAction } from "@/store/panel-config";
@@ -255,10 +256,13 @@ export function useActionHandler(): (actionId: ActionId) => void {
         break;
       }
 
-      // Placeholders for future command palette / picker UI
+      case "nav.commandPalette":
+        useCommandPaletteStore.getState().open();
+        break;
+
+      // Placeholders for future picker UI
       case "nav.project":
       case "nav.worktree":
-      case "nav.commandPalette":
         break;
 
       // -- Worktree navigation --

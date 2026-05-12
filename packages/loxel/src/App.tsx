@@ -3,6 +3,7 @@ import type { DockviewApi } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import { useEffect, useRef } from "react";
 
+import { CommandPaletteModal } from "./components/command-palette/CommandPaletteModal";
 import { LAYOUT_VERSION, createDefaultLayout } from "./components/dockview/default-layout";
 import {
   onOuterLayoutChange,
@@ -101,6 +102,7 @@ export default function App() {
       <SettingsModal />
       <SearchModal />
       <FileSearchModal />
+      <CommandPaletteModal />
     </div>
   );
 }
