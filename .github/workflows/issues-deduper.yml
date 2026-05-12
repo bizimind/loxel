@@ -14,6 +14,7 @@ jobs:
   dedupe:
     name: Check for duplicate issues
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 52
     permissions:
       contents: write
       issues: write

@@ -13,6 +13,7 @@ jobs:
   sync:
     name: Sync issue to issues branch
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 1
     permissions:
       contents: write
     steps:

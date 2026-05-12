@@ -24,6 +24,7 @@ jobs:
     needs: build-matrix
     if: ${{ fromJSON(needs.build-matrix.outputs.platforms)[0] != null }}
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 1
     outputs:
       version: ${{ steps.bump.outputs.version }}
       tag: ${{ steps.bump.outputs.tag }}
@@ -81,6 +82,7 @@ jobs:
   build-frontend:
     needs: check-and-bump
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v6
         with:
@@ -109,6 +111,7 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 3
     outputs:
       sha256_darwin-arm64: ${{ steps.sha.outputs.sha256_darwin-arm64 }}
       sha256_darwin-x64: ${{ steps.sha.outputs.sha256_darwin-x64 }}
@@ -203,6 +206,7 @@ jobs:
   release:
     needs: [build-matrix, check-and-bump, build]
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 1
     steps:
       - uses: actions/checkout@v6
         with:

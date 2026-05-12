@@ -14,6 +14,7 @@ permissions:
 jobs:
   discover:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 1
     outputs:
       lint: ${{ steps.find.outputs.lint }}
       test: ${{ steps.find.outputs.test }}
@@ -174,6 +175,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.lint == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
@@ -188,6 +190,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.test != '[]'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 4
     strategy:
       fail-fast: false
       matrix:
@@ -204,6 +207,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.build != '[]'
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
@@ -222,6 +226,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.typecheck != '[]'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 2
     strategy:
       fail-fast: false
       matrix:
