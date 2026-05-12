@@ -7,6 +7,7 @@ import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { connectAstroLsp, disconnectAstroLsp } from "./astro-lsp-client";
+import { registerAstroMonarch } from "./astro-monarch";
 import { connectDockerLsp, disconnectDockerLsp } from "./docker-lsp-client";
 import { registerHclMonarch } from "./hcl-monarch";
 import { registerMonacoThemes } from "./monaco-theme";
@@ -68,6 +69,7 @@ monaco.languages.register({ id: "dockerbake", aliases: ["Docker Bake", "dockerba
 // semantic tokens on these LSPs (buggy stale-version ranges), so Monarch
 // is the sole source of syntax highlighting for them.
 registerHclMonarch();
+registerAstroMonarch();
 
 // Connect to yaml-language-server — LSP features register async when capabilities arrive
 connectYamlLsp();
