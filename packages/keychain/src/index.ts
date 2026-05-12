@@ -4,200 +4,214 @@ import { FFIType, dlopen, ptr, read, toArrayBuffer } from "bun:ffi";
 
 const CF = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
 const SEC = "/System/Library/Frameworks/Security.framework/Security";
-
-const { symbols: cf } = dlopen(CF, {
-  CFStringCreateWithBytes: {
-    args: [FFIType.ptr, FFIType.ptr, FFIType.i64, FFIType.u32, FFIType.u8],
-    returns: FFIType.ptr,
-  },
-  CFDataCreate: { args: [FFIType.ptr, FFIType.ptr, FFIType.i64], returns: FFIType.ptr },
-  CFDataGetLength: { args: [FFIType.ptr], returns: FFIType.i64 },
-  CFDataGetBytePtr: { args: [FFIType.ptr], returns: FFIType.ptr },
-  CFNumberCreate: { args: [FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.ptr },
-  CFDictionaryCreateMutable: {
-    args: [FFIType.ptr, FFIType.i64, FFIType.ptr, FFIType.ptr],
-    returns: FFIType.ptr,
-  },
-  CFDictionarySetValue: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.void },
-  CFErrorCopyDescription: { args: [FFIType.ptr], returns: FFIType.ptr },
-  CFRelease: { args: [FFIType.ptr], returns: FFIType.void },
-});
-
-const { symbols: sec } = dlopen(SEC, {
-  SecItemCopyMatching: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
-  SecItemDelete: { args: [FFIType.ptr], returns: FFIType.i32 },
-  SecKeyCreateRandomKey: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
-  SecKeyCopyPublicKey: { args: [FFIType.ptr], returns: FFIType.ptr },
-  SecKeyCreateEncryptedData: {
-    args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr],
-    returns: FFIType.ptr,
-  },
-  SecKeyCreateDecryptedData: {
-    args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr],
-    returns: FFIType.ptr,
-  },
-});
-
-const { symbols: dl } = dlopen("/usr/lib/libdl.dylib", {
-  dlopen: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.ptr },
-  dlsym: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
-});
-
 const RTLD_NOLOAD = 0x10;
 const kCFNumberSInt32Type = 3;
-
-const asPtr = (n: number): Pointer => n as unknown as Pointer;
-
-function openHandle(path: string): Pointer {
-  const pathBuf = Buffer.from(path + "\0");
-  const handle = dl.dlopen(ptr(pathBuf), RTLD_NOLOAD);
-  if (!handle) throw new Error(`dlopen(RTLD_NOLOAD) failed for ${path}`);
-  return handle;
-}
-
-function cfConst(handle: Pointer, name: string): Pointer {
-  const nameBuf = Buffer.from(name + "\0");
-  const addr = dl.dlsym(handle, ptr(nameBuf));
-  if (!addr) throw new Error(`dlsym: ${name} not found`);
-  return asPtr(read.ptr(addr, 0));
-}
-
-function cfStructAddr(handle: Pointer, name: string): Pointer {
-  const nameBuf = Buffer.from(name + "\0");
-  const addr = dl.dlsym(handle, ptr(nameBuf));
-  if (!addr) throw new Error(`dlsym: ${name} not found`);
-  return addr;
-}
-
-const cfHandle = openHandle(CF);
-const secHandle = openHandle(SEC);
-
-const kCFAllocatorDefault = null;
-const kCFTypeDictionaryKeyCallBacks = cfStructAddr(cfHandle, "kCFTypeDictionaryKeyCallBacks");
-const kCFTypeDictionaryValueCallBacks = cfStructAddr(cfHandle, "kCFTypeDictionaryValueCallBacks");
-const kCFBooleanTrue = cfConst(cfHandle, "kCFBooleanTrue");
-
-const kSecClass = cfConst(secHandle, "kSecClass");
-const kSecClassKey = cfConst(secHandle, "kSecClassKey");
-const kSecAttrApplicationTag = cfConst(secHandle, "kSecAttrApplicationTag");
-const kSecAttrAccessible = cfConst(secHandle, "kSecAttrAccessible");
-const kSecAttrAccessibleAfterFirstUnlock = cfConst(secHandle, "kSecAttrAccessibleAfterFirstUnlock");
-const kSecAttrIsPermanent = cfConst(secHandle, "kSecAttrIsPermanent");
-const kSecAttrKeyClass = cfConst(secHandle, "kSecAttrKeyClass");
-const kSecAttrKeyClassPrivate = cfConst(secHandle, "kSecAttrKeyClassPrivate");
-const kSecAttrKeySizeInBits = cfConst(secHandle, "kSecAttrKeySizeInBits");
-const kSecAttrKeyType = cfConst(secHandle, "kSecAttrKeyType");
-const kSecAttrKeyTypeRSA = cfConst(secHandle, "kSecAttrKeyTypeRSA");
-const kSecPrivateKeyAttrs = cfConst(secHandle, "kSecPrivateKeyAttrs");
-const kSecReturnRef = cfConst(secHandle, "kSecReturnRef");
-const kSecUseDataProtectionKeychain = cfConst(secHandle, "kSecUseDataProtectionKeychain");
-const kSecKeyAlgorithmRSAEncryptionOAEPSHA256 = cfConst(
-  secHandle,
-  "kSecKeyAlgorithmRSAEncryptionOAEPSHA256",
-);
-
 const errSecSuccess = 0;
 const errSecItemNotFound = -25300;
 
-function makeCFData(value: Buffer): Pointer {
-  const ref = cf.CFDataCreate(kCFAllocatorDefault, ptr(value), value.byteLength);
+type Native = ReturnType<typeof loadNative>;
+
+let native: Native | null = null;
+
+const asPtr = (n: number): Pointer => n as unknown as Pointer;
+
+function unsupportedPlatform(): never {
+  throw new Error("@bizimind/keychain is only supported on macOS");
+}
+
+function getNative(): Native {
+  if (process.platform !== "darwin") unsupportedPlatform();
+  native ??= loadNative();
+  return native;
+}
+
+function loadNative() {
+  const { symbols: cf } = dlopen(CF, {
+    CFDataCreate: { args: [FFIType.ptr, FFIType.ptr, FFIType.i64], returns: FFIType.ptr },
+    CFDataGetLength: { args: [FFIType.ptr], returns: FFIType.i64 },
+    CFDataGetBytePtr: { args: [FFIType.ptr], returns: FFIType.ptr },
+    CFNumberCreate: { args: [FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.ptr },
+    CFDictionaryCreateMutable: {
+      args: [FFIType.ptr, FFIType.i64, FFIType.ptr, FFIType.ptr],
+      returns: FFIType.ptr,
+    },
+    CFDictionarySetValue: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.void },
+    CFErrorCopyDescription: { args: [FFIType.ptr], returns: FFIType.ptr },
+    CFRelease: { args: [FFIType.ptr], returns: FFIType.void },
+  });
+
+  const { symbols: sec } = dlopen(SEC, {
+    SecItemCopyMatching: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
+    SecItemDelete: { args: [FFIType.ptr], returns: FFIType.i32 },
+    SecKeyCreateRandomKey: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+    SecKeyCopyPublicKey: { args: [FFIType.ptr], returns: FFIType.ptr },
+    SecKeyCreateEncryptedData: {
+      args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr],
+      returns: FFIType.ptr,
+    },
+    SecKeyCreateDecryptedData: {
+      args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr],
+      returns: FFIType.ptr,
+    },
+  });
+
+  const { symbols: dl } = dlopen("/usr/lib/libdl.dylib", {
+    dlopen: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.ptr },
+    dlsym: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+  });
+
+  function openHandle(path: string): Pointer {
+    const pathBuf = Buffer.from(path + "\0");
+    const handle = dl.dlopen(ptr(pathBuf), RTLD_NOLOAD);
+    if (!handle) throw new Error(`dlopen(RTLD_NOLOAD) failed for ${path}`);
+    return handle;
+  }
+
+  function cfConst(handle: Pointer, name: string): Pointer {
+    const nameBuf = Buffer.from(name + "\0");
+    const addr = dl.dlsym(handle, ptr(nameBuf));
+    if (!addr) throw new Error(`dlsym: ${name} not found`);
+    return asPtr(read.ptr(addr, 0));
+  }
+
+  function cfStructAddr(handle: Pointer, name: string): Pointer {
+    const nameBuf = Buffer.from(name + "\0");
+    const addr = dl.dlsym(handle, ptr(nameBuf));
+    if (!addr) throw new Error(`dlsym: ${name} not found`);
+    return addr;
+  }
+
+  const cfHandle = openHandle(CF);
+  const secHandle = openHandle(SEC);
+
+  return {
+    cf,
+    sec,
+    kCFAllocatorDefault: null,
+    kCFTypeDictionaryKeyCallBacks: cfStructAddr(cfHandle, "kCFTypeDictionaryKeyCallBacks"),
+    kCFTypeDictionaryValueCallBacks: cfStructAddr(cfHandle, "kCFTypeDictionaryValueCallBacks"),
+    kCFBooleanTrue: cfConst(cfHandle, "kCFBooleanTrue"),
+    kSecClass: cfConst(secHandle, "kSecClass"),
+    kSecClassKey: cfConst(secHandle, "kSecClassKey"),
+    kSecAttrApplicationTag: cfConst(secHandle, "kSecAttrApplicationTag"),
+    kSecAttrAccessible: cfConst(secHandle, "kSecAttrAccessible"),
+    kSecAttrAccessibleAfterFirstUnlock: cfConst(secHandle, "kSecAttrAccessibleAfterFirstUnlock"),
+    kSecAttrIsPermanent: cfConst(secHandle, "kSecAttrIsPermanent"),
+    kSecAttrKeyClass: cfConst(secHandle, "kSecAttrKeyClass"),
+    kSecAttrKeyClassPrivate: cfConst(secHandle, "kSecAttrKeyClassPrivate"),
+    kSecAttrKeySizeInBits: cfConst(secHandle, "kSecAttrKeySizeInBits"),
+    kSecAttrKeyType: cfConst(secHandle, "kSecAttrKeyType"),
+    kSecAttrKeyTypeRSA: cfConst(secHandle, "kSecAttrKeyTypeRSA"),
+    kSecPrivateKeyAttrs: cfConst(secHandle, "kSecPrivateKeyAttrs"),
+    kSecReturnRef: cfConst(secHandle, "kSecReturnRef"),
+    kSecUseDataProtectionKeychain: cfConst(secHandle, "kSecUseDataProtectionKeychain"),
+    kSecKeyAlgorithmRSAEncryptionOAEPSHA256: cfConst(
+      secHandle,
+      "kSecKeyAlgorithmRSAEncryptionOAEPSHA256",
+    ),
+  };
+}
+
+function makeCFData(n: Native, value: Buffer): Pointer {
+  const ref = n.cf.CFDataCreate(n.kCFAllocatorDefault, ptr(value), value.byteLength);
   if (!ref) throw new Error("CFDataCreate failed");
   return ref;
 }
 
-function makeCFNumber(value: number): Pointer {
+function makeCFNumber(n: Native, value: number): Pointer {
   const slot = new Int32Array([value]);
-  const ref = cf.CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, ptr(slot));
+  const ref = n.cf.CFNumberCreate(n.kCFAllocatorDefault, kCFNumberSInt32Type, ptr(slot));
   if (!ref) throw new Error(`CFNumberCreate failed for ${value}`);
   return ref;
 }
 
-function makeDict(): Pointer {
-  const dict = cf.CFDictionaryCreateMutable(
-    kCFAllocatorDefault,
+function makeDict(n: Native): Pointer {
+  const dict = n.cf.CFDictionaryCreateMutable(
+    n.kCFAllocatorDefault,
     0,
-    kCFTypeDictionaryKeyCallBacks,
-    kCFTypeDictionaryValueCallBacks,
+    n.kCFTypeDictionaryKeyCallBacks,
+    n.kCFTypeDictionaryValueCallBacks,
   );
   if (!dict) throw new Error("CFDictionaryCreateMutable failed");
   return dict;
 }
 
-function copyCFData(dataRef: Pointer): Buffer {
-  const len = Number(cf.CFDataGetLength(dataRef));
-  const bytesPtr = cf.CFDataGetBytePtr(dataRef);
+function copyCFData(n: Native, dataRef: Pointer): Buffer {
+  const len = Number(n.cf.CFDataGetLength(dataRef));
+  const bytesPtr = n.cf.CFDataGetBytePtr(dataRef);
   if (!bytesPtr) throw new Error("CFDataGetBytePtr failed");
   return Buffer.from(new Uint8Array(toArrayBuffer(bytesPtr, 0, len)));
 }
 
-function errorDescription(errorRef: Pointer | null): string {
+function errorDescription(n: Native, errorRef: Pointer | null): string {
   if (!errorRef) return "unknown error";
-  const descriptionRef = cf.CFErrorCopyDescription(errorRef);
-  cf.CFRelease(errorRef);
+  const descriptionRef = n.cf.CFErrorCopyDescription(errorRef);
+  n.cf.CFRelease(errorRef);
   if (!descriptionRef) return "unknown error";
 
-  // CFString's textual representation is not directly exposed here; the pointer
-  // value still gives enough context to correlate native failures while avoiding
-  // another fragile FFI conversion surface.
   const description = `CFError ${descriptionRef}`;
-  cf.CFRelease(descriptionRef);
+  n.cf.CFRelease(descriptionRef);
   return description;
 }
 
-function makePrivateKeyQuery(tag: Buffer): Pointer {
-  const tagData = makeCFData(tag);
-  const query = makeDict();
-  cf.CFDictionarySetValue(query, kSecClass, kSecClassKey);
-  cf.CFDictionarySetValue(query, kSecAttrKeyClass, kSecAttrKeyClassPrivate);
-  cf.CFDictionarySetValue(query, kSecAttrApplicationTag, tagData);
-  cf.CFDictionarySetValue(query, kSecReturnRef, kCFBooleanTrue);
-  cf.CFDictionarySetValue(query, kSecUseDataProtectionKeychain, kCFBooleanTrue);
-  cf.CFRelease(tagData);
+function makePrivateKeyQuery(n: Native, tag: Buffer): Pointer {
+  const tagData = makeCFData(n, tag);
+  const query = makeDict(n);
+  n.cf.CFDictionarySetValue(query, n.kSecClass, n.kSecClassKey);
+  n.cf.CFDictionarySetValue(query, n.kSecAttrKeyClass, n.kSecAttrKeyClassPrivate);
+  n.cf.CFDictionarySetValue(query, n.kSecAttrApplicationTag, tagData);
+  n.cf.CFDictionarySetValue(query, n.kSecReturnRef, n.kCFBooleanTrue);
+  n.cf.CFDictionarySetValue(query, n.kSecUseDataProtectionKeychain, n.kCFBooleanTrue);
+  n.cf.CFRelease(tagData);
   return query;
 }
 
-function findPrivateKey(tag: Buffer): Pointer | null {
-  const query = makePrivateKeyQuery(tag);
+function findPrivateKey(n: Native, tag: Buffer): Pointer | null {
+  const query = makePrivateKeyQuery(n, tag);
   const resultSlot = new BigUint64Array(1);
-  const status = sec.SecItemCopyMatching(query, ptr(resultSlot));
-  cf.CFRelease(query);
+  const status = n.sec.SecItemCopyMatching(query, ptr(resultSlot));
+  n.cf.CFRelease(query);
 
   if (status === errSecItemNotFound) return null;
   if (status !== errSecSuccess) throw new Error(`Key lookup failed (OSStatus ${status})`);
   return asPtr(Number(resultSlot[0]));
 }
 
-function createPrivateKey(tag: Buffer): Pointer {
-  const tagData = makeCFData(tag);
-  const keySize = makeCFNumber(2048);
-  const privateAttrs = makeDict();
-  const attrs = makeDict();
+function createPrivateKey(n: Native, tag: Buffer): Pointer {
+  const tagData = makeCFData(n, tag);
+  const keySize = makeCFNumber(n, 2048);
+  const privateAttrs = makeDict(n);
+  const attrs = makeDict(n);
   const errorSlot = new BigUint64Array(1);
 
-  cf.CFDictionarySetValue(privateAttrs, kSecAttrIsPermanent, kCFBooleanTrue);
-  cf.CFDictionarySetValue(privateAttrs, kSecAttrApplicationTag, tagData);
-  cf.CFDictionarySetValue(privateAttrs, kSecAttrAccessible, kSecAttrAccessibleAfterFirstUnlock);
-  cf.CFDictionarySetValue(privateAttrs, kSecUseDataProtectionKeychain, kCFBooleanTrue);
+  n.cf.CFDictionarySetValue(privateAttrs, n.kSecAttrIsPermanent, n.kCFBooleanTrue);
+  n.cf.CFDictionarySetValue(privateAttrs, n.kSecAttrApplicationTag, tagData);
+  n.cf.CFDictionarySetValue(
+    privateAttrs,
+    n.kSecAttrAccessible,
+    n.kSecAttrAccessibleAfterFirstUnlock,
+  );
+  n.cf.CFDictionarySetValue(privateAttrs, n.kSecUseDataProtectionKeychain, n.kCFBooleanTrue);
 
-  cf.CFDictionarySetValue(attrs, kSecAttrKeyType, kSecAttrKeyTypeRSA);
-  cf.CFDictionarySetValue(attrs, kSecAttrKeySizeInBits, keySize);
-  cf.CFDictionarySetValue(attrs, kSecPrivateKeyAttrs, privateAttrs);
-  cf.CFDictionarySetValue(attrs, kSecUseDataProtectionKeychain, kCFBooleanTrue);
+  n.cf.CFDictionarySetValue(attrs, n.kSecAttrKeyType, n.kSecAttrKeyTypeRSA);
+  n.cf.CFDictionarySetValue(attrs, n.kSecAttrKeySizeInBits, keySize);
+  n.cf.CFDictionarySetValue(attrs, n.kSecPrivateKeyAttrs, privateAttrs);
+  n.cf.CFDictionarySetValue(attrs, n.kSecUseDataProtectionKeychain, n.kCFBooleanTrue);
 
-  const key = sec.SecKeyCreateRandomKey(attrs, ptr(errorSlot));
-  cf.CFRelease(attrs);
-  cf.CFRelease(privateAttrs);
-  cf.CFRelease(keySize);
-  cf.CFRelease(tagData);
+  const key = n.sec.SecKeyCreateRandomKey(attrs, ptr(errorSlot));
+  n.cf.CFRelease(attrs);
+  n.cf.CFRelease(privateAttrs);
+  n.cf.CFRelease(keySize);
+  n.cf.CFRelease(tagData);
 
   if (!key) {
-    throw new Error(`Key creation failed: ${errorDescription(asPtr(Number(errorSlot[0])))}`);
+    throw new Error(`Key creation failed: ${errorDescription(n, asPtr(Number(errorSlot[0])))}`);
   }
   return key;
 }
 
-function getOrCreatePrivateKey(tag: Buffer): Pointer {
-  return findPrivateKey(tag) ?? createPrivateKey(tag);
+function getOrCreatePrivateKey(n: Native, tag: Buffer): Pointer {
+  return findPrivateKey(n, tag) ?? createPrivateKey(n, tag);
 }
 
 function makeTag(name: string): Buffer {
@@ -205,58 +219,61 @@ function makeTag(name: string): Buffer {
 }
 
 export function encryptWithKey(name: string, plaintext: Buffer): Buffer {
-  const privateKey = getOrCreatePrivateKey(makeTag(name));
-  const publicKey = sec.SecKeyCopyPublicKey(privateKey);
+  const n = getNative();
+  const privateKey = getOrCreatePrivateKey(n, makeTag(name));
+  const publicKey = n.sec.SecKeyCopyPublicKey(privateKey);
   if (!publicKey) {
-    cf.CFRelease(privateKey);
+    n.cf.CFRelease(privateKey);
     throw new Error("SecKeyCopyPublicKey failed");
   }
 
-  const data = makeCFData(plaintext);
+  const data = makeCFData(n, plaintext);
   const errorSlot = new BigUint64Array(1);
-  const encrypted = sec.SecKeyCreateEncryptedData(
+  const encrypted = n.sec.SecKeyCreateEncryptedData(
     publicKey,
-    kSecKeyAlgorithmRSAEncryptionOAEPSHA256,
+    n.kSecKeyAlgorithmRSAEncryptionOAEPSHA256,
     data,
     ptr(errorSlot),
   );
-  cf.CFRelease(data);
-  cf.CFRelease(publicKey);
-  cf.CFRelease(privateKey);
+  n.cf.CFRelease(data);
+  n.cf.CFRelease(publicKey);
+  n.cf.CFRelease(privateKey);
 
   if (!encrypted) {
-    throw new Error(`Key encryption failed: ${errorDescription(asPtr(Number(errorSlot[0])))}`);
+    throw new Error(`Key encryption failed: ${errorDescription(n, asPtr(Number(errorSlot[0])))}`);
   }
-  const result = copyCFData(encrypted);
-  cf.CFRelease(encrypted);
+  const result = copyCFData(n, encrypted);
+  n.cf.CFRelease(encrypted);
   return result;
 }
 
 export function decryptWithKey(name: string, ciphertext: Buffer): Buffer {
-  const privateKey = getOrCreatePrivateKey(makeTag(name));
-  const data = makeCFData(ciphertext);
+  const n = getNative();
+  const privateKey = getOrCreatePrivateKey(n, makeTag(name));
+  const data = makeCFData(n, ciphertext);
   const errorSlot = new BigUint64Array(1);
-  const decrypted = sec.SecKeyCreateDecryptedData(
+  const decrypted = n.sec.SecKeyCreateDecryptedData(
     privateKey,
-    kSecKeyAlgorithmRSAEncryptionOAEPSHA256,
+    n.kSecKeyAlgorithmRSAEncryptionOAEPSHA256,
     data,
     ptr(errorSlot),
   );
-  cf.CFRelease(data);
-  cf.CFRelease(privateKey);
+  n.cf.CFRelease(data);
+  n.cf.CFRelease(privateKey);
 
   if (!decrypted) {
-    throw new Error(`Key decryption failed: ${errorDescription(asPtr(Number(errorSlot[0])))}`);
+    throw new Error(`Key decryption failed: ${errorDescription(n, asPtr(Number(errorSlot[0])))}`);
   }
-  const result = copyCFData(decrypted);
-  cf.CFRelease(decrypted);
+  const result = copyCFData(n, decrypted);
+  n.cf.CFRelease(decrypted);
   return result;
 }
 
 export function deleteKey(name: string): boolean {
-  const query = makePrivateKeyQuery(makeTag(name));
-  const status = sec.SecItemDelete(query);
-  cf.CFRelease(query);
+  const n = getNative();
+  const query = makePrivateKeyQuery(n, makeTag(name));
+  const status = n.sec.SecItemDelete(query);
+  n.cf.CFRelease(query);
 
   if (status === errSecItemNotFound) return false;
   if (status !== errSecSuccess) throw new Error(`Key delete failed (OSStatus ${status})`);
