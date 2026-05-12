@@ -5,7 +5,11 @@ import { join } from "node:path";
 const isDev = process.env.LOXEL_DEV === "1";
 const stateBase = join(homedir(), ".local", "state", "loxel");
 const stateDir = process.env.LOXEL_STATE_DIR ?? join(stateBase, isDev ? "loxel-dev" : "loxel");
-const port = process.env.LOXEL_PORT ? parseInt(process.env.LOXEL_PORT, 10) : isDev ? 7434 : 7433;
+const port = process.env.LOXEL_SERVE_PORT
+  ? parseInt(process.env.LOXEL_SERVE_PORT, 10)
+  : isDev
+    ? 7434
+    : 7433;
 
 /** First 12 hex chars of SHA-256 — short, stable, filesystem-safe. */
 export function hash12(input: string): string {

@@ -60,7 +60,12 @@ export default async function globalSetup() {
 
   const proc = spawn("bun", ["run", "src/server/index.ts"], {
     cwd: LOXEL_ROOT,
-    env: { ...process.env, LOXEL_DEV: "1", LOXEL_STATE_DIR: stateDir, LOXEL_PORT: String(port) },
+    env: {
+      ...process.env,
+      LOXEL_DEV: "1",
+      LOXEL_STATE_DIR: stateDir,
+      LOXEL_SERVE_PORT: String(port),
+    },
     stdio: "ignore",
     detached: false,
   });
