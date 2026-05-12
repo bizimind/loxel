@@ -396,26 +396,6 @@ function handlePendingUpdateSync(): void {
     // Extract archive (use execFileSync to avoid shell injection)
     execFileSync("tar", ["xzf", archivePath, "-C", targetDir]);
 
-    // Sign binaries on macOS
-    if (process.platform === "darwin") {
-      const signTargets = [
-        path.join(targetDir, "loxel-server"),
-        path.join(targetDir, "yaml-language-server"),
-        path.join(targetDir, "docker-language-server"),
-        path.join(targetDir, "terraform-ls"),
-        path.join(targetDir, "tsgo-lib/tsgo"),
-      ];
-      for (const binPath of signTargets) {
-        if (!fs.existsSync(binPath)) continue;
-        try {
-          execFileSync("codesign", ["-s", "-", "-f", binPath]);
-        } catch {
-          // Non-fatal — ad-hoc signing may fail but the binary can still run
-          console.warn(`[electron] Ad-hoc code signing failed for ${binPath} (non-fatal)`);
-        }
-      }
-    }
-
     // Ensure executables
     for (const bin of [
       "loxel-server",

@@ -1,54 +1,38 @@
+import { decryptWithKey, encryptWithKey } from "@bizimind/keychain";
 import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
+import { config } from "./config";
 import { logger } from "./logger";
 
 const log = logger.child("keychain");
 
-const SERVICE = "com.bizimind.loxel";
-const ACCOUNT = "encryption-key";
+const KEY_ENCRYPTION_KEY = "com.bizimind.loxel.data-key-wrapper";
+const WRAPPED_DEK_PATH = join(config.stateDir, "data-encryption-key.wrapped");
 const KEY_BYTES = 32; // AES-256
-
-const EXIT_ITEM_NOT_FOUND = 44;
-
-async function readKey(): Promise<Buffer | null> {
-  const result = await Bun.$`security find-generic-password -s ${SERVICE} -a ${ACCOUNT} -w`
-    .nothrow()
-    .quiet();
-  if (result.exitCode === 0) return Buffer.from(result.stdout.toString().trim(), "hex");
-  if (result.exitCode === EXIT_ITEM_NOT_FOUND) return null;
-  throw new Error(
-    `Failed to read encryption key from Keychain (exit ${result.exitCode}): ${result.stderr.toString().trim()}`,
-  );
-}
-
-async function writeKey(key: Buffer): Promise<void> {
-  const hex = key.toString("hex");
-  // `-w` at the end (no value) reads from stdin, avoiding argv exposure in `ps`.
-  // The prompt expects password + confirmation, so we send the value twice.
-  const proc = Bun.spawn(
-    ["security", "add-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-U", "-w"],
-    { stdin: "pipe", stdout: "ignore", stderr: "pipe" },
-  );
-  proc.stdin.write(`${hex}\n${hex}\n`);
-  proc.stdin.end();
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    throw new Error(
-      `Failed to store encryption key in Keychain (exit ${exitCode}): ${stderr.trim()}`,
-    );
-  }
-}
+const DEV_KEY = Buffer.from("loxel-dev-fixed-encryption-key!!", "utf8");
 
 export async function loadOrCreateKey(): Promise<Buffer> {
-  const existing = await readKey();
-  if (existing && existing.length === KEY_BYTES) {
-    log.info("Loaded encryption key from Keychain");
-    return existing;
+  if (process.env.LOXEL_DEV === "1") {
+    return DEV_KEY;
+  }
+
+  if (existsSync(WRAPPED_DEK_PATH)) {
+    const key = decryptWithKey(KEY_ENCRYPTION_KEY, readFileSync(WRAPPED_DEK_PATH));
+    if (key.length !== KEY_BYTES) {
+      throw new Error(
+        `Keychain unwrapped a key of unexpected length: ${key.length} bytes (expected ${KEY_BYTES})`,
+      );
+    }
+    log.info("Loaded wrapped data encryption key");
+    return key;
   }
 
   const key = randomBytes(KEY_BYTES);
-  await writeKey(key);
-  log.info("Generated and stored new encryption key in Keychain");
+  const wrapped = encryptWithKey(KEY_ENCRYPTION_KEY, key);
+  mkdirSync(config.stateDir, { recursive: true });
+  writeFileSync(WRAPPED_DEK_PATH, wrapped, { mode: 0o600 });
+  log.info("Generated and wrapped new data encryption key");
   return key;
 }

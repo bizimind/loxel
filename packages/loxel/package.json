@@ -31,12 +31,13 @@
     "sign": "codesign --sign \"$LOXEL_CODESIGN_IDENTITY\" --options runtime build/loxel-server",
     "typecheck": "tsgo --noEmit",
     "preview": "vite preview",
-    "test": "bun test --isolate --preload ./src/test/dom-preload.ts",
+    "test": "bun test src --isolate --preload ./src/test/dom-preload.ts",
     "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.1.0",
     "@bizimind/coding-agent": "workspace:*",
+    "@bizimind/keychain": "workspace:*",
     "@bizimind/localdb-sdk": "workspace:*",
     "@bizimind/logger": "workspace:*",
     "@bizimind/monaco-lsp-client": "workspace:*",
