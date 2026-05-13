@@ -43,16 +43,9 @@ export class DockerLspManager extends StdioLspManager<DockerLspSession, DockerLs
   }
 
   protected resolveBinary(): string | null {
-    const binaryName =
+    const name =
       process.platform === "win32" ? "docker-language-server.exe" : "docker-language-server";
-
-    const sibling = path.join(path.dirname(process.execPath), binaryName);
-    if (Bun.file(sibling).size) return sibling;
-
-    const dev = path.resolve(import.meta.dir, "../../build/", binaryName);
-    if (Bun.file(dev).size) return dev;
-
-    return Bun.which(binaryName);
+    return this.resolveBundledBinary(name, path.resolve(import.meta.dir, "../../build/", name));
   }
 
   protected override spawnArgs(): readonly string[] {
@@ -75,6 +68,10 @@ export class DockerLspManager extends StdioLspManager<DockerLspSession, DockerLs
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
     };
+  }
+
+  protected override getSessionKey(context: DockerLspContext): string {
+    return context.wtPath;
   }
 
   protected override getSessionWorkspace(session: DockerLspSession): string | null {

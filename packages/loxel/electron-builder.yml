@@ -17,7 +17,7 @@ extraResources:
     to: yaml-language-server
   - from: build/docker-language-server
     to: docker-language-server
-  - from: build/terraform-ls/terraform-ls
+  - from: build/terraform-ls
     to: terraform-ls
   - from: build/pyright-langserver
     to: pyright-langserver

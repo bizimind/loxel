@@ -53,6 +53,10 @@ export class AstroLspManager extends StdioLspManager<AstroLspSession, AstroLspCo
     };
   }
 
+  protected override getSessionKey(context: AstroLspContext): string {
+    return context.wtPath;
+  }
+
   protected override getSessionWorkspace(session: AstroLspSession): string | null {
     return session.wtPath;
   }

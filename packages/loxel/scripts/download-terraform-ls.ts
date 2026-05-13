@@ -1,19 +1,19 @@
 /**
  * Downloads the platform-specific `terraform-ls` binary from HashiCorp
- * releases into `packages/loxel/build/terraform-ls/terraform-ls` so it can
- * ship alongside `loxel-server` via electron-builder extraResources.
+ * releases into `packages/loxel/build/terraform-ls` so it can ship alongside
+ * `loxel-server` via electron-builder extraResources.
  *
  * SHA256 digests are pinned from HashiCorp's published SHA256SUMS file.
  * The zip is verified after download and before extraction.
  */
 
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
 const VERSION = "0.36.3";
 const LOXEL = path.resolve(import.meta.dir, "..");
-const OUTDIR = path.join(LOXEL, "build", "terraform-ls");
+const OUTDIR = path.join(LOXEL, "build");
 
 /** Pinned SHA256 digests from the v0.36.3 HashiCorp SHA256SUMS. */
 const SHA256: Record<string, string> = {
@@ -54,7 +54,6 @@ if (existsSync(outBinary)) {
   process.exit(0);
 }
 
-rmSync(OUTDIR, { recursive: true, force: true });
 mkdirSync(OUTDIR, { recursive: true });
 
 console.log(`Downloading ${url}`);
@@ -71,25 +70,33 @@ if (actualHash !== expectedHash) {
   process.exit(1);
 }
 
-const zipPath = path.join(OUTDIR, "terraform-ls.zip");
+const tmpDir = path.join(OUTDIR, ".terraform-ls-tmp");
+rmSync(tmpDir, { recursive: true, force: true });
+mkdirSync(tmpDir, { recursive: true });
+
+const zipPath = path.join(tmpDir, "terraform-ls.zip");
 await Bun.write(zipPath, zipBytes);
 
 console.log("Extracting (SHA256 verified)...");
-const unzip = Bun.spawn(["unzip", "-o", zipPath, binaryName, "-d", OUTDIR], {
+const unzip = Bun.spawn(["unzip", "-o", zipPath, binaryName, "-d", tmpDir], {
   stdout: "inherit",
   stderr: "inherit",
 });
 const code = await unzip.exited;
 if (code !== 0) {
+  rmSync(tmpDir, { recursive: true, force: true });
   console.error("unzip failed");
   process.exit(1);
 }
 
-if (!existsSync(outBinary)) {
-  console.error(`Expected ${outBinary} after unzip but it was not found`);
+const extracted = path.join(tmpDir, binaryName);
+if (!existsSync(extracted)) {
+  rmSync(tmpDir, { recursive: true, force: true });
+  console.error(`Expected ${extracted} after unzip but it was not found`);
   process.exit(1);
 }
 
+renameSync(extracted, outBinary);
 chmodSync(outBinary, 0o755);
-rmSync(zipPath);
+rmSync(tmpDir, { recursive: true, force: true });
 console.log(`Installed: ${outBinary}`);

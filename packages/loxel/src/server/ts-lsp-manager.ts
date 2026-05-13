@@ -77,6 +77,10 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
     return backend.resolveBinary();
   }
 
+  protected override getSessionKey(context: TsLspContext): string {
+    return context.wtPath;
+  }
+
   protected override spawnArgs(): readonly string[] {
     return backend.spawnArgs;
   }

@@ -18,7 +18,7 @@ interface TerraformLspSession extends BaseLspSession {
  * rooted at the worktree path so cross-file references (modules, variable
  * defs) resolve against the full worktree workspace.
  *
- * terraform-ls is a native Go binary bundled as `build/terraform-ls/`
+ * terraform-ls is a native Go binary bundled as `build/terraform-ls`
  * and shipped with loxel-server via electron-builder extraResources.
  */
 export class TerraformLspManager extends StdioLspManager<TerraformLspSession, TerraformLspContext> {
@@ -37,13 +37,10 @@ export class TerraformLspManager extends StdioLspManager<TerraformLspSession, Te
   }
 
   protected resolveBinary(): string | null {
-    const sibling = path.join(path.dirname(process.execPath), "terraform-ls");
-    if (Bun.file(sibling).size) return sibling;
-
-    const dev = path.resolve(import.meta.dir, "../../build/terraform-ls/terraform-ls");
-    if (Bun.file(dev).size) return dev;
-
-    return Bun.which("terraform-ls");
+    return this.resolveBundledBinary(
+      "terraform-ls",
+      path.resolve(import.meta.dir, "../../build/terraform-ls"),
+    );
   }
 
   protected override spawnArgs(): readonly string[] {
@@ -67,6 +64,10 @@ export class TerraformLspManager extends StdioLspManager<TerraformLspSession, Te
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
     };
+  }
+
+  protected override getSessionKey(context: TerraformLspContext): string {
+    return context.wtPath;
   }
 
   protected override getSessionWorkspace(session: TerraformLspSession): string | null {

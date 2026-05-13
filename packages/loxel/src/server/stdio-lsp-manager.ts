@@ -62,6 +62,7 @@ interface LspContentChange {
  */
 export abstract class StdioLspManager<TSession extends BaseLspSession, TContext = void> {
   protected readonly sessions = new Map<ServerWebSocket<unknown>, TSession>();
+  private readonly _sessionsByKey = new Map<string, ServerWebSocket<unknown>>();
   protected readonly log: ReturnType<typeof logger.child>;
 
   constructor(protected readonly name: LogCategory) {
@@ -79,6 +80,12 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     if (!session) return;
     this.killSession(session);
     this.sessions.delete(ws);
+    for (const [key, mappedWs] of this._sessionsByKey) {
+      if (mappedWs === ws) {
+        this._sessionsByKey.delete(key);
+        break;
+      }
+    }
   }
 
   destroy(): void {
@@ -86,6 +93,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       this.killSession(session);
     }
     this.sessions.clear();
+    this._sessionsByKey.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -127,6 +135,18 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected readonly requiresFullTextSync: boolean = false;
 
   /**
+   * Return a dedup key for this session context. When non-null, the base class
+   * enforces at most one active session per key — if a new WebSocket arrives
+   * for a key that already has a session, the old session is killed first.
+   *
+   * Worktree-scoped managers return `context.wtPath`. Global managers (YAML)
+   * return null to opt out of dedup.
+   */
+  protected getSessionKey(_context: TContext): string | null {
+    return null;
+  }
+
+  /**
    * Return the worktree path for this session if the server needs
    * `rootUri` / `rootPath` / `workspaceFolders` injected into the
    * `initialize` request. Returns null by default (no injection).
@@ -138,8 +158,13 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   /**
    * Return language-server-specific `initializationOptions` to merge into the
-   * client's `initialize` request. Returns null by default. Subclasses override
-   * when they need to pass indexing/workspace tuning knobs (e.g. denylists).
+   * client's `initialize` request. Returns null by default.
+   *
+   * Use this for config the server reads once at startup and cannot change
+   * later — e.g. Terraform's `indexing.ignoreDirectoryNames`, Astro's
+   * `typescript.tsdk` path, Pyright's analysis settings. For servers that
+   * expect push-based config via `workspace/didChangeConfiguration` after
+   * initialization, use {@link onClientInitialized} instead.
    */
   protected getInitializationOptions(_session: TSession): Record<string, unknown> | null {
     return null;
@@ -285,7 +310,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     return JSON.stringify(msg);
   }
 
-  /** Fired after the client's `initialized` notification is forwarded. */
+  /**
+   * Fired after the client's `initialized` notification is forwarded.
+   *
+   * Override to push runtime configuration via `workspace/didChangeConfiguration`
+   * for servers whose config protocol is push-based — e.g. Docker's compose/
+   * telemetry settings, YAML's schema mappings. For config the server reads
+   * from `initializationOptions` at startup, use {@link getInitializationOptions}.
+   */
   protected onClientInitialized(_session: TSession): void {}
 
   /**
@@ -375,6 +407,20 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected startSession(ws: ServerWebSocket<unknown>, context: TContext): void {
     this.detach(ws);
 
+    const key = this.getSessionKey(context);
+    if (key) {
+      const existingWs = this._sessionsByKey.get(key);
+      if (existingWs && existingWs !== ws) {
+        this.detach(existingWs);
+        try {
+          existingWs.close(4000, "Replaced by newer connection");
+        } catch {
+          // Already closed
+        }
+      }
+      this._sessionsByKey.set(key, ws);
+    }
+
     const bin = this.resolveBinary();
     if (!bin) {
       this.log.error(`${this.name} binary not found`);
@@ -448,15 +494,22 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   /**
    * Resolve a binary by checking, in order: sibling of the running executable
-   * (the standalone-binary case), the loxel package's node_modules/.bin, then
-   * the ambient PATH.
+   * (standalone deployment), a dev-mode path, then the ambient PATH.
+   *
+   * When `devPath` is provided (absolute path to a binary in `build/`), it is
+   * checked instead of `node_modules/.bin`. Use this for pre-built binaries
+   * that are downloaded or extracted rather than npm-installed.
    */
-  protected resolveBundledBinary(binaryName: string): string | null {
+  protected resolveBundledBinary(binaryName: string, devPath?: string): string | null {
     const sibling = path.join(path.dirname(process.execPath), binaryName);
     if (Bun.file(sibling).size) return sibling;
 
-    const localBin = path.resolve(import.meta.dir, "../../node_modules/.bin/", binaryName);
-    if (Bun.file(localBin).size) return localBin;
+    if (devPath) {
+      if (Bun.file(devPath).size) return devPath;
+    } else {
+      const localBin = path.resolve(import.meta.dir, "../../node_modules/.bin/", binaryName);
+      if (Bun.file(localBin).size) return localBin;
+    }
 
     return Bun.which(binaryName);
   }

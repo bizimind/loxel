@@ -150,7 +150,7 @@ jobs:
           codesign --sign "$LOXEL_CODESIGN_IDENTITY" --options runtime --entitlements packages/loxel/entitlements/loxel-server.plist --force packages/loxel/build/loxel-server
           codesign -s - -f packages/loxel/build/yaml-language-server
           codesign -s - -f packages/loxel/build/docker-language-server
-          codesign -s - -f packages/loxel/build/terraform-ls/terraform-ls
+          codesign -s - -f packages/loxel/build/terraform-ls
           codesign -s - -f packages/loxel/build/pyright-langserver
           codesign -s - -f packages/loxel/build/tsgo-lib/tsgo
         env:
@@ -173,7 +173,7 @@ jobs:
           cp packages/loxel/build/loxel-server staging/
           cp packages/loxel/build/yaml-language-server staging/
           cp packages/loxel/build/docker-language-server staging/
-          cp packages/loxel/build/terraform-ls/terraform-ls staging/
+          cp packages/loxel/build/terraform-ls staging/
           cp packages/loxel/build/pyright-langserver staging/
           cp -r packages/loxel/build/typeshed-fallback staging/typeshed-fallback
           cp -r packages/loxel/build/tsgo-lib staging/tsgo-lib
