@@ -62,7 +62,8 @@ export type WsData =
   | WorktreeLspData<"docker-lsp">
   | WorktreeLspData<"terraform-lsp">
   | WorktreeLspData<"python-lsp">
-  | WorktreeLspData<"astro-lsp">;
+  | WorktreeLspData<"astro-lsp">
+  | WorktreeLspData<"xml-lsp">;
 
 export type WorktreeLspData<T extends string = string> = { type: T; wtPath: string };
 export type WorktreeLspType = Extract<WsData, { wtPath: string }>["type"];

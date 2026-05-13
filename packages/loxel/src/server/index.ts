@@ -60,6 +60,7 @@ import { TerraformLspManager } from "./terraform-lsp-manager";
 import { TsLspManager } from "./ts-lsp-manager";
 import { INTERNAL_WORKTREE_PREFIX } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
+import { XmlLspManager } from "./xml-lsp-manager";
 import { YamlLspManager } from "./yaml-lsp-manager";
 
 const log = logger.child("server");
@@ -564,6 +565,7 @@ const dockerLspManager = new DockerLspManager();
 const terraformLspManager = new TerraformLspManager();
 const pythonLspManager = new PythonLspManager();
 const astroLspManager = new AstroLspManager();
+const xmlLspManager = new XmlLspManager();
 
 function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
   switch (msg.type) {
@@ -887,6 +889,7 @@ const server = Bun.serve<WsData>({
         "terraform-lsp",
         "python-lsp",
         "astro-lsp",
+        "xml-lsp",
       ];
       for (const lspType of worktreeLspTypes) {
         if (url.pathname !== `/ws/${lspType}`) continue;
@@ -982,6 +985,10 @@ const server = Bun.serve<WsData>({
         astroLspManager.createSession(ws, ws.data.wtPath);
         return;
       }
+      if (ws.data?.type === "xml-lsp") {
+        xmlLspManager.createSession(ws, ws.data.wtPath);
+        return;
+      }
       if (shuttingDown) {
         ws.close(1001, "Server shutting down");
         return;
@@ -1019,6 +1026,10 @@ const server = Bun.serve<WsData>({
       }
       if (ws.data?.type === "astro-lsp") {
         astroLspManager.destroySession(ws);
+        return;
+      }
+      if (ws.data?.type === "xml-lsp") {
+        xmlLspManager.destroySession(ws);
         return;
       }
       unsubscribeAllWorktrees(ws);
@@ -1076,6 +1087,10 @@ const server = Bun.serve<WsData>({
       }
       if (ws.data?.type === "astro-lsp") {
         if (typeof message === "string") astroLspManager.handleMessage(ws, message);
+        return;
+      }
+      if (ws.data?.type === "xml-lsp") {
+        if (typeof message === "string") xmlLspManager.handleMessage(ws, message);
         return;
       }
       if (typeof message === "string") {
@@ -1150,6 +1165,7 @@ function shutdown(exitCode = 0) {
   terraformLspManager.destroy();
   pythonLspManager.destroy();
   astroLspManager.destroy();
+  xmlLspManager.destroy();
   perfMonitor.dispose();
   stress.dispose();
   logger.shutdown();

@@ -256,7 +256,8 @@ export function CodeEditorPanel({
       language === "dockerfile" ||
       language === "dockerbake" ||
       language === "terraform" ||
-      language === "astro";
+      language === "astro" ||
+      language === "xml";
     const uri = useFileScheme
       ? monaco.Uri.from({ scheme: "file", path: filePath })
       : monaco.Uri.from({ scheme: "loxel", authority: "HEAD", path: filePath });

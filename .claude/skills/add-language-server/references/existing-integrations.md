@@ -12,6 +12,7 @@ Quick reference for per-LSP quirks. Consult when the new integration needs behav
 | Terraform              | downloaded    | worktree | lazy       | disabled        | no             | `serve`                    | indexing ignore dirs    |
 | Python (Pyright)       | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`                  | analysis settings       |
 | Astro                  | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`                  | TypeScript SDK path     |
+| XML (LemMinX)          | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`                  | none                    |
 
 ## TypeScript — Do Not Use as Template
 
@@ -46,3 +47,7 @@ Build script patches webpack dynamic require and copies `typeshed-fallback` dire
 ## Astro — Use as Template
 
 Simplest worktree-scoped integration. Clean Bun.build (no plugins), standard client, standard lazy connector.
+
+## XML (LemMinX)
+
+Downloaded GraalVM native binary (Java compiled to native — no JRE at runtime). Download script hashes the zip before extraction and restricts unzip to the expected filename. Binary lives in `build/lemminx/lemminx` (subdirectory) because the zip contains a platform-suffixed name (`lemminx-osx-aarch_64`) that gets renamed. Uses `resolveBundledBinary("lemminx", devPath)` with explicit `devPath` since the binary isn't in `node_modules/.bin/`. XML is a Monaco built-in language — no registration or language configuration needed.

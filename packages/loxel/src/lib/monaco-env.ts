@@ -16,6 +16,7 @@ import { dispatchOpenFile } from "./open-file";
 import { connectPythonLsp, disconnectPythonLsp } from "./python-lsp-client";
 import { connectTerraformLsp, disconnectTerraformLsp } from "./terraform-lsp-client";
 import { connectTsLsp } from "./ts-lsp-client";
+import { connectXmlLsp, disconnectXmlLsp } from "./xml-lsp-client";
 import { connectYamlLsp } from "./yaml-lsp-client";
 
 self.MonacoEnvironment = {
@@ -224,6 +225,13 @@ createLazyLspConnector({
   languageIds: ["astro"],
   connect: connectAstroLsp,
   disconnect: disconnectAstroLsp,
+});
+
+// lemminx: only worktrees with .xml files pay the cost.
+createLazyLspConnector({
+  languageIds: ["xml"],
+  connect: connectXmlLsp,
+  disconnect: disconnectXmlLsp,
 });
 
 // Initialize JSON language service — schemas populated dynamically via json-schema-registry.
