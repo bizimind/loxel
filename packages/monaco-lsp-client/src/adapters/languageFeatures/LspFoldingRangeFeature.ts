@@ -56,7 +56,7 @@ export class LspFoldingRangeFeature extends Disposable {
           const registration = monaco.languages.registerFoldingRangeProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             provider,
           );

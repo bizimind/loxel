@@ -44,7 +44,7 @@ export class LspCodeLensFeature extends Disposable {
           const registration = monaco.languages.registerCodeLensProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             provider,
           );

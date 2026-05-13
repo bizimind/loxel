@@ -57,7 +57,7 @@ export class MonacoLspClient {
     const languageIds = languageId
       ? new Set(Array.isArray(languageId) ? languageId : [languageId])
       : undefined;
-    const defaultLanguageId = languageIds ? [...languageIds][0] : undefined;
+    const defaultLanguageIds = languageIds ? [...languageIds] : undefined;
     this._capabilitiesRegistry = new LspCapabilitiesRegistry(c);
     this._bridge = new TextDocumentSynchronizer(s.server, this._capabilitiesRegistry, languageIds);
 
@@ -66,7 +66,7 @@ export class MonacoLspClient {
       this._bridge,
       this._capabilitiesRegistry,
       c,
-      defaultLanguageId,
+      defaultLanguageIds,
     );
     this.createFeatures();
 

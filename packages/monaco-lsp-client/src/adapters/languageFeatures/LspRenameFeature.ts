@@ -25,7 +25,7 @@ export class LspRenameFeature extends Disposable {
           return monaco.languages.registerRenameProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspRenameProvider(this._connection, capability),
           );

@@ -57,7 +57,7 @@ export class LspCompletionFeature extends Disposable {
           return monaco.languages.registerCompletionItemProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspCompletionProvider(this._connection, capability),
           );

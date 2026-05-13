@@ -25,7 +25,7 @@ export class LspLinkedEditingRangeFeature extends Disposable {
           monaco.languages.registerLinkedEditingRangeProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspLinkedEditingRangeProvider(this._connection, capability),
           ),

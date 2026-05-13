@@ -145,7 +145,7 @@ export class LspSemanticTokensFeature extends Disposable {
           const registration = monaco.languages.registerDocumentSemanticTokensProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             provider,
           );

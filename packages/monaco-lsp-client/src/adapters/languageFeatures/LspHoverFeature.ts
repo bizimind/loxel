@@ -30,7 +30,7 @@ export class LspHoverFeature extends Disposable {
           return monaco.languages.registerHoverProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspHoverProvider(this._connection, capability),
           );

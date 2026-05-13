@@ -25,7 +25,7 @@ export class LspReferencesFeature extends Disposable {
           return monaco.languages.registerReferenceProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspReferenceProvider(this._connection, capability),
           );

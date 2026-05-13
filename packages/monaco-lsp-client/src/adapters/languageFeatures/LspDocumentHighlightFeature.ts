@@ -26,7 +26,7 @@ export class LspDocumentHighlightFeature extends Disposable {
           return monaco.languages.registerDocumentHighlightProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspDocumentHighlightProvider(this._connection, capability),
           );

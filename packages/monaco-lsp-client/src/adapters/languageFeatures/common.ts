@@ -413,10 +413,12 @@ const LANGUAGE_ALIASES: Record<string, string> = { typescript: "tsx", javascript
 
 export function toMonacoLanguageSelector(
   s: DocumentSelector | null,
-  defaultLanguageId?: string,
+  defaultLanguageIds?: readonly string[],
 ): monaco.languages.LanguageSelector {
   if (!s || s.length === 0) {
-    return { language: defaultLanguageId ?? "*" };
+    if (!defaultLanguageIds || defaultLanguageIds.length === 0) return { language: "*" };
+    if (defaultLanguageIds.length === 1) return { language: defaultLanguageIds[0] };
+    return defaultLanguageIds.map((lang) => ({ language: lang }));
   }
   return s.flatMap<monaco.languages.LanguageFilter>((s) => {
     if ("notebook" in s) {

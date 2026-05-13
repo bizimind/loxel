@@ -414,8 +414,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         this.detach(existingWs);
         try {
           existingWs.close(4000, "Replaced by newer connection");
-        } catch {
-          // Already closed
+        } catch (err) {
+          this.log.debug("close() on replaced WebSocket threw (already closed)", { error: err });
         }
       }
       this._sessionsByKey.set(key, ws);
