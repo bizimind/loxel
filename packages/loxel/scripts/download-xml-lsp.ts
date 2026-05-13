@@ -8,7 +8,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
 const VERSION = "0.29.2";
@@ -78,19 +78,20 @@ const unzip = Bun.spawn(["unzip", "-o", zipPath, binaryName, "-d", OUTDIR], {
 });
 const code = await unzip.exited;
 if (code !== 0) {
+  rmSync(zipPath, { force: true });
   console.error("unzip failed");
   process.exit(1);
 }
 
 const extractedPath = path.join(OUTDIR, binaryName);
 if (!existsSync(extractedPath)) {
+  rmSync(zipPath, { force: true });
   console.error(`Expected ${extractedPath} after unzip but it was not found`);
   process.exit(1);
 }
 
 if (extractedPath !== outBinary) {
-  const { rename } = await import("node:fs/promises");
-  await rename(extractedPath, outBinary);
+  renameSync(extractedPath, outBinary);
 }
 
 chmodSync(outBinary, 0o755);

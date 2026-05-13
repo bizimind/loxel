@@ -2,17 +2,14 @@ import type { ServerWebSocket, Subprocess } from "bun";
 
 import path from "node:path";
 
-import { type BaseLspSession, type SpawnOptions, StdioLspManager } from "./stdio-lsp-manager";
+import {
+  type SpawnOptions,
+  StdioLspManager,
+  type WtLspContext,
+  type WtLspSession,
+} from "./stdio-lsp-manager";
 
-interface AstroLspContext {
-  wtPath: string;
-}
-
-interface AstroLspSession extends BaseLspSession {
-  wtPath: string;
-}
-
-export class AstroLspManager extends StdioLspManager<AstroLspSession, AstroLspContext> {
+export class AstroLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
   protected override readonly disableSemanticTokens = true;
 
   constructor() {
@@ -35,15 +32,15 @@ export class AstroLspManager extends StdioLspManager<AstroLspSession, AstroLspCo
     return ["--stdio"];
   }
 
-  protected override spawnOptions(context: AstroLspContext): SpawnOptions {
+  protected override spawnOptions(context: WtLspContext): SpawnOptions {
     return { cwd: context.wtPath };
   }
 
   protected buildSession(
     ws: ServerWebSocket<unknown>,
     proc: Subprocess,
-    context: AstroLspContext,
-  ): AstroLspSession {
+    context: WtLspContext,
+  ): WtLspSession {
     return {
       ws,
       proc,
@@ -53,15 +50,15 @@ export class AstroLspManager extends StdioLspManager<AstroLspSession, AstroLspCo
     };
   }
 
-  protected override getSessionKey(context: AstroLspContext): string {
+  protected override getSessionKey(context: WtLspContext): string {
     return context.wtPath;
   }
 
-  protected override getSessionWorkspace(session: AstroLspSession): string | null {
+  protected override getSessionWorkspace(session: WtLspSession): string | null {
     return session.wtPath;
   }
 
-  protected override getInitializationOptions(session: AstroLspSession): Record<string, unknown> {
+  protected override getInitializationOptions(session: WtLspSession): Record<string, unknown> {
     return {
       typescript: { tsdk: path.join(session.wtPath, "node_modules/typescript/lib") },
       contentIntellisense: true,

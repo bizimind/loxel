@@ -1,14 +1,11 @@
 import type { ServerWebSocket, Subprocess } from "bun";
 
-import { type BaseLspSession, type SpawnOptions, StdioLspManager } from "./stdio-lsp-manager";
-
-interface PythonLspContext {
-  wtPath: string;
-}
-
-interface PythonLspSession extends BaseLspSession {
-  wtPath: string;
-}
+import {
+  type SpawnOptions,
+  StdioLspManager,
+  type WtLspContext,
+  type WtLspSession,
+} from "./stdio-lsp-manager";
 
 /**
  * Manages Pyright (`pyright-langserver`) child processes, one per worktree.
@@ -16,7 +13,7 @@ interface PythonLspSession extends BaseLspSession {
  * rooted at the worktree path so cross-file references and module
  * resolution work against the full worktree workspace.
  */
-export class PythonLspManager extends StdioLspManager<PythonLspSession, PythonLspContext> {
+export class PythonLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
   constructor() {
     super("python-lsp");
   }
@@ -33,19 +30,19 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, PythonLs
     return this.resolveBundledBinary("pyright-langserver");
   }
 
-  protected override getSessionKey(context: PythonLspContext): string {
+  protected override getSessionKey(context: WtLspContext): string {
     return context.wtPath;
   }
 
-  protected override spawnOptions(context: PythonLspContext): SpawnOptions {
+  protected override spawnOptions(context: WtLspContext): SpawnOptions {
     return { cwd: context.wtPath };
   }
 
   protected buildSession(
     ws: ServerWebSocket<unknown>,
     proc: Subprocess,
-    context: PythonLspContext,
-  ): PythonLspSession {
+    context: WtLspContext,
+  ): WtLspSession {
     return {
       ws,
       proc,
@@ -55,7 +52,7 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, PythonLs
     };
   }
 
-  protected override getSessionWorkspace(session: PythonLspSession): string | null {
+  protected override getSessionWorkspace(session: WtLspSession): string | null {
     return session.wtPath;
   }
 

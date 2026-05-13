@@ -2,17 +2,14 @@ import type { ServerWebSocket, Subprocess } from "bun";
 
 import path from "node:path";
 
-import { type BaseLspSession, type SpawnOptions, StdioLspManager } from "./stdio-lsp-manager";
+import {
+  type SpawnOptions,
+  StdioLspManager,
+  type WtLspContext,
+  type WtLspSession,
+} from "./stdio-lsp-manager";
 
-interface XmlLspContext {
-  wtPath: string;
-}
-
-interface XmlLspSession extends BaseLspSession {
-  wtPath: string;
-}
-
-export class XmlLspManager extends StdioLspManager<XmlLspSession, XmlLspContext> {
+export class XmlLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
   constructor() {
     super("xml-lsp");
   }
@@ -32,15 +29,15 @@ export class XmlLspManager extends StdioLspManager<XmlLspSession, XmlLspContext>
     );
   }
 
-  protected override spawnOptions(context: XmlLspContext): SpawnOptions {
+  protected override spawnOptions(context: WtLspContext): SpawnOptions {
     return { cwd: context.wtPath };
   }
 
   protected buildSession(
     ws: ServerWebSocket<unknown>,
     proc: Subprocess,
-    context: XmlLspContext,
-  ): XmlLspSession {
+    context: WtLspContext,
+  ): WtLspSession {
     return {
       ws,
       proc,
@@ -50,11 +47,11 @@ export class XmlLspManager extends StdioLspManager<XmlLspSession, XmlLspContext>
     };
   }
 
-  protected override getSessionKey(context: XmlLspContext): string {
+  protected override getSessionKey(context: WtLspContext): string {
     return context.wtPath;
   }
 
-  protected override getSessionWorkspace(session: XmlLspSession): string | null {
+  protected override getSessionWorkspace(session: WtLspSession): string | null {
     return session.wtPath;
   }
 }
