@@ -42,6 +42,6 @@ const tsls: TsLspBackend = {
 };
 
 export function selectTsLspBackend(): TsLspBackend {
-  const choice = (process.env.LOXEL_TS_LSP ?? "tsgo").toLowerCase();
-  return choice === "tsls" || choice === "typescript-language-server" ? tsls : tsgo;
+  const choice = (process.env.LOXEL_TS_LSP ?? "tsls").toLowerCase();
+  return choice === "tsgo" ? tsgo : tsls;
 }

@@ -28,25 +28,25 @@ export const loxelDark: ThemeRegistrationRaw = {
     { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: "#6DA0CF" } },
 
     // Strings
-    { scope: ["string", "punctuation.definition.string"], settings: { foreground: "#F68383" } },
-    { scope: ["constant.character.escape"], settings: { foreground: "#D5B778" } },
-
-    // Numbers
-    { scope: "constant.numeric", settings: { foreground: "#2AACB8" } },
+    { scope: ["string", "punctuation.definition.string"], settings: { foreground: "#cf7c7c" } },
+    // { scope: ["string", "punctuation.definition.string"], settings: { foreground: "#F68383" } },
+    {
+      scope: [
+        "keyword.operator",
+        "constant.character.escape",
+        "punctuation.definition.template-expression.begin.tsx",
+        "punctuation.definition.template-expression.end.tsx",
+      ],
+      settings: { foreground: "#D5B778" },
+    },
 
     // Regex
     { scope: ["string.regexp", "source.regexp"], settings: { foreground: "#D16969" } },
 
     // Types
     {
-      scope: ["entity.name.type", "support.type", "support.class"],
+      scope: ["meta.objectliteral.tsx", "entity.name.type", "support.type", "support.class"],
       settings: { foreground: "#BDBEC4" },
-    },
-
-    // Functions
-    {
-      scope: ["entity.name.function", "support.function", "meta.function-call"],
-      settings: { foreground: "#57A8F5" },
     },
 
     // Properties & attributes
@@ -57,21 +57,34 @@ export const loxelDark: ThemeRegistrationRaw = {
         "support.variable",
         "meta.object-literal.key",
       ],
-      settings: { foreground: "#C87DBB" },
+      settings: { foreground: "#BDBEC4" },
     },
 
     // Variable language (this, self, super)
     { scope: "variable.language", settings: { foreground: "#CF8E6D" } },
 
+    { scope: ["keyword.operator.expression.instanceof.tsx"], settings: { foreground: "#6DA0CF" } },
+
     // Constants
     {
-      scope: ["constant", "constant.language", "constant.other", "variable.other.enummember"],
-      settings: { foreground: "#C77DBB" },
+      scope: [
+        "constant",
+        "constant.numeric",
+        "constant.language",
+        "constant.other",
+        "variable.other.enummember",
+      ],
+      settings: { foreground: "#ed9c6d" },
     },
 
     // Tags (HTML/JSX)
     {
-      scope: ["entity.name.tag", "punctuation.definition.tag"],
+      scope: [
+        "entity.name.tag",
+        "punctuation.definition.tag",
+        "punctuation.definition.tag.begin",
+        "punctuation.definition.tag.end",
+      ],
       settings: { foreground: "#93B196" },
     },
 
@@ -87,22 +100,19 @@ export const loxelDark: ThemeRegistrationRaw = {
     },
 
     // Operators
-    {
-      scope: ["keyword.operator", "entity.other.attribute-name"],
-      settings: { foreground: "#BCBEC4" },
-    },
+    { scope: ["entity.other.attribute-name"], settings: { foreground: "#BCBEC4" } },
 
     // Meta tags
     {
-      scope: ["meta.tag", "punctuation.definition.tag.begin", "punctuation.definition.tag.end"],
-      settings: { foreground: "#93B196" },
+      scope: ["string.quoted.double.html", "meta.embedded.line", "meta.tag"],
+      settings: { foreground: "#BCBEC4" },
     },
 
-    // HTML/JSX attribute values
-    {
-      scope: ["string.quoted.double.html", "meta.embedded.line"],
-      settings: { foreground: "#6AAB73" },
-    },
+    // // HTML/JSX attribute values
+    // {
+    //   scope: ["string.quoted.double.html", "meta.embedded.line"],
+    //   settings: { foreground: "#6AAB73" },
+    // },
 
     // Import/export
     {
@@ -110,17 +120,18 @@ export const loxelDark: ThemeRegistrationRaw = {
       settings: { foreground: "#6DA0CF" },
     },
 
-    // JSX component names (PascalCase tags)
-    { scope: "support.class.component", settings: { foreground: "#30BBA2" } },
-
-    // Namespace / module
-    { scope: ["entity.name.namespace", "entity.name.module"], settings: { foreground: "#2FBAA3" } },
-
-    // Type parameters
-    { scope: "entity.name.type.parameter", settings: { foreground: "#2FBAA3" } },
-
-    // Enum names
-    { scope: "entity.name.type.enum", settings: { foreground: "#2FBAA3" } },
+    {
+      scope: [
+        "entity.name.function",
+        "support.function",
+        "support.class.component",
+        "entity.name.type.enum",
+        "entity.name.type.parameter",
+        "entity.name.namespace",
+        "entity.name.module",
+      ],
+      settings: { foreground: "#659488" },
+    },
 
     // Markdown
     {
@@ -130,115 +141,5 @@ export const loxelDark: ThemeRegistrationRaw = {
     { scope: "markup.italic", settings: { fontStyle: "italic" } },
     { scope: "markup.bold", settings: { fontStyle: "bold" } },
     { scope: "markup.inline.raw", settings: { foreground: "#F68383" } },
-  ],
-};
-
-export const loxelLight: ThemeRegistrationRaw = {
-  name: "loxel-light",
-  type: "light",
-  semanticHighlighting: true,
-  colors: { "editor.foreground": "#000000" },
-  settings: [
-    { settings: { foreground: "#000000" } },
-
-    // Comments
-    { scope: ["comment", "punctuation.definition.comment"], settings: { foreground: "#6A737D" } },
-    {
-      scope: "comment.block.documentation",
-      settings: { foreground: "#6A737D", fontStyle: "italic" },
-    },
-
-    // Keywords
-    { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: "#0000FF" } },
-
-    // Strings
-    { scope: ["string", "punctuation.definition.string"], settings: { foreground: "#A31515" } },
-    { scope: "constant.character.escape", settings: { foreground: "#EE0000" } },
-
-    // Numbers
-    { scope: "constant.numeric", settings: { foreground: "#098658" } },
-
-    // Regex
-    { scope: ["string.regexp", "source.regexp"], settings: { foreground: "#811F3F" } },
-
-    // Types
-    {
-      scope: ["entity.name.type", "support.type", "support.class"],
-      settings: { foreground: "#267F99" },
-    },
-
-    // Functions
-    {
-      scope: ["entity.name.function", "support.function", "meta.function-call"],
-      settings: { foreground: "#795E26" },
-    },
-
-    // Properties & attributes
-    {
-      scope: [
-        "variable.other.property",
-        "variable.other.object.property",
-        "entity.other.attribute-name",
-        "support.variable",
-        "meta.object-literal.key",
-      ],
-      settings: { foreground: "#E50000" },
-    },
-
-    // Variable language
-    { scope: "variable.language", settings: { foreground: "#0000FF" } },
-
-    // Constants
-    {
-      scope: ["constant", "constant.language", "constant.other", "variable.other.enummember"],
-      settings: { foreground: "#0000FF" },
-    },
-
-    // Tags
-    {
-      scope: ["entity.name.tag", "punctuation.definition.tag"],
-      settings: { foreground: "#800000" },
-    },
-
-    // Punctuation
-    {
-      scope: [
-        "punctuation.separator",
-        "punctuation.terminator",
-        "meta.brace",
-        "punctuation.section",
-      ],
-      settings: { foreground: "#000000" },
-    },
-
-    // Operators
-    { scope: "keyword.operator", settings: { foreground: "#000000" } },
-
-    // Meta tags
-    {
-      scope: ["meta.tag", "punctuation.definition.tag.begin", "punctuation.definition.tag.end"],
-      settings: { foreground: "#800000" },
-    },
-
-    // Import/export
-    {
-      scope: ["keyword.control.import", "keyword.control.export", "keyword.control.from"],
-      settings: { foreground: "#0000FF" },
-    },
-
-    // JSX components
-    { scope: "support.class.component", settings: { foreground: "#267F99" } },
-
-    // Namespace / module
-    { scope: ["entity.name.namespace", "entity.name.module"], settings: { foreground: "#267F99" } },
-
-    // Markdown
-    {
-      scope: ["markup.heading", "markup.heading entity.name"],
-      settings: { foreground: "#0000FF", fontStyle: "bold" },
-    },
-    { scope: "markup.italic", settings: { fontStyle: "italic" } },
-    { scope: "markup.bold", settings: { fontStyle: "bold" } },
-    { scope: "markup.inline.raw", settings: { foreground: "#A31515" } },
   ],
 };

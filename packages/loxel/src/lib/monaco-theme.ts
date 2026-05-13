@@ -30,41 +30,21 @@ function readThemeColors(el: Element) {
 // Semantic token rules from LSPs (tsgo, Astro LS) — these layer on top of
 // TextMate syntax tokens and are styled by Monaco's semantic token renderer.
 const DARK_SEMANTIC_RULES: monaco.editor.ITokenThemeRule[] = [
-  { token: "member", foreground: "57A8F5" },
-  { token: "enumMember", foreground: "C87DBB" },
-  { token: "class", foreground: "BDBEC4" },
-  { token: "interface", foreground: "BDBEC4" },
-  { token: "property", foreground: "C87DBB" },
-  { token: "enum", foreground: "2FBAA3" },
-  { token: "namespace", foreground: "2FBAA3" },
-  { token: "typeParameter", foreground: "2FBAA3" },
-  { token: "parameter", foreground: "BDBEC4" },
-  { token: "variable", foreground: "BDBEC4" },
-  { token: "variable.readonly.local", foreground: "BDBEC4" },
-  { token: "variable.readonly", foreground: "C77DBB" },
-  { token: "jsxComponent", foreground: "30BBA2" },
-  { token: "jsxTag", foreground: "93B196" },
-  { token: "jsxBracket", foreground: "93B196" },
-  { token: "delimiter.html", foreground: "93B196" },
-];
-
-const LIGHT_SEMANTIC_RULES: monaco.editor.ITokenThemeRule[] = [
-  { token: "member", foreground: "795E26" },
-  { token: "enumMember", foreground: "0000FF" },
-  { token: "class", foreground: "267F99" },
-  { token: "interface", foreground: "267F99" },
-  { token: "property", foreground: "E50000" },
-  { token: "enum", foreground: "267F99" },
-  { token: "namespace", foreground: "267F99" },
-  { token: "typeParameter", foreground: "267F99" },
-  { token: "parameter", foreground: "001080" },
-  { token: "variable", foreground: "001080" },
-  { token: "variable.readonly.local", foreground: "001080" },
-  { token: "variable.readonly", foreground: "0000FF" },
-  { token: "jsxComponent", foreground: "267F99" },
-  { token: "jsxTag", foreground: "800000" },
-  { token: "jsxBracket", foreground: "800000" },
-  { token: "delimiter.html", foreground: "800000" },
+  { token: "function", foreground: "659488" }, // #659488
+  // { token: "function", foreground: "57A8F5" },
+  { token: "member", foreground: "659488" }, // #659488
+  { token: "enumMember", foreground: "a6859e" }, // #a6859e
+  { token: "class", foreground: "BDBEC4" }, // #BDBEC4
+  { token: "interface", foreground: "BDBEC4" }, // #BDBEC4
+  { token: "property", foreground: "a6859e" }, // #a6859e
+  { token: "enum", foreground: "659488" }, // #659488
+  { token: "namespace", foreground: "659488" }, // #659488
+  { token: "typeParameter", foreground: "659488" }, // #659488
+  { token: "parameter", foreground: "BDBEC4" }, // #BDBEC4
+  { token: "variable", foreground: "BDBEC4" }, // #BDBEC4
+  { token: "variable.readonly.local", foreground: "BDBEC4" }, // #BDBEC4
+  { token: "variable.readonly", foreground: "a6859e" }, // #a6859e
+  { token: "delimiter.html", foreground: "93B196" }, // #93B196
 ];
 
 /**
@@ -81,20 +61,6 @@ export function registerMonacoThemes(): void {
   document.documentElement.appendChild(darkEl);
   const dark = readThemeColors(darkEl);
   darkEl.remove();
-
-  monaco.editor.defineTheme("loxel-light", {
-    base: "vs",
-    inherit: true,
-    rules: [],
-    colors: {
-      "editor.background": light.editorBg,
-      "editor.foreground": light.editorFg,
-      "editorLineNumber.foreground": light.lineNumber,
-      "editorLineNumber.activeForeground": light.lineNumberActive,
-      "editor.lineHighlightBackground": light.editorBg,
-      "editorGutter.background": light.editorBg,
-    },
-  });
 
   monaco.editor.defineTheme("loxel-dark", {
     base: "vs-dark",
@@ -148,27 +114,10 @@ export function enhanceMonacoThemes(highlighter: Highlighter): void {
       "editorGutter.background": dark.editorBg,
     },
   });
-
-  const lightBase = textmateThemeToMonacoTheme(
-    highlighter.getTheme("loxel-light"),
-  ) as monaco.editor.IStandaloneThemeData;
-  monaco.editor.defineTheme("loxel-light", {
-    ...lightBase,
-    rules: [...lightBase.rules, ...LIGHT_SEMANTIC_RULES],
-    colors: {
-      ...lightBase.colors,
-      "editor.background": light.editorBg,
-      "editor.foreground": light.editorFg,
-      "editorLineNumber.foreground": light.lineNumber,
-      "editorLineNumber.activeForeground": light.lineNumberActive,
-      "editor.lineHighlightBackground": light.editorBg,
-      "editorGutter.background": light.editorBg,
-    },
-  });
 }
 
 export function getMonacoThemeName(darkMode: boolean): string {
-  return darkMode ? "loxel-dark" : "loxel-light";
+  return "loxel-dark";
 }
 
 /** Map from Shiki/highlighter language IDs that differ in Monaco */

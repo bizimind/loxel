@@ -1,6 +1,6 @@
 import { createHighlighter, type Highlighter } from "shiki";
 
-import { loxelDark, loxelLight } from "./loxel-themes";
+import { loxelDark } from "./loxel-themes";
 
 // Singleton highlighter instance
 let highlighterPromise: Promise<Highlighter> | null = null;
@@ -50,7 +50,7 @@ const BUNDLED_LANGUAGES = [
 export async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
-      themes: [loxelDark, loxelLight, "github-dark", "github-light"],
+      themes: [loxelDark, "github-dark"],
       langs: [...BUNDLED_LANGUAGES],
     });
   }

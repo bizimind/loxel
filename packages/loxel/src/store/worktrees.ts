@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import { createJSONStorage, persist, subscribeWithSelector } from "zustand/middleware";
 
 import type { AddWorktreePlan, RemoveWorktreePlan } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
@@ -14,6 +14,8 @@ import { deriveProject, useProjectStore } from "./projects";
 import { serverWorktreesStorage } from "./server-storage";
 import { purgeWorktreeCache, transitionWorktreeState } from "./worktree-cache";
 import { purgeWorktreeStores, setActiveWorktreeKey } from "./worktree-store";
+
+const ACTIVE_WT_SESSION_KEY = `${STORAGE_PREFIX}-activeWorktreePath`;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -126,248 +128,279 @@ function patchProject(
 }
 
 export const useWorktreeStore = create<WorktreeState>()(
-  persist(
-    (set, get) => ({
-      byProject: {},
-      activeWorktreePath: null,
-      pendingAddPlan: null,
-      pendingRemovePlan: null,
-      createWorktreeRequested: false,
+  subscribeWithSelector(
+    persist(
+      (set, get) => ({
+        byProject: {},
+        activeWorktreePath: sessionStorage.getItem(ACTIVE_WT_SESSION_KEY),
+        pendingAddPlan: null,
+        pendingRemovePlan: null,
+        createWorktreeRequested: false,
 
-      applyEnrichedProjects: (enriched) => {
-        // Derive the active project to initialize activeWorktreePath for non-bare repos
-        const currentWtPath = get().activeWorktreePath;
-        const allProjects = useProjectStore.getState().projects;
-        const project = deriveProject(currentWtPath, allProjects);
-        const isBare = project?.isBare ?? false;
-        const projectPath = project?.path ?? null;
+        applyEnrichedProjects: (enriched) => {
+          // Derive the active project to initialize activeWorktreePath for non-bare repos
+          const currentWtPath = get().activeWorktreePath;
+          const allProjects = useProjectStore.getState().projects;
+          const project = deriveProject(currentWtPath, allProjects);
+          const isBare = project?.isBare ?? false;
+          const projectPath = project?.path ?? null;
 
-        // Non-bare repos don't have worktree lists; activeWorktreePath = project root
-        const activeWorktreePath =
-          !isBare && !currentWtPath && projectPath ? projectPath : currentWtPath;
+          // Non-bare repos don't have worktree lists; activeWorktreePath = project root
+          const activeWorktreePath =
+            !isBare && !currentWtPath && projectPath ? projectPath : currentWtPath;
 
-        set((s) => {
-          const byProject: Record<string, ProjectState> = { ...s.byProject };
+          set((s) => {
+            const byProject: Record<string, ProjectState> = { ...s.byProject };
 
-          for (const p of enriched) {
-            const existing = byProject[p.path];
-            const validPaths = new Set(p.worktrees.map((wt) => wt.path));
-            byProject[p.path] = {
-              worktrees: p.worktrees.length > 0 ? p.worktrees : (existing?.worktrees ?? []),
-              hasWtConfig: p.hasWtConfig,
-              wtCliAvailable: p.wtCliAvailable,
-              worktreesDir: p.worktreesDir,
-              // Prune stale entries from persisted lists
-              customOrder: existing?.customOrder?.filter((x) => validPaths.has(x)),
-              hiddenPaths: existing?.hiddenPaths?.filter((x) => validPaths.has(x)),
-            };
-          }
-
-          return { byProject, activeWorktreePath };
-        });
-
-        // Initialize the worktree key on first load so worktree stores resolve correctly
-        // before any switchWorktree call. This is a no-op if activeWorktreePath didn't change.
-        if (activeWorktreePath) setActiveWorktreeKey(activeWorktreePath);
-      },
-
-      refreshProjectWorktrees: async (projectPath) => {
-        const allProjects = useProjectStore.getState().projects;
-        const project = allProjects.find((p) => p.path === projectPath);
-        if (!project) return;
-
-        const data = await api.getProjectWorktrees(project.id);
-        const validPaths = new Set(data.worktrees.map((wt) => wt.path));
-
-        set((s) => {
-          const existing = getProject(s, projectPath);
-          return {
-            byProject: patchProject(s, projectPath, {
-              worktrees: data.worktrees,
-              customOrder: existing.customOrder?.filter((x) => validPaths.has(x)),
-              hiddenPaths: existing.hiddenPaths?.filter((x) => validPaths.has(x)),
-            }),
-          };
-        });
-      },
-
-      switchWorktree: async (path) => {
-        // 1. Set activeWorktreePath OPTIMISTICALLY (before API calls)
-        set({ activeWorktreePath: path });
-
-        // 2. Transition worktree state (sets activeWorktreeKey, clears comments)
-        transitionWorktreeState(null, path);
-
-        // 4. No server API call needed — server supports concurrent projects.
-        // WebSocket subscription is handled by the subscription lifecycle in App.tsx.
-      },
-
-      createWorktree: async (projectPath, name, options) => {
-        const hasWtConfig = getProject(get(), projectPath).hasWtConfig ?? false;
-
-        if (hasWtConfig) {
-          const plan = await api.planAddWorktree(projectPath, name);
-
-          if (plan.branchConflict) {
-            if (plan.branchConflict.kind === "used-by-worktree") {
-              throw new Error(
-                `A worktree already exists for branch '${name}' at: ${plan.branchConflict.worktreePath}`,
-              );
+            for (const p of enriched) {
+              const existing = byProject[p.path];
+              const validPaths = new Set(p.worktrees.map((wt) => wt.path));
+              byProject[p.path] = {
+                worktrees: p.worktrees.length > 0 ? p.worktrees : (existing?.worktrees ?? []),
+                hasWtConfig: p.hasWtConfig,
+                wtCliAvailable: p.wtCliAvailable,
+                worktreesDir: p.worktreesDir,
+                // Prune stale entries from persisted lists
+                customOrder: existing?.customOrder?.filter((x) => validPaths.has(x)),
+                hiddenPaths: existing?.hiddenPaths?.filter((x) => validPaths.has(x)),
+              };
             }
-            set({ pendingAddPlan: { ...plan, projectPath } });
-            return;
+
+            return { byProject, activeWorktreePath };
+          });
+
+          // Validate: if the hydrated activeWorktreePath no longer exists, fall back
+          const finalPath = get().activeWorktreePath;
+          if (finalPath) {
+            const allPaths = new Set([
+              ...enriched.map((p) => p.path),
+              ...enriched.flatMap((p) => p.worktrees.map((wt) => wt.path)),
+            ]);
+            if (!allPaths.has(finalPath)) {
+              const first = enriched[0];
+              const fallback = first
+                ? first.isBare
+                  ? (first.worktrees[0]?.path ?? null)
+                  : first.path
+                : null;
+              set({ activeWorktreePath: fallback });
+              if (fallback) setActiveWorktreeKey(fallback);
+              return;
+            }
           }
 
-          addOptimisticEntry(set, projectPath, plan.worktreePath, name, true);
+          if (activeWorktreePath) setActiveWorktreeKey(activeWorktreePath);
+        },
+
+        refreshProjectWorktrees: async (projectPath) => {
+          const allProjects = useProjectStore.getState().projects;
+          const project = allProjects.find((p) => p.path === projectPath);
+          if (!project) return;
+
+          const data = await api.getProjectWorktrees(project.id);
+          const validPaths = new Set(data.worktrees.map((wt) => wt.path));
+
+          set((s) => {
+            const existing = getProject(s, projectPath);
+            return {
+              byProject: patchProject(s, projectPath, {
+                worktrees: data.worktrees,
+                customOrder: existing.customOrder?.filter((x) => validPaths.has(x)),
+                hiddenPaths: existing.hiddenPaths?.filter((x) => validPaths.has(x)),
+              }),
+            };
+          });
+        },
+
+        switchWorktree: async (path) => {
+          // 1. Set activeWorktreePath OPTIMISTICALLY (before API calls)
+          set({ activeWorktreePath: path });
+
+          // 2. Transition worktree state (sets activeWorktreeKey, clears comments)
+          transitionWorktreeState(null, path);
+
+          // 4. No server API call needed — server supports concurrent projects.
+          // WebSocket subscription is handled by the subscription lifecycle in App.tsx.
+        },
+
+        createWorktree: async (projectPath, name, options) => {
+          const hasWtConfig = getProject(get(), projectPath).hasWtConfig ?? false;
+
+          if (hasWtConfig) {
+            const plan = await api.planAddWorktree(projectPath, name);
+
+            if (plan.branchConflict) {
+              if (plan.branchConflict.kind === "used-by-worktree") {
+                throw new Error(
+                  `A worktree already exists for branch '${name}' at: ${plan.branchConflict.worktreePath}`,
+                );
+              }
+              set({ pendingAddPlan: { ...plan, projectPath } });
+              return;
+            }
+
+            addOptimisticEntry(set, projectPath, plan.worktreePath, name, true);
+
+            try {
+              await api.createWorktree(projectPath, name, { branch: options?.branch });
+            } catch (err) {
+              removeOptimisticEntry(set, projectPath, plan.worktreePath);
+              throw err;
+            }
+          } else {
+            await api.createWorktree(projectPath, name, { branch: options?.branch });
+          }
+
+          await get().refreshProjectWorktrees(projectPath);
+        },
+
+        confirmCreateWorktree: async (branchResolution) => {
+          const { pendingAddPlan } = get();
+          if (!pendingAddPlan) return;
+
+          const { name, worktreePath, projectPath } = pendingAddPlan;
+          const hasWtConfig = getProject(get(), projectPath).hasWtConfig ?? false;
+          set({ pendingAddPlan: null });
+
+          addOptimisticEntry(set, projectPath, worktreePath, name, hasWtConfig);
 
           try {
-            await api.createWorktree(projectPath, name, { branch: options?.branch });
+            await api.createWorktree(projectPath, name, { branchResolution });
           } catch (err) {
-            removeOptimisticEntry(set, projectPath, plan.worktreePath);
+            removeOptimisticEntry(set, projectPath, worktreePath);
             throw err;
           }
-        } else {
-          await api.createWorktree(projectPath, name, { branch: options?.branch });
-        }
 
-        await get().refreshProjectWorktrees(projectPath);
-      },
+          await get().refreshProjectWorktrees(projectPath);
+        },
 
-      confirmCreateWorktree: async (branchResolution) => {
-        const { pendingAddPlan } = get();
-        if (!pendingAddPlan) return;
+        requestRemoveWorktree: async (projectPath, wt) => {
+          const hasWtConfig = getProject(get(), projectPath).hasWtConfig ?? false;
 
-        const { name, worktreePath, projectPath } = pendingAddPlan;
-        const hasWtConfig = getProject(get(), projectPath).hasWtConfig ?? false;
-        set({ pendingAddPlan: null });
+          if (hasWtConfig) {
+            const plan = await api.planRemoveWorktree(projectPath, wt.path);
+            set({ pendingRemovePlan: { ...plan, wtPath: wt.path, projectPath } });
+          } else {
+            optimisticRemove(set, projectPath, wt.path);
+            try {
+              await api.removeWorktreeByPath(projectPath, wt.path);
+            } catch (err) {
+              await get().refreshProjectWorktrees(projectPath);
+              throw err;
+            }
+            purgeWorktreeStores(wt.path);
+            purgeWorktreeCache(wt.path);
+            wsClient.unsubscribeWorktree(wt.path);
+            await get().refreshProjectWorktrees(projectPath);
+          }
+        },
 
-        addOptimisticEntry(set, projectPath, worktreePath, name, hasWtConfig);
+        confirmRemoveWorktree: async ({ deleteBranch, force }) => {
+          const { pendingRemovePlan } = get();
+          if (!pendingRemovePlan) return;
 
-        try {
-          await api.createWorktree(projectPath, name, { branchResolution });
-        } catch (err) {
-          removeOptimisticEntry(set, projectPath, worktreePath);
-          throw err;
-        }
+          const { wtPath, worktreePath, projectPath } = pendingRemovePlan;
+          set({ pendingRemovePlan: null });
 
-        await get().refreshProjectWorktrees(projectPath);
-      },
+          optimisticRemove(set, projectPath, worktreePath);
 
-      requestRemoveWorktree: async (projectPath, wt) => {
-        const hasWtConfig = getProject(get(), projectPath).hasWtConfig ?? false;
-
-        if (hasWtConfig) {
-          const plan = await api.planRemoveWorktree(projectPath, wt.path);
-          set({ pendingRemovePlan: { ...plan, wtPath: wt.path, projectPath } });
-        } else {
-          optimisticRemove(set, projectPath, wt.path);
           try {
-            await api.removeWorktreeByPath(projectPath, wt.path);
+            await api.removeWorktreeByWtPath(projectPath, wtPath, { deleteBranch, force });
           } catch (err) {
             await get().refreshProjectWorktrees(projectPath);
             throw err;
           }
-          purgeWorktreeStores(wt.path);
-          purgeWorktreeCache(wt.path);
-          wsClient.unsubscribeWorktree(wt.path);
+
+          purgeWorktreeStores(worktreePath);
+          purgeWorktreeCache(worktreePath);
+          wsClient.unsubscribeWorktree(worktreePath);
           await get().refreshProjectWorktrees(projectPath);
-        }
-      },
+        },
 
-      confirmRemoveWorktree: async ({ deleteBranch, force }) => {
-        const { pendingRemovePlan } = get();
-        if (!pendingRemovePlan) return;
+        dismissPendingPlan: () => {
+          set({ pendingAddPlan: null, pendingRemovePlan: null });
+        },
 
-        const { wtPath, worktreePath, projectPath } = pendingRemovePlan;
-        set({ pendingRemovePlan: null });
+        requestCreateWorktree: () => {
+          set({ createWorktreeRequested: true });
+        },
 
-        optimisticRemove(set, projectPath, worktreePath);
+        clearCreateWorktreeRequest: () => {
+          set({ createWorktreeRequested: false });
+        },
 
-        try {
-          await api.removeWorktreeByWtPath(projectPath, wtPath, { deleteBranch, force });
-        } catch (err) {
-          await get().refreshProjectWorktrees(projectPath);
-          throw err;
-        }
+        setCustomOrder: (projectPath, orderedPaths) => {
+          set((s) => ({ byProject: patchProject(s, projectPath, { customOrder: orderedPaths }) }));
+        },
 
-        purgeWorktreeStores(worktreePath);
-        purgeWorktreeCache(worktreePath);
-        wsClient.unsubscribeWorktree(worktreePath);
-        await get().refreshProjectWorktrees(projectPath);
-      },
+        toggleVisibility: (projectPath, wtPath) => {
+          set((s) => {
+            const current = getProject(s, projectPath).hiddenPaths ?? [];
+            return {
+              byProject: patchProject(s, projectPath, {
+                hiddenPaths: [...toggleSet(new Set(current), wtPath)],
+              }),
+            };
+          });
+        },
 
-      dismissPendingPlan: () => {
-        set({ pendingAddPlan: null, pendingRemovePlan: null });
-      },
+        reset: () => {
+          set({
+            byProject: {},
+            activeWorktreePath: null,
+            pendingAddPlan: null,
+            pendingRemovePlan: null,
+            createWorktreeRequested: false,
+          });
+        },
+      }),
+      {
+        name: `${STORAGE_PREFIX}-worktrees`,
+        storage: createJSONStorage(() => serverWorktreesStorage),
+        partialize: (state) => {
+          // Only persist customOrder and hiddenPaths per project
+          const persisted: Record<string, { customOrder?: string[]; hiddenPaths?: string[] }> = {};
+          for (const [path, ps] of Object.entries(state.byProject)) {
+            if (ps.customOrder || ps.hiddenPaths) {
+              persisted[path] = {
+                ...(ps.customOrder ? { customOrder: ps.customOrder } : {}),
+                ...(ps.hiddenPaths ? { hiddenPaths: ps.hiddenPaths } : {}),
+              };
+            }
+          }
+          return { byProject: persisted };
+        },
+        merge: (persisted, current) => {
+          const p = persisted as { byProject?: Record<string, Partial<ProjectState>> };
+          if (!p.byProject || typeof p.byProject !== "object") return current;
 
-      requestCreateWorktree: () => {
-        set({ createWorktreeRequested: true });
-      },
-
-      clearCreateWorktreeRequest: () => {
-        set({ createWorktreeRequested: false });
-      },
-
-      setCustomOrder: (projectPath, orderedPaths) => {
-        set((s) => ({ byProject: patchProject(s, projectPath, { customOrder: orderedPaths }) }));
-      },
-
-      toggleVisibility: (projectPath, wtPath) => {
-        set((s) => {
-          const current = getProject(s, projectPath).hiddenPaths ?? [];
-          return {
-            byProject: patchProject(s, projectPath, {
-              hiddenPaths: [...toggleSet(new Set(current), wtPath)],
-            }),
-          };
-        });
-      },
-
-      reset: () => {
-        set({
-          byProject: {},
-          activeWorktreePath: null,
-          pendingAddPlan: null,
-          pendingRemovePlan: null,
-          createWorktreeRequested: false,
-        });
-      },
-    }),
-    {
-      name: `${STORAGE_PREFIX}-worktrees`,
-      storage: createJSONStorage(() => serverWorktreesStorage),
-      partialize: (state) => {
-        // Only persist customOrder and hiddenPaths per project
-        const persisted: Record<string, { customOrder?: string[]; hiddenPaths?: string[] }> = {};
-        for (const [path, ps] of Object.entries(state.byProject)) {
-          if (ps.customOrder || ps.hiddenPaths) {
-            persisted[path] = {
-              ...(ps.customOrder ? { customOrder: ps.customOrder } : {}),
-              ...(ps.hiddenPaths ? { hiddenPaths: ps.hiddenPaths } : {}),
+          // Merge persisted customOrder/hiddenPaths into current state
+          const byProject = { ...current.byProject };
+          for (const [path, saved] of Object.entries(p.byProject)) {
+            if (!saved || typeof saved !== "object") continue;
+            const existing = byProject[path] ?? { worktrees: [] };
+            byProject[path] = {
+              ...existing,
+              ...(Array.isArray(saved.customOrder) ? { customOrder: saved.customOrder } : {}),
+              ...(Array.isArray(saved.hiddenPaths) ? { hiddenPaths: saved.hiddenPaths } : {}),
             };
           }
-        }
-        return { byProject: persisted };
+          return { ...current, byProject };
+        },
       },
-      merge: (persisted, current) => {
-        const p = persisted as { byProject?: Record<string, Partial<ProjectState>> };
-        if (!p.byProject || typeof p.byProject !== "object") return current;
-
-        // Merge persisted customOrder/hiddenPaths into current state
-        const byProject = { ...current.byProject };
-        for (const [path, saved] of Object.entries(p.byProject)) {
-          if (!saved || typeof saved !== "object") continue;
-          const existing = byProject[path] ?? { worktrees: [] };
-          byProject[path] = {
-            ...existing,
-            ...(Array.isArray(saved.customOrder) ? { customOrder: saved.customOrder } : {}),
-            ...(Array.isArray(saved.hiddenPaths) ? { hiddenPaths: saved.hiddenPaths } : {}),
-          };
-        }
-        return { ...current, byProject };
-      },
-    },
+    ),
   ),
+);
+
+useWorktreeStore.subscribe(
+  (s) => s.activeWorktreePath,
+  (path) => {
+    if (path) {
+      sessionStorage.setItem(ACTIVE_WT_SESSION_KEY, path);
+    } else {
+      sessionStorage.removeItem(ACTIVE_WT_SESSION_KEY);
+    }
+  },
 );
 
 // ── Optimistic update helpers ──────────────────────────────────────────

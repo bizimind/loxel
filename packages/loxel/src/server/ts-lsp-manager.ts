@@ -234,7 +234,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
       if (p.textDocument?.uri && typeof p.textDocument.text === "string") {
         session.tsDocuments.set(p.textDocument.uri, { content: p.textDocument.text, version: 0 });
       }
-      // Monaco reports `typescript`/`javascript` for .tsx/.jsx files, but LSP
+      // Monaco reports `tsx`/`jsx` for .tsx/.jsx files, but LSP
       // needs `typescriptreact`/`javascriptreact` for tsgo to enable JSX mode.
       if (p.textDocument?.uri) {
         const uri = p.textDocument.uri;

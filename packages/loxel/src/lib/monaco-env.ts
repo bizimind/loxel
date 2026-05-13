@@ -115,8 +115,8 @@ monaco.languages.setLanguageConfiguration("astro", {
 
 // Bridge Shiki's TextMate grammars into Monaco for VS Code-quality highlighting.
 // This replaces Monarch tokenizers for all Shiki-bundled languages (TS, JS, HTML,
-// CSS, Astro, Terraform, etc.) with TextMate-based tokenizers. loxel-dark and
-// loxel-light are loaded as Shiki themes so shikiToMonaco recognizes them natively.
+// CSS, Astro, Terraform, etc.) with TextMate-based tokenizers. loxel-dark is
+// loaded as Shiki themes so shikiToMonaco recognizes them natively.
 void getHighlighter().then((highlighter) => {
   shikiToMonaco(highlighter, monaco);
   enhanceMonacoThemes(highlighter);
