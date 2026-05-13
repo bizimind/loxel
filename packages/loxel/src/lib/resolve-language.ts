@@ -23,3 +23,18 @@ export function resolveLanguage(filePath: string, associations: FileAssociation[
 
   return detectLanguage(filePath);
 }
+
+const XML_PROLOG = /^\s*<\?xml\s/;
+const XML_ROOT = /^\s*<[a-zA-Z]/;
+
+/**
+ * Sniff file content to detect XML when extension-based detection returns
+ * null or plaintext. Only checks the first 200 chars for performance.
+ */
+export function sniffLanguageFromContent(content: string): string | null {
+  const head = content.slice(0, 200);
+  if (XML_PROLOG.test(head) || (XML_ROOT.test(head) && head.includes("</"))) {
+    return "xml";
+  }
+  return null;
+}
