@@ -237,3 +237,21 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Run typecheck
         run: bun run --cwd ${{ matrix.package.path }} typecheck
+
+  ci:
+    name: ci
+    if: always()
+    needs: [lint, test, build, typecheck]
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    steps:
+      - name: Verify CI results
+        run: |
+          results='${{ toJson(needs) }}'
+          echo "$results"
+          if echo "$results" | jq -e '
+            to_entries
+            | any(.value.result == "failure" or .value.result == "cancelled")
+          '; then
+            echo "One or more CI jobs failed or were cancelled"
+            exit 1
+          fi
