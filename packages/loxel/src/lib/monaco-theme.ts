@@ -54,8 +54,6 @@ const DARK_SEMANTIC_RULES: monaco.editor.ITokenThemeRule[] = [
  * that include full TextMate scope rules + CSS variable editor chrome colors.
  */
 export function registerMonacoThemes(): void {
-  const light = readThemeColors(document.documentElement);
-
   const darkEl = document.createElement("div");
   darkEl.className = "dark";
   document.documentElement.appendChild(darkEl);
@@ -90,8 +88,6 @@ export function registerMonacoThemes(): void {
  * `shikiToMonaco` registers its tokenizer-internal theme data.
  */
 export function enhanceMonacoThemes(highlighter: Highlighter): void {
-  const light = readThemeColors(document.documentElement);
-
   const darkEl = document.createElement("div");
   darkEl.className = "dark";
   document.documentElement.appendChild(darkEl);
@@ -116,7 +112,7 @@ export function enhanceMonacoThemes(highlighter: Highlighter): void {
   });
 }
 
-export function getMonacoThemeName(darkMode: boolean): string {
+export function getMonacoThemeName(_darkMode: boolean): string {
   return "loxel-dark";
 }
 
