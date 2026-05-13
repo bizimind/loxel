@@ -12,13 +12,10 @@
 
 import path from "node:path";
 
+import { resolvePackage } from "./resolve-package";
+
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build");
-
-function resolvePackage(name: string): string {
-  const pkgJson = require.resolve(`${name}/package.json`);
-  return path.dirname(pkgJson);
-}
 
 const astroLsDir = resolvePackage("@astrojs/language-server");
 const entrypoint = path.join(astroLsDir, "dist/nodeServer.js");
