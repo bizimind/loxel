@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { TsgoDiagnostic } from "@/api/diagnostics-model";
 
 import * as api from "@/api/client";
+import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { type MergeCallbacks, useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
@@ -17,6 +18,7 @@ import { removeDollarSchema, setDollarSchema } from "@/lib/json-schema-registry"
 import { validateStrictJson } from "@/lib/json-strict-validator";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
 import { resolveLanguage } from "@/lib/resolve-language";
+import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
 import { queryKeys } from "@/queries/query-keys";
 import { useEditorStateStore } from "@/store/editor-state";
 import {
@@ -29,6 +31,85 @@ import { useUIStore } from "@/store/ui";
 type IStandaloneCodeEditor = monacoEditor.IStandaloneCodeEditor;
 
 const identity = (s: string) => s;
+
+function normalizeHex(color: string): string {
+  const c = color.toLowerCase().replace(/^#/, "");
+  if (c.length === 8 && c.endsWith("ff")) return c.slice(0, 6);
+  return c;
+}
+
+// Monaco internals for reading the resolved token color (including semantic overrides).
+// Lazy-loaded because these are internal ESM modules without type declarations.
+let monacoTokenInternals: {
+  TokenizationRegistry: {
+    get(id: string): TokenSupport | null;
+    getColorMap(): MonacoColor[] | null;
+  };
+  TokenMetadata: { getForeground(metadata: number): number };
+} | null = null;
+
+interface TokenSupport {
+  getInitialState(): unknown;
+  tokenize(line: string, hasEOL: boolean, state: unknown): { endState: unknown };
+  tokenizeEncoded(line: string, hasEOL: boolean, state: unknown): { tokens: Uint32Array };
+}
+
+interface MonacoColor {
+  toString(): string;
+}
+
+void loadMonacoTokenInternals();
+
+async function loadMonacoTokenInternals(): Promise<NonNullable<typeof monacoTokenInternals>> {
+  const [languages, attrs] = await Promise.all([
+    import("monaco-editor/esm/vs/editor/common/languages.js" as string),
+    import("monaco-editor/esm/vs/editor/common/encodedTokenAttributes.js" as string),
+  ]);
+  const result = {
+    TokenizationRegistry: languages.TokenizationRegistry,
+    TokenMetadata: attrs.TokenMetadata,
+  };
+  monacoTokenInternals = result;
+  return result;
+}
+
+function getResolvedMonacoColor(
+  editor: monacoEditor.IStandaloneCodeEditor,
+  pos: monaco.IPosition,
+): string | null {
+  if (!monacoTokenInternals) return null;
+  const internals = monacoTokenInternals;
+
+  const model = editor.getModel();
+  if (!model) return null;
+
+  const tokenSupport = internals.TokenizationRegistry.get(model.getLanguageId());
+  if (!tokenSupport) return null;
+
+  let state = tokenSupport.getInitialState();
+  for (let i = 1; i < pos.lineNumber; i++) {
+    const result = tokenSupport.tokenize(model.getLineContent(i), true, state);
+    state = result.endState;
+  }
+
+  const encoded = tokenSupport.tokenizeEncoded(model.getLineContent(pos.lineNumber), true, state);
+  const tokens2 = encoded.tokens;
+
+  let tokenIndex = 0;
+  for (let i = tokens2.length / 2 - 1; i >= 0; i--) {
+    if (pos.column - 1 >= tokens2[i * 2]!) {
+      tokenIndex = i;
+      break;
+    }
+  }
+
+  const metadata = tokens2[tokenIndex * 2 + 1]!;
+  const fgIndex = internals.TokenMetadata.getForeground(metadata);
+  const colorMap = internals.TokenizationRegistry.getColorMap();
+  if (!colorMap?.[fgIndex]) return null;
+
+  return colorMap[fgIndex].toString();
+}
 
 /** Extract $schema URL from the first few lines of a JSON file. */
 const DOLLAR_SCHEMA_RE = /"\$schema"\s*:\s*"([^"]+)"/;
@@ -60,6 +141,9 @@ export function CodeEditorPanel({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
+  const inspectorWidgetRef = useRef<TextMateScopeInspector | null>(null);
+  const inspectorOpenRef = useRef(false);
+
   usePanelActivationFocus(
     panelApi,
     useCallback(() => editorRef.current?.focus(), []),
@@ -86,6 +170,8 @@ export function CodeEditorPanel({
   }
 
   const darkMode = useUIStore((s) => s.darkMode);
+  const darkModeRef = useRef(darkMode);
+  darkModeRef.current = darkMode;
   const editorSettings = useSettingsStore((s) => s.editor);
 
   // Merge callbacks for 3-way auto-merge. Refs are populated in the mount effect.
@@ -133,6 +219,8 @@ export function CodeEditorPanel({
     () => resolveLanguage(filePath, fileAssociations),
     [filePath, fileAssociations],
   );
+  const resolvedLangRef = useRef(resolvedLang);
+  resolvedLangRef.current = resolvedLang;
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
 
   // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one)
@@ -167,7 +255,8 @@ export function CodeEditorPanel({
       language === "json" ||
       language === "dockerfile" ||
       language === "dockerbake" ||
-      language === "terraform";
+      language === "terraform" ||
+      language === "astro";
     const uri = useFileScheme
       ? monaco.Uri.from({ scheme: "file", path: filePath })
       : monaco.Uri.from({ scheme: "loxel", authority: "HEAD", path: filePath });
@@ -225,13 +314,78 @@ export function CodeEditorPanel({
 
     editorRef.current = editor;
 
-    // Dev helper: Ctrl+Shift+I triggers Monaco's built-in token inspector.
+    // TextMate scope inspector — shows real TextMate scope stack instead of
+    // the lossy reverse-mapped scopes from shikiToMonaco.
+    let inspectTimer: ReturnType<typeof setTimeout> | undefined;
+
+    function runInspection(): void {
+      const widget = inspectorWidgetRef.current;
+      if (!widget) return;
+      const model = editor.getModel();
+      const pos = editor.getPosition();
+      if (!model || !pos) return;
+
+      widget.setEditorPosition(pos);
+
+      const lineText = model.getLineContent(pos.lineNumber);
+      const lang = resolvedLangRef.current;
+      if (!lang) {
+        widget.update(null, "No language detected");
+        editor.layoutContentWidget(widget);
+        return;
+      }
+      const themeName = "loxel-dark";
+      inspectTokenAtPosition(lineText, pos.column, lang, themeName)
+        .then((data) => {
+          if (data) {
+            const resolvedColor = getResolvedMonacoColor(editor, pos);
+            if (
+              resolvedColor &&
+              data.foregroundColor &&
+              normalizeHex(resolvedColor) !== normalizeHex(data.foregroundColor)
+            ) {
+              data.semanticOverride = { foregroundColor: resolvedColor };
+            }
+          }
+          widget.update(data);
+          editor.layoutContentWidget(widget);
+        })
+        .catch(() => {
+          widget.update(null);
+          editor.layoutContentWidget(widget);
+        });
+    }
+
+    const cursorDisposable = editor.onDidChangeCursorPosition(() => {
+      if (!inspectorOpenRef.current) return;
+      clearTimeout(inspectTimer);
+      inspectTimer = setTimeout(runInspection, 100);
+    });
+
     editor.addAction({
-      id: "inspect-tokens",
-      label: "Developer: Inspect Tokens",
+      id: "inspect-textmate-scopes",
+      label: "Developer: Inspect TextMate Scopes",
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyI],
-      run: (ed) => {
-        ed.trigger("keyboard", "editor.action.inspectTokens", null);
+      run: () => {
+        if (inspectorOpenRef.current) {
+          inspectorOpenRef.current = false;
+          if (inspectorWidgetRef.current) {
+            editor.removeContentWidget(inspectorWidgetRef.current);
+            inspectorWidgetRef.current.dispose();
+            inspectorWidgetRef.current = null;
+          }
+        } else {
+          inspectorOpenRef.current = true;
+          const widget = new TextMateScopeInspector(() => {
+            inspectorOpenRef.current = false;
+            editor.removeContentWidget(widget);
+            widget.dispose();
+            inspectorWidgetRef.current = null;
+          });
+          inspectorWidgetRef.current = widget;
+          editor.addContentWidget(widget);
+          runInspection();
+        }
       },
     });
 
@@ -315,6 +469,14 @@ export function CodeEditorPanel({
     return () => {
       if (navRafId !== undefined) cancelAnimationFrame(navRafId);
       clearTimeout(dollarSchemaTimer);
+      clearTimeout(inspectTimer);
+      cursorDisposable.dispose();
+      if (inspectorWidgetRef.current) {
+        editor.removeContentWidget(inspectorWidgetRef.current);
+        inspectorWidgetRef.current.dispose();
+        inspectorWidgetRef.current = null;
+      }
+      inspectorOpenRef.current = false;
       if (isJsonFile) removeDollarSchema(fileUriStr);
       getSerializedContentRef.current = null;
       mergeGetRef.current = null;

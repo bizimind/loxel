@@ -406,6 +406,11 @@ export function toMonacoLocation(
   const translatedRange = client.bridge.translateBackRange({ uri: location.uri }, location.range);
   return { uri: translatedRange.textModel.uri, range: translatedRange.range };
 }
+// Monaco registers tsx/jsx as separate language IDs from typescript/javascript,
+// but LSP servers return document selectors with only typescript/javascript.
+// Expand selectors so providers also match tsx/jsx models.
+const LANGUAGE_ALIASES: Record<string, string> = { typescript: "tsx", javascript: "jsx" };
+
 export function toMonacoLanguageSelector(
   s: DocumentSelector | null,
   defaultLanguageId?: string,
@@ -413,7 +418,7 @@ export function toMonacoLanguageSelector(
   if (!s || s.length === 0) {
     return { language: defaultLanguageId ?? "*" };
   }
-  return s.map<monaco.languages.LanguageFilter>((s) => {
+  return s.flatMap<monaco.languages.LanguageFilter>((s) => {
     if ("notebook" in s) {
       if (typeof s.notebook === "string") {
         return { notebookType: s.notebook, language: s.language };
@@ -427,7 +432,14 @@ export function toMonacoLanguageSelector(
       };
     }
 
-    return { language: s.language, pattern: s.pattern, scheme: s.scheme };
+    const filter: monaco.languages.LanguageFilter = {
+      language: s.language,
+      pattern: s.pattern,
+      scheme: s.scheme,
+    };
+    const alias = s.language ? LANGUAGE_ALIASES[s.language] : undefined;
+    if (alias) return [filter, { ...filter, language: alias }];
+    return [filter];
   });
 }
 export function matchesDocumentSelector(

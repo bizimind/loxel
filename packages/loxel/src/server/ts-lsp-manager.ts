@@ -12,6 +12,8 @@ import { selectTsLspBackend } from "./ts-lsp-backend";
 
 const backend = selectTsLspBackend();
 
+const TS_EXTENSIONS = /\.(ts|tsx|js|jsx|mts|mjs|cts|cjs|json|jsonc)$/i;
+
 interface PendingRequest {
   method: string;
   /** loxel:// textDocument URI (if scoped to a document). */
@@ -107,6 +109,8 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
         const msg = parsed as { id?: number | string; method?: string; params?: unknown };
 
         if (msg.method !== undefined) {
+          if (this.shouldDropForNonTsUri(msg.method, msg.params)) return;
+
           const mutated = this.trackDocumentLifecycle(session, msg.method, msg.params);
 
           if (msg.id !== undefined) {
@@ -230,7 +234,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
       if (p.textDocument?.uri && typeof p.textDocument.text === "string") {
         session.tsDocuments.set(p.textDocument.uri, { content: p.textDocument.text, version: 0 });
       }
-      // Monaco reports `typescript`/`javascript` for .tsx/.jsx files, but LSP
+      // Monaco reports `tsx`/`jsx` for .tsx/.jsx files, but LSP
       // needs `typescriptreact`/`javascriptreact` for tsgo to enable JSX mode.
       if (p.textDocument?.uri) {
         const uri = p.textDocument.uri;
@@ -267,6 +271,18 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
       if (p.textDocument?.uri) session.tsDocuments.delete(p.textDocument.uri);
     }
     return mutated;
+  }
+
+  /**
+   * Drop textDocument/* notifications/requests whose URI targets a file tsgo
+   * doesn't understand (e.g. `.astro`, `.vue`). The TS LSP client has no
+   * languageId filter, so Monaco sends every open model to us.
+   */
+  private shouldDropForNonTsUri(method: string, params: unknown): boolean {
+    if (!method.startsWith("textDocument/")) return false;
+    const uri = (params as { textDocument?: { uri?: string } } | null)?.textDocument?.uri;
+    if (!uri) return false;
+    return !TS_EXTENSIONS.test(uri);
   }
 
   /**

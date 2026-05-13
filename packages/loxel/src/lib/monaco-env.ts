@@ -1,3 +1,4 @@
+import { shikiToMonaco } from "@shikijs/monaco";
 import * as monaco from "monaco-editor";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
@@ -6,9 +7,11 @@ import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 
 import { useWorktreeStore } from "@/store/worktrees";
 
+import { connectAstroLsp, disconnectAstroLsp } from "./astro-lsp-client";
 import { connectDockerLsp, disconnectDockerLsp } from "./docker-lsp-client";
-import { registerHclMonarch } from "./hcl-monarch";
-import { registerMonacoThemes } from "./monaco-theme";
+import { registerDockerBakeMonarch } from "./hcl-monarch";
+import { getHighlighter } from "./highlighter";
+import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { dispatchOpenFile } from "./open-file";
 import { connectPythonLsp, disconnectPythonLsp } from "./python-lsp-client";
 import { connectTerraformLsp, disconnectTerraformLsp } from "./terraform-lsp-client";
@@ -58,13 +61,66 @@ monaco.languages.register({
   aliases: ["Terraform", "HCL", "terraform"],
 });
 
+monaco.languages.register({ id: "astro", extensions: [".astro"], aliases: ["Astro", "astro"] });
+
+// TSX/JSX as distinct language IDs so shikiToMonaco can attach TextMate tokenizers.
+// Monaco has built-in "typescript"/"javascript" but not "tsx"/"jsx". TS language
+// features come from the tsgo LSP, not Monaco's built-in TS workers (disabled above).
+monaco.languages.register({
+  id: "tsx",
+  extensions: [".tsx"],
+  aliases: ["TypeScript React", "tsx"],
+});
+monaco.languages.register({
+  id: "jsx",
+  extensions: [".jsx"],
+  aliases: ["JavaScript React", "jsx"],
+});
+
 // docker-bake HCL — served by docker-language-server, not terraform-ls.
 monaco.languages.register({ id: "dockerbake", aliases: ["Docker Bake", "dockerbake"] });
 
-// Monarch tokenizer for HCL (both terraform and dockerbake). We disable
-// semantic tokens on these LSPs (buggy stale-version ranges), so Monarch
-// is the sole source of syntax highlighting for them.
-registerHclMonarch();
+// Monarch tokenizer for docker-bake HCL — not a Shiki-bundled language.
+registerDockerBakeMonarch();
+
+// Astro language configuration (brackets, comments, auto-closing pairs).
+// shikiToMonaco handles tokenization; this provides editing behavior.
+monaco.languages.setLanguageConfiguration("astro", {
+  comments: { lineComment: "//", blockComment: ["/*", "*/"] },
+  brackets: [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["<", ">"],
+  ],
+  autoClosingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: '"', close: '"' },
+    { open: "'", close: "'" },
+    { open: "`", close: "`" },
+    { open: "<!--", close: "-->" },
+  ],
+  surroundingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: '"', close: '"' },
+    { open: "'", close: "'" },
+    { open: "`", close: "`" },
+    { open: "<", close: ">" },
+  ],
+});
+
+// Bridge Shiki's TextMate grammars into Monaco for VS Code-quality highlighting.
+// This replaces Monarch tokenizers for all Shiki-bundled languages (TS, JS, HTML,
+// CSS, Astro, Terraform, etc.) with TextMate-based tokenizers. loxel-dark is
+// loaded as Shiki themes so shikiToMonaco recognizes them natively.
+void getHighlighter().then((highlighter) => {
+  shikiToMonaco(highlighter, monaco);
+  enhanceMonacoThemes(highlighter);
+});
 
 // Connect to yaml-language-server — LSP features register async when capabilities arrive
 connectYamlLsp();
@@ -161,6 +217,13 @@ createLazyLspConnector({
   languageIds: ["python"],
   connect: connectPythonLsp,
   disconnect: disconnectPythonLsp,
+});
+
+// astro-ls: only worktrees with .astro files pay the cost.
+createLazyLspConnector({
+  languageIds: ["astro"],
+  connect: connectAstroLsp,
+  disconnect: disconnectAstroLsp,
 });
 
 // Initialize JSON language service — schemas populated dynamically via json-schema-registry.

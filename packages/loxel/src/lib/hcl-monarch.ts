@@ -133,12 +133,12 @@ const HCL_MONARCH: monaco.languages.IMonarchLanguage = {
 
 let registered = false;
 
-export function registerHclMonarch(): void {
+export function registerDockerBakeMonarch(): void {
   if (registered) return;
   registered = true;
-  monaco.languages.setMonarchTokensProvider("terraform", HCL_MONARCH);
+  // Only dockerbake needs a Monarch tokenizer — terraform uses Shiki's TextMate grammar
+  // via shikiToMonaco. dockerbake is a custom Monaco language ID not in Shiki.
   monaco.languages.setMonarchTokensProvider("dockerbake", HCL_MONARCH);
-  monaco.languages.setLanguageConfiguration("terraform", HCL_LANG_CONFIG);
   monaco.languages.setLanguageConfiguration("dockerbake", HCL_LANG_CONFIG);
 }
 

@@ -1,5 +1,7 @@
 import { createHighlighter, type Highlighter } from "shiki";
 
+import { loxelDark } from "./loxel-themes";
+
 // Singleton highlighter instance
 let highlighterPromise: Promise<Highlighter> | null = null;
 
@@ -38,6 +40,7 @@ const BUNDLED_LANGUAGES = [
   "graphql",
   "vue",
   "svelte",
+  "astro",
   "dotenv",
 ] as const;
 
@@ -47,7 +50,7 @@ const BUNDLED_LANGUAGES = [
 export async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
-      themes: ["github-dark", "github-light"],
+      themes: [loxelDark, "github-dark"],
       langs: [...BUNDLED_LANGUAGES],
     });
   }
@@ -151,6 +154,7 @@ export const EXT_TO_LANG: Record<string, string> = {
   less: "css",
   vue: "vue",
   svelte: "svelte",
+  astro: "astro",
 
   // Data formats
   json: "json",
