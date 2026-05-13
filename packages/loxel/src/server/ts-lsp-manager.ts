@@ -280,8 +280,11 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
    */
   private shouldDropForNonTsUri(method: string, params: unknown): boolean {
     if (!method.startsWith("textDocument/")) return false;
-    const uri = (params as { textDocument?: { uri?: string } } | null)?.textDocument?.uri;
-    if (!uri) return false;
+    if (typeof params !== "object" || params === null) return false;
+    const td = (params as { textDocument?: unknown }).textDocument;
+    if (typeof td !== "object" || td === null) return false;
+    const uri = (td as { uri?: unknown }).uri;
+    if (typeof uri !== "string") return false;
     return !TS_EXTENSIONS.test(uri);
   }
 

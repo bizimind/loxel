@@ -22,6 +22,7 @@ import type {
   ResolvedFilePath,
   WorktreeResources,
   WsData,
+  WorktreeLspType,
 } from "./server-state";
 
 import { AgentManager } from "./agent-manager";
@@ -879,44 +880,22 @@ const server = Bun.serve<WsData>({
       return undefined;
     }
 
-    if (url.pathname === "/ws/ts-lsp") {
-      const wtPath = url.searchParams.get("wt");
-      if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
-      const upgraded = server.upgrade(req, { data: { type: "ts-lsp" as const, wtPath } });
-      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
-      return undefined;
-    }
-
-    if (url.pathname === "/ws/docker-lsp") {
-      const wtPath = url.searchParams.get("wt");
-      if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
-      const upgraded = server.upgrade(req, { data: { type: "docker-lsp" as const, wtPath } });
-      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
-      return undefined;
-    }
-
-    if (url.pathname === "/ws/terraform-lsp") {
-      const wtPath = url.searchParams.get("wt");
-      if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
-      const upgraded = server.upgrade(req, { data: { type: "terraform-lsp" as const, wtPath } });
-      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
-      return undefined;
-    }
-
-    if (url.pathname === "/ws/python-lsp") {
-      const wtPath = url.searchParams.get("wt");
-      if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
-      const upgraded = server.upgrade(req, { data: { type: "python-lsp" as const, wtPath } });
-      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
-      return undefined;
-    }
-
-    if (url.pathname === "/ws/astro-lsp") {
-      const wtPath = url.searchParams.get("wt");
-      if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
-      const upgraded = server.upgrade(req, { data: { type: "astro-lsp" as const, wtPath } });
-      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
-      return undefined;
+    {
+      const worktreeLspTypes: WorktreeLspType[] = [
+        "ts-lsp",
+        "docker-lsp",
+        "terraform-lsp",
+        "python-lsp",
+        "astro-lsp",
+      ];
+      for (const lspType of worktreeLspTypes) {
+        if (url.pathname !== `/ws/${lspType}`) continue;
+        const wtPath = url.searchParams.get("wt");
+        if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
+        const upgraded = server.upgrade(req, { data: { type: lspType, wtPath } });
+        if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
+        return undefined;
+      }
     }
 
     if (url.pathname === "/ws") {

@@ -16,12 +16,7 @@ import path from "node:path";
 const LOXEL = path.resolve(import.meta.dir, "..");
 const OUTDIR = path.join(LOXEL, "build");
 
-/** Resolve a package's installed directory using require.resolve on its package.json. */
-function resolvePackage(name: string, from?: string): string {
-  const paths = from ? [from] : undefined;
-  const pkgJson = require.resolve(`${name}/package.json`, { paths });
-  return path.dirname(pkgJson);
-}
+import { resolvePackage } from "./resolve-package";
 
 const yamlLspDir = resolvePackage("yaml-language-server");
 // These are transitive deps of yaml-language-server — resolve from its directory

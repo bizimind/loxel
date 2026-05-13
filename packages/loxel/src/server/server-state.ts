@@ -58,8 +58,11 @@ export interface ClientState {
 export type WsData =
   | { type: "app" }
   | { type: "yaml-lsp" }
-  | { type: "ts-lsp"; wtPath: string }
-  | { type: "docker-lsp"; wtPath: string }
-  | { type: "terraform-lsp"; wtPath: string }
-  | { type: "python-lsp"; wtPath: string }
-  | { type: "astro-lsp"; wtPath: string };
+  | WorktreeLspData<"ts-lsp">
+  | WorktreeLspData<"docker-lsp">
+  | WorktreeLspData<"terraform-lsp">
+  | WorktreeLspData<"python-lsp">
+  | WorktreeLspData<"astro-lsp">;
+
+export type WorktreeLspData<T extends string = string> = { type: T; wtPath: string };
+export type WorktreeLspType = Extract<WsData, { wtPath: string }>["type"];
