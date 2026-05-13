@@ -17,7 +17,7 @@ import { computeLineEdits } from "@/lib/compute-line-edits";
 import { removeDollarSchema, setDollarSchema } from "@/lib/json-schema-registry";
 import { validateStrictJson } from "@/lib/json-strict-validator";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
-import { resolveLanguage, sniffLanguageFromContent } from "@/lib/resolve-language";
+import { resolveLanguage } from "@/lib/resolve-language";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
 import { queryKeys } from "@/queries/query-keys";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -216,9 +216,7 @@ export function CodeEditorPanel({
   const panelWorktreePath = usePanelWorktreePath();
   const fileAssociations = useSettingsStore(selectEffectiveFileAssociations);
   const resolvedLang = useMemo(
-    () =>
-      resolveLanguage(filePath, fileAssociations) ??
-      (diskContent ? sniffLanguageFromContent(diskContent) : null),
+    () => resolveLanguage(filePath, fileAssociations, diskContent),
     [filePath, fileAssociations, diskContent],
   );
   const resolvedLangRef = useRef(resolvedLang);
