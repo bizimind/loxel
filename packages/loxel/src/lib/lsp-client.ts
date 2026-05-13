@@ -9,7 +9,7 @@ import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client
  * disposes the old transport (killing the server-side subprocess) and opens a
  * new connection.
  */
-export function createWorktreeLspClient(wsPath: string, languageId?: string) {
+export function createWorktreeLspClient(wsPath: string, languageId?: string | readonly string[]) {
   let currentWtPath: string | null = null;
   let currentTransport: WebSocketTransport | null = null;
   let currentClient: MonacoLspClient | null = null;

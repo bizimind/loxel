@@ -26,7 +26,7 @@ export class LspDeclarationFeature extends Disposable {
           return monaco.languages.registerDeclarationProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspDeclarationProvider(this._connection, capability),
           );

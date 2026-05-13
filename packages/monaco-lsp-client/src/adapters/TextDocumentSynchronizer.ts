@@ -21,7 +21,7 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
   constructor(
     private readonly _server: typeof api.TServerInterface,
     private readonly _capabilities: ILspCapabilitiesRegistry,
-    private readonly _languageId?: string,
+    private readonly _languageIds?: ReadonlySet<string>,
   ) {
     super();
 
@@ -62,7 +62,7 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
       throw new Error("Not started");
     }
 
-    if (this._languageId && m.getLanguageId() !== this._languageId) return undefined;
+    if (this._languageIds && !this._languageIds.has(m.getLanguageId())) return undefined;
     const uriStr = m.uri.toString(true);
     let mm = this._managedModels.get(m);
     if (!mm) {

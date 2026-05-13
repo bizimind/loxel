@@ -37,7 +37,7 @@ export class LspDocumentSymbolFeature extends Disposable {
           return monaco.languages.registerDocumentSymbolProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspDocumentSymbolProvider(this._connection, capability),
           );

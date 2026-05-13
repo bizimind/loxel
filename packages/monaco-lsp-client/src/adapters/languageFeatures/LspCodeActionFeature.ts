@@ -50,7 +50,7 @@ export class LspCodeActionFeature extends Disposable {
           return monaco.languages.registerCodeActionProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspCodeActionProvider(this._connection, capability),
           );

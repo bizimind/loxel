@@ -25,7 +25,7 @@ export class LspSelectionRangeFeature extends Disposable {
           return monaco.languages.registerSelectionRangeProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspSelectionRangeProvider(this._connection, capability),
           );

@@ -25,7 +25,7 @@ export class LspRangeFormattingFeature extends Disposable {
           return monaco.languages.registerDocumentRangeFormattingEditProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspDocumentRangeFormattingProvider(this._connection, capability),
           );

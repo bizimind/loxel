@@ -29,7 +29,7 @@ export class LspInlineCompletionFeature extends Disposable {
           monaco.languages.registerInlineCompletionsProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspInlineCompletionProvider(this._connection, capability),
           ),

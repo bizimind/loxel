@@ -25,7 +25,7 @@ export class LspOnTypeFormattingFeature extends Disposable {
           return monaco.languages.registerOnTypeFormattingEditProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspOnTypeFormattingProvider(this._connection, capability),
           );

@@ -24,6 +24,6 @@ export class LspConnection {
     public readonly bridge: ITextModelBridge,
     public readonly capabilities: LspCapabilitiesRegistry,
     public readonly connection: TypedChannel,
-    public readonly defaultLanguageId?: string,
+    public readonly defaultLanguageIds?: readonly string[],
   ) {}
 }

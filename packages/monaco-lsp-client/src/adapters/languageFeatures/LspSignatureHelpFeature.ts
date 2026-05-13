@@ -36,7 +36,7 @@ export class LspSignatureHelpFeature extends Disposable {
           return monaco.languages.registerSignatureHelpProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspSignatureHelpProvider(this._connection, capability),
           );

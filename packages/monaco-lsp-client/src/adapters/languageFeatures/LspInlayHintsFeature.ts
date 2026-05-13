@@ -64,7 +64,7 @@ export class LspInlayHintsFeature extends Disposable {
           const disposable = monaco.languages.registerInlayHintsProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             provider,
           );

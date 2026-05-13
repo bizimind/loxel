@@ -37,8 +37,8 @@ import { LspConnection } from "./LspConnection";
 import { TextDocumentSynchronizer } from "./TextDocumentSynchronizer";
 
 export interface MonacoLspClientOptions {
-  /** Restrict model sync and provider registration to this language. */
-  languageId?: string;
+  /** Restrict model sync and provider registration to these language(s). */
+  languageId?: string | readonly string[];
 }
 
 export class MonacoLspClient {
@@ -54,15 +54,19 @@ export class MonacoLspClient {
     c.startListen();
 
     const languageId = options?.languageId;
+    const languageIds = languageId
+      ? new Set(Array.isArray(languageId) ? languageId : [languageId])
+      : undefined;
+    const defaultLanguageIds = languageIds ? [...languageIds] : undefined;
     this._capabilitiesRegistry = new LspCapabilitiesRegistry(c);
-    this._bridge = new TextDocumentSynchronizer(s.server, this._capabilitiesRegistry, languageId);
+    this._bridge = new TextDocumentSynchronizer(s.server, this._capabilitiesRegistry, languageIds);
 
     this._connection = new LspConnection(
       s.server,
       this._bridge,
       this._capabilitiesRegistry,
       c,
-      languageId,
+      defaultLanguageIds,
     );
     this.createFeatures();
 

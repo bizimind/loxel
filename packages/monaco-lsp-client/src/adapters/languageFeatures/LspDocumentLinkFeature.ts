@@ -25,7 +25,7 @@ export class LspDocumentLinkFeature extends Disposable {
           return monaco.languages.registerLinkProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
-              this._connection.defaultLanguageId,
+              this._connection.defaultLanguageIds,
             ),
             new LspDocumentLinkProvider(this._connection, capability),
           );
