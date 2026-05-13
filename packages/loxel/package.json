@@ -53,6 +53,7 @@
     "@lezer/highlight": "^1.2.3",
     "@milkdown/crepe": "^7.19.0",
     "@milkdown/kit": "^7.19.0",
+    "@shikijs/monaco": "^4.0.2",
     "@tanstack/react-query": "^5.91.0",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.12",

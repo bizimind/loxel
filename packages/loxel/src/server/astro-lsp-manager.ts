@@ -13,6 +13,8 @@ interface AstroLspSession extends BaseLspSession {
 }
 
 export class AstroLspManager extends StdioLspManager<AstroLspSession, AstroLspContext> {
+  protected override readonly disableSemanticTokens = true;
+
   constructor() {
     super("astro-lsp");
   }
