@@ -84,6 +84,7 @@ export interface ActionDef {
   id: ActionId;
   label: string;
   category: ActionCategory;
+  hidden?: boolean;
 }
 
 /**
@@ -144,7 +145,7 @@ export const ACTIONS: readonly ActionDef[] = [
   // Navigation
   { id: "nav.project", label: "Switch Project", category: "nav" },
   { id: "nav.worktree", label: "Switch Worktree", category: "nav" },
-  { id: "nav.commandPalette", label: "Command Palette", category: "nav" },
+  { id: "nav.commandPalette", label: "Command Palette", category: "nav", hidden: true },
   { id: "nav.search", label: "Find in Files", category: "nav" },
   { id: "nav.openFile", label: "Open File", category: "nav" },
   { id: "nav.recentNotification", label: "Go to Recent Notification", category: "nav" },
@@ -172,14 +173,24 @@ export const ACTIONS: readonly ActionDef[] = [
   // File
   { id: "file.revealInExplorer", label: "Reveal in Project Explorer", category: "nav" },
 
-  // Tree
-  { id: "tree.focusNext", label: "Tree: Focus Next Row", category: "tree" },
-  { id: "tree.focusPrevious", label: "Tree: Focus Previous Row", category: "tree" },
-  { id: "tree.expandOrFocusChild", label: "Tree: Expand or Focus Child", category: "tree" },
-  { id: "tree.collapseOrFocusParent", label: "Tree: Collapse or Focus Parent", category: "tree" },
-  { id: "tree.toggleExpanded", label: "Tree: Toggle Folder", category: "tree" },
-  { id: "tree.open", label: "Tree: Open", category: "tree" },
-  { id: "tree.rename", label: "Tree: Rename", category: "tree" },
+  // Tree — handled locally by tree components, not shown in command palette
+  { id: "tree.focusNext", label: "Tree: Focus Next Row", category: "tree", hidden: true },
+  { id: "tree.focusPrevious", label: "Tree: Focus Previous Row", category: "tree", hidden: true },
+  {
+    id: "tree.expandOrFocusChild",
+    label: "Tree: Expand or Focus Child",
+    category: "tree",
+    hidden: true,
+  },
+  {
+    id: "tree.collapseOrFocusParent",
+    label: "Tree: Collapse or Focus Parent",
+    category: "tree",
+    hidden: true,
+  },
+  { id: "tree.toggleExpanded", label: "Tree: Toggle Folder", category: "tree", hidden: true },
+  { id: "tree.open", label: "Tree: Open", category: "tree", hidden: true },
+  { id: "tree.rename", label: "Tree: Rename", category: "tree", hidden: true },
 
   // App
   { id: "app.settings", label: "Open Settings", category: "app" },

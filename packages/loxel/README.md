@@ -117,6 +117,7 @@ Standard IDE editing experience built on Monaco Editor:
 - **Syntax highlighting** for all major languages, code folding, line numbers, glyph margin
 - **TypeScript diagnostics** — real-time type errors and warnings from `tsgo` shown as inline markers
 - **Quick Open** (`Cmd+P`) — fuzzy file path search with file icons, MRU list, and go-to-line via `:line` suffix. Search results (`Cmd+Shift+F`) navigate directly to the matched line and column
+- **Command Palette** (`Cmd+K`) — fuzzy search across all registered actions with keyboard navigation (arrow keys, Enter to execute). Internal actions (tree navigation, the palette itself) are hidden via `hidden: true` on `ActionDef`
 - **Autosave** with capped debounce (250ms idle / 5s max wait), `Cmd+S` to save immediately, `Cmd+W` to close
 - **Format on save** — auto-detects project formatters (oxfmt, prettier, rustfmt, ruff, etc.) from config files and `package.json`. Formats on explicit save (`Cmd+S`) by default; optional format-on-auto-save. Persistent formatter backends (LSP for oxfmt, library import for prettier) eliminate per-request process spawn overhead. Configurable via Settings > Editor.
 - **Conflict detection** — when a file changes on disk (e.g. by an agent), a banner lets you accept the disk version or keep your edits
