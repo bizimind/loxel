@@ -2,6 +2,8 @@ import { SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
+import type { ActionId } from "@/store/keybindings/action-registry";
+
 import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
 import { KeyComboDisplay } from "@/components/ui/key-combo-display";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
@@ -9,7 +11,7 @@ import { useActionHandler } from "@/hooks/useActionHandler";
 import { fuzzyMatch } from "@/lib/fuzzy-match";
 import { cn } from "@/lib/utils";
 import { useCommandPaletteStore } from "@/store/command-palette";
-import { ACTIONS } from "@/store/keybindings/action-registry";
+import { ACTION_IDS, ACTIONS } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
 
 export function CommandPaletteModal() {
@@ -22,7 +24,6 @@ export function CommandPaletteModal() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Open/close the native dialog
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -36,9 +37,8 @@ export function CommandPaletteModal() {
 
   const kbState = useKeybindingStore();
 
-  // Filter and fuzzy-match visible actions
   const filtered = useMemo(() => {
-    const visible = ACTIONS.filter((a) => !a.hidden?.());
+    const visible = ACTIONS.filter((a) => !a.hidden);
     const q = query.trim();
     if (!q) return visible.map((a) => ({ action: a, indices: [] as number[] }));
 
@@ -90,14 +90,15 @@ export function CommandPaletteModal() {
         e.preventDefault();
         const focused = document.activeElement;
         const actionId = focused instanceof HTMLElement ? focused.dataset.commandAction : undefined;
-        if (actionId) {
-          runAction(actionId as Parameters<typeof dispatch>[0]);
+        if (actionId && ACTION_IDS.has(actionId as ActionId)) {
+          runAction(actionId as ActionId);
           return;
         }
-        // Run first result if input is focused
         const first = listRef.current?.querySelector<HTMLElement>("[data-command-option]");
         const firstActionId = first?.dataset?.commandAction;
-        if (firstActionId) runAction(firstActionId as Parameters<typeof dispatch>[0]);
+        if (firstActionId && ACTION_IDS.has(firstActionId as ActionId)) {
+          runAction(firstActionId as ActionId);
+        }
         return;
       }
 
