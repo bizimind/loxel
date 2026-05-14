@@ -2,15 +2,12 @@ import type { ServerWebSocket, Subprocess } from "bun";
 
 import path from "node:path";
 
-import { type BaseLspSession, type SpawnOptions, StdioLspManager } from "./stdio-lsp-manager";
-
-interface DockerLspContext {
-  wtPath: string;
-}
-
-interface DockerLspSession extends BaseLspSession {
-  wtPath: string;
-}
+import {
+  type SpawnOptions,
+  StdioLspManager,
+  type WtLspContext,
+  type WtLspSession,
+} from "./stdio-lsp-manager";
 
 /**
  * Manages Docker's official `docker-language-server` binary (Dockerfile +
@@ -26,7 +23,7 @@ interface DockerLspSession extends BaseLspSession {
  * Semantic tokens are disabled because its token ranges routinely exceed
  * line length and Monaco rejects them.
  */
-export class DockerLspManager extends StdioLspManager<DockerLspSession, DockerLspContext> {
+export class DockerLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
   protected override readonly disableSemanticTokens = true;
   protected override readonly requiresFullTextSync = true;
 
@@ -52,15 +49,15 @@ export class DockerLspManager extends StdioLspManager<DockerLspSession, DockerLs
     return ["start", "--stdio"];
   }
 
-  protected override spawnOptions(context: DockerLspContext): SpawnOptions {
+  protected override spawnOptions(context: WtLspContext): SpawnOptions {
     return { cwd: context.wtPath };
   }
 
   protected buildSession(
     ws: ServerWebSocket<unknown>,
     proc: Subprocess,
-    context: DockerLspContext,
-  ): DockerLspSession {
+    context: WtLspContext,
+  ): WtLspSession {
     return {
       ws,
       proc,
@@ -70,15 +67,15 @@ export class DockerLspManager extends StdioLspManager<DockerLspSession, DockerLs
     };
   }
 
-  protected override getSessionKey(context: DockerLspContext): string {
+  protected override getSessionKey(context: WtLspContext): string {
     return context.wtPath;
   }
 
-  protected override getSessionWorkspace(session: DockerLspSession): string | null {
+  protected override getSessionWorkspace(session: WtLspSession): string | null {
     return session.wtPath;
   }
 
-  protected override handleServerFrame(session: DockerLspSession, body: string): void {
+  protected override handleServerFrame(session: WtLspSession, body: string): void {
     try {
       const parsed: unknown = JSON.parse(body);
       if (typeof parsed === "object" && parsed !== null) {
@@ -103,7 +100,7 @@ export class DockerLspManager extends StdioLspManager<DockerLspSession, DockerLs
     super.handleServerFrame(session, body);
   }
 
-  protected override onClientInitialized(session: DockerLspSession): void {
+  protected override onClientInitialized(session: WtLspSession): void {
     const msg = JSON.stringify({
       jsonrpc: "2.0",
       method: "workspace/didChangeConfiguration",

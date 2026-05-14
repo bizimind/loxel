@@ -23,6 +23,8 @@ extraResources:
     to: pyright-langserver
   - from: build/astro-ls
     to: astro-ls
+  - from: build/lemminx/lemminx
+    to: lemminx
   - from: build/typeshed-fallback
     to: typeshed-fallback
   - from: build/tsgo-lib

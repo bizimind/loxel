@@ -153,6 +153,7 @@ jobs:
           codesign -s - -f packages/loxel/build/terraform-ls
           codesign -s - -f packages/loxel/build/pyright-langserver
           codesign -s - -f packages/loxel/build/astro-ls
+          codesign -s - -f packages/loxel/build/lemminx/lemminx
           codesign -s - -f packages/loxel/build/tsgo-lib/tsgo
         env:
           LOXEL_CODESIGN_IDENTITY: ${{ secrets.LOXEL_CODESIGN_IDENTITY }}
@@ -177,6 +178,7 @@ jobs:
           cp packages/loxel/build/terraform-ls staging/
           cp packages/loxel/build/pyright-langserver staging/
           cp packages/loxel/build/astro-ls staging/
+          cp packages/loxel/build/lemminx/lemminx staging/
           cp -r packages/loxel/build/typeshed-fallback staging/typeshed-fallback
           cp -r packages/loxel/build/tsgo-lib staging/tsgo-lib
           cp -r packages/loxel/dist staging/renderer

@@ -26,6 +26,14 @@ export interface BaseLspSession {
   documentContents: Map<string, string>;
 }
 
+export interface WtLspContext {
+  wtPath: string;
+}
+
+export interface WtLspSession extends BaseLspSession {
+  wtPath: string;
+}
+
 export interface SpawnOptions {
   cwd?: string;
   env?: Record<string, string>;

@@ -216,8 +216,8 @@ export function CodeEditorPanel({
   const panelWorktreePath = usePanelWorktreePath();
   const fileAssociations = useSettingsStore(selectEffectiveFileAssociations);
   const resolvedLang = useMemo(
-    () => resolveLanguage(filePath, fileAssociations),
-    [filePath, fileAssociations],
+    () => resolveLanguage(filePath, fileAssociations, diskContent),
+    [filePath, fileAssociations, diskContent],
   );
   const resolvedLangRef = useRef(resolvedLang);
   resolvedLangRef.current = resolvedLang;
@@ -256,7 +256,8 @@ export function CodeEditorPanel({
       language === "dockerfile" ||
       language === "dockerbake" ||
       language === "terraform" ||
-      language === "astro";
+      language === "astro" ||
+      language === "xml";
     const uri = useFileScheme
       ? monaco.Uri.from({ scheme: "file", path: filePath })
       : monaco.Uri.from({ scheme: "loxel", authority: "HEAD", path: filePath });

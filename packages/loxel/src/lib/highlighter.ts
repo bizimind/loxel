@@ -42,6 +42,7 @@ const BUNDLED_LANGUAGES = [
   "svelte",
   "astro",
   "dotenv",
+  "xml",
 ] as const;
 
 /**
@@ -167,7 +168,23 @@ export const EXT_TO_LANG: Record<string, string> = {
   ini: "ini",
   cfg: "ini",
   conf: "ini",
-  xml: "html",
+  xml: "xml",
+  xsd: "xml",
+  xsl: "xml",
+  xslt: "xml",
+  wsdl: "xml",
+  xhtml: "xml",
+  plist: "xml",
+  csproj: "xml",
+  fsproj: "xml",
+  vbproj: "xml",
+  props: "xml",
+  targets: "xml",
+  nuspec: "xml",
+  resx: "xml",
+  xaml: "xml",
+  axaml: "xml",
+  axml: "xml",
   env: "dotenv",
 
   // Docs

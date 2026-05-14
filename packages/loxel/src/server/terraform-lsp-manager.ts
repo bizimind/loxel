@@ -2,26 +2,14 @@ import type { ServerWebSocket, Subprocess } from "bun";
 
 import path from "node:path";
 
-import { type BaseLspSession, type SpawnOptions, StdioLspManager } from "./stdio-lsp-manager";
+import {
+  type SpawnOptions,
+  StdioLspManager,
+  type WtLspContext,
+  type WtLspSession,
+} from "./stdio-lsp-manager";
 
-interface TerraformLspContext {
-  wtPath: string;
-}
-
-interface TerraformLspSession extends BaseLspSession {
-  wtPath: string;
-}
-
-/**
- * Manages HashiCorp's `terraform-ls` child processes, one per worktree.
- * Each `/ws/terraform-lsp?wt=<path>` connection gets its own subprocess
- * rooted at the worktree path so cross-file references (modules, variable
- * defs) resolve against the full worktree workspace.
- *
- * terraform-ls is a native Go binary bundled as `build/terraform-ls`
- * and shipped with loxel-server via electron-builder extraResources.
- */
-export class TerraformLspManager extends StdioLspManager<TerraformLspSession, TerraformLspContext> {
+export class TerraformLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
   protected override readonly disableSemanticTokens = true;
 
   constructor() {
@@ -48,15 +36,15 @@ export class TerraformLspManager extends StdioLspManager<TerraformLspSession, Te
     return ["serve"];
   }
 
-  protected override spawnOptions(context: TerraformLspContext): SpawnOptions {
+  protected override spawnOptions(context: WtLspContext): SpawnOptions {
     return { cwd: context.wtPath };
   }
 
   protected buildSession(
     ws: ServerWebSocket<unknown>,
     proc: Subprocess,
-    context: TerraformLspContext,
-  ): TerraformLspSession {
+    context: WtLspContext,
+  ): WtLspSession {
     return {
       ws,
       proc,
@@ -66,11 +54,11 @@ export class TerraformLspManager extends StdioLspManager<TerraformLspSession, Te
     };
   }
 
-  protected override getSessionKey(context: TerraformLspContext): string {
+  protected override getSessionKey(context: WtLspContext): string {
     return context.wtPath;
   }
 
-  protected override getSessionWorkspace(session: TerraformLspSession): string | null {
+  protected override getSessionWorkspace(session: WtLspSession): string | null {
     return session.wtPath;
   }
 

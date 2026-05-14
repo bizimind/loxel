@@ -9,11 +9,9 @@ import {
   type WtLspSession,
 } from "./stdio-lsp-manager";
 
-export class AstroLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
-  protected override readonly disableSemanticTokens = true;
-
+export class XmlLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
   constructor() {
-    super("astro-lsp");
+    super("xml-lsp");
   }
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
@@ -25,11 +23,10 @@ export class AstroLspManager extends StdioLspManager<WtLspSession, WtLspContext>
   }
 
   protected resolveBinary(): string | null {
-    return this.resolveBundledBinary("astro-ls");
-  }
-
-  protected override spawnArgs(): readonly string[] {
-    return ["--stdio"];
+    return this.resolveBundledBinary(
+      "lemminx",
+      path.resolve(import.meta.dir, "../../build/lemminx/lemminx"),
+    );
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
@@ -56,12 +53,5 @@ export class AstroLspManager extends StdioLspManager<WtLspSession, WtLspContext>
 
   protected override getSessionWorkspace(session: WtLspSession): string | null {
     return session.wtPath;
-  }
-
-  protected override getInitializationOptions(session: WtLspSession): Record<string, unknown> {
-    return {
-      typescript: { tsdk: path.join(session.wtPath, "node_modules/typescript/lib") },
-      contentIntellisense: true,
-    };
   }
 }

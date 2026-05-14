@@ -30,7 +30,7 @@ Resolve these with the user before starting:
 
 **A. Bun-built from NPM package** — `packages/loxel/scripts/build-<name>.ts`. Two-step: `Bun.build()` bundles the entry point, then `bun build --compile` produces a standalone binary in `build/`. Use `resolvePackage()` from `./resolve-package.ts` to locate the NPM package. Some servers need Bun.build plugins (see pyright and yaml-ls build scripts for examples). Add the NPM package as a devDependency.
 
-**B. Downloaded pre-built binary** — `packages/loxel/scripts/download-<name>.ts`. For Go/Rust binaries. Pin SHA256 digests per platform, verify after download. See docker-ls and terraform-ls download scripts.
+**B. Downloaded pre-built binary** — `packages/loxel/scripts/download-<name>.ts`. For Go/Rust/GraalVM-native binaries. Pin SHA256 digests per platform. Hash the downloaded bytes _in memory before writing or extracting_ — never extract untrusted content before verification. For zip archives, pass the expected binary filename to `unzip` to restrict extraction to that single file. See docker-ls (raw binary), terraform-ls (zip), and xml-lsp (zip with rename) download scripts.
 
 **C. Copied from existing install** — Simple copy script (tsgo pattern).
 
