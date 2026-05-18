@@ -29,6 +29,8 @@ extraResources:
     to: typeshed-fallback
   - from: build/tsgo-lib
     to: tsgo-lib
+  - from: build/typescript-language-server.mjs
+    to: typescript-language-server.mjs
   - from: dist-electron/renderer
     to: renderer
 

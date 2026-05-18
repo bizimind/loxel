@@ -181,6 +181,7 @@ jobs:
           cp packages/loxel/build/lemminx/lemminx staging/
           cp -r packages/loxel/build/typeshed-fallback staging/typeshed-fallback
           cp -r packages/loxel/build/tsgo-lib staging/tsgo-lib
+          cp packages/loxel/build/typescript-language-server.mjs staging/
           cp -r packages/loxel/dist staging/renderer
           tar czf "$ARCHIVE" -C staging .
 
