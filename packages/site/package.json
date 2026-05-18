@@ -10,7 +10,7 @@
     "typecheck": "astro check"
   },
   "dependencies": {
-    "@astrojs/mdx": "^4.2.4",
+    "@astrojs/mdx": "^5.0.4",
     "@astrojs/react": "^4.2.0",
     "@astrojs/sitemap": "^3.2.1",
     "@tailwindcss/typography": "^0.5.19",
