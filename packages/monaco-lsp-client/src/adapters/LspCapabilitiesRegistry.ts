@@ -297,6 +297,9 @@ class DynamicFromStaticOptions {
 
 function deepAssign(target: Record<string, unknown>, source: Record<string, unknown>): void {
   for (const key of Object.keys(source)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      continue;
+    }
     const srcValue = source[key];
     if (srcValue === undefined) {
       continue;

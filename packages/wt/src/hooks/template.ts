@@ -12,7 +12,7 @@
 export function processTemplate(content: string, env: Record<string, string>): string {
   // Match optional backslash(es) followed by ${VAR_NAME} patterns
   // VAR_NAME starts with letter/underscore and contains only uppercase letters, digits, and underscores
-  return content.replace(/(\\*)\$\{([A-Z_][A-Z0-9_]*)\}/g, (match, backslashes, varName) => {
+  return content.replace(/(\\{0,100})\$\{([A-Z_][A-Z0-9_]*)\}/g, (match, backslashes, varName) => {
     const slashCount = backslashes.length;
 
     if (slashCount % 2 === 1) {

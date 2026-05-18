@@ -89,8 +89,9 @@ function normalizeWorktreeName(name: string): string {
       .toLowerCase()
       // Replace non-alphanumeric with hyphen
       .replace(/[^a-z0-9]+/g, "-")
-      // Remove leading/trailing hyphens
-      .replace(/^-+|-+$/g, "")
+      // Remove leading and trailing hyphens
+      .replace(/^-+/, "")
+      .replace(/-+$/, "")
       // Collapse consecutive hyphens
       .replace(/-{2,}/g, "-")
   );

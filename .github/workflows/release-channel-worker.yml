@@ -10,6 +10,9 @@ on:
       - ".github/workflows/release-channel-worker.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: channel-worker-deploy
   cancel-in-progress: false
