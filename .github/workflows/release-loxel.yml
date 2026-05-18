@@ -32,6 +32,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          token: ${{ secrets.GH_PAT_CONTENT_WRITE }}
 
       - uses: oven-sh/setup-bun@v2
 
