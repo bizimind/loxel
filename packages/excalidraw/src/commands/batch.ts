@@ -54,7 +54,7 @@ export async function batchCommand(filePath: string, opts: BatchOptions): Promis
     const results: OpResult[] = [];
 
     // Collect all draw skeletons first, then convert them all at once
-    // This lets convertToExcalidrawElements handle bindings across elements
+    // This lets skeletonsToElements handle bindings across elements
     const drawSkeletons: Array<{ index: number; skeleton: Record<string, unknown> }> = [];
     const mutationOps: Array<{ index: number; op: Record<string, unknown> }> = [];
 
@@ -111,7 +111,7 @@ export async function batchCommand(filePath: string, opts: BatchOptions): Promis
       await withDom(async () => {
         const skeletons = drawSkeletons.map((d) => d.skeleton);
 
-        const converted = await convertSkeletons(skeletons, file.elements);
+        const converted = convertSkeletons(skeletons, file.elements);
 
         // Update boundElements on existing file elements that arrows bind to
         for (const el of converted) {

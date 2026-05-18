@@ -2,8 +2,8 @@ import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
 
 /**
  * Remove references to a deleted element from all boundElements arrays and arrow bindings.
- * Arrow creation and binding is handled natively by @excalidraw/element's
- * convertToExcalidrawElements — this module only handles cleanup on deletion.
+ * Arrow creation and binding is handled by skeletonsToElements and
+ * convertSkeletons — this module only handles cleanup on deletion.
  */
 export function cleanupBindings(elements: ExcalidrawElement[], deletedId: string): void {
   for (const el of elements) {

@@ -6,6 +6,7 @@ import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
 import { createCanvas } from "../canvas-loader.ts";
 import { withDom } from "../dom-shim.ts";
 import { FONT_FAMILIES } from "../elements/element-defaults.ts";
+import { skeletonsToElements } from "../elements/skeleton-converter.ts";
 import { loadFile, saveFile } from "../file/excalidraw-file.ts";
 import { readStdinText } from "./stdin-ids.ts";
 
@@ -65,16 +66,12 @@ export async function importMermaidCommand(
       // (default 20px) with ~50px internal padding. Widen containers so text doesn't wrap.
       ensureContainersFitText(skeletons as Record<string, unknown>[]);
 
-      // Use convertToExcalidrawElements to preserve mermaid's multi-point arrow
+      // Convert skeletons to full elements, preserving mermaid's multi-point arrow
       // paths that route around obstacles. Then fix up any out-of-range fixedPoint
       // values in bindings (mermaid's arrow positions don't always align precisely
       // with shape edges, producing fixedPoints outside 0-1 that excalidraw treats
       // as unbound).
-      const { convertToExcalidrawElements } = await import("@excalidraw/element");
-      const converted = convertToExcalidrawElements(
-        skeletons as Parameters<typeof convertToExcalidrawElements>[0],
-        { regenerateIds: false },
-      ) as unknown as ExcalidrawElement[];
+      const converted = skeletonsToElements(skeletons as Record<string, unknown>[]);
 
       fixArrowBindings(converted);
       return converted;
@@ -128,7 +125,7 @@ function findBoundText(elements: ExcalidrawElement[], containerId: string): stri
 /**
  * Fix arrow bindings so arrows physically connect to shape edges.
  *
- * convertToExcalidrawElements creates binding metadata but with imprecise
+ * skeletonsToElements creates binding metadata but with imprecise
  * fixedPoints (e.g., 0.89 instead of 1.0) because mermaid's arrow positions
  * don't align with shape edges. Excalidraw requires arrow endpoints to
  * physically touch the shape at the fixedPoint position.
