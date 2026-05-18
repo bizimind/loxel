@@ -68,7 +68,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.19",
-    "diff": "^8.0.4",
+    "diff": "^9.0.0",
     "dockview": "^5.1.0",
     "dockview-react": "^5.1.0",
     "jsonc-parser": "^3.3.1",
