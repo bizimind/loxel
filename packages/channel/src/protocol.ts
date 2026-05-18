@@ -237,13 +237,13 @@ export type ClientEnvelope =
 export const JoinPayloadSchema = z.object({
   channelId: z.string().min(1).max(128),
   token: z.string().min(1),
-  meta: z.record(z.unknown()).optional(),
+  meta: z.record(z.string(), z.unknown()).optional(),
   lastSeq: z.number().int().nonnegative().optional(),
 });
 
 export const PeerInfoSchema = z.object({
   clientId: z.string(),
-  meta: z.record(z.unknown()).optional(),
+  meta: z.record(z.string(), z.unknown()).optional(),
   joinedAt: z.number(),
 });
 
@@ -255,7 +255,7 @@ export const JoinedPayloadSchema = z.object({
 
 export const PeerJoinedPayloadSchema = z.object({
   clientId: z.string(),
-  meta: z.record(z.unknown()).optional(),
+  meta: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const PeerLeftPayloadSchema = z.object({

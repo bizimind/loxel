@@ -20,7 +20,7 @@
     "@inquirer/prompts": "^7.2.1",
     "commander": "^14.0.2",
     "yaml": "^2.7.1",
-    "zod": "^4.3.5"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "latest",

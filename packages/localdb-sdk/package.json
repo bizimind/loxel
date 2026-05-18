@@ -11,7 +11,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "zod": "^4.3.5"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "latest",
