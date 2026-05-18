@@ -14,7 +14,7 @@
   "dependencies": {
     "@bizimind/cli-common": "workspace:*",
     "commander": "^14.0.2",
-    "dependency-cruiser": "^16.0.0",
+    "dependency-cruiser": "^17.4.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {
