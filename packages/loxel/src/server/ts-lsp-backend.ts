@@ -5,10 +5,10 @@ import { resolveTsgoBinary } from "./tsgo-path";
 
 export interface TsLspBackend {
   name: "tsgo" | "tsls";
-  /** Return the absolute path to the backend binary, or null if unavailable. */
+  /** Return the absolute path to the binary (or runtime) to execute, or null if unavailable. */
   resolveBinary(): string | null;
-  /** Args passed after the binary. */
-  spawnArgs: readonly string[];
+  /** Args passed after the binary. For tsls this includes the script path. */
+  readonly spawnArgs: readonly string[];
 }
 
 const tsgo: TsLspBackend = {
@@ -17,28 +17,38 @@ const tsgo: TsLspBackend = {
   spawnArgs: ["--lsp", "-stdio"],
 };
 
+/**
+ * Resolve the bundled typescript-language-server.mjs script.
+ * Production: sibling to loxel-server.  Dev: from node_modules.
+ */
+function resolveTslsScript(): string | null {
+  const sibling = path.join(path.dirname(process.execPath), "typescript-language-server.mjs");
+  if (existsSync(sibling)) return sibling;
+
+  try {
+    const pkgJson = Bun.resolveSync("typescript-language-server/package.json", import.meta.dir);
+    const candidate = path.join(path.dirname(pkgJson), "lib/cli.mjs");
+    if (existsSync(candidate)) return candidate;
+  } catch {
+    // Not installed — fall through.
+  }
+
+  return null;
+}
+
 const tsls: TsLspBackend = {
   name: "tsls",
   resolveBinary: () => {
-    const sibling = path.join(path.dirname(process.execPath), "typescript-language-server");
-    if (existsSync(sibling)) return sibling;
-
-    try {
-      const pkgJson = Bun.resolveSync(
-        "typescript-language-server/package.json",
-        path.dirname(process.execPath),
-      );
-      // Walk up to the node_modules root that owns this package and use its `.bin` shim.
-      const nodeModulesDir = path.resolve(path.dirname(pkgJson), "..");
-      const candidate = path.join(nodeModulesDir, ".bin/typescript-language-server");
-      if (existsSync(candidate)) return candidate;
-    } catch {
-      // Not installed — fall through.
-    }
-
-    return Bun.which("typescript-language-server");
+    if (!resolveTslsScript()) return null;
+    // typescript-language-server uses ChildProcess.fork() to spawn tsserver.js,
+    // which requires process.execPath to be a real JS runtime — not a compiled binary.
+    // In production, use the Electron binary with ELECTRON_RUN_AS_NODE=1.
+    return process.env.LOXEL_ELECTRON ?? Bun.which("node");
   },
-  spawnArgs: ["--stdio"],
+  get spawnArgs() {
+    const script = resolveTslsScript();
+    return script ? [script, "--stdio"] : [];
+  },
 };
 
 export function selectTsLspBackend(): TsLspBackend {

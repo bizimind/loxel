@@ -86,7 +86,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
   }
 
   protected override spawnOptions(context: TsLspContext): SpawnOptions {
-    return { cwd: context.wtPath };
+    return { cwd: context.wtPath, env: { ELECTRON_RUN_AS_NODE: "1" } };
   }
 
   protected override buildSession(
