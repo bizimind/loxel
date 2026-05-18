@@ -144,7 +144,7 @@
     },
     "packages/loxel": {
       "name": "@bizimind/loxel",
-      "version": "0.1.146",
+      "version": "0.1.147",
       "dependencies": {
         "@base-ui/react": "^1.1.0",
         "@bizimind/coding-agent": "workspace:*",
@@ -215,7 +215,7 @@
         "@types/react-dom": "^19.1.6",
         "@types/unist": "^3.0.3",
         "@vitejs/plugin-react": "^6.0.0",
-        "electron": "^42.0.0-beta.3",
+        "electron": "^42.1.0",
         "electron-builder": "^26.8.1",
         "pyright": "^1.1.409",
         "tailwindcss": "^4.1.8",
@@ -288,7 +288,7 @@
     },
     "packages/wt": {
       "name": "@bizimind/wt",
-      "version": "0.1.54",
+      "version": "0.1.55",
       "dependencies": {
         "@bizimind/cli-common": "workspace:*",
         "@inquirer/prompts": "^8.4.2",
