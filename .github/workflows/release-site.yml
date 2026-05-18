@@ -8,17 +8,18 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 concurrency:
-  group: release-site
-  cancel-in-progress: false
+  group: release-site-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
 
 jobs:
   deploy:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
@@ -33,7 +34,72 @@ jobs:
         run: bun run --cwd packages/site build
 
       - name: Deploy to Cloudflare Pages
-        run: bunx wrangler pages deploy packages/site/dist --project-name loxel --branch ${{ github.ref_name }}
+        id: deploy
+        run: |
+          set -o pipefail
+          OUTPUT=$(bunx wrangler pages deploy packages/site/dist --project-name loxel --branch "$BRANCH" 2>&1 | tee /dev/stderr)
+          echo "url=$(echo "$OUTPUT" | sed -n 's/.*Deployment alias URL: //p')" >> "$GITHUB_OUTPUT"
         env:
+          BRANCH: ${{ github.ref_name }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Comment preview URL on PR
+        if: github.ref_name != 'main' && steps.deploy.outputs.url
+        uses: actions/github-script@v9
+        env:
+          BRANCH: ${{ github.ref_name }}
+          PREVIEW_URL: ${{ steps.deploy.outputs.url }}
+        with:
+          script: |
+            const branch = process.env.BRANCH;
+            const previewUrl = process.env.PREVIEW_URL;
+
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branch}`,
+              state: 'open',
+            });
+
+            if (prs.length === 0) {
+              console.log(`No open PR found for branch ${branch}, skipping comment.`);
+              return;
+            }
+
+            const prNumber = prs[0].number;
+            const marker = '<!-- site-preview-bot -->';
+            const body = [
+              marker,
+              `### Site Preview`,
+              '',
+              `Deployed to: ${previewUrl}`,
+              '',
+              `<sub>Commit: ${context.sha.slice(0, 7)}</sub>`,
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const existing = comments.find(c => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              console.log(`Updated comment ${existing.id} on PR #${prNumber}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+              console.log(`Created comment on PR #${prNumber}`);
+            }
