@@ -1,0 +1,57 @@
+name: Cleanup site previews
+
+on:
+  pull_request:
+    types: [closed]
+  delete:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    if: >-
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'delete' && github.event.ref_type == 'branch')
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 2
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Delete preview deployments
+        env:
+          BRANCH_PR: ${{ github.event.pull_request.head.ref }}
+          BRANCH_DELETE: ${{ github.event.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BRANCH="$BRANCH_PR"
+          else
+            BRANCH="$BRANCH_DELETE"
+          fi
+
+          if [ "$BRANCH" = "main" ]; then
+            echo "Skipping cleanup for main branch"
+            exit 0
+          fi
+
+          echo "Cleaning up preview deployments for branch: $BRANCH"
+
+          IDS=$(bunx wrangler pages deployment list --project-name loxel --json | \
+            jq -r --arg branch "$BRANCH" \
+            '.[] | select(.deployment_trigger.metadata.branch == $branch) | .id')
+
+          COUNT=0
+          for ID in $IDS; do
+            echo "Deleting deployment: $ID"
+            bunx wrangler pages deployment delete "$ID" --project-name loxel --force
+            COUNT=$((COUNT + 1))
+          done
+
+          echo "Deleted $COUNT preview deployment(s) for branch: $BRANCH"
