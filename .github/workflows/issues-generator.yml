@@ -27,6 +27,8 @@ on:
           - docs
           - epic
 
+permissions: {}
+
 jobs:
   setup:
     name: Setup matrix

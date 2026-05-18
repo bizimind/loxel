@@ -73,9 +73,8 @@ Return ONLY valid JSON. No explanation text before or after.
 
 async function findIssueFile(issueNumber: string): Promise<string | null> {
   const files = await $`ls issues/`.quiet().text();
-  const pattern = new RegExp(`^${issueNumber}-`);
   for (const file of files.split("\n")) {
-    if (pattern.test(file.trim())) {
+    if (file.trim().startsWith(`${issueNumber}-`)) {
       return `issues/${file.trim()}`;
     }
   }

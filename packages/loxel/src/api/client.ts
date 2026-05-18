@@ -824,7 +824,7 @@ class WsClient {
         if (type === BIN_MSG_OUTPUT) {
           const payload = buf.subarray(BIN_HEADER_SIZE);
           const handler = this.terminalOutputHandlers.get(terminalId);
-          if (handler) handler(payload);
+          if (typeof handler === "function") handler(payload);
           for (const listener of this.terminalDataListeners) {
             listener(terminalId, payload);
           }

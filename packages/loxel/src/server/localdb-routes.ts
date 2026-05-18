@@ -40,7 +40,7 @@ function handleGetSchema(req: Request, ctx: LocalDbRouteContext, name: string): 
 
 function parseErrorResponse(e: unknown): Response {
   if (e instanceof ZodError) return error(`Invalid localdb payload: ${e.message}`, 400);
-  return error(String(e), 400);
+  return error(e instanceof Error ? e.message : "Request failed", 400);
 }
 
 function objectRecord(input: unknown): Record<string, unknown> {
@@ -104,7 +104,7 @@ function handleDropColumn(
     ctx.onChange?.({ tableName, tableId: schema.table.id, scope: "schema" });
     return json(schema);
   } catch (e) {
-    return error(String(e), 400);
+    return error(e instanceof Error ? e.message : "Drop column failed", 400);
   }
 }
 
@@ -187,7 +187,7 @@ function handleGetRow(
     if (!row) return error("Row not found", 404);
     return json(row);
   } catch (e) {
-    return error(String(e), 400);
+    return error(e instanceof Error ? e.message : "Get row failed", 400);
   }
 }
 
@@ -241,7 +241,7 @@ function handleDeleteRow(
     ctx.onChange?.({ tableName, tableId: schema.table.id, scope: "data" });
     return new Response(null, { status: 204 });
   } catch (e) {
-    return error(String(e), 400);
+    return error(e instanceof Error ? e.message : "Delete failed", 400);
   }
 }
 

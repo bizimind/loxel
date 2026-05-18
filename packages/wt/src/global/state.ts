@@ -109,7 +109,8 @@ export class GlobalStateManager {
       normalizedPath = realPath.trim();
     } catch {
       // Fall back to original path with trailing slashes removed
-      normalizedPath = repoPath.replace(/\/+$/, "");
+      normalizedPath = repoPath;
+      while (normalizedPath.endsWith("/")) normalizedPath = normalizedPath.slice(0, -1);
     }
 
     if (state.repos.includes(normalizedPath)) {
