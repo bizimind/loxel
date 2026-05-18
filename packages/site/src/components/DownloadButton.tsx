@@ -12,7 +12,10 @@ async function detectPlatform(): Promise<Platform> {
   if (!navigator.userAgent.includes("Mac") && !navigator.userAgent.includes("macOS"))
     return "other";
   try {
-    const data = await navigator.userAgentData?.getHighEntropyValues(["architecture"]);
+    const nav = navigator as unknown as {
+      userAgentData?: { getHighEntropyValues(hints: string[]): Promise<{ architecture?: string }> };
+    };
+    const data = await nav.userAgentData?.getHighEntropyValues(["architecture"]);
     return data?.architecture === "arm" ? "mac-arm" : "mac-intel";
   } catch {
     return navigator.userAgent.includes("Intel") ? "mac-intel" : "mac-arm";

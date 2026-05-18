@@ -10,12 +10,12 @@
     "typecheck": "astro check"
   },
   "dependencies": {
-    "@astrojs/mdx": "^4.2.4",
-    "@astrojs/react": "^4.2.0",
-    "@astrojs/sitemap": "^3.2.1",
+    "@astrojs/mdx": "^5.0.6",
+    "@astrojs/react": "^5.0.5",
+    "@astrojs/sitemap": "^3.7.2",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.8",
-    "astro": "^5.8.0",
+    "astro": "^6.3.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "sharp": "^0.34.5",
@@ -23,9 +23,11 @@
     "unist-util-visit": "^5.1.0"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.9",
     "@types/hast": "^3.0.4",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.5",
-    "unified": "^11.0.5"
+    "unified": "^11.0.5",
+    "vite": "^7.3.3"
   }
 }
