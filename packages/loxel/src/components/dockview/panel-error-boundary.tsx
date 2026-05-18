@@ -1,7 +1,6 @@
 import type { LucideIcon } from "lucide-react";
-import type { FallbackProps } from "react-error-boundary";
-
 import { useCallback } from "react";
+import type { FallbackProps } from "react-error-boundary";
 import { ErrorBoundary } from "react-error-boundary";
 
 import { frontendLog } from "@/lib/frontend-logger";

@@ -1,5 +1,4 @@
 import type { ColumnDef, InlineOption } from "@bizimind/localdb-sdk";
-
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";

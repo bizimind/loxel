@@ -1,5 +1,4 @@
 import type { DebugSnapshot } from "@/store/agent-devtools";
-
 import { useAgentDevToolsStore } from "@/store/agent-devtools";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

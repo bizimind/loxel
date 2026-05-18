@@ -1,6 +1,5 @@
-import type * as monaco from "monaco-editor";
-
 import { diffArrays } from "diff";
+import type * as monaco from "monaco-editor";
 
 /**
  * Compute minimal line-level Monaco edit operations to transform a model's content

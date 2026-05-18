@@ -2,8 +2,6 @@ import { SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
-import type { ActionId } from "@/store/keybindings/action-registry";
-
 import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
 import { KeyComboDisplay } from "@/components/ui/key-combo-display";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
@@ -11,6 +9,7 @@ import { useActionHandler } from "@/hooks/useActionHandler";
 import { fuzzyMatch } from "@/lib/fuzzy-match";
 import { cn } from "@/lib/utils";
 import { useCommandPaletteStore } from "@/store/command-palette";
+import type { ActionId } from "@/store/keybindings/action-registry";
 import { ACTION_IDS, ACTIONS } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
 

@@ -6,7 +6,6 @@
  * (editors, terminals, agents, etc.) with their own persistence and tab management.
  */
 import type { DockviewApi, IDockviewPanelProps } from "dockview-react";
-
 import { useCallback, useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";

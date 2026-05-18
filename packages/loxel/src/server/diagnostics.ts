@@ -1,6 +1,7 @@
-import { $ } from "bun";
 import { rmSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+
+import { $ } from "bun";
 
 import type { TsgoDiagnostic } from "@/api/diagnostics-model";
 

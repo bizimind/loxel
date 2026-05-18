@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { FileDiff } from "@/api/diff-model";
-
 import { detectLanguage, escapeHtml, highlightCode, type HighlightedLine } from "@/lib/highlighter";
 import { useUIStore } from "@/store/ui";
 

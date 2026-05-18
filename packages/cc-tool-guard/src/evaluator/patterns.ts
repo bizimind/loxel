@@ -1,5 +1,4 @@
 import type { ProjectContext, EvaluationResult } from "../types.ts";
-
 import { parseCommand } from "./command-parser.ts";
 
 interface PatternRule {

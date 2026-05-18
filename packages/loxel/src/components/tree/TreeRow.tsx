@@ -1,6 +1,5 @@
-import type { HTMLAttributes, ReactNode } from "react";
-
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
+import type { HTMLAttributes, ReactNode } from "react";
 
 import { FileTypeIcon } from "@/lib/file-icons";
 import { cn } from "@/lib/utils";

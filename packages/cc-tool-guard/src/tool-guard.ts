@@ -9,6 +9,9 @@ import { mkdir, appendFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { getProjectContext } from "./context/project.ts";
+import { evaluateBashCommand, evaluateReadFile } from "./evaluator/evaluator.ts";
+import { addAllowedPattern } from "./settings/settings.ts";
 import type {
   HookInput,
   HookOutput,
@@ -22,10 +25,6 @@ import type {
   UpdateMode,
   SettingsTarget,
 } from "./types.ts";
-
-import { getProjectContext } from "./context/project.ts";
-import { evaluateBashCommand, evaluateReadFile } from "./evaluator/evaluator.ts";
-import { addAllowedPattern } from "./settings/settings.ts";
 
 const SUPPORTED_TOOLS: SupportedTool[] = ["Bash", "Read"];
 const VALID_UPDATE_MODES: UpdateMode[] = ["none", "user", "project", "local"];

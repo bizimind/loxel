@@ -1,7 +1,6 @@
 import * as monaco from "monaco-editor";
 
 import type { FoldingRangeRegistrationOptions } from "../../types";
-
 import { capabilities, FoldingRangeKind, api } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";

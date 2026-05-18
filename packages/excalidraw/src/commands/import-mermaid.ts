@@ -1,11 +1,11 @@
-import { createResult, runAction } from "@bizimind/cli-common";
 import path from "node:path";
 
-import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
+import { createResult, runAction } from "@bizimind/cli-common";
 
 import { createCanvas } from "../canvas-loader.ts";
 import { withDom } from "../dom-shim.ts";
 import { FONT_FAMILIES } from "../elements/element-defaults.ts";
+import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
 import { loadFile, saveFile } from "../file/excalidraw-file.ts";
 import { readStdinText } from "./stdin-ids.ts";
 

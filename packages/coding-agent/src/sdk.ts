@@ -8,9 +8,8 @@ import { createNoopLogger, type AppLogger } from "@bizimind/logger";
 
 import type { ModelRouterOptions } from "./orchestrator/model-router.ts";
 import type { RuntimeDiagnostic, RuntimeEventSink } from "./orchestrator/runtime.ts";
-import type { ProtocolEvent, ProtocolRequest } from "./protocol/schemas.ts";
-
 import { CodingAgentRuntime } from "./orchestrator/runtime.ts";
+import type { ProtocolEvent, ProtocolRequest } from "./protocol/schemas.ts";
 
 export interface CodingAgentSessionOptions {
   /** Model configuration with per-function API key support. */

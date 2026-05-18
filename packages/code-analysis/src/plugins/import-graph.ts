@@ -1,7 +1,7 @@
-import type { ICruiseResult } from "dependency-cruiser";
-
-import { cruise } from "dependency-cruiser";
 import { join } from "node:path";
+
+import type { ICruiseResult } from "dependency-cruiser";
+import { cruise } from "dependency-cruiser";
 
 import type { AnalysisPlugin, AnalysisRecord, NetworkGraphConfig } from "../plugin.ts";
 

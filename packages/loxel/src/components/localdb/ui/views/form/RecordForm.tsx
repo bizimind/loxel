@@ -1,12 +1,10 @@
 import type { TableSchema, FormViewDef, ValidationIssue } from "@bizimind/localdb-sdk";
 import type React from "react";
-
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
 import type { DataAdapter } from "../../adapters/data-adapter.ts";
-
 import { FieldInput } from "../../fields/field-ui.tsx";
 import { getField, defaultComponentKeyForColumn } from "../../fields/registry.ts";
 

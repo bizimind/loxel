@@ -4,7 +4,6 @@
  * Replaces the separate ProjectSidebar and WorktreeSidebar components.
  */
 import type { DragEndEvent, DragStartEvent, UniqueIdentifier } from "@dnd-kit/core";
-
 import {
   closestCenter,
   DndContext,
@@ -40,7 +39,6 @@ import { createPortal } from "react-dom";
 
 import type { WorktreeEntry } from "@/api/git-models";
 import type { Project } from "@/api/project-model";
-
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";

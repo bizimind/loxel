@@ -1,5 +1,6 @@
-import { $ } from "bun";
 import path from "node:path";
+
+import { $ } from "bun";
 
 import { validatePath, validateRefName } from "./validation";
 import { validateWorktreePath } from "./worktree";

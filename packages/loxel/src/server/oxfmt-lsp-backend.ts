@@ -1,9 +1,8 @@
-import type { FileSink, Subprocess } from "bun";
-
 import { join } from "node:path";
 
-import type { FormatterBackend } from "./formatter-backends";
+import type { FileSink, Subprocess } from "bun";
 
+import type { FormatterBackend } from "./formatter-backends";
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
 

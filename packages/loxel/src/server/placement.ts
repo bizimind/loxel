@@ -1,5 +1,4 @@
 import type { CommentThread, DiffFileContext, PlacedThread } from "@/api/review-model";
-
 import { relocateAnchor } from "@/lib/content-anchor";
 
 import * as git from "./git-commands";

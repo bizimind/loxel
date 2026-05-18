@@ -1,5 +1,4 @@
 import type { TableMeta, MigrationPlan } from "@bizimind/localdb-sdk";
-
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";

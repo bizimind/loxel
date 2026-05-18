@@ -4,8 +4,9 @@
  * Find real git binary and execute commands.
  */
 
-import { $ } from "bun";
 import { statSync } from "fs";
+
+import { $ } from "bun";
 
 let cachedRealGit: string | null = null;
 

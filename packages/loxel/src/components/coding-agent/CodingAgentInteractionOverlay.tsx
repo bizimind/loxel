@@ -6,7 +6,6 @@ import { HelpCircle, ShieldAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { PendingApproval, PendingHumanInput } from "@/api/coding-agent-model";
-
 import { Button } from "@/components/ui/button";
 
 interface CodingAgentInteractionOverlayProps {

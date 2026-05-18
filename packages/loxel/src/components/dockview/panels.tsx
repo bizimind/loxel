@@ -11,11 +11,8 @@
  */
 import type { IDockviewPanelProps, IWatermarkPanelProps } from "dockview-react";
 import type { LucideIcon } from "lucide-react";
-
 import { AlertTriangleIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-
-import type { ActionId } from "@/store/keybindings/action-registry";
 
 import { AgentDevToolsPanel } from "@/components/agent-devtools/AgentDevToolsPanel";
 import { BrowserPanel, type BrowserPanelParams } from "@/components/browser/BrowserPanel";
@@ -34,6 +31,7 @@ import { LogsPanel } from "@/components/panels/LogsPanel";
 import { ProjectFilesPanel } from "@/components/panels/ProjectFilesPanel";
 import { Terminal } from "@/components/terminal/Terminal";
 import { KeyComboDisplay } from "@/components/ui/key-combo-display";
+import type { ActionId } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import { CENTER_PANELS, QUICKSTART_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
 

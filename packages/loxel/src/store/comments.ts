@@ -1,13 +1,12 @@
 import { create } from "zustand";
 
+import * as api from "@/api/client";
 import type {
   CommentThread,
   CreateThreadRequest,
   DiffFileContext,
   PlacedThread,
 } from "@/api/review-model";
-
-import * as api from "@/api/client";
 import { frontendLog } from "@/lib/frontend-logger";
 
 import { getActiveWt } from "./active-worktree";

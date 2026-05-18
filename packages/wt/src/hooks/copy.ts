@@ -1,11 +1,11 @@
-import { wrapError, type OutputContext } from "@bizimind/cli-common";
-import { Glob } from "bun";
 import { mkdir, cp } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname, isAbsolute, relative, basename, resolve, sep } from "node:path";
 
-import type { FileItem, CopyItem, TemplateFileItem, InlineTemplateItem } from "../config/schema.ts";
+import { wrapError, type OutputContext } from "@bizimind/cli-common";
+import { Glob } from "bun";
 
+import type { FileItem, CopyItem, TemplateFileItem, InlineTemplateItem } from "../config/schema.ts";
 import { processTemplate } from "./template.ts";
 
 /**

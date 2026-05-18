@@ -1,7 +1,6 @@
 import { describe, test, expect } from "bun:test";
 
 import type { CopyItem, TemplateFileItem, InlineTemplateItem } from "./schema.ts";
-
 import {
   PortOffsetingSchema,
   UniqueNamingSchema,

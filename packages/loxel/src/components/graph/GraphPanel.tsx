@@ -4,7 +4,6 @@ import type {
   IDockviewPanelHeaderProps,
   IDockviewPanelProps,
 } from "dockview-react";
-
 import { DockviewReact } from "dockview-react";
 import {
   CalendarIcon,

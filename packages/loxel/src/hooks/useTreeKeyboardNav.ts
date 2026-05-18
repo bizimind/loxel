@@ -1,10 +1,8 @@
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
-
 import { useCallback } from "react";
 
-import type { ActionId } from "@/store/keybindings/action-registry";
-
 import { TREE_PATH_ATTR } from "@/components/tree";
+import type { ActionId } from "@/store/keybindings/action-registry";
 import { eventToKeyCombo } from "@/store/keybindings/keybinding-schema";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
 

@@ -17,7 +17,6 @@
 import { $ } from "bun";
 
 import type { DedupeResult, Relation } from "./schema.ts";
-
 import { validateDedupeResult } from "./schema.ts";
 
 const DRY_RUN = process.argv.includes("--dry-run");

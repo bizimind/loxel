@@ -1,6 +1,7 @@
-import { $ } from "bun";
 import { stat } from "node:fs/promises";
 import path from "node:path";
+
+import { $ } from "bun";
 
 import type { StatusInfo, WorktreeEntry, WorktreeStatusInfo } from "@/api/git-models";
 

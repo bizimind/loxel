@@ -1,18 +1,15 @@
 import type { editor as monacoEditor } from "monaco-editor";
-
 import * as monaco from "monaco-editor";
 import { useEffect, useRef } from "react";
 
 import type { TsgoDiagnostic } from "@/api/diagnostics-model";
 import type { PlacedThread } from "@/api/review-model";
-
 import { getMonacoThemeName } from "@/lib/monaco-theme";
 
-import type { ChangeRegion } from "./change-regions";
-import type { LineRange } from "./unchanged-regions";
-
 import { buildCommentDecorations } from "../comments/comment-decorations";
+import type { ChangeRegion } from "./change-regions";
 import { buildMonacoDecorations } from "./monaco-decorations";
+import type { LineRange } from "./unchanged-regions";
 
 type IStandaloneCodeEditor = monacoEditor.IStandaloneCodeEditor;
 

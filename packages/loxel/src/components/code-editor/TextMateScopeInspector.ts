@@ -1,5 +1,4 @@
 import type { editor as monacoEditor } from "monaco-editor";
-
 import * as monaco from "monaco-editor";
 
 import type { ScopeInspectorData } from "@/lib/textmate-inspector";

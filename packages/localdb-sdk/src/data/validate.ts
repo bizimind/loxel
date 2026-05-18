@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
 
 import type { ColumnDef } from "../column-types/column-def.ts";
-
 import { quoteName, isMulti, hasInlineOptions } from "../column-types/ddl.ts";
 import { OptionsManager } from "../options/manager.ts";
 import { dataTableName } from "../schema/manager.ts";

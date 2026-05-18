@@ -10,7 +10,9 @@
 import { z } from "zod";
 
 import type { RuntimeEventSink } from "../orchestrator/runtime.ts";
+import { CodingAgentRuntime } from "../orchestrator/runtime.ts";
 import type { ProtocolEvent } from "../protocol/schemas.ts";
+import { planStepSchema, todoItemSchema } from "../session/model.ts";
 import type {
   MessageContent,
   SendOptions,
@@ -18,9 +20,6 @@ import type {
   SessionConfig,
   SessionEvent,
 } from "./session-types.ts";
-
-import { CodingAgentRuntime } from "../orchestrator/runtime.ts";
-import { planStepSchema, todoItemSchema } from "../session/model.ts";
 
 interface PendingRun {
   resolve: (result: SendResult) => void;

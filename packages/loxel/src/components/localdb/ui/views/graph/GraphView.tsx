@@ -1,5 +1,4 @@
 import type { TableSchema, GraphViewDef } from "@bizimind/localdb-sdk";
-
 import { useState, useEffect } from "react";
 import {
   BarChart,

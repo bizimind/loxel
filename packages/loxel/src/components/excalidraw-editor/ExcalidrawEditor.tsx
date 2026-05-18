@@ -6,7 +6,6 @@ import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 import type { DockviewPanelApi } from "dockview-react";
-
 import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
 
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
@@ -14,6 +13,7 @@ import { useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { useEditorStateStore } from "@/store/editor-state";
 import { useUIStore } from "@/store/ui";
+
 import "@/styles/excalidraw-theme.css";
 
 /** Lazy-loaded wrapper that renders Excalidraw with a custom MainMenu (no Open/Save/links). */

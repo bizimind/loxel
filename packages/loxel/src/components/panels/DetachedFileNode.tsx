@@ -1,5 +1,4 @@
 import type { DirEntry } from "@/api/project-files-model";
-
 import { InlineRenameInput, TreeRow } from "@/components/tree";
 import { DETACHED_FILE_DRAG_TYPE, setRowDragImage } from "@/hooks/useProjectFileDrag";
 import { dispatchOpenFile } from "@/lib/open-file";

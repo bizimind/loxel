@@ -1,22 +1,20 @@
+import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { Terminal as XTerm } from "@xterm/xterm";
 /**
  * Core terminal component using xterm.js.
  * Accepts a terminalId and optional close/create callbacks.
  */
 import type { DockviewPanelApi } from "dockview-react";
-
-import { FitAddon } from "@xterm/addon-fit";
-import { SearchAddon } from "@xterm/addon-search";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import { Terminal as XTerm } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
-
-import type { OscPayload } from "@/lib/osc-notification-parser";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { frontendLog } from "@/lib/frontend-logger";
+import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
 import { WINDOW_ID } from "@/lib/window-id";
 import { useFileSearchStore } from "@/store/file-search";

@@ -1,9 +1,8 @@
 import { createCanvas } from "@napi-rs/canvas";
 
-import type { ExcalidrawElement } from "./excalidraw-types.ts";
-
 import { FONT_FAMILIES, type FontFamilyName } from "./element-defaults.ts";
 import { generateElementId } from "./element-id.ts";
+import type { ExcalidrawElement } from "./excalidraw-types.ts";
 
 /** Properties shared by all element creation options */
 export interface BaseOptions {

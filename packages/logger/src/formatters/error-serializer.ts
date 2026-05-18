@@ -1,5 +1,4 @@
 import type { SerializedError } from "../types.ts";
-
 import { sanitizeValue } from "./sanitizer.ts";
 
 /** Maximum depth for cause chain traversal to prevent infinite loops */

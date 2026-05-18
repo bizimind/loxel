@@ -1,12 +1,11 @@
 import type { DockviewApi } from "dockview-react";
 
-import type { PanelId, PanelZone } from "./panel-config";
-import type { SidebarZone } from "./settings-store";
-import type { ToolsBarEntry } from "./worktree-tools-bar";
-
 import { collapseZone, expandZone, findZoneGroup } from "./layout-actions";
 import { usePanelBadgeStore } from "./panel-badges";
+import type { PanelId, PanelZone } from "./panel-config";
 import { ALLOWED_ZONES, ZONE_DIRECTION_MAP, getPanelTitle } from "./panel-config";
+import type { SidebarZone } from "./settings-store";
+import type { ToolsBarEntry } from "./worktree-tools-bar";
 import { getCurrentWorktreeToolsBar } from "./worktree-tools-bar";
 
 /** Maps zone -> the state key for its active panel. */

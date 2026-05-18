@@ -13,7 +13,6 @@ import {
 } from "@bizimind/coding-agent";
 
 import type { AgentEventPayload, AgentSessionOptions, AgentStatus } from "@/api/ws-protocol";
-
 import { deriveAgentStatus } from "@/api/ws-protocol";
 
 import { logger } from "./logger";

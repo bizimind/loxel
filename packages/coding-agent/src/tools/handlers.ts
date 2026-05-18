@@ -1,11 +1,9 @@
-import { createOpenRouter, type OpenRouterProvider } from "@openrouter/ai-sdk-provider";
-import { generateObject } from "ai";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { z } from "zod";
 
-import type { ToolRuntimeContext } from "./context.ts";
-import type { ToolResult } from "./contracts.ts";
+import { createOpenRouter, type OpenRouterProvider } from "@openrouter/ai-sdk-provider";
+import { generateObject } from "ai";
+import { z } from "zod";
 
 import {
   BASH_LIMITS,
@@ -20,6 +18,8 @@ import { ensureStateLayout, getSessionPaths, getStateLayout } from "../state/lay
 import { createPlanFileName } from "../utils/ids.ts";
 import { isPathWithinResolved, normalizeWorkspacePath } from "../utils/path.ts";
 import { resolveShellBinary } from "../utils/shell.ts";
+import type { ToolRuntimeContext } from "./context.ts";
+import type { ToolResult } from "./contracts.ts";
 import { isToolAllowedInProfile } from "./profile.ts";
 import {
   askUserQuestionInputSchema,

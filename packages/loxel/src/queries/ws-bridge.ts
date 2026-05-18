@@ -1,9 +1,8 @@
 import { useEffect } from "react";
 
-import type { WsMessage } from "@/api/ws-protocol";
-
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
+import type { WsMessage } from "@/api/ws-protocol";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { dispatchOpenFile } from "@/lib/open-file";
 import { consumeSavedContent } from "@/lib/save-editor-content";

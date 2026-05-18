@@ -1,10 +1,8 @@
 import type { TableSchema, ColumnMeta, ColumnDef, OptionSet } from "@bizimind/localdb-sdk";
-
 import { PencilIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import type { DataAdapter } from "@/components/localdb/ui";
-
 import { Button } from "@/components/ui/button";
 import { useQueryScope } from "@/queries/use-scope";
 

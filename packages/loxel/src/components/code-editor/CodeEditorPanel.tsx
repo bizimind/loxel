@@ -1,13 +1,11 @@
+import { useQuery } from "@tanstack/react-query";
 import type { DockviewPanelApi } from "dockview-react";
 import type { editor as monacoEditor } from "monaco-editor";
-
-import { useQuery } from "@tanstack/react-query";
 import * as monaco from "monaco-editor";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import type { TsgoDiagnostic } from "@/api/diagnostics-model";
-
 import * as api from "@/api/client";
+import type { TsgoDiagnostic } from "@/api/diagnostics-model";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";

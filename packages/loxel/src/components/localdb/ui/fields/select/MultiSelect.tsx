@@ -3,7 +3,6 @@ import type { InlineOption } from "@bizimind/localdb-sdk";
 import { Badge } from "@/components/ui/badge";
 
 import type { FieldViewProps, FieldEditProps } from "../field-props.ts";
-
 import { EmptyValue, FieldError } from "../field-ui.tsx";
 import { issueMessage } from "../issue-message.ts";
 import { registerField } from "../registry.ts";

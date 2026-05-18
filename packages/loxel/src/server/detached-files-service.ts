@@ -4,7 +4,6 @@ import { join } from "node:path";
 import type { DirEntry } from "@/api/project-files-model";
 
 import type { FileChange } from "./file-sync-service";
-
 import { FilesSyncService } from "./file-sync-service";
 import { logger } from "./logger";
 

@@ -5,7 +5,6 @@
  * click-to-navigate in the notification center overlay.
  */
 import type { ServerNotification } from "@/api/notification-model";
-
 import { getCenterApi } from "@/store/tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 

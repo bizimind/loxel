@@ -1,5 +1,4 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
-
 import { ImageIcon } from "lucide-react";
 
 import { getDisplayFilename } from "@/lib/detached-path";

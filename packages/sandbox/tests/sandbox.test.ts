@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ContainerInfo } from "../src/container-info.ts";
+import { ContainerNotFoundError, SandboxError } from "../src/errors.ts";
 import type { ExecHandle } from "../src/exec-handle.ts";
 import type {
   ExecOptions,
@@ -10,8 +11,6 @@ import type {
   SandboxProvider,
   SpawnOptions,
 } from "../src/provider.ts";
-
-import { ContainerNotFoundError, SandboxError } from "../src/errors.ts";
 import { SandboxSpecSchema } from "../src/sandbox-spec.ts";
 import { SandboxTemplate, SDK_LABEL, SDK_LABEL_VALUE } from "../src/sandbox-template.ts";
 

@@ -1,10 +1,10 @@
-import { Command } from "commander";
 import { execSync } from "node:child_process";
 
-import type { UpdateConfig } from "../update/index.ts";
+import { Command } from "commander";
 
 import { createResult } from "../result.ts";
 import { runAction } from "../runner.ts";
+import type { UpdateConfig } from "../update/index.ts";
 import { createUpdateSystem } from "../update/index.ts";
 
 export interface UpdateOptions {

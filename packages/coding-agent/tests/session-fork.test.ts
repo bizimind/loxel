@@ -1,5 +1,6 @@
-import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+
+import { MockLanguageModelV3 } from "ai/test";
 
 import {
   type TestEnv,

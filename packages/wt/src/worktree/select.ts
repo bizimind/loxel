@@ -1,6 +1,5 @@
-import type { WtConfig } from "../config/schema.ts";
-
 import { resolveConfig, getWorktreesDir } from "../config/loader.ts";
+import type { WtConfig } from "../config/schema.ts";
 import { isTTY } from "../init/detect.ts";
 import { search } from "../prompt.ts";
 import { listWorktrees, findWorktreeByName, type Worktree } from "./git.ts";

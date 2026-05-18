@@ -3,7 +3,6 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import type { SearchMatch } from "@/api/search-model";
 import type { SearchScope, WorkspacePackage } from "@/components/search/search-scope-model";
-
 import { scopeKey } from "@/components/search/search-scope-model";
 import { STORAGE_PREFIX } from "@/lib/env";
 

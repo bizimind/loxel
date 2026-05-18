@@ -6,10 +6,9 @@ import type {
   CompletionItem,
   TextDocumentPositionParams,
 } from "../../types";
-import type { ITextModelBridge } from "../ITextModelBridge";
-
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
+import type { ITextModelBridge } from "../ITextModelBridge";
 import { assertTargetTextModel } from "../ITextModelBridge";
 import { LspConnection } from "../LspConnection";
 import { toMonacoLanguageSelector } from "./common";

@@ -1,6 +1,7 @@
-import { test } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+
+import { test } from "@playwright/test";
 
 import { captureScreenshot } from "../helpers/screenshot";
 import { waitForLoxel } from "../helpers/server";

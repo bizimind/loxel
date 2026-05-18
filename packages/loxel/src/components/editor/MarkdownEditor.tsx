@@ -1,6 +1,3 @@
-import type { EditorView as ProseMirrorView } from "@milkdown/kit/prose/view";
-import type { DockviewPanelApi } from "dockview-react";
-
 /**
  * Core markdown editor component using milkdown/crepe.
  * Accepts a filePath and optional callbacks.
@@ -21,6 +18,8 @@ import {
   clearTextInCurrentBlockCommand,
 } from "@milkdown/kit/preset/commonmark";
 import { Selection } from "@milkdown/kit/prose/state";
+import type { EditorView as ProseMirrorView } from "@milkdown/kit/prose/view";
+import type { DockviewPanelApi } from "dockview-react";
 import { CheckIcon, ClipboardIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -41,6 +40,7 @@ import { rawLineToProsePosition } from "@/lib/prosemirror-position";
 import { useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
+
 import "@/styles/milkdown-theme.css";
 
 /**

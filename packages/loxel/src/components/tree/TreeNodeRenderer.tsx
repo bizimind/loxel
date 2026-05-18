@@ -1,5 +1,4 @@
 import type { FilesTreeProps, TreeNode } from "./FilesTree";
-
 import { TreeRow } from "./TreeRow";
 
 export type TreeNodeRendererProps = Pick<

@@ -1,5 +1,4 @@
 import type { SearchAddon } from "@xterm/addon-search";
-
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { SEARCH_DECORATIONS } from "./search-decorations";

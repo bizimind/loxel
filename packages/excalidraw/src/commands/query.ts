@@ -1,7 +1,6 @@
-import { createResult, formatTable, runAction } from "@bizimind/cli-common";
 import path from "node:path";
 
-import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
+import { createResult, formatTable, runAction } from "@bizimind/cli-common";
 
 import {
   findByText,
@@ -9,6 +8,7 @@ import {
   type TraversalDirection,
 } from "../elements/element-graph.ts";
 import { activeElements, findElementById } from "../elements/element-query.ts";
+import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
 import { loadFile } from "../file/excalidraw-file.ts";
 
 interface QueryOptions {

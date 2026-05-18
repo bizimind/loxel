@@ -1,5 +1,4 @@
 import type { DirEntry } from "@/api/project-files-model";
-
 import { TreeRow } from "@/components/tree";
 import { dispatchOpenFile } from "@/lib/open-file";
 import { useWorktreeUI } from "@/store/worktree-ui";

@@ -1,10 +1,9 @@
 import { Axiom } from "@axiomhq/js";
 import { Logger, AxiomJSTransport, ConsoleTransport, type LogEvent } from "@axiomhq/logging";
 
-import type { LoggerConfig, LoggerMode, LogLevel, LogSource, SerializedError } from "./types.ts";
-
 import { serializeError } from "./formatters/error-serializer.ts";
 import { sanitizeContext } from "./formatters/sanitizer.ts";
+import type { LoggerConfig, LoggerMode, LogLevel, LogSource, SerializedError } from "./types.ts";
 
 export type { LogLevel, LoggerMode, LogSource, SerializedError, LoggerConfig };
 export { serializeError } from "./formatters/error-serializer.ts";

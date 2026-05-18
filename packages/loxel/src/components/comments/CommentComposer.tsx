@@ -1,11 +1,9 @@
-import type { editor } from "monaco-editor";
-
 import { SendIcon, XIcon } from "lucide-react";
+import type { editor } from "monaco-editor";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { CreateThreadRequest } from "@/api/review-model";
-
 import { Button } from "@/components/ui/button";
 import { createContentAnchor } from "@/lib/content-anchor";
 import { frontendLog } from "@/lib/frontend-logger";

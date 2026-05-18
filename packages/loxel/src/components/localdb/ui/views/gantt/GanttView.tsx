@@ -1,5 +1,4 @@
 import type { TableSchema, GanttViewDef } from "@bizimind/localdb-sdk";
-
 import { useState, useEffect, useRef, useCallback } from "react";
 
 import type { DataAdapter } from "../../adapters/data-adapter.ts";

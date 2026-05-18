@@ -1,8 +1,7 @@
 import { mkdir, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { z } from "zod";
 
-import type { ToolProfile } from "../tools/profile.ts";
+import { z } from "zod";
 
 import {
   ensureSessionLayout,
@@ -10,6 +9,7 @@ import {
   getSessionPaths,
   getStateLayout,
 } from "../state/layout.ts";
+import type { ToolProfile } from "../tools/profile.ts";
 import {
   createBranchId,
   createCompactionId,

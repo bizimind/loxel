@@ -1,5 +1,4 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
-
 import { DatabaseIcon } from "lucide-react";
 
 import { Tab } from "./tab";

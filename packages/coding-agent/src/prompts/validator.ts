@@ -1,6 +1,5 @@
-import type { PromptTemplate } from "./templates.ts";
-
 import { CANONICAL_TOOLS } from "../tools/tool-names.ts";
+import type { PromptTemplate } from "./templates.ts";
 
 const placeholderPattern = /\$\{[^}]+\}/g;
 const toolMentionPattern = /`([A-Za-z][A-Za-z0-9]+)`/g;

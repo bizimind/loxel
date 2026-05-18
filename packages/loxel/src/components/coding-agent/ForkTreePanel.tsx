@@ -8,9 +8,8 @@
 import { GitFork } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
-import type { SessionRecordSnapshot } from "@/api/coding-agent-model";
-
 import { wsClient } from "@/api/client";
+import type { SessionRecordSnapshot } from "@/api/coding-agent-model";
 import { useActiveAgentSession } from "@/hooks/useActiveAgentSession";
 import { getBranchColor } from "@/lib/colors";
 import { cn } from "@/lib/utils";

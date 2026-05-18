@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import type { KeyCombo } from "./keybinding-schema";
-
 import { buildReverseLookup } from "./keybinding-resolver";
+import type { KeyCombo } from "./keybinding-schema";
 import {
   TEMPLATES,
   eventToKeyCombo,

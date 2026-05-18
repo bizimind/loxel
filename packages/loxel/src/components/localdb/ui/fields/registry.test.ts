@@ -1,6 +1,6 @@
-import type { ColumnDef } from "@bizimind/localdb-sdk";
-
 import { describe, expect, test } from "bun:test";
+
+import type { ColumnDef } from "@bizimind/localdb-sdk";
 
 import { defaultComponentKeyForColumn } from "./registry.ts";
 

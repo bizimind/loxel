@@ -35,7 +35,6 @@ import type {
 } from "./review-model";
 import type { UpdateState } from "./update-model";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
-
 import {
   BIN_HEADER_SIZE,
   BIN_MSG_INPUT,

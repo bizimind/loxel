@@ -1,18 +1,16 @@
-import type { DockviewPanelApi } from "dockview-react";
-import type { ReactNode } from "react";
-
 import { useQueryClient } from "@tanstack/react-query";
+import type { DockviewPanelApi } from "dockview-react";
 import { CheckIcon, CopyIcon, CrosshairIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
-import type { FilesTreeHandle, TreeNode } from "@/components/tree";
-
 import * as api from "@/api/client";
+import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 import { ProjectFileMenu } from "@/components/menus/ProjectFileMenu";
 import { DetachedFileNode } from "@/components/panels/DetachedFileNode";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
 import { ExternalFileNode } from "@/components/panels/ExternalFileNode";
+import type { FilesTreeHandle, TreeNode } from "@/components/tree";
 import { FilesTree, InlineRenameInput, TREE_PATH_ATTR } from "@/components/tree";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { showToast } from "@/components/ui/toast";

@@ -1,3 +1,6 @@
+import { mkdir, rm } from "node:fs/promises";
+import path from "node:path";
+
 /**
  * Shared test helpers for Session API tests.
  *
@@ -5,11 +8,8 @@
  * so that each topic-specific test file stays focused on its scenarios.
  */
 import { MockLanguageModelV3, convertArrayToReadableStream } from "ai/test";
-import { mkdir, rm } from "node:fs/promises";
-import path from "node:path";
 
 import type { SessionEvent, SessionEventHandlers } from "../../src/session/session-types.ts";
-
 import { Session } from "../../src/session/session.ts";
 
 // The real stream-part type from the V3 spec (extracted structurally so we

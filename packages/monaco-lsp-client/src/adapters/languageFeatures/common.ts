@@ -2,7 +2,6 @@ import * as monaco from "monaco-editor";
 import picomatch from "picomatch";
 
 import type { Command, Diagnostic, DocumentSelector, Location, LocationLink } from "../../types";
-
 import {
   CodeActionKind,
   CodeActionTriggerKind,

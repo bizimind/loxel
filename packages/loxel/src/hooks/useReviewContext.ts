@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 
 import type { ReviewContext } from "@/api/review-model";
-
 import { useCommitsQuery } from "@/queries/use-repo-queries";
 import { useRepositoryStore } from "@/store/worktree-repository";
 import { useWorktreeUI } from "@/store/worktree-ui";

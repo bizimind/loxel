@@ -5,7 +5,6 @@ import { DEFAULT_SCROLLBACK_LINES, type AgentSessionOptions } from "@/api/ws-pro
 import { STORAGE_PREFIX } from "@/lib/env";
 
 import type { PanelId } from "./panel-config";
-
 import { ALLOWED_ZONES, SIDEBAR_PANELS, SIDEBAR_ZONES } from "./panel-config";
 import { serverSettingsStorage } from "./server-storage";
 
@@ -92,7 +91,6 @@ export interface IndentationOverride {
 // ---------------------------------------------------------------------------
 
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
-
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
 
 export interface EditorSettings {

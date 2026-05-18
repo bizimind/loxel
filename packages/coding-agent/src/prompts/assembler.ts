@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
 
-import type { SessionRecord } from "../session/model.ts";
-import type { CanonicalToolName } from "../tools/tool-names.ts";
-
 import { REMINDER_DEFAULTS } from "../core/constants.ts";
+import type { SessionRecord } from "../session/model.ts";
 import { buildCapabilityFallbackHints, normalizeDeclaredTools } from "../tools/capabilities.ts";
+import type { CanonicalToolName } from "../tools/tool-names.ts";
 import { baseSystemPrompt, planModePrompt, toolReminderTemplate } from "./templates.ts";
 import { validatePromptRender } from "./validator.ts";
 

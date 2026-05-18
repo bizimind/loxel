@@ -6,13 +6,12 @@
 import { PencilIcon, RotateCcwIcon, SearchIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
-import type { ActionCategory, ActionId } from "@/store/keybindings/action-registry";
-import type { KeyCombo } from "@/store/keybindings/keybinding-schema";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { KeyComboDisplay } from "@/components/ui/key-combo-display";
+import type { ActionCategory, ActionId } from "@/store/keybindings/action-registry";
 import { ACTIONS } from "@/store/keybindings/action-registry";
+import type { KeyCombo } from "@/store/keybindings/keybinding-schema";
 import { TEMPLATES } from "@/store/keybindings/keybinding-schema";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
 

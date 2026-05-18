@@ -1,7 +1,6 @@
 import { XIcon } from "lucide-react";
 
 import type { ServerNotification } from "@/api/notification-model";
-
 import { dayjs } from "@/lib/dayjs";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { cn } from "@/lib/utils";

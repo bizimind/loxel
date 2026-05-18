@@ -3,11 +3,10 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { RouteContext } from "./routes";
-import type { WorktreeResources } from "./server-state";
-
 import { DetachedFilesService } from "./detached-files-service";
+import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
+import type { WorktreeResources } from "./server-state";
 
 describe("detached file project destinations", () => {
   let root: string;

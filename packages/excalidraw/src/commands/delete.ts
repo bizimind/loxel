@@ -1,5 +1,6 @@
-import { createResult, runAction } from "@bizimind/cli-common";
 import path from "node:path";
+
+import { createResult, runAction } from "@bizimind/cli-common";
 
 import { cleanupBindings } from "../binding/arrow-binding.ts";
 import { collectCascadeTargets } from "../elements/element-graph.ts";

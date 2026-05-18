@@ -1,13 +1,11 @@
 import type { editor } from "monaco-editor";
 import type { RefObject } from "react";
-
 import { useEffect, useRef } from "react";
 
 import { cn } from "@/lib/utils";
 
 import type { ChangePair } from "./change-regions";
 import type { CollapsibleRegion } from "./unchanged-regions";
-
 import { VIEW_ZONE_HEIGHT } from "./unchanged-regions";
 
 type IStandaloneCodeEditor = editor.IStandaloneCodeEditor;

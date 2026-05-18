@@ -1,7 +1,6 @@
 import type { TableSchema } from "@bizimind/localdb-sdk";
 
 import type { DataAdapter } from "@/components/localdb/ui";
-
 import { DataTable as UIDataTable } from "@/components/localdb/ui";
 
 interface Props {

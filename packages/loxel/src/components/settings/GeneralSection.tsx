@@ -8,9 +8,8 @@ import {
 } from "lucide-react";
 import { useCallback } from "react";
 
-import type { UpdateState } from "@/api/update-model";
-
 import * as api from "@/api/client";
+import type { UpdateState } from "@/api/update-model";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { queryKeys } from "@/queries/query-keys";

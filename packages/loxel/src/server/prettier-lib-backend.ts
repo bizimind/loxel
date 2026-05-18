@@ -1,7 +1,6 @@
 import { join } from "node:path";
 
 import type { FormatterBackend } from "./formatter-backends";
-
 import { logger } from "./logger";
 
 const log = logger.child("format");

@@ -1,11 +1,11 @@
-import { $ } from "bun";
 import { readdir } from "node:fs/promises";
 import { join, sep } from "node:path";
+
+import { $ } from "bun";
 
 import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 
 import type { FileChange } from "./file-sync-service";
-
 import { FilesSyncService } from "./file-sync-service";
 import { logger } from "./logger";
 

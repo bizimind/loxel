@@ -1,9 +1,8 @@
 import { ChevronRightIcon, CopyIcon } from "lucide-react";
 import { memo, useCallback, useState } from "react";
 
-import type { RawEvent } from "@/store/agent-devtools";
-
 import { cn } from "@/lib/utils";
+import type { RawEvent } from "@/store/agent-devtools";
 
 /** Color mapping for event type categories. */
 function badgeColor(type: string): string {

@@ -1,13 +1,12 @@
-import type { ServerWebSocket } from "bun";
-
-import { openDatabase } from "@bizimind/localdb-sdk";
-import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
 import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
+import { openDatabase } from "@bizimind/localdb-sdk";
+import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
+import type { ServerWebSocket } from "bun";
+
 import type { WorktreeEntry } from "@/api/git-models";
 import type { AgentEventPayload, WsClientMessage, WsMessage } from "@/api/ws-protocol";
-
 import {
   BIN_HEADER_SIZE,
   BIN_MSG_INPUT,
@@ -15,15 +14,6 @@ import {
   encodeBinaryFrame,
   parseBinaryHeader,
 } from "@/api/ws-protocol";
-
-import type {
-  ClientState,
-  ProjectState,
-  ResolvedFilePath,
-  WorktreeResources,
-  WsData,
-  WorktreeLspType,
-} from "./server-state";
 
 import { AgentManager } from "./agent-manager";
 import { AstroLspManager } from "./astro-lsp-manager";
@@ -53,6 +43,14 @@ import { handleRequest } from "./routes";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
 import { createServerPerfMonitor } from "./server-perf-monitor";
+import type {
+  ClientState,
+  ProjectState,
+  ResolvedFilePath,
+  WorktreeResources,
+  WsData,
+  WorktreeLspType,
+} from "./server-state";
 import { resolveLoginShellEnv } from "./shell-env";
 import { recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";

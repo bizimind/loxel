@@ -1,9 +1,9 @@
-import type { PluginOption } from "vite";
+import { copyFileSync, mkdirSync } from "node:fs";
+import path from "node:path";
 
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { copyFileSync, mkdirSync } from "node:fs";
-import path from "node:path";
+import type { PluginOption } from "vite";
 import { defineConfig } from "vite";
 import electron from "vite-plugin-electron";
 

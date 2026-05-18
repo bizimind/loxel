@@ -9,12 +9,10 @@
  * multi-instance sync via the notification store.
  */
 import type { wsClient as WsClientType } from "@/api/client";
-
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { useSettingsStore } from "@/store/settings-store";
 
 import type { OscPayload } from "./osc-notification-parser";
-
 import { parseOsc777, parseOsc9, parseOsc99 } from "./osc-notification-parser";
 
 // Byte constants

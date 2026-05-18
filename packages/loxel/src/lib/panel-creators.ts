@@ -7,9 +7,8 @@
  */
 import type { DockviewApi } from "dockview-react";
 
-import type { SplitPosition } from "@/components/dockview/default-layout";
-
 import * as api from "@/api/client";
+import type { SplitPosition } from "@/components/dockview/default-layout";
 import { nextPanelTitle } from "@/components/dockview/default-layout";
 import { renameEditorCacheKey, setEditorContent } from "@/components/editor/MarkdownEditor";
 import { renameDrawingCacheKey } from "@/components/excalidraw-editor/ExcalidrawEditor";

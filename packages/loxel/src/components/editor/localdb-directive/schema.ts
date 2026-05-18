@@ -1,6 +1,5 @@
 import type { NodeType, Node } from "@milkdown/kit/prose/model";
 import type { ParserState, SerializerState, MarkdownNode } from "@milkdown/kit/transformer";
-
 import { $nodeSchema } from "@milkdown/kit/utils";
 
 /**

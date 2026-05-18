@@ -1,6 +1,7 @@
-import { Glob } from "bun";
 import { existsSync, mkdirSync, readlinkSync, symlinkSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+
+import { Glob } from "bun";
 
 /** Matches a hex commit hash (4–40 chars). */
 export const REF_PATTERN = /^[a-f0-9]{4,40}$/i;

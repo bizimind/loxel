@@ -2,12 +2,11 @@ import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import type { DetectedFormatter } from "@/api/client";
-import type { FormatterOverride } from "@/lib/formatting-model";
-import type { IndentationOverride } from "@/store/settings-store";
-
 import * as api from "@/api/client";
 import { Input } from "@/components/ui/input";
+import type { FormatterOverride } from "@/lib/formatting-model";
 import { cn } from "@/lib/utils";
+import type { IndentationOverride } from "@/store/settings-store";
 import { DEFAULT_EDITOR_SETTINGS, useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
 

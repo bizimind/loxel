@@ -1,5 +1,6 @@
-import { $ } from "bun";
 import { describe, expect, test } from "bun:test";
+
+import { $ } from "bun";
 
 import { commit, createRepo, writeFile } from "./test-utils";
 import {

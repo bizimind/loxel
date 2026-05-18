@@ -2,7 +2,6 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import type { LogLevel } from "@/api/log-entry-model";
-
 import { STORAGE_PREFIX } from "@/lib/env";
 import { toggleSet } from "@/lib/set-utils";
 

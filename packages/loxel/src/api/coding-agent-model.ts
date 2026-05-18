@@ -2,7 +2,6 @@
  * Pure functions to convert coding-agent protocol events into renderable timeline items.
  */
 import type { PlanStep, SessionRecord, TodoItem } from "@bizimind/coding-agent/schemas";
-
 import { planStepSchema, todoItemSchema } from "@bizimind/coding-agent/schemas";
 import { z } from "zod";
 

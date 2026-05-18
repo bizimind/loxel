@@ -4,7 +4,6 @@ import type {
   Header,
   VisibilityState,
 } from "@tanstack/react-table";
-
 import {
   createColumnHelper,
   flexRender,
@@ -15,7 +14,6 @@ import { PencilLineIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { CommitInfo } from "@/api/git-models";
-
 import { isUncommittedHash } from "@/api/git-models";
 import { useCommitsWithUncommitted } from "@/hooks/useCommitsWithUncommitted";
 import { cn } from "@/lib/utils";
@@ -23,12 +21,11 @@ import { useCommitsQuery } from "@/queries/use-repo-queries";
 import { useRepositoryStore } from "@/store/worktree-repository";
 import { getCurrentWorktreeUI, useWorktreeUI } from "@/store/worktree-ui";
 
-import type { LayoutNode } from "./layout";
-
 import { CommitContextMenu } from "../menus/CommitMenu";
 import { BranchLine } from "./BranchLine";
 import { CommitNode } from "./CommitNode";
 import { REF_LABELS_WIDTH } from "./constants";
+import type { LayoutNode } from "./layout";
 import { calculateLayout } from "./layout";
 
 function formatRelativeTime(dateStr: string): string {

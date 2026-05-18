@@ -1,17 +1,14 @@
-import type { editor } from "monaco-editor";
-
 import { MessageSquareCheckIcon, MessageSquareDotIcon, MessageSquarePlusIcon } from "lucide-react";
+import type { editor } from "monaco-editor";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { PlacedThread } from "@/api/review-model";
-
 import { cn } from "@/lib/utils";
 
 import type { ChangeRegion } from "./change-regions";
-import type { LineRange } from "./unchanged-regions";
-
 import { buildLineChangeMap } from "./change-regions";
+import type { LineRange } from "./unchanged-regions";
 import { VIEW_ZONE_HEIGHT } from "./unchanged-regions";
 
 type IStandaloneCodeEditor = editor.IStandaloneCodeEditor;

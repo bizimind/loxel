@@ -1,7 +1,6 @@
-import { createResult, runAction } from "@bizimind/cli-common";
 import path from "node:path";
 
-import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
+import { createResult, runAction } from "@bizimind/cli-common";
 
 import { withDom } from "../dom-shim.ts";
 import {
@@ -19,6 +18,7 @@ import {
   type TextOptions,
 } from "../elements/element-factory.ts";
 import { validateIdUnique } from "../elements/element-id.ts";
+import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
 import { loadFile, saveFile } from "../file/excalidraw-file.ts";
 
 interface DrawResult {

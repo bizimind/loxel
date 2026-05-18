@@ -1,9 +1,9 @@
-import { $ } from "bun";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
-import type { TempRepo } from "./test-utils";
+import { $ } from "bun";
 
 import { getBranches, getRefs, getStashes } from "./refs";
+import type { TempRepo } from "./test-utils";
 import { branch, checkoutBranch, commit, createRepo, tag, writeFile } from "./test-utils";
 
 let template: TempRepo;

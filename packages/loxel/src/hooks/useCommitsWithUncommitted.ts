@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 
 import type { CommitInfo } from "@/api/git-models";
-
 import { injectUncommittedCommits } from "@/lib/uncommitted-commits";
 import { useCommitsQuery, useWorktreeStatusesQuery } from "@/queries/use-repo-queries";
 import { useWorktreeUI } from "@/store/worktree-ui";

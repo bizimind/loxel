@@ -1,6 +1,5 @@
-import type { SessionRecord } from "../session/model.ts";
-
 import { REMINDER_DEFAULTS } from "../core/constants.ts";
+import type { SessionRecord } from "../session/model.ts";
 
 function defaultsForKey(key: string): { cooldown: number; maxRepeats: number } {
   switch (key) {

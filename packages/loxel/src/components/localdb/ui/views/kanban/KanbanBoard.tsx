@@ -1,6 +1,5 @@
 import type { TableSchema, KanbanViewDef, InlineOption, ColumnDef } from "@bizimind/localdb-sdk";
 import type React from "react";
-
 import { useState, useEffect } from "react";
 
 import { dayjs } from "@/lib/dayjs";

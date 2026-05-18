@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-
 import { ErrorBoundary } from "react-error-boundary";
 
 import { frontendLog } from "@/lib/frontend-logger";

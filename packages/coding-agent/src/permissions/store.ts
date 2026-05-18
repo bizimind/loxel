@@ -2,9 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
-import type { ApprovalDecision, PermissionFile, PermissionRule } from "./model.ts";
-
 import { ensureStateLayout, getStateLayout } from "../state/layout.ts";
+import type { ApprovalDecision, PermissionFile, PermissionRule } from "./model.ts";
 import { permissionFileSchema } from "./model.ts";
 
 const EMPTY_FILE: PermissionFile = { version: 1, updatedAt: new Date(0).toISOString(), rules: [] };

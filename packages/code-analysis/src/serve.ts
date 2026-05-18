@@ -3,10 +3,9 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { AnalysisPlugin, VizType } from "./plugin.ts";
-
 import _networkGraphHtml from "../resources/network-graph/index.html" with { type: "text" };
 import _treemapHtml from "../resources/treemap/index.html" with { type: "text" };
+import type { AnalysisPlugin, VizType } from "./plugin.ts";
 
 const HTML: Record<VizType, string> = {
   treemap: _treemapHtml as unknown as string,

@@ -1,9 +1,7 @@
 import type { DockviewApi } from "dockview-react";
 
-import type { PanelId } from "@/store/panel-config";
-import type { ToolsBarEntry } from "@/store/worktree-tools-bar";
-
 import { collapseZone, expandZone, getGroupZone } from "@/store/layout-actions";
+import type { PanelId } from "@/store/panel-config";
 import {
   ZONE_DIRECTION_MAP,
   ZONE_INITIAL_SIZES,
@@ -13,6 +11,7 @@ import {
 } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { buildToolbarEntries, getEffectiveLayoutConfig } from "@/store/settings-store";
+import type { ToolsBarEntry } from "@/store/worktree-tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 

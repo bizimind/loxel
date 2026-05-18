@@ -1,5 +1,4 @@
 import type { NodeViewConstructor } from "@milkdown/kit/prose/view";
-
 import { $view } from "@milkdown/kit/utils";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";

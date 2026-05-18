@@ -2,11 +2,10 @@ import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { ModelEntry } from "@/store/settings-store";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
+import type { ModelEntry } from "@/store/settings-store";
 
 interface ModelFormDialogProps {
   open: boolean;

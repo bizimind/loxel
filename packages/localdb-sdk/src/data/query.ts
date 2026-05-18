@@ -1,10 +1,9 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 
-import type { ColumnSpec } from "./crud.ts";
-
 import { isFormula, quoteName } from "../column-types/ddl.ts";
 import { dataTableName, validateColumnName, validateTableName } from "../schema/manager.ts";
 import { parseQueryOptions } from "../validation/schemas.ts";
+import type { ColumnSpec } from "./crud.ts";
 
 export type FilterOperator =
   | "eq"

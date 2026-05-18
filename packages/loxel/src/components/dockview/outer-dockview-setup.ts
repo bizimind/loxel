@@ -6,10 +6,9 @@
  */
 import type { DockviewApi } from "dockview-react";
 
-import type { PanelId } from "@/store/panel-config";
-
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { getGroupZone } from "@/store/layout-actions";
+import type { PanelId } from "@/store/panel-config";
 import { ALLOWED_ZONES } from "@/store/panel-config";
 import { movePanelToZone, movePanel, setDockviewApi } from "@/store/tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";

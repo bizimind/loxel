@@ -13,7 +13,6 @@ import {
 import { useMemo, useState } from "react";
 
 import type { BranchInfo, RefInfo } from "@/api/git-models";
-
 import { BranchContextMenu } from "@/components/menus/BranchMenu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

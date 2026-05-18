@@ -1,5 +1,6 @@
-import { $ } from "bun";
 import path from "node:path";
+
+import { $ } from "bun";
 
 export async function isBareRepo(cwd: string): Promise<boolean> {
   const result = await $`git -C ${cwd} rev-parse --is-bare-repository`.text();

@@ -1,10 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
-
 import { useCallback, useState } from "react";
 
-import type { DirEntry } from "@/api/project-files-model";
-
 import * as api from "@/api/client";
+import type { DirEntry } from "@/api/project-files-model";
 import { showToast } from "@/components/ui/toast";
 import { toAbsoluteDir } from "@/lib/detached-path";
 import { fileParentDir, pathName } from "@/lib/project-file-helpers";

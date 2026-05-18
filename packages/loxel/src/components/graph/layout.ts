@@ -1,5 +1,4 @@
 import type { CommitInfo } from "@/api/git-models";
-
 import { getBranchColor } from "@/lib/colors";
 
 export interface LayoutNode {

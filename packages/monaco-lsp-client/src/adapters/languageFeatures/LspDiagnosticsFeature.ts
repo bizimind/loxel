@@ -8,7 +8,6 @@ import type {
   PublishDiagnosticsParams,
   UnchangedDocumentDiagnosticReport,
 } from "../../types";
-
 import { api, capabilities } from "../../types";
 import { Disposable, DisposableStore } from "../../utils";
 import { LspConnection } from "../LspConnection";

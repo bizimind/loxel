@@ -2,12 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, rm, symlink } from "node:fs/promises";
 import path from "node:path";
 
-import type { ToolRuntimeContext } from "../src/tools/context.ts";
-
 import { READ_LIMITS } from "../src/core/constants.ts";
 import { PermissionStore } from "../src/permissions/store.ts";
 import { SessionStore } from "../src/session/store.ts";
 import { normalizeDeclaredTools } from "../src/tools/capabilities.ts";
+import type { ToolRuntimeContext } from "../src/tools/context.ts";
 import { invokeToolByName } from "../src/tools/handlers.ts";
 import { TaskManager } from "../src/tools/task-manager.ts";
 

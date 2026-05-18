@@ -1,7 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import type { CommentThread, DiffFileContext } from "../api/review-model";
-
 import { createContentAnchor } from "../lib/content-anchor";
 
 function mockGitCommands(

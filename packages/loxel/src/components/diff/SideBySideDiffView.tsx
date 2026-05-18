@@ -1,12 +1,10 @@
-import type { editor } from "monaco-editor";
-
 import { useQuery } from "@tanstack/react-query";
+import type { editor } from "monaco-editor";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import * as api from "@/api/client";
 import type { TsgoDiagnostic } from "@/api/diagnostics-model";
 import type { FileDiff } from "@/api/diff-model";
-
-import * as api from "@/api/client";
 import { fileDiffPath } from "@/api/diff-model";
 import { AddCommentButton } from "@/components/comments/AddCommentButton";
 import { CommentComposer } from "@/components/comments/CommentComposer";
@@ -20,10 +18,9 @@ import { useCommentStore } from "@/store/comments";
 import { useUIStore } from "@/store/ui";
 import { useReviewStore } from "@/store/worktree-reviews";
 
-import type { ViewZoneDescriptor } from "./EditorPanel";
-
 import { buildChangeRegions, buildScrollAlignment } from "./change-regions";
 import { DiffGutter } from "./DiffGutter";
+import type { ViewZoneDescriptor } from "./EditorPanel";
 import { EditorPanel } from "./EditorPanel";
 import { LineNumbersColumn } from "./LineNumbersColumn";
 import { VIEW_ZONE_HEIGHT, adjustAlignmentSections } from "./unchanged-regions";

@@ -1,3 +1,6 @@
+import { Connection } from "./connection.ts";
+import { ChannelError, InvalidStateError } from "./errors.ts";
+import { getLogger } from "./logger.ts";
 import type { BinaryFrame, ClientId, PeerInfo, ServerEnvelope } from "./protocol.ts";
 import type {
   AnyEventHandler,
@@ -8,10 +11,6 @@ import type {
   EventHandler,
   ResolvedChannelClientOptions,
 } from "./types.ts";
-
-import { Connection } from "./connection.ts";
-import { ChannelError, InvalidStateError } from "./errors.ts";
-import { getLogger } from "./logger.ts";
 
 /**
  * Default options for ChannelClient.

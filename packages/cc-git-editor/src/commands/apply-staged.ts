@@ -6,9 +6,10 @@
  * using git hash-object and update-index.
  */
 
-import { Glob } from "bun";
 import { rm } from "fs/promises";
 import { join } from "path";
+
+import { Glob } from "bun";
 
 import { getGitDir, runGit } from "../utils/git.ts";
 

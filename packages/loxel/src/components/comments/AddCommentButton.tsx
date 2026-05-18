@@ -1,6 +1,5 @@
-import type { editor } from "monaco-editor";
-
 import { MessageSquarePlusIcon } from "lucide-react";
+import type { editor } from "monaco-editor";
 import { useEffect, useRef } from "react";
 
 import { Button } from "@/components/ui/button";

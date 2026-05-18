@@ -1,6 +1,5 @@
-import type { FormattingSettings } from "@/lib/formatting-model";
-
 import * as api from "@/api/client";
+import type { FormattingSettings } from "@/lib/formatting-model";
 import { frontendLog } from "@/lib/frontend-logger";
 import { useEditorStateStore } from "@/store/editor-state";
 

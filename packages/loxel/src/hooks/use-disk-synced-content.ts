@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 /**
  * Shared hook for disk-synced editor content.
  * Handles React Query fetching, editor state machine,
@@ -7,8 +8,6 @@
  * and handles its own imperative update mechanism (Monaco setValue, Crepe action, Excalidraw updateScene).
  */
 import type { MutableRefObject } from "react";
-
-import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import * as api from "@/api/client";

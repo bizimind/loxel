@@ -2,11 +2,10 @@ import { create } from "zustand";
 import { createJSONStorage, persist, subscribeWithSelector } from "zustand/middleware";
 
 import type { AddWorktreePlan, RemoveWorktreePlan } from "@/api/client";
-import type { WorktreeEntry } from "@/api/git-models";
-import type { EnrichedProject } from "@/api/project-model";
-
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
+import type { WorktreeEntry } from "@/api/git-models";
+import type { EnrichedProject } from "@/api/project-model";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { toggleSet } from "@/lib/set-utils";
 

@@ -1,9 +1,10 @@
-import { Menu, app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+import { Menu, app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 const IS_DEV = !!process.env.VITE_DEV_SERVER_URL;
 const SERVER_PORT = IS_DEV ? 7434 : 7433;

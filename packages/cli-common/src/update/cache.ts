@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+
 import { z } from "zod";
 
 import { compareVersions } from "./checker.ts";

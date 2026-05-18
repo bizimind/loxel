@@ -1,5 +1,4 @@
 import type { DockviewApi, IDockviewReactProps, SerializedDockview } from "dockview-react";
-
 import { DockviewReact } from "dockview-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 

@@ -1,5 +1,4 @@
 import type { LucideIcon } from "lucide-react";
-
 import {
   BotIcon,
   BrainCircuitIcon,
@@ -16,13 +15,12 @@ import {
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
-import type { SettingsState } from "@/store/settings-store";
-
 import * as api from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
 import { frontendLog } from "@/lib/frontend-logger";
 import { syncSchemas } from "@/lib/schema-sync";
+import type { SettingsState } from "@/store/settings-store";
 import {
   getDirtyWtConfigs,
   selectIsWtConfigDirty,

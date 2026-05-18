@@ -1,7 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
-import type { TempRepo } from "./test-utils";
-
 import {
   getCommitDiff,
   getRangeDiff,
@@ -9,6 +7,7 @@ import {
   getUnstagedDiff,
   getWorkingTreeDiff,
 } from "./diff";
+import type { TempRepo } from "./test-utils";
 import { commit, createRepo, deleteFile, renameFile, stageFile, writeFile } from "./test-utils";
 
 /**

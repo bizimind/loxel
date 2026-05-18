@@ -1,15 +1,14 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 
 import type { ColumnDef, FormulaColumnDef, InlineOption } from "../column-types/column-def.ts";
-import type { QueryOptions, Page } from "./query.ts";
-import type { InsertResult, UpdateResult, ValidationIssue } from "./validate.ts";
-
 import { quoteName, isFormula, isMulti, hasInlineOptions } from "../column-types/ddl.ts";
 import { evaluateFormula } from "../formula/evaluator.ts";
 import { OptionsManager } from "../options/manager.ts";
 import { dataTableName, validateTableName } from "../schema/manager.ts";
 import { parseRowPayload } from "../validation/schemas.ts";
+import type { QueryOptions, Page } from "./query.ts";
 import { queryTable } from "./query.ts";
+import type { InsertResult, UpdateResult, ValidationIssue } from "./validate.ts";
 import { validateRow, findUniqueViolations } from "./validate.ts";
 
 export type ColumnSpec = { name: string; def: ColumnDef; id: number };

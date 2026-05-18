@@ -1,5 +1,6 @@
-import { createResult, runAction } from "@bizimind/cli-common";
 import path from "node:path";
+
+import { createResult, runAction } from "@bizimind/cli-common";
 
 import { findElementByIdOrThrow } from "../elements/element-query.ts";
 import { bumpVersion, loadFile, saveFile } from "../file/excalidraw-file.ts";

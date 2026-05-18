@@ -5,9 +5,8 @@ import type {
   ServerCapabilities,
   TextDocumentChangeRegistrationOptions,
 } from "../types";
-import type { IDisposable } from "../utils";
-
 import { Capability, api, capabilities, TextDocumentSyncKind } from "../types";
+import type { IDisposable } from "../utils";
 import { Disposable } from "../utils";
 
 /**

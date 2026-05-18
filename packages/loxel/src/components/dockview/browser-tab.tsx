@@ -1,10 +1,8 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
-
 import { GlobeIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { BrowserPanelParams } from "@/components/browser/BrowserPanel";
-
 import { ContextMenuItem } from "@/components/ui/context-menu";
 import { createBrowser } from "@/lib/panel-creators";
 

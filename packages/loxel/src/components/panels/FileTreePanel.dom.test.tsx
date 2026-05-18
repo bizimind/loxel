@@ -1,7 +1,7 @@
-import type { ReactNode } from "react";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import type { ReactNode } from "react";
 
 import { setActiveWorktreeKey } from "@/store/worktree-store";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";

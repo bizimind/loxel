@@ -1,5 +1,4 @@
 import type { Pointer } from "bun:ffi";
-
 import { FFIType, dlopen, ptr, read, toArrayBuffer } from "bun:ffi";
 
 const CF = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
