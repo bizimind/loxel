@@ -24,6 +24,9 @@
     "oxlint-tsgolint": "^0.21.1",
     "typescript": "^5"
   },
+  "overrides": {
+    "devalue": "^5.8.1"
+  },
   "patchedDependencies": {
     "@excalidraw/excalidraw@0.18.0": "patches/@excalidraw%2Fexcalidraw@0.18.0.patch"
   }
