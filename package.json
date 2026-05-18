@@ -22,7 +22,7 @@
     "oxfmt": "^0.24.0",
     "oxlint": "1.60.0",
     "oxlint-tsgolint": "^0.21.1",
-    "typescript": "^5"
+    "typescript": "^6"
   },
   "overrides": {
     "devalue": ">=5.8.1",
