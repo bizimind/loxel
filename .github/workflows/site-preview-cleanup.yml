@@ -30,6 +30,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          set -o pipefail
           if [ "$EVENT_NAME" = "pull_request" ]; then
             BRANCH="$BRANCH_PR"
           else

@@ -36,6 +36,7 @@ jobs:
       - name: Deploy to Cloudflare Pages
         id: deploy
         run: |
+          set -o pipefail
           OUTPUT=$(bunx wrangler pages deploy packages/site/dist --project-name loxel --branch "$BRANCH" 2>&1 | tee /dev/stderr)
           echo "url=$(echo "$OUTPUT" | sed -n 's/.*Deployment alias URL: //p')" >> "$GITHUB_OUTPUT"
         env:
