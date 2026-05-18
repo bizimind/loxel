@@ -84,17 +84,13 @@ function generateRandomName(): string {
  * - Converts to lowercase
  */
 function normalizeWorktreeName(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      // Replace non-alphanumeric with hyphen
-      .replace(/[^a-z0-9]+/g, "-")
-      // Remove leading and trailing hyphens
-      .replace(/^-+/, "")
-      .replace(/-+$/, "")
-      // Collapse consecutive hyphens
-      .replace(/-{2,}/g, "-")
-  );
+  let result = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-{2,}/g, "-");
+  while (result.startsWith("-")) result = result.slice(1);
+  while (result.endsWith("-")) result = result.slice(0, -1);
+  return result;
 }
 
 /**
