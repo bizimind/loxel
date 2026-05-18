@@ -2,9 +2,9 @@
 
 ## Reporting a Vulnerability
 
-Please **do not** open a public GitHub issue for security vulnerabilities.
+**Preferred:** Use [GitHub's private vulnerability reporting](https://github.com/bizimind/loxel/security/advisories/new) to report security issues directly. This enables private discussion and coordinated disclosure.
 
-Instead, email **ori.100000@gmail.com** with:
+**Alternative:** Email **ori.100000@gmail.com** with:
 
 - A description of the vulnerability
 - Steps to reproduce
