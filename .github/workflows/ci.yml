@@ -216,7 +216,7 @@ jobs:
         package: ${{ fromJson(needs.discover.outputs.build) }}
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
       - uses: oven-sh/setup-bun@v2
@@ -238,7 +238,7 @@ jobs:
         package: ${{ fromJson(needs.discover.outputs.typecheck) }}
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
       - uses: oven-sh/setup-bun@v2
