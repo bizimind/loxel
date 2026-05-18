@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/wt",
-  "version": "0.1.53",
+  "version": "0.1.54",
   "description": "CLI for managing git worktrees with port offsetting, unique naming, and hooks",
   "type": "module",
   "exports": {
