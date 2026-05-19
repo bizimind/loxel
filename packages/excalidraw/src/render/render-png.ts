@@ -16,6 +16,10 @@ interface RenderOptions {
  * Uses @excalidraw/element's renderElement with rough.js to draw directly
  * onto an @napi-rs/canvas surface (provided by the dom-shim), bypassing
  * the previous SVG → resvg-wasm pipeline.
+ *
+ * Dark mode rendering matches the excalidraw editor: elements are rendered
+ * in light-mode colors, then composited with the CSS filter
+ * `invert(93%) hue-rotate(180deg)` onto a dark background.
  */
 export async function renderToPng(file: ExcalidrawFile, opts: RenderOptions): Promise<Uint8Array> {
   return withDom(async () => {
@@ -67,34 +71,23 @@ export async function renderToPng(file: ExcalidrawFile, opts: RenderOptions): Pr
     const width = Math.abs(maxX - minX) + opts.padding * 2;
     const height = Math.abs(maxY - minY) + opts.padding * 2;
 
-    // Create canvas via document.createElement — goes through the dom-shim
-    // which returns a hybrid canvas backed by @napi-rs/canvas
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.ceil(width * opts.scale);
-    canvas.height = Math.ceil(height * opts.scale);
+    const canvasW = Math.ceil(width * opts.scale);
+    const canvasH = Math.ceil(height * opts.scale);
 
-    const context = canvas.getContext("2d")!;
+    // Render elements in light mode onto a temp canvas, then composite onto
+    // the final canvas with excalidraw's dark mode CSS filter. This matches
+    // the editor: elements use light-mode colors, the filter transforms them.
+    const DARK_FILTER = "invert(93%) hue-rotate(180deg)";
 
-    // Bootstrap: reset transform, apply scale
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.scale(opts.scale, opts.scale);
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = canvasW;
+    tempCanvas.height = canvasH;
+    const tempCtx = tempCanvas.getContext("2d")!;
 
-    // Fill background (always dark mode)
-    const viewBgColor = (file.appState.viewBackgroundColor as string) ?? "transparent";
-    const isTransparent = viewBgColor === "transparent";
-    const bgColor = isTransparent ? "transparent" : "#121212";
+    tempCtx.setTransform(1, 0, 0, 1, 0, 0);
+    tempCtx.scale(opts.scale, opts.scale);
 
-    if (!isTransparent) {
-      context.fillStyle = bgColor;
-      context.fillRect(0, 0, width, height);
-    } else {
-      context.clearRect(0, 0, width, height);
-    }
-
-    // Create rough.js canvas for hand-drawn style rendering
-    const rc = rough.canvas(canvas);
-
-    const theme = "dark";
+    const rc = rough.canvas(tempCanvas);
 
     const renderConfig = {
       imageCache: new Map(),
@@ -103,48 +96,58 @@ export async function renderToPng(file: ExcalidrawFile, opts: RenderOptions): Pr
       embedsValidationStatus: new Map(),
       elementsPendingErasure: new Set(),
       pendingFlowchartNodes: null,
-      theme,
+      theme: "light",
     };
 
     const appState = {
       scrollX: -minX + opts.padding,
       scrollY: -minY + opts.padding,
       zoom: { value: 1 },
-      theme,
+      theme: "light" as const,
       exportScale: opts.scale,
       shouldCacheIgnoreZoom: false,
       frameRendering: { enabled: false, name: false, outline: false, clip: false },
-      viewBackgroundColor: !isTransparent ? bgColor : null,
+      viewBackgroundColor: null,
       selectedElementIds: {},
       hoveredElementIds: {},
       openDialog: null,
       frameToHighlight: null,
     };
 
-    // Render each element onto the canvas
     for (const element of renderTargets) {
       // @ts-expect-error -- our loose ExcalidrawElement satisfies the library at runtime
       if (isIframeLikeElement(element)) continue;
-      // Skip bound text — rendered with its container
       // @ts-expect-error -- our loose ExcalidrawElement satisfies the library at runtime
       if (isTextElement(element) && element.containerId && elementsMap.has(element.containerId)) {
         continue;
       }
 
-      context.save();
+      tempCtx.save();
       // @ts-expect-error -- our loose ExcalidrawElement / elementsMap satisfies the library at runtime
-      renderElement(element, elementsMap, elementsMap, rc, context, renderConfig, appState);
+      renderElement(element, elementsMap, elementsMap, rc, tempCtx, renderConfig, appState);
 
       // @ts-expect-error -- our loose ExcalidrawElement satisfies the library at runtime
       const boundText = getBoundTextElement(element, elementsMap);
       if (boundText) {
         // @ts-expect-error -- our loose ExcalidrawElement / elementsMap satisfies the library at runtime
-        renderElement(boundText, elementsMap, elementsMap, rc, context, renderConfig, appState);
+        renderElement(boundText, elementsMap, elementsMap, rc, tempCtx, renderConfig, appState);
       }
-      context.restore();
+      tempCtx.restore();
     }
 
-    // Export to PNG buffer — toBuffer is added by the dom-shim's canvas hybrid
+    // Composite: dark background + filter-transformed elements
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasW;
+    canvas.height = canvasH;
+    const context = canvas.getContext("2d")!;
+
+    context.fillStyle = "#121212";
+    context.fillRect(0, 0, canvasW, canvasH);
+
+    context.filter = DARK_FILTER;
+    context.drawImage(tempCanvas, 0, 0);
+    context.filter = "none";
+
     return new Uint8Array(
       (canvas as unknown as { toBuffer(mime: string): Buffer }).toBuffer("image/png"),
     );
