@@ -225,5 +225,53 @@ function maybeCreateBoundText(
     { id: textId, type: "text" },
   ];
 
-  results.push(textEl as unknown as ExcalidrawElement);
+  const text = textEl as unknown as ExcalidrawElement;
+  centerBoundText(text, container);
+  results.push(text);
+}
+
+const BOUND_TEXT_PADDING = 5;
+
+/**
+ * Position a bound text element centered within its container.
+ *
+ * newTextElement ignores the container's position when computing text coordinates,
+ * placing the text center at (0, container.y) instead of the container center.
+ * This recomputes x/y using the same formula as excalidraw's internal positioning.
+ */
+function centerBoundText(text: ExcalidrawElement, container: ExcalidrawElement): void {
+  const textAlign = ((text as Record<string, unknown>).textAlign as string) ?? "center";
+  const verticalAlign = ((text as Record<string, unknown>).verticalAlign as string) ?? "middle";
+
+  let padX = BOUND_TEXT_PADDING;
+  let padY = BOUND_TEXT_PADDING;
+  if (container.type === "ellipse") {
+    padX += (container.width / 2) * (1 - Math.SQRT2 / 2);
+    padY += (container.height / 2) * (1 - Math.SQRT2 / 2);
+  } else if (container.type === "diamond") {
+    padX += container.width / 4;
+    padY += container.height / 4;
+  }
+
+  let availW: number;
+  let availH: number;
+  if (container.type === "ellipse") {
+    availW = Math.round((container.width / 2) * Math.SQRT2);
+    availH = Math.round((container.height / 2) * Math.SQRT2);
+  } else if (container.type === "diamond") {
+    availW = container.width / 2 - 2 * BOUND_TEXT_PADDING;
+    availH = container.height / 2 - 2 * BOUND_TEXT_PADDING;
+  } else {
+    availW = container.width - 2 * BOUND_TEXT_PADDING;
+    availH = container.height - 2 * BOUND_TEXT_PADDING;
+  }
+
+  const el = text as Record<string, unknown>;
+  if (textAlign === "left") el.x = container.x + padX;
+  else if (textAlign === "right") el.x = container.x + padX + availW - text.width;
+  else el.x = container.x + padX + (availW - text.width) / 2;
+
+  if (verticalAlign === "top") el.y = container.y + padY;
+  else if (verticalAlign === "bottom") el.y = container.y + padY + availH - text.height;
+  else el.y = container.y + padY + (availH - text.height) / 2;
 }

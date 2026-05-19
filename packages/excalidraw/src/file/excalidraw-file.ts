@@ -9,13 +9,13 @@ export interface ExcalidrawFile {
   files: Record<string, unknown>;
 }
 
-export function createEmptyFile(bgColor = "#ffffff"): ExcalidrawFile {
+export function createEmptyFile(bgColor = "#121212"): ExcalidrawFile {
   return {
     type: "excalidraw",
     version: 2,
     source: "excalidraw-cli",
     elements: [],
-    appState: { gridSize: null, viewBackgroundColor: bgColor },
+    appState: { gridSize: null, viewBackgroundColor: bgColor, theme: "dark" },
     files: {},
   };
 }
