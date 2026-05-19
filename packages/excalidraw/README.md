@@ -162,7 +162,8 @@ src/
 ├── import/
 │   └── table-parser.ts       # CSV and markdown table parser
 ├── elements/
-│   ├── element-factory.ts    # Build skeletons → convertToExcalidrawElements
+│   ├── element-factory.ts    # Build skeletons, convert via skeleton-converter
+│   ├── skeleton-converter.ts # Dispatch skeletons to @excalidraw/element factory functions
 │   ├── element-defaults.ts   # Default values (colors, sizes, fonts)
 │   ├── element-id.ts         # ID generation
 │   ├── element-query.ts      # Find elements by ID/type
@@ -177,7 +178,7 @@ src/
 
 Key dependencies:
 
-- **@excalidraw/element** — element creation and arrow binding via `convertToExcalidrawElements`
+- **@excalidraw/element** — element creation via factory functions (`newElement`, `newArrowElement`, etc.)
 - **@excalidraw/utils** — SVG export via `exportToSvg`
 - **jsdom** — DOM environment required by @excalidraw APIs
 - **canvas** — text measurement for labeled shapes (native addon)

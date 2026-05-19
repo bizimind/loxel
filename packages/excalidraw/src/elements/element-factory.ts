@@ -268,7 +268,7 @@ function prepositionBoundArrows(
 }
 
 /** Convert a global coordinate to a fixedPoint [0-1, 0-1] relative to a shape's bounding box */
-function globalToFixedPoint(
+export function globalToFixedPoint(
   globalX: number,
   globalY: number,
   shape: ExcalidrawElement,

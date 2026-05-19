@@ -6,6 +6,7 @@ import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
 import { createCanvas } from "../canvas-loader.ts";
 import { withDom } from "../dom-shim.ts";
 import { FONT_FAMILIES } from "../elements/element-defaults.ts";
+import { globalToFixedPoint } from "../elements/element-factory.ts";
 import { skeletonsToElements } from "../elements/skeleton-converter.ts";
 import { loadFile, saveFile } from "../file/excalidraw-file.ts";
 import { readStdinText } from "./stdin-ids.ts";
@@ -66,13 +67,22 @@ export async function importMermaidCommand(
       // (default 20px) with ~50px internal padding. Widen containers so text doesn't wrap.
       ensureContainersFitText(skeletons as Record<string, unknown>[]);
 
-      // Convert skeletons to full elements, preserving mermaid's multi-point arrow
-      // paths that route around obstacles. Then fix up any out-of-range fixedPoint
-      // values in bindings (mermaid's arrow positions don't always align precisely
-      // with shape edges, producing fixedPoints outside 0-1 that excalidraw treats
-      // as unbound).
+      // Save arrow binding refs before conversion — skeletonsToElements dispatches
+      // to individual factory functions that don't resolve cross-element start/end refs.
+      const arrowRefs = new Map<string, { startId?: string; endId?: string }>();
+      for (const skel of skeletons as Record<string, unknown>[]) {
+        if (skel.type !== "arrow") continue;
+        const startRef = skel.start as { id: string } | undefined;
+        const endRef = skel.end as { id: string } | undefined;
+        if (startRef || endRef) {
+          arrowRefs.set(skel.id as string, { startId: startRef?.id, endId: endRef?.id });
+        }
+      }
+
       const converted = skeletonsToElements(skeletons as Record<string, unknown>[]);
 
+      // Create bindings from saved refs, then snap fixedPoints to exact edges.
+      createArrowBindings(converted, arrowRefs);
       fixArrowBindings(converted);
       return converted;
     });
@@ -120,6 +130,64 @@ function findBoundText(elements: ExcalidrawElement[], containerId: string): stri
     (el) => el.type === "text" && (el as Record<string, unknown>).containerId === containerId,
   );
   return textEl ? ((textEl as Record<string, unknown>).text as string) : undefined;
+}
+
+/**
+ * Create startBinding/endBinding on arrows from saved skeleton start/end refs.
+ * Also updates target shapes' boundElements for bidirectional binding.
+ */
+function createArrowBindings(
+  elements: ExcalidrawElement[],
+  arrowRefs: Map<string, { startId?: string; endId?: string }>,
+): void {
+  const byId = new Map(elements.map((el) => [el.id, el]));
+
+  for (const el of elements) {
+    if (el.type !== "arrow") continue;
+    const refs = arrowRefs.get(el.id);
+    if (!refs) continue;
+    const arrow = el as Record<string, unknown>;
+
+    if (!arrow.startBinding && refs.startId) {
+      const target = byId.get(refs.startId);
+      if (target) {
+        arrow.startBinding = {
+          elementId: refs.startId,
+          fixedPoint: globalToFixedPoint(el.x, el.y, target),
+          focus: 0,
+          gap: 1,
+        };
+        appendBoundElement(target, el.id);
+      }
+    }
+
+    if (!arrow.endBinding && refs.endId) {
+      const target = byId.get(refs.endId);
+      if (target) {
+        const points = arrow.points as [number, number][];
+        const last = points[points.length - 1]!;
+        arrow.endBinding = {
+          elementId: refs.endId,
+          fixedPoint: globalToFixedPoint(el.x + last[0], el.y + last[1], target),
+          focus: 0,
+          gap: 1,
+        };
+        appendBoundElement(target, el.id);
+      }
+    }
+  }
+}
+
+function appendBoundElement(target: ExcalidrawElement, arrowId: string): void {
+  const bound =
+    ((target as Record<string, unknown>).boundElements as Array<{
+      id: string;
+      type: string;
+    }> | null) ?? [];
+  if (!bound.some((b) => b.id === arrowId)) {
+    bound.push({ id: arrowId, type: "arrow" });
+    (target as Record<string, unknown>).boundElements = bound;
+  }
 }
 
 /**

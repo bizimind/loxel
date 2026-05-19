@@ -120,7 +120,9 @@ export async function batchCommand(filePath: string, opts: BatchOptions): Promis
           const endBinding = el.endBinding as { elementId: string } | null;
           for (const binding of [startBinding, endBinding]) {
             if (!binding) continue;
-            const target = file.elements.find((e) => e.id === binding.elementId);
+            const target =
+              file.elements.find((e) => e.id === binding.elementId) ??
+              converted.find((e) => e.id === binding.elementId);
             if (target) {
               const bound = (target.boundElements as Array<{ id: string; type: string }>) ?? [];
               if (!bound.some((b) => b.id === el.id)) {
