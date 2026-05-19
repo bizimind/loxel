@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -178,13 +178,9 @@ export async function maybeAutoUpdate(
 
   // Re-exec the current command with the new binary
   // Must use process.execPath (real filesystem path) not process.argv[0] (may be internal bunfs path)
-  try {
-    execSync([process.execPath, ...argv.slice(1)].map((a) => `"${a}"`).join(" "), {
-      stdio: "inherit",
-    });
-  } catch {
-    // Command may exit with non-zero, that's fine
-  }
+  // Use spawnSync with array args to avoid shell metacharacter injection
+  const result = spawnSync(process.execPath, argv.slice(1), { stdio: "inherit" });
+  if (result.error) throw result.error;
 
   return true;
 }

@@ -1,5 +1,7 @@
 name: Generate Build Matrix
 
+permissions: {}
+
 on:
   workflow_call:
     outputs:

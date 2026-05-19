@@ -259,7 +259,7 @@ async function recordApprovalDecision(
   input: unknown,
 ): Promise<void> {
   const decisionRecord = {
-    id: `approval_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    id: `approval_${Date.now()}_${crypto.randomUUID().slice(0, 12)}`,
     timestamp: new Date().toISOString(),
     toolName,
     decision,

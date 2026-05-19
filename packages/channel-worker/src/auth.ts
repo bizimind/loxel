@@ -117,21 +117,19 @@ export async function validateJwt(
 
     return { valid: true, claims: payload as JwtClaims };
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-
     if (error instanceof jose.errors.JWTExpired) {
       return { valid: false, error: "Token expired" };
     }
     if (error instanceof jose.errors.JWTClaimValidationFailed) {
-      return { valid: false, error: `Claim validation failed: ${error.message}` };
+      return { valid: false, error: "Claim validation failed" };
     }
     if (error instanceof jose.errors.JWSSignatureVerificationFailed) {
       return { valid: false, error: "Invalid signature" };
     }
     if (error instanceof jose.errors.JOSEError) {
-      return { valid: false, error: error.message };
+      return { valid: false, error: "Token validation failed" };
     }
-    return { valid: false, error: errorMsg };
+    return { valid: false, error: "Authentication failed" };
   }
 }
 

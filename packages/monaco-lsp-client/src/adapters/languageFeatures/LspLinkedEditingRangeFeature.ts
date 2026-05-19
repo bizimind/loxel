@@ -57,7 +57,7 @@ class LspLinkedEditingRangeProvider implements monaco.languages.LinkedEditingRan
     }
 
     let wordPattern: RegExp | undefined;
-    if (result.wordPattern !== undefined) {
+    if (result.wordPattern !== undefined && result.wordPattern.length <= 500) {
       try {
         wordPattern = new RegExp(result.wordPattern);
       } catch {

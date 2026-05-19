@@ -6,5 +6,6 @@ export function json(data: unknown, status = 200): Response {
 }
 
 export function error(message: string, status = 400): Response {
-  return json({ error: message }, status);
+  const safe = message.split("\n", 1)[0];
+  return json({ error: safe }, status);
 }

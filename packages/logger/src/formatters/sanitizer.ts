@@ -17,6 +17,7 @@ const SENSITIVE_PATTERNS = [
   "privatekey",
   "access_key",
   "accesskey",
+  "stack",
 ];
 
 /** Maximum string length before truncation */
