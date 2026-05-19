@@ -24,6 +24,12 @@ export function evaluateFormula(expression: string, row: Record<string, unknown>
   // Note: "eval" and "Function" are reserved in strict mode and cannot be
   // parameter names, so we shadow them via a with-block workaround using
   // local variable re-binding at the top of the function body instead.
+  const FORBIDDEN_PATTERN =
+    /\b(constructor|__proto__|prototype|__defineGetter__|__defineSetter__|__lookupGetter__|__lookupSetter__)\b/;
+  if (FORBIDDEN_PATTERN.test(expression)) {
+    throw new FormulaError("Formula contains forbidden keyword", expression);
+  }
+
   const dangerousGlobals = [
     "process",
     "globalThis",
