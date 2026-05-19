@@ -4,6 +4,7 @@ import type { ExcalidrawElement } from "./excalidraw-types.ts";
 
 import { FONT_FAMILIES, type FontFamilyName } from "./element-defaults.ts";
 import { generateElementId } from "./element-id.ts";
+import { skeletonsToElements } from "./skeleton-converter.ts";
 
 /** Properties shared by all element creation options */
 export interface BaseOptions {
@@ -55,7 +56,7 @@ export interface FrameOptions extends BaseOptions {
   children?: string[];
 }
 
-/** Build a skeleton object for convertToExcalidrawElements */
+/** Build a skeleton object for skeletonsToElements */
 function baseSkeleton(type: string, opts: BaseOptions): Record<string, unknown> {
   return {
     id: opts.id ?? generateElementId(),
@@ -147,17 +148,15 @@ export function buildFrameSkeleton(opts: FrameOptions): Record<string, unknown> 
  * When existingElements is provided, bound arrows can reference shapes in the existing
  * file. The existing elements are NOT re-processed, only used for arrow position calculation.
  */
-export async function convertSkeletons(
+export function convertSkeletons(
   skeletons: Record<string, unknown>[],
   existingElements: ExcalidrawElement[] = [],
-): Promise<ExcalidrawElement[]> {
-  const { convertToExcalidrawElements } = await import("@excalidraw/element");
-
+): ExcalidrawElement[] {
   // Pre-process: set arrow x/y between bound shapes so the converter
   // computes meaningful fixedPoint values for the binding.
   prepositionBoundArrows(skeletons, existingElements);
 
-  // Save arrow binding refs before conversion. convertToExcalidrawElements only
+  // Save arrow binding refs before conversion. skeletonsToElements only
   // receives new skeletons, so it can't resolve start/end references to shapes
   // that already exist in the file. We'll fix up missing bindings after conversion.
   const arrowBindingRefs = new Map<string, { startId?: string; endId?: string }>();
@@ -170,10 +169,7 @@ export async function convertSkeletons(
     }
   }
 
-  const result = convertToExcalidrawElements(
-    skeletons as Parameters<typeof convertToExcalidrawElements>[0],
-    { regenerateIds: false },
-  ) as unknown as ExcalidrawElement[];
+  const result = skeletonsToElements(skeletons);
 
   // Post-process: set baseline on text elements for correct export positioning.
   // @excalidraw/utils uses `baseline` for vertical text placement in both
@@ -191,7 +187,7 @@ export async function convertSkeletons(
   }
 
   // Post-process: create bindings for arrows that reference existing elements.
-  // convertToExcalidrawElements only receives new skeletons, so it can't resolve
+  // skeletonsToElements only receives new skeletons, so it can't resolve
   // start/end refs to shapes already in the file — those arrows end up with
   // null startBinding/endBinding. Fix them up using the arrow geometry that
   // prepositionBoundArrows already computed.
@@ -229,9 +225,9 @@ export async function convertSkeletons(
   }
 
   // Post-process: update arrow points to actually span between bound shapes.
-  // convertToExcalidrawElements computes fixedPoint/binding metadata but leaves
-  // arrow points at their default small size. We use the binding data to set
-  // the correct arrow geometry.
+  // skeletonsToElements computes fixedPoint/binding metadata but leaves arrow
+  // points at their default small size. We use the binding data to set the
+  // correct arrow geometry.
   for (const el of result) {
     if (el.type !== "arrow") continue;
     repositionBoundArrow(el, allElements);
@@ -272,7 +268,7 @@ function prepositionBoundArrows(
 }
 
 /** Convert a global coordinate to a fixedPoint [0-1, 0-1] relative to a shape's bounding box */
-function globalToFixedPoint(
+export function globalToFixedPoint(
   globalX: number,
   globalY: number,
   shape: ExcalidrawElement,

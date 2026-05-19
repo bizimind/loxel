@@ -262,6 +262,25 @@ export async function withDom<T>(fn: () => T | Promise<T>): Promise<T> {
       g.getComputedStyle = win.getComputedStyle;
     }
 
+    if (!g.CSSStyleSheet) {
+      g.CSSStyleSheet = class CSSStyleSheet {
+        cssRules: { cssText: string }[] = [];
+        insertRule(rule: string, index?: number) {
+          const entry = { cssText: rule };
+          const idx = index ?? this.cssRules.length;
+          this.cssRules.splice(idx, 0, entry);
+          return idx;
+        }
+        deleteRule(index: number) {
+          this.cssRules.splice(index, 1);
+        }
+        replaceSync() {}
+        replace() {
+          return Promise.resolve(this);
+        }
+      };
+    }
+
     g.window = window;
     g.document = document;
     g.navigator = window.navigator;
