@@ -64,7 +64,7 @@
     },
     "packages/code-analysis": {
       "name": "@bizimind/code-analysis",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "bin": {
         "code-analysis": "./src/cli.ts",
       },
@@ -144,7 +144,7 @@
     },
     "packages/loxel": {
       "name": "@bizimind/loxel",
-      "version": "0.1.148",
+      "version": "0.1.149",
       "dependencies": {
         "@base-ui/react": "^1.1.0",
         "@bizimind/coding-agent": "workspace:*",
@@ -288,7 +288,7 @@
     },
     "packages/wt": {
       "name": "@bizimind/wt",
-      "version": "0.1.55",
+      "version": "0.1.56",
       "dependencies": {
         "@bizimind/cli-common": "workspace:*",
         "@inquirer/prompts": "^8.4.2",

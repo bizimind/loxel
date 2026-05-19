@@ -15,6 +15,7 @@ updates:
     groups:
       all-non-major:
         patterns: ["*"]
+        exclude-patterns: ["oxfmt"]
         update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions
