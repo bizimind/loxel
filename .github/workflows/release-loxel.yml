@@ -215,9 +215,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: blacksmith-2vcpu-macos-15
+          - os: blacksmith-6vcpu-macos-latest
             arch: arm64
-          - os: blacksmith-2vcpu-macos-15
+          - os: blacksmith-6vcpu-macos-latest
             arch: x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
