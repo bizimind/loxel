@@ -34,6 +34,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT_CONTENT_WRITE }}
 
+      - uses: pnpm/action-setup@v6
       - uses: oven-sh/setup-bun@v2
 
       - name: Bump patch version
@@ -41,7 +42,7 @@ jobs:
         run: |
           cd packages/loxel
           CURRENT=$(jq -r .version package.json)
-          NEW_VERSION=$(bunx semver -i patch "$CURRENT")
+          NEW_VERSION=$(pnpm dlx semver -i patch "$CURRENT")
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "tag=loxel-v$NEW_VERSION" >> $GITHUB_OUTPUT
 
@@ -89,10 +90,11 @@ jobs:
         with:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
+      - uses: pnpm/action-setup@v6
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build frontend
         run: bun run --cwd packages/loxel build:ui
@@ -122,10 +124,11 @@ jobs:
         with:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
+      - uses: pnpm/action-setup@v6
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build server standalone
         run: bun run --cwd packages/loxel build:server:standalone
@@ -229,10 +232,11 @@ jobs:
         with:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
+      - uses: pnpm/action-setup@v6
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build server standalone
         run: bun run --cwd packages/loxel build:server:standalone
@@ -266,8 +270,8 @@ jobs:
       - name: Build Electron app
         run: |
           cd packages/loxel
-          ELECTRON=1 bunx vite build
-          bunx electron-builder --mac --${{ matrix.arch }}
+          ELECTRON=1 pnpm dlx vite build
+          pnpm dlx electron-builder --mac --${{ matrix.arch }}
         env:
           CSC_LINK: ${{ secrets.LOXEL_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.LOXEL_CERTIFICATE_PWD }}

@@ -4,7 +4,7 @@
 
 ```bash
 # Install dependencies
-bun install
+pnpm install
 
 # Set up git hooks (runs automatically via prepare script)
 bun run prepare

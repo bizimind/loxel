@@ -1,6 +1,6 @@
 # loxel
 
-A Bun monorepo containing packages that extend Claude Code's capabilities for agent-friendly development workflows.
+A monorepo (pnpm + Bun) containing packages that extend Claude Code's capabilities for agent-friendly development workflows.
 
 ## Packages
 
@@ -23,7 +23,7 @@ A Bun monorepo containing packages that extend Claude Code's capabilities for ag
 ## Installation
 
 ```bash
-bun install
+pnpm install
 ```
 
 ## Development

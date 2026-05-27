@@ -29,20 +29,21 @@ jobs:
         with:
           node-version: 22
 
+      - uses: pnpm/action-setup@v6
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Deploy to Cloudflare Workers
         run: |
           # Set secrets (wrangler secret put is idempotent)
-          echo "$WORKOS_CLIENT_ID" | bunx wrangler secret put WORKOS_CLIENT_ID
-          echo "$AXIOM_TOKEN" | bunx wrangler secret put AXIOM_TOKEN
+          echo "$WORKOS_CLIENT_ID" | pnpm dlx wrangler secret put WORKOS_CLIENT_ID
+          echo "$AXIOM_TOKEN" | pnpm dlx wrangler secret put AXIOM_TOKEN
           # Deploy
-          bunx wrangler deploy
+          pnpm dlx wrangler deploy
         working-directory: packages/channel-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}

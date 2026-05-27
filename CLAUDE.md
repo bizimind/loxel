@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-loxel is a Bun monorepo containing packages that extend Claude Code's capabilities for agent-friendly development workflows. The packages intercept and adapt standard tools (like Git) for non-blocking agent execution while preserving normal UX for humans.
+loxel is a monorepo (pnpm for package management, Bun for runtime) containing packages that extend Claude Code's capabilities for agent-friendly development workflows. The packages intercept and adapt standard tools (like Git) for non-blocking agent execution while preserving normal UX for humans.
 
 ## Environment Setup
 
@@ -21,7 +21,7 @@ The `.env` file is copied to the worktree root by `wt add` hooks (source: `.wt-l
 ## Build Commands
 
 ```bash
-bun install                                    # Install all dependencies
+pnpm install                                   # Install all dependencies
 
 # Build individual packages (all packages with build scripts)
 bun run --cwd packages/cc-git-editor build
@@ -89,6 +89,8 @@ bun test --cwd packages/wt --test-name-pattern "validates"
 **Hook Protocol**: Tools integrate with Claude Code via JSON-over-stdin/stdout. See `cc-tool-guard/src/tool-guard.ts` for the pattern.
 
 ## Bun Guidelines
+
+**pnpm** is the package manager (`pnpm install`, `pnpm-lock.yaml`). **Bun** is the runtime (`bun run`, `bun test`, `bun build`). Do not use `bun install` or `bun add` for dependency management.
 
 Use Bun's native APIs and avoid external npm dependencies when Bun provides alternatives:
 

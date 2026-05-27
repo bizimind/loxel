@@ -34,6 +34,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT_CONTENT_WRITE }}
 
+      - uses: pnpm/action-setup@v6
       - uses: oven-sh/setup-bun@v2
 
       - name: Bump patch version
@@ -41,7 +42,7 @@ jobs:
         run: |
           cd packages/wt
           CURRENT=$(jq -r .version package.json)
-          NEW_VERSION=$(bunx semver -i patch "$CURRENT")
+          NEW_VERSION=$(pnpm dlx semver -i patch "$CURRENT")
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "tag=wt-v$NEW_VERSION" >> $GITHUB_OUTPUT
 
@@ -94,10 +95,11 @@ jobs:
         with:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
+      - uses: pnpm/action-setup@v6
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build binary
         run: bun run --cwd packages/wt build
@@ -136,10 +138,11 @@ jobs:
         with:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
+      - uses: pnpm/action-setup@v6
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build schema
         run: |

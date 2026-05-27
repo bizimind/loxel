@@ -20,6 +20,7 @@ jobs:
         with:
           node-version: "22"
 
+      - uses: pnpm/action-setup@v6
       - uses: oven-sh/setup-bun@v2
 
       - name: Delete preview deployments
@@ -44,14 +45,14 @@ jobs:
 
           echo "Cleaning up preview deployments for branch: $BRANCH"
 
-          IDS=$(bunx wrangler pages deployment list --project-name loxel --json | \
+          IDS=$(pnpm dlx wrangler pages deployment list --project-name loxel --json | \
             jq -r --arg branch "$BRANCH" \
             '.[] | select(.deployment_trigger.metadata.branch == $branch) | .id')
 
           COUNT=0
           for ID in $IDS; do
             echo "Deleting deployment: $ID"
-            bunx wrangler pages deployment delete "$ID" --project-name loxel --force
+            pnpm dlx wrangler pages deployment delete "$ID" --project-name loxel --force
             COUNT=$((COUNT + 1))
           done
 
