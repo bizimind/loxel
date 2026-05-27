@@ -298,7 +298,7 @@ jobs:
           done
 
   release:
-    needs: [build-matrix, check-and-bump, build, build-electron]
+    needs: [build-matrix, check-and-bump, build]
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 1
     steps:
@@ -318,8 +318,6 @@ jobs:
             --arg sha_darwin_arm64 "${{ needs.build.outputs.sha256_darwin-arm64 }}" \
             --arg sha_darwin_x64 "${{ needs.build.outputs.sha256_darwin-x64 }}" \
             --arg sha_linux_x64 "${{ needs.build.outputs.sha256_linux-x64 }}" \
-            --arg app_sha_arm64 "${{ needs.build-electron.outputs.sha256_dmg_arm64 }}" \
-            --arg app_sha_x64 "${{ needs.build-electron.outputs.sha256_dmg_x64 }}" \
             --arg base "$BASE" \
             '{
               version: $v,
@@ -328,11 +326,7 @@ jobs:
                 "darwin-arm64": {url: "\($base)/darwin-arm64/loxel-update-\($v).tar.gz", sha256: $sha_darwin_arm64},
                 "darwin-x64": {url: "\($base)/darwin-x64/loxel-update-\($v).tar.gz", sha256: $sha_darwin_x64},
                 "linux-x64": {url: "\($base)/linux-x64/loxel-update-\($v).tar.gz", sha256: $sha_linux_x64}
-              } | with_entries(select(.key | IN($platforms[]))),
-              app: {
-                "darwin-arm64": {url: "\($base)/app/darwin-arm64/Loxel-\($v)-mac-arm64.dmg", sha256: $app_sha_arm64},
-                "darwin-x64": {url: "\($base)/app/darwin-x64/Loxel-\($v)-mac-x64.dmg", sha256: $app_sha_x64}
-              }
+              } | with_entries(select(.key | IN($platforms[])))
             }' > manifest.json
           cat manifest.json
 
@@ -350,14 +344,10 @@ jobs:
           BASE="https://loxel.bizimind.io/loxel"
           PLATFORMS='${{ needs.build-matrix.outputs.platforms }}'
 
-          # Build download links
           LINKS=""
           for platform in $(echo "$PLATFORMS" | jq -r '.[]'); do
             LINKS="${LINKS}- [${platform} update](${BASE}/${platform}/loxel-update-${VERSION}.tar.gz)"$'\n'
           done
-          LINKS="${LINKS}"$'\n'"## App Installers"$'\n'
-          LINKS="${LINKS}- [macOS arm64](${BASE}/app/darwin-arm64/Loxel-${VERSION}-mac-arm64.dmg)"$'\n'
-          LINKS="${LINKS}- [macOS x64](${BASE}/app/darwin-x64/Loxel-${VERSION}-mac-x64.dmg)"$'\n'
 
           gh release create "${{ needs.check-and-bump.outputs.tag }}" \
             --title "loxel ${VERSION}" \
@@ -367,3 +357,33 @@ jobs:
           ${LINKS}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Update manifest with app download links after Electron build completes.
+  # Runs independently — does not block the server update release.
+  update-manifest-with-app:
+    needs: [check-and-bump, build-electron]
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 1
+    steps:
+      - name: Update manifest
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          VERSION="${{ needs.check-and-bump.outputs.version }}"
+          BASE="https://loxel.bizimind.io/loxel"
+
+          aws s3 cp s3://loxel/loxel/manifest.json manifest.json
+          jq \
+            --arg app_sha_arm64 "${{ needs.build-electron.outputs.sha256_dmg_arm64 }}" \
+            --arg app_sha_x64 "${{ needs.build-electron.outputs.sha256_dmg_x64 }}" \
+            --arg base "$BASE" \
+            --arg v "$VERSION" \
+            '.app = {
+              "darwin-arm64": {url: "\($base)/app/darwin-arm64/Loxel-\($v)-mac-arm64.dmg", sha256: $app_sha_arm64},
+              "darwin-x64": {url: "\($base)/app/darwin-x64/Loxel-\($v)-mac-x64.dmg", sha256: $app_sha_x64}
+            }' manifest.json > manifest-updated.json
+          mv manifest-updated.json manifest.json
+          cat manifest.json
+          aws s3 cp manifest.json s3://loxel/loxel/manifest.json --content-type application/json
