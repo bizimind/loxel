@@ -1,9 +1,11 @@
-import { Menu, app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
+import { Menu, app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+import { loadOrCreateDek } from "./dek";
 
 const IS_DEV = !!process.env.VITE_DEV_SERVER_URL;
 const SERVER_PORT = IS_DEV ? 7434 : 7433;
@@ -13,11 +15,6 @@ const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 const EXTERNAL_RESOURCES = path.join(os.homedir(), ".local", "share", "loxel", "loxel");
 const UPDATES_DIR = path.join(os.homedir(), ".local", "state", "loxel", "loxel", "updates");
 
-const STATE_DIR = IS_DEV
-  ? path.join(os.homedir(), ".local", "state", "loxel", "loxel-dev")
-  : path.join(os.homedir(), ".local", "state", "loxel", "loxel");
-const DEK_FILE = path.join(STATE_DIR, "data-encryption-key.enc");
-
 let serverProcess: ChildProcess | null = null;
 
 /** Whether this Electron process spawned the server (and should handle updates). */
@@ -25,51 +22,6 @@ let isServerOwner = false;
 
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
-
-/** Cached DEK for reuse when restarting server (e.g., after failed update). */
-let cachedDekBase64: string | null = null;
-
-function loadOrCreateDek(): string {
-  if (cachedDekBase64) return cachedDekBase64;
-
-  if (!safeStorage.isEncryptionAvailable()) {
-    dialog.showErrorBox(
-      "Encryption Unavailable",
-      "System keychain encryption is not available. Loxel cannot start without secure key storage.",
-    );
-    app.exit(1);
-    throw new Error("safeStorage not available");
-  }
-
-  let dekBase64: string;
-  if (fs.existsSync(DEK_FILE)) {
-    try {
-      const encrypted = fs.readFileSync(DEK_FILE);
-      dekBase64 = safeStorage.decryptString(encrypted);
-      const decoded = Buffer.from(dekBase64, "base64");
-      if (decoded.length !== 32) throw new Error(`Invalid DEK length: ${decoded.length}`);
-    } catch (err) {
-      console.warn("[electron] Failed to decrypt DEK file, generating new key:", err);
-      fs.unlinkSync(DEK_FILE);
-      dekBase64 = generateAndStoreDek();
-    }
-  } else {
-    dekBase64 = generateAndStoreDek();
-  }
-
-  cachedDekBase64 = dekBase64;
-  return dekBase64;
-}
-
-function generateAndStoreDek(): string {
-  const dek = crypto.randomBytes(32);
-  const dekBase64 = dek.toString("base64");
-  const encrypted = safeStorage.encryptString(dekBase64);
-  fs.mkdirSync(STATE_DIR, { recursive: true });
-  fs.writeFileSync(DEK_FILE, encrypted, { mode: 0o600 });
-  console.log("[electron] Generated and stored new data encryption key");
-  return dekBase64;
-}
 
 import {
   OPEN_FOLDER_DIALOG,
@@ -131,7 +83,7 @@ function getServerPaths(): { serverBin: string; rendererDir: string } {
   };
 }
 
-function startServer(dekBase64: string): void {
+function startServer(options: { dekBase64: string }): void {
   if (IS_DEV) {
     // In dev, spawn bun running the server source directly
     serverProcess = spawn("bun", ["run", "src/server/index.ts"], {
@@ -153,7 +105,7 @@ function startServer(dekBase64: string): void {
     });
   }
 
-  serverProcess.stdin!.write(dekBase64 + "\n");
+  serverProcess.stdin!.write(options.dekBase64 + "\n");
   serverProcess.stdin!.end();
 
   serverProcess.stdout?.on("data", (data: Buffer) => {
@@ -398,7 +350,7 @@ function handlePendingUpdateSync(): void {
   try {
     if (!fs.existsSync(pendingPath)) {
       console.error("[electron] No pending.json found after exit code 42");
-      startServer(loadOrCreateDek());
+      startServer({ dekBase64: loadOrCreateDek() });
       return;
     }
 
@@ -515,7 +467,7 @@ function handlePendingUpdateSync(): void {
     dialog.showErrorBox("Update Failed", `Failed to install update: ${err}`);
 
     // Restart server with old version
-    startServer(loadOrCreateDek());
+    startServer({ dekBase64: loadOrCreateDek() });
   }
 }
 
@@ -671,8 +623,7 @@ async function ensureServer(): Promise<void> {
     }
   }
 
-  const dekBase64 = loadOrCreateDek();
-  startServer(dekBase64);
+  startServer({ dekBase64: loadOrCreateDek() });
   isServerOwner = true;
 
   // Wait for the Bun server to be ready before creating the window.
