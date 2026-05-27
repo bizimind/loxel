@@ -35,6 +35,8 @@ jobs:
           token: ${{ secrets.GH_PAT_CONTENT_WRITE }}
 
       - uses: pnpm/action-setup@v6
+        with:
+          version: 10
       - uses: oven-sh/setup-bun@v2
 
       - name: Bump patch version
@@ -96,6 +98,8 @@ jobs:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
       - uses: pnpm/action-setup@v6
+        with:
+          version: 10
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
@@ -139,6 +143,8 @@ jobs:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
       - uses: pnpm/action-setup@v6
+        with:
+          version: 10
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies

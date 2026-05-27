@@ -30,6 +30,8 @@ jobs:
           node-version: 22
 
       - uses: pnpm/action-setup@v6
+        with:
+          version: 10
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -40,10 +42,10 @@ jobs:
       - name: Deploy to Cloudflare Workers
         run: |
           # Set secrets (wrangler secret put is idempotent)
-          echo "$WORKOS_CLIENT_ID" | pnpm dlx wrangler secret put WORKOS_CLIENT_ID
-          echo "$AXIOM_TOKEN" | pnpm dlx wrangler secret put AXIOM_TOKEN
+          echo "$WORKOS_CLIENT_ID" | pnpm exec wrangler secret put WORKOS_CLIENT_ID
+          echo "$AXIOM_TOKEN" | pnpm exec wrangler secret put AXIOM_TOKEN
           # Deploy
-          pnpm dlx wrangler deploy
+          pnpm exec wrangler deploy
         working-directory: packages/channel-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}

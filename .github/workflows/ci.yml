@@ -181,6 +181,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
+        with:
+          version: 10
       - uses: oven-sh/setup-bun@v2
       - run: pnpm install --frozen-lockfile
       - name: Check formatting
@@ -201,6 +203,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
+        with:
+          version: 10
       - uses: oven-sh/setup-bun@v2
       - run: pnpm install --frozen-lockfile
       - name: Run tests
@@ -222,6 +226,8 @@ jobs:
         with:
           node-version: 24
       - uses: pnpm/action-setup@v6
+        with:
+          version: 10
       - uses: oven-sh/setup-bun@v2
       - run: pnpm install --frozen-lockfile
       - name: Run build
@@ -245,6 +251,8 @@ jobs:
         with:
           node-version: 24
       - uses: pnpm/action-setup@v6
+        with:
+          version: 10
       - uses: oven-sh/setup-bun@v2
       - run: pnpm install --frozen-lockfile
       - name: Run typecheck
