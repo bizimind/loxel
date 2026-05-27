@@ -209,6 +209,79 @@ jobs:
             "s3://loxel/loxel/${{ matrix.platform }}/loxel-update-${VERSION}.tar.gz" \
             --content-type application/gzip
 
+  # Build signed + notarized Electron app (macOS only)
+  build-electron:
+    needs: [check-and-bump, build-frontend]
+    strategy:
+      matrix:
+        include:
+          - os: blacksmith-2vcpu-macos-15
+            arch: arm64
+          - os: blacksmith-2vcpu-macos-15
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.check-and-bump.outputs.tag }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build server standalone
+        run: bun run --cwd packages/loxel build:server:standalone
+        env:
+          BUN_NO_CODESIGN_MACHO_BINARY: "1"
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: loxel-renderer
+          path: packages/loxel/dist/
+
+      - name: Import signing certificate
+        run: |
+          echo "$LOXEL_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "temp" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "temp" build.keychain
+          security import certificate.p12 -k build.keychain -P "$LOXEL_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "temp" build.keychain
+        env:
+          LOXEL_CERTIFICATE: ${{ secrets.LOXEL_CERTIFICATE }}
+          LOXEL_CERTIFICATE_PWD: ${{ secrets.LOXEL_CERTIFICATE_PWD }}
+
+      - name: Decode Apple API key
+        run: |
+          echo "$APPLE_API_KEY_BASE64" | base64 --decode > /tmp/AuthKey.p8
+        env:
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY }}
+
+      - name: Build Electron app
+        run: |
+          cd packages/loxel
+          bun run build:icon
+          ELECTRON=1 bunx vite build
+          bunx electron-builder --mac --${{ matrix.arch }}
+        env:
+          CSC_LINK: ${{ secrets.LOXEL_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.LOXEL_CERTIFICATE_PWD }}
+          APPLE_API_KEY: /tmp/AuthKey.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+      - name: Upload Electron app artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: loxel-electron-${{ matrix.arch }}
+          path: |
+            packages/loxel/release/*.dmg
+            packages/loxel/release/*.zip
+          retention-days: 30
+
   release:
     needs: [build-matrix, check-and-bump, build]
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
