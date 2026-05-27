@@ -6,8 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { loadOrCreateDek } from "./dek";
-
-const IS_DEV = !!process.env.VITE_DEV_SERVER_URL;
+import { IS_DEV } from "./env";
 const SERVER_PORT = IS_DEV ? 7434 : 7433;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
@@ -105,6 +104,7 @@ function startServer(options: { dekBase64: string }): void {
     });
   }
 
+  serverProcess.stdin!.on("error", () => {});
   serverProcess.stdin!.write(options.dekBase64 + "\n");
   serverProcess.stdin!.end();
 

@@ -4,7 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const IS_DEV = !!process.env.VITE_DEV_SERVER_URL;
+import { IS_DEV } from "./env";
+
 const STATE_DIR = IS_DEV
   ? path.join(os.homedir(), ".local", "state", "loxel", "loxel-dev")
   : path.join(os.homedir(), ".local", "state", "loxel", "loxel");
@@ -33,7 +34,6 @@ export function loadOrCreateDek(): string {
       if (decoded.length !== 32) throw new Error(`Invalid DEK length: ${decoded.length}`);
     } catch (err) {
       console.warn("[electron] Failed to decrypt DEK file, generating new key:", err);
-      fs.unlinkSync(DEK_FILE);
       dekBase64 = generateAndStoreDek();
     }
   } else {

@@ -40,14 +40,9 @@ export function decrypt(ciphertext: string): string {
   const iv = packed.subarray(0, IV_BYTES);
   const tag = packed.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
   const encrypted = packed.subarray(IV_BYTES + TAG_BYTES);
-  try {
-    const decipher = createDecipheriv(ALGORITHM, k, iv);
-    decipher.setAuthTag(tag);
-    return decipher.update(encrypted, undefined, "utf8") + decipher.final("utf8");
-  } catch {
-    log.warn("Failed to decrypt value (key mismatch or corrupt data) — returning empty string");
-    return "";
-  }
+  const decipher = createDecipheriv(ALGORITHM, k, iv);
+  decipher.setAuthTag(tag);
+  return decipher.update(encrypted, undefined, "utf8") + decipher.final("utf8");
 }
 
 export function isEncrypted(value: string): boolean {
