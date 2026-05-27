@@ -266,7 +266,6 @@ jobs:
       - name: Build Electron app
         run: |
           cd packages/loxel
-          bun run build:icon
           ELECTRON=1 bunx vite build
           bunx electron-builder --mac --${{ matrix.arch }}
         env:

@@ -4,7 +4,7 @@ copyright: Copyright © 2025
 
 directories:
   output: release
-  buildResources: build
+  buildResources: assets
 
 files:
   - dist-electron/**/*
