@@ -2,7 +2,7 @@ import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { type ModelEntry, useSettingsStore } from "@/store/settings-store";
+import { type ModelEntry, isApiKeyError, useSettingsStore } from "@/store/settings-store";
 
 import { ModelFormDialog } from "./ModelFormDialog";
 
@@ -73,6 +73,9 @@ export function ModelsSection() {
                 <span className="text-muted-foreground shrink-0 rounded bg-[var(--surface-0)] px-1.5 py-0.5 text-[9px] font-medium uppercase">
                   {model.provider}
                 </span>
+                {isApiKeyError(model.apiKey) && (
+                  <span className="text-destructive shrink-0 text-[10px]">Key unavailable</span>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
                 <button

@@ -2,16 +2,15 @@ import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { ModelEntry } from "@/store/settings-store";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
+import { type ModelEntry, isApiKeyError } from "@/store/settings-store";
 
 interface ModelFormDialogProps {
   open: boolean;
   editingModel: ModelEntry | null;
-  onSave: (data: Omit<ModelEntry, "id" | "provider">) => void;
+  onSave: (data: { label: string; modelId: string; apiKey: string }) => void;
   onCancel: () => void;
 }
 
@@ -26,7 +25,8 @@ export function ModelFormDialog({ open, editingModel, onSave, onCancel }: ModelF
     if (!open) return;
     setLabel(editingModel?.label ?? "");
     setModelId(editingModel?.modelId ?? "");
-    setApiKey(editingModel?.apiKey ?? "");
+    const key = editingModel?.apiKey;
+    setApiKey(key && !isApiKeyError(key) ? key : "");
     setShowKey(false);
     requestAnimationFrame(() => labelRef.current?.focus());
   }, [open, editingModel]);
@@ -110,6 +110,11 @@ export function ModelFormDialog({ open, editingModel, onSave, onCancel }: ModelF
                   {showKey ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
                 </button>
               </div>
+              {editingModel && isApiKeyError(editingModel.apiKey) && (
+                <p className="text-destructive text-[10px]">
+                  {editingModel.apiKey.err} — please re-enter the key.
+                </p>
+              )}
             </FieldGroup>
           </div>
 
