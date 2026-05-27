@@ -7,9 +7,13 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "bun run src/cli.ts",
-    "build": "bun run build.ts",
-    "typecheck": "tsgo --noEmit"
+    "dev": "bun src/cli.ts",
+    "build": "bun build.ts",
+    "typecheck": "tsgo --noEmit",
+    "lint": "pnpm -w run lint",
+    "lint:fix": "pnpm -w run lint:fix",
+    "fmt": "pnpm -w run fmt",
+    "fmt:check": "pnpm -w run fmt:check"
   },
   "dependencies": {
     "@bizimind/cli-common": "workspace:*",

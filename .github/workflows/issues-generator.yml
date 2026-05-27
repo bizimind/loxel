@@ -76,8 +76,8 @@ jobs:
           USER_PROMPT: ${{ inputs.prompt }}
           TASK_TYPE: ${{ inputs.task_type }}
         run: |
-          BASE_PROMPT=$(bun run .github/scripts/backlog-filler/randomizer.ts)
-          MOOD_JSON=$(bun run .github/scripts/backlog-filler/select-mood.ts)
+          BASE_PROMPT=$(bun .github/scripts/backlog-filler/randomizer.ts)
+          MOOD_JSON=$(bun .github/scripts/backlog-filler/select-mood.ts)
           MOOD=$(echo "$MOOD_JSON" | jq -r '.mood')
           MOOD_DESC=$(echo "$MOOD_JSON" | jq -r '.desc')
 

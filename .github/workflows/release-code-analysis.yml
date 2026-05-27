@@ -102,7 +102,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build binary
-        run: bun run --cwd packages/code-analysis build
+        run: pnpm -C packages/code-analysis run build
         env:
           BUN_NO_CODESIGN_MACHO_BINARY: "1"
 

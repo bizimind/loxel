@@ -97,7 +97,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build frontend
-        run: bun run --cwd packages/loxel build:ui
+        run: pnpm -C packages/loxel run build:ui
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
 
@@ -131,7 +131,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build server standalone
-        run: bun run --cwd packages/loxel build:server:standalone
+        run: pnpm -C packages/loxel run build:server:standalone
         env:
           BUN_NO_CODESIGN_MACHO_BINARY: "1"
 
@@ -239,7 +239,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build server standalone
-        run: bun run --cwd packages/loxel build:server:standalone
+        run: pnpm -C packages/loxel run build:server:standalone
         env:
           BUN_NO_CODESIGN_MACHO_BINARY: "1"
 

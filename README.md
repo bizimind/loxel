@@ -30,14 +30,14 @@ pnpm install
 
 ```bash
 # Build a package
-bun run --cwd packages/<package> build
+pnpm -C packages/<package> run build
 
 # Run tests
-bun test --cwd packages/<package>
+pnpm -C packages/<package> run test
 
 # Lint and format
-bun run lint
-bun run fmt
+pnpm run lint
+pnpm run fmt
 ```
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture and development workflow documentation.

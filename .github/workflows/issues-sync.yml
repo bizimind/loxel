@@ -45,7 +45,7 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
           ISSUE_LABELS: ${{ toJson(github.event.issue.labels.*.name) }}
           ISSUE_CREATED: ${{ github.event.issue.created_at }}
-        run: bun run main-scripts/.github/scripts/issues-sync/add-issue.ts
+        run: bun main-scripts/.github/scripts/issues-sync/add-issue.ts
 
       - name: Commit and push
         env:

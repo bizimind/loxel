@@ -12,7 +12,7 @@ for file in $staged; do
 done
 
 # Auto-fix formatting
-bun run fmt
+pnpm run fmt
 
 # Re-stage formatted files, but be careful with partially staged files
 if [ -n "$partially_staged" ]; then
@@ -32,7 +32,7 @@ else
 fi
 
 # Run lint (fail on errors)
-bun run lint
+pnpm run lint
 
 # Run typecheck (fail on errors)
-bun run typecheck
+pnpm run typecheck

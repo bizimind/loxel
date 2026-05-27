@@ -102,7 +102,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build binary
-        run: bun run --cwd packages/wt build
+        run: pnpm -C packages/wt run build
         env:
           BUN_NO_CODESIGN_MACHO_BINARY: "1"
 
@@ -147,7 +147,7 @@ jobs:
       - name: Build schema
         run: |
           mkdir -p packages/wt/dist
-          bun run --cwd packages/wt build:config-schema > packages/wt/dist/wt.schema.json
+          pnpm -C packages/wt run build:config-schema > packages/wt/dist/wt.schema.json
 
       - name: Generate manifest
         run: |
