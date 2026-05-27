@@ -148,7 +148,7 @@ jobs:
       - name: Sign binaries (macOS)
         if: runner.os == 'macOS'
         run: |
-          codesign --sign "$LOXEL_CODESIGN_IDENTITY" --options runtime --entitlements packages/loxel/entitlements/loxel-server.plist --force packages/loxel/build/loxel-server
+          codesign --sign "$LOXEL_CODESIGN_IDENTITY" --options runtime --force packages/loxel/build/loxel-server
           codesign -s - -f packages/loxel/build/yaml-language-server
           codesign -s - -f packages/loxel/build/docker-language-server
           codesign -s - -f packages/loxel/build/terraform-ls

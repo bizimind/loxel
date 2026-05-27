@@ -116,10 +116,6 @@
         "@types/node": "^24.0.0",
       },
     },
-    "packages/keychain": {
-      "name": "@bizimind/keychain",
-      "version": "0.1.0",
-    },
     "packages/localdb-sdk": {
       "name": "@bizimind/localdb-sdk",
       "version": "0.1.0",
@@ -144,11 +140,10 @@
     },
     "packages/loxel": {
       "name": "@bizimind/loxel",
-      "version": "0.1.151",
+      "version": "0.1.152",
       "dependencies": {
         "@base-ui/react": "^1.1.0",
         "@bizimind/coding-agent": "workspace:*",
-        "@bizimind/keychain": "workspace:*",
         "@bizimind/localdb-sdk": "workspace:*",
         "@bizimind/logger": "workspace:*",
         "@bizimind/monaco-lsp-client": "workspace:*",
@@ -406,8 +401,6 @@
     "@bizimind/coding-agent": ["@bizimind/coding-agent@workspace:packages/coding-agent"],
 
     "@bizimind/excalidraw-cli": ["@bizimind/excalidraw-cli@workspace:packages/excalidraw"],
-
-    "@bizimind/keychain": ["@bizimind/keychain@workspace:packages/keychain"],
 
     "@bizimind/localdb-sdk": ["@bizimind/localdb-sdk@workspace:packages/localdb-sdk"],
 

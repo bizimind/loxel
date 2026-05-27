@@ -9,7 +9,6 @@
     { "path": "./packages/coding-agent" },
     { "path": "./packages/excalidraw" },
     { "path": "./packages/logger" },
-    { "path": "./packages/keychain" },
     { "path": "./packages/loxel" },
     { "path": "./packages/monaco-lsp-client" },
     { "path": "./packages/whisper-cpp" },
