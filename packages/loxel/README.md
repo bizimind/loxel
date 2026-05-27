@@ -230,9 +230,7 @@ bun run dev:app           # Electron window with Vite HMR
 bun run build:app         # Build standalone server + renderer + package DMG/zip
 ```
 
-`build:app` runs three steps: compiles the server to a standalone binary (`bun build --compile`), builds the renderer with Vite, and packages everything with electron-builder. Output goes to `release/`.
-
-Requires `rsvg-convert` (from `librsvg`) for icon generation: `brew install librsvg`.
+`build:app` runs two steps: compiles the server to a standalone binary (`bun build --compile`), builds the renderer with Vite, and packages everything with electron-builder. Output goes to `release/`.
 
 ### Type check
 
