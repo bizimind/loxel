@@ -190,7 +190,10 @@ function isEncryptedStoreKey(storeKey: string): boolean {
   return storeKey.endsWith(ENCRYPTED_STORE_SUFFIX);
 }
 
-function transformModelKeys(jsonStr: string, transform: (apiKey: string) => string): string {
+function transformModelKeys(
+  jsonStr: string,
+  transform: (apiKey: string) => string | { err: string },
+): string {
   const parsed: unknown = JSON.parse(jsonStr);
   if (typeof parsed !== "object" || parsed === null) return jsonStr;
   const state = (parsed as Record<string, unknown>).state;
@@ -215,7 +218,13 @@ function encryptModelKeys(jsonStr: string): string {
 }
 
 function decryptModelKeys(jsonStr: string): string {
-  return transformModelKeys(jsonStr, decrypt);
+  return transformModelKeys(jsonStr, (v) => {
+    try {
+      return decrypt(v);
+    } catch {
+      return { err: "Decryption failed (encryption key changed)" };
+    }
+  });
 }
 
 function requireString(body: Record<string, unknown>, field: string): string {

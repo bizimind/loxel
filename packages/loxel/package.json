@@ -40,7 +40,6 @@
   "dependencies": {
     "@base-ui/react": "^1.1.0",
     "@bizimind/coding-agent": "workspace:*",
-    "@bizimind/keychain": "workspace:*",
     "@bizimind/localdb-sdk": "workspace:*",
     "@bizimind/logger": "workspace:*",
     "@bizimind/monaco-lsp-client": "workspace:*",

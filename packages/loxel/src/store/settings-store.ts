@@ -16,12 +16,20 @@ import { serverSettingsStorage } from "./server-storage";
 export type SidebarPanelId = Exclude<PanelId, "diff" | "editor">;
 export type SidebarZone = "left" | "bottom" | "right";
 
+export interface ApiKeyError {
+  err: string;
+}
+
+export function isApiKeyError(apiKey: string | ApiKeyError): apiKey is ApiKeyError {
+  return typeof apiKey === "object" && apiKey !== null && "err" in apiKey;
+}
+
 export interface ModelEntry {
   id: string;
   label: string;
   provider: "openrouter";
   modelId: string;
-  apiKey: string;
+  apiKey: string | ApiKeyError;
 }
 
 export type AgentFunction =
@@ -914,7 +922,7 @@ export function buildSessionOptions(
 ): AgentSessionOptions | Record<string, never> {
   const lookup = new Map(models.map((m) => [m.id, m]));
   const baseEntry = lookup.get(settings.baseModelId);
-  if (!baseEntry) return {};
+  if (!baseEntry || isApiKeyError(baseEntry.apiKey)) return {};
 
   const base = { modelId: baseEntry.modelId, apiKey: baseEntry.apiKey };
   const modelConfig: Record<string, { modelId: string; apiKey: string }> = { base };
@@ -922,7 +930,7 @@ export function buildSessionOptions(
   for (const [fn, routerKey] of Object.entries(ROUTER_KEY_MAP)) {
     const overrideId = settings.functionOverrides[fn as AgentFunction];
     const entry = overrideId ? lookup.get(overrideId) : undefined;
-    if (entry) {
+    if (entry && !isApiKeyError(entry.apiKey)) {
       modelConfig[routerKey] = { modelId: entry.modelId, apiKey: entry.apiKey };
     }
   }

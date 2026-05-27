@@ -5,7 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const IS_DEV = !!process.env.VITE_DEV_SERVER_URL;
+import { loadOrCreateDek } from "./dek";
+import { IS_DEV } from "./env";
 const SERVER_PORT = IS_DEV ? 7434 : 7433;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
@@ -81,13 +82,13 @@ function getServerPaths(): { serverBin: string; rendererDir: string } {
   };
 }
 
-function startServer(): void {
+function startServer(options: { dekBase64: string }): void {
   if (IS_DEV) {
     // In dev, spawn bun running the server source directly
     serverProcess = spawn("bun", ["run", "src/server/index.ts"], {
       cwd: path.resolve(import.meta.dirname, "../.."),
       env: { ...process.env, LOXEL_DEV: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
   } else {
     // In production, spawn the server binary (external or bundled)
@@ -99,9 +100,13 @@ function startServer(): void {
         LOXEL_RESOURCES_DIR: EXTERNAL_RESOURCES,
         LOXEL_ELECTRON: process.execPath,
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
   }
+
+  serverProcess.stdin!.on("error", () => {});
+  serverProcess.stdin!.write(options.dekBase64 + "\n");
+  serverProcess.stdin!.end();
 
   serverProcess.stdout?.on("data", (data: Buffer) => {
     process.stdout.write(data);
@@ -345,7 +350,7 @@ function handlePendingUpdateSync(): void {
   try {
     if (!fs.existsSync(pendingPath)) {
       console.error("[electron] No pending.json found after exit code 42");
-      startServer();
+      startServer({ dekBase64: loadOrCreateDek() });
       return;
     }
 
@@ -462,7 +467,7 @@ function handlePendingUpdateSync(): void {
     dialog.showErrorBox("Update Failed", `Failed to install update: ${err}`);
 
     // Restart server with old version
-    startServer();
+    startServer({ dekBase64: loadOrCreateDek() });
   }
 }
 
@@ -618,7 +623,7 @@ async function ensureServer(): Promise<void> {
     }
   }
 
-  startServer();
+  startServer({ dekBase64: loadOrCreateDek() });
   isServerOwner = true;
 
   // Wait for the Bun server to be ready before creating the window.
