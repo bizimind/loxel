@@ -5,6 +5,12 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "lint": "pnpm -w run lint",
+    "lint:fix": "pnpm -w run lint:fix",
+    "fmt": "pnpm -w run fmt",
+    "fmt:check": "pnpm -w run fmt:check"
+  },
   "dependencies": {
     "@hediet/json-rpc": "^0.5.0",
     "@hediet/json-rpc-browser": "^0.5.1",

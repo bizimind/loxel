@@ -26,6 +26,9 @@ jobs:
         with:
           fetch-depth: 1
 
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -79,10 +82,10 @@ jobs:
             fi
 
             # Run the check-issue script
-            bun run ../.github/scripts/issues-deduper/check-issue.ts $ISSUE
+            bun ../.github/scripts/issues-deduper/check-issue.ts $ISSUE
 
             # Process the results (take actions on GitHub)
-            bun run ../.github/scripts/issues-deduper/process-results.ts $ISSUE
+            bun ../.github/scripts/issues-deduper/process-results.ts $ISSUE
 
             # Update last-processed after each successful check
             echo "$ISSUE" > last-processed.txt

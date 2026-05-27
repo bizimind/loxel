@@ -8,7 +8,11 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "lint": "pnpm -w run lint",
+    "lint:fix": "pnpm -w run lint:fix",
+    "fmt": "pnpm -w run fmt",
+    "fmt:check": "pnpm -w run fmt:check"
   },
   "dependencies": {
     "zod": "^4.4.3"

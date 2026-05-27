@@ -7,7 +7,11 @@
     "build:agentic-editor": "bun build --compile src/editors/agentic-editor.ts --outfile dist/agentic-editor",
     "build:continue-rebase": "bun build --compile src/commands/continue-rebase.ts --outfile dist/continue-rebase",
     "build:apply-staged-edits": "bun build --compile src/commands/apply-staged.ts --outfile dist/apply-staged-edits",
-    "build": "bun run build:git && bun run build:agentic-editor && bun run build:continue-rebase && bun run build:apply-staged-edits",
-    "typecheck": "tsgo --noEmit"
+    "build": "pnpm run build:git && pnpm run build:agentic-editor && pnpm run build:continue-rebase && pnpm run build:apply-staged-edits",
+    "typecheck": "tsgo --noEmit",
+    "lint": "pnpm -w run lint",
+    "lint:fix": "pnpm -w run lint:fix",
+    "fmt": "pnpm -w run fmt",
+    "fmt:check": "pnpm -w run fmt:check"
   }
 }

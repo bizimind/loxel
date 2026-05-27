@@ -4,10 +4,10 @@
 
 ```bash
 # Install dependencies
-bun install
+pnpm install
 
 # Set up git hooks (runs automatically via prepare script)
-bun run prepare
+pnpm run prepare
 ```
 
 Copy `.env.example` to `.env` and fill in the required values.
@@ -16,17 +16,17 @@ Copy `.env.example` to `.env` and fill in the required values.
 
 ```bash
 # Build a package
-bun run --cwd packages/<package> build
+pnpm -C packages/<package> run build
 
 # Run tests
-bun test --cwd packages/<package>
+pnpm -C packages/<package> run test
 
 # Type check
-bun run --cwd packages/<package> typecheck
+pnpm -C packages/<package> run typecheck
 
 # Lint and format
-bun run lint
-bun run fmt
+pnpm run lint
+pnpm run fmt
 ```
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation.
@@ -34,9 +34,9 @@ See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation.
 ## Pull Requests
 
 - Keep PRs focused — one feature or fix per PR
-- Run `bun run lint:fix && bun run fmt` before pushing
-- Ensure `bun run typecheck` passes for affected packages
-- Tests must pass: `bun run --cwd packages/<package> test`
+- Run `pnpm run lint:fix && pnpm run fmt` before pushing
+- Ensure `pnpm run typecheck` passes for affected packages
+- Tests must pass: `pnpm -C packages/<package> run test`
 
 ## Reporting Issues
 

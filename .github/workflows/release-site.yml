@@ -25,19 +25,22 @@ jobs:
         with:
           node-version: "22"
 
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build site
-        run: bun run --cwd packages/site build
+        run: pnpm -C packages/site run build
 
       - name: Deploy to Cloudflare Pages
         id: deploy
         run: |
           set -o pipefail
-          OUTPUT=$(bunx wrangler pages deploy packages/site/dist --project-name loxel --branch "$BRANCH" 2>&1 | tee /dev/stderr)
+          OUTPUT=$(pnpm dlx wrangler pages deploy packages/site/dist --project-name loxel --branch "$BRANCH" 2>&1 | tee /dev/stderr)
           echo "url=$(echo "$OUTPUT" | sed -n 's/.*Deployment alias URL: //p')" >> "$GITHUB_OUTPUT"
         env:
           BRANCH: ${{ github.ref_name }}

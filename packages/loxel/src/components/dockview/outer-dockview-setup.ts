@@ -104,7 +104,8 @@ export function setupOuterDockview(api: DockviewApi): void {
 
   // Accept external drags (toolbar icons)
   api.onUnhandledDragOverEvent((event) => {
-    const types = event.nativeEvent.dataTransfer?.types;
+    const types =
+      "dataTransfer" in event.nativeEvent ? event.nativeEvent.dataTransfer?.types : undefined;
     if (types?.includes("text/plain")) {
       event.accept();
     }
@@ -115,7 +116,10 @@ export function setupOuterDockview(api: DockviewApi): void {
     if (!event.group) return;
 
     // Toolbar icon drop on a sidebar group — move panel via movePanelToZone
-    const panelId = event.nativeEvent.dataTransfer?.getData("text/plain");
+    const panelId =
+      "dataTransfer" in event.nativeEvent
+        ? event.nativeEvent.dataTransfer?.getData("text/plain")
+        : undefined;
     if (!panelId) return;
 
     const dropZone = getGroupZone(api, event.group);

@@ -4,12 +4,16 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "postinstall": "bun run scripts/download-whisper.ts",
+    "postinstall": "bun scripts/download-whisper.ts",
     "build": "cmake-js compile",
     "build:debug": "cmake-js compile --debug",
     "rebuild": "cmake-js rebuild",
     "clean": "cmake-js clean",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "lint": "pnpm -w run lint",
+    "lint:fix": "pnpm -w run lint:fix",
+    "fmt": "pnpm -w run fmt",
+    "fmt:check": "pnpm -w run fmt:check"
   },
   "dependencies": {
     "node-addon-api": "^8.3.0"

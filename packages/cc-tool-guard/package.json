@@ -5,6 +5,10 @@
   "scripts": {
     "build": "bun build --compile src/tool-guard.ts --outfile dist/cc-tool-guard",
     "test": "bun test",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "lint": "pnpm -w run lint",
+    "lint:fix": "pnpm -w run lint:fix",
+    "fmt": "pnpm -w run fmt",
+    "fmt:check": "pnpm -w run fmt:check"
   }
 }
