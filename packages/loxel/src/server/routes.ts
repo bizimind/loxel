@@ -2978,7 +2978,14 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
     try {
       if (method === "GET") {
         const value = storeDb.getStore(storeKey);
-        return json({ value: isSettings && value ? decryptModelKeys(value) : value });
+        if (isSettings && value) {
+          try {
+            return json({ value: decryptModelKeys(value) });
+          } catch {
+            return error("Stored API keys could not be decrypted (encryption key changed)", 404);
+          }
+        }
+        return json({ value });
       }
       if (method === "PUT") {
         const body = await parseBody(req);
