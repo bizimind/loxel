@@ -6,13 +6,21 @@ import DownloadButton from "../components/DownloadButton.tsx";
 
 const MANIFEST_URL = "https://loxel.bizimind.io/loxel/manifest.json";
 
+function isObj(v: unknown): v is Record<string, unknown> {
+  return v != null && typeof v === "object";
+}
+
 let version = "0.1.141";
 let binaries: Record<string, string> = {};
 try {
-  const manifest = await fetch(MANIFEST_URL).then((r) => r.json());
-  version = manifest.version ?? version;
-  for (const [platform, info] of Object.entries(manifest.app ?? {})) {
-    binaries[platform] = (info as { url: string }).url;
+  const manifest: unknown = await fetch(MANIFEST_URL).then((r) => r.json());
+  if (isObj(manifest)) {
+    if (typeof manifest.version === "string") version = manifest.version;
+    if (isObj(manifest.app)) {
+      for (const [platform, info] of Object.entries(manifest.app)) {
+        if (isObj(info) && typeof info.url === "string") binaries[platform] = info.url;
+      }
+    }
   }
 } catch {
   // fall back to hardcoded version, no binary URLs
