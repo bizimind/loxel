@@ -9,7 +9,7 @@ let binaries: Record<string, string> = {};
 try {
   const manifest = await fetch(MANIFEST_URL).then((r) => r.json());
   version = manifest.version ?? version;
-  for (const [platform, info] of Object.entries(manifest.binaries ?? {})) {
+  for (const [platform, info] of Object.entries(manifest.app ?? {})) {
     binaries[platform] = (info as { url: string }).url;
   }
 } catch {
