@@ -61,9 +61,11 @@ const result = await Bun.build({
         build.onLoad({ filter: /pyright-langserver\.js$/ }, async (args) => {
           let code = await Bun.file(args.path).text();
           // Replace the webpack runtime's dynamic require with global chunk lookup.
-          // Original: require("./"+o.u(e))
-          // Patched:  global.__pyright_chunks[o.u(e)]
-          const patched = code.replace('require("./"+o.u(e))', "global.__pyright_chunks[o.u(e)]");
+          // Pattern: require("./"+X.u(e)) where X is a minified variable name
+          const patched = code.replace(
+            /require\("\.\/"\+(\w+)\.u\(e\)\)/,
+            "global.__pyright_chunks[$1.u(e)]",
+          );
           if (patched === code) {
             throw new Error(
               "Webpack chunk patch failed to match — pyright bundle format may have changed",
