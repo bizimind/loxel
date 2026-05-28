@@ -1,20 +1,9 @@
 ---
 import Base from "../layouts/Base.astro";
 import DownloadButton from "../components/DownloadButton.tsx";
+import { fetchManifest } from "../lib/manifest";
 
-const MANIFEST_URL = "https://loxel.bizimind.io/loxel/manifest.json";
-
-let version = "0.1.141";
-let binaries: Record<string, string> = {};
-try {
-  const manifest = await fetch(MANIFEST_URL).then((r) => r.json());
-  version = manifest.version ?? version;
-  for (const [platform, info] of Object.entries(manifest.binaries ?? {})) {
-    binaries[platform] = (info as { url: string }).url;
-  }
-} catch {
-  // fall back to hardcoded version, no binary URLs
-}
+const { version, downloads: binaries } = await fetchManifest();
 ---
 
 <Base title="Download" description="Download Loxel for macOS.">
