@@ -29,7 +29,7 @@ jobs:
       version: ${{ steps.bump.outputs.version }}
       tag: ${{ steps.bump.outputs.tag }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT_CONTENT_WRITE }}
@@ -93,7 +93,7 @@ jobs:
       sha256_darwin-x64: ${{ steps.sha.outputs.sha256_darwin-x64 }}
       sha256_linux-x64: ${{ steps.sha.outputs.sha256_linux-x64 }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
         with:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
@@ -139,7 +139,7 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 1
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
         with:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 

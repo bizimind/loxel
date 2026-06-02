@@ -25,7 +25,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
       - name: Find affected packages
@@ -179,7 +179,7 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - uses: pnpm/action-setup@v6
         with:
           version: 10
@@ -201,7 +201,7 @@ jobs:
       matrix:
         package: ${{ fromJson(needs.discover.outputs.test) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - uses: pnpm/action-setup@v6
         with:
           version: 10
@@ -221,7 +221,7 @@ jobs:
       matrix:
         package: ${{ fromJson(needs.discover.outputs.build) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -246,7 +246,7 @@ jobs:
       matrix:
         package: ${{ fromJson(needs.discover.outputs.typecheck) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - uses: actions/setup-node@v6
         with:
           node-version: 24
