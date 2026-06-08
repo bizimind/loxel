@@ -73,7 +73,7 @@
     "dockview": "^6.0.1",
     "dockview-react": "^6.0.1",
     "jsonc-parser": "^3.3.1",
-    "lucide-react": "^1.0.0",
+    "lucide-react": "^1.17.0",
     "monaco-editor": "0.55.1",
     "motion": "^12.29.0",
     "picomatch": "^4.0.4",
@@ -92,7 +92,7 @@
     "unist-util-visit": "^5.1.0",
     "yaml": "^2.8.3",
     "zod": "^4",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@astrojs/language-server": "^2.16.9",
@@ -110,7 +110,7 @@
     "@types/unist": "^3.0.3",
     "@vitejs/plugin-react": "^6.0.0",
     "electron": "^42.1.0",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "^26.13.0",
     "pyright": "^1.1.409",
     "tailwindcss": "^4.1.8",
     "typescript-language-server": "^5.1.3",
