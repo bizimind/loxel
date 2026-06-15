@@ -34,7 +34,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GH_PAT_CONTENT_WRITE }}
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.8
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
@@ -97,7 +97,7 @@ jobs:
         with:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.8
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2

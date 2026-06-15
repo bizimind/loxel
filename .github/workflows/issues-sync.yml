@@ -23,7 +23,7 @@ jobs:
           ref: issues
           fetch-depth: 1
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.8
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
