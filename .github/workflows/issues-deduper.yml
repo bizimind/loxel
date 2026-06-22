@@ -22,7 +22,7 @@ jobs:
     steps:
       # Checkout main branch first (for scripts and setup-claude action)
       - name: Checkout main branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 1
 
@@ -37,7 +37,7 @@ jobs:
 
       # Checkout issues branch into separate directory
       - name: Checkout issues branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
         with:
           ref: issues
           path: issues-repo
