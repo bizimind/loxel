@@ -25,7 +25,7 @@
     "fmt:check": "pnpm -w run fmt:check"
   },
   "dependencies": {
-    "@axiomhq/js": "^1.4.0",
+    "@axiomhq/js": "^1.7.0",
     "@axiomhq/logging": "^0.2.0"
   },
   "devDependencies": {
