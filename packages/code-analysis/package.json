@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.13.2"
   },
   "engines": {
     "bun": ">=1.0.0"
