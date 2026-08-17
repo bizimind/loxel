@@ -15,7 +15,7 @@
     "@hediet/json-rpc": "^0.5.0",
     "@hediet/json-rpc-browser": "^0.5.1",
     "@hediet/json-rpc-websocket": "^0.5.1",
-    "picomatch": "^4.0.4"
+    "picomatch": "^4.0.5"
   },
   "devDependencies": {
     "@types/picomatch": "^4.0.3"
