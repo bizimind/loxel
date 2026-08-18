@@ -339,7 +339,7 @@ export class ChannelRoom extends DurableObject<Env> {
 
     // Send buffered messages if client is reconnecting with lastSeq
     if (lastSeq !== undefined) {
-      await this.sendBufferedMessages(ws, session.clientId, lastSeq);
+      this.sendBufferedMessages(ws, session.clientId, lastSeq);
     }
 
     // Notify existing peers
@@ -370,6 +370,13 @@ export class ChannelRoom extends DurableObject<Env> {
     // Remove from maps
     this.sessions.delete(ws);
     this.clientSockets.delete(session.clientId);
+
+    // Clean up per-client state
+    this.rateLimiters.delete(session.clientId);
+    this.lastSeenSeq.delete(session.clientId);
+    this.messageBuffers.delete(session.clientId);
+    // Delete persisted buffer from DO storage
+    this.ctx.storage.delete(`buffer:${session.clientId}`);
 
     // Notify remaining peers
     this.broadcastControl({
@@ -544,13 +551,12 @@ export class ChannelRoom extends DurableObject<Env> {
           }
         }
       } else if (frame.to) {
-        // Buffer for recipient (for reconnect recovery)
-        if (frame.seq > 0) {
-          this.bufferBinaryMessage(frame.to, frame);
-        }
-        // Send to specific peer
+        // Send to specific peer — check existence before buffering
         const targetWs = this.clientSockets.get(frame.to);
         if (targetWs) {
+          if (frame.seq > 0) {
+            this.bufferBinaryMessage(frame.to, frame);
+          }
           this.sendRaw(targetWs, encoded);
         }
       }
@@ -698,7 +704,13 @@ export class ChannelRoom extends DurableObject<Env> {
   }
 
   /**
-   * Buffer a message for a client (for delivery on reconnect).
+   * Buffer a message for a client (in-memory only).
+   *
+   * NOTE: Reconnect message recovery is currently limited because reconnecting
+   * clients receive a new server-generated clientId. Buffers keyed by the old
+   * clientId become unreachable. A proper fix requires a stable client identity
+   * (e.g., client-chosen session ID sent in the join message). For now, buffers
+   * only help within a single connection lifetime (e.g., deduplication).
    */
   private bufferMessage(clientId: ClientId, message: BufferedMessage): void {
     let buffer = this.messageBuffers.get(clientId);
@@ -713,11 +725,6 @@ export class ChannelRoom extends DurableObject<Env> {
     if (buffer.length > this.BUFFER_SIZE) {
       buffer.shift();
     }
-
-    // Persist to DO storage asynchronously for performance.
-    // Trade-off: If DO is evicted before write completes, recent messages
-    // may be lost. For stronger guarantees, await this call.
-    this.ctx.storage.put(`buffer:${clientId}`, buffer);
   }
 
   /**
@@ -734,9 +741,16 @@ export class ChannelRoom extends DurableObject<Env> {
       isBroadcast: boolean;
     },
   ): void {
-    // Convert ArrayBuffer to base64 for storage
+    // Convert ArrayBuffer to base64 for storage using chunked encoding
+    // to avoid exceeding the JS engine's maximum call stack / argument limit
     const bytes = new Uint8Array(frame.payload);
-    const base64 = btoa(String.fromCharCode(...bytes));
+    const CHUNK_SIZE = 8192;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+      const chunk = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
+      binary += String.fromCharCode(...chunk);
+    }
+    const base64 = btoa(binary);
 
     this.bufferMessage(clientId, {
       seq: frame.seq,
@@ -753,20 +767,13 @@ export class ChannelRoom extends DurableObject<Env> {
   /**
    * Send buffered messages to a reconnecting client.
    * Only sends messages with seq > lastSeq.
+   *
+   * NOTE: This currently has limited effectiveness because reconnecting clients
+   * receive a new clientId, so the buffer lookup will find an empty buffer.
+   * See bufferMessage() for details on the limitation.
    */
-  private async sendBufferedMessages(
-    ws: WebSocket,
-    clientId: ClientId,
-    lastSeq: number,
-  ): Promise<void> {
-    // Try in-memory first, then fall back to storage
-    let buffer = this.messageBuffers.get(clientId);
-    if (!buffer) {
-      buffer = (await this.ctx.storage.get<BufferedMessage[]>(`buffer:${clientId}`)) ?? [];
-      if (buffer.length > 0) {
-        this.messageBuffers.set(clientId, buffer);
-      }
-    }
+  private sendBufferedMessages(ws: WebSocket, clientId: ClientId, lastSeq: number): void {
+    const buffer = this.messageBuffers.get(clientId) ?? [];
 
     for (const msg of buffer) {
       if (msg.seq > lastSeq) {

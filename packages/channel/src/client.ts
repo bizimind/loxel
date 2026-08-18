@@ -104,7 +104,11 @@ export class ChannelClient {
    * @throws {ConnectionTimeoutError} If connection times out
    */
   async connect(): Promise<ConnectedEvent> {
-    if (this._state !== "disconnected") {
+    if (
+      this._state === "connected" ||
+      this._state === "connecting" ||
+      this._state === "reconnecting"
+    ) {
       throw new InvalidStateError("Already connected or connecting");
     }
 
@@ -148,7 +152,11 @@ export class ChannelClient {
 
         onClose: (reason, willReconnect) => {
           const wasConnected = this._state === "connected";
-          this._state = "disconnected";
+          // Use "reconnecting" state so callers can distinguish temporary
+          // drops (auto-reconnect active) from permanent disconnection.
+          // This prevents callers from creating parallel connections by
+          // calling connect() in response to a disconnect event.
+          this._state = willReconnect ? "reconnecting" : "disconnected";
           this._clientId = null;
           this._peers.clear();
 
@@ -412,7 +420,10 @@ export class ChannelClient {
 
   private buildWebSocketUrl(): string {
     const base = this.options.url.replace(/\/$/, "");
-    return `${base}/channel/${encodeURIComponent(this.options.channelId)}`;
+    // Include token as query parameter so the worker can reject
+    // unauthenticated upgrade requests before they reach the DO.
+    // Full JWT verification still happens in the DO after the join message.
+    return `${base}/channel/${encodeURIComponent(this.options.channelId)}?token=${encodeURIComponent(this.options.token)}`;
   }
 
   private handleServerMessage(envelope: ServerEnvelope): void {

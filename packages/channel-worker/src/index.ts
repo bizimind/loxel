@@ -147,6 +147,20 @@ async function handleFetch(request: Request, env: Env, _logger: AppLogger): Prom
     );
   }
 
+  // Reject unauthenticated WebSocket upgrades early.
+  // Full JWT verification happens in the DO after the join message,
+  // but this prevents anonymous clients from holding open sockets.
+  const token = url.searchParams.get("token");
+  if (!token) {
+    return new Response(
+      JSON.stringify({ error: "Unauthorized", message: "Missing token query parameter" }),
+      {
+        status: 401,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      },
+    );
+  }
+
   // Route to Durable Object by channel ID
   // Using idFromName creates a consistent ID for the same channel
   const id = env.CHANNEL_ROOM.idFromName(channelId);
