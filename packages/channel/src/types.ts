@@ -166,4 +166,4 @@ export type AnyEventHandler = (event: ChannelEvent) => void;
 // Connection State
 // ============================================================================
 
-export type ConnectionState = "disconnected" | "connecting" | "connected";
+export type ConnectionState = "disconnected" | "connecting" | "connected" | "reconnecting";
