@@ -165,6 +165,16 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     classification: "uncertain",
     reason: "Recursive delete in home",
   },
+  {
+    pattern: /\brm\s+(-[rRf]+\s+)+\.(\s|\/|$)/,
+    classification: "uncertain",
+    reason: "Recursive delete of current directory",
+  },
+  {
+    pattern: /\brm\s+(-[rRf]+\s+)+\*(\s|$)/,
+    classification: "uncertain",
+    reason: "Recursive delete with wildcard glob",
+  },
 
   // Environment modification
   {
@@ -240,7 +250,7 @@ const SAFE_PATTERNS: PatternRule[] = [
 
   // Package managers - local operations
   {
-    pattern: /^bun\s+(test|build|run|install|add|remove|update|x)\b/,
+    pattern: /^bun\s+(test|build|run|install|add|remove|update)\b/,
     classification: "safe",
     reason: "Bun operation",
   },
@@ -259,7 +269,6 @@ const SAFE_PATTERNS: PatternRule[] = [
     classification: "safe",
     reason: "yarn operation",
   },
-  { pattern: /^npx\s+/, classification: "safe", reason: "npx execution" },
 
   // Build tools
   { pattern: /^(tsc|typescript)\b/, classification: "safe", reason: "TypeScript compiler" },
