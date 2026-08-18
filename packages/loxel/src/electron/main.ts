@@ -19,6 +19,9 @@ let serverProcess: ChildProcess | null = null;
 /** Whether this Electron process spawned the server (and should handle updates). */
 let isServerOwner = false;
 
+/** Consecutive crash count for owned server restart backoff. */
+let serverCrashCount = 0;
+
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
 
@@ -124,9 +127,24 @@ function startServer(options: { dekBase64: string }): void {
       return;
     }
 
-    // Server failed to start (e.g., EADDRINUSE from spawn race) — drop ownership
     if (isServerOwner && code !== 0) {
-      isServerOwner = false;
+      // Server crashed — attempt restart with backoff to avoid restart loops.
+      // Cap at 3 consecutive failures before giving up and dropping ownership.
+      serverCrashCount++;
+      if (serverCrashCount <= 3) {
+        const delayMs = serverCrashCount * 1000;
+        console.log(
+          `[electron] Owned server crashed (attempt ${serverCrashCount}/3), restarting in ${delayMs}ms...`,
+        );
+        setTimeout(() => {
+          startServer({ dekBase64: loadOrCreateDek() });
+        }, delayMs);
+      } else {
+        console.error("[electron] Owned server crashed 3 times, dropping ownership");
+        isServerOwner = false;
+        serverCrashCount = 0;
+        startServerHealthCheck();
+      }
     }
   });
 }
@@ -158,6 +176,16 @@ const APP_ORIGIN = new URL(process.env.VITE_DEV_SERVER_URL ?? SERVER_URL).origin
 function isLocal(url: string): boolean {
   try {
     return new URL(url).origin === APP_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+/** Only allow http/https URLs to be opened externally — blocks file://, custom protocols, etc. */
+function isHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
   }
@@ -273,10 +301,12 @@ async function createWindow(): Promise<BrowserWindow> {
     if (isLocal(url)) {
       return { action: "allow" };
     }
-    if (metaKeyHeld) {
-      openInBrowserTab(url);
-    } else {
-      shell.openExternal(url);
+    if (isHttpUrl(url)) {
+      if (metaKeyHeld) {
+        openInBrowserTab(url);
+      } else {
+        shell.openExternal(url);
+      }
     }
     return { action: "deny" };
   });
@@ -286,10 +316,12 @@ async function createWindow(): Promise<BrowserWindow> {
   win.webContents.on("will-navigate", (event, url) => {
     if (!isLocal(url)) {
       event.preventDefault();
-      if (metaKeyHeld) {
-        openInBrowserTab(url);
-      } else {
-        shell.openExternal(url);
+      if (isHttpUrl(url)) {
+        if (metaKeyHeld) {
+          openInBrowserTab(url);
+        } else {
+          shell.openExternal(url);
+        }
       }
     }
   });
@@ -584,7 +616,7 @@ app.on("web-contents-created", (_, contents) => {
   // (or browser panel tab when Cmd is held).
   // Each webview gets its own webContents, so mainWindow's handler doesn't cover them.
   contents.setWindowOpenHandler(({ url }) => {
-    if (!isLocal(url)) {
+    if (!isLocal(url) && isHttpUrl(url)) {
       if (metaKeyHeld) {
         openInBrowserTab(url);
       } else {
@@ -635,7 +667,11 @@ async function ensureServer(): Promise<void> {
   if (!serverProcess) isServerOwner = false;
 
   // Server started successfully — clean up backup from any previous update
-  if (isServerOwner) cleanupUpdateBackup();
+  // and reset crash counter so future crashes get full retry budget.
+  if (isServerOwner) {
+    serverCrashCount = 0;
+    cleanupUpdateBackup();
+  }
 }
 
 // macOS: "New Window" in dock right-click menu
