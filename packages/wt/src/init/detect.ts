@@ -36,7 +36,13 @@ export async function detectRepoType(cwd: string): Promise<RepoType> {
     const significantEntries = entries.filter(
       (e) => !e.startsWith(".DS_Store") && e !== ".gitignore",
     );
-    return significantEntries.length === 0 ? "empty" : "empty";
+    if (significantEntries.length > 0) {
+      throw new Error(
+        "Directory contains files but is not a git repository.\n" +
+          "Run 'git init' first, or use an empty directory.",
+      );
+    }
+    return "empty";
   }
 
   // Check if we're inside a worktree
