@@ -778,7 +778,9 @@ export function MarkdownEditor({
 
     container.addEventListener("keydown", handleKeyDown, true);
     return () => container.removeEventListener("keydown", handleKeyDown, true);
-  }, [save]);
+    // crepeKey re-attaches the listener after the container is remounted (accept disk version).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [save, crepeKey]);
 
   // Open relative file links in the appropriate editor instead of navigating.
   useEffect(() => {
@@ -806,7 +808,9 @@ export function MarkdownEditor({
 
     container.addEventListener("click", handleClick, true);
     return () => container.removeEventListener("click", handleClick, true);
-  }, [filePath]);
+    // crepeKey re-attaches the listener after the container is remounted (accept disk version).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filePath, crepeKey]);
 
   // Toggle dark mode class
   useEffect(() => {

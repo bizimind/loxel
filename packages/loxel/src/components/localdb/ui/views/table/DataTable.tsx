@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import type { DataAdapter } from "../../adapters/data-adapter.ts";
+import { groupIssuesByColumn } from "../../fields/issue-message.ts";
 import { getField, defaultComponentKeyForColumn } from "../../fields/registry.ts";
 import { CellEditor } from "./CellEditor.tsx";
 
@@ -23,6 +24,7 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [addingRow, setAddingRow] = useState(false);
   const [newRow, setNewRow] = useState<Record<string, unknown>>({});
+  const [newRowIssues, setNewRowIssues] = useState<Record<string, ValidationIssue[]>>({});
   const [saving, setSaving] = useState(false);
   const [editingCell, setEditingCell] = useState<{ rowId: number; column: string } | null>(null);
   const [editingValue, setEditingValue] = useState<unknown>(null);
@@ -66,8 +68,14 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
         const v = newRow[col!.name];
         if (v !== undefined && v !== null && v !== "") payload[col!.name] = v;
       }
-      await adapter.insert(schema.table.name, payload);
+      const result = await adapter.insert(schema.table.name, payload);
+      if (!result.ok) {
+        // Recoverable: keep the draft row and show the issues next to their fields.
+        setNewRowIssues(groupIssuesByColumn(result.issues));
+        return;
+      }
       setNewRow({});
+      setNewRowIssues({});
       setAddingRow(false);
       reload();
     } catch (err) {
@@ -80,11 +88,13 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
   function startAdding() {
     setAddingRow(true);
     setNewRow({});
+    setNewRowIssues({});
   }
 
   function cancelAdding() {
     setAddingRow(false);
     setNewRow({});
+    setNewRowIssues({});
   }
 
   function startEditing(row: Record<string, unknown>, column: string) {
@@ -146,6 +156,11 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
     setEditingValue(null);
     setEditingIssues([]);
   }
+
+  // Issues whose path does not point at a rendered add-row cell (or has no path at all).
+  const rowLevelIssues = Object.entries(newRowIssues)
+    .filter(([key]) => !orderedCols.some((col) => col!.name === key))
+    .flatMap(([, issues]) => issues);
 
   if (error) return <div className="text-destructive px-4 py-2 text-sm">Error: {error}</div>;
   if (loading) return <div className="text-muted-foreground px-4 py-2 text-sm">Loading…</div>;
@@ -230,6 +245,7 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
                       onChange={(v) => setNewRow((r) => ({ ...r, [col!.name]: v }))}
                       onCommit={() => void saveNewRow()}
                       onCancel={cancelAdding}
+                      issues={newRowIssues[col!.name]}
                       autoFocus={i === 0}
                     />
                   </td>
@@ -253,13 +269,18 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
 
       {/* Footer: save/cancel or add-row trigger */}
       {addingRow ? (
-        <div className="border-border/50 flex gap-2 border-t px-4 py-1.5">
+        <div className="border-border/50 flex items-center gap-2 border-t px-4 py-1.5">
           <Button type="button" onClick={() => void saveNewRow()} disabled={saving} size="xs">
             {saving ? "Saving…" : "Save"}
           </Button>
           <Button type="button" onClick={cancelAdding} variant="outline" size="xs">
             Cancel
           </Button>
+          {rowLevelIssues.length > 0 && (
+            <span role="alert" className="text-destructive text-xs">
+              {rowLevelIssues.map((issue) => issue.message).join("; ")}
+            </span>
+          )}
         </div>
       ) : (
         <button
