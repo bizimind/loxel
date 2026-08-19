@@ -154,13 +154,14 @@ export const useWorktreeStore = create<WorktreeState>()(
 
             for (const p of enriched) {
               const existing = byProject[p.path];
-              const validPaths = new Set(p.worktrees.map((wt) => wt.path));
+              const effectiveWorktrees =
+                p.worktrees.length > 0 ? p.worktrees : (existing?.worktrees ?? []);
+              const validPaths = new Set(effectiveWorktrees.map((wt) => wt.path));
               byProject[p.path] = {
-                worktrees: p.worktrees.length > 0 ? p.worktrees : (existing?.worktrees ?? []),
+                worktrees: effectiveWorktrees,
                 hasWtConfig: p.hasWtConfig,
                 wtCliAvailable: p.wtCliAvailable,
                 worktreesDir: p.worktreesDir,
-                // Prune stale entries from persisted lists
                 customOrder: existing?.customOrder?.filter((x) => validPaths.has(x)),
                 hiddenPaths: existing?.hiddenPaths?.filter((x) => validPaths.has(x)),
               };
