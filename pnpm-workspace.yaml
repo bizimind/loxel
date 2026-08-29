@@ -1,2 +1,5 @@
 packages:
   - "packages/*"
+
+# Delay newly published versions to reduce supply-chain risk.
+minimumReleaseAge: 10080
