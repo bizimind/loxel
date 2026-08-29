@@ -16,12 +16,13 @@ afterEach(() => {
 
 /**
  * Advance both the fake interval queue and `Date.now()` in lockstep.
- * Bun's `jest.advanceTimersByTime` fires due intervals but does not move the
- * system clock, so we pair it with `setSystemTime`.
+ * Bun's `jest.advanceTimersByTime` moves the system clock on some platforms
+ * but not others, so restore the explicitly calculated target afterward.
  */
 function advance(ms: number): void {
-  setSystemTime(new Date(Date.now() + ms));
+  const target = new Date(Date.now() + ms);
   jest.advanceTimersByTime(ms);
+  setSystemTime(target);
 }
 
 describe("stderr-throttle", () => {

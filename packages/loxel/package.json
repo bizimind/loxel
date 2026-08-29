@@ -38,8 +38,7 @@
     "lint": "pnpm -w run lint",
     "lint:fix": "pnpm -w run lint:fix",
     "fmt": "pnpm -w run fmt",
-    "fmt:check": "pnpm -w run fmt:check",
-    "ci:reproduce-main": "true"
+    "fmt:check": "pnpm -w run fmt:check"
   },
   "dependencies": {
     "@base-ui/react": "^1.1.0",
