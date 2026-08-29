@@ -96,7 +96,7 @@
   },
   "devDependencies": {
     "@astrojs/language-server": "^2.16.14",
-    "@happy-dom/global-registrator": "^20.11.6",
+    "@happy-dom/global-registrator": "^20.9.0",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^6.9.1",
