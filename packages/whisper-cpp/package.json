@@ -16,7 +16,7 @@
     "fmt:check": "pnpm -w run fmt:check"
   },
   "dependencies": {
-    "node-addon-api": "^8.3.0"
+    "node-addon-api": "^8.9.2"
   },
   "devDependencies": {
     "cmake-js": "^8.0.0"
