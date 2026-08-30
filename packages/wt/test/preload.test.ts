@@ -31,8 +31,18 @@ describe("test safety preload", () => {
     expect(() => fs.writeFile("/tmp/test", "data")).toThrow("[TEST SAFETY] fs.writeFile");
   });
 
+  test("default fs.writeFileSync is blocked", async () => {
+    const fs = (await import("node:fs")).default;
+    expect(() => fs.writeFileSync("/tmp/test", "data")).toThrow("[TEST SAFETY] fs.writeFileSync");
+  });
+
   test("child_process.spawn is blocked", async () => {
     const cp = await import("node:child_process");
+    expect(() => cp.spawn("echo", ["hello"])).toThrow("[TEST SAFETY] child_process.spawn");
+  });
+
+  test("default child_process.spawn is blocked", async () => {
+    const cp = (await import("node:child_process")).default;
     expect(() => cp.spawn("echo", ["hello"])).toThrow("[TEST SAFETY] child_process.spawn");
   });
 });

@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@bizimind/logger": "workspace:*",
-    "commander": "^14.0.2",
+    "commander": "^15.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
