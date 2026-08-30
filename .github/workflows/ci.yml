@@ -14,6 +14,17 @@ permissions:
   actions: read
 
 jobs:
+  bun-version:
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 1
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Check Bun version alignment
+        run: bun .github/scripts/check-bun-version.ts
+
   discover:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 1
@@ -184,6 +195,8 @@ jobs:
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
       - name: Check formatting
         run: pnpm run fmt:check
@@ -206,6 +219,8 @@ jobs:
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
       - name: Run tests
         run: pnpm -C ${{ matrix.package.path }} run test
@@ -229,6 +244,8 @@ jobs:
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
       - name: Run build
         run: pnpm -C ${{ matrix.package.path }} run build
@@ -254,6 +271,8 @@ jobs:
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
       - name: Run typecheck
         run: pnpm -C ${{ matrix.package.path }} run typecheck
@@ -261,7 +280,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [lint, test, build, typecheck]
+    needs: [bun-version, lint, test, build, typecheck]
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     steps:
       - name: Verify CI results

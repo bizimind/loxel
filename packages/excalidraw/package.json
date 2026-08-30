@@ -31,7 +31,7 @@
     "svg-path-bbox": "^2.1.0"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "1.4.0",
     "@types/node": "^24.0.0"
   },
   "engines": {

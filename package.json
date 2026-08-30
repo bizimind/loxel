@@ -4,6 +4,7 @@
   "license": "FSL-1.1-ALv2",
   "scripts": {
     "prepare": "git config core.hooksPath .githooks",
+    "check:bun-version": "bun .github/scripts/check-bun-version.ts",
     "lint": "oxlint --ignore-pattern '**/deps/**'",
     "lint:fix": "oxlint --fix --ignore-pattern '**/deps/**'",
     "fmt": "oxfmt --write .",
@@ -13,7 +14,7 @@
     "typecheck": "pnpm -r --parallel run typecheck"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "1.4.0",
     "@types/node": "^24.0.0",
     "@typescript/native-preview": "7.0.0-dev.20260519.1",
     "oxfmt": "^0.24.0",
@@ -23,6 +24,7 @@
   },
   "pnpm": {
     "overrides": {
+      "bun": "1.4.0",
       "devalue": ">=5.8.1",
       "dompurify": ">=3.4.3",
       "immutable": "4.3.9",
