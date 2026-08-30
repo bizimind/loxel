@@ -22,6 +22,6 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250124.0",
     "@types/bun": "latest",
-    "wrangler": "^4.61.0"
+    "wrangler": "^4.125.0"
   }
 }
