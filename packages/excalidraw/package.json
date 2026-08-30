@@ -25,7 +25,7 @@
     "@excalidraw/mermaid-to-excalidraw": "^2.2.2",
     "@excalidraw/utils": "^0.1.2",
     "@napi-rs/canvas": "^1.0.7",
-    "commander": "^14.0.2",
+    "commander": "^15.0.0",
     "linkedom": "^0.18.13",
     "roughjs": "^4.6.6",
     "svg-path-bbox": "^2.1.0"

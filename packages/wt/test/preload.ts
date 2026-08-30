@@ -34,7 +34,7 @@ Bun.write = createBlockedFn("Bun.write");
 // =============================================================================
 // Block node:fs/promises (async filesystem operations)
 // =============================================================================
-mock.module("node:fs/promises", () => ({
+const fsPromisesMock = {
   // Dangerous - blocked
   writeFile: createBlockedFn("fs.writeFile"),
   mkdir: createBlockedFn("fs.mkdir"),
@@ -50,12 +50,14 @@ mock.module("node:fs/promises", () => ({
   chown: createBlockedFn("fs.chown"),
   truncate: createBlockedFn("fs.truncate"),
   appendFile: createBlockedFn("fs.appendFile"),
-}));
+};
+
+mock.module("node:fs/promises", () => ({ ...fsPromisesMock, default: fsPromisesMock }));
 
 // =============================================================================
 // Block node:fs (sync filesystem operations)
 // =============================================================================
-mock.module("node:fs", () => ({
+const fsMock = {
   // Dangerous - blocked
   writeFileSync: createBlockedFn("fs.writeFileSync"),
   mkdirSync: createBlockedFn("fs.mkdirSync"),
@@ -71,12 +73,14 @@ mock.module("node:fs", () => ({
   chownSync: createBlockedFn("fs.chownSync"),
   truncateSync: createBlockedFn("fs.truncateSync"),
   appendFileSync: createBlockedFn("fs.appendFileSync"),
-}));
+};
+
+mock.module("node:fs", () => ({ ...fsMock, default: fsMock }));
 
 // =============================================================================
 // Block node:child_process
 // =============================================================================
-mock.module("node:child_process", () => ({
+const childProcessMock = {
   spawn: createBlockedFn("child_process.spawn"),
   spawnSync: createBlockedFn("child_process.spawnSync"),
   exec: createBlockedFn("child_process.exec"),
@@ -84,7 +88,9 @@ mock.module("node:child_process", () => ({
   execFile: createBlockedFn("child_process.execFile"),
   execFileSync: createBlockedFn("child_process.execFileSync"),
   fork: createBlockedFn("child_process.fork"),
-}));
+};
+
+mock.module("node:child_process", () => ({ ...childProcessMock, default: childProcessMock }));
 
 // =============================================================================
 // Block dangerous process methods
