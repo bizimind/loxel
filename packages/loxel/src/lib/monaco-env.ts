@@ -1,9 +1,9 @@
 import { shikiToMonaco } from "@shikijs/monaco";
 import * as monaco from "monaco-editor";
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
-import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
-import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
+import editorWorker from "monaco-editor/esm/vs/editor/editor.worker.js?worker";
+import cssWorker from "monaco-editor/esm/vs/language/css/css.worker.js?worker";
+import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker.js?worker";
+import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker.js?worker";
 
 import { useWorktreeStore } from "@/store/worktrees";
 
