@@ -204,11 +204,11 @@ importers:
   packages/logger:
     dependencies:
       '@axiomhq/js':
-        specifier: ^1.4.0
-        version: 1.6.1
+        specifier: ^1.8.0
+        version: 1.8.0
       '@axiomhq/logging':
-        specifier: ^0.2.0
-        version: 0.2.2(@axiomhq/js@1.6.1)
+        specifier: ^0.4.0
+        version: 0.4.0(@axiomhq/js@1.8.0)
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -651,12 +651,12 @@ packages:
   '@astrojs/yaml2ts@0.2.4':
     resolution: {integrity: sha512-8oddpOae35pJsXPQXhTkM0ypfKPskVsh2bCxRtbf7e+/Epw2nReakFYpLKjZMEr75CsoF203PMnCocpfz0s69A==}
 
-  '@axiomhq/js@1.6.1':
-    resolution: {integrity: sha512-iNWOnGvP+R2lIWYk9jkfvRI/rfhOR9hlWJOBJhMKwZ9mfpE0KdnFnG2XPLoMcrbyrOBKj6Jw0hpIH5GhPucLog==}
+  '@axiomhq/js@1.8.0':
+    resolution: {integrity: sha512-VRkqV9XH+pkj8d9eRdw8TuWvXdCkVDMtDOz2rix5UAg7x5SlOeWhUz9fwc0ZgySosMSMA7WP7X0fFX8N/jBHtQ==}
     engines: {node: '>=20'}
 
-  '@axiomhq/logging@0.2.2':
-    resolution: {integrity: sha512-r21JL+hQH4KL8wlkfzcl9OToMLSX2iPVeQR51EfaDmXNz9oeLJTyaqfiXQJSfHnjoV/NOIE6TNQ4CxHfzt/ROg==}
+  '@axiomhq/logging@0.4.0':
+    resolution: {integrity: sha512-exb1qV5pt15ydSX5iIB9AQ0xv+O5iHmslHoyGJAmCgehFlHESivbuiFyb6Kbk0y4MW+zz8/aD5N0dHQLfUb4TA==}
     engines: {node: '>=20'}
     peerDependencies:
       '@axiomhq/js': ^1.0.0
@@ -7293,13 +7293,13 @@ snapshots:
     dependencies:
       yaml: 2.9.0
 
-  '@axiomhq/js@1.6.1':
+  '@axiomhq/js@1.8.0':
     dependencies:
       fetch-retry: 6.0.0
 
-  '@axiomhq/logging@0.2.2(@axiomhq/js@1.6.1)':
+  '@axiomhq/logging@0.4.0(@axiomhq/js@1.8.0)':
     optionalDependencies:
-      '@axiomhq/js': 1.6.1
+      '@axiomhq/js': 1.8.0
 
   '@babel/code-frame@7.29.7':
     dependencies:
