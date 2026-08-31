@@ -14,10 +14,10 @@
   },
   "devDependencies": {
     "@types/bun": "1.4.0",
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.13.3",
     "@typescript/native-preview": "7.0.0-dev.20260519.1",
     "oxfmt": "^0.24.0",
-    "oxlint": "1.60.0",
+    "oxlint": "1.79.0",
     "oxlint-tsgolint": "^0.21.1",
     "typescript": "^6"
   },
