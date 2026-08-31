@@ -59,7 +59,7 @@
     "@milkdown/kit": "^7.22.1",
     "@shikijs/monaco": "^4.4.3",
     "@tanstack/react-query": "^5.102.0",
-    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-table": "^9.1.2",
     "@tanstack/react-virtual": "^3.14.10",
     "@types/mdast": "^4.0.4",
     "@xterm/addon-fit": "^0.11.0",

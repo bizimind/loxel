@@ -2,15 +2,11 @@ import type {
   ColumnOrderState,
   ColumnSizingState,
   Header,
-  VisibilityState,
+  StockFeatures,
+  ColumnVisibilityState,
 } from "@tanstack/react-table";
 
-import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import { createColumnHelper, flexRender, stockFeatures, useTable } from "@tanstack/react-table";
 import { PencilLineIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -50,10 +46,10 @@ function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString();
 }
 
-const columnHelper = createColumnHelper<LayoutNode>();
+const columnHelper = createColumnHelper<StockFeatures, LayoutNode>();
 
 function buildColumns(graphWidth: number) {
-  return [
+  return columnHelper.columns([
     columnHelper.display({
       id: "graph",
       size: graphWidth + REF_LABELS_WIDTH,
@@ -88,7 +84,7 @@ function buildColumns(graphWidth: number) {
       enableHiding: true,
       cell: (info) => formatRelativeTime(info.getValue()),
     }),
-  ];
+  ]);
 }
 
 /**
@@ -98,8 +94,8 @@ function buildColumns(graphWidth: number) {
  * so drag right = narrower (inverted delta).
  */
 function createInvertedResizeHandler(
-  table: ReturnType<typeof useReactTable<LayoutNode>>,
-  header: Header<LayoutNode, unknown>,
+  table: ReturnType<typeof useTable<StockFeatures, LayoutNode>>,
+  header: Header<StockFeatures, LayoutNode>,
 ) {
   return (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
@@ -139,8 +135,8 @@ function createInvertedResizeHandler(
  * Columns after subject get a left-edge handle (inverted direction).
  */
 function getResizeSides(
-  headers: Header<LayoutNode, unknown>[],
-  header: Header<LayoutNode, unknown>,
+  headers: Header<StockFeatures, LayoutNode>[],
+  header: Header<StockFeatures, LayoutNode>,
 ): { left: boolean; right: boolean } {
   const subjectIndex = headers.findIndex((h) => h.id === "subject");
   const headerIndex = headers.indexOf(header);
@@ -151,7 +147,11 @@ function getResizeSides(
 }
 
 // Full-height resize handles overlaying the entire content area
-function ColumnResizeOverlay({ table }: { table: ReturnType<typeof useReactTable<LayoutNode>> }) {
+function ColumnResizeOverlay({
+  table,
+}: {
+  table: ReturnType<typeof useTable<StockFeatures, LayoutNode>>;
+}) {
   const headers = table.getHeaderGroups()[0]!.headers;
 
   return (
@@ -199,7 +199,9 @@ function CommitRow({
   onColumnDragOver,
   onColumnDrop,
 }: {
-  row: ReturnType<ReturnType<typeof useReactTable<LayoutNode>>["getRowModel"]>["rows"][number];
+  row: ReturnType<
+    ReturnType<typeof useTable<StockFeatures, LayoutNode>>["getRowModel"]
+  >["rows"][number];
   selected: boolean;
   onClick: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -353,7 +355,7 @@ export function CommitGraph() {
   const setGraphColumnSizing = useWorktreeUI((s) => s.setGraphColumnSizing);
   const columnOrder = useWorktreeUI((s) => s.graphColumnOrder);
   const setGraphColumnOrder = useWorktreeUI((s) => s.setGraphColumnOrder);
-  const [columnVisibility] = useState<VisibilityState>({});
+  const [columnVisibility] = useState<ColumnVisibilityState>({});
 
   // Column drag state for reordering
   const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
@@ -446,14 +448,14 @@ export function CommitGraph() {
     [setGraphColumnOrder],
   );
 
-  const table = useReactTable({
+  const table = useTable<StockFeatures, LayoutNode>({
+    features: stockFeatures,
     data: layout.nodes,
     columns,
     columnResizeMode: "onChange",
     state: { columnSizing, columnOrder, columnVisibility },
     onColumnSizingChange: handleColumnSizingChange,
     onColumnOrderChange: handleColumnOrderChange,
-    getCoreRowModel: getCoreRowModel(),
   });
 
   // Set the graph column to the computed layout width only on first visit
@@ -476,7 +478,7 @@ export function CommitGraph() {
   const handleColumnDrop = useCallback(
     (toId: string) => {
       if (draggingColumnId && draggingColumnId !== toId) {
-        const currentOrder = table.getState().columnOrder;
+        const currentOrder = table.state.columnOrder;
         const order =
           currentOrder.length > 0 ? [...currentOrder] : table.getAllColumns().map((c) => c.id);
 
