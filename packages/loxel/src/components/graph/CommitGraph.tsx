@@ -4,6 +4,8 @@ import type {
   Header,
   StockFeatures,
   ColumnVisibilityState,
+  Row,
+  Table,
 } from "@tanstack/react-table";
 
 import { createColumnHelper, flexRender, stockFeatures, useTable } from "@tanstack/react-table";
@@ -94,7 +96,7 @@ function buildColumns(graphWidth: number) {
  * so drag right = narrower (inverted delta).
  */
 function createInvertedResizeHandler(
-  table: ReturnType<typeof useTable<StockFeatures, LayoutNode>>,
+  table: Table<StockFeatures, LayoutNode>,
   header: Header<StockFeatures, LayoutNode>,
 ) {
   return (e: React.MouseEvent | React.TouchEvent) => {
@@ -147,11 +149,7 @@ function getResizeSides(
 }
 
 // Full-height resize handles overlaying the entire content area
-function ColumnResizeOverlay({
-  table,
-}: {
-  table: ReturnType<typeof useTable<StockFeatures, LayoutNode>>;
-}) {
+function ColumnResizeOverlay({ table }: { table: Table<StockFeatures, LayoutNode> }) {
   const headers = table.getHeaderGroups()[0]!.headers;
 
   return (
@@ -199,9 +197,7 @@ function CommitRow({
   onColumnDragOver,
   onColumnDrop,
 }: {
-  row: ReturnType<
-    ReturnType<typeof useTable<StockFeatures, LayoutNode>>["getRowModel"]
-  >["rows"][number];
+  row: Row<StockFeatures, LayoutNode>;
   selected: boolean;
   onClick: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
