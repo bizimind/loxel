@@ -38,6 +38,8 @@ jobs:
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - name: Bump patch version
         id: bump
@@ -101,6 +103,8 @@ jobs:
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

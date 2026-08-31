@@ -68,7 +68,7 @@ jobs:
           version: 10
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - uses: ./.github/actions/setup-claude
 

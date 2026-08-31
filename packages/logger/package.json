@@ -29,6 +29,6 @@
     "@axiomhq/logging": "^0.4.0"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "1.4.0"
   }
 }

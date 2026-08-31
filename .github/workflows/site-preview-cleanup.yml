@@ -23,7 +23,6 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 10
-      - uses: oven-sh/setup-bun@v2
 
       - name: Delete preview deployments
         env:

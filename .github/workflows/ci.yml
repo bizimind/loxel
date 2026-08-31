@@ -184,6 +184,8 @@ jobs:
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
       - name: Check formatting
         run: pnpm run fmt:check
@@ -206,6 +208,8 @@ jobs:
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
       - name: Run tests
         run: pnpm -C ${{ matrix.package.path }} run test
@@ -229,6 +233,8 @@ jobs:
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
       - name: Run build
         run: pnpm -C ${{ matrix.package.path }} run build
@@ -254,6 +260,8 @@ jobs:
         with:
           version: 10
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - run: pnpm install --frozen-lockfile
       - name: Run typecheck
         run: pnpm -C ${{ matrix.package.path }} run typecheck
