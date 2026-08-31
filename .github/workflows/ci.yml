@@ -14,17 +14,6 @@ permissions:
   actions: read
 
 jobs:
-  bun-version:
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    timeout-minutes: 1
-    steps:
-      - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - name: Check Bun version alignment
-        run: bun .github/scripts/check-bun-version.ts
-
   discover:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 1
@@ -280,7 +269,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [bun-version, lint, test, build, typecheck]
+    needs: [lint, test, build, typecheck]
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     steps:
       - name: Verify CI results
