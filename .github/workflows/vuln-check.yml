@@ -22,7 +22,7 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.36.0
@@ -47,6 +47,6 @@ jobs:
 
       - name: Upload SARIF
         if: always() && github.ref == 'refs/heads/main'
-        uses: github/codeql-action/upload-sarif@v4.35.5
+        uses: github/codeql-action/upload-sarif@v4.37.8
         with:
           sarif_file: trivy-results.sarif
