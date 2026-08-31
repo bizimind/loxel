@@ -103,7 +103,7 @@ export function setupOuterDockview(api: DockviewApi): void {
   });
 
   // Accept external drags (toolbar icons)
-  api.onUnhandledDragOverEvent((event) => {
+  api.onUnhandledDragOver((event) => {
     const types =
       "dataTransfer" in event.nativeEvent ? event.nativeEvent.dataTransfer?.types : undefined;
     if (types?.includes("text/plain")) {
