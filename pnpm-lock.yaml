@@ -316,8 +316,8 @@ importers:
         specifier: ^1.33.0
         version: 1.33.0(react@19.2.8)
       monaco-editor:
-        specifier: 0.55.1
-        version: 0.55.1
+        specifier: 0.56.0
+        version: 0.56.0
       motion:
         specifier: ^12.29.0
         version: 12.40.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -5441,6 +5441,9 @@ packages:
 
   monaco-editor@0.55.1:
     resolution: {integrity: sha512-jz4x+TJNFHwHtwuV9vA9rMujcZRb0CEilTEwG2rRSpe/A7Jdkuj8xPKttCgOh+v/lkHy7HsZ64oj+q3xoAFl9A==}
+
+  monaco-editor@0.56.0:
+    resolution: {integrity: sha512-sXboRm3BeBeLm938eaiyLMe0OxzfXIlZvbv4ir/jVgQy1zDhWjgmny0WoN45fuDKhCCQsYMbBJrv/A6jd8aCUg==}
 
   motion-dom@12.40.0:
     resolution: {integrity: sha512-HxU3ZaBwNPVQUBQf1xxgq+7JrPNZvjLVxgbpEZL7RrWJnsxOf0/OM+yrHG9ogLQ31Do/r57Oz2gQWPK+6q62mg==}
@@ -12766,6 +12769,11 @@ snapshots:
   monaco-editor@0.55.1:
     dependencies:
       dompurify: 3.4.7
+      marked: 14.0.0
+
+  monaco-editor@0.56.0:
+    dependencies:
+      dompurify: 3.4.14
       marked: 14.0.0
 
   motion-dom@12.40.0:

@@ -50,6 +50,12 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         "@": path.resolve(import.meta.dirname, "./src"),
+        // Monaco 0.56 exposes its worker modules through paths that Rolldown cannot resolve
+        // through the package export map; keep those browser worker imports on concrete files.
+        "monaco-editor/esm/vs": path.resolve(
+          import.meta.dirname,
+          "node_modules/monaco-editor/esm/vs",
+        ),
         // @hediet/json-rpc-websocket imports `ws` for Node.js — shim to nothing in browser
         ws: path.resolve(import.meta.dirname, "./src/lib/ws-shim.ts"),
       },
