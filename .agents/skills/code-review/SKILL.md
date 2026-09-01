@@ -1,13 +1,17 @@
 ---
-allowed-tools: Read, Bash(find:*), Bash(grep:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(gh issue view:*), Bash(gh search:*), Bash(gh issue list:*), Bash(gh pr comment:*), Bash(gh pr diff:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh api:*)
 description: Code review a pull request
 ---
 
 Provide a code review for the given pull request.
 
-**CRITICAL: Always launch agents with `run_in_background: false` (foreground).** Background agents waste turns polling for completion.
+## Rules
 
-To do this, follow these steps precisely:
+- This is a review-only task. You may edit files locally to test hypotheses (e.g., check if a fix compiles, write and run temp tests to verify a suspicion), but never commit or push changes.
+- You have internet access for reading, exploring, and research (e.g., checking library docs, fetching API references) and for posting review comments to the PR — but never write to external services, create issues, or post anywhere other than the PR under review.
+- Always launch agents with `run_in_background: false` (foreground). Background agents waste turns polling for completion.
+- We only want HIGH SIGNAL issues. False positives erode trust and waste reviewer time — when in doubt, don't flag it.
+
+## Steps
 
 1. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
    - The root CLAUDE.md file, if it exists
@@ -27,7 +31,7 @@ To do this, follow these steps precisely:
    Agent 4: Opus bug agent (parallel subagent with agent 3)
    Look for problems that exist in the introduced code. This could be security issues, incorrect logic, etc. Only look for issues that fall within the changed code.
 
-   **CRITICAL: We only want HIGH SIGNAL issues.** Flag issues where:
+   **We only want HIGH SIGNAL issues.** Flag issues where:
    - The code will fail to compile or parse (syntax errors, type errors, missing imports, unresolved references)
 
    - The code will definitely produce wrong results regardless of inputs (clear logic errors)
