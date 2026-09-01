@@ -29,5 +29,6 @@ jobs:
         uses: anthropics/claude-code-action@v1.0.211
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--model claude-opus-5[1m]"
           show_full_output: true
           prompt: "/code-review Code review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"

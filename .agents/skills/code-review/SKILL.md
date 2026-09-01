@@ -5,7 +5,7 @@ description: Code review a pull request
 
 Provide a code review for the given pull request.
 
-<br />
+**CRITICAL: Always launch agents with `run_in_background: false` (foreground).** Background agents waste turns polling for completion.
 
 To do this, follow these steps precisely:
 
