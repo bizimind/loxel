@@ -10,12 +10,11 @@ Reference material for configuring and understanding loxel's runtime behavior.
 
 ## Environment Variables
 
-Most of these you set once in your shell profile. The `LOXEL_*` injection variables are set automatically by loxel in every terminal it opens — you don't configure them. See [Terminals](/docs/terminals) for how these are used in practice, and [TypeScript Intelligence](/docs/typescript-intelligence) for `LOXEL_TS_LSP`.
+Most of these you set once in your shell profile. The `LOXEL_*` injection variables are set automatically by loxel in every terminal it opens — you don't configure them. See [Terminals](/docs/terminals) for how these are used in practice.
 
 | Variable                     | What it does                                                  | Default                |
 | ---------------------------- | ------------------------------------------------------------- | ---------------------- |
 | `LOXEL_DEV`                  | Dev mode: separate state directory, port 7434 instead of 7433 | (unset = prod)         |
-| `LOXEL_TS_LSP`               | TypeScript LSP backend: `tsgo` or `tsls`                      | `tsgo`                 |
 | `LOXEL_STATIC_DIR`           | Override the frontend assets directory                        | Auto-detect            |
 | `LOXEL_PORT`                 | Auto-injected in terminals: port of the running loxel server  | (injected)             |
 | `LOXEL_WORKTREE`             | Auto-injected in terminals: worktree path for that terminal   | (injected)             |

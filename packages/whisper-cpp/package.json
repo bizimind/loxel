@@ -9,7 +9,7 @@
     "build:debug": "cmake-js compile --debug",
     "rebuild": "cmake-js rebuild",
     "clean": "cmake-js clean",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "pnpm -w run lint",
     "lint:fix": "pnpm -w run lint:fix",
     "fmt": "pnpm -w run fmt",

@@ -30,7 +30,7 @@ self.MonacoEnvironment = {
   },
 };
 
-// Disable ALL built-in TS/JS language features. We use server-backed hover and tsgo diagnostics.
+// Disable ALL built-in TS/JS language features. We use server-backed hover and TypeScript diagnostics.
 // This prevents Monaco from trying to load the TS worker module (which causes the toUrl error
 // since we return the generic editor worker instead of the TS worker).
 const disabledModeConfig: monaco.typescript.ModeConfiguration = {
@@ -66,7 +66,7 @@ monaco.languages.register({ id: "astro", extensions: [".astro"], aliases: ["Astr
 
 // TSX/JSX as distinct language IDs so shikiToMonaco can attach TextMate tokenizers.
 // Monaco has built-in "typescript"/"javascript" but not "tsx"/"jsx". TS language
-// features come from the tsgo LSP, not Monaco's built-in TS workers (disabled above).
+// features come from the TypeScript LSP, not Monaco's built-in TS workers (disabled above).
 monaco.languages.register({
   id: "tsx",
   extensions: [".tsx"],
@@ -251,7 +251,7 @@ import { initSchemaSync } from "./schema-sync";
 initSchemaSync();
 
 // TS/JS language features (hover, completions, definition, references,
-// semantic tokens, diagnostics) are delivered by the tsgo LSP over the
+// semantic tokens, diagnostics) are delivered by the TypeScript LSP over the
 // WebSocket at /ws/ts-lsp via packages/monaco-lsp-client. No providers are
 // registered here — doing so would compete with the LSP-backed providers.
 

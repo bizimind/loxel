@@ -86,16 +86,16 @@ JetBrains-style split diff with synchronized scrolling:
 
 ### TypeScript Language Intelligence
 
-All per-file TS/JS language features are delivered by a `tsgo --lsp -stdio` subprocess per worktree, proxied to Monaco over a WebSocket at `/ws/ts-lsp` via the `monaco-lsp-client` package. The backend is pluggable (`LOXEL_TS_LSP=tsgo|tsls`, see `packages/loxel/src/server/ts-lsp-backend.ts`). No TypeScript runs on Bun's JS thread.
+All per-file TS/JS language features are delivered by the official TypeScript 7 native language server (`tsc --lsp -stdio`) in a subprocess per worktree, proxied to Monaco over a WebSocket at `/ws/ts-lsp` via the `monaco-lsp-client` package. No TypeScript runs on Bun's JS thread.
 
-- **Project diagnostics** — the `GET /api/diagnostics` endpoint shells out to the `tsgo` CLI against a committed ref or the working tree and caches results per-commit. Used by the diff viewer and the project-wide diagnostics query
-- **Per-file diagnostics** — pushed by tsgo over LSP (`textDocument/publishDiagnostics`) and rendered as Monaco markers by `LspDiagnosticsFeature`
+- **Project diagnostics** — the `GET /api/diagnostics` endpoint shells out to the `tsc` CLI against a committed ref or the working tree and caches results per-commit. Used by the diff viewer and the project-wide diagnostics query
+- **Per-file diagnostics** — pushed by TypeScript over LSP (`textDocument/publishDiagnostics`) and rendered as Monaco markers by `LspDiagnosticsFeature`
 - **Hover, go to definition, find references, completions, rename, code actions, inlay hints, signature help, document symbols, folding ranges** — delivered via the corresponding `Lsp*Feature` registered by `MonacoLspClient`. Cmd-click/F12 jumps open a new editor tab via `registerEditorOpener` (see `monaco-env.ts`), not Monaco's inline peek widget
-- **Semantic highlighting** — only provided when the chosen backend implements `textDocument/semanticTokens/full`. `tsgo` currently does not, so TS files fall back to Monarch syntactic highlighting. Switch to `LOXEL_TS_LSP=tsls` (`typescript-language-server`) for full semantic tokens
-- **Unused variable dimming** — tsgo emits these as diagnostics with the appropriate tag, surfaced by `LspDiagnosticsFeature` via `MarkerTag.Unnecessary`
+- **Semantic highlighting** — provided when TypeScript returns semantic tokens; TS files otherwise fall back to Monarch syntactic highlighting
+- **Unused variable dimming** — TypeScript emits these as diagnostics with the appropriate tag, surfaced by `LspDiagnosticsFeature` via `MarkerTag.Unnecessary`
 - **LSP stderr rate-cap** — every `StdioLspManager` subprocess (TS, terraform-ls, etc.) drains stderr through a per-session token-bucket throttle (200-line burst, 50 lines/sec steady-state). Chatty servers can't flood the shared log ring buffer or rotating log file; dropped lines are counted and summarized periodically at `debug` level
 
-**LSP lifecycle**: `tsgo` is connected eagerly when a worktree becomes active, since most worktrees have TS/JS files. `terraform-language-server`, `docker-language-server`, `pyright` (Python), and `@astrojs/language-server` (Astro) are expensive to spawn (they walk the workspace) and most worktrees don't need them, so they are lazy-connected: the subprocess is only started when a model of the matching language (`terraform`, `dockerfile`/`dockerbake`, `python`, or `astro`) first appears in the active worktree, and disconnected when the last such model is disposed. Switching worktrees re-evaluates the count so the LSP follows the active scope. See `createLazyLspConnector` in `src/lib/monaco-env.ts`.
+**LSP lifecycle**: TypeScript is connected eagerly when a worktree becomes active, since most worktrees have TS/JS files. `terraform-language-server`, `docker-language-server`, `pyright` (Python), and `@astrojs/language-server` (Astro) are expensive to spawn (they walk the workspace) and most worktrees don't need them, so they are lazy-connected: the subprocess is only started when a model of the matching language (`terraform`, `dockerfile`/`dockerbake`, `python`, or `astro`) first appears in the active worktree, and disconnected when the last such model is disposed. Switching worktrees re-evaluates the count so the LSP follows the active scope. See `createLazyLspConnector` in `src/lib/monaco-env.ts`.
 
 ### Git Operations
 
@@ -115,7 +115,7 @@ Full git client via context menus and inline forms:
 Standard IDE editing experience built on Monaco Editor:
 
 - **Syntax highlighting** for all major languages, code folding, line numbers, glyph margin
-- **TypeScript diagnostics** — real-time type errors and warnings from `tsgo` shown as inline markers
+- **TypeScript diagnostics** — real-time type errors and warnings from TypeScript shown as inline markers
 - **Quick Open** (`Cmd+P`) — fuzzy file path search with file icons, MRU list, and go-to-line via `:line` suffix. Search results (`Cmd+Shift+F`) navigate directly to the matched line and column
 - **Command Palette** (`Cmd+K`) — fuzzy search across all registered actions with keyboard navigation (arrow keys, Enter to execute). Internal actions (tree navigation, the palette itself) are hidden via `hidden: true` on `ActionDef`
 - **Autosave** with capped debounce (250ms idle / 5s max wait), `Cmd+S` to save immediately, `Cmd+W` to close
@@ -161,7 +161,7 @@ Branch info, upstream tracking (ahead/behind), working tree status counts (stage
 - SQLite databases for reviews/comments and project metadata
 - PTY manager for terminal sessions with scrollback buffers
 - Agent manager for coding agent subprocess lifecycle
-- TypeScript LSP subprocess manager (`TsLspManager` spawns `tsgo --lsp -stdio` per worktree) proxied to the frontend over `/ws/ts-lsp`
+- TypeScript LSP subprocess manager (`TsLspManager` spawns `tsc --lsp -stdio` per worktree) proxied to the frontend over `/ws/ts-lsp`
 - File watcher with debounced broadcasts (150ms status, 500ms worktree changes)
 
 **Client** (React 19, Vite):

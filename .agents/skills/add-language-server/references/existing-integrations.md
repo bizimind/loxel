@@ -4,15 +4,15 @@ Quick reference for per-LSP quirks. Consult when the new integration needs behav
 
 ## Integration Matrix
 
-| LSP                    | Binary Source | Scope    | Connection | Semantic Tokens | Full-text Sync | Spawn Args                 | Init Options            |
-| ---------------------- | ------------- | -------- | ---------- | --------------- | -------------- | -------------------------- | ----------------------- |
-| TypeScript (tsgo/tsls) | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio` / `--stdio` | preferences             |
-| YAML                   | Bun-built     | global   | always     | enabled         | no             | `--stdio`                  | schema map (post-init)  |
-| Docker                 | downloaded    | worktree | lazy       | disabled        | yes            | `start --stdio`            | compose=off (post-init) |
-| Terraform              | downloaded    | worktree | lazy       | disabled        | no             | `serve`                    | indexing ignore dirs    |
-| Python (Pyright)       | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`                  | analysis settings       |
-| Astro                  | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`                  | TypeScript SDK path     |
-| XML (LemMinX)          | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`                  | none                    |
+| LSP              | Binary Source | Scope    | Connection | Semantic Tokens | Full-text Sync | Spawn Args      | Init Options            |
+| ---------------- | ------------- | -------- | ---------- | --------------- | -------------- | --------------- | ----------------------- |
+| TypeScript (tsc) | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences             |
+| YAML             | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (post-init)  |
+| Docker           | downloaded    | worktree | lazy       | disabled        | yes            | `start --stdio` | compose=off (post-init) |
+| Terraform        | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs    |
+| Python (Pyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | analysis settings       |
+| Astro            | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path     |
+| XML (LemMinX)    | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | none                    |
 
 ## TypeScript — Do Not Use as Template
 
@@ -21,8 +21,7 @@ The most complex manager. Unique behaviors not found in other LSPs:
 - Bidirectional URI translation (`loxel://HEAD/` <-> `file:///`)
 - LanguageId fixup: `tsx` -> `typescriptreact`, `jsx` -> `javascriptreact`
 - Server-side filtering of non-TS files via `shouldDropForNonTsUri()`
-- Inline `workspace/configuration` response (tsgo blocks until answered)
-- Backend selection between `tsgo` and `tsls` via `LOXEL_TS_LSP` env var
+- Inline `workspace/configuration` response (TypeScript blocks until answered)
 
 ## YAML — Global Singleton
 

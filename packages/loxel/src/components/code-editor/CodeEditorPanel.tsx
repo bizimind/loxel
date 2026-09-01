@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import * as monaco from "monaco-editor";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import type { TsgoDiagnostic } from "@/api/diagnostics-model";
+import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 
 import * as api from "@/api/client";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
@@ -235,7 +235,7 @@ export function CodeEditorPanel({
     panelWorktreePath && filePath.startsWith(panelWorktreePath + "/")
       ? filePath.slice(panelWorktreePath.length + 1)
       : filePath;
-  const diagnostics = useMemo<TsgoDiagnostic[]>(() => {
+  const diagnostics = useMemo<TypeScriptDiagnostic[]>(() => {
     if (!diagData?.diagnostics) return [];
     return diagData.diagnostics.filter((d) => d.file === relativePath);
   }, [diagData, relativePath]);
@@ -559,7 +559,7 @@ export function CodeEditorPanel({
     model.updateOptions({ tabSize, insertSpaces });
   }, [editorSettings, filePath]);
 
-  // Apply tsgo diagnostics as Monaco markers
+  // Apply TypeScript diagnostics as Monaco markers
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -567,7 +567,7 @@ export function CodeEditorPanel({
     if (!model) return;
 
     if (diagnostics.length === 0) {
-      monaco.editor.setModelMarkers(model, "tsgo", []);
+      monaco.editor.setModelMarkers(model, "typescript", []);
       return;
     }
 
@@ -579,13 +579,13 @@ export function CodeEditorPanel({
       message: `TS${d.code}: ${d.message}`,
       severity:
         d.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
-      source: "tsgo",
+      source: "typescript",
     }));
 
-    monaco.editor.setModelMarkers(model, "tsgo", markers);
+    monaco.editor.setModelMarkers(model, "typescript", markers);
   }, [diagnostics]);
 
-  // Real-time per-file diagnostics are delivered by tsgo over LSP (via
+  // Real-time per-file diagnostics are delivered by TypeScript over LSP (via
   // LspDiagnosticsFeature in monaco-lsp-client) — no HTTP round-trip needed.
 
   // Strict JSON validation — flag comments/trailing commas for files resolved as "json" (not "jsonc")

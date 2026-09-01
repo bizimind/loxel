@@ -39,26 +39,14 @@ Each worktree gets its own language server subprocess. Switching worktrees switc
 
 ## Unused symbols
 
-Symbols flagged as unused by the language server are dimmed in the editor. This uses Monaco's `MarkerTag.Unnecessary` — the same visual treatment as VS Code. `tsgo` emits these diagnostics automatically; no extra configuration required.
+Symbols flagged as unused by the language server are dimmed in the editor. This uses Monaco's `MarkerTag.Unnecessary` — the same visual treatment as VS Code. TypeScript emits these diagnostics automatically; no extra configuration required.
 
 ---
 
-## Backend selection
+## TypeScript server
 
-The TypeScript language server backend is set with the `LOXEL_TS_LSP` environment variable:
-
-| Value            | Package                      | Notes                                                 |
-| ---------------- | ---------------------------- | ----------------------------------------------------- |
-| `tsgo` (default) | `@typescript/native-preview` | Faster startup                                        |
-| `tsls`           | `typescript-language-server` | Adds semantic token highlighting (more syntax colors) |
-
-Set this before starting loxel:
-
-```bash
-LOXEL_TS_LSP=tsls loxel
-```
-
-> **Tip:** `tsls` produces richer syntax coloring via semantic tokens — individual local variables, parameters, and type aliases get distinct colors beyond what TextMate grammar rules provide. Use it if you prefer that style; the tradeoff is slightly slower startup compared to `tsgo`.
+Loxel uses the official TypeScript 7 native compiler and language server (`tsc --lsp -stdio`).
+The same runtime provides diagnostics, completions, navigation, refactors, and other editor features.
 
 ---
 
@@ -80,4 +68,4 @@ YAML is a singleton that starts with loxel and stays running. The Terraform, Doc
 ## See also
 
 - [Editor](/docs/editor) — Monaco editor that surfaces TypeScript diagnostics as inline markers
-- [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — `LOXEL_TS_LSP` for switching between `tsgo` and `tsls` backends
+- [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — runtime configuration reference

@@ -149,7 +149,8 @@ code-analysis -p type-issues/TS2345
 code-analysis -p type-issues/TS7006
 ```
 
-Tries **tsgo** first, falls back to **tsc**. Both are run with `--noEmit`.
+Runs **tsc** with `--noEmit`, falling back to the preview-era **tsgo** command for projects
+that have not migrated yet.
 
 **Variant:** TypeScript error code (e.g. `TS2345`, `TS7006`).
 

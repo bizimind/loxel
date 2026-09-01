@@ -8,9 +8,7 @@ import {
   buildLineOffsets,
   offsetAt,
 } from "./stdio-lsp-manager";
-import { selectTsLspBackend } from "./ts-lsp-backend";
-
-const backend = selectTsLspBackend();
+import { resolveTypeScriptBinary } from "./typescript-path";
 
 const TS_EXTENSIONS = /\.(ts|tsx|js|jsx|mts|mjs|cts|cjs|json|jsonc)$/i;
 
@@ -52,8 +50,8 @@ interface LspContentChange {
 }
 
 /**
- * Manages `tsgo --lsp -stdio` child processes, one per WebSocket connection.
- * Each `/ws/ts-lsp?wt=<path>` connection gets its own tsgo rooted at the
+ * Manages `tsc --lsp -stdio` child processes, one per WebSocket connection.
+ * Each `/ws/ts-lsp?wt=<path>` connection gets its own TypeScript rooted at the
  * worktree path. Translates loxel://HEAD/... ↔ file:///... URIs and augments
  * semantic token responses with custom JSX tokens.
  */
@@ -74,7 +72,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
   // Hooks
 
   protected resolveBinary(): string | null {
-    return backend.resolveBinary();
+    return resolveTypeScriptBinary();
   }
 
   protected override getSessionKey(context: TsLspContext): string {
@@ -82,11 +80,11 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
   }
 
   protected override spawnArgs(): readonly string[] {
-    return backend.spawnArgs;
+    return ["--lsp", "-stdio"];
   }
 
   protected override spawnOptions(context: TsLspContext): SpawnOptions {
-    return { cwd: context.wtPath, env: { ELECTRON_RUN_AS_NODE: "1" } };
+    return { cwd: context.wtPath };
   }
 
   protected override buildSession(
@@ -133,14 +131,14 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
             session.pendingRequests.set(msg.id, pending);
           }
 
-          // Inject rootUri/workspaceFolders so tsgo knows which project to load.
+          // Inject rootUri/workspaceFolders so TypeScript knows which project to load.
           if (msg.method === "initialize") {
             outgoing = this.augmentInitializeRequest(session, parsed as Record<string, unknown>);
           } else if (mutated) {
             outgoing = JSON.stringify(parsed);
           }
 
-          // After server acks init, push TS preferences so tsgo enables
+          // After server acks init, push TS preferences so TypeScript enables
           // module-export completions, inlay hints, etc. in steady state too.
           if (msg.method === "initialized") {
             queueMicrotask(() => this.sendConfigUpdate(session));
@@ -151,7 +149,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
       // Not JSON — forward verbatim.
     }
 
-    // Translate loxel://HEAD/... → file:///... so tsgo sees real file paths.
+    // Translate loxel://HEAD/... → file:///... so TypeScript sees real file paths.
     // Case-insensitive because Monaco may preserve or normalize the authority
     // component depending on URI construction path.
     const translated = outgoing.replace(/loxel:\/\/head\//gi, "file:///");
@@ -159,7 +157,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
   }
 
   protected override handleServerFrame(session: TsLspSession, body: string): void {
-    // Server→client requests we fulfill locally (tsgo blocks on
+    // Server→client requests we fulfill locally (TypeScript blocks on
     // workspace/configuration until we answer).
     if (this.handleServerRequest(session, body)) return;
 
@@ -239,7 +237,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
         session.tsDocuments.set(p.textDocument.uri, { content: p.textDocument.text, version: 0 });
       }
       // Monaco reports `tsx`/`jsx` for .tsx/.jsx files, but LSP
-      // needs `typescriptreact`/`javascriptreact` for tsgo to enable JSX mode.
+      // needs `typescriptreact`/`javascriptreact` for TypeScript to enable JSX mode.
       if (p.textDocument?.uri) {
         const uri = p.textDocument.uri;
         const current = p.textDocument.languageId;
@@ -278,7 +276,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
   }
 
   /**
-   * Drop textDocument/* notifications/requests whose URI targets a file tsgo
+   * Drop textDocument/* notifications/requests whose URI targets a file TypeScript
    * doesn't understand (e.g. `.astro`, `.vue`). The TS LSP client has no
    * languageId filter, so Monaco sends every open model to us.
    */
@@ -294,7 +292,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
 
   /**
    * Handle server→client requests locally (don't forward to the WebSocket
-   * client). Returns true if consumed. tsgo sends `workspace/configuration`
+   * client). Returns true if consumed. TypeScript sends `workspace/configuration`
    * immediately after `initialized` and blocks until it's answered — so we
    * reply inline with our canned TS/JS preferences.
    */
@@ -334,7 +332,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
       return true;
     }
 
-    // client/(un)registerCapability: DO NOT swallow. tsgo announces the
+    // client/(un)registerCapability: DO NOT swallow. TypeScript announces the
     // semantic-tokens capability dynamically via client/registerCapability,
     // and if we ack it locally the real Monaco client never sees the
     // registration — so no semantic-token provider is registered and our

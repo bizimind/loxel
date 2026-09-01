@@ -27,7 +27,7 @@ function readThemeColors(el: Element) {
   };
 }
 
-// Semantic token rules from LSPs (tsgo, Astro LS) — these layer on top of
+// Semantic token rules from LSPs (TypeScript, Astro LS) — these layer on top of
 // TextMate syntax tokens and are styled by Monaco's semantic token renderer.
 const DARK_SEMANTIC_RULES: monaco.editor.ITokenThemeRule[] = [
   { token: "function", foreground: "659488" }, // #659488

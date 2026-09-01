@@ -31,6 +31,7 @@
     "@types/hast": "^3.0.5",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
     "unified": "^11.0.5",
     "vite": "^7.3.5"
   }

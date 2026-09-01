@@ -98,7 +98,6 @@ function startServer(options: { dekBase64: string }): void {
         ...process.env,
         LOXEL_STATIC_DIR: rendererDir,
         LOXEL_RESOURCES_DIR: EXTERNAL_RESOURCES,
-        LOXEL_ELECTRON: process.execPath,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -381,21 +380,14 @@ function handlePendingUpdateSync(): void {
       const src = path.join(targetDir, file);
       if (fs.existsSync(src)) fs.copyFileSync(src, path.join(backupDir, file));
     }
-    const rendererDir = path.join(targetDir, "renderer");
-    if (fs.existsSync(rendererDir)) {
-      fs.cpSync(rendererDir, path.join(backupDir, "renderer"), { recursive: true });
-    }
-    const tsgoLibDir = path.join(targetDir, "tsgo-lib");
-    if (fs.existsSync(tsgoLibDir)) {
-      fs.cpSync(tsgoLibDir, path.join(backupDir, "tsgo-lib"), { recursive: true });
-    }
-
-    // Delete old renderer/ and tsgo-lib/ so stale files from previous build don't persist
-    if (fs.existsSync(rendererDir)) {
-      fs.rmSync(rendererDir, { recursive: true });
-    }
-    if (fs.existsSync(tsgoLibDir)) {
-      fs.rmSync(tsgoLibDir, { recursive: true });
+    // Include the preview-era directory so the migration removes it on success
+    // while retaining a rollback path if installation fails.
+    const resourceDirs = ["renderer", "typescript-lib", "tsgo-lib"];
+    for (const dir of resourceDirs) {
+      const source = path.join(targetDir, dir);
+      if (!fs.existsSync(source)) continue;
+      fs.cpSync(source, path.join(backupDir, dir), { recursive: true });
+      fs.rmSync(source, { recursive: true });
     }
     fs.mkdirSync(targetDir, { recursive: true });
 
@@ -408,7 +400,7 @@ function handlePendingUpdateSync(): void {
       "yaml-language-server",
       "docker-language-server",
       "terraform-ls",
-      "tsgo-lib/tsgo",
+      "typescript-lib/tsc",
     ]) {
       const binPath = path.join(targetDir, bin);
       if (fs.existsSync(binPath)) fs.chmodSync(binPath, 0o755);
@@ -445,7 +437,7 @@ function handlePendingUpdateSync(): void {
           const backup = path.join(backupDir, file);
           if (fs.existsSync(backup)) fs.copyFileSync(backup, path.join(targetDir, file));
         }
-        for (const dir of ["renderer", "tsgo-lib"]) {
+        for (const dir of ["renderer", "typescript-lib", "tsgo-lib"]) {
           const backup = path.join(backupDir, dir);
           if (!fs.existsSync(backup)) continue;
           const dest = path.join(targetDir, dir);

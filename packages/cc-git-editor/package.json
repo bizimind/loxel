@@ -8,7 +8,7 @@
     "build:continue-rebase": "bun build --compile src/commands/continue-rebase.ts --outfile dist/continue-rebase",
     "build:apply-staged-edits": "bun build --compile src/commands/apply-staged.ts --outfile dist/apply-staged-edits",
     "build": "pnpm run build:git && pnpm run build:agentic-editor && pnpm run build:continue-rebase && pnpm run build:apply-staged-edits",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "pnpm -w run lint",
     "lint:fix": "pnpm -w run lint:fix",
     "fmt": "pnpm -w run fmt",
