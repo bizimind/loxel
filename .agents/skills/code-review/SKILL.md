@@ -4,6 +4,8 @@ description: Code review a pull request
 
 Provide a code review for the given pull request.
 
+**CRITICAL: This is a review-only task. Do not edit, fix, or modify any code. Do not create commits or push changes. Only read code and post review comments.**
+
 **CRITICAL: Always launch agents with `run_in_background: false` (foreground).** Background agents waste turns polling for completion.
 
 To do this, follow these steps precisely:
