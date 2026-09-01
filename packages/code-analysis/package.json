@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/code-analysis",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Live code visualization CLI — treemaps, graphs, and more",
   "bin": {
     "code-analysis": "./src/cli.ts"
