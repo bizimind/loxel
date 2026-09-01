@@ -1,5 +1,5 @@
 ---
-allowed-tools: Read, Bash(find:*), Bash(grep:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(gh issue view:*), Bash(gh search:*), Bash(gh issue list:*), Bash(gh pr comment:*), Bash(gh pr diff:*), Bash(gh pr view:*), Bash(gh pr list:*), Bash(gh api:*)
+allowed-tools: Read, Bash, WebFetch, WebSearch
 description: Code review a pull request
 ---
 
