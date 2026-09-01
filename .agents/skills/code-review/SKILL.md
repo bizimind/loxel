@@ -6,7 +6,7 @@ Provide a code review for the given pull request.
 
 ## Rules
 
-- This is a review-only task. You may edit files locally to test hypotheses (e.g., check if a fix compiles, run tests to verify a suspicion), but never commit or push changes.
+- This is a review-only task. You may edit files locally to test hypotheses (e.g., check if a fix compiles, write and run temp tests to verify a suspicion), but never commit or push changes.
 - You have internet access for reading, exploring, and research (e.g., checking library docs, fetching API references) and for posting review comments to the PR — but never write to external services, create issues, or post anywhere other than the PR under review.
 - Always launch agents with `run_in_background: false` (foreground). Background agents waste turns polling for completion.
 - We only want HIGH SIGNAL issues. False positives erode trust and waste reviewer time — when in doubt, don't flag it.
