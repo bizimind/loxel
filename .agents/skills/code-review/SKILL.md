@@ -1,5 +1,4 @@
 ---
-allowed-tools: Read, Bash, WebFetch, WebSearch
 description: Code review a pull request
 ---
 
