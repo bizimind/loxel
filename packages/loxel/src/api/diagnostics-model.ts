@@ -1,4 +1,4 @@
-export interface TsgoDiagnostic {
+export interface TypeScriptDiagnostic {
   /** Relative file path from repo root */
   file: string;
   /** 1-indexed line number */

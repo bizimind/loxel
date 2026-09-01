@@ -174,7 +174,7 @@ function convertLspToMonacoCompletionItem(
   }
 
   if (!range) {
-    // Servers like tsgo omit textEdit and rely on the client to compute the
+    // Servers like TypeScript 7 omit textEdit and rely on the client to compute the
     // replacement range. Default to the word being typed so Monaco's filter
     // matches against the full identifier (otherwise camelCase splits like
     // `useState` get filtered as just `State`).

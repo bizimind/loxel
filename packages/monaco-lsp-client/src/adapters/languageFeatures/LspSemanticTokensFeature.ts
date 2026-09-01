@@ -21,7 +21,7 @@ export class LspSemanticTokensFeature extends Disposable {
             dynamicRegistration: true,
             // Disable delta tokens. The server augments FULL responses with
             // custom JSX tokens (see ts-lsp-manager.augmentSemanticTokens);
-            // delta responses would be computed by tsgo against its
+            // delta responses would be computed by TypeScript against its
             // NON-augmented token sequence, so applying them on the client
             // (which holds the augmented sequence) drifts positions and
             // produces the offset highlighting seen during live editing.

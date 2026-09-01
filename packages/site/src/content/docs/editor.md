@@ -98,7 +98,7 @@ The file tree supports keyboard-only navigation:
 
 ## TypeScript diagnostics
 
-Real-time errors and warnings from `tsgo` appear as inline Monaco markers as you type — no manual run required. The full language server feature set (hover, go-to-definition, completions, rename, and more) is covered in [TypeScript Intelligence](/docs/typescript-intelligence).
+Real-time errors and warnings from TypeScript appear as inline Monaco markers as you type — no manual run required. The full language server feature set (hover, go-to-definition, completions, rename, and more) is covered in [TypeScript Intelligence](/docs/typescript-intelligence).
 
 ---
 

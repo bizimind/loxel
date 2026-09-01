@@ -1,6 +1,6 @@
 import type { FormattingSettings } from "@/lib/formatting-model";
 
-import type { TsgoDiagnostic } from "./diagnostics-model";
+import type { TypeScriptDiagnostic } from "./diagnostics-model";
 import type { DiffInfo } from "./diff-model";
 import type {
   BranchInfo,
@@ -346,7 +346,7 @@ export async function getDiagnostics(wt: string, ref?: string, worktree?: string
   if (ref) params.set("ref", ref);
   if (worktree) params.set("worktree", worktree);
   const query = params.toString();
-  return fetchJson<{ diagnostics: TsgoDiagnostic[]; error?: string }>(
+  return fetchJson<{ diagnostics: TypeScriptDiagnostic[]; error?: string }>(
     `/diagnostics${query ? `?${query}` : ""}`,
   );
 }

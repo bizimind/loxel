@@ -13,9 +13,10 @@ const plugin: AnalysisPlugin = {
   },
 
   async generate(workDir, _args): Promise<AnalysisRecord[]> {
-    // Try tsgo first, fall back to tsc.
+    // TypeScript 7 renamed the native compiler to tsc. Keep the preview-era name as
+    // a fallback for projects that still install @typescript/native-preview.
     const records =
-      (await runTypeChecker(workDir, "tsgo")) ?? (await runTypeChecker(workDir, "tsc"));
+      (await runTypeChecker(workDir, "tsc")) ?? (await runTypeChecker(workDir, "tsgo"));
     return records ?? [];
   },
 
@@ -41,10 +42,11 @@ async function runTypeChecker(workDir: string, bin: string): Promise<AnalysisRec
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ]);
-  await proc.exited;
+  const exitCode = await proc.exited;
   // If the binary didn't exist, output will be empty or contain "command not found".
   const combined = stdout + stderr;
   if (combined.includes("command not found")) return null;
+  if (exitCode === 0) return [];
 
   const records: AnalysisRecord[] = [];
   for (const line of combined.split("\n")) {

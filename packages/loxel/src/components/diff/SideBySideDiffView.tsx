@@ -3,7 +3,7 @@ import type { editor } from "monaco-editor";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { TsgoDiagnostic } from "@/api/diagnostics-model";
+import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { FileDiff } from "@/api/diff-model";
 
 import * as api from "@/api/client";
@@ -88,7 +88,7 @@ export function SideBySideDiffView({
   const oldLines = oldFile?.lines ?? [];
   const newLines = newFile?.lines ?? [];
 
-  // Fetch tsgo diagnostics for both refs
+  // Fetch TypeScript diagnostics for both refs
   const { data: oldDiagData } = useQuery({
     queryKey: queryKeys.diagnostics(activeProjectPath, oldRef, undefined),
     queryFn: () =>
@@ -110,12 +110,12 @@ export function SideBySideDiffView({
   });
 
   // Filter diagnostics to this file
-  const oldDiagnostics = useMemo<TsgoDiagnostic[]>(() => {
+  const oldDiagnostics = useMemo<TypeScriptDiagnostic[]>(() => {
     if (!oldDiagData?.diagnostics) return [];
     return oldDiagData.diagnostics.filter((d) => d.file === oldPath);
   }, [oldDiagData, oldPath]);
 
-  const newDiagnostics = useMemo<TsgoDiagnostic[]>(() => {
+  const newDiagnostics = useMemo<TypeScriptDiagnostic[]>(() => {
     if (!newDiagData?.diagnostics) return [];
     return newDiagData.diagnostics.filter((d) => d.file === filePath);
   }, [newDiagData, filePath]);

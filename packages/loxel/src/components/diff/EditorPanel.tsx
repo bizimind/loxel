@@ -3,7 +3,7 @@ import type { editor as monacoEditor } from "monaco-editor";
 import * as monaco from "monaco-editor";
 import { useEffect, useRef } from "react";
 
-import type { TsgoDiagnostic } from "@/api/diagnostics-model";
+import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { PlacedThread } from "@/api/review-model";
 
 import { getMonacoThemeName } from "@/lib/monaco-theme";
@@ -40,7 +40,7 @@ interface EditorPanelProps {
   side?: "old" | "new";
   changeRegions: ChangeRegion[];
   darkMode: boolean;
-  diagnostics?: TsgoDiagnostic[];
+  diagnostics?: TypeScriptDiagnostic[];
   hiddenRanges?: LineRange[];
   viewZones?: ViewZoneDescriptor[];
   /** Placed comment threads to render as decorations */
@@ -225,7 +225,7 @@ export function EditorPanel({
     ]);
   }, [selectionHighlightLines]);
 
-  // Apply tsgo diagnostics as Monaco markers
+  // Apply TypeScript diagnostics as Monaco markers
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -233,7 +233,7 @@ export function EditorPanel({
     if (!model) return;
 
     if (!diagnostics || diagnostics.length === 0) {
-      monaco.editor.setModelMarkers(model, "tsgo", []);
+      monaco.editor.setModelMarkers(model, "typescript", []);
       return;
     }
 
@@ -245,10 +245,10 @@ export function EditorPanel({
       message: `TS${d.code}: ${d.message}`,
       severity:
         d.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
-      source: "tsgo",
+      source: "typescript",
     }));
 
-    monaco.editor.setModelMarkers(model, "tsgo", markers);
+    monaco.editor.setModelMarkers(model, "typescript", markers);
   }, [diagnostics]);
 
   // Apply hidden areas (collapsed unchanged regions)

@@ -27,10 +27,8 @@ extraResources:
     to: lemminx
   - from: build/typeshed-fallback
     to: typeshed-fallback
-  - from: build/tsgo-lib
-    to: tsgo-lib
-  - from: build/typescript-language-server.mjs
-    to: typescript-language-server.mjs
+  - from: build/typescript-lib
+    to: typescript-lib
   - from: dist-electron/renderer
     to: renderer
 

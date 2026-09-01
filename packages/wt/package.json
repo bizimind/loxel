@@ -12,7 +12,7 @@
     "dev": "bun src/cli.ts",
     "build": "bun build --compile --minify src/cli.ts --outfile dist/wt",
     "build:config-schema": "bun src/config/json-schema.ts",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "bun test",
     "lint": "pnpm -w run lint",
     "lint:fix": "pnpm -w run lint:fix",
