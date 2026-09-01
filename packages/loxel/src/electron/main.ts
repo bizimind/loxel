@@ -98,7 +98,6 @@ function startServer(options: { dekBase64: string }): void {
         ...process.env,
         LOXEL_STATIC_DIR: rendererDir,
         LOXEL_RESOURCES_DIR: EXTERNAL_RESOURCES,
-        LOXEL_ELECTRON: process.execPath,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });

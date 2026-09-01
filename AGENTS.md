@@ -208,9 +208,9 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 ## Type Checking
 
-Type checking uses `tsgo` (`@typescript/native-preview`) — the native TypeScript compiler — instead of `tsc`. All package `typecheck` scripts run `tsgo --noEmit`. The root `bun run typecheck` runs all packages in parallel via `bun run --filter '*' typecheck`.
-
-Note: `tsgo` does not support the `baseUrl` tsconfig option (it was removed). Use `paths` with relative prefixes instead.
+Type checking uses the official TypeScript 7 native compiler (`@typescript/native`) via `tsc`.
+Regular TypeScript package `typecheck` scripts run `tsc --noEmit`; the site runs `astro check`.
+The root `bun run typecheck` invokes each workspace's script in parallel.
 
 ## CI & Releases
 

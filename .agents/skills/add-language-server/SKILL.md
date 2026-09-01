@@ -32,7 +32,8 @@ Resolve these with the user before starting:
 
 **B. Downloaded pre-built binary** — `packages/loxel/scripts/download-<name>.ts`. For Go/Rust/GraalVM-native binaries. Pin SHA256 digests per platform. Hash the downloaded bytes _in memory before writing or extracting_ — never extract untrusted content before verification. For zip archives, pass the expected binary filename to `unzip` to restrict extraction to that single file. See docker-ls (raw binary), terraform-ls (zip), and xml-lsp (zip with rename) download scripts.
 
-**C. Copied from existing install** — Simple copy script (tsgo pattern).
+**C. Copied from existing install** — Simple copy script (TypeScript 7's
+`copy-typescript.ts` pattern).
 
 Add a `build:<name>` or `download:<name>` script in package.json and chain it in `build:server:standalone`.
 
