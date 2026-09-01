@@ -7,8 +7,6 @@ Provide a code review for the given pull request.
 
 **CRITICAL: Always launch agents with `run_in_background: false` (foreground).** Background agents waste turns polling for completion.
 
-<br />
-
 To do this, follow these steps precisely:
 
 1. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
