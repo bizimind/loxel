@@ -108,7 +108,7 @@
     "@types/react-dom": "^19.2.4",
     "@types/unist": "^3.0.3",
     "@vitejs/plugin-react": "^6.1.0",
-    "electron": "^42.1.0",
+    "electron": "^42.5.1",
     "electron-builder": "^26.15.3",
     "pyright": "^1.1.413",
     "tailwindcss": "^4.3.3",
