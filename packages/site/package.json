@@ -14,17 +14,18 @@
     "fmt:check": "pnpm -w run fmt:check"
   },
   "dependencies": {
-    "@astrojs/mdx": "^5.0.6",
-    "@astrojs/react": "^5.0.5",
+    "@astrojs/markdown-satteri": "^0.3.8",
+    "@astrojs/mdx": "^7.0.8",
+    "@astrojs/react": "^6.0.4",
     "@astrojs/sitemap": "^3.7.2",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
-    "astro": "^6.4.6",
+    "astro": "^7.2.6",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "satteri": "0.10.5",
     "sharp": "^0.35.3",
-    "tailwindcss": "^4.3.3",
-    "unist-util-visit": "^5.1.0"
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
@@ -32,7 +33,6 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "typescript": "npm:@typescript/typescript6@6.0.2",
-    "unified": "^11.0.5",
-    "vite": "^7.3.5"
+    "vite": "^8.2.2"
   }
 }

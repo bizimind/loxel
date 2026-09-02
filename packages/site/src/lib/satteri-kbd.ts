@@ -1,7 +1,6 @@
-import type { Element, ElementContent, Root } from "hast";
-import type { Plugin } from "unified";
+import type { Element, ElementContent } from "hast";
 
-import { visit } from "unist-util-visit";
+import { defineHastPlugin } from "satteri";
 
 // ── Detection ──────────────────────────────────────────────────────────────
 
@@ -147,18 +146,21 @@ function buildKbdNode(text: string): Element {
   };
 }
 
-// ── Plugin ─────────────────────────────────────────────────────────────────
+// ── Sätteri plugin ─────────────────────────────────────────────────────────
 
-export const rehypeKbd: Plugin<[], Root> = () => (tree) => {
-  visit(tree, "element", (node: Element, index, parent) => {
-    if (node.tagName !== "code") return;
-    if (!parent || (parent as Element).tagName === "pre") return;
-    if (index === null || index === undefined) return;
+export const satteriKbd = defineHastPlugin({
+  name: "keyboard-shortcuts",
+  element: {
+    filter: ["code"],
+    visit(node, ctx) {
+      const parent = ctx.parent(node);
+      if (parent.type === "element" && parent.tagName === "pre") return;
 
-    const child = node.children[0];
-    if (!child || child.type !== "text") return;
-    if (!isShortcut(child.value)) return;
+      const child = node.children[0];
+      if (!child || child.type !== "text") return;
+      if (!isShortcut(child.value)) return;
 
-    (parent as Element).children[index] = buildKbdNode(child.value);
-  });
-};
+      return buildKbdNode(child.value);
+    },
+  },
+});
