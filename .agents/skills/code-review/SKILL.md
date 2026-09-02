@@ -13,14 +13,30 @@ Provide a code review for the given pull request.
 
 ## Steps
 
-1. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
+1. Check for prior Claude review comments on this PR. Run:
+
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/{pr_number}/comments --jq '.[] | select(.user.login == "claude-code-review[bot]" or (.user.login | test("claude";"i"))) | {id, path, line, commit_id, created_at, body}'
+   ```
+
+   If prior comments exist, this is a **re-review**. Determine the interdiff — the set of changes between the last review and the current HEAD:
+   - Find the `commit_id` of the most recent prior review comment (this is the commit that was last reviewed).
+   - Run `git diff <last-reviewed-commit>..HEAD` to get only the changes since the last review.
+   - Pass both the prior comments and the interdiff to the review agents in step 4 so they can:
+     - Skip issues that were already flagged and haven't changed
+     - Check whether previously flagged issues were addressed
+     - Focus review effort on new and changed code
+
+   If no prior comments exist, this is a **first review** — proceed normally with the full diff.
+
+2. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
    - The root CLAUDE.md file, if it exists
 
    - Any CLAUDE.md files in directories containing files modified by the pull request
 
-2. Launch a sonnet agent to view the pull request and return a summary of the changes
+3. Launch a sonnet agent to view the pull request and return a summary of the changes
 
-3. Launch 4 agents in parallel to independently review the changes. Each agent should return the list of issues, where each issue includes a description and the reason it was flagged (e.g. "CLAUDE.md adherence", "bug"). The agents should do the following:
+4. Launch 4 agents in parallel to independently review the changes. If step 1 identified this as a **re-review**, provide each agent with the prior comments and interdiff so they focus on new/changed code and skip already-flagged issues that haven't changed. Each agent should return the list of issues, where each issue includes a description and the reason it was flagged (e.g. "CLAUDE.md adherence", "bug"). The agents should do the following:
 
    Agents 1 + 2: CLAUDE.md compliance sonnet agents
    Audit changes for CLAUDE.md compliance in parallel. Note: When evaluating CLAUDE.md compliance for a file, you should only consider CLAUDE.md files that share a file path with the file or parents.
@@ -51,22 +67,22 @@ Provide a code review for the given pull request.
 
    In addition to the above, each subagent should be told the PR title and description. This will help provide context regarding the author's intent.
 
-4. For each issue found in the previous step by agents 3 and 4, launch parallel subagents to validate the issue. These subagents should get the PR title and description along with a description of the issue. The agent's job is to review the issue to validate that the stated issue is truly an issue with high confidence. For example, if an issue such as "variable is not defined" was flagged, the subagent's job would be to validate that is actually true in the code. Another example would be CLAUDE.md issues. The agent should validate that the CLAUDE.md rule that was violated is scoped for this file and is actually violated. Use Opus subagents for bugs and logic issues, and sonnet agents for CLAUDE.md violations.
+5. For each issue found in the previous step by agents 3 and 4, launch parallel subagents to validate the issue. These subagents should get the PR title and description along with a description of the issue. The agent's job is to review the issue to validate that the stated issue is truly an issue with high confidence. For example, if an issue such as "variable is not defined" was flagged, the subagent's job would be to validate that is actually true in the code. Another example would be CLAUDE.md issues. The agent should validate that the CLAUDE.md rule that was violated is scoped for this file and is actually violated. Use Opus subagents for bugs and logic issues, and sonnet agents for CLAUDE.md violations.
 
-5. Filter out any issues that were not validated in step 4. This step will give us our list of high signal issues for our review.
+6. Filter out any issues that were not validated in step 5. This step will give us our list of high signal issues for our review.
 
-6. Output a summary of the review findings in your response:
+7. Output a summary of the review findings in your response:
    - If issues were found, list each issue with a brief description.
 
    - If no issues were found, state: "No issues found. Checked for bugs and CLAUDE.md compliance."
 
    If NO issues were found, post a summary comment using `gh pr comment` and stop.
 
-   If issues were found, continue to step 7.
+   If issues were found, continue to step 8.
 
-7. Create a list of all comments that you plan on leaving. This is only for you to make sure you are comfortable with the comments. Do not post this list anywhere.
+8. Create a list of all comments that you plan on leaving. This is only for you to make sure you are comfortable with the comments. Do not post this list anywhere.
 
-8. Post inline comments for each issue using `gh api`. Use this exact syntax:
+9. Post inline comments for each issue using `gh api`. Use this exact syntax:
 
    ```bash
    gh api repos/{owner}/{repo}/pulls/{pr_number}/comments \
@@ -96,7 +112,7 @@ Provide a code review for the given pull request.
 
    **IMPORTANT: Only post ONE comment per unique issue. Do not post duplicate comments.**
 
-Use this list when evaluating issues in Steps 3 and 4 (these are false positives, do NOT flag):
+Use this list when evaluating issues in Steps 4 and 5 (these are false positives, do NOT flag):
 
 - Pre-existing issues
 
