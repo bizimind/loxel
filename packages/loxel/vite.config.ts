@@ -1,5 +1,3 @@
-import type { PluginOption } from "vite";
-
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { copyFileSync, mkdirSync } from "node:fs";
@@ -17,21 +15,18 @@ export default defineConfig(({ mode }) => {
       react(),
       tailwindcss(),
       ...(isElectron
-        ? (electron([
+        ? electron([
             {
               entry: path.join(import.meta.dirname, "src/electron/main.ts"),
               onstart(args) {
                 args.startup();
               },
               vite: {
-                build: {
-                  outDir: path.join(import.meta.dirname, "dist-electron/main"),
-                  rollupOptions: { external: ["electron"] },
-                },
+                build: { outDir: path.join(import.meta.dirname, "dist-electron/main") },
                 plugins: [
                   {
-                    // Copy preload.cjs as-is — sandboxed Electron renderers require CJS,
-                    // but vite-plugin-electron converts to ESM.
+                    // Keep preload.cjs byte-for-byte CJS for sandboxed Electron renderers;
+                    // this type:module package defaults Electron builds to ESM.
                     name: "copy-preload",
                     closeBundle() {
                       const src = path.join(import.meta.dirname, "src/electron/preload.cjs");
@@ -43,7 +38,7 @@ export default defineConfig(({ mode }) => {
                 ],
               },
             },
-          ]) as PluginOption[])
+          ])
         : []),
     ],
     base: "./",
