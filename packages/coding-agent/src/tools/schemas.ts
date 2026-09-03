@@ -222,7 +222,13 @@ export const taskStopOutputSchema = z
   .strict();
 
 export const webFetchInputSchema = z
-  .object({ url: z.string().url(), prompt: z.string().min(1) })
+  .object({
+    url: z
+      .string()
+      .url()
+      .refine((u) => /^https?:\/\//i.test(u), { message: "Only http and https URLs are allowed" }),
+    prompt: z.string().min(1),
+  })
   .strict();
 
 export const webFetchOutputSchema = z
