@@ -16,16 +16,19 @@ Provide a code review for the given pull request.
 1. Check for prior Claude review comments on this PR. Run:
 
    ```bash
-   gh api repos/{owner}/{repo}/pulls/{pr_number}/comments --jq '.[] | select(.user.login == "claude-code-review[bot]" or (.user.login | test("claude";"i"))) | {id, path, line, commit_id, created_at, body}'
+   gh api repos/{owner}/{repo}/pulls/{pr_number}/comments --jq '.[] | select(.user.login == "claude[bot]") | {id, path, line, original_commit_id, created_at, body}'
    ```
 
-   If prior comments exist, this is a **re-review**. Determine the interdiff — the set of changes between the last review and the current HEAD:
-   - Find the `commit_id` of the most recent prior review comment (this is the commit that was last reviewed).
-   - Run `git diff <last-reviewed-commit>..HEAD` to get only the changes since the last review.
+   If prior comments exist, this is a **re-review**. Determine the interdiff — the set of changes between the last review and the current PR head:
+   - Find the `original_commit_id` of the most recent prior review comment (this is the commit that was actually reviewed — note: `commit_id` gets re-pointed to the current PR head by GitHub, so always use `original_commit_id`).
+   - Get the current PR head: `gh pr view {pr_number} --json headRefOid --jq .headRefOid`
+   - Fetch the old commit into the shallow clone: `git fetch origin <original_commit_id>`
+   - Run `git diff <original_commit_id>..<pr_head_sha>` to get only the changes since the last review. Do NOT diff against `HEAD` — in a `pull_request` workflow, `HEAD` is the merge ref, not the PR tip.
    - Pass both the prior comments and the interdiff to the review agents in step 4 so they can:
      - Skip issues that were already flagged and haven't changed
      - Check whether previously flagged issues were addressed
      - Focus review effort on new and changed code
+   - **Fallback**: if the interdiff cannot be computed (e.g., fetch fails, empty diff, or any error), fall back to reviewing the full PR diff as if this were a first review. Do not skip the review.
 
    If no prior comments exist, this is a **first review** — proceed normally with the full diff.
 
