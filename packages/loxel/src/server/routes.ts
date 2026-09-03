@@ -1425,6 +1425,13 @@ function handleBrowse(req: Request, _ctx: RouteContext): Response {
   const rawPath = url.searchParams.get("path") ?? homedir();
   const dirPath = resolve(rawPath.replace(/^~/, homedir()));
 
+  // Defense-in-depth: restrict browsing to the user's home directory.
+  // The server has no auth, so limit exposure of the filesystem.
+  const home = homedir();
+  if (!dirPath.startsWith(home + "/") && dirPath !== home) {
+    return json({ path: dirPath, dirs: [] });
+  }
+
   try {
     const entries = readdirSync(dirPath, { withFileTypes: true });
     const dirs: BrowseEntry[] = [];
