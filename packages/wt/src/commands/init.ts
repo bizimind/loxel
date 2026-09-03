@@ -156,6 +156,11 @@ async function handleEmptyDir(
   // Gather configuration
   const config = await gatherConfig(cwd, options, interactive, true);
 
+  // Create bare repo first — GitHub setup needs a git repo for `git remote add`
+  ctx.log("\nCreating bare repository...");
+  await initBareRepo(cwd, config.baseBranch);
+  ctx.log("  Done");
+
   // Check for GitHub integration
   let githubUrl: string | undefined;
   if (options.github || (interactive && !options.yes)) {
@@ -173,11 +178,6 @@ async function handleEmptyDir(
       ctx.log(`  Created: ${githubUrl}`);
     }
   }
-
-  // Create bare repo
-  ctx.log("\nCreating bare repository...");
-  await initBareRepo(cwd, config.baseBranch);
-  ctx.log("  Done");
 
   // Create wt.yaml
   ctx.log("Creating wt.yaml...");

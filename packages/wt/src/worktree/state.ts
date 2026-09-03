@@ -1,7 +1,15 @@
+import { unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
 const STATE_FILENAME = ".wt-state.json";
+const LOCK_FILENAME = ".wt-state.lock";
+/** Max time (ms) to wait for the lock before giving up. */
+const LOCK_TIMEOUT_MS = 10_000;
+/** A lock file older than this (ms) is considered stale and can be broken. */
+const LOCK_STALE_MS = 30_000;
+/** Interval (ms) between lock-acquisition retries. */
+const LOCK_RETRY_INTERVAL_MS = 50;
 
 /**
  * Schema for the state file.
@@ -27,13 +35,19 @@ export function findNextAvailableIndex(usedIndices: number[]): number {
 /**
  * State manager for tracking worktree port offset indices.
  * Persists to .wt-state.json in the root directory.
+ *
+ * Mutating operations (`allocateIndex`, `freeIndex`) acquire an exclusive file
+ * lock (`.wt-state.lock`) to prevent concurrent `wt add` / `wt remove` from
+ * allocating duplicate port indices.
  */
 export class StateManager {
   private statePath: string;
+  private lockPath: string;
   private state: State | null = null;
 
   constructor(rootDir: string) {
     this.statePath = join(rootDir, STATE_FILENAME);
+    this.lockPath = join(rootDir, LOCK_FILENAME);
   }
 
   /**
@@ -107,44 +121,118 @@ export class StateManager {
   }
 
   /**
+   * Acquire an exclusive file lock. Retries with backoff until `LOCK_TIMEOUT_MS`.
+   * Breaks stale locks older than `LOCK_STALE_MS`.
+   */
+  private async acquireLock(): Promise<void> {
+    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+
+    while (Date.now() < deadline) {
+      try {
+        // O_CREAT | O_EXCL: atomic create-if-not-exists
+        writeFileSync(this.lockPath, String(process.pid), { flag: "wx" });
+        return;
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+
+        // Lock file exists — check staleness
+        try {
+          const stat = await Bun.file(this.lockPath).stat();
+          if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+            // Stale lock — remove and retry immediately
+            try {
+              unlinkSync(this.lockPath);
+            } catch {
+              // ignore
+            }
+            continue;
+          }
+        } catch {
+          // Lock file disappeared between check and stat — retry
+          continue;
+        }
+
+        await Bun.sleep(LOCK_RETRY_INTERVAL_MS);
+      }
+    }
+
+    throw new Error(
+      `Timed out waiting for state lock (${this.lockPath}). ` +
+        "Another wt process may be running. " +
+        `Delete the lock file manually if this persists.`,
+    );
+  }
+
+  /** Release the file lock. */
+  private releaseLock(): void {
+    try {
+      unlinkSync(this.lockPath);
+    } catch {
+      // ignore — lock may already be cleaned up
+    }
+  }
+
+  /**
+   * Run a callback under the exclusive file lock.
+   * Invalidates cached state before and after so the read is fresh.
+   */
+  private async withLock<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquireLock();
+    // Invalidate cached state so we read the latest from disk
+    this.state = null;
+    try {
+      return await fn();
+    } finally {
+      this.state = null;
+      this.releaseLock();
+    }
+  }
+
+  /**
    * Allocate a new index for a worktree.
    * Reuses the lowest available index from removed worktrees.
+   * Acquires a file lock to prevent concurrent duplicate allocations.
    *
    * @throws Error if worktree already exists
    */
   async allocateIndex(worktreeName: string): Promise<number> {
-    const state = await this.load();
+    return this.withLock(async () => {
+      const state = await this.load();
 
-    if (worktreeName in state.worktrees) {
-      throw new Error(`Worktree '${worktreeName}' already exists in state`);
-    }
+      if (worktreeName in state.worktrees) {
+        throw new Error(`Worktree '${worktreeName}' already exists in state`);
+      }
 
-    // Find the lowest available index
-    const newIndex = findNextAvailableIndex(Object.values(state.worktrees));
+      // Find the lowest available index
+      const newIndex = findNextAvailableIndex(Object.values(state.worktrees));
 
-    state.worktrees[worktreeName] = newIndex;
-    await this.save();
+      state.worktrees[worktreeName] = newIndex;
+      await this.save();
 
-    return newIndex;
+      return newIndex;
+    });
   }
 
   /**
    * Remove a worktree from state, freeing its index for reuse.
+   * Acquires a file lock to prevent concurrent modification.
    *
    * @throws Error if worktree doesn't exist
    */
   async freeIndex(worktreeName: string): Promise<number> {
-    const state = await this.load();
+    return this.withLock(async () => {
+      const state = await this.load();
 
-    const index = state.worktrees[worktreeName];
-    if (index === undefined) {
-      throw new Error(`Worktree '${worktreeName}' not found in state`);
-    }
+      const index = state.worktrees[worktreeName];
+      if (index === undefined) {
+        throw new Error(`Worktree '${worktreeName}' not found in state`);
+      }
 
-    delete state.worktrees[worktreeName];
-    await this.save();
+      delete state.worktrees[worktreeName];
+      await this.save();
 
-    return index;
+      return index;
+    });
   }
 
   /**

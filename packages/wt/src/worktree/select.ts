@@ -105,7 +105,7 @@ export async function selectWorktree(
     });
   }
 
-  const worktree = findWorktreeByName(ctx.worktrees, selectedName);
+  const worktree = findWorktreeByName(ctx.worktrees, selectedName, ctx.worktreesDir);
 
   if (!worktree) {
     throwWorktreeNotFound(selectedName, ctx.managed, ctx.worktreesDir);

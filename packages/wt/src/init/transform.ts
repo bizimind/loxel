@@ -1,6 +1,6 @@
 import { wrapError } from "@bizimind/cli-common";
 import { $ } from "bun";
-import { readdir, rename, rm, mkdir } from "node:fs/promises";
+import { copyFile, readdir, rename, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -67,6 +67,9 @@ async function convertToBareRepo(cwd: string, gitDir: string): Promise<void> {
 
 /**
  * Register the worktree with git's worktree tracking system.
+ *
+ * Called after `convertToBareRepo` has moved .git/ contents (including the index)
+ * into `cwd`.
  */
 async function registerWorktree(cwd: string, worktreePath: string, branch: string): Promise<void> {
   const bareWorktreesDir = join(cwd, "worktrees");
@@ -75,11 +78,16 @@ async function registerWorktree(cwd: string, worktreePath: string, branch: strin
   const trackingDir = join(bareWorktreesDir, branch);
   await mkdir(trackingDir, { recursive: true });
 
+  const worktreeGitFile = join(worktreePath, ".git");
+
   await Promise.all([
-    Bun.write(join(worktreePath, ".git"), `gitdir: ${trackingDir}\n`),
+    Bun.write(worktreeGitFile, `gitdir: ${trackingDir}\n`),
     Bun.write(join(trackingDir, "HEAD"), `ref: refs/heads/${branch}\n`),
-    Bun.write(join(trackingDir, "gitdir"), `${worktreePath}\n`),
+    Bun.write(join(trackingDir, "gitdir"), `${worktreeGitFile}\n`),
     Bun.write(join(trackingDir, "commondir"), `../..\n`),
+    // Copy the index so git knows the tracked-file state of this worktree.
+    // The original index was moved from .git/ to the repo root during bare conversion.
+    copyFile(join(cwd, "index"), join(trackingDir, "index")),
   ]);
 }
 
