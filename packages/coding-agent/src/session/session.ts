@@ -93,6 +93,7 @@ export class Session {
         if (this.pendingRun) {
           const { reject } = this.pendingRun;
           this.pendingRun = null;
+          this.pendingRunId = null;
           this.abortCleanup = null;
           reject(new Error("Run cancelled"));
         }

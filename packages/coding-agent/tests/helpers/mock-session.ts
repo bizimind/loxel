@@ -4,7 +4,7 @@
  * Provides mock model builders, event collectors, and environment setup
  * so that each topic-specific test file stays focused on its scenarios.
  */
-import { MockLanguageModelV3, convertArrayToReadableStream } from "ai/test";
+import { MockLanguageModelV4, convertArrayToReadableStream } from "ai/test";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 
@@ -12,9 +12,9 @@ import type { SessionEvent, SessionEventHandlers } from "../../src/session/sessi
 
 import { Session } from "../../src/session/session.ts";
 
-// The real stream-part type from the V3 spec (extracted structurally so we
+// The real stream-part type from the V4 spec (extracted structurally so we
 // don't add a dep on @ai-sdk/provider).
-type DoStreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
+type DoStreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
 type LanguageModelStreamPart = DoStreamResult["stream"] extends ReadableStream<infer P> ? P : never;
 
 // ---------------------------------------------------------------------------
@@ -23,28 +23,39 @@ type LanguageModelStreamPart = DoStreamResult["stream"] extends ReadableStream<i
 
 const MOCK_USAGE = {
   inputTokens: { total: 10, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
-  outputTokens: { total: 5, text: undefined, reasoning: undefined },
+  outputTokens: { total: 5, text: 3, reasoning: 2 },
 };
 
 /** Build stream parts for a text-only model response (finishReason: "stop"). */
-export function textStreamParts(text: string) {
+export function textStreamParts(text: string): LanguageModelStreamPart[] {
   const id = `t-${crypto.randomUUID().slice(0, 8)}`;
   return [
     { type: "stream-start" as const, warnings: [] as never[] },
     { type: "text-start" as const, id },
     { type: "text-delta" as const, id, delta: text },
     { type: "text-end" as const, id },
-    { type: "finish" as const, usage: MOCK_USAGE, finishReason: "stop" as const },
+    {
+      type: "finish" as const,
+      usage: MOCK_USAGE,
+      finishReason: { unified: "stop" as const, raw: undefined },
+    },
   ];
 }
 
 /** Build stream parts for a tool call (finishReason: "tool-calls"). */
-export function toolCallStreamParts(toolName: string, input: Record<string, unknown>) {
+export function toolCallStreamParts(
+  toolName: string,
+  input: Record<string, unknown>,
+): LanguageModelStreamPart[] {
   const id = `tc-${crypto.randomUUID().slice(0, 8)}`;
   return [
     { type: "stream-start" as const, warnings: [] as never[] },
     { type: "tool-call" as const, toolCallId: id, toolName, input: JSON.stringify(input) },
-    { type: "finish" as const, usage: MOCK_USAGE, finishReason: "tool-calls" as const },
+    {
+      type: "finish" as const,
+      usage: MOCK_USAGE,
+      finishReason: { unified: "tool-calls" as const, raw: undefined },
+    },
   ];
 }
 
@@ -52,31 +63,24 @@ export function toolCallStreamParts(toolName: string, input: Record<string, unkn
 // Mock model builder
 // ---------------------------------------------------------------------------
 
-// Mock stream parts are loosely shaped — the helpers below omit fields that
-// the real V3 type requires. We derive StreamPart from the helper returns and
-// cast once at the MockLanguageModelV3 boundary where the full shape is needed.
-type StreamPart =
-  | ReturnType<typeof textStreamParts>[number]
-  | ReturnType<typeof toolCallStreamParts>[number];
-type StreamParts = StreamPart[];
+type StreamParts = LanguageModelStreamPart[];
 
 /**
- * Convert mock stream parts to the ReadableStream shape MockLanguageModelV3
- * expects. Centralizes the one cast needed because our mock parts omit fields
- * required by the full LanguageModelV3StreamPart type.
+ * Convert mock stream parts to the ReadableStream shape MockLanguageModelV4
+ * expects.
  */
 export function mockStream(parts: StreamParts): ReadableStream<LanguageModelStreamPart> {
-  return convertArrayToReadableStream(parts as unknown as LanguageModelStreamPart[]);
+  return convertArrayToReadableStream(parts);
 }
 
 /**
- * Create a MockLanguageModelV3 that pops responses from a queue.
+ * Create a MockLanguageModelV4 that pops responses from a queue.
  * Each entry in `responses` is consumed on a successive `doStream` call
  * (one per model step in the `streamText` loop).
  */
 export function createMockModel(responses: StreamParts[]) {
   const queue = [...responses];
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async () => {
       const parts = queue.shift();
       if (!parts) throw new Error("Mock model: no more responses queued");
@@ -90,11 +94,11 @@ export function createMockModel(responses: StreamParts[]) {
 // ---------------------------------------------------------------------------
 
 /** Replace the model router on a Session's internal runtime with a mock model. */
-export function patchSessionModel(session: Session, model: MockLanguageModelV3): void {
+export function patchSessionModel(session: Session, model: MockLanguageModelV4): void {
   // Structurally typed access to private runtime for testing — narrow to the
   // single field we patch rather than using `any`.
   const internals = session as unknown as {
-    runtime: { modelRouter: { getModel: () => MockLanguageModelV3 } };
+    runtime: { modelRouter: { getModel: () => MockLanguageModelV4 } };
   };
   internals.runtime.modelRouter.getModel = () => model;
 }
@@ -242,5 +246,5 @@ export async function setupTestEnv(prefix: string): Promise<TestEnv> {
   };
 }
 
-export { Session, MockLanguageModelV3, path };
+export { Session, MockLanguageModelV4, path };
 export type { SessionEvent, SessionEventHandlers };
