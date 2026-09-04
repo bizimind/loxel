@@ -13,22 +13,24 @@ Provide a code review for the given pull request.
 
 ## Steps
 
-1. Check for prior Claude review comments on this PR. Run:
+1. Check for prior Claude review comments on this PR. Query both inline review comments and issue comments (no-issues reviews post via `gh pr comment`, which creates issue comments):
 
    ```bash
-   gh api repos/{owner}/{repo}/pulls/{pr_number}/comments --jq '.[] | select(.user.login == "claude[bot]") | {id, path, line, original_commit_id, created_at, body}'
+   # Inline review comments (carry original_commit_id)
+   gh api repos/{owner}/{repo}/pulls/{pr_number}/comments --jq '.[] | select(.user.login == "claude[bot]") | {id, type: "inline", path, line, original_commit_id, created_at, body}'
+
+   # Issue comments (no-issues summaries — embed reviewed SHA in body, see step 7)
+   gh api repos/{owner}/{repo}/issues/{pr_number}/comments --jq '.[] | select(.user.login == "claude[bot]") | {id, type: "issue", created_at, body}'
    ```
 
    If prior comments exist, this is a **re-review**. Determine the interdiff — the set of changes between the last review and the current PR head:
-   - Find the `original_commit_id` of the most recent prior review comment (this is the commit that was actually reviewed — note: `commit_id` gets re-pointed to the current PR head by GitHub, so always use `original_commit_id`).
+   - Find the last-reviewed commit: use `original_commit_id` from the most recent inline comment, or extract the `<!-- reviewed-sha: ... -->` tag from the most recent issue comment (see step 7). Use whichever is newer. Note: `commit_id` gets re-pointed to the current PR head by GitHub — always use `original_commit_id` for inline comments.
    - Get the current PR head: `gh pr view {pr_number} --json headRefOid --jq .headRefOid`
-   - Fetch the old commit into the shallow clone: `git fetch origin <original_commit_id>`
-   - Run `git diff <original_commit_id>..<pr_head_sha>` to get only the changes since the last review. Do NOT diff against `HEAD` — in a `pull_request` workflow, `HEAD` is the merge ref, not the PR tip.
-   - Pass both the prior comments and the interdiff to the review agents in step 4 so they can:
-     - Skip issues that were already flagged and haven't changed
-     - Check whether previously flagged issues were addressed
-     - Focus review effort on new and changed code
-   - **Fallback**: if the interdiff cannot be computed (e.g., fetch fails, empty diff, or any error), fall back to reviewing the full PR diff as if this were a first review. Do not skip the review.
+   - Fetch the old commit into the shallow clone: `git fetch origin <last_reviewed_sha>`
+   - Compute the raw diff: `git diff <last_reviewed_sha>..<pr_head_sha>`. Do NOT diff against `HEAD` — in a `pull_request` workflow, `HEAD` is the merge ref, not the PR tip.
+   - Filter to PR-only files: get `gh pr diff {pr_number} --name-only` and discard any hunks from the raw diff that touch files not in this list. This prevents base-branch changes (from rebases or "Update branch") from leaking into the interdiff.
+   - If the interdiff is **empty** (same tree as last review — e.g., `reopened`, `ready_for_review`, or a job re-run), this is still a re-review: pass the prior comments to step 4 so already-flagged issues are not re-posted, and tell agents there are no new changes to review.
+   - **Fallback**: if the interdiff cannot be computed (fetch fails or any other error), review the full PR diff — but still pass any prior comments to step 4 so already-flagged issues are not posted twice. Do not skip the review.
 
    If no prior comments exist, this is a **first review** — proceed normally with the full diff.
 
@@ -79,7 +81,17 @@ Provide a code review for the given pull request.
 
    - If no issues were found, state: "No issues found. Checked for bugs and CLAUDE.md compliance."
 
-   If NO issues were found, post a summary comment using `gh pr comment` and stop.
+   If NO issues were found, post a summary comment using `gh pr comment`. Include the reviewed SHA in the comment body as an HTML comment so future re-reviews can find it:
+
+   ```
+   ## Code review
+
+   No issues found. Checked for bugs and CLAUDE.md compliance.
+
+   <!-- reviewed-sha: <full_pr_head_sha> -->
+   ```
+
+   Then stop.
 
    If issues were found, continue to step 8.
 
@@ -144,6 +156,8 @@ Notes:
 ## Code review
 
 No issues found. Checked for bugs and CLAUDE.md compliance.
+
+<!-- reviewed-sha: <full_pr_head_sha> -->
 
 ---
 
