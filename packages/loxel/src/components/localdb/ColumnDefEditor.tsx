@@ -39,19 +39,37 @@ export function ColumnDefEditor({ open, initial, onSave, onCancel, saving }: Pro
     "nullable" in (initial ?? {}) ? ((initial as { nullable?: boolean }).nullable ?? true) : true,
   );
 
-  // Kind-specific state
-  const [min, setMin] = useState<string>("");
-  const [max, setMax] = useState<string>("");
-  const [integer, setInteger] = useState(false);
-  const [maxLength, setMaxLength] = useState<string>("");
-  const [unique, setUnique] = useState(false);
-  const [multi, setMulti] = useState(false);
-  const [hasOptions, setHasOptions] = useState(false);
-  const [optionItems, setOptionItems] = useState<InlineOption[]>([]);
+  // Kind-specific state — seeded from `initial` when editing an existing column
+  const initNum = initial?.kind === "number" ? initial : undefined;
+  const initText = initial?.kind === "text" ? initial : undefined;
+  const initUrl = initial?.kind === "url" ? initial : undefined;
+  const initFormula = initial?.kind === "formula" ? initial : undefined;
+  const initWithUnique = initText ?? initUrl ?? initNum;
+  const initWithMulti = initial as { multi?: boolean } | undefined;
+  const initWithOptions = (initNum ?? initText) as
+    | { options?: { source: "inline"; items: InlineOption[] } }
+    | undefined;
+
+  const [min, setMin] = useState<string>(initNum?.min !== undefined ? String(initNum.min) : "");
+  const [max, setMax] = useState<string>(initNum?.max !== undefined ? String(initNum.max) : "");
+  const [integer, setInteger] = useState(initNum?.integer ?? false);
+  const [maxLength, setMaxLength] = useState<string>(
+    initText?.maxLength !== undefined ? String(initText.maxLength) : "",
+  );
+  const [unique, setUnique] = useState(
+    (initWithUnique as { unique?: boolean } | undefined)?.unique ?? false,
+  );
+  const [multi, setMulti] = useState(initWithMulti?.multi ?? false);
+  const [hasOptions, setHasOptions] = useState(initWithOptions?.options?.source === "inline");
+  const [optionItems, setOptionItems] = useState<InlineOption[]>(
+    initWithOptions?.options?.items ?? [],
+  );
   const [newOptionValue, setNewOptionValue] = useState("");
   const [newOptionLabel, setNewOptionLabel] = useState("");
-  const [expression, setExpression] = useState("");
-  const [resultKind, setResultKind] = useState<"number" | "text" | "boolean">("number");
+  const [expression, setExpression] = useState(initFormula?.expression ?? "");
+  const [resultKind, setResultKind] = useState<"number" | "text" | "boolean">(
+    initFormula?.resultKind ?? "number",
+  );
 
   function buildDef(): ColumnDef {
     const base = { label, nullable };

@@ -68,7 +68,11 @@ export function DataTable({ schema, viewDef, adapter, pageSize = 50 }: Props) {
         const v = newRow[col!.name];
         if (v !== undefined && v !== null && v !== "") payload[col!.name] = v;
       }
-      await adapter.insert(schema.table.name, payload);
+      const result = await adapter.insert(schema.table.name, payload);
+      if (!result.ok) {
+        setError(result.issues.map((i) => `${i.path.join(".")}: ${i.code}`).join("; "));
+        return;
+      }
       setNewRow({});
       setAddingRow(false);
       reload();
