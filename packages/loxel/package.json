@@ -114,7 +114,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "vite": "^8.0.16",
-    "vite-plugin-electron": "^1.0.0-beta.3",
+    "vite-plugin-electron": "^1.1.1",
     "yaml-language-server": "^1.24.0"
   }
 }
