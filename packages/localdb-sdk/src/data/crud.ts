@@ -122,7 +122,19 @@ export class DataLayer {
       if (raw === null || raw === undefined) continue;
 
       if (isMulti(def)) {
-        const arr = typeof raw === "string" ? (JSON.parse(raw) as unknown[]) : (raw as unknown[]);
+        let arr: unknown[];
+        if (typeof raw === "string") {
+          try {
+            arr = JSON.parse(raw) as unknown[];
+          } catch {
+            console.warn(
+              `Malformed JSON in column "${name}" (row id=${String(row["id"])}), defaulting to []`,
+            );
+            arr = [];
+          }
+        } else {
+          arr = raw as unknown[];
+        }
         if (hasInlineOptions(def)) {
           const ids = arr as number[];
           result[name] = this.optionsMgr.resolveIdsToOptions(ids);

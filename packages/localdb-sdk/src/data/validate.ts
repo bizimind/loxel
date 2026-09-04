@@ -208,12 +208,17 @@ export function findUniqueViolations(
     const value = row[name];
     if (value === null || value === undefined) continue;
 
-    const idClause = excludeId !== undefined ? ` AND id != ${excludeId}` : "";
+    const params: (string | number)[] = [value as string | number];
+    let idClause = "";
+    if (excludeId !== undefined) {
+      idClause = " AND id != ?";
+      params.push(excludeId);
+    }
     const existing = db
       .prepare(
         `SELECT 1 FROM ${dataTableName(tableName)} WHERE ${quoteName(name)} = ?${idClause} LIMIT 1`,
       )
-      .get(value as string);
+      .get(...params);
 
     if (existing) {
       issues.push({ path: [name], code: "unique", message: `"${name}": value already exists` });
