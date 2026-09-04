@@ -13,14 +13,35 @@ Provide a code review for the given pull request.
 
 ## Steps
 
-1. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
+1. Check for prior Claude review comments on this PR. Query both inline review comments and issue comments (no-issues reviews post via `gh pr comment`, which creates issue comments):
+
+   ```bash
+   # Inline review comments (carry original_commit_id)
+   gh api repos/{owner}/{repo}/pulls/{pr_number}/comments --jq '.[] | select(.user.login == "claude[bot]") | {id, type: "inline", path, line, original_commit_id, created_at, body}'
+
+   # Issue comments (no-issues summaries — embed reviewed SHA in body, see step 7)
+   gh api repos/{owner}/{repo}/issues/{pr_number}/comments --jq '.[] | select(.user.login == "claude[bot]") | {id, type: "issue", created_at, body}'
+   ```
+
+   If prior comments exist, this is a **re-review**. Determine the interdiff — the set of changes between the last review and the current PR head:
+   - Find the last-reviewed commit: use `original_commit_id` from the most recent inline comment, or extract the `<!-- reviewed-sha: ... -->` tag from the most recent issue comment (see step 7). Use whichever is newer. Note: `commit_id` gets re-pointed to the current PR head by GitHub — always use `original_commit_id` for inline comments.
+   - Get the current PR head: `gh pr view {pr_number} --json headRefOid --jq .headRefOid`
+   - Fetch the old commit into the shallow clone: `git fetch origin <last_reviewed_sha>`
+   - Compute the raw diff: `git diff <last_reviewed_sha>..<pr_head_sha>`. Do NOT diff against `HEAD` — in a `pull_request` workflow, `HEAD` is the merge ref, not the PR tip.
+   - Filter to PR-only files: get `gh pr diff {pr_number} --name-only` and discard any hunks from the raw diff that touch files not in this list. This prevents base-branch changes (from rebases or "Update branch") from leaking into the interdiff.
+   - If the interdiff is **empty** (same tree as last review — e.g., `reopened`, `ready_for_review`, or a job re-run), this is still a re-review: pass the prior comments to step 4 so already-flagged issues are not re-posted, and tell agents there are no new changes to review.
+   - **Fallback**: if the interdiff cannot be computed (fetch fails or any other error), review the full PR diff — but still pass any prior comments to step 4 so already-flagged issues are not posted twice. Do not skip the review.
+
+   If no prior comments exist, this is a **first review** — proceed normally with the full diff.
+
+2. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
    - The root CLAUDE.md file, if it exists
 
    - Any CLAUDE.md files in directories containing files modified by the pull request
 
-2. Launch a sonnet agent to view the pull request and return a summary of the changes
+3. Launch a sonnet agent to view the pull request and return a summary of the changes
 
-3. Launch 4 agents in parallel to independently review the changes. Each agent should return the list of issues, where each issue includes a description and the reason it was flagged (e.g. "CLAUDE.md adherence", "bug"). The agents should do the following:
+4. Launch 4 agents in parallel to independently review the changes. If step 1 identified this as a **re-review**, provide each agent with the prior comments and interdiff so they focus on new/changed code and skip already-flagged issues that haven't changed. Each agent should return the list of issues, where each issue includes a description and the reason it was flagged (e.g. "CLAUDE.md adherence", "bug"). The agents should do the following:
 
    Agents 1 + 2: CLAUDE.md compliance sonnet agents
    Audit changes for CLAUDE.md compliance in parallel. Note: When evaluating CLAUDE.md compliance for a file, you should only consider CLAUDE.md files that share a file path with the file or parents.
@@ -51,22 +72,32 @@ Provide a code review for the given pull request.
 
    In addition to the above, each subagent should be told the PR title and description. This will help provide context regarding the author's intent.
 
-4. For each issue found in the previous step by agents 3 and 4, launch parallel subagents to validate the issue. These subagents should get the PR title and description along with a description of the issue. The agent's job is to review the issue to validate that the stated issue is truly an issue with high confidence. For example, if an issue such as "variable is not defined" was flagged, the subagent's job would be to validate that is actually true in the code. Another example would be CLAUDE.md issues. The agent should validate that the CLAUDE.md rule that was violated is scoped for this file and is actually violated. Use Opus subagents for bugs and logic issues, and sonnet agents for CLAUDE.md violations.
+5. For each issue found in the previous step by agents 3 and 4, launch parallel subagents to validate the issue. These subagents should get the PR title and description along with a description of the issue. The agent's job is to review the issue to validate that the stated issue is truly an issue with high confidence. For example, if an issue such as "variable is not defined" was flagged, the subagent's job would be to validate that is actually true in the code. Another example would be CLAUDE.md issues. The agent should validate that the CLAUDE.md rule that was violated is scoped for this file and is actually violated. Use Opus subagents for bugs and logic issues, and sonnet agents for CLAUDE.md violations.
 
-5. Filter out any issues that were not validated in step 4. This step will give us our list of high signal issues for our review.
+6. Filter out any issues that were not validated in step 5. This step will give us our list of high signal issues for our review.
 
-6. Output a summary of the review findings in your response:
+7. Output a summary of the review findings in your response:
    - If issues were found, list each issue with a brief description.
 
    - If no issues were found, state: "No issues found. Checked for bugs and CLAUDE.md compliance."
 
-   If NO issues were found, post a summary comment using `gh pr comment` and stop.
+   If NO issues were found, post a summary comment using `gh pr comment`. Include the reviewed SHA in the comment body as an HTML comment so future re-reviews can find it:
 
-   If issues were found, continue to step 7.
+   ```
+   ## Code review
 
-7. Create a list of all comments that you plan on leaving. This is only for you to make sure you are comfortable with the comments. Do not post this list anywhere.
+   No issues found. Checked for bugs and CLAUDE.md compliance.
 
-8. Post inline comments for each issue using `gh api`. Use this exact syntax:
+   <!-- reviewed-sha: <full_pr_head_sha> -->
+   ```
+
+   Then stop.
+
+   If issues were found, continue to step 8.
+
+8. Create a list of all comments that you plan on leaving. This is only for you to make sure you are comfortable with the comments. Do not post this list anywhere.
+
+9. Post inline comments for each issue using `gh api`. Use this exact syntax:
 
    ```bash
    gh api repos/{owner}/{repo}/pulls/{pr_number}/comments \
@@ -96,7 +127,7 @@ Provide a code review for the given pull request.
 
    **IMPORTANT: Only post ONE comment per unique issue. Do not post duplicate comments.**
 
-Use this list when evaluating issues in Steps 3 and 4 (these are false positives, do NOT flag):
+Use this list when evaluating issues in Steps 4 and 5 (these are false positives, do NOT flag):
 
 - Pre-existing issues
 
@@ -125,6 +156,8 @@ Notes:
 ## Code review
 
 No issues found. Checked for bugs and CLAUDE.md compliance.
+
+<!-- reviewed-sha: <full_pr_head_sha> -->
 
 ---
 
