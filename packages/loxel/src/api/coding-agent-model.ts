@@ -406,13 +406,9 @@ function findLastItemIdx(
   items: CodingAgentTimelineItem[],
   kind: CodingAgentTimelineItem["kind"],
 ): number {
-  for (let i = items.length - 1; i >= 0; i--) {
-    if (items[i]!.kind === kind) return i;
-    // Stop searching past any non-matching content to avoid concatenating
-    // separate responses across tool call / event boundaries
-    return -1;
-  }
-  return -1;
+  // Only inspect the boundary item to avoid concatenating separate responses
+  // across tool call / event boundaries.
+  return items.at(-1)?.kind === kind ? items.length - 1 : -1;
 }
 
 function findLastAssistantIdx(items: CodingAgentTimelineItem[]): number {

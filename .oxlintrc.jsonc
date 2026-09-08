@@ -42,6 +42,8 @@
     "no-unreachable": "error",
     "no-useless-constructor": "error",
     "no-useless-return": "error",
+    // Some upstream API docs use zero-width spaces to avoid closing JSDoc glob examples.
+    "no-irregular-whitespace": ["error", { "skipComments": true }],
     "radix": "error",
     "no-lonely-if": "error",
     "default-case": "error",
@@ -84,6 +86,27 @@
     "react/no-unescaped-entities": "off",
     "react/no-unknown-property": "off",
     "react/jsx-no-useless-fragment": "off",
+    // Newly implemented style rules would require broad, non-functional rewrites.
+    "react/forbid-component-props": "off",
+    "react/jsx-no-literals": "off",
+    "typescript/explicit-member-accessibility": "off",
+    "no-underscore-dangle": "off",
+    "require-unicode-regexp": "off",
+    // Oxlint 1.79 split the opt-in React compiler lint into individual rules.
+    // Adopt these separately from the toolchain upgrade; counts are from 1.80.0.
+    // See https://github.com/bizimind/loxel/issues/186.
+    "react/refs": "off", // 35
+    "react/no-unstable-nested-components": "off", // 30
+    "react/todo": "off", // 26
+    "react/set-state-in-effect": "off", // 24
+    "react/exhaustive-effect-dependencies": "off", // 19
+    "react/memo-dependencies": "off", // 13
+    "react/hooks": "off", // 13
+    "react/rule-suppression": "off", // 12
+    "react/purity": "off", // 4
+    "react/immutability": "off", // 2
+    "react/static-components": "off", // 1
+    "react/incompatible-library": "off", // 1
     // react-perf
     "react-perf/jsx-no-new-function-as-prop": "off",
     "react-perf/jsx-no-new-object-as-prop": "off",
@@ -98,9 +121,8 @@
     // no-loop-func: closures capturing loop variables are safe under `let`/`const` (block-scoped); the rule flags valid patterns.
     "no-loop-func": "off",
 
-    // --- Rules temporarily disabled ---
-    // TODO: revisit in oxlint 1.61.0 — false positives with closure reads and continue-in-loop patterns.
-    // See https://github.com/oxc-project/oxc/issues/21359 (fix merged but may not be in 1.60.0)
+    // Still reports loop-carried assignments as unused in 1.80.0.
+    // See https://github.com/oxc-project/oxc/issues/21359.
     "no-useless-assignment": "off",
 
     // --- Type-aware rules (disabled for incremental adoption) ---
