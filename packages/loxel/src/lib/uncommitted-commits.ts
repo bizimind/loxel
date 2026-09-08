@@ -1,5 +1,4 @@
 import type { CommitInfo, RefInfo, WorktreeStatusInfo } from "@/api/git-models";
-
 import { UNCOMMITTED_PREFIX } from "@/api/git-models";
 
 /**

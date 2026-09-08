@@ -1,9 +1,8 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import type { Project } from "@/api/project-model";
-
 import * as api from "@/api/client";
+import type { Project } from "@/api/project-model";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { toggleSet } from "@/lib/set-utils";
 

@@ -1,12 +1,10 @@
 import type { TableSchema, CalendarViewDef } from "@bizimind/localdb-sdk";
-
 import { useState, useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import type { DataAdapter } from "../../adapters/data-adapter.ts";
-
 import { RecordForm } from "../form/RecordForm.tsx";
 
 interface Props {

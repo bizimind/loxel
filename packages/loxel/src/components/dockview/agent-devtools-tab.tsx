@@ -1,5 +1,4 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
-
 import { BugPlayIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";

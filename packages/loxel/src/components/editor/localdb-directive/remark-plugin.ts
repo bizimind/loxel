@@ -1,6 +1,5 @@
-import type { Root } from "mdast";
-
 import { $remark } from "@milkdown/kit/utils";
+import type { Root } from "mdast";
 import remarkDirective from "remark-directive";
 import { visit } from "unist-util-visit";
 

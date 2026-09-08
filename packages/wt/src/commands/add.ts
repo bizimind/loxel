@@ -1,12 +1,11 @@
 import { createResult, runAction } from "@bizimind/cli-common";
 
-import type { AddResult } from "../lib/add.ts";
-import type { AbortedResult } from "../types.ts";
-
 import { resolveConfig } from "../config/loader.ts";
 import { isTTY } from "../init/detect.ts";
 import { selectBranchExistsAction, inputWorktreeName } from "../init/prompts.ts";
+import type { AddResult } from "../lib/add.ts";
 import { planAdd, executeAdd } from "../lib/add.ts";
+import type { AbortedResult } from "../types.ts";
 
 interface AddOptions {
   open?: boolean;

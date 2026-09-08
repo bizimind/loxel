@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import type { LogFn } from "./stress-detector";
-
 import { createStressDetector } from "./stress-detector";
 
 interface LogCall {

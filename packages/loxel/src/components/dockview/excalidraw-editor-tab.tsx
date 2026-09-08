@@ -1,5 +1,4 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
-
 import { PencilRulerIcon } from "lucide-react";
 
 import { EditorTab } from "./editor-tab";

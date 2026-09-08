@@ -1,5 +1,4 @@
 import type { DockviewPanelApi } from "dockview-react";
-
 import { useEffect, useState } from "react";
 
 export function usePanelActive(panelApi: DockviewPanelApi | undefined): boolean {

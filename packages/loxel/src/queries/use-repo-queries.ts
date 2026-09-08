@@ -1,7 +1,7 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-
 import { useQuery } from "@tanstack/react-query";
 
+import * as api from "@/api/client";
 import type { DiffInfo } from "@/api/diff-model";
 import type {
   BranchInfo,
@@ -11,13 +11,11 @@ import type {
   StatusInfo,
   WorktreeStatusInfo,
 } from "@/api/git-models";
-import type { DiffSource } from "@/store/worktree-repository";
-import type { BranchFilterPreset } from "@/store/worktree-ui";
-
-import * as api from "@/api/client";
 import { toAbsoluteDir } from "@/lib/detached-path";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
+import type { DiffSource } from "@/store/worktree-repository";
+import type { BranchFilterPreset } from "@/store/worktree-ui";
 
 function getRecentDays(preset: BranchFilterPreset): number | null {
   switch (preset) {

@@ -1,4 +1,3 @@
-import { $ } from "bun";
 import {
   chmod,
   constants,
@@ -15,6 +14,8 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+
+import { $ } from "bun";
 
 import type { FileOperationResult } from "@/api/file-operations-model";
 

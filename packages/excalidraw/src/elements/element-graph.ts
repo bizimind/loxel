@@ -1,6 +1,5 @@
-import type { ExcalidrawElement } from "./excalidraw-types.ts";
-
 import { activeElements } from "./element-query.ts";
+import type { ExcalidrawElement } from "./excalidraw-types.ts";
 
 export type TraversalDirection = "in" | "out" | "both";
 

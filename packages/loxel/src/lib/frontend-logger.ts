@@ -1,3 +1,4 @@
+import { postLogEntry } from "@/api/client";
 /**
  * Frontend structured logger.
  *
@@ -6,8 +7,6 @@
  * through the same pipeline as server-originated logs.
  */
 import type { ChildLogger, LogCategory, LogLevel } from "@/api/log-entry-model";
-
-import { postLogEntry } from "@/api/client";
 
 // --- Error serialization (matches server logger helpers) ---
 

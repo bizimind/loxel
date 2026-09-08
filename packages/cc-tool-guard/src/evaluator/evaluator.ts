@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ProjectContext, EvaluationResult, EvaluationError } from "../types.ts";
-
 import { checkKnownPatterns } from "./patterns.ts";
 import { SYSTEM_PROMPT, buildUserPrompt } from "./prompt.ts";
 import { evaluateReadRequest } from "./read-patterns.ts";

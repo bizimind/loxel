@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
-import type { ProtocolEvent } from "../src/protocol/schemas.ts";
-
 import { CodingAgentRuntime } from "../src/orchestrator/runtime.ts";
+import type { ProtocolEvent } from "../src/protocol/schemas.ts";
 import { SessionStore } from "../src/session/store.ts";
 
 const originalHome = process.env.HOME;

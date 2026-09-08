@@ -1,5 +1,4 @@
 import type { RefObject } from "react";
-
 import { useEffect, useMemo, useState } from "react";
 
 import { detectLanguage, highlightCode } from "@/lib/highlighter";
@@ -7,7 +6,6 @@ import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui";
 
 import type { ChangeRegion, ChangeType } from "./change-regions";
-
 import { buildLineChangeMap } from "./change-regions";
 
 function getRowBgClass(changeType: ChangeType | undefined): string {

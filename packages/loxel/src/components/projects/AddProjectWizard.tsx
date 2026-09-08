@@ -8,9 +8,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { DetectPathResult, WorkspaceSetup } from "@/api/project-model";
-
 import * as api from "@/api/client";
+import type { DetectPathResult, WorkspaceSetup } from "@/api/project-model";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { cn } from "@/lib/utils";

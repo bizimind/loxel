@@ -3,17 +3,15 @@
  */
 
 import type { IDockviewPanel } from "dockview-react";
-
 import { useCallback } from "react";
 
 import type { SplitPosition } from "@/components/dockview/default-layout";
-import type { ActionId } from "@/store/keybindings/action-registry";
-
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
+import type { ActionId } from "@/store/keybindings/action-registry";
 import { findAdjacentCenterGroup } from "@/store/layout-actions";
 import { getCenterPanelDef, getCreateEventForAction } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";

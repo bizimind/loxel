@@ -4,7 +4,6 @@ import type React from "react";
 import { cn } from "@/lib/utils";
 
 import type { ComponentKey } from "../../fields/field-props.ts";
-
 import { FieldInput, FieldSelect, FieldTextarea } from "../../fields/field-ui.tsx";
 import { issueMessage } from "../../fields/issue-message.ts";
 import { getField, defaultComponentKeyForColumn } from "../../fields/registry.ts";

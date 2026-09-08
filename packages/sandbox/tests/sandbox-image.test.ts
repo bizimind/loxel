@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import type { ProviderType } from "../src/provider.ts";
-
 import { createProvider } from "../src/create-provider.ts";
 import { detectProviders } from "../src/detect.ts";
+import type { ProviderType } from "../src/provider.ts";
 import { SandboxTemplate } from "../src/sandbox-template.ts";
 
 // Smoke-test the built sandbox image by running each tool inside a container

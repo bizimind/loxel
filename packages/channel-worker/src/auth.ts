@@ -1,5 +1,4 @@
 import type { AppLogger } from "@bizimind/logger";
-
 import * as jose from "jose";
 
 /**

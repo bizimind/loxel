@@ -1,5 +1,4 @@
 import type { LayoutEdge } from "./layout";
-
 import { generateEdgePath } from "./layout";
 
 interface BranchLineProps {

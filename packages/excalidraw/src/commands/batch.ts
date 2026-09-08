@@ -1,7 +1,6 @@
-import { createResult, runAction } from "@bizimind/cli-common";
 import path from "node:path";
 
-import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
+import { createResult, runAction } from "@bizimind/cli-common";
 
 import { cleanupBindings } from "../binding/arrow-binding.ts";
 import { STYLE_PROPS } from "../commands/edit.ts";
@@ -20,6 +19,7 @@ import {
 import { collectCascadeTargets } from "../elements/element-graph.ts";
 import { generateElementId, validateIdUnique } from "../elements/element-id.ts";
 import { filterByGroupId, findElementByIdOrThrow } from "../elements/element-query.ts";
+import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
 import { bumpVersion, loadFile, saveFile } from "../file/excalidraw-file.ts";
 
 interface BatchOptions {

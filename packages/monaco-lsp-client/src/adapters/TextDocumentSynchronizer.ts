@@ -6,11 +6,10 @@ import type {
   TextDocumentContentChangeEvent,
   TextDocumentIdentifier,
 } from "../types";
-import type { ITextModelBridge } from "./ITextModelBridge";
-import type { ILspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
-
 import { api, capabilities } from "../types";
 import { Disposable } from "../utils";
+import type { ITextModelBridge } from "./ITextModelBridge";
+import type { ILspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 
 export class TextDocumentSynchronizer extends Disposable implements ITextModelBridge {
   private readonly _managedModels = new Map<monaco.editor.ITextModel, ManagedModel>();

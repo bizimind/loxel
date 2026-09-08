@@ -3,7 +3,6 @@
  * Each worktree gets its own store instance via the worktree store factory.
  */
 import type { PanelId } from "./panel-config";
-
 import {
   DEFAULT_ACTIVE_BOTTOM,
   DEFAULT_ACTIVE_LEFT,

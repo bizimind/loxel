@@ -1,11 +1,9 @@
 import type { RefObject } from "react";
-
 import { useCallback, useRef, useState } from "react";
 
+import * as api from "@/api/client";
 import type { FileOperationResult } from "@/api/file-operations-model";
 import type { FilesTreeHandle } from "@/components/tree";
-
-import * as api from "@/api/client";
 import { showToast } from "@/components/ui/toast";
 import { frontendLog } from "@/lib/frontend-logger";
 import { fileParentDir } from "@/lib/project-file-helpers";

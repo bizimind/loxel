@@ -5,7 +5,6 @@ import type {
   DocumentSymbol,
   SymbolInformation,
 } from "../../types";
-
 import { capabilities, SymbolTag } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";

@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, jest, spyOn, test } from "bun:test";
+
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, useState } from "react";
 
 import { FilesTree, type FilesTreeHandle, type TreeNode } from "./FilesTree";

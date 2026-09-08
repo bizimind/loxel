@@ -1,5 +1,4 @@
 import type { LocalDb } from "@bizimind/localdb-sdk";
-
 import {
   parseColumnDef,
   parseColumnDefs,

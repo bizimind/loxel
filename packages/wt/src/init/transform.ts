@@ -1,7 +1,8 @@
-import { wrapError } from "@bizimind/cli-common";
-import { $ } from "bun";
 import { readdir, rename, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+
+import { wrapError } from "@bizimind/cli-common";
+import { $ } from "bun";
 
 /**
  * Initialize a bare git repository.

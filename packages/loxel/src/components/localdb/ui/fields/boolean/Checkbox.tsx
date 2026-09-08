@@ -1,5 +1,4 @@
 import type { FieldViewProps, FieldEditProps } from "../field-props.ts";
-
 import { EmptyValue } from "../field-ui.tsx";
 import { registerField } from "../registry.ts";
 

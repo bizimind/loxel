@@ -1,9 +1,8 @@
 import * as monaco from "monaco-editor";
 
 import type { SemanticTokensRegistrationOptions } from "../../types";
-import type { IDisposable } from "../../utils";
-
 import { capabilities, TokenFormat, api } from "../../types";
+import type { IDisposable } from "../../utils";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";
 import { toMonacoLanguageSelector } from "./common";

@@ -1,13 +1,12 @@
 import { describe, test, expect } from "bun:test";
 
-import type { AckEvent, MessageFailedEvent, ChannelClientOptions } from "../src/types.ts";
-
 import {
   JoinPayloadSchema,
   type AckEnvelope,
   type AckPayload,
   type JoinPayload,
 } from "../src/protocol.ts";
+import type { AckEvent, MessageFailedEvent, ChannelClientOptions } from "../src/types.ts";
 
 describe("Reliability Protocol Types", () => {
   describe("JoinPayload with lastSeq", () => {

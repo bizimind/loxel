@@ -1,7 +1,6 @@
 import * as monaco from "monaco-editor";
 
 import type { CodeLensRegistrationOptions, CodeLens } from "../../types";
-
 import { capabilities, api } from "../../types";
 import { Disposable } from "../../utils";
 import { assertTargetTextModel } from "../ITextModelBridge";

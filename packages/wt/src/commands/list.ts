@@ -1,8 +1,7 @@
 import { createResult, formatTable, runAction } from "@bizimind/cli-common";
 
-import type { ListResult } from "../types.ts";
-
 import { getWorktreesDir, resolveConfig } from "../config/loader.ts";
+import type { ListResult } from "../types.ts";
 import { listWorktrees } from "../worktree/git.ts";
 import { getWorktreeName } from "../worktree/select.ts";
 import { StateManager } from "../worktree/state.ts";

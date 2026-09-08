@@ -11,9 +11,8 @@
  */
 import { create } from "zustand";
 
-import type { ServerNotification } from "@/api/notification-model";
-
 import { wsClient } from "@/api/client";
+import type { ServerNotification } from "@/api/notification-model";
 
 /**
  * How long to suppress notifications after panel registration (ms).

@@ -1,10 +1,9 @@
 import { useCallback, useRef } from "react";
 
-import type { PanelId } from "@/store/panel-config";
-
 import { NotificationDot } from "@/components/ui/notification-dot";
 import { cn } from "@/lib/utils";
 import { usePanelBadgeStore } from "@/store/panel-badges";
+import type { PanelId } from "@/store/panel-config";
 import { getPanelIcon, getPanelLabel } from "@/store/panel-config";
 import { togglePanel } from "@/store/tools-bar";
 import { useWorktreeToolsBar } from "@/store/worktree-tools-bar";

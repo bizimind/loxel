@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
 
 import type { ColumnDef } from "../column-types/column-def.ts";
-
 import { buildColumnDdlFragment, isFormula, quoteName } from "../column-types/ddl.ts";
 import { dataTableName } from "./manager.ts";
 

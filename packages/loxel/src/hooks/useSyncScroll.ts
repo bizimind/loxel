@@ -1,9 +1,7 @@
 import type { RefObject } from "react";
-
 import { useCallback, useEffect, useRef } from "react";
 
 import type { ScrollAlignmentSection } from "@/components/diff/change-regions";
-
 import { translateScrollPosition } from "@/components/diff/change-regions";
 
 /** Delay before syncing follower scroll position after wheel scrolling stops */

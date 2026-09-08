@@ -3,7 +3,6 @@ import { chmod, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import type { BinaryInfo, Manifest } from "./manifest.ts";
-
 import { getBinaryInfo } from "./manifest.ts";
 import { getCurrentPlatform } from "./platform.ts";
 

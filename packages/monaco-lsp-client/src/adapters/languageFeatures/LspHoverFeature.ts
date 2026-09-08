@@ -1,7 +1,6 @@
 import * as monaco from "monaco-editor";
 
 import type { HoverRegistrationOptions, MarkupContent, MarkedString } from "../../types";
-
 import { capabilities, MarkupKind } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";

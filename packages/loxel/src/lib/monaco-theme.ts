@@ -1,7 +1,6 @@
-import type { Highlighter } from "shiki";
-
 import { textmateThemeToMonacoTheme } from "@shikijs/monaco";
 import * as monaco from "monaco-editor";
+import type { Highlighter } from "shiki";
 
 function resolveColorVar(name: string, el: Element): string {
   const raw = getComputedStyle(el).getPropertyValue(name).trim();

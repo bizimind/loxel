@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import type { ContainerInfo } from "../container-info.ts";
+import { CliError, ContainerNotFoundError, SandboxError } from "../errors.ts";
 import type { ExecHandle } from "../exec-handle.ts";
+import { createExecHandle } from "../exec-handle.ts";
+import { runCli, runCliJson, spawnCliStream } from "../exec.ts";
 import type {
   ExecOptions,
   ExecResult,
@@ -12,10 +15,6 @@ import type {
   SandboxProvider,
   SpawnOptions,
 } from "../provider.ts";
-
-import { CliError, ContainerNotFoundError, SandboxError } from "../errors.ts";
-import { createExecHandle } from "../exec-handle.ts";
-import { runCli, runCliJson, spawnCliStream } from "../exec.ts";
 import { buildExecArgs, buildRunArgs, buildSpawnArgs, normalizeState } from "./provider-utils.ts";
 
 // Docker/Podman `inspect` and `ps --format json` output shapes. Both runtimes

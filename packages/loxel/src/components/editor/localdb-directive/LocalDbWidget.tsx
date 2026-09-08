@@ -8,10 +8,9 @@ import type {
   GanttViewDef,
   ViewDef,
 } from "@bizimind/localdb-sdk";
-import type React from "react";
-
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SettingsIcon } from "lucide-react";
+import type React from "react";
 import { useEffect, useState } from "react";
 
 import {

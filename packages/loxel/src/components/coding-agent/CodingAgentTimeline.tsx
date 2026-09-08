@@ -1,5 +1,4 @@
 import type { TodoItem } from "@bizimind/coding-agent/schemas";
-
 /**
  * Coding agent timeline component.
  * Renders messages, tool calls, plans, and events in a scrollable container.
@@ -14,7 +13,6 @@ import type {
   PendingHumanInput,
 } from "@/api/coding-agent-model";
 import type { AgentStatus } from "@/api/ws-protocol";
-
 import { cn } from "@/lib/utils";
 
 import { AgentMarkdown } from "./AgentMarkdown";

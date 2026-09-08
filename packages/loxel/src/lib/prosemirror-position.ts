@@ -10,11 +10,10 @@
  * representation (HTML, comments, images, link URLs).
  */
 import type { Node as ProseMirrorNode } from "@milkdown/kit/prose/model";
-import type { Node as UnistNode } from "unist";
-
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
+import type { Node as UnistNode } from "unist";
 
 import { splitFrontmatter } from "./frontmatter";
 

@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 
 import type { CommitInfo } from "@/api/git-models";
-
 import { useCommitsWithUncommitted } from "@/hooks/useCommitsWithUncommitted";
 import { injectUncommittedCommits } from "@/lib/uncommitted-commits";
 import { useBranchCommitsQuery, useWorktreeStatusesQuery } from "@/queries/use-repo-queries";

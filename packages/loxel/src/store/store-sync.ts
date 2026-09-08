@@ -8,12 +8,10 @@
  */
 
 import type { LogLevel } from "@/api/log-entry-model";
-
 import { reconcile } from "@/lib/reconcile";
 
-import type { TemplateName } from "./keybindings/keybinding-schema";
-
 import { buildReverseLookup } from "./keybindings/keybinding-resolver";
+import type { TemplateName } from "./keybindings/keybinding-schema";
 import { TEMPLATES } from "./keybindings/keybinding-schema";
 import { useKeybindingStore } from "./keybindings/keybinding-store";
 import { useProjectStore } from "./projects";

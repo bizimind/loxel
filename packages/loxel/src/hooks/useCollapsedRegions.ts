@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DiffHunk } from "@/api/diff-model";
 import type { CollapsibleRegion, LineRange } from "@/components/diff/unchanged-regions";
-
 import { buildCollapsibleRegions, computeHiddenRanges } from "@/components/diff/unchanged-regions";
 import { toggleSet } from "@/lib/set-utils";
 

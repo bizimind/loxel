@@ -1,6 +1,5 @@
-import type { editor as monacoEditor } from "monaco-editor";
-
 import { useQuery } from "@tanstack/react-query";
+import type { editor as monacoEditor } from "monaco-editor";
 import * as monaco from "monaco-editor";
 import { useEffect, useMemo, useRef } from "react";
 

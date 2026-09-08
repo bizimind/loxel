@@ -1,9 +1,7 @@
 import type { DockviewPanelApi } from "dockview-react";
-
 import { useCallback, useEffect, useMemo } from "react";
 
 import type { FileDiff } from "@/api/diff-model";
-
 import { fileDiffPath } from "@/api/diff-model";
 import { BranchCommitDropdown } from "@/components/panels/BranchCommitDropdown";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";

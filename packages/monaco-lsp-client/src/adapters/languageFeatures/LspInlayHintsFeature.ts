@@ -6,7 +6,6 @@ import type {
   InlayHintLabelPart,
   MarkupContent,
 } from "../../types";
-
 import { capabilities, api } from "../../types";
 import { Disposable } from "../../utils";
 import { assertTargetTextModel } from "../ITextModelBridge";

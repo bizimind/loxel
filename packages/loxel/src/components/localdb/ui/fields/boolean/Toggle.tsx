@@ -1,7 +1,6 @@
 import { Switch } from "@/components/ui/switch";
 
 import type { FieldViewProps, FieldEditProps } from "../field-props.ts";
-
 import { registerField } from "../registry.ts";
 
 export function BooleanToggleView({ value }: FieldViewProps<boolean>) {

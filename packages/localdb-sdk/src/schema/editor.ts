@@ -1,8 +1,6 @@
 import type { Database } from "bun:sqlite";
 
 import type { ColumnDef } from "../column-types/column-def.ts";
-import type { MigrationPlan, MigrationResult } from "./migration.ts";
-
 import {
   buildColumnDdlFragment,
   columnToDdl,
@@ -21,6 +19,7 @@ import {
   validateColumnReferences,
   validateUniqueColumnNames,
 } from "./manager.ts";
+import type { MigrationPlan, MigrationResult } from "./migration.ts";
 import { planAlterColumn, coerceExpr } from "./migration.ts";
 import { rebuildTable } from "./rebuild.ts";
 

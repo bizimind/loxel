@@ -7,7 +7,6 @@
  */
 
 import type { LucideIcon } from "lucide-react";
-
 import {
   ArrowBigUpIcon,
   ArrowRightToLineIcon,
@@ -18,9 +17,8 @@ import {
   OptionIcon,
 } from "lucide-react";
 
-import type { KeyCombo } from "@/store/keybindings/keybinding-schema";
-
 import { cn } from "@/lib/utils";
+import type { KeyCombo } from "@/store/keybindings/keybinding-schema";
 import { KEY_LABELS } from "@/store/keybindings/keybinding-schema";
 
 /** Maps canonical key part names to lucide icons. */

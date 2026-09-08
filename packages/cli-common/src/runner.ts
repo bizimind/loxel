@@ -3,14 +3,13 @@
  * and handles json/human/quiet output modes.
  */
 
-import type { CommandResult } from "./result.ts";
-
 import {
   createOutputContext,
   getOutputMode,
   type OutputContext,
   type OutputMode,
 } from "./output.ts";
+import type { CommandResult } from "./result.ts";
 import { errorResult } from "./result.ts";
 
 export interface RunOptions {

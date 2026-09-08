@@ -2,9 +2,8 @@ import { ChevronRightIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, XIcon } fr
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { BrowseEntry } from "@/api/project-model";
-
 import * as api from "@/api/client";
+import type { BrowseEntry } from "@/api/project-model";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 

@@ -12,7 +12,6 @@ import {
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { PlacedThread } from "@/api/review-model";
-
 import { CommentMarkdown } from "@/components/comments/CommentMarkdown";
 import { OutdatedDiff } from "@/components/comments/OutdatedDiff";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";

@@ -1,5 +1,4 @@
 import type { DockviewPanelApi } from "dockview-react";
-
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,

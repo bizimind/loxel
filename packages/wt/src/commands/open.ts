@@ -1,7 +1,6 @@
 import { createResult, runAction } from "@bizimind/cli-common";
 
 import type { OpenResult } from "../types.ts";
-
 import { loadWorktreeContext, selectWorktree } from "../worktree/select.ts";
 
 interface OpenOptions {

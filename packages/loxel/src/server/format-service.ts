@@ -4,7 +4,6 @@ import { join } from "node:path";
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 
 import type { BackendMode, FormatterBackend } from "./formatter-backends";
-
 import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
 import { PrettierLibBackend } from "./prettier-lib-backend";

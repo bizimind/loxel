@@ -1,10 +1,8 @@
 import type { ReactNode } from "react";
-
 import { useCallback, useRef } from "react";
 
-import type { PanelId } from "@/store/panel-config";
-
 import { cn } from "@/lib/utils";
+import type { PanelId } from "@/store/panel-config";
 
 /**
  * Panel header that doubles as a drag handle for dockview panel rearrangement.

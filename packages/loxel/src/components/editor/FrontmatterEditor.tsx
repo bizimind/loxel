@@ -1,8 +1,7 @@
-import type { editor as monacoEditor } from "monaco-editor";
-import type { MutableRefObject } from "react";
-
 import { ChevronDown, ChevronRight, PlusIcon, XIcon } from "lucide-react";
+import type { editor as monacoEditor } from "monaco-editor";
 import * as monaco from "monaco-editor";
+import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getMonacoThemeName } from "@/lib/monaco-theme";

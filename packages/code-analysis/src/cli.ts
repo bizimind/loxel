@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
+import { resolve } from "node:path";
+
 import { createResult, formatTable, runAction } from "@bizimind/cli-common";
 import { program } from "commander";
-import { resolve } from "node:path";
 
 import { resolveArgs } from "./plugin.ts";
 import { ensurePluginsLoaded, listPlugins, loadPlugin } from "./registry.ts";

@@ -1,6 +1,6 @@
-import type { Page } from "@playwright/test";
-
 import { resolve } from "node:path";
+
+import type { Page } from "@playwright/test";
 
 const SCREENSHOTS_DIR = resolve(import.meta.dirname, "../../../site/public/screenshots");
 
