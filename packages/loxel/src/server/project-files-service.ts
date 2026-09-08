@@ -7,6 +7,7 @@ import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 
 import type { FileChange } from "./file-sync-service";
 import { FilesSyncService } from "./file-sync-service";
+import { readOnlyGitEnv } from "./git-commands/git-env";
 import { logger } from "./logger";
 
 const log = logger.child("files");
@@ -255,11 +256,15 @@ export class ProjectFilesService {
 
   private async buildStatusMaps(): Promise<void> {
     const [statusOutput, ignoredOutput] = await Promise.all([
-      $`git -C ${this.worktreeCwd} status --porcelain`.text().catch((err: unknown) => {
-        log.error("Failed to run git status for file tree", { error: err });
-        return "";
-      }),
+      $`git -C ${this.worktreeCwd} status --porcelain`
+        .env(readOnlyGitEnv())
+        .text()
+        .catch((err: unknown) => {
+          log.error("Failed to run git status for file tree", { error: err });
+          return "";
+        }),
       $`git -C ${this.worktreeCwd} ls-files --others --ignored --exclude-standard --directory`
+        .env(readOnlyGitEnv())
         .text()
         .catch((err: unknown) => {
           log.error("Failed to list ignored files for file tree", { error: err });

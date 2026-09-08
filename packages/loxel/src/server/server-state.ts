@@ -16,10 +16,8 @@ export interface ProjectState {
   reviewDb: ReviewDb;
   localDb: LocalDb;
   authorName: string | null;
-  hasWtConfig: boolean;
-  wtCliAvailable: boolean;
-  /** Absolute path to the worktrees directory from wt.yaml (null when hasWtConfig is false). */
-  worktreesDir: string | null;
+  /** Absolute path to the directory holding this repo's worktrees (`.worktrees`). */
+  worktreesDir: string;
 }
 
 /**

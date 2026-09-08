@@ -146,21 +146,6 @@ jobs:
         with:
           ref: ${{ needs.check-and-bump.outputs.tag }}
 
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build schema
-        run: |
-          mkdir -p packages/wt/dist
-          pnpm -C packages/wt run build:config-schema > packages/wt/dist/wt.schema.json
-
       - name: Generate manifest
         run: |
           VERSION="${{ needs.check-and-bump.outputs.version }}"
@@ -191,7 +176,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
         run: |
-          aws s3 cp packages/wt/dist/wt.schema.json s3://loxel/wt/schema.json --content-type application/json
+          aws s3 cp packages/wt/wt.sh s3://loxel/wt/wt.sh --content-type text/x-shellscript
           aws s3 cp manifest.json s3://loxel/wt/manifest.json --content-type application/json
 
       - name: Create GitHub Release
@@ -212,6 +197,8 @@ jobs:
             --notes "## Downloads
 
           ${LINKS}
-          Or install via: \`curl -fsSL https://loxel.bizimind.io/wt/install.sh | bash\`"
+          Or install via: \`curl -fsSL https://loxel.bizimind.io/wt/install.sh | bash\`
+
+          Shell helpers: [wt.sh](${BASE}/wt.sh)"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

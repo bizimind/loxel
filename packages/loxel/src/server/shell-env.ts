@@ -61,3 +61,15 @@ export function buildSpawnEnv(): Record<string, string | undefined> {
   }
   return env;
 }
+
+/**
+ * Same as `buildSpawnEnv()` but with unset variables dropped, for APIs that
+ * require a fully-defined string map (e.g. wt hook environments).
+ */
+export function buildHookEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(buildSpawnEnv())) {
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}

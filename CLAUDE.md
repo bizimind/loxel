@@ -16,7 +16,7 @@ echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc   # or bash/fish equivalent
 direnv allow                                    # trust the .envrc in this repo
 ```
 
-The `.env` file is copied to the worktree root by `wt add` hooks (source: `.wt-local-res/.env`). There is a single root `.env` — packages do not have their own `.env` files.
+The `.env` file is copied to the worktree root by the repo-root `init.wt.sh` hook that `wt add` runs (source: `.wt-local-res/.env`). There is a single root `.env` — packages do not have their own `.env` files.
 
 ## Build Commands
 
@@ -46,7 +46,7 @@ pnpm -C packages/<package> run typecheck       # Single package
 pnpm -C packages/<package> run test            # Run all tests in package (uses package.json script)
 
 # Run a single test file (bun test runner directly)
-bun test packages/wt/src/config/schema.test.ts
+bun test packages/wt/src/git/name.test.ts
 
 # Run tests matching a pattern
 bun test --cwd packages/wt --test-name-pattern "validates"
@@ -64,7 +64,7 @@ bun test --cwd packages/wt --test-name-pattern "validates"
 
 - **excalidraw**: CLI for agents to create, edit, and view Excalidraw diagrams. Provides batch operations via JSON-over-stdin for atomic multi-element mutations (draw, move, resize, edit, group). Uses jsdom DOM shim for headless element creation via `@excalidraw/element`. Entry point: `src/cli.ts`.
 
-- **wt**: Git worktree manager CLI for parallel development. Handles automatic port offsetting, unique resource naming (Docker containers, databases), and lifecycle hooks. Config via `wt.yaml`.
+- **wt**: Configless git worktree manager CLI for parallel development. Git is the only source of truth (`git worktree list`) — no config or state file. Worktrees live in `<repoRoot>/.worktrees/<name>` (override with `WT_DIR`). `add`/`list`/`view`/`mv`/`remove`; `mv` renames the directory and its branch together (and runs `rename.wt.sh`). Per-worktree setup/teardown/fixup lives in repo-root hook scripts (`init.wt.sh`, `clean.wt.sh`, `rename.wt.sh`) that wt runs with `WT_NAME`/`WT_PATH`/`WT_ROOT`/`WT_BRANCH` set (`rename.wt.sh` also gets `WT_OLD_NAME`/`WT_OLD_PATH`/`WT_OLD_BRANCH`). `packages/wt/wt.sh` holds the `wta`/`wtv`/`wtr`/`wtm` shell functions that cd into the worktree wt reports. Works with bare and non-bare repos.
 
 #### Libraries
 

@@ -3,22 +3,26 @@ import { $ } from "bun";
 import type { DiffInfo } from "@/api/diff-model";
 
 import { parseDiffOutput } from "../parsers/diff";
-import { FSMONITOR, validateCommitHash } from "./validation";
+import { FSMONITOR, readOnlyGitEnv } from "./git-env";
+import { validateCommitHash } from "./validation";
 import { validateWorktreePath } from "./worktree";
 
 export async function getStagedDiff(cwd: string): Promise<DiffInfo> {
-  const result = await $`git ${FSMONITOR} -C ${cwd} diff --cached`.text();
+  const result = await $`git ${FSMONITOR} -C ${cwd} diff --cached`.env(readOnlyGitEnv()).text();
   return parseDiffOutput(result);
 }
 
 export async function getUnstagedDiff(cwd: string): Promise<DiffInfo> {
-  const result = await $`git ${FSMONITOR} -C ${cwd} diff`.text();
+  const result = await $`git ${FSMONITOR} -C ${cwd} diff`.env(readOnlyGitEnv()).text();
   return parseDiffOutput(result);
 }
 
 export async function getCommitDiff(cwd: string, commit: string): Promise<DiffInfo> {
   validateCommitHash(commit);
-  const result = await $`git -C ${cwd} diff-tree -p --root ${commit}`.nothrow().text();
+  const result = await $`git -C ${cwd} diff-tree -p --root ${commit}`
+    .env(readOnlyGitEnv())
+    .nothrow()
+    .text();
   return parseDiffOutput(result);
 }
 
@@ -33,8 +37,9 @@ export async function getRangeDiff(cwd: string, range: string): Promise<DiffInfo
   if (ref1) validateCommitHash(ref1);
   validateCommitHash(ref2);
 
-  const base = ref1 ?? (await $`git hash-object -t tree /dev/null`.text()).trim();
-  const result = await $`git -C ${cwd} diff ${base}${dots}${ref2}`.text();
+  const base =
+    ref1 ?? (await $`git hash-object -t tree /dev/null`.env(readOnlyGitEnv()).text()).trim();
+  const result = await $`git -C ${cwd} diff ${base}${dots}${ref2}`.env(readOnlyGitEnv()).text();
   return parseDiffOutput(result);
 }
 
@@ -49,10 +54,13 @@ export async function getWorkingTreeDiff(
   }
   const ref = base ?? "HEAD";
 
-  const trackedResult = await $`git ${FSMONITOR} -C ${worktreePath} diff ${ref}`.text();
+  const trackedResult = await $`git ${FSMONITOR} -C ${worktreePath} diff ${ref}`
+    .env(readOnlyGitEnv())
+    .text();
   const trackedDiff = parseDiffOutput(trackedResult);
 
   const untrackedResult = await $`git -C ${worktreePath} ls-files --others --exclude-standard`
+    .env(readOnlyGitEnv())
     .nothrow()
     .text();
   const untrackedFiles = untrackedResult
@@ -65,6 +73,7 @@ export async function getWorkingTreeDiff(
   const untrackedDiffs = await Promise.all(
     untrackedFiles.map(async (file) => {
       const diff = await $`git -C ${worktreePath} diff --no-index -- /dev/null ${file}`
+        .env(readOnlyGitEnv())
         .nothrow()
         .text();
       return parseDiffOutput(diff);

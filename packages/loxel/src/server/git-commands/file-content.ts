@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { $ } from "bun";
 
+import { readOnlyGitEnv } from "./git-env";
 import { validatePath, validateRefName } from "./validation";
 import { validateWorktreePath } from "./worktree";
 
@@ -16,7 +17,7 @@ export async function getFileContent(
   }
 
   const refSpec = ref ? `${ref}:${filePath}` : filePath;
-  const result = await $`git -C ${cwd} show ${refSpec}`.nothrow().text();
+  const result = await $`git -C ${cwd} show ${refSpec}`.env(readOnlyGitEnv()).nothrow().text();
 
   if (result.startsWith("fatal:")) {
     return [];

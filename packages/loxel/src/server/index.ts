@@ -106,15 +106,6 @@ function resolveFilePath(absolutePath: string): ResolvedFilePath | null {
   return null;
 }
 
-async function checkWtCli(): Promise<boolean> {
-  try {
-    Bun.spawnSync(["wt", "version"], { stdout: "ignore", stderr: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Remove orphaned temp worktrees left from prior server exits (crashes, SIGKILL, etc.).
  * These are identified by the `INTERNAL_WORKTREE_PREFIX` directory name prefix.
@@ -441,6 +432,8 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
 
   const watcher = new FileWatcher({
     gitRoot: cwd,
+    // Bare repos have no working tree, so status events are meaningless there.
+    // `undefined` allows every event (including "worktrees") for regular repos.
     allowedEvents: isBare ? new Set(["refs", "log", "worktrees"]) : undefined,
     onEvent: async (event) => {
       const project = projects.get(cwd);
@@ -469,23 +462,20 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
     debounceMs: 150,
   });
 
-  const hasWtConfig = isBare && existsSync(join(cwd, "wt.yaml"));
-
-  const [, reviewDb, authorName, , wtCliAvailable, worktreesDir] = await Promise.all([
+  const [, reviewDb, authorName, , worktreesDir, managed] = await Promise.all([
     pruneOrphanedTempWorktrees(cwd),
     ReviewDb.open(cwd),
     getGitAuthorName(cwd),
     watcher.start(),
-    isBare && hasWtConfig ? checkWtCli() : Promise.resolve(false),
-    hasWtConfig ? resolveWorktreesDir(cwd) : Promise.resolve(null),
+    resolveWorktreesDir(cwd),
+    listManagedWorktrees(cwd),
   ]);
 
   const localDb = openDatabase(join(config.stateDir, "localdb", hash12(cwd), "localdb.db"));
 
-  let filteredWorktrees: WorktreeEntry[] = [];
-  if (isBare && hasWtConfig) {
-    const managed = await listManagedWorktrees(cwd);
-    filteredWorktrees = managed.map((wt) => ({
+  const filteredWorktrees: WorktreeEntry[] = managed
+    .filter((wt) => !basename(wt.path).startsWith(INTERNAL_WORKTREE_PREFIX))
+    .map((wt) => ({
       path: wt.path,
       branch: wt.branch,
       commit: wt.head,
@@ -493,12 +483,6 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
       createdAt: null,
       wtName: wt.name,
     }));
-  } else if (isBare) {
-    const allWorktrees = await getWorktrees(cwd);
-    filteredWorktrees = allWorktrees.filter(
-      (wt) => !basename(wt.path).startsWith(INTERNAL_WORKTREE_PREFIX),
-    );
-  }
 
   const project: ProjectState = {
     cwd,
@@ -507,8 +491,6 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
     reviewDb,
     localDb,
     authorName,
-    hasWtConfig,
-    wtCliAvailable,
     worktreesDir,
   };
 
@@ -556,8 +538,7 @@ const agentManager = new AgentManager();
 const notificationStore = new NotificationStore();
 const schemaService = new SchemaService();
 const formatService = new FormatService();
-const wtSchemaUrl = `http://127.0.0.1:${config.port}/api/wt-json-schema`;
-const yamlLspManager = new YamlLspManager({ [wtSchemaUrl]: ["wt.yaml"] });
+const yamlLspManager = new YamlLspManager({});
 const tsLspManager = new TsLspManager();
 const dockerLspManager = new DockerLspManager();
 const terraformLspManager = new TerraformLspManager();

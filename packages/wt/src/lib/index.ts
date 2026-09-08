@@ -1,17 +1,32 @@
-export { planAdd, executeAdd } from "./add.ts";
-export type { AddPlan, AddParams, AddResult, BranchConflict } from "./add.ts";
-export { planRemove, executeRemove } from "./remove.ts";
-export type { RemovePlan, RemoveParams, RemoveResult } from "./remove.ts";
-export type { ProgressHandler } from "./progress.ts";
-export { silentProgress } from "./progress.ts";
-export type { WorktreeStatus } from "../init/detect.ts";
-export type { LoadedConfig } from "../config/loader.ts";
-export { resolveWorktreesDir, listManagedWorktrees } from "./config.ts";
-export type { ManagedWorktree } from "./config.ts";
-export { getWorktreeName } from "../worktree/select.ts";
-export { WT_CONFIG_JSON_SCHEMA } from "../config/json-schema.ts";
-export { detectRepoType, hasUncommittedChanges, getCurrentBranch } from "../init/detect.ts";
-export type { RepoType } from "../init/detect.ts";
-export { initBareRepo, transformToBare, ensureWorktreesDir } from "../init/transform.ts";
-export { generateWtYamlContent, writeWtYaml } from "../init/config.ts";
-export type { InitConfig } from "../init/config.ts";
+/**
+ * Public library API for @bizimind/wt.
+ *
+ * Everything here works configless and against both bare and non-bare
+ * repositories: git itself is the source of truth.
+ */
+
+export { executeAdd, planAdd } from "./add.ts";
+export type { AddParams, AddPlan, AddResult, BranchConflict } from "./add.ts";
+export { executeMove, planMove } from "./move.ts";
+export type { BranchSkipReason, MoveParams, MovePlan, MoveResult, MoveTarget } from "./move.ts";
+export { executeRemove, planRemove } from "./remove.ts";
+export type { RemoveParams, RemovePlan, RemoveResult } from "./remove.ts";
+export { currentManagedWorktree, listManagedWorktrees, resolveWorktreesDir } from "./worktrees.ts";
+export type { ManagedWorktree } from "./worktrees.ts";
+
+export { silentProgress } from "../progress.ts";
+export type { ProgressHandler } from "../progress.ts";
+
+export { getWorktreeName } from "../git/index.ts";
+export {
+  assertCanTransformToBare,
+  detectRepoType,
+  ensureWorktreesDir,
+  getCurrentBranch,
+  hasUncommittedChanges,
+  initBareRepo,
+  transformToBare,
+} from "../git/index.ts";
+export type { RepoType } from "../git/index.ts";
+
+export { HOOK_CLEAN, HOOK_INIT, HOOK_RENAME } from "../hooks/run.ts";

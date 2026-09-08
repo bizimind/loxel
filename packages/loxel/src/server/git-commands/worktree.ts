@@ -8,7 +8,7 @@ import type { StatusInfo, WorktreeEntry, WorktreeStatusInfo } from "@/api/git-mo
 import { logger } from "../logger";
 import { parseStatusOutput } from "../parsers/status";
 import { INTERNAL_WORKTREE_PREFIX } from "../worktree-utils";
-import { FSMONITOR } from "./validation";
+import { FSMONITOR, readOnlyGitEnv } from "./git-env";
 
 const log = logger.child("git");
 
@@ -67,7 +67,7 @@ export function parseWorktreeListOutput(output: string): WorktreeEntry[] {
 }
 
 export async function getWorktrees(cwd: string): Promise<WorktreeEntry[]> {
-  const result = await $`git -C ${cwd} worktree list --porcelain`.text();
+  const result = await $`git -C ${cwd} worktree list --porcelain`.env(readOnlyGitEnv()).text();
   const entries = parseWorktreeListOutput(result);
 
   return Promise.all(
@@ -84,7 +84,13 @@ export async function getWorktrees(cwd: string): Promise<WorktreeEntry[]> {
 }
 
 export async function getWorktreeStatus(worktreePath: string): Promise<StatusInfo> {
-  const result = await $`git ${FSMONITOR} -C ${worktreePath} status --porcelain=v2 --branch`.text();
+  // `getDirtyWorktreeStatuses` calls this once per worktree, and `/api/worktree-statuses` is
+  // refetched on every `refs_changed`/`log_changed`. Without GIT_OPTIONAL_LOCKS=0 each call
+  // writes `index.lock`, which the FileWatcher reads as a change — one self-trigger per
+  // worktree per event, the worst case of the loop the watcher design exists to prevent.
+  const result = await $`git ${FSMONITOR} -C ${worktreePath} status --porcelain=v2 --branch`
+    .env(readOnlyGitEnv())
+    .text();
   return parseStatusOutput(result);
 }
 

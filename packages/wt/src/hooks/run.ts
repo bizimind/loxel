@@ -1,50 +1,72 @@
-import { wrapError } from "@bizimind/cli-common";
+import { DETACHED } from "../git/index.ts";
+import { silentProgress, type ProgressHandler } from "../progress.ts";
 
-export interface HookScriptResult {
-  output: string;
+/** Run inside a new worktree right after `wt add`. */
+export const HOOK_INIT = "init.wt.sh";
+/** Run inside a worktree right before `wt remove`. */
+export const HOOK_CLEAN = "clean.wt.sh";
+/** Run inside a worktree at its new path right after `wt mv`. */
+export const HOOK_RENAME = "rename.wt.sh";
+
+export interface HookContext {
+  /** Repository root — where hook scripts live */
+  root: string;
+  /** Worktree name */
+  name: string;
+  /** Absolute path to the worktree the hook runs in */
+  worktreePath: string;
+  /** Branch name, or null when detached */
+  branch: string | null;
+  /** Base environment for the hook (default: process.env) */
+  baseEnv?: Record<string, string | undefined>;
+  /** Hook-specific variables layered on top of the standard WT_* set */
+  extraEnv?: Record<string, string>;
 }
 
 /**
- * Run a hook script with environment variables.
- * Captures stdout and stderr and returns them.
+ * Run a repo-root hook script if it exists, with cwd set to the worktree.
  *
- * @param script - Shell script content to execute
- * @param cwd - Working directory for the script (typically the worktree path)
- * @param env - Environment variables to set (wt-computed vars like WT_NAME, WT_PATH, etc.)
- * @param baseEnv - Base environment to merge with (default: process.env). Use to provide
- *   a resolved shell PATH when calling from a non-shell context (e.g., GUI app).
+ * A hook that is missing, or that fails, never aborts the surrounding
+ * add/remove: failures are reported through `progress.warn`.
+ *
+ * @returns true when the script existed and exited 0
  */
-export async function runHookScript(
-  script: string,
-  cwd: string,
-  env: Record<string, string>,
-  baseEnv?: Record<string, string | undefined>,
-): Promise<HookScriptResult> {
-  // Merge base env with hook env, allowing hook env to override
-  const fullEnv = { ...(baseEnv ?? process.env), ...env };
+export async function runHook(
+  hook: string,
+  ctx: HookContext,
+  progress: ProgressHandler = silentProgress,
+): Promise<boolean> {
+  const script = `${ctx.root}/${hook}`;
+  if (!(await Bun.file(script).exists())) return false;
 
-  try {
-    const proc = Bun.spawn(["bash", "-c", script], {
-      cwd,
-      env: fullEnv,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+  progress.log(`Running ${hook}...`);
 
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const exitCode = await proc.exited;
+  const proc = Bun.spawn(["bash", script], {
+    cwd: ctx.worktreePath,
+    env: {
+      ...(ctx.baseEnv ?? process.env),
+      WT_NAME: ctx.name,
+      WT_PATH: ctx.worktreePath,
+      WT_ROOT: ctx.root,
+      WT_BRANCH: ctx.branch ?? DETACHED,
+      ...ctx.extraEnv,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 
-    const output = (stdout + stderr).trim();
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
 
-    if (exitCode !== 0) {
-      throw new Error(`Script exited with code ${exitCode}${output ? `\n${output}` : ""}`);
-    }
+  const output = (stdout + stderr).trim();
+  if (output) progress.log(output);
 
-    return { output };
-  } catch (err) {
-    throw wrapError("Hook script failed", err);
+  if (exitCode !== 0) {
+    progress.warn(`Warning: ${hook} exited with code ${exitCode}; continuing`);
+    return false;
   }
+  return true;
 }

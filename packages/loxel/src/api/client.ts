@@ -502,25 +502,6 @@ export async function convertProject(req: ConvertProjectRequest) {
   return fetchJson<Project>("/projects/convert", { method: "POST", body: JSON.stringify(req) });
 }
 
-// --- Wt config API ---
-
-export async function getWtConfigRaw(projectId: string) {
-  return fetchJson<{ content: string }>(
-    `/wt-config-raw?projectId=${encodeURIComponent(projectId)}`,
-  );
-}
-
-export async function saveWtConfigRaw(projectId: string, content: string) {
-  return fetchJson<{ success: boolean }>("/wt-config-save", {
-    method: "POST",
-    body: JSON.stringify({ projectId, content }),
-  });
-}
-
-export async function getWtJsonSchema() {
-  return fetchJson<object>("/wt-json-schema");
-}
-
 // --- Schema API ---
 
 export interface SchemaSyncResult {
@@ -573,10 +554,10 @@ export async function createWorktree(
   name: string,
   options?: { branch?: string; branchResolution?: "use-existing" | "delete-and-create" },
 ) {
-  return fetchJson<import("@bizimind/wt/lib").AddResult | { success: boolean }>(
-    "/worktree/create",
-    { method: "POST", body: JSON.stringify({ projectPath, name, ...options }) },
-  );
+  return fetchJson<import("@bizimind/wt/lib").AddResult>("/worktree/create", {
+    method: "POST",
+    body: JSON.stringify({ projectPath, name, ...options }),
+  });
 }
 
 export async function planRemoveWorktree(projectPath: string, wtPath: string) {
@@ -599,13 +580,6 @@ export async function removeWorktreeByWtPath(
       deleteBranch: options.deleteBranch,
       force: options.force,
     }),
-  });
-}
-
-export async function removeWorktreeByPath(projectPath: string, path: string, force?: boolean) {
-  return fetchJson<{ success: boolean }>("/worktree/remove", {
-    method: "POST",
-    body: JSON.stringify({ projectPath, path, force }),
   });
 }
 

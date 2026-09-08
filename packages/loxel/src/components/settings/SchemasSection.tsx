@@ -65,11 +65,7 @@ export function SchemasSection() {
                 <>
                   <span className="text-muted-foreground truncate text-xs">{schema.glob}</span>
                   <span className="text-muted-foreground flex items-center gap-1.5 truncate text-xs">
-                    <span className="truncate">
-                      {schema.url === "__builtin:wt-json-schema__"
-                        ? "(local wt.yaml schema)"
-                        : schema.url}
-                    </span>
+                    <span className="truncate">{schema.url}</span>
                     <span className="bg-muted text-muted-foreground shrink-0 rounded px-1 py-0.5 text-[9px] leading-none">
                       Built-in
                     </span>
