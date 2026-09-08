@@ -3,15 +3,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { checkForUpdatesWithCache, shouldCheckForUpdates, type CacheConfig } from "./cache.ts";
-import { checkForUpdates, compareVersions, type UpdateCheckResult } from "./checker.ts";
+import { checkForUpdates, type UpdateCheckResult } from "./checker.ts";
 import { fetchManifest, type Manifest } from "./manifest.ts";
-import { getCurrentPlatform, type Platform } from "./platform.ts";
-import {
-  cleanupFailedUpdate,
-  downloadAndVerify,
-  isRunningCompiled,
-  performUpdate,
-} from "./updater.ts";
+import { getCurrentPlatform } from "./platform.ts";
+import { cleanupFailedUpdate, isRunningCompiled, performUpdate } from "./updater.ts";
 
 // Re-export all types and functions
 export { checkForUpdates, compareVersions, type UpdateCheckResult } from "./checker.ts";
