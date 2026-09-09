@@ -1,11 +1,12 @@
-import { FitAddon } from "@xterm/addon-fit";
-import { SearchAddon } from "@xterm/addon-search";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import { Terminal as XTerm } from "@xterm/xterm";
 /**
  * Core terminal component using xterm.js.
  * Accepts a terminalId and optional close/create callbacks.
  */
+
+import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { Terminal as XTerm } from "@xterm/xterm";
 import type { DockviewPanelApi } from "dockview-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 

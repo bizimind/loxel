@@ -1,4 +1,3 @@
-import { useStore } from "zustand/react";
 /**
  * Worktree store factory — creates per-worktree Zustand store instances.
  *
@@ -10,6 +9,8 @@ import { useStore } from "zustand/react";
  *
  * Imperative code (store actions, event handlers) uses activeWorktreeKey.
  */
+
+import { useStore } from "zustand/react";
 import type { StateCreator, StoreApi } from "zustand/vanilla";
 import { createStore } from "zustand/vanilla";
 
