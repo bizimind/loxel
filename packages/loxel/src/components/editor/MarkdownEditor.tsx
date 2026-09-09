@@ -183,6 +183,11 @@ export function MarkdownEditor({
     [],
   );
 
+  // Timer for clearing the programmatic update flag after the debounce window.
+  // milkdown's markdownUpdated listener is debounced by 200ms, so we clear the flag
+  // 300ms after the last programmatic dispatch to ensure the listener sees it as true.
+  const programmaticClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const {
     diskContent,
     editorFileState,
@@ -384,6 +389,7 @@ export function MarkdownEditor({
           try {
             const { frontmatter: mergedFm, body: mergedBody } = splitFrontmatter(merged);
             isProgrammaticRef.current = true;
+            if (programmaticClearTimerRef.current) clearTimeout(programmaticClearTimerRef.current);
             crepe.editor.action((ctx) => {
               const view = ctx.get(editorViewCtx);
               const parser = ctx.get(parserCtx);
@@ -401,13 +407,13 @@ export function MarkdownEditor({
               frontmatterRef.current = mergedFm;
               setFrontmatter(mergedFm);
             }
-            isProgrammaticRef.current = false;
-            // Re-read canonicalized content (ProseMirror may normalize)
+            // Clear flag after milkdown's debounced listener window
+            programmaticClearTimerRef.current = setTimeout(() => {
+              isProgrammaticRef.current = false;
+            }, 300);
             const canonicalBody = normalizeTrailingNewline(crepe.getMarkdown());
             const canonicalized = mergeFrontmatter(frontmatterRef.current, canonicalBody);
             editorContentCache.set(effectCacheKey, canonicalized);
-            // Re-arm autosave for external changes (isProgrammaticRef suppressed handleChange).
-            // Skip for format-echo merges — content is already on disk.
             if (!programmaticMerge) {
               if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
               autosaveTimerRef.current = setTimeout(() => save(), AUTOSAVE_DEBOUNCE_MS);
@@ -571,6 +577,7 @@ export function MarkdownEditor({
     }
 
     isProgrammaticRef.current = true;
+    if (programmaticClearTimerRef.current) clearTimeout(programmaticClearTimerRef.current);
     try {
       crepe.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
@@ -580,18 +587,17 @@ export function MarkdownEditor({
         const { tr } = view.state;
         tr.replaceWith(0, view.state.doc.content.size, newDoc.content);
         view.dispatch(tr);
-        // Restore cursor near its previous position (clamped to new doc size).
-        // This preserves caret location when external changes don't affect the
-        // area around the cursor (e.g. agent edits at end of file).
         const pos = Math.min(savedAnchor, view.state.doc.content.size);
         view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(pos))));
       });
       editorContentCache.set(cacheKey, diskContent);
     } catch {
       // Editor may have been destroyed between the ref check and the action
-    } finally {
-      isProgrammaticRef.current = false;
     }
+    // Clear flag after milkdown's debounced markdownUpdated listener has fired (200ms)
+    programmaticClearTimerRef.current = setTimeout(() => {
+      isProgrammaticRef.current = false;
+    }, 300);
   }, [diskContent, cacheKey, filePath]);
 
   // Keyboard shortcuts
@@ -610,7 +616,7 @@ export function MarkdownEditor({
 
     container.addEventListener("keydown", handleKeyDown, true);
     return () => container.removeEventListener("keydown", handleKeyDown, true);
-  }, [save]);
+  }, [save, crepeKey]);
 
   // Open relative file links in the appropriate editor instead of navigating.
   useEffect(() => {
@@ -637,7 +643,7 @@ export function MarkdownEditor({
 
     container.addEventListener("click", handleClick, true);
     return () => container.removeEventListener("click", handleClick, true);
-  }, [filePath]);
+  }, [filePath, crepeKey]);
 
   // Toggle dark mode class
   useEffect(() => {

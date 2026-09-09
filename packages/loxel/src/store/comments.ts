@@ -61,7 +61,12 @@ export const useCommentStore = create<CommentState>((set, get) => ({
     }
     set({ loading: true });
     try {
-      const placed = await api.postPlacedThreads(getActiveWt(), reviewIds, files);
+      const scopeWt = getActiveWt();
+      const placed = await api.postPlacedThreads(scopeWt, reviewIds, files);
+
+      // Guard against stale responses after worktree switch
+      if (getActiveWt() !== scopeWt) return;
+
       const byFile = new Map<string, PlacedThread[]>();
       const lost: PlacedThread[] = [];
 
