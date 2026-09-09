@@ -157,4 +157,19 @@ describe("findWorktreeByName", () => {
     expect(result).toBeDefined();
     expect(result?.bare).toBe(true);
   });
+
+  test("disambiguates suffix matches with worktreesDir", () => {
+    const wts: Worktree[] = [
+      { path: "/repo.git", head: "aaa", branch: null, bare: true },
+      { path: "/repo.git/.worktrees/review", head: "bbb", branch: "review", bare: false },
+      { path: "/repo.git/.worktrees/feat/review", head: "ccc", branch: "feat/review", bare: false },
+    ];
+    const worktreesDir = "/repo.git/.worktrees";
+
+    const review = findWorktreeByName(wts, "review", worktreesDir);
+    expect(review?.path).toBe("/repo.git/.worktrees/review");
+
+    const featReview = findWorktreeByName(wts, "feat/review", worktreesDir);
+    expect(featReview?.path).toBe("/repo.git/.worktrees/feat/review");
+  });
 });

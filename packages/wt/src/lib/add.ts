@@ -78,7 +78,7 @@ export async function planAdd(params: {
   }
 
   const existingWorktrees = await listWorktrees(rootDir);
-  if (findWorktreeByName(existingWorktrees, name)) {
+  if (findWorktreeByName(existingWorktrees, name, worktreesDir)) {
     throw new Error(`Worktree '${name}' already exists. Use 'wt open ${name}' to open it.`);
   }
 

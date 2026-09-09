@@ -68,7 +68,7 @@ export async function planRemove(params: {
   const worktrees = await listWorktrees(rootDir);
   const managed = getManagedWorktrees(worktrees, worktreesDir);
 
-  const worktree = findWorktreeByName(worktrees, name);
+  const worktree = findWorktreeByName(worktrees, name, worktreesDir);
   if (!worktree) {
     const managedNames = managed.map((wt) => getWorktreeName(wt.path, worktreesDir));
     if (managedNames.length > 0) {
@@ -104,8 +104,9 @@ export async function executeRemove(
 ): Promise<RemoveResult> {
   const { name, repoPath } = params;
   const { config, rootDir } = params.loadedConfig ?? (await loadConfig(repoPath, { repoPath }));
+  const worktreesDir = getWorktreesDir({ config, rootDir, configPath: "" });
   const worktrees = await listWorktrees(rootDir);
-  const worktree = findWorktreeByName(worktrees, name);
+  const worktree = findWorktreeByName(worktrees, name, worktreesDir);
 
   if (!worktree) {
     throw new Error(`Worktree '${name}' not found.`);
@@ -124,10 +125,14 @@ export async function executeRemove(
   }
 
   const state = new StateManager(rootDir);
-  const index = (await state.getIndex(name)) ?? 0;
-  const env = computeAllEnvVars(name, worktree.path, rootDir, index, config);
+  const index = await state.getIndex(name);
 
-  await runCleanHook(progress, config, worktree.path, env, forceRemove, params.hookEnv);
+  if (index !== undefined) {
+    const env = computeAllEnvVars(name, worktree.path, rootDir, index, config);
+    await runCleanHook(progress, config, worktree.path, env, forceRemove, params.hookEnv);
+  } else {
+    progress.warn(`Warning: No state entry for '${name}', skipping clean hook`);
+  }
 
   progress.log(`Removing worktree '${name}'...`);
   await removeWorktree(rootDir, worktree.path, forceRemove);

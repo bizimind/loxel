@@ -218,9 +218,25 @@ export async function deleteBranch(cwd: string, branch: string, force = false): 
 
 /**
  * Find a worktree by name.
- * Matches the name against the path suffix (supports names with slashes like "feat/foo").
+ *
+ * When `worktreesDir` is provided, matches the exact relative path under that
+ * directory (avoids false positives like "review" matching "feat/review").
+ * Falls back to path-suffix matching for worktrees outside the managed directory.
  */
-export function findWorktreeByName(worktrees: Worktree[], name: string): Worktree | undefined {
+export function findWorktreeByName(
+  worktrees: Worktree[],
+  name: string,
+  worktreesDir?: string,
+): Worktree | undefined {
+  if (worktreesDir) {
+    const base = worktreesDir.endsWith("/") ? worktreesDir : worktreesDir + "/";
+    // Prefer exact match under worktreesDir
+    const exact = worktrees.find(
+      (wt) => wt.path.startsWith(base) && wt.path.slice(base.length) === name,
+    );
+    if (exact) return exact;
+  }
+  // Fallback: suffix match (for bare root or when worktreesDir is unknown)
   return worktrees.find((wt) => wt.path.endsWith(`/${name}`));
 }
 
