@@ -39,6 +39,8 @@ export interface ToolRuntimeContext {
   providerConfig?: { webSearch?: ModelConfig; webSearchFallback?: ModelConfig };
   /** Environment variables passed to spawned subprocesses. When undefined, inherits process.env. */
   env?: Record<string, string | undefined>;
+  /** Cancels work owned by the current model run. */
+  abortSignal?: AbortSignal;
   emitEvent: (type: string, payload: Record<string, unknown>) => Promise<void>;
   onHumanQuestion: HumanQuestionHandler;
   onApproval: ApprovalHandler;

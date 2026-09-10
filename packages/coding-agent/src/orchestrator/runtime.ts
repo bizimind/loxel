@@ -74,6 +74,7 @@ export class CodingAgentRuntime {
 
   private readonly activeRunBySession = new Map<string, string>();
   private readonly cancelledRuns = new Set<string>();
+  private readonly runAbortControllers = new Map<string, AbortController>();
   private readonly pendingApprovals = new Map<string, PendingApproval>();
   private readonly pendingApprovalAliases = new Map<string, string>();
   private readonly pendingQuestions = new Map<string, PendingQuestion>();
@@ -119,11 +120,44 @@ export class CodingAgentRuntime {
     }
 
     for (const [, runId] of this.activeRunBySession) {
-      this.cancelledRuns.add(runId);
+      this.cancelRun(runId);
     }
     this.activeRunBySession.clear();
 
     this.diagnosticListeners.clear();
+  }
+
+  private cancelRun(runId: string): void {
+    const error = new Error(`Run cancelled: ${runId}`);
+    this.cancelledRuns.add(runId);
+    this.runAbortControllers.get(runId)?.abort(error);
+
+    const pendingPrefix = `${runId}:`;
+    for (const [key, pending] of this.pendingApprovals) {
+      if (key.startsWith(pendingPrefix)) {
+        pending.reject(error);
+        this.pendingApprovals.delete(key);
+      }
+    }
+    for (const key of this.pendingApprovalAliases.keys()) {
+      if (key.startsWith(pendingPrefix)) {
+        this.pendingApprovalAliases.delete(key);
+      }
+    }
+    for (const [key, pending] of this.pendingQuestions) {
+      if (key.startsWith(pendingPrefix)) {
+        pending.reject(error);
+        this.pendingQuestions.delete(key);
+      }
+    }
+  }
+
+  private finishRun(sessionId: string, runId: string): void {
+    if (this.activeRunBySession.get(sessionId) === runId) {
+      this.activeRunBySession.delete(sessionId);
+    }
+    this.cancelledRuns.delete(runId);
+    this.runAbortControllers.delete(runId);
   }
 
   private async emitDiagnostic(diagnostic: RuntimeDiagnostic): Promise<void> {
@@ -253,6 +287,10 @@ export class CodingAgentRuntime {
           });
 
           return new Promise<unknown>((resolve, reject) => {
+            if (this.cancelledRuns.has(req.runId)) {
+              reject(new Error(`Run cancelled: ${req.runId}`));
+              return;
+            }
             this.pendingQuestions.set(pendingKey, { resolve, reject });
           });
         },
@@ -276,6 +314,10 @@ export class CodingAgentRuntime {
 
           return new Promise<"allow" | "allow_this_session" | "allow_always" | "deny">(
             (resolve, reject) => {
+              if (this.cancelledRuns.has(req.runId)) {
+                reject(new Error(`Run cancelled: ${req.runId}`));
+                return;
+              }
               this.pendingApprovals.set(pendingKey, { resolve, reject });
             },
           );
@@ -352,11 +394,29 @@ export class CodingAgentRuntime {
         }
 
         case "session.input": {
-          const session = await this.loadSessionOrThrow(request.session_id);
+          const runId = createRunId();
+          const abortController = new AbortController();
+          this.activeRunBySession.set(request.session_id, runId);
+          this.runAbortControllers.set(runId, abortController);
+
+          let session: SessionRecord;
+          try {
+            session = await this.loadSessionOrThrow(request.session_id);
+            abortController.signal.throwIfAborted();
+          } catch (error) {
+            const wasCancelled = this.cancelledRuns.has(runId);
+            this.finishRun(request.session_id, runId);
+            if (wasCancelled) {
+              requestLog.info("Session input stopped before dispatch after cancellation", {
+                runId,
+              });
+              return;
+            }
+            throw error;
+          }
+
           const orchestrator = this.createOrchestrator();
           const messages: RunInputMessage[] = request.messages;
-          const runId = createRunId();
-          this.activeRunBySession.set(session.id, runId);
           requestLog.info("Dispatching session input run", {
             runId,
             messageCount: messages.length,
@@ -370,6 +430,7 @@ export class CodingAgentRuntime {
             rewindToMessageId: request.rewind_to_message_id,
             messages,
             runId,
+            abortSignal: abortController.signal,
             approvalOverrides: Object.fromEntries(
               Object.entries(request.approval_overrides ?? {})
                 .map(([name, decision]) => [normalizeToolName(name), decision] as const)
@@ -386,15 +447,17 @@ export class CodingAgentRuntime {
 
           void runPromise
             .then((result) => {
-              this.activeRunBySession.delete(session.id);
-              this.cancelledRuns.delete(result.runId);
               requestLog.info("Session input run completed", {
                 runId: result.runId,
                 responseTextLength: result.text.length,
               });
             })
             .catch(async (error) => {
-              this.activeRunBySession.delete(session.id);
+              if (this.cancelledRuns.has(runId)) {
+                requestLog.info("Session input run stopped after cancellation", { runId });
+                return;
+              }
+
               requestLog.error("Session input run failed", { runId, error });
               await this.emit({
                 type: "run.failed",
@@ -403,6 +466,9 @@ export class CodingAgentRuntime {
                 run_id: runId,
                 payload: { message: error instanceof Error ? error.message : String(error) },
               });
+            })
+            .finally(() => {
+              this.finishRun(session.id, runId);
             });
 
           return;
@@ -411,7 +477,7 @@ export class CodingAgentRuntime {
         case "session.cancel": {
           const runId = request.run_id ?? this.activeRunBySession.get(request.session_id);
           if (runId) {
-            this.cancelledRuns.add(runId);
+            this.cancelRun(runId);
           }
           requestLog.info("Cancelled run", { runId });
 

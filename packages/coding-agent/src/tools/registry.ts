@@ -1,4 +1,4 @@
-import { tool, type ToolSet } from "ai";
+import { tool, type ToolExecutionOptions, type ToolSet } from "ai";
 
 import type { ToolPolicyViolationResult } from "../core/errors.ts";
 import { intersectWithDeclared } from "./capabilities.ts";
@@ -21,8 +21,11 @@ export function createAiToolSet(ctx: ToolRuntimeContext): ToolSet {
       tool({
         description: `coding-agent tool ${toolName}`,
         inputSchema: schema.input,
-        execute: async (input: unknown) => {
-          const result = await invokeToolByName(toolName, input, ctx);
+        execute: async (
+          input: unknown,
+          { abortSignal }: Pick<ToolExecutionOptions<never>, "abortSignal">,
+        ) => {
+          const result = await invokeToolByName(toolName, input, { ...ctx, abortSignal });
           if (!result.ok) {
             // Policy violations are reported as tool results (isError: true)
             // so the model can see and react to the policy feedback.

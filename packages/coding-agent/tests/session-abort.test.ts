@@ -9,9 +9,46 @@ import {
   createMockModel,
   mockStream,
   patchSessionModel,
+  path,
   setupTestEnv,
   textStreamParts,
+  toolCallStreamParts,
 } from "./helpers/mock-session.ts";
+
+function activeRunCount(activeSession: Session): number {
+  const runtime = (
+    activeSession as unknown as { runtime: { activeRunBySession: Map<string, string> } }
+  ).runtime;
+  return runtime.activeRunBySession.size;
+}
+
+async function waitForRuntimeIdle(activeSession: Session): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (activeRunCount(activeSession) === 0) return;
+    await Bun.sleep(10);
+  }
+
+  throw new Error("Timed out waiting for the cancelled run to stop");
+}
+
+async function waitForFile(filePath: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (await Bun.file(filePath).exists()) return;
+    await Bun.sleep(10);
+  }
+
+  throw new Error(`Timed out waiting for ${filePath}`);
+}
+
+async function captureRejection(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+
+  throw new Error("Expected promise to reject");
+}
 
 describe("Session abort signal", () => {
   let env: TestEnv;
@@ -44,18 +81,76 @@ describe("Session abort signal", () => {
     expect(events.ofType("run.started").length).toBe(0);
   });
 
-  test("abort mid-run cancels the run", async () => {
+  test("abort immediately after send stops the run before model dispatch", async () => {
+    const events = collectEvents();
+    session = await Session.create({ workspaceRoot: env.workspaceRoot, handlers: events.handlers });
+    const model = createMockModel([textStreamParts("unreachable")]);
+    patchSessionModel(session, model);
+
+    const controller = new AbortController();
+    const pending = session.send("hi", { signal: controller.signal });
+    const caught = captureRejection(pending);
+
+    // The runtime must register the run synchronously, before its first session-store await.
+    expect(activeRunCount(session)).toBe(1);
+    controller.abort();
+
+    expect((await caught).message).toBe("Run cancelled");
+    await waitForRuntimeIdle(session);
+
+    expect(model.doStreamCalls).toHaveLength(0);
+    expect(events.ofType("run.cancelled")).toHaveLength(1);
+    expect(events.ofType("run.started")).toHaveLength(0);
+    expect(events.ofType("run.completed")).toHaveLength(0);
+    expect(events.ofType("run.failed")).toHaveLength(0);
+  });
+
+  test("abort mid-stream stops generation before later tool execution", async () => {
     const events = collectEvents();
     session = await Session.create({ workspaceRoot: env.workspaceRoot, handlers: events.handlers });
 
-    const doStreamStarted = Promise.withResolvers<void>();
-    const unblock = Promise.withResolvers<void>();
+    const lateWritePath = path.join(env.workspaceRoot, "late-write.txt");
+    const unblockAfterAbort = Promise.withResolvers<void>();
+    const initialTextParts = textStreamParts("working");
+    const lateToolParts = toolCallStreamParts("Write", {
+      file_path: lateWritePath,
+      content: "must not be written",
+    });
+    const firstStreamParts = [
+      ...initialTextParts.slice(0, 3),
+      initialTextParts[3]!,
+      ...lateToolParts.slice(1),
+    ];
+    let partIndex = 0;
     const model = new MockLanguageModelV4({
-      doStream: async () => {
-        doStreamStarted.resolve();
-        await unblock.promise;
+      doStream: async ({ abortSignal }) => {
+        if (model.doStreamCalls.length > 1) {
+          return { stream: mockStream(textStreamParts("late completion")) };
+        }
 
-        return { stream: mockStream(textStreamParts("late")) };
+        abortSignal?.addEventListener("abort", () => unblockAfterAbort.resolve(), { once: true });
+
+        return {
+          stream: new ReadableStream({
+            async pull(controller) {
+              if (partIndex === 3) {
+                await unblockAfterAbort.promise;
+                if (abortSignal?.aborted) {
+                  controller.error(new DOMException("Run cancelled", "AbortError"));
+                  return;
+                }
+              }
+
+              const part = firstStreamParts[partIndex];
+              partIndex += 1;
+              if (part) {
+                controller.enqueue(part);
+              } else {
+                controller.close();
+              }
+            },
+          }),
+        };
       },
     });
     patchSessionModel(session, model);
@@ -69,18 +164,127 @@ describe("Session abort signal", () => {
       rejection = err;
     });
 
-    // Wait for the model to actually start before aborting
-    await doStreamStarted.promise;
+    // Wait until application code observes a model delta. The provider stream's
+    // next pull is blocked, so cancellation must interrupt it before the late tool call.
+    await events.waitFor("run.delta");
 
     controller.abort();
     await caught;
+    unblockAfterAbort.resolve();
+    await waitForRuntimeIdle(session);
 
     expect(rejection).not.toBeNull();
     expect(rejection!.message).toBe("Run cancelled");
-    expect(events.ofType("run.cancelled").length).toBeGreaterThan(0);
+    expect(events.ofType("run.cancelled")).toHaveLength(1);
+    expect(events.ofType("tool.call.requested")).toHaveLength(0);
+    expect(events.ofType("run.completed")).toHaveLength(0);
+    expect(events.ofType("run.failed")).toHaveLength(0);
+    expect(model.doStreamCalls).toHaveLength(1);
+    expect(await Bun.file(lateWritePath).exists()).toBe(false);
+  });
 
-    // Clean up: unblock so the model promise resolves and doesn't leak
-    unblock.resolve();
+  test("abort stops an in-flight Bash tool", async () => {
+    const events = collectEvents();
+    session = await Session.create({ workspaceRoot: env.workspaceRoot, handlers: events.handlers });
+
+    const startedPath = path.join(env.workspaceRoot, "bash-started.txt");
+    const lateWritePath = path.join(env.workspaceRoot, "bash-late-write.txt");
+    const childScript = [
+      `await Bun.write(${JSON.stringify(startedPath)}, "started")`,
+      "await Bun.sleep(500)",
+      `await Bun.write(${JSON.stringify(lateWritePath)}, "late")`,
+    ].join("; ");
+    // Keep the Bun process as a shell child: killing only the shell would let this child write late.
+    const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(childScript)}`;
+    const model = createMockModel([
+      toolCallStreamParts("Bash", { command, timeout: 5_000 }),
+      textStreamParts("unreachable"),
+    ]);
+    patchSessionModel(session, model);
+
+    const controller = new AbortController();
+    const pending = session.send("run command", {
+      signal: controller.signal,
+      approvalOverrides: { Bash: "allow" },
+    });
+    const caught = captureRejection(pending);
+
+    await waitForFile(startedPath);
+    controller.abort();
+
+    expect((await caught).message).toBe("Run cancelled");
+    await waitForRuntimeIdle(session);
+    await Bun.sleep(600);
+
+    expect(model.doStreamCalls).toHaveLength(1);
+    expect(await Bun.file(lateWritePath).exists()).toBe(false);
+    expect(events.ofType("run.cancelled")).toHaveLength(1);
+    expect(events.ofType("run.completed")).toHaveLength(0);
+    expect(events.ofType("run.failed")).toHaveLength(0);
+  });
+
+  test("abort rejects a pending tool approval", async () => {
+    const approvalRequested = Promise.withResolvers<void>();
+    const events = collectEvents({ "approval.requested": () => approvalRequested.resolve() });
+    session = await Session.create({ workspaceRoot: env.workspaceRoot, handlers: events.handlers });
+    const model = createMockModel([
+      toolCallStreamParts("Bash", { command: "echo unreachable" }),
+      textStreamParts("unreachable"),
+    ]);
+    patchSessionModel(session, model);
+
+    const controller = new AbortController();
+    const pending = session.send("run command", { signal: controller.signal });
+    const caught = captureRejection(pending);
+
+    await approvalRequested.promise;
+    controller.abort();
+
+    expect((await caught).message).toBe("Run cancelled");
+    await waitForRuntimeIdle(session);
+
+    expect(model.doStreamCalls).toHaveLength(1);
+    expect(events.ofType("run.cancelled")).toHaveLength(1);
+    expect(events.ofType("run.completed")).toHaveLength(0);
+    expect(events.ofType("run.failed")).toHaveLength(0);
+  });
+
+  test("abort rejects a pending human question", async () => {
+    const questionRequested = Promise.withResolvers<void>();
+    const events = collectEvents({ "human.input.requested": () => questionRequested.resolve() });
+    session = await Session.create({ workspaceRoot: env.workspaceRoot, handlers: events.handlers });
+    const model = createMockModel([
+      toolCallStreamParts("AskUserQuestion", {
+        questions: [
+          {
+            id: "choice",
+            question: "Pick one?",
+            header: "Choice",
+            options: [
+              { label: "A (Recommended)", description: "First choice" },
+              { label: "B", description: "Second choice" },
+            ],
+          },
+        ],
+      }),
+      textStreamParts("unreachable"),
+    ]);
+    patchSessionModel(session, model);
+
+    const controller = new AbortController();
+    const pending = session.send("ask me", { signal: controller.signal });
+    const caught = captureRejection(pending);
+
+    await questionRequested.promise;
+    controller.abort();
+
+    expect((await caught).message).toBe("Run cancelled");
+    await waitForRuntimeIdle(session);
+
+    expect(model.doStreamCalls).toHaveLength(1);
+    expect(events.ofType("run.cancelled")).toHaveLength(1);
+    expect(events.ofType("run.completed")).toHaveLength(0);
+    expect(events.ofType("run.failed")).toHaveLength(0);
   });
 
   test("abort signal listener is cleaned up after successful send()", async () => {

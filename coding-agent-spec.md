@@ -9,7 +9,7 @@ Design a `coding-agent` package that provides Claude Code / Codex CLI-like capab
 - Plan mode (structured planning + progress tracking)
 - Approval gates for risky actions
 
-Primary model routing is through **OpenRouter** using **Vercel AI SDK 6**, targeting **GLM-5** and **Kimi K2.5**.
+Primary model routing is through **OpenRouter** using **Vercel AI SDK 7**, targeting **GLM-5** and **Kimi K2.5**.
 
 ## Non-Goals
 
@@ -20,7 +20,7 @@ Primary model routing is through **OpenRouter** using **Vercel AI SDK 6**, targe
 ## Tech Constraints
 
 - Runtime: TypeScript + Bun
-- Model SDK: Vercel AI SDK 6
+- Model SDK: Vercel AI SDK 7
 - Validation: Zod 4
 - Provider: OpenRouter (model aliases/configurable fallbacks)
 - Transport: stdio JSON stream (newline-delimited JSON events)
@@ -99,7 +99,7 @@ Each request emits structured stream events:
 
 ### 2) Message Model
 
-Use Vercel AI SDK message types directly (`CoreMessage`/SDK-equivalent in v6) as the canonical conversation format.
+Use Vercel AI SDK message types directly (`ModelMessage` in v7) as the canonical conversation format.
 
 Include a thin envelope only for runtime metadata:
 
@@ -338,7 +338,7 @@ Optional compatibility aliases (only when needed for external parity surfaces):
 - `BashOutput` delegates to `TaskOutput`.
 - `KillShell` delegates to `TaskStop`.
 
-### 3.3) `WebSearch` Backend Specification (OpenRouter + Vercel AI SDK 6)
+### 3.3) `WebSearch` Backend Specification (OpenRouter + Vercel AI SDK 7)
 
 Primary backend decision:
 
@@ -361,11 +361,13 @@ Policy requirements:
 - enforce mandatory final response `Sources:` section with markdown links.
 - retain raw URLs in tool metadata for deterministic downstream citation rendering.
 
-### 3.4) AI SDK v6 + Zod 4 Integration Decisions
+### 3.4) AI SDK v7 + Zod 4 Integration Decisions
 
 Core runtime decisions (SDK-native first):
 
-- use AI SDK v6 `generateText` / `streamText` for the core orchestration loop.
+- use AI SDK v7 `generateText` / `streamText` for the core orchestration loop.
+- pass generated system context through `instructions`; preserve trusted persisted system messages in their original conversation order with `allowSystemInMessages`.
+- pass an `AbortSignal` to each model stream so cancellation stops generation and prevents later tool execution.
 - use `ToolLoopAgent` for reusable subagents where shared defaults are beneficial; keep primary orchestrator loop explicit for protocol/event control.
 - use `tool(...)` definitions as the canonical runtime tool contract.
 - use `ModelMessage`-style SDK message types directly in session state and wire payloads wherever possible.
@@ -1050,7 +1052,7 @@ Error handling:
    - each tool handler tested with mocked context, permission checks, and typed outputs.
    - include policy edge cases (`approval_denied`, timeout, bad params).
 3. Orchestrator loop integration tests:
-   - use AI SDK mock models (`MockLanguageModelV3`, stream simulation utilities) for deterministic multi-step tool-calling flows.
+   - use AI SDK mock models (`MockLanguageModelV4`, stream simulation utilities) for deterministic multi-step tool-calling flows.
    - verify loop transitions: model -> tool -> human wait -> resume -> complete.
 4. Protocol contract tests:
    - golden tests for stdio event streams (start/delta/tool/human/plan/complete).

@@ -63,6 +63,7 @@ export interface RunTurnInput {
   rewindToMessageId?: string;
   messages: RunInputMessage[];
   runId?: string;
+  abortSignal?: AbortSignal;
   approvalOverrides?: Partial<Record<CanonicalToolName, "allow" | "deny">>;
   loopControl?: LoopControlOptions;
 }
@@ -385,6 +386,7 @@ export class Orchestrator {
         instructions: systemPrompt,
         // The local protocol explicitly supports trusted persisted system messages.
         allowSystemInMessages: true,
+        abortSignal: input.abortSignal,
         tools,
         stopWhen: [isStepCount(MAX_AGENT_STEPS)],
         onStepEnd: async (stepResult) => {
@@ -648,7 +650,12 @@ export class Orchestrator {
     try {
       const result = await runModel(modelProfile);
       outputText = await result.text;
+      input.abortSignal?.throwIfAborted();
     } catch (firstError) {
+      if (input.abortSignal?.aborted) {
+        throw input.abortSignal.reason ?? firstError;
+      }
+
       // Check if this was a loop control break (not a real error)
       if (firstError instanceof LoopControlBreakError) {
         wasLoopControlBreak = true;
@@ -669,12 +676,15 @@ export class Orchestrator {
         try {
           const fallback = await runModel("fallback");
           outputText = await fallback.text;
+          input.abortSignal?.throwIfAborted();
         } catch (fallbackError) {
           log.error("Fallback model run failed", { error: fallbackError });
           throw fallbackError;
         }
       }
     }
+
+    input.abortSignal?.throwIfAborted();
 
     outputText = ensureSourcesSection(outputText, Array.from(webSources.values()));
 
@@ -721,6 +731,8 @@ export class Orchestrator {
         outputText = `${outputText}\n\n---\n**Completion Check Failed:**\n${reminderText}`;
       }
     }
+
+    input.abortSignal?.throwIfAborted();
 
     const assistantMsg = await this.sessionStore.appendMessage(
       session,
