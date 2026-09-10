@@ -16,6 +16,7 @@ overrides:
   nanoid@>=4.0.0 <5.1.16: 5.1.16
   postcss: 8.5.26
   sharp: 0.35.4
+  smol-toml@<=1.7.0: 1.7.1
   svgo: 4.1.0
   tar@<=7.5.20: 7.5.22
   undici@>=7.0.0 <7.29.0: 7.29.0
@@ -6049,8 +6050,8 @@ packages:
     resolution: {integrity: sha512-VZBmZP8WU3sMOZm1bdgTadsQbcscK0UM8oKxKVBs4XAhUo2Xxzm/OFMGBkPusxw9xL3Uy8LrzEqGqJhclsr0yA==}
     deprecated: Unsupported
 
-  smol-toml@1.6.1:
-    resolution: {integrity: sha512-dWUG8F5sIIARXih1DTaQAX4SsiTXhInKf1buxdY9DIg4ZYPZK5nGM1VRIYmEbDbsHt7USo99xSLFu5Q1IqTmsg==}
+  smol-toml@1.7.1:
+    resolution: {integrity: sha512-PPlsspAZ4jbMBu5DMFhfUGDQLu/vrL4SyBROVS37x8ynnVmFIs1VPBz1Co8Xks3TvpIaZXmU85y4DrQ+UyVFoQ==}
     engines: {node: '>= 18'}
 
   source-map-js@1.2.1:
@@ -6925,7 +6926,7 @@ snapshots:
       picomatch: 4.0.5
       retext-smartypants: 6.2.0
       shiki: 4.4.3
-      smol-toml: 1.6.1
+      smol-toml: 1.7.1
       unified: 11.0.5
 
   '@astrojs/internal-helpers@0.11.0':
@@ -6936,7 +6937,7 @@ snapshots:
       picomatch: 4.0.5
       retext-smartypants: 6.2.0
       shiki: 4.4.3
-      smol-toml: 1.6.1
+      smol-toml: 1.7.1
       unified: 11.0.5
 
   '@astrojs/language-server@2.16.14(@typescript/typescript6@6.0.2)(prettier@3.9.6)':
@@ -10027,7 +10028,7 @@ snapshots:
       picomatch: 4.0.5
       semver: 7.8.5
       shiki: 4.4.3
-      smol-toml: 1.6.1
+      smol-toml: 1.7.1
       svgo: 4.1.0
       tinyclip: 0.1.13
       tinyexec: 1.2.2
@@ -13058,7 +13059,7 @@ snapshots:
 
   sliced@1.0.1: {}
 
-  smol-toml@1.6.1: {}
+  smol-toml@1.7.1: {}
 
   source-map-js@1.2.1: {}
 
