@@ -1,9 +1,9 @@
-import type { QueryClient } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { beforeEach, describe, expect, jest, mock, spyOn, test } from "bun:test";
 
+import type { QueryClient } from "@tanstack/react-query";
 import { QueryClientProvider, QueryClient as ReactQueryClient } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, jest, mock, spyOn, test } from "bun:test";
+import type { ReactNode } from "react";
 
 import type { DirEntry } from "@/api/project-files-model";
 

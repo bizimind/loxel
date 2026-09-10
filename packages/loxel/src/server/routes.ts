@@ -1,3 +1,8 @@
+import { accessSync, constants, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { realpath, rm, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, join, relative, resolve } from "node:path";
+
 import {
   planAdd,
   executeAdd,
@@ -17,14 +22,11 @@ import {
   type ProgressHandler,
   type RemovePlan,
 } from "@bizimind/wt/lib";
-import { accessSync, constants, existsSync, mkdirSync, readdirSync } from "node:fs";
-import { realpath, rm, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, join, relative, resolve } from "node:path";
 
 import type { DiffInfo } from "@/api/diff-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
 import type { LogCategory, LogLevel } from "@/api/log-entry-model";
+import { LOG_CATEGORIES, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
 import type {
   BrowseEntry,
   DetectPathResult,
@@ -33,14 +35,10 @@ import type {
 } from "@/api/project-model";
 import type { SearchMatch } from "@/api/search-model";
 import type { WsMessage } from "@/api/ws-protocol";
-import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
-
-import { LOG_CATEGORIES, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
+import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 import { getMediaType } from "@/lib/media-extensions";
 import { isHttpUrl } from "@/url-utils";
-
-import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
 
 import { config } from "./config";
 import { getDiagnostics } from "./diagnostics";
@@ -51,6 +49,7 @@ import * as projectStore from "./project-store";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import { decrypt, encrypt, isEncrypted } from "./secret-store";
+import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
 import { buildSpawnEnv } from "./shell-env";
 import * as storeDb from "./store-db";
 import { stress } from "./stress-detector";

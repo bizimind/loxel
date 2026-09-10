@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { SettingsIcon } from "lucide-react";
 
-import type { UpdateState } from "@/api/update-model";
-
 import * as api from "@/api/client";
+import type { UpdateState } from "@/api/update-model";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useWindowFocused } from "@/hooks/useWindowFocused";
 import { cn } from "@/lib/utils";

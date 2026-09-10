@@ -6,7 +6,6 @@
  */
 
 import type { LanguageModel } from "ai";
-
 import { generateObject } from "ai";
 import { z } from "zod";
 

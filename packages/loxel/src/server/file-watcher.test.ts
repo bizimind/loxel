@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import type { WatchEvent } from "./file-watcher";
-
 import { classifyGitChange } from "./file-watcher";
 
 describe("classifyGitChange", () => {

@@ -1,7 +1,6 @@
 import * as monaco from "monaco-editor";
 
 import type { DocumentHighlightRegistrationOptions } from "../../types";
-
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";

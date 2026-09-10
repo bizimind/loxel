@@ -1,10 +1,9 @@
 import { randomBytes } from "node:crypto";
 
-import type { ProviderType, SandboxProvider } from "./provider.ts";
-
 import { createProvider } from "./create-provider.ts";
 import { detectPreferredProvider } from "./detect.ts";
 import { ContainerNotFoundError, ProviderNotFoundError, SandboxError } from "./errors.ts";
+import type { ProviderType, SandboxProvider } from "./provider.ts";
 import { SandboxSpecSchema, type SandboxSpec, type SandboxSpecInput } from "./sandbox-spec.ts";
 import { Sandbox } from "./sandbox.ts";
 

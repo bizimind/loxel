@@ -5,12 +5,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { ActionId } from "@/store/keybindings/action-registry";
-import type { KeyCombo } from "@/store/keybindings/keybinding-schema";
-
 import { Button } from "@/components/ui/button";
 import { KeyComboDisplay } from "@/components/ui/key-combo-display";
+import type { ActionId } from "@/store/keybindings/action-registry";
 import { getActionDef } from "@/store/keybindings/action-registry";
+import type { KeyCombo } from "@/store/keybindings/keybinding-schema";
 import { eventToKeyCombo } from "@/store/keybindings/keybinding-schema";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
 

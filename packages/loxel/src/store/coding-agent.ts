@@ -1,5 +1,4 @@
 import type { TodoItem } from "@bizimind/coding-agent/schemas";
-
 import { create } from "zustand";
 
 import type {
@@ -8,13 +7,12 @@ import type {
   PendingHumanInput,
   SessionRecordSnapshot,
 } from "@/api/coding-agent-model";
+import { processProtocolEvent } from "@/api/coding-agent-model";
 /**
  * Zustand store for coding agent session state.
  * Global (not scoped) — sessions are keyed by UUID and survive project/worktree switches.
  */
 import type { AgentEventPayload, AgentStatus } from "@/api/ws-protocol";
-
-import { processProtocolEvent } from "@/api/coding-agent-model";
 import { deriveAgentStatus } from "@/api/ws-protocol";
 
 /** Max timeline items per session to prevent unbounded DOM growth. */

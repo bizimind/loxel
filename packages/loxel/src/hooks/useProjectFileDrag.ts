@@ -1,10 +1,8 @@
 import type { RefObject } from "react";
-
 import { useCallback, useState } from "react";
 
-import type { TreeNode } from "@/components/tree";
-
 import * as api from "@/api/client";
+import type { TreeNode } from "@/components/tree";
 import { showToast } from "@/components/ui/toast";
 import { frontendLog } from "@/lib/frontend-logger";
 import { fileParentDir } from "@/lib/project-file-helpers";

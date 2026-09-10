@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext } from "react";
 
 import type { PanelId } from "@/store/panel-config";
 import type { SidebarZone } from "@/store/settings-store";
-
 import { movePanelToZone } from "@/store/tools-bar";
 
 const ToolbarZoneContext = createContext<SidebarZone | null>(null);

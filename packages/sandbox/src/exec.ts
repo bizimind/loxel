@@ -1,6 +1,5 @@
-import type { ExecResult } from "./provider.ts";
-
 import { CliError } from "./errors.ts";
+import type { ExecResult } from "./provider.ts";
 
 /** Sanitize command args for error messages — redact values after -e flags. */
 function sanitizeCommand(args: string[]): string[] {

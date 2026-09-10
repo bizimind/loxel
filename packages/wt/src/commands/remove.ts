@@ -1,13 +1,12 @@
 import { createResult, runAction, type OutputContext } from "@bizimind/cli-common";
 
-import type { WorktreeStatus } from "../init/detect.ts";
-import type { RemoveResult, RemovePlan } from "../lib/remove.ts";
-import type { AbortedResult } from "../types.ts";
-
 import { resolveConfig } from "../config/loader.ts";
+import type { WorktreeStatus } from "../init/detect.ts";
 import { isTTY } from "../init/detect.ts";
 import { confirmForceRemove, selectRemoveAction } from "../init/prompts.ts";
+import type { RemoveResult, RemovePlan } from "../lib/remove.ts";
 import { planRemove, executeRemove } from "../lib/remove.ts";
+import type { AbortedResult } from "../types.ts";
 import { loadWorktreeContext, selectWorktree } from "../worktree/select.ts";
 
 interface RemoveOptions {

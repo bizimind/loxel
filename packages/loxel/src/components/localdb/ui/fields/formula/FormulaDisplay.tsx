@@ -1,7 +1,6 @@
 import type { FormulaColumnDef } from "@bizimind/localdb-sdk";
 
 import type { FieldViewProps } from "../field-props.ts";
-
 import { EmptyValue } from "../field-ui.tsx";
 
 export function FormulaDisplay({ value, schema }: FieldViewProps<unknown>) {

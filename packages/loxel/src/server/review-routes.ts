@@ -7,10 +7,9 @@ import {
   UpdateThreadRequestSchema,
 } from "@/api/review-model";
 
-import type { ReviewDb } from "./review-db";
-
 import { placeThreads } from "./placement";
 import { error, json } from "./response-helpers";
+import type { ReviewDb } from "./review-db";
 
 interface ReviewRouteContext {
   reviewDb: ReviewDb;

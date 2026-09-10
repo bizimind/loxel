@@ -1,11 +1,9 @@
 import type React from "react";
-
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 
 import type { FieldViewProps, FieldEditProps } from "../field-props.ts";
-
 import { EmptyValue } from "../field-ui.tsx";
 
 export function TagsView({ value }: FieldViewProps<string[]>) {

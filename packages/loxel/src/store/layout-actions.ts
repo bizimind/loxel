@@ -12,9 +12,8 @@
  */
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 
-import type { SidebarZone } from "./settings-store";
-
 import { isCenterPanel } from "./panel-config";
+import type { SidebarZone } from "./settings-store";
 import { getCurrentWorktreeToolsBar } from "./worktree-tools-bar";
 
 export type MoveDirection = "right" | "left" | "up" | "down";

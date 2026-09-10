@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
-import type { TempRepo } from "./test-utils";
-
 import { getBranchCommits, getLog } from "./log";
+import type { TempRepo } from "./test-utils";
 import { branch, checkoutBranch, commit, createRepo, merge, tag } from "./test-utils";
 
 /**

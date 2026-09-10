@@ -6,9 +6,8 @@
  */
 import { create } from "zustand";
 
-import type { LogEntry } from "@/api/log-entry-model";
-
 import { getLogs, wsClient } from "@/api/client";
+import type { LogEntry } from "@/api/log-entry-model";
 import { usePanelBadgeStore } from "@/store/panel-badges";
 
 /** Max entries kept in the store. Oldest are dropped when exceeded by live appends. */

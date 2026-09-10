@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { LocalDb } from "./index.ts";
-
 import { openDatabase } from "./index.ts";
 
 let db: LocalDb;

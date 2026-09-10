@@ -1,8 +1,7 @@
 import type { Database } from "bun:sqlite";
 
-import type { ViewDef, ViewType } from "./view-types.ts";
-
 import { parseViewDef } from "../validation/schemas.ts";
+import type { ViewDef, ViewType } from "./view-types.ts";
 
 export interface ViewMeta {
   id: number;

@@ -5,12 +5,10 @@
  * subscribes to WebSocket events, forwards user messages and approvals.
  */
 import type { DockviewPanelApi } from "dockview-react";
-
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { WsMessage } from "@/api/ws-protocol";
-
 import { wsClient } from "@/api/client";
+import type { WsMessage } from "@/api/ws-protocol";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { frontendLog } from "@/lib/frontend-logger";

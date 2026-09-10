@@ -1,5 +1,4 @@
 import type { Element, ElementContent } from "hast";
-
 import { defineHastPlugin } from "satteri";
 
 // ── Detection ──────────────────────────────────────────────────────────────

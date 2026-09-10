@@ -1,6 +1,6 @@
-import type { MarkdownNode } from "@milkdown/kit/transformer";
-
 import { describe, expect, it } from "bun:test";
+
+import type { MarkdownNode } from "@milkdown/kit/transformer";
 
 import { extractDirectiveText, parseDirectiveAttrs } from "./schema";
 

@@ -1,10 +1,9 @@
 import { Command } from "commander";
 
-import type { UpdateConfig } from "../update/index.ts";
-
 import { formatKeyValue } from "../formatters.ts";
 import { createResult } from "../result.ts";
 import { runAction } from "../runner.ts";
+import type { UpdateConfig } from "../update/index.ts";
 import { createUpdateSystem } from "../update/index.ts";
 import { getCurrentPlatform } from "../update/platform.ts";
 

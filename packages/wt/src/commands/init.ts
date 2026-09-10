@@ -1,7 +1,6 @@
-import { createResult, runAction, type OutputContext } from "@bizimind/cli-common";
 import { basename, join } from "node:path";
 
-import type { AbortedResult, InitResult } from "../types.ts";
+import { createResult, runAction, type OutputContext } from "@bizimind/cli-common";
 
 import { GlobalStateManager } from "../global/state.ts";
 import { writeWtYaml, type InitConfig } from "../init/config.ts";
@@ -29,6 +28,7 @@ import {
   confirmRegularToBareConversion,
 } from "../init/prompts.ts";
 import { initBareRepo, transformToBare, ensureWorktreesDir } from "../init/transform.ts";
+import type { AbortedResult, InitResult } from "../types.ts";
 
 export interface InitOptions {
   editor?: string;

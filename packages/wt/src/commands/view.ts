@@ -7,7 +7,6 @@ import {
 } from "@bizimind/cli-common";
 
 import type { ViewResult } from "../types.ts";
-
 import { computeAllEnvVars } from "../worktree/env.ts";
 import { isSynced } from "../worktree/git.ts";
 import { loadWorktreeContext, selectWorktree } from "../worktree/select.ts";

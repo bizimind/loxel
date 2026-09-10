@@ -6,7 +6,6 @@ import type {
   WorkspaceEdit,
   CodeAction,
 } from "../../types";
-
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";

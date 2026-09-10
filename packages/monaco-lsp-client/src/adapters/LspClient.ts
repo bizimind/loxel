@@ -1,12 +1,9 @@
 import type { IMessageTransport } from "@hediet/json-rpc";
-
 import { TypedChannel } from "@hediet/json-rpc";
 
 import type { ClientCapabilities } from "../types";
-import type { IDisposable } from "../utils";
-import type { OptionsOf, RegistrableCapability } from "./LspCapabilitiesRegistry";
-
 import { api } from "../types";
+import type { IDisposable } from "../utils";
 import { DisposableStore } from "../utils";
 import { LspCodeActionFeature } from "./languageFeatures/LspCodeActionFeature";
 import { LspCodeLensFeature } from "./languageFeatures/LspCodeLensFeature";
@@ -32,6 +29,7 @@ import { LspSelectionRangeFeature } from "./languageFeatures/LspSelectionRangeFe
 import { LspSemanticTokensFeature } from "./languageFeatures/LspSemanticTokensFeature";
 import { LspSignatureHelpFeature } from "./languageFeatures/LspSignatureHelpFeature";
 import { LspTypeDefinitionFeature } from "./languageFeatures/LspTypeDefinitionFeature";
+import type { OptionsOf, RegistrableCapability } from "./LspCapabilitiesRegistry";
 import { LspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 import { LspConnection } from "./LspConnection";
 import { TextDocumentSynchronizer } from "./TextDocumentSynchronizer";

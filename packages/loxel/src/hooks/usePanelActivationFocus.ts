@@ -1,5 +1,4 @@
 import type { DockviewPanelApi } from "dockview-react";
-
 import { useEffect } from "react";
 
 /**

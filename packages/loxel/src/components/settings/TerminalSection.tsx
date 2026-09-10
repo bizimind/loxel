@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { NotificationSequences } from "@/store/settings-store";
-
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import type { NotificationSequences } from "@/store/settings-store";
 import { DEFAULT_TERMINAL_SCROLLBACK, useSettingsStore } from "@/store/settings-store";
 
 export function TerminalSection() {

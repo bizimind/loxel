@@ -1,6 +1,7 @@
-import { test } from "@playwright/test";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+
+import { test } from "@playwright/test";
 
 import { captureScreenshot } from "../helpers/screenshot";
 import { waitForLoxel } from "../helpers/server";

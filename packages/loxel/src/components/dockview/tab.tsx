@@ -1,5 +1,4 @@
 import type { DockviewPanelApi } from "dockview-react";
-
 import { useCallback, useState } from "react";
 
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";

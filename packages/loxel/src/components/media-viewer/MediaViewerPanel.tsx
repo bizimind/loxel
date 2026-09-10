@@ -1,5 +1,4 @@
 import type { DockviewPanelApi } from "dockview-react";
-
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -17,9 +16,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { WsMessage } from "@/api/ws-protocol";
-
 import { wsClient } from "@/api/client";
+import type { WsMessage } from "@/api/ws-protocol";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { getMediaType } from "@/lib/media-extensions";
 import { cn } from "@/lib/utils";

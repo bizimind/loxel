@@ -30,6 +30,7 @@ import { useWsSubscription } from "./hooks/useWsSubscription";
 import { useWsBridge } from "./queries/ws-bridge";
 import { useProjectStore } from "./store/projects";
 import { useWorktreeToolsBar } from "./store/worktree-tools-bar";
+
 import "./styles/dockview-theme.css";
 import { useWorktreeStore } from "./store/worktrees";
 

@@ -21,7 +21,6 @@ import {
 import { stringify as yamlStringify } from "yaml";
 
 import type { LogEntry, LogLevel } from "@/api/log-entry-model";
-
 import { LOG_CATEGORIES } from "@/api/log-entry-model";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
 import { highlightCode } from "@/lib/highlighter";

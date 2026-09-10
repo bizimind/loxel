@@ -1,23 +1,22 @@
-import { createNoopLogger, type AppLogger } from "@bizimind/logger";
-import { streamText, stepCountIs, type ModelMessage } from "ai";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
-import type { ProtocolEvent } from "../protocol/schemas.ts";
-import type { SessionRecord } from "../session/model.ts";
-import type { SessionStore } from "../session/store.ts";
-import type { ToolRuntimeContext } from "../tools/context.ts";
-import type { CanonicalToolName } from "../tools/tool-names.ts";
-import type { ModelProfile, ModelRouter } from "./model-router.ts";
+import { createNoopLogger, type AppLogger } from "@bizimind/logger";
+import { streamText, stepCountIs, type ModelMessage } from "ai";
 
 import { LoopControlBreakError, isToolPolicyViolation } from "../core/errors.ts";
 import { PermissionStore } from "../permissions/store.ts";
 import { buildPromptAssembly } from "../prompts/assembler.ts";
 import { markReminderInjected } from "../prompts/reminders.ts";
+import type { ProtocolEvent } from "../protocol/schemas.ts";
+import type { SessionRecord } from "../session/model.ts";
+import type { SessionStore } from "../session/store.ts";
 import { ensureStateLayout, getSessionPaths, getStateLayout } from "../state/layout.ts";
 import { normalizeDeclaredTools } from "../tools/capabilities.ts";
+import type { ToolRuntimeContext } from "../tools/context.ts";
 import { createAiToolSet } from "../tools/registry.ts";
 import { TaskManager } from "../tools/task-manager.ts";
+import type { CanonicalToolName } from "../tools/tool-names.ts";
 import { createPlanFileName, createRunId } from "../utils/ids.ts";
 import { asRecord } from "../utils/record.ts";
 import {
@@ -27,6 +26,7 @@ import {
   type TaskStatus,
 } from "./completion-conditions.ts";
 import { LoopController, DEFAULT_LOOP_CONTROL_CONFIG } from "./loop-control.ts";
+import type { ModelProfile, ModelRouter } from "./model-router.ts";
 
 // Maximum steps as a safety limit. The loop terminates naturally when the model
 // returns a finish_reason other than "tool-calls". This limit prevents runaway

@@ -1,5 +1,4 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
-
 import { DiffIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 

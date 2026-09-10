@@ -6,9 +6,9 @@
  * Each editor provides a deserialize/serialize pair and an optional content cache,
  * and handles its own imperative update mechanism (Monaco setValue, Crepe action, Excalidraw updateScene).
  */
-import type { MutableRefObject } from "react";
 
 import { useQuery } from "@tanstack/react-query";
+import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import * as api from "@/api/client";

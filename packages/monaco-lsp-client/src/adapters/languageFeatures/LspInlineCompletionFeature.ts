@@ -5,7 +5,6 @@ import type {
   InlineCompletionRegistrationOptions,
   StringValue,
 } from "../../types";
-
 import { capabilities, InlineCompletionTriggerKind } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";

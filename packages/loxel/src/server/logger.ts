@@ -8,7 +8,6 @@ import { mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:f
 import { join } from "node:path";
 
 import type { ChildLogger, LogCategory, LogEntry, LogLevel } from "@/api/log-entry-model";
-
 import { LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
 
 import { config } from "./config";

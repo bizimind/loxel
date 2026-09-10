@@ -1,10 +1,10 @@
-import { createResult, runAction } from "@bizimind/cli-common";
 import path from "node:path";
 
-import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
+import { createResult, runAction } from "@bizimind/cli-common";
 
 import { repositionBoundArrow } from "../elements/element-factory.ts";
 import { filterByGroupId, findElementById } from "../elements/element-query.ts";
+import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
 import { bumpVersion, loadFile, saveFile } from "../file/excalidraw-file.ts";
 
 interface MoveOptions {

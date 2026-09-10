@@ -1,9 +1,8 @@
 import { tool, type ToolSet } from "ai";
 
 import type { ToolPolicyViolationResult } from "../core/errors.ts";
-import type { ToolRuntimeContext } from "./context.ts";
-
 import { intersectWithDeclared } from "./capabilities.ts";
+import type { ToolRuntimeContext } from "./context.ts";
 import { invokeToolByName } from "./handlers.ts";
 import { getAllowedToolsForProfile } from "./profile.ts";
 import { toolSchemas } from "./schemas.ts";

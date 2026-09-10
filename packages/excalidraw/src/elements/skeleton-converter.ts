@@ -1,5 +1,4 @@
 import type { ElementConstructorOpts } from "@excalidraw/element";
-
 import {
   newArrowElement,
   newElement,
@@ -11,9 +10,8 @@ import {
   newTextElement,
 } from "@excalidraw/element";
 
-import type { ExcalidrawElement } from "./excalidraw-types.ts";
-
 import { generateElementId } from "./element-id.ts";
+import type { ExcalidrawElement } from "./excalidraw-types.ts";
 
 /**
  * Convert skeleton objects to full excalidraw elements using individual factory functions.

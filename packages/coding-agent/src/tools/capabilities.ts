@@ -1,5 +1,4 @@
 import type { CanonicalToolName } from "./tool-names.ts";
-
 import { normalizeToolName } from "./tool-names.ts";
 
 export const DOCUMENTED_TOOLS = [

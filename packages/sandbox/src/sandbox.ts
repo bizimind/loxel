@@ -1,4 +1,5 @@
 import type { ContainerInfo } from "./container-info.ts";
+import { CliError, ContainerNotFoundError, SandboxError } from "./errors.ts";
 import type { ExecHandle } from "./exec-handle.ts";
 import type {
   ExecOptions,
@@ -7,8 +8,6 @@ import type {
   SandboxProvider,
   SpawnOptions,
 } from "./provider.ts";
-
-import { CliError, ContainerNotFoundError, SandboxError } from "./errors.ts";
 
 /** Patterns in CLI stderr that indicate the container no longer exists. */
 const NOT_FOUND_PATTERNS = [

@@ -1,5 +1,4 @@
 import type { CommitInfo, RefInfo } from "@/api/git-models";
-
 import { cn } from "@/lib/utils";
 
 interface CommitNodeProps {

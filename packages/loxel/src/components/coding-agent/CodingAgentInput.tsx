@@ -10,7 +10,6 @@ import { ClockIcon, SendIcon, SquareIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentStatus } from "@/api/ws-protocol";
-
 import { cn } from "@/lib/utils";
 
 interface CodingAgentInputProps {

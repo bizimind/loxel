@@ -8,12 +8,11 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { STORAGE_PREFIX } from "@/lib/env";
 
-import type { ActionId } from "./action-registry";
-import type { BindingTemplate, KeyCombo, TemplateName } from "./keybinding-schema";
-
 import { serverKeybindingsStorage } from "../server-storage";
+import type { ActionId } from "./action-registry";
 import { ACTION_IDS } from "./action-registry";
 import { buildReverseLookup } from "./keybinding-resolver";
+import type { BindingTemplate, KeyCombo, TemplateName } from "./keybinding-schema";
 import { TEMPLATES, normalizeKeyCombo } from "./keybinding-schema";
 
 // ---------------------------------------------------------------------------

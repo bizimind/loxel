@@ -3,7 +3,6 @@
  */
 
 import type { ActionId } from "./action-registry";
-
 import { ACTIONS, ACTION_IDS } from "./action-registry";
 
 // ---------------------------------------------------------------------------

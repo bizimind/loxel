@@ -9,9 +9,9 @@
  *
  * Imperative code (store actions, event handlers) uses activeWorktreeKey.
  */
-import type { StateCreator, StoreApi } from "zustand/vanilla";
 
 import { useStore } from "zustand/react";
+import type { StateCreator, StoreApi } from "zustand/vanilla";
 import { createStore } from "zustand/vanilla";
 
 import { frontendLog } from "@/lib/frontend-logger";

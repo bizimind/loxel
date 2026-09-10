@@ -1,8 +1,7 @@
 import { TypedChannel } from "@hediet/json-rpc";
 
-import type { ITextModelBridge } from "./ITextModelBridge";
-
 import { api } from "../types";
+import type { ITextModelBridge } from "./ITextModelBridge";
 import { LspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 
 /**

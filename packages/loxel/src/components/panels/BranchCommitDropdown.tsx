@@ -2,7 +2,6 @@ import { ChevronDownIcon, ListChecksIcon } from "lucide-react";
 import { useMemo } from "react";
 
 import type { CommitInfo } from "@/api/git-models";
-
 import { UNCOMMITTED_PREFIX } from "@/api/git-models";
 import {
   DropdownMenu,

@@ -1,8 +1,7 @@
-import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
-import type { ExcalidrawFile } from "../file/excalidraw-file.ts";
-
 import { withDom } from "../dom-shim.ts";
 import { activeElements } from "../elements/element-query.ts";
+import type { ExcalidrawElement } from "../elements/excalidraw-types.ts";
+import type { ExcalidrawFile } from "../file/excalidraw-file.ts";
 
 interface RenderOptions {
   scale: number;

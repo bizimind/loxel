@@ -7,11 +7,10 @@
  */
 import { useEffect } from "react";
 
-import type { WsMessage } from "@/api/ws-protocol";
-import type { DevToolsTab } from "@/store/agent-devtools";
-
 import { wsClient } from "@/api/client";
+import type { WsMessage } from "@/api/ws-protocol";
 import { cn } from "@/lib/utils";
+import type { DevToolsTab } from "@/store/agent-devtools";
 import { useAgentDevToolsStore } from "@/store/agent-devtools";
 
 import { DevToolsEventLog } from "./DevToolsEventLog";

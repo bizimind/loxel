@@ -2,12 +2,12 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+
 import { z } from "zod";
 
 import type { ContentAnchor } from "@/api/comment-model";
-import type { Comment, CommentThread, Review, ReviewContext } from "@/api/review-model";
-
 import { ContentAnchorSchema } from "@/api/comment-model";
+import type { Comment, CommentThread, Review, ReviewContext } from "@/api/review-model";
 import { ReviewContextSchema } from "@/api/review-model";
 
 import { config } from "./config";

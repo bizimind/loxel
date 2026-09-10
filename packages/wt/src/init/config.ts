@@ -1,5 +1,6 @@
-import { wrapError } from "@bizimind/cli-common";
 import { join } from "node:path";
+
+import { wrapError } from "@bizimind/cli-common";
 
 export interface InitConfig {
   editor?: string;

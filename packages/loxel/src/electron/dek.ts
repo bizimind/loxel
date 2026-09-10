@@ -1,8 +1,9 @@
-import { app, dialog, safeStorage } from "electron";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+import { app, dialog, safeStorage } from "electron";
 
 import { IS_DEV } from "./env";
 

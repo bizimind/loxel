@@ -1,6 +1,6 @@
-import type { ServerWebSocket, Subprocess } from "bun";
-
 import path from "node:path";
+
+import type { ServerWebSocket, Subprocess } from "bun";
 
 import {
   type SpawnOptions,

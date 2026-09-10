@@ -1,8 +1,9 @@
-import { $ } from "bun";
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, realpath, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+import { $ } from "bun";
 
 // Resolve the real tmpdir to handle macOS /tmp → /private/tmp symlink
 let resolvedTmpDir: string | undefined;

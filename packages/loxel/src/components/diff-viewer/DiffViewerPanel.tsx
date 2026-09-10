@@ -9,11 +9,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { DiffHunk, DiffInfo, FileDiff } from "@/api/diff-model";
-import type { DiffFileContext } from "@/api/review-model";
-
 import * as api from "@/api/client";
+import type { DiffHunk, DiffInfo, FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
+import type { DiffFileContext } from "@/api/review-model";
 import { SideBySideDiffView } from "@/components/diff/SideBySideDiffView";
 import { Button } from "@/components/ui/button";
 import { useReviewContext } from "@/hooks/useReviewContext";
