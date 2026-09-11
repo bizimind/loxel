@@ -207,3 +207,90 @@ describe("executeRemove", () => {
     expect(await branchExists(repo.root, "unmerged")).toBe(true);
   });
 });
+
+describe("executeRemove with submodules", () => {
+  async function repoWithSubmodule(): Promise<{ subUrl: string }> {
+    repo = await createTestRepo({ bare: true });
+    const subDir = join(repo.root, "..", "submodule-origin");
+    await git(["init", "--initial-branch=main", subDir]);
+    await git(["config", "user.email", "test@example.com"], subDir);
+    await git(["config", "user.name", "Test"], subDir);
+    await Bun.write(join(subDir, "tracked.txt"), "v1\n");
+    await git(["add", "-A"], subDir);
+    await git(["commit", "-m", "initial submodule commit"], subDir);
+    return { subUrl: subDir };
+  }
+
+  async function addSubmoduleTo(worktreePath: string, subUrl: string): Promise<void> {
+    await git(
+      ["-c", "protocol.file.allow=always", "submodule", "add", subUrl, "mysub"],
+      worktreePath,
+    );
+    await git(["commit", "-m", "add submodule"], worktreePath);
+  }
+
+  test("removes a clean worktree containing a submodule without user force", async () => {
+    const { subUrl } = await repoWithSubmodule();
+    const added = await executeAdd({ name: "with-sub", repoPath: repo.root });
+    await addSubmoduleTo(added.path, subUrl);
+
+    const declined = await git(["worktree", "remove", added.path], repo.root).catch(
+      (error: unknown) => error,
+    );
+    expect(String(declined)).toContain("submodules cannot be moved or removed");
+    expect((await planRemove({ name: "with-sub", repoPath: repo.root })).dirty).toBe(false);
+
+    await executeRemove({
+      name: "with-sub",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: false,
+    });
+
+    expect(await Bun.file(join(added.path, "mysub", ".git")).exists()).toBe(false);
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
+  });
+
+  test("requires force for modified submodule contents", async () => {
+    const { subUrl } = await repoWithSubmodule();
+    const added = await executeAdd({ name: "dirty-sub", repoPath: repo.root });
+    await addSubmoduleTo(added.path, subUrl);
+    await Bun.write(join(added.path, "mysub", "tracked.txt"), "modified\n");
+
+    expect((await planRemove({ name: "dirty-sub", repoPath: repo.root })).dirty).toBe(true);
+    await expect(
+      executeRemove({ name: "dirty-sub", repoPath: repo.root, deleteBranch: false, force: false }),
+    ).rejects.toThrow(/uncommitted or untracked/i);
+  });
+
+  test("detects untracked submodule files even when ignore=all is configured", async () => {
+    const { subUrl } = await repoWithSubmodule();
+    const added = await executeAdd({ name: "ignored-dirty-sub", repoPath: repo.root });
+    await addSubmoduleTo(added.path, subUrl);
+    await git(["config", "submodule.mysub.ignore", "all"], added.path);
+    await Bun.write(join(added.path, "mysub", "untracked-secret"), "keep me\n");
+
+    expect(await git(["status", "--porcelain"], added.path)).toBe("");
+    expect((await planRemove({ name: "ignored-dirty-sub", repoPath: repo.root })).dirty).toBe(true);
+    await expect(
+      executeRemove({
+        name: "ignored-dirty-sub",
+        repoPath: repo.root,
+        deleteBranch: false,
+        force: false,
+      }),
+    ).rejects.toThrow(/uncommitted or untracked/i);
+    expect(await Bun.file(join(added.path, "mysub", "untracked-secret")).text()).toBe("keep me\n");
+  });
+
+  test("does not escalate a locked worktree", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "locked", repoPath: repo.root });
+    await git(["worktree", "lock", added.path], repo.root);
+
+    await expect(
+      executeRemove({ name: "locked", repoPath: repo.root, deleteBranch: false, force: false }),
+    ).rejects.toThrow(/lock/i);
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).toContain(added.path);
+  });
+});

@@ -1,4 +1,4 @@
-import { mkdir, realpath, stat } from "node:fs/promises";
+import { mkdir, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { git, gitFailure, runGit } from "./run.ts";
@@ -202,8 +202,40 @@ export async function removeWorktree(root: string, path: string, force: boolean)
   const args = force ? ["worktree", "remove", "--force", path] : ["worktree", "remove", path];
   const result = await runGit(args, root);
   if (result.exitCode === 0) return;
-  throw new Error(`Failed to remove worktree at ${path}: ${gitFailure(result)}`);
+
+  const reason = gitFailure(result);
+  if (!SUBMODULE_REFUSAL.test(reason)) {
+    throw new Error(`Failed to remove worktree at ${path}: ${reason}`);
+  }
+
+  if (!force && (await isWorktreeDirty(path))) {
+    throw new Error(`Failed to remove worktree at ${path}: it now has local changes`);
+  }
+
+  if (!force) {
+    const escalated = await runGit(["worktree", "remove", "--force", path], root);
+    if (escalated.exitCode === 0) return;
+    const escalatedReason = gitFailure(escalated);
+    if (!SUBMODULE_REFUSAL.test(escalatedReason)) {
+      throw new Error(`Failed to remove worktree at ${path}: ${escalatedReason}`);
+    }
+  }
+
+  // Older Git versions may retain the blanket submodule refusal even with
+  // --force. Only that same refusal reaches the manual compatibility path.
+  await removeSubmoduleWorktreeManually(root, path);
 }
+
+/** Complete the older-Git compatibility path and report partial success. */
+export async function removeSubmoduleWorktreeManually(root: string, path: string): Promise<void> {
+  await rm(path, { recursive: true, force: true });
+  const pruned = await runGit(["worktree", "prune"], root);
+  if (pruned.exitCode !== 0) {
+    throw new Error(`Removed ${path}, but failed to prune its Git metadata: ${gitFailure(pruned)}`);
+  }
+}
+
+const SUBMODULE_REFUSAL = /working trees containing submodules cannot be moved or removed/i;
 
 /**
  * The worktree containing `dirPath`, or undefined when it is outside them all.
@@ -238,9 +270,8 @@ export async function isWorktreeDirty(worktreePath: string): Promise<boolean> {
 
 /** Porcelain status lines for a worktree (modified, staged and untracked). */
 export async function worktreeChanges(worktreePath: string): Promise<string[]> {
-  const result = await runGit(["status", "--porcelain"], worktreePath);
-  if (result.exitCode !== 0) return [];
-  return result.stdout.split("\n").filter((line) => line.trim().length > 0);
+  const output = await git(["status", "--porcelain", "--ignore-submodules=none"], worktreePath);
+  return output.split("\n").filter((line) => line.trim().length > 0);
 }
 
 /** Commits ahead of / behind the upstream branch, or null when there is none. */
