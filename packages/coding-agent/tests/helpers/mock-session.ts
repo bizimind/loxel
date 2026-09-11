@@ -119,15 +119,10 @@ export interface EventCollector {
  * Build an EventCollector that captures all session events.
  *
  * Default behavior:
- * - `approval.requested` auto-responds with "allow" (deferred via setTimeout)
- * - `human.input.requested` auto-responds with empty answers (deferred)
+ * - `approval.requested` auto-responds with "allow"
+ * - `human.input.requested` auto-responds with empty answers
  *
  * Pass `overrides` to replace handlers for specific event types.
- *
- * **Important**: approval and human-input `respond()` calls MUST be deferred
- * via `setTimeout(fn, 50)` so the runtime registers the pending entry before
- * the response arrives. See the runtime's emit → sink → handler synchronous
- * path and the async disk persistence in `emitFull`.
  */
 export function collectEvents(overrides?: Partial<SessionEventHandlers>): EventCollector {
   const all: SessionEvent[] = [];
@@ -157,11 +152,11 @@ export function collectEvents(overrides?: Partial<SessionEventHandlers>): EventC
     "tool.call.result": push,
     "approval.requested": (e) => {
       push(e);
-      setTimeout(() => e.respond("allow"), 50);
+      e.respond("allow");
     },
     "human.input.requested": (e) => {
       push(e);
-      setTimeout(() => e.respond({}), 50);
+      e.respond({});
     },
     "message.received": push,
     "session.rewound": push,

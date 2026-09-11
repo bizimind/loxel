@@ -784,6 +784,8 @@ Mode-aware invariants:
    - parse tool calls in order; execute safe parallelism where independent.
    - for gated calls, emit `approval.requested` and transition to `WAIT_HUMAN`.
    - for `AskUserQuestion`, emit `human.input.requested` and transition to `WAIT_HUMAN`.
+   - register pending interactions before publishing their request events so in-process hosts may respond synchronously.
+   - cancellation rejects pending interactions; later responses to their expired keys are logged and ignored.
 5. Tool result append:
    - validate outputs against output schema.
    - append tool result messages back into conversation.

@@ -211,8 +211,11 @@ export class CodingAgentRuntime {
 
   private async emitFull(event: ProtocolEvent): Promise<void> {
     const redacted = redactSecrets(event);
-    await this.sink.emit(redacted);
+    const persistence = this.persistProtocolEvent(redacted);
+    await Promise.all([persistence, this.sink.emit(redacted)]);
+  }
 
+  private async persistProtocolEvent(redacted: ProtocolEvent): Promise<void> {
     if (
       !PERSISTED_PROTOCOL_EVENT_TYPES.has(redacted.type) ||
       redacted.session_id === "system" ||
@@ -278,49 +281,72 @@ export class CodingAgentRuntime {
         },
         onHumanQuestion: async (req) => {
           const pendingKey = `${req.runId}:question:${createEventId()}`;
-          await this.emit({
-            type: "human.input.requested",
-            request_id: undefined,
-            session_id: req.sessionId,
-            run_id: req.runId,
-            payload: { key: pendingKey, tool_name: req.toolName, input: req.input },
-          });
+          if (this.cancelledRuns.has(req.runId)) {
+            throw new Error(`Run cancelled: ${req.runId}`);
+          }
 
-          return new Promise<unknown>((resolve, reject) => {
-            if (this.cancelledRuns.has(req.runId)) {
-              reject(new Error(`Run cancelled: ${req.runId}`));
-              return;
+          const { promise, resolve, reject } = Promise.withResolvers<unknown>();
+          const pending: PendingQuestion = { resolve, reject };
+          this.pendingQuestions.set(pendingKey, pending);
+
+          try {
+            const [answer] = await Promise.all([
+              promise,
+              this.emit({
+                type: "human.input.requested",
+                request_id: undefined,
+                session_id: req.sessionId,
+                run_id: req.runId,
+                payload: { key: pendingKey, tool_name: req.toolName, input: req.input },
+              }),
+            ]);
+            return answer;
+          } finally {
+            if (this.pendingQuestions.get(pendingKey) === pending) {
+              this.pendingQuestions.delete(pendingKey);
             }
-            this.pendingQuestions.set(pendingKey, { resolve, reject });
-          });
+          }
         },
         onApproval: async (req) => {
           const pendingKey = `${req.runId}:approval:${createEventId()}`;
           const aliasKey = `${req.runId}:approval:${req.toolName}`;
-          this.pendingApprovalAliases.set(aliasKey, pendingKey);
-          await this.emit({
-            type: "approval.requested",
-            request_id: undefined,
-            session_id: req.sessionId,
-            run_id: req.runId,
-            payload: {
-              key: pendingKey,
-              tool_name: req.toolName,
-              input: req.input,
-              reason: req.reason,
-              options: ["allow", "allow_this_session", "allow_always", "deny"],
-            },
-          });
+          if (this.cancelledRuns.has(req.runId)) {
+            throw new Error(`Run cancelled: ${req.runId}`);
+          }
 
-          return new Promise<"allow" | "allow_this_session" | "allow_always" | "deny">(
-            (resolve, reject) => {
-              if (this.cancelledRuns.has(req.runId)) {
-                reject(new Error(`Run cancelled: ${req.runId}`));
-                return;
-              }
-              this.pendingApprovals.set(pendingKey, { resolve, reject });
-            },
-          );
+          const { promise, resolve, reject } = Promise.withResolvers<
+            "allow" | "allow_this_session" | "allow_always" | "deny"
+          >();
+          const pending: PendingApproval = { resolve, reject };
+          this.pendingApprovalAliases.set(aliasKey, pendingKey);
+          this.pendingApprovals.set(pendingKey, pending);
+
+          try {
+            const [decision] = await Promise.all([
+              promise,
+              this.emit({
+                type: "approval.requested",
+                request_id: undefined,
+                session_id: req.sessionId,
+                run_id: req.runId,
+                payload: {
+                  key: pendingKey,
+                  tool_name: req.toolName,
+                  input: req.input,
+                  reason: req.reason,
+                  options: ["allow", "allow_this_session", "allow_always", "deny"],
+                },
+              }),
+            ]);
+            return decision;
+          } finally {
+            if (this.pendingApprovals.get(pendingKey) === pending) {
+              this.pendingApprovals.delete(pendingKey);
+            }
+            if (this.pendingApprovalAliases.get(aliasKey) === pendingKey) {
+              this.pendingApprovalAliases.delete(aliasKey);
+            }
+          }
         },
         isCancelled: (runId: string) => this.cancelledRuns.has(runId),
       },
@@ -621,9 +647,8 @@ export class CodingAgentRuntime {
               requestLog.warn("No pending question for pending_key", {
                 pendingKey: request.pending_key,
               });
-              throw new Error(`No pending question found for key ${request.pending_key}`);
+              return;
             }
-
             pending.resolve({
               answers:
                 request.answers ??
@@ -661,9 +686,8 @@ export class CodingAgentRuntime {
             const pending = this.pendingQuestions.get(key);
             if (!pending) {
               requestLog.warn("No pending question for answers key", { pendingKey: key });
-              throw new Error(`No pending question found for key ${key}`);
+              return;
             }
-
             pending.resolve({ answers: request.answers, freeform: request.freeform });
             this.pendingQuestions.delete(key);
             await this.emit({
@@ -680,9 +704,8 @@ export class CodingAgentRuntime {
           const pending = this.pendingQuestions.get(candidateKey);
           if (!pending) {
             requestLog.warn("No pending question for derived key", { pendingKey: candidateKey });
-            throw new Error(`No pending question found for key ${candidateKey}`);
+            return;
           }
-
           pending.resolve({
             answers: { [request.question_id ?? "question"]: request.selected_options ?? [] },
             freeform: request.freeform_text
@@ -714,9 +737,8 @@ export class CodingAgentRuntime {
           const pending = this.pendingApprovals.get(key);
           if (!pending) {
             requestLog.warn("No pending approval for key", { pendingKey: key });
-            throw new Error(`No pending approval found for key ${key}`);
+            return;
           }
-
           pending.resolve(request.decision);
           this.pendingApprovals.delete(key);
           for (const [alias, target] of this.pendingApprovalAliases.entries()) {

@@ -131,6 +131,50 @@ describe("CodingAgentRuntime events", () => {
     expect(events.some((event) => event.type === "human.input.response")).toBe(true);
   });
 
+  test("late responses for completed interactions are ignored", async () => {
+    const events: ProtocolEvent[] = [];
+    const runtime = new CodingAgentRuntime({
+      emit: async (event) => {
+        events.push(event);
+      },
+    });
+
+    await runtime.handleRequest({
+      type: "approval.response",
+      request_id: "req_late_approval",
+      session_id: "session_1",
+      run_id: "run_1",
+      pending_key: "run_1:approval:expired",
+      tool_name: "Write",
+      decision: "allow",
+    });
+    await runtime.handleRequest({
+      type: "human.input.response",
+      request_id: "req_late_pending_question",
+      session_id: "session_1",
+      run_id: "run_1",
+      pending_key: "run_1:question:expired",
+      answers: { q1: ["a"] },
+    });
+    await runtime.handleRequest({
+      type: "human.input.response",
+      request_id: "req_late_answers_question",
+      session_id: "session_1",
+      run_id: "run_1",
+      answers: { "run_1:question:expired": ["a"] },
+    });
+    await runtime.handleRequest({
+      type: "human.input.response",
+      request_id: "req_late_derived_question",
+      session_id: "session_1",
+      run_id: "run_1",
+      question_id: "expired",
+      selected_options: ["a"],
+    });
+
+    expect(events).toHaveLength(0);
+  });
+
   test("session.start in plan mode emits plan-mode context", async () => {
     const events: ProtocolEvent[] = [];
     const runtime = new CodingAgentRuntime({
