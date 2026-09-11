@@ -60,6 +60,7 @@ describe("tool handlers", () => {
     onApproval?: ToolRuntimeContext["onApproval"];
     onHumanQuestion?: ToolRuntimeContext["onHumanQuestion"];
     approvalOverrides?: ToolRuntimeContext["approvalOverrides"];
+    abortSignal?: AbortSignal;
     emitEvent?: ToolRuntimeContext["emitEvent"];
     declaredTools?: string[] | null;
   }): Promise<ToolRuntimeContext> {
@@ -93,6 +94,7 @@ describe("tool handlers", () => {
       runId: "run_test",
       declaredTools: normalizeDeclaredTools(options?.declaredTools ?? null) ?? undefined,
       approvalOverrides: options?.approvalOverrides,
+      abortSignal: options?.abortSignal,
       emitEvent: options?.emitEvent ?? (async () => {}),
       onHumanQuestion: options?.onHumanQuestion ?? (async () => ({ answers: { q1: ["a"] } })),
       onApproval: options?.onApproval ?? (async () => "allow"),
@@ -263,6 +265,29 @@ describe("tool handlers", () => {
     if (!result.ok) {
       expect(result.error.code).toBe("TOOL_RUNTIME_ERROR");
     }
+  });
+
+  test("TaskOutput stops blocking when the run is aborted", async () => {
+    const controller = new AbortController();
+    const ctx = await createContext({ mode: "execute", abortSignal: controller.signal });
+    const launched = await invokeToolByName(
+      "Bash",
+      { command: "sleep 30", run_in_background: true },
+      ctx,
+    );
+    expect(launched.ok).toBe(true);
+    if (!launched.ok) return;
+
+    const taskId = (launched.value as { backgroundTaskId: string }).backgroundTaskId;
+    const pending = invokeToolByName(
+      "TaskOutput",
+      { task_id: taskId, block: true, timeout: 5_000 },
+      ctx,
+    );
+    controller.abort(new Error("task output cancelled"));
+
+    await expect(pending).rejects.toThrow("task output cancelled");
+    await ctx.taskManager.stopTask(taskId);
   });
 
   test("returns TOOL_VALIDATION_UNKNOWN_FIELD on unknown params", async () => {
@@ -719,6 +744,37 @@ describe("tool handlers", () => {
     expect(out.truncated).toBe(true);
     expect(typeof out.artifact_path).toBe("string");
     expect(await Bun.file(out.artifact_path!).exists()).toBe(true);
+  });
+
+  test("WebFetch aborts its request when the run is cancelled", async () => {
+    const fetchStarted = Promise.withResolvers<void>();
+    globalThis.fetch = ((_: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+      new Promise<Response>((_, reject) => {
+        fetchStarted.resolve();
+        const signal = init?.signal;
+        signal?.addEventListener(
+          "abort",
+          () =>
+            reject(
+              signal.reason instanceof Error
+                ? signal.reason
+                : new DOMException("Aborted", "AbortError"),
+            ),
+          { once: true },
+        );
+      })) as typeof fetch;
+
+    const controller = new AbortController();
+    const ctx = await createContext({ mode: "execute", abortSignal: controller.signal });
+    const pending = invokeToolByName(
+      "WebFetch",
+      { url: "https://example.com", prompt: "Summarize" },
+      ctx,
+    );
+    await fetchStarted.promise;
+    controller.abort(new Error("web fetch cancelled"));
+
+    await expect(pending).rejects.toThrow("web fetch cancelled");
   });
 
   test("Grep supports files_with_matches and count output modes", async () => {

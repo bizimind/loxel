@@ -31,8 +31,8 @@
   "dependencies": {
     "@bizimind/cli-common": "workspace:*",
     "@bizimind/logger": "workspace:*",
-    "@openrouter/ai-sdk-provider": "^2.2.3",
-    "ai": "^6.0.0",
+    "@openrouter/ai-sdk-provider": "^3.0.0",
+    "ai": "^7.0.79",
     "zod": "^4.4.3"
   },
   "devDependencies": {
