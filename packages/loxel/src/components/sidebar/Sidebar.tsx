@@ -217,7 +217,6 @@ export function Sidebar() {
   const updateProject = useProjectStore((s) => s.updateProject);
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
-  const activeProject = useProjectStore((s) => deriveProject(activeWorktreePath, s.projects));
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
 
   // Auto-expand newly loaded projects so linked worktrees and the create action are visible.
@@ -316,18 +315,17 @@ export function Sidebar() {
   /** Click a project row: regular repos switch to their root; bare repos toggle expansion. */
   const handleProjectClick = useCallback(
     (project: Project) => {
-      const isActive = project.id === activeProject?.id;
       const projectIsBare = project.isBare ?? false;
 
       if (projectIsBare) {
         // For bare repos: just toggle expand/collapse — user picks a worktree explicitly
         toggleProjectExpanded(project.id);
-      } else if (!isActive) {
+      } else if (activeWorktreePath !== project.path) {
         // Non-bare: switch to project path as the worktree
         switchWorktree(project.path);
       }
     },
-    [activeProject, switchWorktree, toggleProjectExpanded],
+    [activeWorktreePath, switchWorktree, toggleProjectExpanded],
   );
 
   return (

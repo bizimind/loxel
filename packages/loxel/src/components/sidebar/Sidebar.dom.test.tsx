@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import type { EnrichedProject } from "@/api/project-model";
 import { useProjectStore } from "@/store/projects";
@@ -55,5 +55,16 @@ describe("Sidebar regular-repository worktrees", () => {
     expect(screen.getByText("regular-repo")).toBeDefined();
     expect(screen.getByText("topic")).toBeDefined();
     expect(screen.getByText("Add worktree")).toBeDefined();
+  });
+
+  test("switches from a linked worktree back to the regular repository root", async () => {
+    useWorktreeStore.setState({ activeWorktreePath: project.worktrees[0]!.path });
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("regular-repo"));
+
+    await waitFor(() => {
+      expect(useWorktreeStore.getState().activeWorktreePath).toBe(project.path);
+    });
   });
 });

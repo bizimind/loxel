@@ -1463,6 +1463,28 @@ function parseStringArray(body: Record<string, unknown>, field: string): string[
   return value.filter((v): v is string => typeof v === "string");
 }
 
+export function validateCopyFiles(copyFiles: string[]): void {
+  for (const file of copyFiles) {
+    const segments = file.split(/[\\/]/);
+    if (
+      !file ||
+      isAbsolute(file) ||
+      segments.some((segment) => segment === "" || segment === "." || segment === "..")
+    ) {
+      throw new Error(`Copy file must be a relative path without traversal: ${file}`);
+    }
+  }
+}
+
+function copyFilesValidationResponse(copyFiles: string[]): Response | null {
+  try {
+    validateCopyFiles(copyFiles);
+    return null;
+  } catch (err) {
+    return error(describeError(err, "Invalid copy file"), 400);
+  }
+}
+
 function validateCloneUrl(url: string): void {
   if (url.startsWith("-")) {
     throw new Error("Invalid clone URL");
@@ -1593,6 +1615,8 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   const setup = requireSetup(body);
   const copyFiles = parseStringArray(body, "copyFiles");
   const setupCommands = parseStringArray(body, "setupCommands");
+  const copyFilesError = copyFilesValidationResponse(copyFiles);
+  if (copyFilesError) return copyFilesError;
 
   if (name.includes("/") || name.includes("\\") || name === ".." || name === ".") {
     return error("Invalid project name", 400);
@@ -1645,6 +1669,8 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   const setup = requireSetup(body);
   const copyFiles = parseStringArray(body, "copyFiles");
   const setupCommands = parseStringArray(body, "setupCommands");
+  const copyFilesError = copyFilesValidationResponse(copyFiles);
+  if (copyFilesError) return copyFilesError;
 
   validateCloneUrl(url);
   const destDir = expandTilde(destination);
@@ -1715,6 +1741,8 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
   const setup = requireSetup(body);
   const copyFiles = parseStringArray(body, "copyFiles");
   const setupCommands = parseStringArray(body, "setupCommands");
+  const copyFilesError = copyFilesValidationResponse(copyFiles);
+  if (copyFilesError) return copyFilesError;
 
   const dirPath = expandTilde(path);
 
@@ -1781,6 +1809,8 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   const path = requireString(body, "path");
   const copyFiles = parseStringArray(body, "copyFiles");
   const setupCommands = parseStringArray(body, "setupCommands");
+  const copyFilesError = copyFilesValidationResponse(copyFiles);
+  if (copyFilesError) return copyFilesError;
 
   const dirPath = expandTilde(path);
 
@@ -1851,16 +1881,7 @@ export async function writeInitHook(
   const commands = setupCommands.map((cmd) => cmd.replaceAll("\n", " ").trim()).filter(Boolean);
   if (copyFiles.length === 0 && commands.length === 0) return;
 
-  for (const file of copyFiles) {
-    const segments = file.split(/[\\/]/);
-    if (
-      !file ||
-      isAbsolute(file) ||
-      segments.some((segment) => segment === "" || segment === "." || segment === "..")
-    ) {
-      throw new Error(`Copy file must be a relative path without traversal: ${file}`);
-    }
-  }
+  validateCopyFiles(copyFiles);
 
   const lines = [
     "#!/usr/bin/env bash",

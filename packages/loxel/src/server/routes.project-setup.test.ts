@@ -111,6 +111,23 @@ describe("project conversion preflight", () => {
     expect(teardownCount).toBe(0);
     expect(existsSync(join(repo, ".git"))).toBe(true);
   });
+
+  test("rejects invalid copy paths before tearing down or converting the repository", async () => {
+    const repo = await seedRepo();
+    let teardownCount = 0;
+
+    const response = await handleRequest(
+      new Request("http://localhost/api/projects/convert", {
+        method: "POST",
+        body: JSON.stringify({ path: repo, copyFiles: ["../secret"], setupCommands: [] }),
+      }),
+      context(() => teardownCount++),
+    );
+
+    expect(response.status).toBe(400);
+    expect(teardownCount).toBe(0);
+    expect(existsSync(join(repo, ".git"))).toBe(true);
+  });
 });
 
 async function runGit(cwd: string, ...args: string[]): Promise<void> {
