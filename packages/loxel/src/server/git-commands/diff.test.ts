@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import path from "node:path";
+
+import { $ } from "bun";
 
 import {
   getCommitDiff,
@@ -310,6 +313,98 @@ describe("getWorkingTreeDiff", () => {
       const paths = diff.files.map((f) => f.newPath);
       expect(paths).toContain("second.txt");
       expect(paths).toContain("third.txt");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+describe("resolved diff bases", () => {
+  async function repoWithWorktree(): Promise<{
+    repo: TempRepo;
+    wtPath: string;
+    wtHead: string;
+    repoHead: string;
+  }> {
+    const repo = await template.copy();
+    const wtPath = path.join(repo.path, ".worktrees", "feature");
+    await $`git -C ${repo.path} worktree add -b feature ${wtPath}`.quiet();
+    const wtHead = await commit(wtPath, "only on branch", { "only-on-branch.txt": "branch\n" });
+    const repoHead = (await $`git -C ${repo.path} rev-parse HEAD`.text()).trim();
+    return { repo, wtPath, wtHead, repoHead };
+  }
+
+  test("resolves a working-tree HEAD in that worktree", async () => {
+    const { repo, wtPath, wtHead, repoHead } = await repoWithWorktree();
+    try {
+      await writeFile(wtPath, "only-on-branch.txt", "branch changed\n");
+      const diff = await getWorkingTreeDiff(repo.path, wtPath);
+      expect(diff.baseRef).toBe(wtHead);
+      expect(diff.baseRef).not.toBe(repoHead);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("reports an explicit working-tree base as a full SHA", async () => {
+    const repo = await template.copy();
+    try {
+      await writeFile(repo.path, "hello.txt", "changed\n");
+      expect(
+        (await getWorkingTreeDiff(repo.path, repo.path, initialHash.slice(0, 8))).baseRef,
+      ).toBe(initialHash);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("reports a commit parent and null for a root commit", async () => {
+    const repo = await template.copy();
+    try {
+      const second = await commit(repo.path, "second", { "second.txt": "2\n" });
+      expect((await getCommitDiff(repo.path, second)).baseRef).toBe(initialHash);
+      expect((await getCommitDiff(repo.path, initialHash)).baseRef).toBeNull();
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("uses the left commit for a two-dot range", async () => {
+    const repo = await template.copy();
+    try {
+      const second = await commit(repo.path, "second", { "second.txt": "2\n" });
+      expect((await getRangeDiff(repo.path, `${initialHash}..${second}`)).baseRef).toBe(
+        initialHash,
+      );
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("uses the merge base for a divergent three-dot range", async () => {
+    const repo = await template.copy();
+    try {
+      await $`git -C ${repo.path} branch left ${initialHash}`.quiet();
+      const right = await commit(repo.path, "right", { "right.txt": "right\n" });
+      await $`git -C ${repo.path} switch left`.quiet();
+      const left = await commit(repo.path, "left", { "left.txt": "left\n" });
+
+      const diff = await getRangeDiff(repo.path, `${left}...${right}`);
+
+      expect(diff.baseRef).toBe(initialHash);
+      expect(diff.files.map((file) => file.newPath)).toEqual(["right.txt"]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("reports HEAD for staged changes and no commit base for unstaged changes", async () => {
+    const repo = await template.copy();
+    try {
+      await writeFile(repo.path, "hello.txt", "hello\nstaged\n");
+      await stageFile(repo.path, "hello.txt");
+      expect((await getStagedDiff(repo.path)).baseRef).toBe(initialHash);
+      expect((await getUnstagedDiff(repo.path)).baseRef).toBeNull();
     } finally {
       await repo.cleanup();
     }

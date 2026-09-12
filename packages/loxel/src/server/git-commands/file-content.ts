@@ -2,28 +2,39 @@ import path from "node:path";
 
 import { $ } from "bun";
 
+import { logger } from "../logger";
 import { readOnlyGitEnv } from "./git-env";
 import { validatePath, validateRefName } from "./validation";
 import { validateWorktreePath } from "./worktree";
+
+const log = logger.child("git");
 
 export async function getFileContent(
   cwd: string,
   filePath: string,
   ref?: string,
+  worktreePath?: string,
 ): Promise<string[]> {
   validatePath(filePath);
   if (ref) {
     validateRefName(ref);
   }
+  if (worktreePath) await validateWorktreePath(worktreePath, cwd);
 
+  const gitCwd = worktreePath ?? cwd;
   const refSpec = ref ? `${ref}:${filePath}` : filePath;
-  const result = await $`git -C ${cwd} show ${refSpec}`.env(readOnlyGitEnv()).nothrow().text();
+  const result = await $`git -C ${gitCwd} show ${refSpec}`.env(readOnlyGitEnv()).nothrow().quiet();
 
-  if (result.startsWith("fatal:")) {
+  if (result.exitCode !== 0) {
+    log.debug("git show could not read file content", {
+      refSpec,
+      cwd: gitCwd,
+      stderr: result.stderr.toString().trim(),
+    });
     return [];
   }
 
-  return result.split("\n");
+  return result.stdout.toString().split("\n");
 }
 
 export async function getFileLines(

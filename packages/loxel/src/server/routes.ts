@@ -466,7 +466,11 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
     return json({ lines });
   }
 
-  const lines = await git.getFileContent(resolved.cwd, path, ref);
+  // Resolve symbolic refs in the same worktree that produced the diff. The
+  // project repository may have a different HEAD, especially for bare repos.
+  const wt = url.searchParams.get("wt") ?? worktree;
+  const gitScope = wt && wt !== resolved.cwd ? wt : undefined;
+  const lines = await git.getFileContent(resolved.cwd, path, ref, gitScope);
   return json({ lines });
 }
 

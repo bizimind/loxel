@@ -7,14 +7,44 @@ import { FSMONITOR, readOnlyGitEnv } from "./git-env";
 import { validateCommitHash } from "./validation";
 import { validateWorktreePath } from "./worktree";
 
+/**
+ * Resolve a revision to a full commit SHA, or null when it does not name a
+ * commit (`<root>^` has no parent).
+ *
+ * Resolving here — in the repository the diff was computed in — is what makes
+ * the answer safe to re-resolve anywhere else. `HEAD` in a linked worktree and
+ * `HEAD` in the project repository are different commits; the SHA they resolve
+ * to is the same object in the shared store.
+ */
+async function resolveCommit(cwd: string, rev: string): Promise<string | null> {
+  const spec = `${rev}^{commit}`;
+  const result = await $`git -C ${cwd} rev-parse --verify --quiet ${spec}`
+    .env(readOnlyGitEnv())
+    .nothrow()
+    .text();
+  return result.trim() || null;
+}
+
+async function resolveMergeBase(cwd: string, left: string, right: string): Promise<string | null> {
+  const result = await $`git -C ${cwd} merge-base ${left} ${right}`
+    .env(readOnlyGitEnv())
+    .nothrow()
+    .text();
+  return result.trim() || null;
+}
+
 export async function getStagedDiff(cwd: string): Promise<DiffInfo> {
-  const result = await $`git ${FSMONITOR} -C ${cwd} diff --cached`.env(readOnlyGitEnv()).text();
-  return parseDiffOutput(result);
+  const baseRef = await resolveCommit(cwd, "HEAD");
+  const result = baseRef
+    ? await $`git ${FSMONITOR} -C ${cwd} diff --cached ${baseRef}`.env(readOnlyGitEnv()).text()
+    : await $`git ${FSMONITOR} -C ${cwd} diff --cached`.env(readOnlyGitEnv()).text();
+  return { files: parseDiffOutput(result), baseRef };
 }
 
 export async function getUnstagedDiff(cwd: string): Promise<DiffInfo> {
   const result = await $`git ${FSMONITOR} -C ${cwd} diff`.env(readOnlyGitEnv()).text();
-  return parseDiffOutput(result);
+  // The old side here is the index, which is not a commit and has no SHA to name.
+  return { files: parseDiffOutput(result), baseRef: null };
 }
 
 export async function getCommitDiff(cwd: string, commit: string): Promise<DiffInfo> {
@@ -23,7 +53,8 @@ export async function getCommitDiff(cwd: string, commit: string): Promise<DiffIn
     .env(readOnlyGitEnv())
     .nothrow()
     .text();
-  return parseDiffOutput(result);
+  // A root commit has no parent, so the old side is the empty tree: null.
+  return { files: parseDiffOutput(result), baseRef: await resolveCommit(cwd, `${commit}^`) };
 }
 
 export async function getRangeDiff(cwd: string, range: string): Promise<DiffInfo> {
@@ -37,10 +68,24 @@ export async function getRangeDiff(cwd: string, range: string): Promise<DiffInfo
   if (ref1) validateCommitHash(ref1);
   validateCommitHash(ref2);
 
-  const base =
-    ref1 ?? (await $`git hash-object -t tree /dev/null`.env(readOnlyGitEnv()).text()).trim();
-  const result = await $`git -C ${cwd} diff ${base}${dots}${ref2}`.env(readOnlyGitEnv()).text();
-  return parseDiffOutput(result);
+  const rightRef = (await resolveCommit(cwd, ref2)) ?? ref2;
+  let baseRef: string | null;
+  let diffBase: string;
+  if (!ref1) {
+    baseRef = null;
+    diffBase = (await $`git hash-object -t tree /dev/null`.env(readOnlyGitEnv()).text()).trim();
+  } else if (dots === "...") {
+    baseRef = await resolveMergeBase(cwd, ref1, rightRef);
+    // Preserve Git's own failure when the revisions have no merge base.
+    diffBase = baseRef ?? ref1;
+  } else {
+    baseRef = await resolveCommit(cwd, ref1);
+    diffBase = baseRef ?? ref1;
+  }
+  const rangeSpec =
+    dots === "..." && ref1 && !baseRef ? `${ref1}...${rightRef}` : `${diffBase}..${rightRef}`;
+  const result = await $`git -C ${cwd} diff ${rangeSpec}`.env(readOnlyGitEnv()).text();
+  return { files: parseDiffOutput(result), baseRef };
 }
 
 export async function getWorkingTreeDiff(
@@ -54,10 +99,15 @@ export async function getWorkingTreeDiff(
   }
   const ref = base ?? "HEAD";
 
-  const trackedResult = await $`git ${FSMONITOR} -C ${worktreePath} diff ${ref}`
+  // Resolved against the worktree, not `cwd`: an unqualified HEAD here means
+  // the commit this worktree has checked out, which is rarely the project's.
+  const baseRef = await resolveCommit(worktreePath, ref);
+  const diffRef = baseRef ?? ref;
+
+  const trackedResult = await $`git ${FSMONITOR} -C ${worktreePath} diff ${diffRef}`
     .env(readOnlyGitEnv())
     .text();
-  const trackedDiff = parseDiffOutput(trackedResult);
+  const trackedFiles = parseDiffOutput(trackedResult);
 
   const untrackedResult = await $`git -C ${worktreePath} ls-files --others --exclude-standard`
     .env(readOnlyGitEnv())
@@ -68,7 +118,7 @@ export async function getWorkingTreeDiff(
     .split("\n")
     .filter((f) => f);
 
-  if (untrackedFiles.length === 0) return trackedDiff;
+  if (untrackedFiles.length === 0) return { files: trackedFiles, baseRef };
 
   const untrackedDiffs = await Promise.all(
     untrackedFiles.map(async (file) => {
@@ -80,9 +130,9 @@ export async function getWorkingTreeDiff(
     }),
   );
 
-  const allFiles = [...trackedDiff.files];
-  for (const diff of untrackedDiffs) {
-    allFiles.push(...diff.files);
+  const allFiles = [...trackedFiles];
+  for (const files of untrackedDiffs) {
+    allFiles.push(...files);
   }
-  return { files: allFiles };
+  return { files: allFiles, baseRef };
 }
