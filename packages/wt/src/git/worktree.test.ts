@@ -1,13 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { rename } from "node:fs/promises";
 import { join } from "node:path";
 
+import { executeAdd } from "../lib/index.ts";
 import { createTestRepo, type TestRepo } from "../test-repo.ts";
+import { git } from "./run.ts";
 import {
   findWorktree,
   getManagedWorktrees,
   getWorktreeName,
   listWorktrees,
   parseWorktreeList,
+  pathExists,
+  removeSubmoduleWorktreeManually,
   resolveRepoRoot,
   worktreesDir,
   type Worktree,
@@ -186,5 +191,39 @@ describe("listWorktrees", () => {
     const worktrees = await listWorktrees(repo.root);
     expect(worktrees).toHaveLength(1);
     expect(worktrees[0]?.bare).toBe(true);
+  });
+});
+
+describe("removeSubmoduleWorktreeManually", () => {
+  let repo: TestRepo;
+
+  afterEach(() => repo.cleanup());
+
+  test("removes a checkout and only its own metadata", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "legacy-git", repoPath: repo.root });
+    const unrelated = await executeAdd({ name: "temporarily-offline", repoPath: repo.root });
+    await git(["config", "gc.worktreePruneExpire", "now"], repo.root);
+    await rename(unrelated.path, `${unrelated.path}.offline`);
+
+    await removeSubmoduleWorktreeManually(repo.root, added.path);
+
+    expect(await pathExists(added.path)).toBe(false);
+    const listed = await git(["worktree", "list", "--porcelain"], repo.root);
+    expect(listed).not.toContain(added.path);
+    expect(listed).toContain(unrelated.path);
+  });
+
+  test("keeps the checkout when its metadata cannot be resolved", async () => {
+    repo = await createTestRepo({ bare: true });
+    const target = join(repo.root, "..", "manual-removal-target");
+    const notRepo = join(repo.root, "..", "not-a-repository");
+    await Bun.write(join(target, "valuable-name"), "contents");
+    await Bun.write(join(notRepo, ".keep"), "");
+
+    await expect(removeSubmoduleWorktreeManually(notRepo, target)).rejects.toThrow(
+      /Failed to locate Git metadata/,
+    );
+    expect(await pathExists(target)).toBe(true);
   });
 });

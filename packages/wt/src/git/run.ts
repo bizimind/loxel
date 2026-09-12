@@ -12,7 +12,12 @@ export interface GitResult {
  */
 export async function runGit(args: string[], cwd?: string): Promise<GitResult> {
   const shell = cwd ? $`git ${args}`.cwd(cwd) : $`git ${args}`;
-  const result = await shell.quiet().nothrow();
+  // Parsing and narrow safety fallbacks depend on stable Git output. Preserve
+  // the caller's environment while preventing localized diagnostics.
+  const result = await shell
+    .env({ ...process.env, LANG: "C", LC_ALL: "C" })
+    .quiet()
+    .nothrow();
 
   return {
     exitCode: result.exitCode,

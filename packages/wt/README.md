@@ -58,6 +58,12 @@ flags and it runs unattended — nothing prompts without a terminal.
 | `-d`, `--delete-branch` | `remove` | Also delete the worktree's branch                          |
 | `--keep-branch`         | `remove` | Keep the branch (no prompt)                                |
 
+Clean worktrees with initialized submodules can be removed without `--force`.
+Changes inside submodules are checked explicitly, even when the repository config
+sets `submodule.<name>.ignore=all`; those removals still require `--force`.
+The older-Git compatibility fallback removes only the selected worktree's metadata;
+it does not prune other unavailable worktrees from the repository.
+
 ## Where worktrees live
 
 New worktrees are created at `<repoRoot>/.worktrees/<name>`. The repo root is
