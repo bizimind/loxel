@@ -231,6 +231,44 @@ describe("refreshProjectWorktrees", () => {
     expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([other]);
     expect(useWorktreeStore.getState().activeWorktreePath).toBe(other.path);
   });
+
+  test("does not reuse request IDs after the store resets", async () => {
+    let resolveBeforeReset: (value: { worktrees: WorktreeEntry[] }) => void = () => {};
+    let resolveAfterReset: (value: { worktrees: WorktreeEntry[] }) => void = () => {};
+    listResponses = [
+      new Promise((resolve) => {
+        resolveBeforeReset = resolve;
+      }),
+      new Promise((resolve) => {
+        resolveAfterReset = resolve;
+      }),
+    ];
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "p1",
+          path: PROJECT,
+          name: "repo",
+          addedAt: "",
+          isBare: true,
+          worktreesDir: "/repo/.worktrees",
+          worktrees: [other],
+        },
+      ],
+    });
+
+    const beforeReset = useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    useWorktreeStore.getState().reset();
+    useWorktreeStore.setState({ activeWorktreePath: other.path });
+    const afterReset = useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    resolveAfterReset({ worktrees: [other] });
+    await afterReset;
+    resolveBeforeReset({ worktrees: [] });
+    await beforeReset;
+
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([other]);
+    expect(useWorktreeStore.getState().activeWorktreePath).toBe(other.path);
+  });
 });
 
 afterEach(() => {
