@@ -145,6 +145,50 @@ export function useWsBridge(): void {
           break;
         }
 
+        case "worktree_files_resynced": {
+          const { projectPath } = message;
+          const editorStore = useEditorStateStore.getState();
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.status(projectPath, message.wtPath),
+          });
+          queryClient.invalidateQueries({ queryKey: queryKeys.worktreeStatuses(projectPath) });
+          queryClient.invalidateQueries({ queryKey: ["diff", projectPath] });
+          queryClient.invalidateQueries({ queryKey: ["dirContents", projectPath] });
+          queryClient.invalidateQueries({
+            predicate: (query) => {
+              const key = query.queryKey;
+              return (
+                key[0] === "fileContent" &&
+                key[1] === projectPath &&
+                key[3] === undefined &&
+                key[4] === message.wtPath
+              );
+            },
+          });
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.detachedFiles(projectPath, message.wtPath),
+          });
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.externalFiles(projectPath, message.wtPath),
+          });
+
+          // A broad query invalidation refreshes clean editors. Dirty/saving editors
+          // need the same conflict-aware state-machine path as a normal file event.
+          for (const [path, entry] of editorStore.files) {
+            if (entry.state === "clean") continue;
+            const queryKey = queryKeys.fileContent(projectPath, path, undefined, message.wtPath);
+            if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;
+            api
+              .getFileContentByPath(path, message.wtPath)
+              .then((data) => {
+                editorStore.handleDiskChange(path, [], data.content);
+                queryClient.setQueryData(queryKey, data);
+              })
+              .catch(() => {});
+          }
+          break;
+        }
+
         case "detached_files_changed": {
           const projectPath = deriveProjectPath(message.wtPath);
           queryClient.setQueryData(

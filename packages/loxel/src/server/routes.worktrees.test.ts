@@ -25,9 +25,15 @@ async function branches(repo: string): Promise<string[]> {
 describe("worktree routes on a regular (non-bare) repo", () => {
   let repo: string;
   let ctx: RouteContext;
+  let suspended = 0;
+  let resumed = 0;
+  let completed = 0;
 
   beforeEach(async () => {
     repo = await realpath(await mkdtemp(join(tmpdir(), "loxel-wt-")));
+    suspended = 0;
+    resumed = 0;
+    completed = 0;
     await git(repo, "init", "--initial-branch=main", ".");
     await git(repo, "config", "user.email", "test@example.com");
     await git(repo, "config", "user.name", "Test");
@@ -49,6 +55,15 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       getProject: (cwd) => (cwd === repo ? project : undefined),
       findProjectForPath: () => undefined,
       getWorktreeResources: () => undefined,
+      suspendWorktreeWatchers: async () => {
+        suspended++;
+        return async () => {
+          resumed++;
+        };
+      },
+      completeWorktreeRemoval: () => {
+        completed++;
+      },
       resolveFilePath: () => null,
       initializeProject: async () => ({ project, worktrees: [] }),
       teardownProject: () => {},
@@ -116,7 +131,7 @@ describe("worktree routes on a regular (non-bare) repo", () => {
     const refused = await post("/api/worktree/remove", { projectPath: repo, path: wtPath });
     expect(refused.status).not.toBe(200);
     expect(existsSync(wtPath)).toBe(true);
-
+    expect({ suspended, resumed, completed }).toEqual({ suspended: 1, resumed: 1, completed: 0 });
     const forced = await post("/api/worktree/remove", {
       projectPath: repo,
       path: wtPath,
@@ -126,6 +141,7 @@ describe("worktree routes on a regular (non-bare) repo", () => {
     expect(forced.status).toBe(200);
     expect(existsSync(wtPath)).toBe(false);
     expect(await branches(repo)).not.toContain("feat-x");
+    expect({ suspended, resumed, completed }).toEqual({ suspended: 2, resumed: 1, completed: 1 });
   });
 
   test("remove keeps the branch when deleteBranch is false", async () => {

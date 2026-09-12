@@ -30,6 +30,10 @@ export class DetachedFilesService {
       recursive: false,
       filter: (filename) => !filename.startsWith("."),
       onFlush: (changes) => this.handleFlush(changes),
+      onUnknownChange: async () => {
+        this.cachedEntries = await this.readDir();
+        this.onListChanged(this.cachedEntries);
+      },
     });
   }
 
@@ -42,6 +46,14 @@ export class DetachedFilesService {
   stop(): void {
     this.syncService.stop();
     this.cachedEntries = [];
+  }
+
+  async pauseWatching(): Promise<void> {
+    await this.syncService.pause();
+  }
+
+  async resumeWatching(): Promise<void> {
+    await this.syncService.resume();
   }
 
   listFiles(): DirEntry[] {
