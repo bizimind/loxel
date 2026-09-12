@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
 import type { WsMessage } from "@/api/ws-protocol";
+import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { dispatchOpenFile } from "@/lib/open-file";
 import { consumeSavedContent } from "@/lib/save-editor-content";
@@ -19,6 +20,8 @@ import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { queryKeys } from "./query-keys";
+
+const log = frontendLog.child("files");
 
 /**
  * Bridges WebSocket messages to TanStack React Query cache operations.
@@ -139,7 +142,14 @@ export function useWsBridge(): void {
                   editorStore.handleDiskChange(changedPath, nonces, data.content);
                   queryClient.setQueryData(queryKey, data);
                 })
-                .catch(() => {});
+                .catch((error: unknown) => {
+                  log.error("Failed to refresh editor after external file change", {
+                    error,
+                    path: changedPath,
+                    projectPath,
+                    worktreePath: message.wtPath,
+                  });
+                });
             }
           }
           break;
@@ -184,7 +194,14 @@ export function useWsBridge(): void {
                 editorStore.handleDiskChange(path, [], data.content);
                 queryClient.setQueryData(queryKey, data);
               })
-              .catch(() => {});
+              .catch((error: unknown) => {
+                log.error("Failed to refresh dirty editor after worktree resync", {
+                  error,
+                  path,
+                  projectPath,
+                  worktreePath: message.wtPath,
+                });
+              });
           }
           break;
         }
