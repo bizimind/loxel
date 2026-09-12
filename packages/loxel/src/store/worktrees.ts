@@ -15,6 +15,7 @@ import { purgeWorktreeCache, transitionWorktreeState } from "./worktree-cache";
 import { purgeWorktreeStores, setActiveWorktreeKey } from "./worktree-store";
 
 const ACTIVE_WT_SESSION_KEY = `${STORAGE_PREFIX}-activeWorktreePath`;
+const refreshRequestIds = new Map<string, number>();
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -188,12 +189,15 @@ export const useWorktreeStore = create<WorktreeState>()(
         },
 
         refreshProjectWorktrees: async (projectPath) => {
+          const requestId = (refreshRequestIds.get(projectPath) ?? 0) + 1;
+          refreshRequestIds.set(projectPath, requestId);
           const allProjects = useProjectStore.getState().projects;
           const project = allProjects.find((p) => p.path === projectPath);
           if (!project) return;
           const priorPaths = new Set(getProject(get(), projectPath).worktrees.map((wt) => wt.path));
 
           const data = await api.getProjectWorktrees(project.id);
+          if (refreshRequestIds.get(projectPath) !== requestId) return;
           const validPaths = new Set([
             ...data.worktrees.map((wt) => wt.path),
             ...(project.isBare ? [] : [project.path]),
@@ -345,6 +349,7 @@ export const useWorktreeStore = create<WorktreeState>()(
         },
 
         reset: () => {
+          refreshRequestIds.clear();
           set({
             byProject: {},
             activeWorktreePath: null,
