@@ -228,10 +228,27 @@ export async function removeWorktree(root: string, path: string, force: boolean)
 
 /** Complete the older-Git compatibility path and report partial success. */
 export async function removeSubmoduleWorktreeManually(root: string, path: string): Promise<void> {
+  const [gitDirResult, commonDirResult] = await Promise.all([
+    runGit(["rev-parse", "--path-format=absolute", "--git-dir"], path),
+    runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], root),
+  ]);
+  if (gitDirResult.exitCode !== 0 || commonDirResult.exitCode !== 0) {
+    const reason =
+      gitDirResult.exitCode !== 0 ? gitFailure(gitDirResult) : gitFailure(commonDirResult);
+    throw new Error(`Failed to locate Git metadata for ${path}: ${reason}`);
+  }
+
+  const gitDir = await canonicalize(gitDirResult.stdout.trim());
+  const worktreeMetadataRoot = join(await canonicalize(commonDirResult.stdout.trim()), "worktrees");
+  if (dirname(gitDir) !== worktreeMetadataRoot) {
+    throw new Error(`Refusing to remove unexpected Git metadata path: ${gitDir}`);
+  }
+
   await rm(path, { recursive: true, force: true });
-  const pruned = await runGit(["worktree", "prune"], root);
-  if (pruned.exitCode !== 0) {
-    throw new Error(`Removed ${path}, but failed to prune its Git metadata: ${gitFailure(pruned)}`);
+  try {
+    await rm(gitDir, { recursive: true });
+  } catch (err) {
+    throw new Error(`Removed ${path}, but failed to remove its Git metadata`, { cause: err });
   }
 }
 

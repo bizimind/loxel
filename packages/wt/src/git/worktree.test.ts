@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { rename } from "node:fs/promises";
 import { join } from "node:path";
 
 import { executeAdd } from "../lib/index.ts";
@@ -198,17 +199,22 @@ describe("removeSubmoduleWorktreeManually", () => {
 
   afterEach(() => repo.cleanup());
 
-  test("removes a checkout and prunes its metadata", async () => {
+  test("removes a checkout and only its own metadata", async () => {
     repo = await createTestRepo({ bare: true });
     const added = await executeAdd({ name: "legacy-git", repoPath: repo.root });
+    const unrelated = await executeAdd({ name: "temporarily-offline", repoPath: repo.root });
+    await git(["config", "gc.worktreePruneExpire", "now"], repo.root);
+    await rename(unrelated.path, `${unrelated.path}.offline`);
 
     await removeSubmoduleWorktreeManually(repo.root, added.path);
 
     expect(await pathExists(added.path)).toBe(false);
-    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
+    const listed = await git(["worktree", "list", "--porcelain"], repo.root);
+    expect(listed).not.toContain(added.path);
+    expect(listed).toContain(unrelated.path);
   });
 
-  test("reports partial success when metadata pruning fails", async () => {
+  test("keeps the checkout when its metadata cannot be resolved", async () => {
     repo = await createTestRepo({ bare: true });
     const target = join(repo.root, "..", "manual-removal-target");
     const notRepo = join(repo.root, "..", "not-a-repository");
@@ -216,8 +222,8 @@ describe("removeSubmoduleWorktreeManually", () => {
     await Bun.write(join(notRepo, ".keep"), "");
 
     await expect(removeSubmoduleWorktreeManually(notRepo, target)).rejects.toThrow(
-      /Removed .* failed to prune its Git metadata/,
+      /Failed to locate Git metadata/,
     );
-    expect(await pathExists(target)).toBe(false);
+    expect(await pathExists(target)).toBe(true);
   });
 });
