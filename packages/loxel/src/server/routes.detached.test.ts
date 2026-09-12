@@ -35,6 +35,8 @@ describe("detached file project destinations", () => {
       getProject: () => undefined,
       findProjectForPath: () => undefined,
       getWorktreeResources: (path) => (path === wt ? resources : undefined),
+      suspendWorktreeWatchers: async () => async () => {},
+      completeWorktreeRemoval: () => {},
       resolveFilePath: () => null,
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},

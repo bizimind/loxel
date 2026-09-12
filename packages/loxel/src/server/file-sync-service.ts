@@ -62,6 +62,7 @@ export interface FilesSyncOptions {
 export class FilesSyncService {
   private dirWatcher: FSWatcher | null = null;
   private fileWatchers = new Map<string, FSWatcher>();
+  private watchedFiles = new Set<string>();
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingKeys = new Set<string>();
   private hasUnknownChange = false;
@@ -69,6 +70,9 @@ export class FilesSyncService {
   private nonces = new Map<string, NonceEntry[]>();
   private readonly debounceMs: number;
   private readonly nonceExpiryMs: number;
+  private started = false;
+  private paused = false;
+  private activeFlushes = new Set<Promise<void>>();
 
   constructor(private options: FilesSyncOptions) {
     this.debounceMs = options.debounceMs ?? 10;
@@ -76,9 +80,47 @@ export class FilesSyncService {
   }
 
   start(): void {
-    const watchDir = this.options.watchDir;
-    if (!watchDir) return; // Individual file mode — files added via watchFile()
+    if (this.started) return;
+    this.started = true;
+    this.paused = false;
+    this.attachWatchers();
+  }
 
+  /** Temporarily stop event delivery without discarding caches, files, or nonce state. */
+  async pause(): Promise<void> {
+    if (!this.started || this.paused) return;
+    this.paused = true;
+    this.closeActiveWatchers();
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    await Promise.allSettled([...this.activeFlushes]);
+  }
+
+  /** Resume a paused service and conservatively resynchronize changes missed while paused. */
+  async resume(): Promise<void> {
+    if (!this.started || !this.paused) return;
+    this.paused = false;
+    this.attachWatchers();
+    // fs.watch has no replay. Conservatively catch up anything that changed
+    // while handles were closed on a failed worktree removal.
+    if (this.options.watchDir && this.options.onUnknownChange) this.hasUnknownChange = true;
+    for (const path of this.watchedFiles) this.pendingKeys.add(path);
+    // Writes performed through the service while paused still need their normal
+    // nonce-bearing echo so the originating editor does not see a false conflict.
+    for (const key of this.nonces.keys()) this.pendingKeys.add(key);
+    if (this.pendingKeys.size > 0 || this.hasUnknownChange) await this.flush();
+  }
+
+  private attachWatchers(): void {
+    const watchDir = this.options.watchDir;
+    if (watchDir) this.attachDirectoryWatcher(watchDir);
+    for (const path of this.watchedFiles) this.attachFileWatcher(path);
+  }
+
+  private attachDirectoryWatcher(watchDir: string): void {
+    if (this.dirWatcher) return;
     try {
       this.dirWatcher = watch(
         watchDir,
@@ -109,14 +151,10 @@ export class FilesSyncService {
   }
 
   stop(): void {
-    if (this.dirWatcher) {
-      this.dirWatcher.close();
-      this.dirWatcher = null;
-    }
-    for (const [, watcher] of this.fileWatchers) {
-      watcher.close();
-    }
-    this.fileWatchers.clear();
+    this.started = false;
+    this.paused = false;
+    this.closeActiveWatchers();
+    this.watchedFiles.clear();
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
@@ -134,6 +172,13 @@ export class FilesSyncService {
    * The file's absolute path is used as the change key in flush callbacks.
    */
   watchFile(absolutePath: string): void {
+    if (this.watchedFiles.has(absolutePath)) return;
+    this.watchedFiles.add(absolutePath);
+    if (!this.started || this.paused) return;
+    this.attachFileWatcher(absolutePath);
+  }
+
+  private attachFileWatcher(absolutePath: string): void {
     if (this.fileWatchers.has(absolutePath)) return;
     try {
       const watcher = watch(absolutePath, () => {
@@ -152,6 +197,7 @@ export class FilesSyncService {
 
   /** Remove an individual file from the watcher. */
   unwatchFile(absolutePath: string): void {
+    this.watchedFiles.delete(absolutePath);
     const watcher = this.fileWatchers.get(absolutePath);
     if (watcher) {
       watcher.close();
@@ -192,14 +238,22 @@ export class FilesSyncService {
   }
 
   private scheduleFlush(): void {
+    if (this.paused) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
-      this.flush();
+      void this.flush();
     }, this.debounceMs);
   }
 
-  private flush(): void {
+  private flush(): Promise<void> {
+    const task = this.processFlush();
+    this.activeFlushes.add(task);
+    void task.finally(() => this.activeFlushes.delete(task));
+    return task;
+  }
+
+  private async processFlush(): Promise<void> {
     stress.track("fs-flush");
     const unknownChange = this.hasUnknownChange;
     this.hasUnknownChange = false;
@@ -212,12 +266,7 @@ export class FilesSyncService {
     // the keyed changes missed.
     if (unknownChange && this.options.onUnknownChange) {
       try {
-        const result = this.options.onUnknownChange();
-        if (result instanceof Promise) {
-          result.catch((err: unknown) => {
-            log.error("Failed to handle unknown file change", { error: err });
-          });
-        }
+        await this.options.onUnknownChange();
       } catch (err) {
         log.error("Failed to handle unknown file change", { error: err });
       }
@@ -235,14 +284,16 @@ export class FilesSyncService {
     });
 
     try {
-      const result = this.options.onFlush(changes);
-      if (result instanceof Promise) {
-        result.catch((err: unknown) => {
-          log.error("Failed to process file change flush", { error: err });
-        });
-      }
+      await this.options.onFlush(changes);
     } catch (err) {
       log.error("Failed to process file change flush", { error: err });
     }
+  }
+
+  private closeActiveWatchers(): void {
+    this.dirWatcher?.close();
+    this.dirWatcher = null;
+    for (const watcher of this.fileWatchers.values()) watcher.close();
+    this.fileWatchers.clear();
   }
 }

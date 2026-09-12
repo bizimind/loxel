@@ -85,6 +85,14 @@ export class ExternalFilesService {
     this.syncService.stop();
   }
 
+  async pauseWatching(): Promise<void> {
+    await this.syncService.pause();
+  }
+
+  async resumeWatching(): Promise<void> {
+    await this.syncService.resume();
+  }
+
   private handleFlush(changes: FileChange[]): void {
     for (const { key, nonces } of changes) {
       if (this.files.has(key)) {

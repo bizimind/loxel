@@ -73,6 +73,10 @@ export interface RouteContext {
   getProject: (cwd: string) => ProjectState | undefined;
   findProjectForPath: (path: string) => ProjectState | undefined;
   getWorktreeResources: (wtPath: string) => WorktreeResources | undefined;
+  /** Pause filesystem delivery while a worktree directory is being removed. */
+  suspendWorktreeWatchers: (wtPath: string) => Promise<() => Promise<void>>;
+  /** Permanently tear down resources after the final removal broadcast. */
+  completeWorktreeRemoval: (wtPath: string) => void;
   /** Resolve an absolute file path to its owning worktree and service type. */
   resolveFilePath: (absolutePath: string) => ResolvedFilePath | null;
   initializeProject: (repoPath: string) => Promise<{ project: ProjectState; worktrees: unknown[] }>;
@@ -2144,6 +2148,7 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
   const force = typeof body.force === "boolean" ? body.force : false;
 
   wtLog.info(`Removing worktree '${name}'`, { deleteBranch, force });
+  const resumeWatchers = await ctx.suspendWorktreeWatchers(wtPath);
   try {
     const result = await executeRemove(
       {
@@ -2158,8 +2163,14 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
     );
     wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
     ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    ctx.completeWorktreeRemoval(wtPath);
     return json(result);
   } catch (err) {
+    try {
+      await resumeWatchers();
+    } catch (resumeError) {
+      wtLog.error(`Failed to resume watchers for '${name}'`, { error: resumeError });
+    }
     wtLog.error(`Failed to remove worktree '${name}'`, { error: err });
     return error(describeError(err, "Failed to remove worktree"));
   }
