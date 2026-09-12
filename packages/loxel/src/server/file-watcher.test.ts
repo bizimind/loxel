@@ -280,7 +280,7 @@ describe("FileWatcher worktree lifecycle", () => {
     expect(await sawWorktrees(seen)).toBe(true);
   }, 60000);
 
-  test("stop() closes the worktrees watcher and start() stays idempotent", async () => {
+  test("stop() closes delivery and start() restores it without duplicate watchers", async () => {
     const { base, repo } = await makeRepo();
     const wt = path.join(base, "w");
     await Bun.$`git -C ${repo} worktree add -q -b w ${wt}`.quiet();
@@ -295,6 +295,13 @@ describe("FileWatcher worktree lifecycle", () => {
     await Bun.$`git -C ${repo} worktree remove --force ${wt}`.quiet();
     await Bun.sleep(SETTLE_MS);
     expect(seen).toEqual([]);
+
+    await watcher.start();
+    await Bun.sleep(ARM_MS);
+    const afterRestart = path.join(base, "after-restart");
+    await Bun.$`git -C ${repo} worktree add -q -b after-restart ${afterRestart}`.quiet();
+    expect(await sawWorktrees(seen)).toBe(true);
+    await Bun.$`git -C ${repo} worktree remove --force ${afterRestart}`.quiet();
   }, 60000);
 });
 

@@ -11,6 +11,7 @@ let removeCalls: { wtPath: string; options: { deleteBranch: boolean; force: bool
 let planRemoveCalls: string[] = [];
 let branchDeleteSucceeds = true;
 let listResult: { worktrees: WorktreeEntry[] } = { worktrees: [] };
+let listResponses: Array<Promise<{ worktrees: WorktreeEntry[] }>> = [];
 
 const actualClient = await import("@/api/client");
 
@@ -36,7 +37,7 @@ mock.module("@/api/client", () => ({
       hookRan: false,
     });
   },
-  getProjectWorktrees: () => Promise.resolve(listResult),
+  getProjectWorktrees: () => listResponses.shift() ?? Promise.resolve(listResult),
 }));
 
 const { useWorktreeStore } = await import("./worktrees");
@@ -56,6 +57,7 @@ beforeEach(() => {
   planRemoveCalls = [];
   branchDeleteSucceeds = true;
   listResult = { worktrees: [] };
+  listResponses = [];
   plan = { name: "feat-x", worktreePath: WT_PATH, branch: "feat-x", dirty: true, isMain: false };
   useWorktreeStore.setState({
     byProject: { [PROJECT]: { worktrees: [worktree] } },
@@ -191,6 +193,43 @@ describe("refreshProjectWorktrees", () => {
     await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
 
     expect(useWorktreeStore.getState().activeWorktreePath).toBeNull();
+  });
+
+  test("ignores an older refresh response that resolves after a newer one", async () => {
+    let resolveOlder: (value: { worktrees: WorktreeEntry[] }) => void = () => {};
+    let resolveNewer: (value: { worktrees: WorktreeEntry[] }) => void = () => {};
+    listResponses = [
+      new Promise((resolve) => {
+        resolveOlder = resolve;
+      }),
+      new Promise((resolve) => {
+        resolveNewer = resolve;
+      }),
+    ];
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "p1",
+          path: PROJECT,
+          name: "repo",
+          addedAt: "",
+          isBare: true,
+          worktreesDir: "/repo/.worktrees",
+          worktrees: [worktree, other],
+        },
+      ],
+    });
+    useWorktreeStore.setState({ activeWorktreePath: other.path });
+
+    const older = useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    const newer = useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    resolveNewer({ worktrees: [other] });
+    await newer;
+    resolveOlder({ worktrees: [] });
+    await older;
+
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([other]);
+    expect(useWorktreeStore.getState().activeWorktreePath).toBe(other.path);
   });
 });
 

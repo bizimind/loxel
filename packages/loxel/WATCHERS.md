@@ -121,6 +121,7 @@ When changing watcher behavior, verify:
 - project-level events are not multiplied once per subscribed worktree;
 - worktree lifecycle broadcasts precede resource teardown;
 - temporary suspension preserves caches, tracked paths, pending changes, and nonces;
+- restarting a stopped `FileWatcher` restores Git event delivery without duplicate handles;
 - permanent teardown closes every watch handle and clears timers;
 - regular-repository root checkouts remain valid active paths;
 - similarly prefixed and external-`WT_DIR` projects are not confused;
