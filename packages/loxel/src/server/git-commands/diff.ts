@@ -70,20 +70,21 @@ export async function getRangeDiff(cwd: string, range: string): Promise<DiffInfo
 
   const rightRef = (await resolveCommit(cwd, ref2)) ?? ref2;
   let baseRef: string | null;
-  let diffBase: string;
+  let rangeSpec: string;
   if (!ref1) {
+    const emptyTree = (
+      await $`git hash-object -t tree /dev/null`.env(readOnlyGitEnv()).text()
+    ).trim();
     baseRef = null;
-    diffBase = (await $`git hash-object -t tree /dev/null`.env(readOnlyGitEnv()).text()).trim();
+    rangeSpec = `${emptyTree}..${rightRef}`;
   } else if (dots === "...") {
     baseRef = await resolveMergeBase(cwd, ref1, rightRef);
     // Preserve Git's own failure when the revisions have no merge base.
-    diffBase = baseRef ?? ref1;
+    rangeSpec = baseRef ? `${baseRef}..${rightRef}` : `${ref1}...${rightRef}`;
   } else {
     baseRef = await resolveCommit(cwd, ref1);
-    diffBase = baseRef ?? ref1;
+    rangeSpec = `${baseRef ?? ref1}..${rightRef}`;
   }
-  const rangeSpec =
-    dots === "..." && ref1 && !baseRef ? `${ref1}...${rightRef}` : `${diffBase}..${rightRef}`;
   const result = await $`git -C ${cwd} diff ${rangeSpec}`.env(readOnlyGitEnv()).text();
   return { files: parseDiffOutput(result), baseRef };
 }
