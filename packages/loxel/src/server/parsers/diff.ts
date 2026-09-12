@@ -1,13 +1,16 @@
-import type { DiffHunk, DiffInfo, FileDiff } from "@/api/diff-model";
+import type { DiffHunk, FileDiff } from "@/api/diff-model";
 
 /**
  * Parse unified diff output from git diff.
+ *
+ * Returns only the files: the diff's base is not recoverable from its text,
+ * so the caller — which knows the revisions it asked about — supplies it.
  */
-export function parseDiffOutput(output: string): DiffInfo {
+export function parseDiffOutput(output: string): FileDiff[] {
   const files: FileDiff[] = [];
 
   if (!output.trim()) {
-    return { files };
+    return files;
   }
 
   // Split by diff headers
@@ -21,7 +24,7 @@ export function parseDiffOutput(output: string): DiffInfo {
     }
   }
 
-  return { files };
+  return files;
 }
 
 /**

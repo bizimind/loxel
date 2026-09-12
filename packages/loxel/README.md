@@ -82,6 +82,8 @@ JetBrains-style split diff with synchronized scrolling:
 - **Monaco Editor** with syntax highlighting (Shiki), diff decorations, and collapsible unchanged regions
 - **Gutter connector** SVG showing line relationships between panels
 - **Split and unified** view modes
+- **Server-resolved bases** — both panes use the exact commit that produced the diff, including
+  worktree-specific `HEAD` values and merge bases for three-dot ranges
 - **Hunk-level staging** — stage or unstage individual hunks directly from the diff view
 
 ### TypeScript Language Intelligence
