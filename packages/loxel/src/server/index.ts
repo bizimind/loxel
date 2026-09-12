@@ -20,6 +20,7 @@ import { AstroLspManager } from "./astro-lsp-manager";
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { DockerLspManager } from "./docker-lsp-manager";
+import { describeError } from "./error-message";
 import { ExternalFilesService } from "./external-files-service";
 import { FileOperationsService } from "./file-operations-service";
 import { FileWatcher } from "./file-watcher";
@@ -67,6 +68,8 @@ const log = logger.child("server");
 
 const projects = new Map<string, ProjectState>();
 const wtResources = new Map<string, WorktreeResources>();
+/** Worktrees whose callbacks must stay quiescent while removal is attempted. */
+const suspendedWorktrees = new Set<string>();
 
 /** Find the project whose cwd is a prefix of the given path (longest match). */
 export function findProjectForPath(targetPath: string): ProjectState | undefined {
@@ -184,11 +187,12 @@ function sendTo(ws: ServerWebSocket<WsData>, message: WsMessage) {
 async function handleStatusEvent(wtPath: string) {
   stress.track("status-event", { wtPath });
   const resources = wtResources.get(wtPath);
-  if (!resources) return;
+  if (!resources || suspendedWorktrees.has(wtPath)) return;
   if (Date.now() < resources.statusSuppressUntil) return;
 
   try {
     const status = await getStatus(wtPath);
+    if (suspendedWorktrees.has(wtPath) || wtResources.get(wtPath) !== resources) return;
     resources.statusSuppressUntil = Date.now() + STATUS_SUPPRESS_MS;
     broadcastToSubscribers(wtPath, { type: "status_changed", wtPath, data: status });
     debouncedWorktreeStatusBroadcast(resources.projectPath);
@@ -200,10 +204,19 @@ async function handleStatusEvent(wtPath: string) {
         if (r) r.statusSuppressUntil = Date.now() + STATUS_SUPPRESS_MS;
       })
       .catch((err: unknown) => {
-        log.error("Failed to refresh file tree git status", { error: err });
+        if (suspendedWorktrees.has(wtPath) || !existsSync(wtPath)) return;
+        log.error("Failed to refresh file tree git status", {
+          error: describeError(err, "file tree status refresh failed"),
+        });
       });
   } catch (err) {
-    log.error("Failed to handle git status change", { error: err });
+    if (suspendedWorktrees.has(wtPath) || !existsSync(wtPath)) {
+      log.debug(`Skipping status refresh for removed worktree: ${wtPath}`);
+      return;
+    }
+    log.error("Failed to handle git status change", {
+      error: describeError(err, "git status failed"),
+    });
   }
 }
 
@@ -394,6 +407,7 @@ function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void 
 }
 
 function teardownWorktreeResources(wtPath: string, resources: WorktreeResources): void {
+  suspendedWorktrees.delete(wtPath);
   resources.worktreeWatcher?.stop();
   resources.filesService.stop();
   resources.fileOpsService.dispose();
@@ -402,6 +416,67 @@ function teardownWorktreeResources(wtPath: string, resources: WorktreeResources)
   formatService.invalidateCache(wtPath);
   wtResources.delete(wtPath);
   log.info(`Worktree resources torn down: ${wtPath}`);
+}
+
+function reconcileRemovedWorktrees(projectPath: string): void {
+  for (const [wtPath, resources] of [...wtResources]) {
+    if (resources.projectPath !== projectPath || existsSync(wtPath)) continue;
+
+    log.info(`Worktree removed outside the app, releasing resources: ${wtPath}`);
+    completeWorktreeRemoval(wtPath);
+  }
+}
+
+/** Permanently release a removed worktree after its final project broadcast. */
+function completeWorktreeRemoval(wtPath: string): void {
+  const resources = wtResources.get(wtPath);
+  if (!resources) return;
+  for (const ws of resources.subscribers) {
+    clients.get(ws)?.subscribedWorktrees.delete(wtPath);
+  }
+  teardownWorktreeResources(wtPath, resources);
+}
+
+/** Pause only filesystem delivery; service caches and tracked external files remain intact. */
+async function suspendWorktreeWatchers(wtPath: string): Promise<() => Promise<void>> {
+  const resources = wtResources.get(wtPath);
+  if (!resources) return async () => {};
+
+  suspendedWorktrees.add(wtPath);
+  resources.worktreeWatcher?.stop();
+  await Promise.all([
+    resources.filesService.pauseWatching(),
+    resources.detachedFilesService.pauseWatching(),
+    resources.externalFilesService.pauseWatching(),
+  ]);
+  log.debug(`Suspended watchers for ${wtPath}`);
+
+  let resumed = false;
+  return async () => {
+    if (resumed) return;
+    resumed = true;
+    if (wtResources.get(wtPath) !== resources) return;
+    const results = await Promise.allSettled([
+      resources.filesService.resumeWatching(),
+      resources.detachedFilesService.resumeWatching(),
+      resources.externalFilesService.resumeWatching(),
+    ]);
+    suspendedWorktrees.delete(wtPath);
+    const watcherResults = await Promise.allSettled([
+      resources.worktreeWatcher?.start() ?? Promise.resolve(),
+    ]);
+    results.push(...watcherResults);
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (failures.length > 0) throw new AggregateError(failures, `Failed to resume ${wtPath}`);
+    broadcastToSubscribers(wtPath, {
+      type: "worktree_files_resynced",
+      wtPath,
+      projectPath: resources.projectPath,
+    });
+    log.debug(`Resumed watchers for ${wtPath}`);
+  };
 }
 
 /** Unsubscribe a client from all worktrees (on disconnect). */
@@ -441,6 +516,7 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
 
       if (event === "worktrees") {
         broadcastToProject(cwd, worktreesChangedMessage(cwd));
+        reconcileRemovedWorktrees(cwd);
         return;
       }
 
@@ -896,6 +972,8 @@ const server = Bun.serve<WsData>({
         getProject: (cwd: string) => projects.get(cwd),
         findProjectForPath,
         getWorktreeResources: (wtPath: string) => wtResources.get(wtPath),
+        suspendWorktreeWatchers,
+        completeWorktreeRemoval,
         resolveFilePath,
         initializeProject,
         teardownProject,
@@ -926,6 +1004,8 @@ const server = Bun.serve<WsData>({
       getProject: (cwd: string) => projects.get(cwd),
       findProjectForPath,
       getWorktreeResources: (wtPath: string) => wtResources.get(wtPath),
+      suspendWorktreeWatchers,
+      completeWorktreeRemoval,
       resolveFilePath,
       initializeProject,
       teardownProject,

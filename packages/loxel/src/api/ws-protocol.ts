@@ -58,6 +58,7 @@ export type WsMessage =
   | { type: "file_content_changed"; wtPath: string; data: { path: string; nonces: string[] } }
   | { type: "detached_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
+  | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
   | { type: "open_file"; wtPath: string; data: { filePath: string } }
   | { type: "open_url"; wtPath: string; data: { url: string } }
   // Project-scoped (sent to all subscribers under project)

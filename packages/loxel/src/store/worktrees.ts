@@ -15,6 +15,8 @@ import { purgeWorktreeCache, transitionWorktreeState } from "./worktree-cache";
 import { purgeWorktreeStores, setActiveWorktreeKey } from "./worktree-store";
 
 const ACTIVE_WT_SESSION_KEY = `${STORAGE_PREFIX}-activeWorktreePath`;
+const refreshRequestIds = new Map<string, number>();
+let nextRefreshRequestId = 0;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -188,12 +190,19 @@ export const useWorktreeStore = create<WorktreeState>()(
         },
 
         refreshProjectWorktrees: async (projectPath) => {
+          const requestId = ++nextRefreshRequestId;
+          refreshRequestIds.set(projectPath, requestId);
           const allProjects = useProjectStore.getState().projects;
           const project = allProjects.find((p) => p.path === projectPath);
           if (!project) return;
+          const priorPaths = new Set(getProject(get(), projectPath).worktrees.map((wt) => wt.path));
 
           const data = await api.getProjectWorktrees(project.id);
-          const validPaths = new Set(data.worktrees.map((wt) => wt.path));
+          if (refreshRequestIds.get(projectPath) !== requestId) return;
+          const validPaths = new Set([
+            ...data.worktrees.map((wt) => wt.path),
+            ...(project.isBare ? [] : [project.path]),
+          ]);
 
           set((s) => {
             const existing = getProject(s, projectPath);
@@ -205,6 +214,23 @@ export const useWorktreeStore = create<WorktreeState>()(
               }),
             };
           });
+
+          const active = get().activeWorktreePath;
+          const activeProject = deriveProject(active, allProjects);
+          const belongedToProject =
+            active === project.path ||
+            priorPaths.has(active ?? "") ||
+            activeProject?.id === project.id;
+          if (!active || !belongedToProject || validPaths.has(active)) return;
+
+          purgeWorktreeStores(active);
+          purgeWorktreeCache(active);
+          wsClient.unsubscribeWorktree(active);
+
+          const fallback = project.isBare ? (data.worktrees[0]?.path ?? null) : project.path;
+          set({ activeWorktreePath: fallback });
+          if (fallback) transitionWorktreeState(active, fallback);
+          else setActiveWorktreeKey("");
         },
 
         switchWorktree: async (path) => {
@@ -324,6 +350,7 @@ export const useWorktreeStore = create<WorktreeState>()(
         },
 
         reset: () => {
+          refreshRequestIds.clear();
           set({
             byProject: {},
             activeWorktreePath: null,

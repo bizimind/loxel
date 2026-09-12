@@ -89,6 +89,15 @@ export class ProjectFilesService {
     this.untrackedDirs.clear();
   }
 
+  async pauseWatching(): Promise<void> {
+    await this.syncService.pause();
+    await this.queue;
+  }
+
+  async resumeWatching(): Promise<void> {
+    await this.syncService.resume();
+  }
+
   /**
    * Write a file with nonce tracking for echo detection.
    * The write callback is injected to allow git-commands validation.
