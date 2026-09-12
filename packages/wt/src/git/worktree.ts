@@ -312,8 +312,9 @@ export async function isWorktreeDirty(worktreePath: string): Promise<boolean> {
 
 /** Porcelain status lines for a worktree (modified, staged and untracked). */
 export async function worktreeChanges(worktreePath: string): Promise<string[]> {
-  const output = await git(["status", "--porcelain", "--ignore-submodules=none"], worktreePath);
-  return output.split("\n").filter((line) => line.trim().length > 0);
+  const result = await runGit(["status", "--porcelain", "--ignore-submodules=none"], worktreePath);
+  if (result.exitCode !== 0) return [];
+  return result.stdout.split("\n").filter((line) => line.trim().length > 0);
 }
 
 /** Commits ahead of / behind the upstream branch, or null when there is none. */

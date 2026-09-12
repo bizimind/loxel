@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { branchExists, git, pathExists } from "../git/index.ts";
 import { createTestRepo, writeHook, type TestRepo } from "../test-repo.ts";
@@ -287,8 +287,9 @@ describe("executeRemove", () => {
 describe("executeRemove with submodules", () => {
   async function repoWithSubmodule(): Promise<{ subUrl: string }> {
     repo = await createTestRepo({ bare: true });
-    const subDir = join(repo.root, "..", "submodule-origin");
-    await git(["init", "--initial-branch=main", subDir]);
+    const parent = dirname(repo.root);
+    const subDir = join(parent, "submodule-origin");
+    await git(["init", "--initial-branch=main", subDir], parent);
     await git(["config", "user.email", "test@example.com"], subDir);
     await git(["config", "user.name", "Test"], subDir);
     await Bun.write(join(subDir, "tracked.txt"), "v1\n");
@@ -302,7 +303,18 @@ describe("executeRemove with submodules", () => {
       ["-c", "protocol.file.allow=always", "submodule", "add", subUrl, "mysub"],
       worktreePath,
     );
-    await git(["commit", "-m", "add submodule"], worktreePath);
+    await git(
+      [
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "add submodule",
+      ],
+      worktreePath,
+    );
   }
 
   test("removes a clean worktree containing a submodule without user force", async () => {
