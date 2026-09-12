@@ -226,7 +226,18 @@ describe("executeRemove with submodules", () => {
       ["-c", "protocol.file.allow=always", "submodule", "add", subUrl, "mysub"],
       worktreePath,
     );
-    await git(["commit", "-m", "add submodule"], worktreePath);
+    await git(
+      [
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "add submodule",
+      ],
+      worktreePath,
+    );
   }
 
   test("removes a clean worktree containing a submodule without user force", async () => {
