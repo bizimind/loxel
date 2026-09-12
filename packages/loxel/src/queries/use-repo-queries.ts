@@ -56,7 +56,7 @@ async function fetchCommits(wt: string, preset: BranchFilterPreset, limit = 200)
 }
 
 async function fetchDiff(wt: string, source: DiffSource | null): Promise<DiffInfo> {
-  if (!source) return { files: [] };
+  if (!source) return { files: [], baseRef: null };
 
   if (source.type === "uncommitted" && source.worktree) {
     return api.getDiff(wt, { worktree: source.worktree, base: source.base });
@@ -73,7 +73,7 @@ async function fetchDiff(wt: string, source: DiffSource | null): Promise<DiffInf
   if (source.type === "range" && source.range) {
     return api.getDiff(wt, { range: source.range });
   }
-  return { files: [] };
+  return { files: [], baseRef: null };
 }
 
 export type CommitsQueryData = GraphData;

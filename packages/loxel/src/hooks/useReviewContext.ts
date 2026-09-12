@@ -7,7 +7,12 @@ import { useWorktreeUI } from "@/store/worktree-ui";
 
 /**
  * Computes the ReviewContext and default review name from the current diff source.
- * Used by CommentsPanel (header ReviewSelector) and DiffContent (placed-threads fetch).
+ * Used by CommentsPanel (header ReviewSelector).
+ *
+ * `parentHash` here is a best-effort label for naming a review, not the base a
+ * diff is rendered against. It can be a symbolic ref, and the commit lookup can
+ * miss when the commit is outside the current branch filter. The base used for
+ * rendering comes from `DiffInfo.baseRef`, which the server resolves.
  */
 export function useReviewContext(): {
   reviewContext: ReviewContext;
@@ -33,8 +38,7 @@ export function useReviewContext(): {
       commitHash = diffSource.commit;
       parentHash = commits.find((c) => c.hash === diffSource.commit)?.parents[0];
     } else if (diffSource?.type === "range" && diffSource.range) {
-      commitHash = diffSource.range.split("..")[1];
-      parentHash = diffSource.range.split("..")[0];
+      [parentHash, commitHash] = diffSource.range.split(/\.{2,3}/);
     }
 
     const commitHashes: string[] = [];
