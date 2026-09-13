@@ -9,11 +9,11 @@ import { gitSucceeds } from "./run.ts";
  * directory, so it has to satisfy both: no escaping the worktrees directory,
  * and a valid git ref. Nested names like `feat/foo` are allowed.
  */
-export async function worktreeNameError(name: string): Promise<string | null> {
+export async function worktreeNameError(name: string, cwd?: string): Promise<string | null> {
   const structural = structuralNameError(name);
   if (structural) return structural;
 
-  if (!(await gitSucceeds(["check-ref-format", `refs/heads/${name}`]))) {
+  if (!(await gitSucceeds(["check-ref-format", `refs/heads/${name}`], cwd))) {
     return `'${name}' is not a valid git branch name`;
   }
   return null;
