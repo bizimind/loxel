@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 
-import { createTestRepo, type TestRepo } from "../test-repo.ts";
+import { createTestDirectory, createTestRepo, type TestRepo } from "../test-repo.ts";
 import {
   findWorktree,
   getManagedWorktrees,
@@ -16,10 +16,14 @@ import {
 
 describe("pathExists", () => {
   test("returns false only when the path is missing", async () => {
-    expect(await pathExists(join(process.cwd(), ".missing-wt-path", crypto.randomUUID()))).toBe(
-      false,
-    );
-    await expect(pathExists(join(process.cwd(), "package.json", "child"))).rejects.toThrow();
+    const directory = await createTestDirectory();
+    try {
+      expect(await pathExists(join(directory.root, "missing"))).toBe(false);
+      await Bun.write(join(directory.root, "file"), "content");
+      await expect(pathExists(join(directory.root, "file", "child"))).rejects.toThrow();
+    } finally {
+      await directory.cleanup();
+    }
   });
 });
 
@@ -179,8 +183,12 @@ describe("resolveRepoRoot", () => {
   });
 
   test("rejects a directory outside any repository", async () => {
-    repo = await createTestRepo();
-    await expect(resolveRepoRoot("/")).rejects.toThrow("Not inside a git repository");
+    const directory = await createTestDirectory();
+    try {
+      await expect(resolveRepoRoot(directory.root)).rejects.toThrow("Not inside a git repository");
+    } finally {
+      await directory.cleanup();
+    }
   });
 });
 

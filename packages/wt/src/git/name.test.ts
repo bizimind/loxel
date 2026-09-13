@@ -1,15 +1,31 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
+import { createTestDirectory, type TestDirectory } from "../test-repo.ts";
 import { structuralNameError, worktreeNameError } from "./name.ts";
+
+let directory: TestDirectory | undefined;
+
+function testCwd(): string {
+  if (!directory) throw new Error("wt test directory was not initialized");
+  return directory.root;
+}
+
+beforeAll(async () => {
+  directory = await createTestDirectory();
+});
+
+afterAll(async () => {
+  await directory?.cleanup();
+});
 
 describe("worktreeNameError", () => {
   test("accepts a simple name", async () => {
-    expect(await worktreeNameError("feature-x")).toBeNull();
+    expect(await worktreeNameError("feature-x", testCwd())).toBeNull();
   });
 
   test("accepts a nested name", async () => {
-    expect(await worktreeNameError("feat/add-voice-input")).toBeNull();
-    expect(await worktreeNameError("a/b/c")).toBeNull();
+    expect(await worktreeNameError("feat/add-voice-input", testCwd())).toBeNull();
+    expect(await worktreeNameError("a/b/c", testCwd())).toBeNull();
   });
 
   test("rejects an empty name", async () => {
@@ -38,7 +54,9 @@ describe("worktreeNameError", () => {
   test.each([["bad name"], ["bad~name"], ["bad^name"], ["bad:name"], ["feat/.hidden"]])(
     "rejects invalid git ref %p",
     async (name) => {
-      expect(await worktreeNameError(name)).toBe(`'${name}' is not a valid git branch name`);
+      expect(await worktreeNameError(name, testCwd())).toBe(
+        `'${name}' is not a valid git branch name`,
+      );
     },
   );
 });

@@ -141,7 +141,7 @@ describe("executeRemove", () => {
   });
 
   test("does not bypass a worktree lock when force is used for dirty files", async () => {
-    const repo = await createTestRepo();
+    repo = await createTestRepo();
     const created = await executeAdd({ name: "locked", repoPath: repo.root });
     await Bun.write(join(created.path, "dirty.txt"), "keep me");
     await Bun.$`git -C ${repo.root} worktree lock ${created.path}`.quiet();

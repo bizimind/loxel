@@ -269,7 +269,12 @@ Also exported: `resolveWorktreesDir`, `listManagedWorktrees`,
 
 ```sh
 bun src/cli.ts add feature-x      # run from source
-pnpm -C packages/wt run test      # tests (real temporary git repos)
+pnpm -C packages/wt run test      # safety-gated tests (read TEST_SAFETY.md before changes)
 pnpm -C packages/wt run typecheck
 pnpm -C packages/wt run build     # standalone binary at dist/wt
 ```
+
+The current behavioral suite uses real temporary Git repositories and generated hook scripts.
+Changes to tests or their safety infrastructure invalidate an approved hash and stop the suite
+before execution. Read [TEST_SAFETY.md](./TEST_SAFETY.md) for the required review and
+acknowledgement process.
