@@ -1835,7 +1835,7 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   }
 
   try {
-    await assertCanTransformToBare(dirPath);
+    await assertCanTransformToBare(dirPath, currentBranch, ".worktrees");
   } catch (err) {
     return error(describeError(err, "Repository cannot be converted"), 400);
   }
@@ -1843,8 +1843,21 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   // Teardown only after every non-mutating conversion preflight has passed.
   ctx.teardownProject(dirPath);
 
-  await transformToBare(dirPath, currentBranch, ".worktrees");
-  await writeInitHook(dirPath, copyFiles, setupCommands);
+  try {
+    await transformToBare(dirPath, currentBranch, ".worktrees");
+    await writeInitHook(dirPath, copyFiles, setupCommands);
+  } catch (err) {
+    try {
+      await ctx.initializeProject(dirPath);
+    } catch (restoreError) {
+      wtLog.error("Failed to restore project after conversion failure", {
+        error: restoreError,
+        conversionError: describeError(err, "Repository conversion failed"),
+        projectPath: dirPath,
+      });
+    }
+    return error(describeError(err, "Failed to convert repository"), 500);
+  }
 
   // Re-add and re-initialize the project
   const project = await projectStore.addProject(dirPath);

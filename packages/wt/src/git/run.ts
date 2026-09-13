@@ -11,14 +11,23 @@ export interface GitResult {
  * while keeping git's own stderr.
  */
 export async function runGit(args: string[], cwd?: string): Promise<GitResult> {
-  const shell = cwd ? $`git ${args}`.cwd(cwd) : $`git ${args}`;
-  const result = await shell.quiet().nothrow();
+  try {
+    const shell = cwd ? $`git ${args}`.cwd(cwd) : $`git ${args}`;
+    const result = await shell.quiet().nothrow();
 
-  return {
-    exitCode: result.exitCode,
-    stdout: result.stdout.toString(),
-    stderr: result.stderr.toString().trim(),
-  };
+    return {
+      exitCode: result.exitCode,
+      stdout: result.stdout.toString(),
+      stderr: result.stderr.toString().trim(),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      exitCode: 128,
+      stdout: "",
+      stderr: cwd ? `cannot change to '${cwd}': ${message}` : message,
+    };
+  }
 }
 
 /**

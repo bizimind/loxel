@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { branchExists, git, pathExists } from "../git/index.ts";
@@ -184,6 +185,24 @@ describe("executeRemove", () => {
     expect(result.hookRan).toBe(false);
     expect(warnings.join("\n")).toContain("clean.wt.sh exited with code 1");
     expect(await Bun.file(join(added.path, "README.md")).exists()).toBe(false);
+  });
+
+  test("removes a registered worktree whose checkout disappeared", async () => {
+    repo = await createTestRepo({ bare: true });
+    await writeHook(repo.root, "clean.wt.sh", "true");
+    const added = await executeAdd({ name: "missing", repoPath: repo.root });
+    await rm(added.path, { recursive: true });
+    const warnings: string[] = [];
+
+    expect((await planRemove({ name: "missing", repoPath: repo.root })).dirty).toBe(false);
+    const result = await executeRemove(
+      { name: "missing", repoPath: repo.root, deleteBranch: false, force: false },
+      { log: () => {}, warn: (message) => warnings.push(message) },
+    );
+
+    expect(result.removed).toBe(true);
+    expect(result.hookRan).toBe(false);
+    expect(warnings.join("\n")).toContain("clean.wt.sh failed to run");
   });
 
   test("deleting an unmerged branch without force warns instead of failing", async () => {

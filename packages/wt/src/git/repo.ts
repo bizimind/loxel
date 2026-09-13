@@ -1,9 +1,10 @@
-import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { wrapError } from "@bizimind/cli-common";
 
 import { git, runGit } from "./run.ts";
+import { pathExists } from "./worktree.ts";
 
 export type RepoType = "empty" | "bare" | "regular" | "worktree";
 
@@ -49,14 +50,10 @@ export async function transformToBare(
   currentBranch: string,
   worktreesDir: string,
 ): Promise<void> {
-  await assertCanTransformToBare(cwd);
+  await assertCanTransformToBare(cwd, currentBranch, worktreesDir);
 
   const gitDir = join(cwd, ".git");
   const worktreePath = join(cwd, worktreesDir, currentBranch);
-  if (await pathExists(worktreePath)) {
-    throw new Error(`Cannot convert because the destination already exists: ${worktreePath}`);
-  }
-
   try {
     await moveFilesToWorktree(cwd, worktreePath, worktreesDir);
     await convertToBareRepo(cwd, gitDir);
@@ -66,24 +63,23 @@ export async function transformToBare(
   }
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-/** Reject conversion before any files move when linked worktrees already exist. */
-export async function assertCanTransformToBare(cwd: string): Promise<void> {
+/** Reject conversion before any files move when it cannot complete safely. */
+export async function assertCanTransformToBare(
+  cwd: string,
+  currentBranch: string,
+  worktreesDir: string,
+): Promise<void> {
   const worktreeList = await git(["worktree", "list", "--porcelain"], cwd);
   const worktreeCount = worktreeList
     .split("\n")
     .filter((line) => line.startsWith("worktree ")).length;
   if (worktreeCount > 1) {
     throw new Error("Cannot convert a repository that already has linked worktrees.");
+  }
+
+  const worktreePath = join(cwd, worktreesDir, currentBranch);
+  if (await pathExists(worktreePath)) {
+    throw new Error(`Cannot convert because the destination already exists: ${worktreePath}`);
   }
 }
 

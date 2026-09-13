@@ -41,32 +41,38 @@ export async function runHook(
 
   progress.log(`Running ${hook}...`);
 
-  const proc = Bun.spawn(["bash", script], {
-    cwd: ctx.worktreePath,
-    env: {
-      ...(ctx.baseEnv ?? process.env),
-      WT_NAME: ctx.name,
-      WT_PATH: ctx.worktreePath,
-      WT_ROOT: ctx.root,
-      WT_BRANCH: ctx.branch ?? DETACHED,
-      ...ctx.extraEnv,
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  try {
+    const proc = Bun.spawn(["bash", script], {
+      cwd: ctx.worktreePath,
+      env: {
+        ...(ctx.baseEnv ?? process.env),
+        WT_NAME: ctx.name,
+        WT_PATH: ctx.worktreePath,
+        WT_ROOT: ctx.root,
+        WT_BRANCH: ctx.branch ?? DETACHED,
+        ...ctx.extraEnv,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
 
-  const output = (stdout + stderr).trim();
-  if (output) progress.log(output);
+    const output = (stdout + stderr).trim();
+    if (output) progress.log(output);
 
-  if (exitCode !== 0) {
-    progress.warn(`Warning: ${hook} exited with code ${exitCode}; continuing`);
+    if (exitCode !== 0) {
+      progress.warn(`Warning: ${hook} exited with code ${exitCode}; continuing`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    progress.warn(`Warning: ${hook} failed to run: ${message}; continuing`);
     return false;
   }
-  return true;
 }

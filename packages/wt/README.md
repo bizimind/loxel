@@ -77,6 +77,11 @@ work: `wt add feat/voice-input` creates `.worktrees/feat/voice-input` on branch
 named after the worktree already exists, wt offers to reuse it or recreate it —
 unless another worktree has it checked out, which is an error.
 
+If a registered worktree's checkout directory disappears outside `wt`, it remains
+listable and removable. Git-dependent inspection reports no dirty changes or
+upstream divergence for that unavailable checkout, and a cleanup hook that cannot
+start there is skipped with a warning.
+
 ## Renaming
 
 `wt mv` renames the worktree's directory (`git worktree move`) and its branch

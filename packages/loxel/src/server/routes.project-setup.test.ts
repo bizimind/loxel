@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,7 +56,13 @@ describe("project conversion preflight", () => {
     return root;
   }
 
-  function context(onTeardown: () => void): RouteContext {
+  function context(
+    onTeardown: () => void,
+    onInitialize: RouteContext["initializeProject"] = async () => ({
+      project: {} as never,
+      worktrees: [],
+    }),
+  ): RouteContext {
     return {
       broadcastToSubscribers: () => {},
       broadcastToProject: () => {},
@@ -65,7 +71,7 @@ describe("project conversion preflight", () => {
       findProjectForPath: () => undefined,
       getWorktreeResources: () => undefined,
       resolveFilePath: () => null,
-      initializeProject: async () => ({ project: {} as never, worktrees: [] }),
+      initializeProject: onInitialize,
       teardownProject: onTeardown,
       shutdown: () => {},
       resolveSchema: async () => ({}),
@@ -126,6 +132,55 @@ describe("project conversion preflight", () => {
 
     expect(response.status).toBe(400);
     expect(teardownCount).toBe(0);
+    expect(existsSync(join(repo, ".git"))).toBe(true);
+  });
+
+  test("rejects an existing destination before tearing down the live project", async () => {
+    const repo = await seedRepo();
+    await writeFile(join(repo, ".gitignore"), ".worktrees/\n");
+    await runGit(repo, "add", ".gitignore");
+    await runGit(repo, "commit", "-m", "ignore worktrees");
+    await mkdir(join(repo, ".worktrees", "main"), { recursive: true });
+    await writeFile(join(repo, ".worktrees", "main", "local-secret"), "keep me");
+    let teardownCount = 0;
+
+    const response = await handleRequest(
+      new Request("http://localhost/api/projects/convert", {
+        method: "POST",
+        body: JSON.stringify({ path: repo, copyFiles: [], setupCommands: [] }),
+      }),
+      context(() => teardownCount++),
+    );
+
+    expect(response.status).toBe(400);
+    expect(teardownCount).toBe(0);
+    expect(existsSync(join(repo, ".git"))).toBe(true);
+    expect(await Bun.file(join(repo, ".worktrees", "main", "local-secret")).text()).toBe("keep me");
+  });
+
+  test("restores the live project when conversion fails after teardown", async () => {
+    const repo = await seedRepo();
+    await writeFile(join(repo, ".gitignore"), ".worktrees/\n");
+    await runGit(repo, "add", ".gitignore");
+    await runGit(repo, "commit", "-m", "ignore worktrees");
+    let initializeCount = 0;
+
+    const response = await handleRequest(
+      new Request("http://localhost/api/projects/convert", {
+        method: "POST",
+        body: JSON.stringify({ path: repo, copyFiles: [], setupCommands: [] }),
+      }),
+      context(
+        () => mkdirSync(join(repo, ".worktrees", "main"), { recursive: true }),
+        async () => {
+          initializeCount++;
+          return { project: {} as never, worktrees: [] };
+        },
+      ),
+    );
+
+    expect(response.status).toBe(500);
+    expect(initializeCount).toBe(1);
     expect(existsSync(join(repo, ".git"))).toBe(true);
   });
 });

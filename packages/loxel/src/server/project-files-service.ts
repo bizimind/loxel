@@ -7,7 +7,7 @@ import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 
 import type { FileChange } from "./file-sync-service";
 import { FilesSyncService } from "./file-sync-service";
-import { readOnlyGitEnv } from "./git-commands/git-env";
+import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
 
 const log = logger.child("files");

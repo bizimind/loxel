@@ -8,10 +8,20 @@ import {
   getWorktreeName,
   listWorktrees,
   parseWorktreeList,
+  pathExists,
   resolveRepoRoot,
   worktreesDir,
   type Worktree,
 } from "./worktree.ts";
+
+describe("pathExists", () => {
+  test("returns false only when the path is missing", async () => {
+    expect(await pathExists(join(process.cwd(), ".missing-wt-path", crypto.randomUUID()))).toBe(
+      false,
+    );
+    await expect(pathExists(join(process.cwd(), "package.json", "child"))).rejects.toThrow();
+  });
+});
 
 const wt = (path: string, extra: Partial<Worktree> = {}): Worktree => ({
   path,
