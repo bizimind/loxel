@@ -11,6 +11,7 @@ export {
   getWorkingTreeFileContent,
   writeWorkingTreeFileContent,
 } from "./file-content";
+export { FSMONITOR, readOnlyGitEnv } from "./git-env";
 export { getBranchCommits, getLog } from "./log";
 export {
   checkout,

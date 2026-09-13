@@ -18,7 +18,7 @@ A monorepo (pnpm + Bun) containing packages that extend Claude Code's capabiliti
 | [monaco-lsp-client](packages/monaco-lsp-client) | Monaco editor LSP client adapter                                                                       |
 | [sandbox](packages/sandbox)                     | Docker-based sandbox environments for isolated code execution                                          |
 | [whisper-cpp](packages/whisper-cpp)             | Node addon wrapping whisper.cpp for speech-to-text                                                     |
-| [wt](packages/wt)                               | Git worktree manager with automatic port offsetting, unique naming, and lifecycle hooks                |
+| [wt](packages/wt)                               | Configless Git worktree manager with conventional lifecycle hooks                                      |
 
 ## Installation
 

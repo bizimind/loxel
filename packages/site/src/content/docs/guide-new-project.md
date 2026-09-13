@@ -34,7 +34,7 @@ Use this when you're starting from a GitHub, GitLab, or other remote URL. Paste 
 
 **Single-workspace** clones as a regular repo — standard `git clone`. One working tree, one branch at a time. The right choice for solo projects or repos where you won't run multiple agents in parallel.
 
-**Multi-workspace** clones as a bare repo and creates the first worktree alongside it, plus a `wt.yaml` for lifecycle hooks. Choose this if you plan to run parallel workstreams from day one. You can always convert later, but starting bare is cleaner.
+**Multi-workspace** clones as a bare repo and creates the first worktree alongside it. Optional setup choices are written to a repo-root `init.wt.sh` lifecycle hook. Choose this if you plan to run parallel workstreams from day one. You can always convert later, but starting bare is cleaner.
 
 > **Tip:** If you're unsure, default to single-workspace. You can convert to bare later — as long as you have a clean working tree.
 
@@ -51,7 +51,7 @@ If you have a folder of code with no git history, use **Init**. Loxel runs `git 
 Use **Convert** to restructure a regular repo into a bare + worktrees layout. Two preconditions:
 
 - Clean working tree (no uncommitted changes)
-- No existing `wt.yaml` in the repo
+- No existing linked worktrees
 
 Commit everything first, then convert. Loxel handles the restructuring in-place.
 

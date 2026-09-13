@@ -1,6 +1,7 @@
 /**
  * Unified sidebar — shows all projects with their worktrees as collapsible groups.
- * Bare repos expand to show worktrees; non-bare repos are single clickable rows.
+ * Every project can expand to show linked worktrees; a non-bare project's
+ * header remains the switch target for its root checkout.
  * Replaces the separate ProjectSidebar and WorktreeSidebar components.
  */
 import type { DragEndEvent, DragStartEvent, UniqueIdentifier } from "@dnd-kit/core";
@@ -90,8 +91,6 @@ const EMPTY_WORKTREES: WorktreeEntry[] = [];
 // ── Shared worktree removal hook ────────────────────────────────────────
 
 function useWorktreeRemoval(projectPath: string) {
-  const ps = useWorktreeStore((s) => s.byProject[projectPath]);
-  const hasWtConfig = ps?.hasWtConfig ?? false;
   const requestRemoveWorktree = useWorktreeStore((s) => s.requestRemoveWorktree);
   const confirmRemoveWorktree = useWorktreeStore((s) => s.confirmRemoveWorktree);
   const dismissPendingPlan = useWorktreeStore((s) => s.dismissPendingPlan);
@@ -104,7 +103,6 @@ function useWorktreeRemoval(projectPath: string) {
     position: { x: number; y: number };
     worktree: WorktreeEntry;
   } | null>(null);
-  const [removingWorktree, setRemovingWorktree] = useState<WorktreeEntry | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, wt: WorktreeEntry) => {
@@ -116,55 +114,36 @@ function useWorktreeRemoval(projectPath: string) {
     async (wt: WorktreeEntry) => {
       setContextMenu(null);
       setRemoveError(null);
-
-      if (hasWtConfig) {
-        try {
-          await requestRemoveWorktree(projectPath, wt);
-        } catch (err) {
-          setRemoveError(err instanceof Error ? err.message : "Failed to inspect worktree");
-        }
-      } else {
-        setRemovingWorktree(wt);
+      try {
+        await requestRemoveWorktree(projectPath, wt);
+      } catch (err) {
+        setRemoveError(err instanceof Error ? err.message : "Failed to inspect worktree");
       }
     },
-    [hasWtConfig, requestRemoveWorktree, projectPath],
+    [requestRemoveWorktree, projectPath],
   );
 
-  const handleSimpleRemoveConfirm = useCallback(async () => {
-    if (!removingWorktree) return;
-    setRemovingWorktree(null);
-    try {
-      await requestRemoveWorktree(projectPath, removingWorktree);
-    } catch (err) {
-      setRemoveError(err instanceof Error ? err.message : "Failed to remove worktree");
-    }
-  }, [removingWorktree, requestRemoveWorktree, projectPath]);
-
   const handlePlanRemoveConfirm = useCallback(
-    async (deleteBranch: boolean) => {
+    async (options: { deleteBranch: boolean; force: boolean }) => {
       setRemoveError(null);
       try {
-        const hasDirtyState = pendingRemovePlan?.status !== null;
-        await confirmRemoveWorktree({ deleteBranch, force: hasDirtyState });
+        await confirmRemoveWorktree(options);
       } catch (err) {
         setRemoveError(err instanceof Error ? err.message : "Failed to remove worktree");
       }
     },
-    [confirmRemoveWorktree, pendingRemovePlan],
+    [confirmRemoveWorktree],
   );
 
   return {
     contextMenu,
     setContextMenu,
-    removingWorktree,
-    setRemovingWorktree,
     removeError,
     setRemoveError,
     pendingRemovePlan,
     dismissPendingPlan,
     handleContextMenu,
     handleRemoveRequest,
-    handleSimpleRemoveConfirm,
     handlePlanRemoveConfirm,
   };
 }
@@ -190,18 +169,7 @@ function WorktreeRemoveDialogs({ removal }: { removal: ReturnType<typeof useWork
         </ContextMenu>
       )}
 
-      {/* Simple remove confirmation */}
-      <ConfirmDialog
-        open={removal.removingWorktree !== null}
-        title="Remove worktree"
-        description={`Remove worktree "${removal.removingWorktree ? worktreeName(removal.removingWorktree) : ""}"? This will delete the worktree directory.`}
-        confirmLabel="Remove"
-        destructive
-        onConfirm={removal.handleSimpleRemoveConfirm}
-        onCancel={() => removal.setRemovingWorktree(null)}
-      />
-
-      {/* Enhanced remove dialog (wt library plan) */}
+      {/* Remove dialog (wt library plan) */}
       {removal.pendingRemovePlan && (
         <RemoveWorktreeDialog
           plan={removal.pendingRemovePlan}
@@ -249,15 +217,14 @@ export function Sidebar() {
   const updateProject = useProjectStore((s) => s.updateProject);
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
-  const activeProject = useProjectStore((s) => deriveProject(activeWorktreePath, s.projects));
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
 
-  // Auto-expand bare projects that aren't already in the expanded set
+  // Auto-expand newly loaded projects so linked worktrees and the create action are visible.
   useEffect(() => {
     const { expandedProjectIds: expanded, toggleProjectExpanded: toggle } =
       useProjectStore.getState();
     const expandedSet = new Set(expanded);
-    const toExpand = projects.filter((p) => (p.isBare ?? false) && !expandedSet.has(p.id));
+    const toExpand = projects.filter((p) => !expandedSet.has(p.id));
     for (const p of toExpand) {
       toggle(p.id);
     }
@@ -345,21 +312,20 @@ export function Sidebar() {
     }
   }, [deletingProject, deleteProject]);
 
-  /** Click a project row: for non-bare repos switch to it; for bare repos toggle expand. */
+  /** Click a project row: regular repos switch to their root; bare repos toggle expansion. */
   const handleProjectClick = useCallback(
     (project: Project) => {
-      const isActive = project.id === activeProject?.id;
       const projectIsBare = project.isBare ?? false;
 
       if (projectIsBare) {
         // For bare repos: just toggle expand/collapse — user picks a worktree explicitly
         toggleProjectExpanded(project.id);
-      } else if (!isActive) {
+      } else if (activeWorktreePath !== project.path) {
         // Non-bare: switch to project path as the worktree
         switchWorktree(project.path);
       }
     },
-    [activeProject, switchWorktree, toggleProjectExpanded],
+    [activeWorktreePath, switchWorktree, toggleProjectExpanded],
   );
 
   return (
@@ -383,8 +349,7 @@ export function Sidebar() {
       {/* Project + worktree list */}
       <div className="flex-1 overflow-x-hidden overflow-y-auto">
         {projects.map((project) => {
-          const isActive = project.id === activeProject?.id;
-          const projectIsBare = project.isBare ?? false;
+          const isRootActive = activeWorktreePath === project.path;
           const isExpanded = expandedSet.has(project.id);
           const isRenaming = project.id === renamingId;
 
@@ -395,30 +360,26 @@ export function Sidebar() {
                 <div
                   className={cn(
                     "hover:bg-primary/50 group relative flex cursor-pointer items-center gap-2 px-2.5 py-1.5 transition-colors",
-                    isActive && !projectIsBare && "bg-primary",
+                    isRootActive && "bg-primary",
                   )}
                   style={{ paddingLeft: "8px" }}
                   onClick={() => !isRenaming && handleProjectClick(project)}
                   onContextMenu={(e) => handleProjectContextMenu(e, project)}
                 >
-                  {/* Expand/collapse chevron for bare repos, folder icon for non-bare */}
-                  {projectIsBare ? (
-                    <button
-                      className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleProjectExpanded(project.id);
-                      }}
-                    >
-                      {isExpanded ? (
-                        <ChevronDownIcon className="size-3.5" />
-                      ) : (
-                        <ChevronRightIcon className="size-3.5" />
-                      )}
-                    </button>
-                  ) : (
-                    <FileTypeIcon filename="folder" isFolder className="size-3.5 shrink-0" />
-                  )}
+                  <button
+                    className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleProjectExpanded(project.id);
+                    }}
+                    title={isExpanded ? "Collapse worktrees" : "Expand worktrees"}
+                  >
+                    {isExpanded ? (
+                      <ChevronDownIcon className="size-3.5" />
+                    ) : (
+                      <ChevronRightIcon className="size-3.5" />
+                    )}
+                  </button>
 
                   <ProjectIconWithBadge id={project.id} name={project.name} size="sm" />
 
@@ -449,8 +410,7 @@ export function Sidebar() {
                   </div>
                 </div>
 
-                {/* Worktree list for expanded bare repos */}
-                {projectIsBare && isExpanded && <WorktreeList project={project} />}
+                {isExpanded && <WorktreeList project={project} />}
               </div>
             );
           }
@@ -469,11 +429,11 @@ export function Sidebar() {
                     id={project.id}
                     name={project.name}
                     size="md"
-                    active={isActive && !projectIsBare}
+                    active={isRootActive}
                   />
                 </button>
               </div>
-              {projectIsBare && isExpanded && (
+              {isExpanded && (
                 <CollapsedWorktreeList project={project} activeWorktreePath={activeWorktreePath} />
               )}
             </div>
@@ -990,9 +950,9 @@ function WorktreeList({ project }: { project: Project }) {
       <WorktreeRemoveDialogs removal={removal} />
 
       {/* Branch conflict resolution dialog */}
-      {pendingAddPlan?.branchConflict?.kind === "exists-unused" && (
+      {pendingAddPlan?.branchConflict?.kind === "exists" && (
         <BranchConflictDialog
-          branchName={pendingAddPlan.branchConflict.branchName}
+          branchName={pendingAddPlan.branch}
           error={addError}
           onResolve={handleBranchConflictResolve}
           onCancel={() => {
@@ -1095,12 +1055,14 @@ function RemoveWorktreeDialog({
 }: {
   plan: NonNullable<ReturnType<typeof useWorktreeStore.getState>["pendingRemovePlan"]>;
   error: string | null;
-  onConfirm: (deleteBranch: boolean) => void;
+  onConfirm: (options: { deleteBranch: boolean; force: boolean }) => void;
   onCancel: () => void;
 }) {
-  const status = plan.status;
-  const canDeleteBranch = plan.branchDeletionApplicable && plan.branch;
-  const showBranchInfo = canDeleteBranch && plan.branch !== plan.name;
+  const [deleteBranch, setDeleteBranch] = useState(false);
+  const [force, setForce] = useState(false);
+
+  const branch = plan.branch;
+  const blocked = plan.dirty && !force;
 
   return (
     <DialogShell open onCancel={onCancel} className="w-96">
@@ -1109,48 +1071,54 @@ function RemoveWorktreeDialog({
         <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
           Delete worktree{" "}
           <span className="text-foreground font-medium break-words">{plan.name}</span>?
-          {showBranchInfo && (
+          {branch && (
             <>
               <br />
-              Current branch:{" "}
-              <span className="text-foreground font-medium break-words">{plan.branch}</span>
+              Branch: <span className="text-foreground font-medium break-words">{branch}</span>
             </>
           )}
         </p>
 
-        {status && (
+        {plan.isMain && (
           <div className="border-warning/20 bg-warning/5 mt-3 rounded-md border p-2.5">
             <p className="text-warning text-[11px] font-medium">
-              This worktree has local changes that will be lost:
+              This is the repository&rsquo;s main worktree.
             </p>
-            <ul className="text-muted-foreground mt-1.5 space-y-0.5 text-[10px]">
-              {status.untrackedFiles.length > 0 && (
-                <li>
-                  {status.untrackedFiles.length} untracked file
-                  {status.untrackedFiles.length === 1 ? "" : "s"}
-                </li>
-              )}
-              {status.stagedCount > 0 && (
-                <li>
-                  {status.stagedCount} staged change{status.stagedCount === 1 ? "" : "s"}
-                </li>
-              )}
-              {status.unstagedCount > 0 && (
-                <li>
-                  {status.unstagedCount} modified file{status.unstagedCount === 1 ? "" : "s"}
-                </li>
-              )}
-              {status.aheadCount === null && plan.branch && (
-                <li>Branch &ldquo;{plan.branch}&rdquo; has never been pushed</li>
-              )}
-              {status.aheadCount !== null && status.aheadCount > 0 && (
-                <li>
-                  {status.aheadCount} unpushed commit{status.aheadCount === 1 ? "" : "s"}
-                </li>
-              )}
-            </ul>
           </div>
         )}
+
+        {plan.dirty && (
+          <div className="border-warning/20 bg-warning/5 mt-3 rounded-md border p-2.5">
+            <p className="text-warning text-[11px] font-medium">
+              This worktree has uncommitted or untracked files. They will be lost.
+            </p>
+          </div>
+        )}
+
+        <div className="mt-3 flex flex-col gap-1.5">
+          {plan.dirty && (
+            <label className="text-muted-foreground flex items-center gap-2 text-[11px]">
+              <input
+                type="checkbox"
+                checked={force}
+                onChange={(e) => setForce(e.target.checked)}
+                className="accent-destructive size-3"
+              />
+              Discard local changes (force remove)
+            </label>
+          )}
+          {branch && (
+            <label className="text-muted-foreground flex items-center gap-2 text-[11px]">
+              <input
+                type="checkbox"
+                checked={deleteBranch}
+                onChange={(e) => setDeleteBranch(e.target.checked)}
+                className="accent-destructive size-3"
+              />
+              Also delete branch &ldquo;{branch}&rdquo;
+            </label>
+          )}
+        </div>
 
         {error && <div className="text-destructive mt-2 text-[10px]">{error}</div>}
       </div>
@@ -1160,20 +1128,11 @@ function RemoveWorktreeDialog({
           variant="destructive-outline"
           size="xs"
           className="w-full"
-          onClick={() => onConfirm(false)}
+          disabled={blocked}
+          onClick={() => onConfirm({ deleteBranch, force })}
         >
-          Delete worktree only
+          {deleteBranch ? "Remove worktree and branch" : "Remove worktree"}
         </Button>
-        {canDeleteBranch && (
-          <Button
-            variant="destructive-outline"
-            size="xs"
-            className="w-full"
-            onClick={() => onConfirm(true)}
-          >
-            Delete worktree and branch
-          </Button>
-        )}
         <Button variant="outline" size="xs" className="w-full" onClick={onCancel}>
           Cancel
         </Button>

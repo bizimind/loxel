@@ -1,42 +1,51 @@
 import { createResult, formatTable, runAction } from "@bizimind/cli-common";
 
-import { getWorktreesDir, resolveConfig } from "../config/loader.ts";
-import type { ListResult } from "../types.ts";
-import { listWorktrees } from "../worktree/git.ts";
-import { getWorktreeName } from "../worktree/select.ts";
-import { StateManager } from "../worktree/state.ts";
+import {
+  canonicalWorktreesDir,
+  DETACHED,
+  getWorktreeName,
+  listWorktrees,
+  resolveRepoRoot,
+} from "../git/index.ts";
 
 interface ListOptions {
   json?: boolean;
-  repoPath?: string;
 }
 
-/**
- * List all worktrees with their status.
- */
+interface ListedWorktree {
+  name: string;
+  path: string;
+  branch: string;
+  /** HEAD commit hash */
+  head: string;
+  /** The main worktree (or the bare repo's own entry) */
+  main: boolean;
+  /** Whether the worktree is locked */
+  locked: boolean;
+}
+
+export interface ListResult {
+  worktrees: ListedWorktree[];
+}
+
+/** List every worktree git knows about. */
 export async function listCommand(options: ListOptions = {}): Promise<void> {
   await runAction<ListResult>(options, async () => {
-    const { config, rootDir } = await resolveConfig(options.repoPath);
-    const worktreesDir = getWorktreesDir({ config, rootDir, configPath: "" });
-
-    const worktrees = await listWorktrees(rootDir);
-    const state = new StateManager(rootDir);
-    const stateData = await state.getAll();
-
-    // Filter to only show worktrees in our managed directory (exclude bare repo)
-    const managedWorktrees = worktrees.filter((wt) => !wt.bare && wt.path.startsWith(worktreesDir));
+    const root = await resolveRepoRoot(process.cwd());
+    const dir = await canonicalWorktreesDir(root);
+    const worktrees = await listWorktrees(root);
 
     const result: ListResult = {
-      worktrees: managedWorktrees.map((wt) => {
-        const name = getWorktreeName(wt.path, worktreesDir);
-        const index = stateData[name];
-        return {
-          name,
+      worktrees: worktrees
+        .filter((wt) => !wt.bare)
+        .map((wt) => ({
+          name: getWorktreeName(wt.path, dir),
           path: wt.path,
-          branch: wt.branch ?? "(detached)",
-          portOffset: index === undefined ? 0 : index * config.port_offseting.offset,
-        };
-      }),
+          branch: wt.branch ?? DETACHED,
+          head: wt.head,
+          main: wt.path === root,
+          locked: wt.locked,
+        })),
     };
 
     return createResult(result, formatListResult);
@@ -48,13 +57,18 @@ function formatListResult(result: ListResult): string {
     return "No worktrees found.\n\nCreate one with: wt add <name>";
   }
 
-  return (
-    "Worktrees:\n\n" +
-    formatTable(result.worktrees, [
-      { key: "name", label: "Name" },
-      { key: "branch", label: "Branch" },
-      { key: "path", label: "Path" },
-      { key: "portOffset", label: "Offset", align: "right" },
-    ])
-  );
+  const rows = result.worktrees.map((wt) => ({
+    name: wt.name,
+    branch: wt.branch,
+    path: wt.main ? `${wt.path} *` : wt.path,
+  }));
+
+  const table = formatTable(rows, [
+    { key: "name", label: "Name" },
+    { key: "branch", label: "Branch" },
+    { key: "path", label: "Path" },
+  ]);
+
+  // A bare repo has no main worktree, so the legend would explain nothing.
+  return result.worktrees.some((wt) => wt.main) ? `${table}\n\n* main worktree` : table;
 }

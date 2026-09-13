@@ -24,7 +24,7 @@ Loxel is built around these needs.
 The primary workflow: manage multiple repositories and worktrees from a single window, switching between them instantly.
 
 - **Project sidebar** — add and switch between git repositories
-- **Worktree sidebar** — view and switch between worktrees within bare repos
+- **Worktree sidebar** — view and switch between worktrees, in bare and regular repos alike (managed by `wt`, under `.worktrees/`)
 - **Per-context layouts** — each project + worktree combination remembers its own panel layout, so switching back restores exactly where you left off
 - **Cross-worktree awareness** — see dirty status across all worktrees of the same repo at a glance
 - **Shared review database** — code review comments are stored per-repo (keyed by git's common dir), so reviews are visible from any worktree

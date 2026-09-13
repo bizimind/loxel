@@ -1,78 +1,82 @@
-import {
-  createResult,
-  formatKeyValue,
-  formatSection,
-  formatSections,
-  runAction,
-} from "@bizimind/cli-common";
+import { createResult, formatKeyValue, runAction } from "@bizimind/cli-common";
 
-import type { ViewResult } from "../types.ts";
-import { computeAllEnvVars } from "../worktree/env.ts";
-import { isSynced } from "../worktree/git.ts";
-import { loadWorktreeContext, selectWorktree } from "../worktree/select.ts";
-import { StateManager } from "../worktree/state.ts";
+import {
+  canonicalWorktreesDir,
+  DETACHED,
+  findWorktree,
+  listWorktrees,
+  resolveRepoRoot,
+  upstreamDivergence,
+  worktreeChanges,
+} from "../git/index.ts";
+import { resolveWorktreeName } from "./select.ts";
 
 interface ViewOptions {
   json?: boolean;
-  repoPath?: string;
 }
 
-/**
- * View detailed information about a worktree.
- */
+export interface ViewResult {
+  name: string;
+  path: string;
+  branch: string;
+  head: string;
+  main: boolean;
+  /** Whether the worktree is locked */
+  locked: boolean;
+  /** Number of uncommitted or untracked files */
+  dirty: number;
+  /** Commits ahead of upstream, or null when there is no upstream */
+  ahead: number | null;
+  /** Commits behind upstream, or null when there is no upstream */
+  behind: number | null;
+}
+
+/** Show one worktree's details. */
 export async function viewCommand(name?: string, options: ViewOptions = {}): Promise<void> {
   await runAction<ViewResult>(options, async () => {
-    const wtCtx = await loadWorktreeContext({ repoPath: options.repoPath });
+    const repoPath = process.cwd();
+    const selected = await resolveWorktreeName(name, "view", repoPath);
 
-    const { worktree, name: selectedName } = await selectWorktree(wtCtx, name, {
-      promptMessage: "Select a worktree to view:",
-      nonInteractiveUsage: "Usage: wt view <name>",
-    });
+    const root = await resolveRepoRoot(repoPath);
+    const dir = await canonicalWorktreesDir(root);
+    const worktree = findWorktree(await listWorktrees(root), dir, selected);
+    if (!worktree) {
+      throw new Error(`Worktree '${selected}' not found.`);
+    }
 
-    const result = await buildViewResult(wtCtx, worktree, selectedName);
+    const [changes, divergence] = await Promise.all([
+      worktreeChanges(worktree.path),
+      upstreamDivergence(worktree.path),
+    ]);
+
+    const result: ViewResult = {
+      name: selected,
+      path: worktree.path,
+      branch: worktree.branch ?? DETACHED,
+      head: worktree.head.slice(0, 12),
+      main: worktree.path === root,
+      locked: worktree.locked,
+      dirty: changes.length,
+      ahead: divergence?.ahead ?? null,
+      behind: divergence?.behind ?? null,
+    };
+
     return createResult(result, formatViewResult);
   });
 }
 
-async function buildViewResult(
-  wtCtx: Awaited<ReturnType<typeof loadWorktreeContext>>,
-  worktree: Awaited<ReturnType<typeof selectWorktree>>["worktree"],
-  name: string,
-): Promise<ViewResult> {
-  const state = new StateManager(wtCtx.rootDir);
-  const index = (await state.getIndex(name)) ?? 0;
-  const env = computeAllEnvVars(name, worktree.path, wtCtx.rootDir, index, wtCtx.config);
-  const synced = await isSynced(worktree.path);
-
-  return {
-    name,
-    path: worktree.path,
-    branch: worktree.branch ?? "(detached)",
-    head: worktree.head.slice(0, 7),
-    portOffset: index * wtCtx.config.port_offseting.offset,
-    synced,
-    env,
-  };
-}
-
 function formatViewResult(result: ViewResult): string {
-  const info = formatKeyValue({
+  const info: Record<string, string | number> = {
     branch: result.branch,
     head: result.head,
     path: result.path,
-    offset: result.portOffset,
-    synced: result.synced ? "Yes" : "No",
-  });
+    main: result.main ? "yes" : "no",
+    locked: result.locked ? "yes" : "no",
+    dirty: `${result.dirty} change(s)`,
+  };
+  if (result.ahead !== null && result.behind !== null) {
+    info.upstream = `+${result.ahead} / -${result.behind}`;
+  }
 
-  const envSection =
-    Object.keys(result.env).length > 0
-      ? formatSection(
-          "Environment",
-          Object.entries(result.env)
-            .map(([k, v]) => `${k}=${v}`)
-            .join("\n"),
-        )
-      : null;
-
-  return formatSections(`Worktree: ${result.name}\n\n${info}`, envSection);
+  return `Worktree: ${result.name}\n\n${formatKeyValue(info)}`;
 }

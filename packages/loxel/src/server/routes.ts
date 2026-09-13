@@ -1,14 +1,14 @@
-import { accessSync, constants, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
+  assertCanTransformToBare,
   planAdd,
   executeAdd,
   planRemove,
   executeRemove,
-  WT_CONFIG_JSON_SCHEMA,
   getWorktreeName,
   listManagedWorktrees,
   detectRepoType,
@@ -17,7 +17,6 @@ import {
   initBareRepo,
   transformToBare,
   ensureWorktreesDir,
-  writeWtYaml,
   type AddPlan,
   type ProgressHandler,
   type RemovePlan,
@@ -42,6 +41,7 @@ import { isHttpUrl } from "@/url-utils";
 
 import { config } from "./config";
 import { getDiagnostics } from "./diagnostics";
+import { describeError } from "./error-message";
 import * as git from "./git-commands";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
@@ -50,7 +50,7 @@ import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import { decrypt, encrypt, isEncrypted } from "./secret-store";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
-import { buildSpawnEnv } from "./shell-env";
+import { buildHookEnv, buildSpawnEnv } from "./shell-env";
 import * as storeDb from "./store-db";
 import { stress } from "./stress-detector";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
@@ -1463,6 +1463,28 @@ function parseStringArray(body: Record<string, unknown>, field: string): string[
   return value.filter((v): v is string => typeof v === "string");
 }
 
+export function validateCopyFiles(copyFiles: string[]): void {
+  for (const file of copyFiles) {
+    const segments = file.split(/[\\/]/);
+    if (
+      !file ||
+      isAbsolute(file) ||
+      segments.some((segment) => segment === "" || segment === "." || segment === "..")
+    ) {
+      throw new Error(`Copy file must be a relative path without traversal: ${file}`);
+    }
+  }
+}
+
+function copyFilesValidationResponse(copyFiles: string[]): Response | null {
+  try {
+    validateCopyFiles(copyFiles);
+    return null;
+  } catch (err) {
+    return error(describeError(err, "Invalid copy file"), 400);
+  }
+}
+
 function validateCloneUrl(url: string): void {
   if (url.startsWith("-")) {
     throw new Error("Invalid clone URL");
@@ -1495,12 +1517,10 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
     const repoType = await detectRepoType(dirPath);
 
     if (repoType === "bare") {
-      const hasWtConf = existsSync(join(dirPath, "wt.yaml"));
       const result: DetectPathResult = {
         type: "git-repo-bare",
         path: dirPath,
         name: basename(dirPath).replace(/\.git$/, ""),
-        hasWtConfig: hasWtConf,
       };
       return json(result);
     }
@@ -1595,6 +1615,8 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   const setup = requireSetup(body);
   const copyFiles = parseStringArray(body, "copyFiles");
   const setupCommands = parseStringArray(body, "setupCommands");
+  const copyFilesError = copyFilesValidationResponse(copyFiles);
+  if (copyFilesError) return copyFilesError;
 
   if (name.includes("/") || name.includes("\\") || name === ".." || name === ".") {
     return error("Invalid project name", 400);
@@ -1614,17 +1636,16 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   } else {
     await initBareRepo(projectDir, "main");
     await createInitialCommit(projectDir);
-    await writeWtYaml(projectDir, { baseBranch: "main", worktreesDir: ".worktrees" });
     await ensureWorktreesDir(projectDir, ".worktrees");
+    await writeInitHook(projectDir, copyFiles, setupCommands);
 
-    if (copyFiles.length > 0 || setupCommands.length > 0) {
-      await writeWtHooksConfig(projectDir, copyFiles, setupCommands);
-    }
-
-    const wtPath = join(projectDir, ".worktrees", "main");
-    const wtResult = Bun.spawnSync(["git", "-C", projectDir, "worktree", "add", wtPath, "main"]);
-    if (wtResult.exitCode !== 0) {
-      return error(`Failed to create initial worktree: ${wtResult.stderr.toString()}`, 500);
+    try {
+      await executeAdd(
+        { name: "main", branch: "main", repoPath: projectDir, hookEnv: buildHookEnv() },
+        wtProgress,
+      );
+    } catch (err) {
+      return error(describeError(err, "Failed to create initial worktree"), 500);
     }
   }
 
@@ -1648,6 +1669,8 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   const setup = requireSetup(body);
   const copyFiles = parseStringArray(body, "copyFiles");
   const setupCommands = parseStringArray(body, "setupCommands");
+  const copyFilesError = copyFilesValidationResponse(copyFiles);
+  if (copyFilesError) return copyFilesError;
 
   validateCloneUrl(url);
   const destDir = expandTilde(destination);
@@ -1691,21 +1714,11 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
     // default to main
   }
 
-  await writeWtYaml(bareDir, { baseBranch, worktreesDir: ".worktrees" });
   await ensureWorktreesDir(bareDir, ".worktrees");
-
-  if (copyFiles.length > 0 || setupCommands.length > 0) {
-    await writeWtHooksConfig(bareDir, copyFiles, setupCommands);
-  }
+  await writeInitHook(bareDir, copyFiles, setupCommands);
 
   await executeAdd(
-    {
-      name: baseBranch,
-      branch: baseBranch,
-      open: false,
-      repoPath: bareDir,
-      hookEnv: buildSpawnEnv(),
-    },
+    { name: baseBranch, branch: baseBranch, repoPath: bareDir, hookEnv: buildHookEnv() },
     wtProgress,
   );
 
@@ -1728,6 +1741,8 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
   const setup = requireSetup(body);
   const copyFiles = parseStringArray(body, "copyFiles");
   const setupCommands = parseStringArray(body, "setupCommands");
+  const copyFilesError = copyFilesValidationResponse(copyFiles);
+  if (copyFilesError) return copyFilesError;
 
   const dirPath = expandTilde(path);
 
@@ -1756,24 +1771,24 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
       if (commitResult.exitCode !== 0) {
         return error(`git commit failed: ${commitResult.stderr.toString()}`, 500);
       }
-      const worktreesDir = ".worktrees";
-      await transformToBare(dirPath, "main", worktreesDir);
-      await writeWtYaml(dirPath, { baseBranch: "main", worktreesDir });
+      await transformToBare(dirPath, "main", ".worktrees");
     } else {
       await initBareRepo(dirPath, "main");
       await createInitialCommit(dirPath);
-      await writeWtYaml(dirPath, { baseBranch: "main", worktreesDir: ".worktrees" });
       await ensureWorktreesDir(dirPath, ".worktrees");
-
-      const wtPath = join(dirPath, ".worktrees", "main");
-      const wtResult = Bun.spawnSync(["git", "-C", dirPath, "worktree", "add", wtPath, "main"]);
-      if (wtResult.exitCode !== 0) {
-        return error(`Failed to create initial worktree: ${wtResult.stderr.toString()}`, 500);
-      }
     }
 
-    if (copyFiles.length > 0 || setupCommands.length > 0) {
-      await writeWtHooksConfig(dirPath, copyFiles, setupCommands);
+    await writeInitHook(dirPath, copyFiles, setupCommands);
+
+    if (!existsSync(join(dirPath, ".worktrees", "main"))) {
+      try {
+        await executeAdd(
+          { name: "main", branch: "main", repoPath: dirPath, hookEnv: buildHookEnv() },
+          wtProgress,
+        );
+      } catch (err) {
+        return error(describeError(err, "Failed to create initial worktree"), 500);
+      }
     }
   }
 
@@ -1794,6 +1809,8 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   const path = requireString(body, "path");
   const copyFiles = parseStringArray(body, "copyFiles");
   const setupCommands = parseStringArray(body, "setupCommands");
+  const copyFilesError = copyFilesValidationResponse(copyFiles);
+  if (copyFilesError) return copyFilesError;
 
   const dirPath = expandTilde(path);
 
@@ -1802,31 +1819,44 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
     return error("Path is not a regular git repository", 400);
   }
 
-  if (existsSync(join(dirPath, "wt.yaml"))) {
-    return error("Repository already has a wt.yaml configuration", 400);
-  }
-
   const dirty = await hasUncommittedChanges(dirPath);
   if (dirty) {
     return error("Repository has uncommitted changes. Commit or stash them first.", 400);
   }
 
-  // Teardown any existing project state before conversion
-  ctx.teardownProject(dirPath);
-
   let currentBranch: string;
   try {
     currentBranch = await getCurrentBranch(dirPath);
   } catch {
-    currentBranch = "main";
+    return error(
+      "Cannot convert a repository while HEAD is detached. Check out a branch first.",
+      400,
+    );
   }
 
-  const worktreesDir = ".worktrees";
-  await transformToBare(dirPath, currentBranch, worktreesDir);
-  await writeWtYaml(dirPath, { baseBranch: currentBranch, worktreesDir });
+  try {
+    await assertCanTransformToBare(dirPath, currentBranch, ".worktrees");
+  } catch (err) {
+    return error(describeError(err, "Repository cannot be converted"), 400);
+  }
 
-  if (copyFiles.length > 0 || setupCommands.length > 0) {
-    await writeWtHooksConfig(dirPath, copyFiles, setupCommands);
+  // Teardown only after every non-mutating conversion preflight has passed.
+  ctx.teardownProject(dirPath);
+
+  try {
+    await transformToBare(dirPath, currentBranch, ".worktrees");
+    await writeInitHook(dirPath, copyFiles, setupCommands);
+  } catch (err) {
+    try {
+      await ctx.initializeProject(dirPath);
+    } catch (restoreError) {
+      wtLog.error("Failed to restore project after conversion failure", {
+        error: restoreError,
+        conversionError: describeError(err, "Repository conversion failed"),
+        projectPath: dirPath,
+      });
+    }
+    return error(describeError(err, "Failed to convert repository"), 500);
   }
 
   // Re-add and re-initialize the project
@@ -1841,48 +1871,64 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   return json(project);
 }
 
-/** Write hooks config (copy files + setup commands) into an existing wt.yaml. */
-async function writeWtHooksConfig(
+/** Name of the wt add hook script, run in each new worktree. */
+const INIT_HOOK_NAME = "init.wt.sh";
+/** Repo-root directory holding local-only files copied into new worktrees. */
+const LOCAL_RES_DIR = ".wt-local-res";
+
+/** Quote a value for safe interpolation into the generated bash hook. */
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/**
+ * Write the repo-root `init.wt.sh` hook that bootstraps every new worktree:
+ * copies local-only files from `.wt-local-res` and runs the setup commands.
+ * No-op when there is nothing to do.
+ */
+export async function writeInitHook(
   repoDir: string,
   copyFiles: string[],
   setupCommands: string[],
 ): Promise<void> {
-  const configPath = join(repoDir, "wt.yaml");
-  if (!existsSync(configPath)) return;
+  const commands = setupCommands.map((cmd) => cmd.replaceAll("\n", " ").trim()).filter(Boolean);
+  if (copyFiles.length === 0 && commands.length === 0) return;
 
-  let content = await Bun.file(configPath).text();
+  validateCopyFiles(copyFiles);
 
-  const hooksLines: string[] = ["hooks:", "  add:"];
+  const lines = [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "# Generated by loxel. Runs in the new worktree after `wt add`.",
+    "# $WT_ROOT is the repo root; local-only files live there.",
+  ];
+
   if (copyFiles.length > 0) {
-    hooksLines.push("    files:");
-    for (const f of copyFiles) {
-      hooksLines.push(`      - '${f.replaceAll("'", "''")}'`);
-    }
-
-    // Create copy_source directory and empty placeholder files
-    const copySourceDir = join(repoDir, ".wt-local-res");
-    mkdirSync(copySourceDir, { recursive: true });
-    for (const f of copyFiles) {
-      const filePath = join(copySourceDir, f);
+    // Seed placeholders so the user has an obvious place to put the real files.
+    const localResDir = join(repoDir, LOCAL_RES_DIR);
+    mkdirSync(localResDir, { recursive: true });
+    for (const file of copyFiles) {
+      const filePath = join(localResDir, file);
       mkdirSync(join(filePath, ".."), { recursive: true });
-      if (!existsSync(filePath)) {
-        await Bun.write(filePath, "");
-      }
+      if (!existsSync(filePath)) await Bun.write(filePath, "");
     }
-  }
-  if (setupCommands.length > 0) {
-    const sanitized = setupCommands.map((cmd) => cmd.replaceAll("\n", " ").trim()).filter(Boolean);
-    if (sanitized.length > 0) {
-      hooksLines.push("    run: |");
-      for (const cmd of sanitized) {
-        hooksLines.push(`      ${cmd}`);
-      }
+
+    lines.push("");
+    for (const file of copyFiles) {
+      const quoted = shellQuote(file);
+      lines.push(`mkdir -p "$(dirname ${quoted})"`);
+      lines.push(`cp -R "$WT_ROOT/${LOCAL_RES_DIR}/"${quoted} ${quoted}`);
     }
   }
 
-  // Append hooks config to the YAML
-  content += "\n" + hooksLines.join("\n") + "\n";
-  await Bun.write(configPath, content);
+  if (commands.length > 0) {
+    lines.push("");
+    lines.push(...commands);
+  }
+
+  const hookPath = join(repoDir, INIT_HOOK_NAME);
+  await Bun.write(hookPath, `${lines.join("\n")}\n`);
+  chmodSync(hookPath, 0o755);
 }
 
 // GET /api/projects
@@ -1892,23 +1938,10 @@ async function handleGetProjects(_req: Request, ctx: RouteContext): Promise<Resp
     data.projects.map(async (p) => {
       const project = ctx.getProject(p.path);
       if (!project) {
-        return {
-          ...p,
-          worktrees: [],
-          hasWtConfig: false,
-          wtCliAvailable: false,
-          worktreesDir: null,
-        };
+        return { ...p, worktrees: [], worktreesDir: null };
       }
-      const worktrees = project.isBare ? await listProjectWorktrees(project.cwd) : [];
-      return {
-        ...p,
-        isBare: project.isBare,
-        hasWtConfig: project.hasWtConfig,
-        wtCliAvailable: project.wtCliAvailable,
-        worktreesDir: project.worktreesDir,
-        worktrees,
-      };
+      const worktrees = await listProjectWorktrees(project.cwd);
+      return { ...p, isBare: project.isBare, worktreesDir: project.worktreesDir, worktrees };
     }),
   );
   return json({ projects: enriched });
@@ -1998,44 +2031,37 @@ async function handleDeleteProjectFromDisk(
   return json({ success: true });
 }
 
-/** List worktrees for a bare project (wt-managed or plain git). */
-async function listProjectWorktrees(projectPath: string): Promise<WorktreeEntryResponse[]> {
-  const wtConfigPath = join(projectPath, "wt.yaml");
-  if (existsSync(wtConfigPath)) {
-    const managed = await listManagedWorktrees(projectPath);
-    return Promise.all(
-      managed.map(async (wt) => {
-        const createdAt = await statCreatedAt(wt.path);
-        return {
-          path: wt.path,
-          branch: wt.branch,
-          commit: wt.head,
-          isMain: false,
-          createdAt,
-          wtName: wt.name,
-        };
-      }),
-    );
-  }
-  const allWorktrees = await git.getWorktrees(projectPath);
-  return allWorktrees.filter((wt) => !basename(wt.path).startsWith(INTERNAL_WORKTREE_PREFIX));
+/** List wt-managed worktrees for a project (bare or regular). */
+export async function listProjectWorktrees(projectPath: string): Promise<WorktreeEntryResponse[]> {
+  const managed = await listManagedWorktrees(projectPath);
+  return Promise.all(
+    managed
+      .filter((wt) => !basename(wt.path).startsWith(INTERNAL_WORKTREE_PREFIX))
+      .map(async (wt) => ({
+        path: wt.path,
+        branch: wt.branch,
+        commit: wt.head,
+        isMain: false,
+        createdAt: await statCreatedAt(wt.path),
+        wtName: wt.name,
+      })),
+  );
 }
 
 // GET /api/projects/:id/worktrees
-async function handleProjectWorktrees(projectPath: string, isBare: boolean): Promise<Response> {
-  if (!isBare) return json({ worktrees: [] });
+async function handleProjectWorktrees(projectPath: string): Promise<Response> {
   const worktrees = await listProjectWorktrees(projectPath);
   return json({ worktrees });
 }
 
-/** Shape returned by GET /api/projects/:id/worktrees — WorktreeEntry with optional wtName. */
+/** Shape returned by GET /api/projects/:id/worktrees — WorktreeEntry with a wt name. */
 interface WorktreeEntryResponse {
   path: string;
   branch: string | null;
   commit: string;
   isMain: boolean;
   createdAt: string | null;
-  wtName?: string;
+  wtName: string;
 }
 
 async function statCreatedAt(dirPath: string): Promise<string | null> {
@@ -2057,14 +2083,13 @@ async function handlePlanAddWorktree(req: Request, ctx: RouteContext): Promise<R
   const projectPath = requireString(body, "projectPath");
   const project = ctx.getProject(projectPath);
   if (!project) return error("Project not found", 404);
-  if (!project.hasWtConfig) return error("No wt.yaml config found", 400);
   const name = requireString(body, "name");
 
   try {
     const plan: AddPlan = await planAdd({ name, repoPath: project.cwd });
     return json(plan);
   } catch (err) {
-    return error(err instanceof Error ? err.message : "planAdd failed");
+    return error(describeError(err, "Failed to plan worktree creation"));
   }
 }
 
@@ -2081,44 +2106,19 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
       ? body.branchResolution
       : undefined;
 
-  if (project.hasWtConfig) {
-    // Use wt library directly
-    wtLog.info(`Creating worktree '${name}'`, { branch, branchResolution });
-    try {
-      const result = await executeAdd(
-        {
-          name,
-          branch,
-          branchResolution,
-          open: false,
-          repoPath: project.cwd,
-          hookEnv: buildSpawnEnv(),
-        },
-        wtProgress,
-      );
-      wtLog.info(`Worktree '${name}' created`, {
-        path: result.path,
-        portOffset: result.portOffset,
-      });
-      ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
-      return json(result);
-    } catch (err) {
-      wtLog.error(`Failed to create worktree '${name}'`, { error: err });
-      return error(err instanceof Error ? err.message : "executeAdd failed");
-    }
-  } else {
-    // Use plain git
-    const worktreesDir = join(project.cwd, ".worktrees");
-    const wtPath = join(worktreesDir, name);
-    if (branch) {
-      await Bun.$`git -C ${project.cwd} worktree add -b ${name} ${wtPath} ${branch}`;
-    } else {
-      await Bun.$`git -C ${project.cwd} worktree add -b ${name} ${wtPath}`;
-    }
+  wtLog.info(`Creating worktree '${name}'`, { branch, branchResolution });
+  try {
+    const result = await executeAdd(
+      { name, branch, branchResolution, repoPath: project.cwd, hookEnv: buildHookEnv() },
+      wtProgress,
+    );
+    wtLog.info(`Worktree '${name}' created`, { path: result.path, branch: result.branch });
+    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    return json(result);
+  } catch (err) {
+    wtLog.error(`Failed to create worktree '${name}'`, { error: err });
+    return error(describeError(err, "Failed to create worktree"));
   }
-
-  ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
-  return json({ success: true });
 }
 
 // POST /api/worktree/plan-remove
@@ -2127,18 +2127,19 @@ async function handlePlanRemoveWorktree(req: Request, ctx: RouteContext): Promis
   const projectPath = requireString(body, "projectPath");
   const project = ctx.getProject(projectPath);
   if (!project) return error("Project not found", 404);
-  if (!project.hasWtConfig || !project.worktreesDir) {
-    return error("No wt.yaml config found", 400);
-  }
   // Client sends the worktree path — extract the wt directory name relative to worktreesDir
   const wtPath = requireString(body, "path");
+  await git.validateWorktreePath(wtPath, project.cwd);
   const name = getWorktreeName(wtPath, project.worktreesDir);
 
   try {
     const plan: RemovePlan = await planRemove({ name, repoPath: project.cwd });
+    if (resolve(plan.worktreePath) !== resolve(wtPath)) {
+      return error("Worktree path did not resolve to the requested worktree", 400);
+    }
     return json(plan);
   } catch (err) {
-    return error(err instanceof Error ? err.message : "planRemove failed");
+    return error(describeError(err, "Failed to inspect worktree"));
   }
 }
 
@@ -2149,44 +2150,32 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
   const project = ctx.getProject(projectPath);
   if (!project) return error("Project not found", 404);
 
-  if (project.hasWtConfig && project.worktreesDir) {
-    // Use wt library directly — client sends the worktree path
-    const wtPath = requireString(body, "path");
-    const name = getWorktreeName(wtPath, project.worktreesDir);
-    const deleteBranch = typeof body.deleteBranch === "boolean" ? body.deleteBranch : false;
-    const force = typeof body.force === "boolean" ? body.force : false;
+  const wtPath = requireString(body, "path");
+  await git.validateWorktreePath(wtPath, project.cwd);
+  const name = getWorktreeName(wtPath, project.worktreesDir);
+  const deleteBranch = typeof body.deleteBranch === "boolean" ? body.deleteBranch : false;
+  const force = typeof body.force === "boolean" ? body.force : false;
 
-    wtLog.info(`Removing worktree '${name}'`, { deleteBranch, force });
-    try {
-      const result = await executeRemove(
-        { name, deleteBranch, force, repoPath: project.cwd, hookEnv: buildSpawnEnv() },
-        wtProgress,
-      );
-      wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
-      ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
-      return json(result);
-    } catch (err) {
-      wtLog.error(`Failed to remove worktree '${name}'`, { error: err });
-      return error(err instanceof Error ? err.message : "executeRemove failed");
-    }
-  } else {
-    // Fallback: plain git — uses path-based API
-    const wtPath = requireString(body, "path");
-    const force = typeof body.force === "boolean" ? body.force : false;
-
-    await git.validateWorktreePath(wtPath, project.cwd);
-
-    const args = ["git", "-C", project.cwd, "worktree", "remove", wtPath];
-    if (force) args.push("--force");
-    const result = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" });
-    if (result.exitCode !== 0) {
-      const stderr = new TextDecoder().decode(result.stderr);
-      return error(`git worktree remove failed: ${stderr.trim()}`);
-    }
+  wtLog.info(`Removing worktree '${name}'`, { deleteBranch, force });
+  try {
+    const result = await executeRemove(
+      {
+        name,
+        deleteBranch,
+        force,
+        repoPath: project.cwd,
+        expectedPath: wtPath,
+        hookEnv: buildHookEnv(),
+      },
+      wtProgress,
+    );
+    wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
+    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    return json(result);
+  } catch (err) {
+    wtLog.error(`Failed to remove worktree '${name}'`, { error: err });
+    return error(describeError(err, "Failed to remove worktree"));
   }
-
-  ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
-  return json({ success: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -2262,28 +2251,26 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
   if (!Array.isArray(schemas)) return error("schemas must be an array");
 
   const yamlMap: Record<string, string[]> = {};
-  const wtSchemaUrl = `http://127.0.0.1:${config.port}/api/wt-json-schema`;
 
   // Collect JSON schemas to resolve and build YAML map in a single pass
-  const jsonToResolve: { glob: string; resolvedUrl: string }[] = [];
+  const jsonToResolve: { glob: string; url: string }[] = [];
 
   for (const entry of schemas) {
     if (typeof entry !== "object" || entry === null) continue;
     const { glob, url } = entry as { glob?: string; url?: string };
     if (typeof glob !== "string" || typeof url !== "string") continue;
 
-    const resolvedUrl = url === "__builtin:wt-json-schema__" ? wtSchemaUrl : url;
     const classification = classifyGlob(glob);
 
     if (classification.json) {
-      jsonToResolve.push({ glob, resolvedUrl });
+      jsonToResolve.push({ glob, url });
     }
 
     if (classification.yaml) {
       // Convert local file paths to file:// URLs for yaml-language-server
-      let yamlSchemaUrl = resolvedUrl;
-      if (!resolvedUrl.startsWith("http://") && !resolvedUrl.startsWith("https://")) {
-        yamlSchemaUrl = resolvedUrl.startsWith("/") ? `file://${resolvedUrl}` : resolvedUrl;
+      let yamlSchemaUrl = url;
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        yamlSchemaUrl = url.startsWith("/") ? `file://${url}` : url;
       }
       const existing = yamlMap[yamlSchemaUrl];
       if (existing) {
@@ -2296,56 +2283,14 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
 
   // Resolve JSON schemas in parallel
   const jsonResults = await Promise.all(
-    jsonToResolve.map(async ({ glob, resolvedUrl }) => {
-      const schema = await ctx.resolveSchema(resolvedUrl);
-      return { glob, url: resolvedUrl, schema };
+    jsonToResolve.map(async ({ glob, url }) => {
+      const schema = await ctx.resolveSchema(url);
+      return { glob, url, schema };
     }),
   );
 
   ctx.updateYamlSchemas(yamlMap);
   return json({ json: jsonResults, yaml: { synced: true } });
-}
-
-// ---------------------------------------------------------------------------
-// Wt config routes (project-level)
-// ---------------------------------------------------------------------------
-
-// GET /api/wt-json-schema — JSON schema for wt.yaml autocomplete
-function handleWtJsonSchema(): Response {
-  return json(WT_CONFIG_JSON_SCHEMA);
-}
-
-// GET /api/wt-config-raw?projectId=xxx — raw wt.yaml content for a project
-async function handleWtConfigRaw(req: Request): Promise<Response> {
-  const url = new URL(req.url);
-  const projectId = url.searchParams.get("projectId");
-  if (!projectId) return error("Missing projectId parameter");
-
-  const data = await projectStore.loadProjects();
-  const project = data.projects.find((p) => p.id === projectId);
-  if (!project) return error("Project not found", 404);
-
-  const configPath = join(project.path, "wt.yaml");
-  if (!existsSync(configPath)) return error("No wt.yaml found", 404);
-
-  const content = await Bun.file(configPath).text();
-  return json({ content });
-}
-
-// POST /api/wt-config-save — write wt.yaml content for a project
-async function handleWtConfigSave(req: Request): Promise<Response> {
-  const body = await parseBody(req);
-  const projectId = requireString(body, "projectId");
-  const content = requireString(body, "content");
-
-  const data = await projectStore.loadProjects();
-  const project = data.projects.find((p) => p.id === projectId);
-  if (!project) return error("Project not found", 404);
-
-  const configPath = join(project.path, "wt.yaml");
-  if (!existsSync(configPath)) return error("No wt.yaml found", 404);
-  await Bun.write(configPath, content);
-  return json({ success: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -2846,8 +2791,6 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/search-scopes": handleSearchScopes,
     "/api/file-index": handleFileIndex,
     "/api/schemas/resolve": handleSchemaResolve,
-    "/api/wt-json-schema": handleWtJsonSchema,
-    "/api/wt-config-raw": handleWtConfigRaw,
     "/api/version": handleGetVersion,
     "/api/update/status": handleGetUpdateStatus,
     "/api/detected-formatters": handleDetectedFormatters,
@@ -2893,7 +2836,6 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detached-file-rename": handleDetachedFileRename,
     "/api/detached-file-copy-to-project": handleDetachedFileCopyToProject,
     "/api/schemas/sync": handleSchemaSync,
-    "/api/wt-config-save": handleWtConfigSave,
     "/api/update/check": handleUpdateCheck,
     "/api/update/download": handleUpdateDownload,
     "/api/update/install": handleUpdateInstall,
@@ -2940,7 +2882,7 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
       const data = await projectStore.loadProjects();
       const project = data.projects.find((p) => p.id === projectWtMatch[1]);
       if (!project) return error("Project not found", 404);
-      return await handleProjectWorktrees(project.path, project.isBare ?? false);
+      return await handleProjectWorktrees(project.path);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       return error(message, 500);

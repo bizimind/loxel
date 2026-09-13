@@ -1,150 +1,75 @@
-import { createResult, runAction, type OutputContext } from "@bizimind/cli-common";
+import { createResult, runAction } from "@bizimind/cli-common";
 
-import { resolveConfig } from "../config/loader.ts";
-import type { WorktreeStatus } from "../init/detect.ts";
-import { isTTY } from "../init/detect.ts";
-import { confirmForceRemove, selectRemoveAction } from "../init/prompts.ts";
-import type { RemoveResult, RemovePlan } from "../lib/remove.ts";
-import { planRemove, executeRemove } from "../lib/remove.ts";
-import type { AbortedResult } from "../types.ts";
-import { loadWorktreeContext, selectWorktree } from "../worktree/select.ts";
+import { executeRemove, planRemove, type RemovePlan, type RemoveResult } from "../lib/index.ts";
+import { confirmForceRemove, isTTY, selectRemoveAction } from "../prompt.ts";
+import type { AbortedResult } from "./aborted.ts";
+import { abortedResult } from "./aborted.ts";
+import { resolveWorktreeName } from "./select.ts";
 
 interface RemoveOptions {
   force?: boolean;
+  deleteBranch?: boolean;
+  keepBranch?: boolean;
   json?: boolean;
-  repoPath?: string;
 }
 
 type RemoveCommandResult = RemoveResult | AbortedResult;
 
-/**
- * Remove a worktree.
- */
+/** Remove a worktree after running clean.wt.sh. */
 export async function removeCommand(
   name: string | undefined,
   options: RemoveOptions,
 ): Promise<void> {
   await runAction<RemoveCommandResult>(options, async (ctx) => {
-    const loadedConfig = await resolveConfig(options.repoPath);
-    const repoPath = loadedConfig.rootDir;
+    const repoPath = process.cwd();
+    const selected = await resolveWorktreeName(name, "remove", repoPath);
+    const plan = await planRemove({ name: selected, repoPath });
 
-    // Select worktree by name or interactively
-    let selectedName = name;
-    if (!selectedName) {
-      const wtCtx = await loadWorktreeContext({ repoPath });
-      const result = await selectWorktree(wtCtx, undefined, {
-        promptMessage: "Select a worktree to remove:",
-        nonInteractiveUsage: "Usage: wt rm <name>",
-        noWorktreesMessage: "No worktrees exist to remove.",
-      });
-      selectedName = result.name;
+    if (plan.isMain) {
+      throw new Error("Refusing to remove the main worktree.");
     }
 
-    const plan = await planRemove({ name: selectedName, repoPath, loadedConfig });
+    const deleteBranch = await decideBranchDeletion(plan, options);
+    if (deleteBranch === "cancel") return abortedResult("User cancelled");
 
-    // In TTY mode, prompt for remove action (remove-with-branch / remove-only / cancel)
-    let shouldDeleteBranch: boolean;
-    if (isTTY()) {
-      const action = await selectRemoveAction(plan.name, plan.branch);
-      if (action === "cancel") {
-        return createResult<AbortedResult>(
-          { aborted: true, reason: "User cancelled" },
-          () => "Aborted.",
-        );
-      }
-      shouldDeleteBranch = action === "remove-with-branch";
-    } else {
-      shouldDeleteBranch = plan.branchDeletionApplicable;
-    }
+    const force = await decideForce(plan, options);
+    if (force === "cancel") return abortedResult("User declined force removal");
 
-    // Safety check for dirty state
-    let force = options.force ?? false;
-    if (!force && plan.status) {
-      printWorktreeWarnings(ctx, plan);
-
-      if (isTTY()) {
-        const confirmed = await confirmForceRemove(selectedName);
-        if (!confirmed) {
-          return createResult<AbortedResult>(
-            { aborted: true, reason: "User declined force removal" },
-            () => "Aborted.",
-          );
-        }
-      } else {
-        throw new Error("Use --force to remove worktree with local changes");
-      }
-
-      force = true;
-    }
-
-    const progress = { log: ctx.log, warn: ctx.warn };
     const result = await executeRemove(
-      { name: selectedName, deleteBranch: shouldDeleteBranch, force, repoPath, loadedConfig },
-      progress,
+      { name: selected, repoPath, deleteBranch, force },
+      { log: ctx.log, warn: ctx.warn },
     );
 
-    return createResult<RemoveResult>(result, () => `Worktree '${selectedName}' removed.`);
+    return createResult<RemoveResult>(result, (data) => {
+      const branch = data.branchDeleted ? " and its branch" : "";
+      return `Removed worktree '${data.name}'${branch}.`;
+    });
   });
 }
 
-/**
- * Print worktree warnings using the output context.
- */
-function printWorktreeWarnings(ctx: OutputContext, plan: RemovePlan): void {
-  const status = plan.status;
-  if (!status) return;
+/** Flags win; otherwise ask when interactive, and keep the branch when not. */
+async function decideBranchDeletion(
+  plan: RemovePlan,
+  options: RemoveOptions,
+): Promise<boolean | "cancel"> {
+  if (options.deleteBranch) return true;
+  if (options.keepBranch || !plan.branch) return false;
+  if (!isTTY()) return false;
 
-  ctx.warn("");
-  ctx.warn(`Warning: Worktree '${plan.name}' has local changes that will be lost:`);
-  ctx.warn("");
-
-  printUntrackedWarnings(ctx, status);
-  printUncommittedWarnings(ctx, status);
-  printBranchWarnings(ctx, plan.branch, status);
+  const action = await selectRemoveAction(plan.name, plan.branch);
+  if (action === "cancel") return "cancel";
+  return action === "remove-with-branch";
 }
 
-function printUntrackedWarnings(ctx: OutputContext, status: WorktreeStatus): void {
-  if (status.untrackedFiles.length === 0) return;
+/** A dirty worktree needs --force, or a confirmation when interactive. */
+async function decideForce(plan: RemovePlan, options: RemoveOptions): Promise<boolean | "cancel"> {
+  if (options.force) return true;
+  if (!plan.dirty) return false;
 
-  ctx.warn(`  Untracked files (${status.untrackedFiles.length}):`);
-  const maxFiles = 5;
-  const filesToShow = status.untrackedFiles.slice(0, maxFiles);
-  for (const file of filesToShow) {
-    ctx.warn(`    - ${file}`);
+  if (!isTTY()) {
+    throw new Error(
+      `Worktree '${plan.name}' has uncommitted or untracked changes. Use --force to remove it.`,
+    );
   }
-  if (status.untrackedFiles.length > maxFiles) {
-    ctx.warn(`    (and ${status.untrackedFiles.length - maxFiles} more)`);
-  }
-  ctx.warn("");
-}
-
-function printUncommittedWarnings(ctx: OutputContext, status: WorktreeStatus): void {
-  if (status.stagedCount === 0 && status.unstagedCount === 0) return;
-
-  ctx.warn("  Uncommitted changes:");
-  if (status.stagedCount > 0) {
-    ctx.warn(`    - ${status.stagedCount} file${status.stagedCount === 1 ? "" : "s"} staged`);
-  }
-  if (status.unstagedCount > 0) {
-    ctx.warn(`    - ${status.unstagedCount} file${status.unstagedCount === 1 ? "" : "s"} modified`);
-  }
-  ctx.warn("");
-}
-
-function printBranchWarnings(
-  ctx: OutputContext,
-  branchName: string | null,
-  status: WorktreeStatus,
-): void {
-  if (branchName === null) return;
-
-  if (status.aheadCount === null) {
-    ctx.warn("  Branch status:");
-    ctx.warn(`    - Branch '${branchName}' has never been pushed`);
-    ctx.warn("");
-  } else if (status.aheadCount > 0) {
-    ctx.warn("  Unpushed commits:");
-    ctx.warn(`    - ${status.aheadCount} commit${status.aheadCount === 1 ? "" : "s"} not pushed`);
-    ctx.warn("");
-  }
+  return (await confirmForceRemove(plan.name)) ? true : "cancel";
 }

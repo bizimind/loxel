@@ -116,7 +116,7 @@ Write operations (`git add`, `git commit`, `git checkout`, `git mv`, `git rm`, e
 
 Read operations (`git status`, `git diff`, `git log`, `git show`) do not require exclusive index.lock. `git status` with fsmonitor uses a try-lock — if the lock is held, it skips the fsmonitor update gracefully.
 
-The FileWatcher already filters `.lock` files (`file-watcher.ts:93`), so index.lock creation/deletion won't trigger spurious watcher events.
+The FileWatcher deliberately does **not** filter `.lock` files — on macOS FSEvents coalesces git's write bursts and often reports only the `X.lock` name, so ignoring locks meant ignoring the operation entirely. Spurious self-triggering is prevented at the source instead: every read-only git command runs with `GIT_OPTIONAL_LOCKS=0` (`src/server/git-commands/git-env.ts`) and writes nothing inside the git dir. This covers the per-worktree status fan-out too: `getDirtyWorktreeStatuses` runs `getWorktreeStatus` once per worktree behind `/api/worktree-statuses`, which is refetched on every `refs_changed`/`log_changed`.
 
 **Recommendation:** Background operations like `git status` (triggered by watchers, not user action) should retry with backoff — they're read operations where index.lock contention from fsmonitor is transient. User-initiated git write operations should catch index.lock errors and surface a clear message.
 

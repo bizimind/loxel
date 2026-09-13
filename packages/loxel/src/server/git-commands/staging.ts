@@ -1,7 +1,8 @@
 import { $ } from "bun";
 
 import { logger } from "../logger";
-import { FSMONITOR, validatePath } from "./validation";
+import { FSMONITOR } from "./git-env";
+import { validatePath } from "./validation";
 
 const log = logger.child("git");
 
