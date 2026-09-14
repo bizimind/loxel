@@ -4,6 +4,7 @@ import type { CommitInfo } from "@/api/git-models";
 
 import { LOG_FORMAT, parseLogOutput } from "../parsers/log";
 import { readOnlyGitEnv } from "./git-env";
+import { resolveDefaultBranchRef } from "./repo";
 import { validateRefName } from "./validation";
 
 export async function getLog(
@@ -37,6 +38,23 @@ export async function getLog(
   return parseLogOutput(result);
 }
 
+/**
+ * The commits this branch adds on top of the repository's default branch —
+ * `merge-base(default, HEAD)..HEAD`, the same range a pull request shows.
+ *
+ * This deliberately does *not* ask for commits unique to this branch relative
+ * to every other ref (`HEAD --not <all refs>`), which is what it used to do.
+ * That excluded by reachability, so any ref sharing history truncated the
+ * list: a branch stacked on another showed only the commits added since the
+ * parent branch, and a stale ref left behind by `gh pr checkout` or a
+ * `backup-` branch silently clipped it further. Measured on a real stacked
+ * branch, that reported 2 commits where the pull request had 17.
+ *
+ * `mergeBase` is null when there is nothing to compare against — a detached
+ * HEAD, a repository with no recognizable default branch, or HEAD being the
+ * default branch itself — and the commits are then the most recent ones, since
+ * an empty panel is worse than a rough answer.
+ */
 export async function getBranchCommits(
   cwd: string,
   options: { limit?: number } = {},
@@ -53,40 +71,40 @@ export async function getBranchCommits(
     return { commits, mergeBase: null };
   }
 
-  const refFormat = "%(refname)";
-  const refsResult =
-    await $`git -C ${cwd} for-each-ref --format=${refFormat} refs/heads refs/remotes`
-      .env(readOnlyGitEnv())
-      .text();
-  const excludeRefs = new Set([
-    `refs/heads/${currentBranch}`,
-    `refs/remotes/origin/${currentBranch}`,
-  ]);
-  const otherRefs = refsResult
-    .trim()
-    .split("\n")
-    .filter((r) => r && !excludeRefs.has(r) && !r.endsWith("/HEAD"));
-
-  if (otherRefs.length === 0) {
-    const commits = await getLog(cwd, { limit: Math.min(limit, 20) });
-    return { commits, mergeBase: null };
+  const defaultRef = await resolveDefaultBranchRef(cwd);
+  if (!defaultRef || defaultRef === currentBranch || defaultRef.endsWith(`/${currentBranch}`)) {
+    return { commits: await recentCommits(cwd, limit), mergeBase: null };
   }
 
-  const args: string[] = [
+  const mergeBaseResult = await $`git -C ${cwd} merge-base ${defaultRef} HEAD`
+    .env(readOnlyGitEnv())
+    .nothrow()
+    .text();
+  const mergeBase = mergeBaseResult.trim();
+  if (!mergeBase) {
+    // Unrelated histories, or the default ref is gone since we resolved it.
+    return { commits: await recentCommits(cwd, limit), mergeBase: null };
+  }
+
+  const args = [
     "log",
     `--format=${LOG_FORMAT}`,
-    `-n`,
+    "-n",
     String(limit),
     "--topo-order",
-    "HEAD",
-    "--not",
-    ...otherRefs,
+    `${mergeBase}..HEAD`,
   ];
   const result = await $`git -C ${cwd} ${args}`.env(readOnlyGitEnv()).nothrow().text();
   const commits = parseLogOutput(result.trim());
 
-  const oldest = commits[commits.length - 1];
-  const mergeBase = oldest?.parents[0] ?? null;
+  // HEAD sitting on the default branch has no commits of its own to show.
+  if (commits.length === 0) {
+    return { commits: await recentCommits(cwd, limit), mergeBase: null };
+  }
 
   return { commits, mergeBase };
+}
+
+function recentCommits(cwd: string, limit: number): Promise<CommitInfo[]> {
+  return getLog(cwd, { limit: Math.min(limit, 20) });
 }

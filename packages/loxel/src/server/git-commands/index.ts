@@ -28,7 +28,7 @@ export {
   stashPop,
 } from "./operations";
 export { getBranches, getRecentBranchNames, getRefs, getStashes } from "./refs";
-export { isBareRepo, getGitRoot } from "./repo";
+export { isBareRepo, getGitRoot, resolveDefaultBranchRef } from "./repo";
 export { discardChanges, stageFiles, stageHunk, unstageFiles, unstageHunk } from "./staging";
 export { getStatus } from "./status";
 export { validatePath } from "./validation";
