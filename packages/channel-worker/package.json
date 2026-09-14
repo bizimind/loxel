@@ -17,11 +17,11 @@
   "dependencies": {
     "@bizimind/channel": "workspace:*",
     "@bizimind/logger": "workspace:*",
-    "jose": "^6.2.10"
+    "jose": "^6.2.12"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260823.1",
-    "@types/bun": "1.4.0",
-    "wrangler": "^4.125.0"
+    "@cloudflare/workers-types": "^5.20260907.1",
+    "@types/bun": "1.4.1",
+    "wrangler": "^4.129.0"
   }
 }
