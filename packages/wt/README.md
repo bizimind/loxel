@@ -87,38 +87,40 @@ wt add main -b main        # check out the default branch as the first worktree
 
 `wt` also works in a regular (non-bare) repo: there the repo root is the main worktree's top level and added worktrees go in `<repo>/.worktrees/<name>` beside your code (add `.worktrees/` to `.gitignore`).
 
-### 2. Write `init.wt.sh`
-
-Create `init.wt.sh` at the repo root. It runs inside every new worktree right after `wt add`:
+### 2. Create worktrees
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-cp "$WT_ROOT/.env.local" .              # local-only files the new worktree needs
-pnpm install
-docker run -d --name "myapp-$WT_NAME" -p 0:5432 postgres:15   # per-worktree service
-```
-
-### 3. Create worktrees
-
-```bash
-wt add feature-auth        # creates .worktrees/feature-auth on branch feature-auth, runs init.wt.sh
+wt add feature-auth        # creates .worktrees/feature-auth on branch feature-auth
 wt add feature-payments
 wt add bugfix-123
 
 wt list                    # see all worktrees
 ```
 
-### 4. Work in parallel
+### 3. Work in parallel
 
-Each worktree is a full checkout on its own branch, with whatever `init.wt.sh` set up for it. Run one agent or dev server per worktree; nothing collides because every resource is keyed off `$WT_NAME`.
+Each worktree is a full checkout on its own branch. Run one agent or dev server per worktree.
 
-### 5. Clean up
+### 4. Clean up
 
 ```bash
-wt remove feature-auth     # runs clean.wt.sh, removes the worktree, offers to delete the branch
+wt remove feature-auth     # removes the worktree, offers to delete the branch
 ```
+
+### 5. Automate setup with a hook (optional)
+
+A fresh worktree has the tracked files but none of the local, git-ignored state that makes the repo runnable. If you put a script named `init.wt.sh` at the repo root, `wt add` runs it inside every new worktree. The contents are entirely yours. As an example, this one copies a local env file, installs dependencies and starts a database container named after the worktree:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+cp "$WT_ROOT/.env.local" .
+pnpm install
+docker run -d --name "myapp-$WT_NAME" -p 0:5432 postgres:15
+```
+
+A matching `clean.wt.sh` would remove that container before `wt remove` deletes the checkout. See [Hooks](#hooks) for the full set of hooks and the variables they receive, and [Real-World Examples](#real-world-examples) for complete hook sets.
 
 ---
 
@@ -170,9 +172,9 @@ Two things to know about paths. The script's working directory is the worktree (
 
 File copying, dependency installs, container setup, `.env` generation, port assignment: all of it lives in these scripts. wt has no opinion about any of it. Hook output streams to the terminal as it is produced. A failing hook prints a warning; it never aborts the add, rename or remove.
 
-### Copying local resources
+### Example: copying local resources
 
-A common pattern is a `.wt-local-res` directory at the repo root holding the untracked files every worktree needs, mirrored onto the worktree by `init.wt.sh`:
+This `init.wt.sh` shows the most common job: mirroring untracked files (env files, credentials, certs) from a directory at the repo root into the new worktree. The directory name is a convention, not something wt knows about:
 
 ```bash
 #!/usr/bin/env bash
@@ -180,9 +182,9 @@ set -euo pipefail
 cp -R "$WT_ROOT/.wt-local-res/." .
 ```
 
-### Per-worktree ports and names
+### Example: per-worktree ports and names
 
-Derive ports and resource names from `WT_NAME` (or from a hash of it when you need a number) inside the hooks:
+wt assigns no ports and generates no names; hooks derive them from `WT_NAME`. This `init.wt.sh` shows one way to turn the name into a stable numeric offset for ports and a safe database name:
 
 ```bash
 #!/usr/bin/env bash
@@ -325,6 +327,8 @@ They call `wt` on PATH; set `WT_BIN` before sourcing to point somewhere else (a 
 ---
 
 ## Real-World Examples
+
+Each of these is an example set of hook scripts for one kind of project. None of it is required by wt; copy what fits and change the rest.
 
 ### Full-stack web app (Node.js + PostgreSQL + Redis)
 
