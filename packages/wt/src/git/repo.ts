@@ -1,4 +1,4 @@
-import { mkdir, readdir, rename, rm } from "node:fs/promises";
+import { mkdir, readdir, realpath, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 
 import { wrapError } from "@bizimind/cli-common";
@@ -50,7 +50,10 @@ export async function initBareRepo(cwd: string, defaultBranch: string): Promise<
  *
  * @returns The absolute path of the worktree the working tree moved to
  */
-export async function transformToBare(cwd: string, currentBranch: string): Promise<string> {
+export async function transformToBare(rawCwd: string, currentBranch: string): Promise<string> {
+  // One frame of reference for every derived path: the worktrees dir is canonical, so the repo
+  // path must be too, or a symlinked project path makes the entry filter miss `.worktrees`.
+  const cwd = await realpath(rawCwd);
   const { dir, worktreePath } = await assertCanTransformToBare(cwd, currentBranch);
 
   const gitDir = join(cwd, ".git");
@@ -70,9 +73,10 @@ export async function transformToBare(cwd: string, currentBranch: string): Promi
  * @returns The worktrees directory and the path the working tree would move to
  */
 export async function assertCanTransformToBare(
-  cwd: string,
+  rawCwd: string,
   currentBranch: string,
 ): Promise<{ dir: string; worktreePath: string }> {
+  const cwd = await realpath(rawCwd);
   const worktreeList = await git(["worktree", "list", "--porcelain"], cwd);
   const worktreeCount = worktreeList
     .split("\n")

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { symlink } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createTestDirectory, createTestRepo, type TestRepo } from "../test-repo.ts";
@@ -79,6 +80,21 @@ describe("transformToBare", () => {
     expect(await detectRepoType(repo.root)).toBe("regular");
     expect(await Bun.file(join(repo.root, "README.md")).exists()).toBe(true);
     expect(await Bun.file(join(destination, "local-secret")).text()).toBe("keep me");
+  });
+
+  test("converts a repo reached through a symlinked path", async () => {
+    repo = await createTestRepo();
+    const link = join(repo.root, "..", "link");
+    await symlink(repo.root, link);
+
+    const worktreePath = await transformToBare(link, "main");
+
+    expect(worktreePath).toBe(join(repo.root, ".worktrees", "main"));
+    expect(await detectRepoType(repo.root)).toBe("bare");
+    expect(await git(["status", "--porcelain"], worktreePath)).toBe("");
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).toContain(
+      `worktree ${worktreePath}`,
+    );
   });
 
   test("honors WT_DIR for the converted working tree", async () => {

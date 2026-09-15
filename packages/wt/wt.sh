@@ -56,7 +56,8 @@ _wt_jump() {
   _wt_path="$(printf '%s' "$_wt_out" | jq -r '.path // empty')"
   # Empty guard: a bare `cd` would silently send you home. Also covers the
   # {"aborted":true} shape you get from cancelling a prompt.
-  [ -n "$_wt_path" ] && cd "$_wt_path"
+  [ -n "$_wt_path" ] || return 0
+  cd "$_wt_path"
 }
 
 wta() { _wt_jump add "$@"; }
