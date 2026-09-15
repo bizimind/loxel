@@ -35,12 +35,16 @@ function splitOrPromote(active: IDockviewPanel, position: "left" | "right" | "to
   }
 }
 
-/** Resolve the active bare-repo project + its worktree state, or null if not applicable. */
-function getActiveBareProject() {
+/**
+ * Resolve the active project + its worktree state, or null when no project is active.
+ * Works for bare and regular repos alike: a regular repo's root is not a managed worktree, so
+ * the per-action guards below skip it naturally.
+ */
+function getActiveProjectWorktrees() {
   const wtState = useWorktreeStore.getState();
   const projects = useProjectStore.getState().projects;
   const project = deriveProject(wtState.activeWorktreePath, projects);
-  if (!project || !(project.isBare ?? false)) return null;
+  if (!project) return null;
   const ps = wtState.byProject[project.path];
   return { wtState, project, ps };
 }
@@ -266,7 +270,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
       // -- Worktree navigation --
       case "worktree.next":
       case "worktree.prev": {
-        const ctx = getActiveBareProject();
+        const ctx = getActiveProjectWorktrees();
         if (!ctx?.ps) break;
         const ordered = getOrderedWorktrees(ctx.ps.worktrees, ctx.ps.customOrder).filter(
           (wt) => !wt.pending,
@@ -295,7 +299,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "worktree.focus.7":
       case "worktree.focus.8":
       case "worktree.focus.9": {
-        const ctx = getActiveBareProject();
+        const ctx = getActiveProjectWorktrees();
         if (!ctx?.ps) break;
         const ordered = getOrderedWorktrees(ctx.ps.worktrees, ctx.ps.customOrder).filter(
           (wt) => !wt.pending,
@@ -313,7 +317,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
 
       // -- Worktree create --
       case "worktree.new": {
-        const ctx = getActiveBareProject();
+        const ctx = getActiveProjectWorktrees();
         if (!ctx) break;
 
         // Expand sidebar + project if needed
@@ -329,7 +333,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
 
       // -- Worktree delete --
       case "worktree.delete": {
-        const ctx = getActiveBareProject();
+        const ctx = getActiveProjectWorktrees();
         if (!ctx?.ps) break;
 
         const wt = ctx.ps.worktrees.find((w) => w.path === ctx.wtState.activeWorktreePath);
