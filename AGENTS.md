@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-loxel is a Bun monorepo containing packages that extend Claude Code's capabilities for agent-friendly development workflows. The packages intercept and adapt standard tools (like Git) for non-blocking agent execution while preserving normal UX for humans.
+loxel is a monorepo (pnpm for package management, Bun for runtime) containing packages that extend Claude Code's capabilities for agent-friendly development workflows. The packages intercept and adapt standard tools (like Git) for non-blocking agent execution while preserving normal UX for humans.
 
 ## Environment Setup
 
@@ -21,35 +21,35 @@ The `.env` file is copied to the worktree root by the repo-root `init.wt.sh` hoo
 ## Build Commands
 
 ```bash
-bun install                                    # Install all dependencies
+pnpm install                                   # Install all dependencies
 
 # Build individual packages (all packages with build scripts)
-bun run --cwd packages/cc-git-editor build
-bun run --cwd packages/cc-tool-guard build
-bun run --cwd packages/whisper-cpp build
-bun run --cwd packages/wt build
+pnpm -C packages/cc-git-editor run build
+pnpm -C packages/cc-tool-guard run build
+pnpm -C packages/whisper-cpp run build
+pnpm -C packages/wt run build
 
-# Lint and format (root-level)
-bun run lint                                   # Run oxlint
-bun run lint:fix                               # Fix lint issues
-bun run fmt                                    # Format with oxfmt
-bun run fmt:check                              # Check formatting
+# Lint and format (root-level, or from any package via aliases)
+pnpm run lint                                  # Run oxlint
+pnpm run lint:fix                              # Fix lint issues
+pnpm run fmt                                   # Format with oxfmt
+pnpm run fmt:check                             # Check formatting
 
 # Type checking
-bun run typecheck                              # All packages (parallel)
-bun run --cwd packages/<package> typecheck     # Single package
+pnpm run typecheck                             # All packages (parallel)
+pnpm -C packages/<package> run typecheck       # Single package
 ```
 
 ## Testing
 
 ```bash
-bun run --cwd packages/<package> test          # Run all tests in package (uses package.json script)
+pnpm -C packages/<package> run test            # Run all tests in package (uses package.json script)
 
-# Run a single test file
+# Run a single test file (bun test runner directly)
 bun test packages/wt/src/git/name.test.ts
 
 # Run tests matching a pattern
-bun test --cwd packages/wt --test-name-pattern "validates"
+bun test packages/wt --test-name-pattern "validates"
 ```
 
 ## Architecture
@@ -64,7 +64,11 @@ bun test --cwd packages/wt --test-name-pattern "validates"
 
 - **excalidraw**: CLI for agents to create, edit, and view Excalidraw diagrams. Provides batch operations via JSON-over-stdin for atomic multi-element mutations (draw, move, resize, edit, group). Uses jsdom DOM shim for headless element creation via `@excalidraw/element`. Entry point: `src/cli.ts`.
 
-- **wt**: Configless git worktree manager CLI for parallel development. Git is the only source of truth (`git worktree list`) — no config or state file. Worktrees live in `<repoRoot>/.worktrees/<name>` (override with `WT_DIR`). `add`/`list`/`view`/`mv`/`remove`; `mv` renames the directory and its branch together (and runs `rename.wt.sh`). Per-worktree setup/teardown/fixup lives in repo-root hook scripts (`init.wt.sh`, `clean.wt.sh`, `rename.wt.sh`) that wt runs with `WT_NAME`/`WT_PATH`/`WT_ROOT`/`WT_BRANCH` set (`rename.wt.sh` also gets `WT_OLD_NAME`/`WT_OLD_PATH`/`WT_OLD_BRANCH`). `packages/wt/wt.sh` holds the `wta`/`wtv`/`wtr`/`wtm` shell functions that cd into the worktree wt reports. Works with bare and non-bare repos.
+- **wt**: Configless git worktree manager CLI (`add`/`list`/`view`/`mv`/`remove`, repo-root `init.wt.sh`/`clean.wt.sh`/`rename.wt.sh` hooks). Read `packages/wt/README.md` or the `wt` skill before working on it.
+
+- **loxel**: The IDE itself (Electron app plus Bun server). See `packages/loxel/README.md`.
+
+- Also in the monorepo, each with its own README where present: **code-analysis**, **coding-agent**, **sandbox**, **site**, **localdb-sdk**, **monaco-lsp-client**.
 
 #### Libraries
 
@@ -89,6 +93,8 @@ bun test --cwd packages/wt --test-name-pattern "validates"
 **Hook Protocol**: Tools integrate with Claude Code via JSON-over-stdin/stdout. See `cc-tool-guard/src/tool-guard.ts` for the pattern.
 
 ## Bun Guidelines
+
+**pnpm** is the package manager and script runner (`pnpm install`, `pnpm run <script>`, `pnpm -C <path> run <script>`). **Bun** is the runtime only — compiler (`bun build`), test runner (`bun test`), and TS execution (`bun <file.ts>`). Do not use `bun install`, `bun add`, or `bun run <script-name>` for dependency management or script invocation.
 
 Use Bun's native APIs and avoid external npm dependencies when Bun provides alternatives:
 
@@ -204,13 +210,14 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 **Formatter**: oxfmt with 100-char print width, 2-space indentation, trailing commas, Tailwind CSS class sorting (via `cn` function), and auto-sorted imports.
 
-**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`bun run fmt`), re-stages formatted files, runs lint (`bun run lint`), and runs typecheck (`bun run typecheck`). Configured via `"prepare": "git config core.hooksPath .githooks"` in root package.json.
+**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`). Configured via `"prepare": "git config core.hooksPath .githooks"` in root package.json.
 
 ## Type Checking
 
-Type checking uses `tsgo` (`@typescript/native-preview`) — the native TypeScript compiler — instead of `tsc`. All package `typecheck` scripts run `tsgo --noEmit`. The root `bun run typecheck` runs all packages in parallel via `bun run --filter '*' typecheck`.
-
-Note: `tsgo` does not support the `baseUrl` tsconfig option (it was removed). Use `paths` with relative prefixes instead.
+Type checking uses the official TypeScript 7 native compiler (`@typescript/native`) via `tsc`.
+Regular TypeScript package `typecheck` scripts run `tsc --noEmit`; the site runs `astro check`.
+The root `pnpm run typecheck` invokes each workspace's script in parallel via
+`pnpm -r --parallel run typecheck`.
 
 ## CI & Releases
 
@@ -232,7 +239,7 @@ Note: `tsgo` does not support the `baseUrl` tsconfig option (it was removed). Us
 
 When asked to implement a feature, fix a bug, or execute a plan, the expected deliverable is a PR. After completing implementation:
 
-1. Run `bun run lint:fix` and `bun run fmt`
+1. Run `pnpm run lint:fix` and `pnpm run fmt`
 
 2. Run `typecheck` and `test` for affected packages
 
