@@ -40,7 +40,8 @@ wt update            # update the binary in place
 | `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leave the branch alone           |
 | `-f`, `--force`         | `mv`     | Move a locked worktree                                      |
 | `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes           |
-| `-d`, `--delete-branch` | `remove` | Also delete the branch                                      |
+| `-d`, `--delete-branch` | `remove` | Also delete the branch; an unmerged one is kept (warns)     |
+| `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)           |
 | `--keep-branch`         | `remove` | Keep the branch (don't prompt)                              |
 
 **Interactive vs. unattended.** At a terminal `wt` prompts for missing values — the worktree name, which worktree to act on (type-to-filter picker: type to narrow, ↑/↓, Enter; Ctrl+C cancels), whether to reuse an existing branch, whether to force a dirty removal, whether to delete the branch. Pass everything as flags to run unattended; with no terminal (scripts, CI, agents) a missing required value errors instead of blocking. Cancelling a prompt is not an error — it returns `{"aborted":true,"reason":"..."}` with exit code 0.

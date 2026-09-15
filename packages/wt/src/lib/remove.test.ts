@@ -87,6 +87,9 @@ describe("executeRemove", () => {
     });
     expect(await Bun.file(join(added.path, "README.md")).exists()).toBe(false);
     expect(await branchExists(repo.root, "feat/foo")).toBe(true);
+    // The empty `feat/` directory must go too, or the name cannot be reused.
+    expect(await pathExists(join(repo.root, ".worktrees", "feat"))).toBe(false);
+    expect(await pathExists(join(repo.root, ".worktrees"))).toBe(true);
   });
 
   test("deletes the branch when asked", async () => {
@@ -224,5 +227,43 @@ describe("executeRemove", () => {
     expect(result.branchDeleted).toBe(false);
     expect(warnings.join("\n")).toContain("could not delete branch 'unmerged'");
     expect(await branchExists(repo.root, "unmerged")).toBe(true);
+  });
+
+  test("force-deletes an unmerged branch with forceBranch", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "unmerged", repoPath: repo.root });
+    await git(["config", "user.email", "test@example.com"], added.path);
+    await git(["config", "user.name", "Test"], added.path);
+    await Bun.write(join(added.path, "new.txt"), "work\n");
+    await git(["add", "."], added.path);
+    await git(["commit", "-m", "work"], added.path);
+
+    const result = await executeRemove({
+      name: "unmerged",
+      repoPath: repo.root,
+      deleteBranch: true,
+      force: false,
+      forceBranch: true,
+    });
+
+    expect(result.branchDeleted).toBe(true);
+    expect(await branchExists(repo.root, "unmerged")).toBe(false);
+  });
+
+  test("keeps a sibling worktree's parent directory when pruning", async () => {
+    repo = await createTestRepo({ bare: true });
+    await executeAdd({ name: "feat/one", repoPath: repo.root });
+    await executeAdd({ name: "feat/two", repoPath: repo.root });
+
+    await executeRemove({
+      name: "feat/one",
+      repoPath: repo.root,
+      deleteBranch: true,
+      force: false,
+    });
+
+    expect(await pathExists(join(repo.root, ".worktrees", "feat", "two"))).toBe(true);
+    const reused = await executeAdd({ name: "feat/one", repoPath: repo.root });
+    expect(reused.created).toBe(true);
   });
 });

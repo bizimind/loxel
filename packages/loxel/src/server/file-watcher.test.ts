@@ -257,6 +257,32 @@ describe("FileWatcher worktree lifecycle", () => {
     expect(await sawWorktrees(seen)).toBe(true);
   }, 60000);
 
+  test("keeps reporting removals after git deletes and recreates worktrees/", async () => {
+    const { base, repo } = await makeRepo();
+    const { seen, watcher } = startWatcher(repo);
+    await watcher.start();
+    await Bun.sleep(ARM_MS);
+
+    // Removing the only worktree makes git delete `.git/worktrees` outright, which kills the
+    // directory watcher without any event. The next add must re-arm it.
+    const a = path.join(base, "a");
+    await Bun.$`git -C ${repo} worktree add -q -b a ${a}`.quiet();
+    expect(await sawWorktrees(seen)).toBe(true);
+    seen.length = 0;
+    await Bun.$`git -C ${repo} worktree remove --force ${a}`.quiet();
+    expect(await sawWorktrees(seen)).toBe(true);
+    expect(existsSync(path.join(repo, ".git", "worktrees"))).toBe(false);
+
+    seen.length = 0;
+    const b = path.join(base, "b");
+    await Bun.$`git -C ${repo} worktree add -q -b b ${b}`.quiet();
+    expect(await sawWorktrees(seen)).toBe(true);
+
+    seen.length = 0;
+    await Bun.$`git -C ${repo} worktree remove --force ${b}`.quiet();
+    expect(await sawWorktrees(seen)).toBe(true);
+  }, 60000);
+
   test("commits inside a worktree do not emit worktrees", async () => {
     const { base, repo } = await makeRepo();
     const wt = path.join(base, "noisy");

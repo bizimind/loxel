@@ -27,6 +27,7 @@ export {
   moveWorktree,
   parseWorktreeList,
   pathExists,
+  pruneEmptyParents,
   removeWorktree,
   resolveRepoRoot,
   upstreamDivergence,

@@ -9,6 +9,7 @@ import { resolveWorktreeName } from "./select.ts";
 interface RemoveOptions {
   force?: boolean;
   deleteBranch?: boolean;
+  forceBranch?: boolean;
   keepBranch?: boolean;
   json?: boolean;
 }
@@ -36,7 +37,7 @@ export async function removeCommand(
     if (force === "cancel") return abortedResult("User declined force removal");
 
     const result = await executeRemove(
-      { name: selected, repoPath, deleteBranch, force },
+      { name: selected, repoPath, deleteBranch, force, forceBranch: options.forceBranch ?? false },
       { log: ctx.log, warn: ctx.warn },
     );
 
@@ -52,7 +53,7 @@ async function decideBranchDeletion(
   plan: RemovePlan,
   options: RemoveOptions,
 ): Promise<boolean | "cancel"> {
-  if (options.deleteBranch) return true;
+  if (options.deleteBranch || options.forceBranch) return true;
   if (options.keepBranch || !plan.branch) return false;
   if (!isTTY()) return false;
 

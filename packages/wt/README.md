@@ -227,7 +227,8 @@ Run interactively and wt prompts for the common decisions: the worktree name, wh
 | `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leaving the branch alone        |
 | `-f`, `--force`         | `mv`     | Move a locked worktree                                     |
 | `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes          |
-| `-d`, `--delete-branch` | `remove` | Also delete the worktree's branch                          |
+| `-d`, `--delete-branch` | `remove` | Also delete the worktree's branch; an unmerged one is kept |
+| `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)          |
 | `--keep-branch`         | `remove` | Keep the branch (no prompt)                                |
 
 ### `wt list` (alias: `ls`)
@@ -264,11 +265,12 @@ Rename a worktree and its branch, then run `rename.wt.sh`. See [Renaming](#renam
 
 ### `wt remove [name]` (aliases: `rm`, `delete`)
 
-Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it.
+Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with unmerged commits (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused.
 
 ```bash
 wt remove feature-auth                 # prompts about the branch when interactive
-wt remove feature-auth -d              # also delete the branch
+wt remove feature-auth -d              # also delete the branch, if merged
+wt remove feature-auth -D              # delete the branch even if unmerged
 wt remove feature-auth --force         # remove despite uncommitted changes
 ```
 

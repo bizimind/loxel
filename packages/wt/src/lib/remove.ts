@@ -1,6 +1,6 @@
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
-import { deleteBranch, isWorktreeDirty, removeWorktree } from "../git/index.ts";
+import { deleteBranch, isWorktreeDirty, pruneEmptyParents, removeWorktree } from "../git/index.ts";
 import { HOOK_CLEAN, runHook, type HookContext } from "../hooks/run.ts";
 import { silentProgress, type ProgressHandler } from "../progress.ts";
 import { locateWorktree } from "./worktrees.ts";
@@ -74,7 +74,7 @@ export async function executeRemove(
   progress: ProgressHandler = silentProgress,
 ): Promise<RemoveResult> {
   const { name, repoPath, force } = params;
-  const { root, worktree } = await locateWorktree(name, repoPath);
+  const { root, dir, worktree } = await locateWorktree(name, repoPath);
 
   if (params.expectedPath && resolve(worktree.path) !== resolve(params.expectedPath)) {
     throw new Error(`Worktree '${name}' resolved to an unexpected path: ${worktree.path}`);
@@ -97,6 +97,7 @@ export async function executeRemove(
 
   progress.log(`Removing worktree '${name}'...`);
   await removeWorktree(root, worktree.path, force);
+  await pruneEmptyParents(dirname(worktree.path), dir);
 
   const branchDeleted = await tryDeleteBranch(
     root,

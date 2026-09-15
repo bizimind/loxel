@@ -38,9 +38,9 @@ describe("transformToBare", () => {
     repo = await createTestRepo();
     await git(["checkout", "-b", "feat/topic"], repo.root);
 
-    await transformToBare(repo.root, "feat/topic", ".worktrees");
+    const worktreePath = await transformToBare(repo.root, "feat/topic");
 
-    const worktreePath = join(repo.root, ".worktrees", "feat", "topic");
+    expect(worktreePath).toBe(join(repo.root, ".worktrees", "feat", "topic"));
     expect(await detectRepoType(repo.root)).toBe("bare");
     expect(await git(["rev-parse", "--abbrev-ref", "HEAD"], worktreePath)).toBe("feat/topic");
     expect(await Bun.file(join(worktreePath, "README.md")).exists()).toBe(true);
@@ -57,7 +57,7 @@ describe("transformToBare", () => {
     const linkedPath = join(repo.root, "..", "linked");
     await git(["worktree", "add", "-b", "linked", linkedPath], repo.root);
 
-    await expect(transformToBare(repo.root, "main", ".worktrees")).rejects.toThrow(
+    await expect(transformToBare(repo.root, "main")).rejects.toThrow(
       "already has linked worktrees",
     );
 
@@ -74,13 +74,28 @@ describe("transformToBare", () => {
     await git(["add", ".gitignore"], repo.root);
     await git(["commit", "-m", "ignore local worktrees"], repo.root);
 
-    await expect(transformToBare(repo.root, "main", ".worktrees")).rejects.toThrow(
-      "destination already exists",
-    );
+    await expect(transformToBare(repo.root, "main")).rejects.toThrow("destination already exists");
 
     expect(await detectRepoType(repo.root)).toBe("regular");
     expect(await Bun.file(join(repo.root, "README.md")).exists()).toBe(true);
     expect(await Bun.file(join(destination, "local-secret")).text()).toBe("keep me");
+  });
+
+  test("honors WT_DIR for the converted working tree", async () => {
+    repo = await createTestRepo();
+    const trees = join(repo.root, "..", "trees");
+    process.env.WT_DIR = trees;
+    try {
+      const worktreePath = await transformToBare(repo.root, "main");
+
+      expect(worktreePath).toBe(join(trees, "main"));
+      expect(await detectRepoType(repo.root)).toBe("bare");
+      expect(await Bun.file(join(worktreePath, "README.md")).exists()).toBe(true);
+      expect(await Bun.file(join(repo.root, ".worktrees")).exists()).toBe(false);
+      expect(await git(["status", "--porcelain"], worktreePath)).toBe("");
+    } finally {
+      delete process.env.WT_DIR;
+    }
   });
 
   test("preserves a colliding stale worktree admin directory", async () => {
@@ -89,9 +104,8 @@ describe("transformToBare", () => {
     const staleAdmin = join(repo.root, ".git", "worktrees", "topic");
     await Bun.write(join(staleAdmin, "sentinel"), "do not overwrite");
 
-    await transformToBare(repo.root, "feat/topic", ".worktrees");
+    const worktreePath = await transformToBare(repo.root, "feat/topic");
 
-    const worktreePath = join(repo.root, ".worktrees", "feat", "topic");
     expect(await Bun.file(join(staleAdmin.replace("/.git/", "/"), "sentinel")).text()).toBe(
       "do not overwrite",
     );

@@ -4,6 +4,7 @@ import {
   currentManagedWorktree,
   executeMove,
   planMove,
+  shellQuote,
   type MovePlan,
   type MoveResult,
 } from "../lib/index.ts";
@@ -142,9 +143,4 @@ function warnStaleCwd(cwd: string, result: MoveResult, progress: ProgressHandler
   // Keep the subdirectory they were standing in.
   const suffix = cwd.slice(result.oldPath.length);
   progress.warn(`Your shell is still in the old path; run: cd ${shellQuote(result.path + suffix)}`);
-}
-
-/** Quote an arbitrary path as one POSIX-shell argument. */
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
 }

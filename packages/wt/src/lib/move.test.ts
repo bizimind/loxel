@@ -346,5 +346,6 @@ describe("executeMove", () => {
     const back = await executeMove({ oldName: "a/b/c", name: "flat2", repoPath: repo.root });
     expect(back.path).toBe(join(repo.root, ".worktrees", "flat2"));
     expect(back.branchRenamed).toBe(true);
+    expect(await pathExists(join(repo.root, ".worktrees", "a"))).toBe(false);
   });
 });

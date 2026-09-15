@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   assertValidWorktreeName,
@@ -8,6 +8,7 @@ import {
   getWorktreeName,
   moveWorktree,
   pathExists,
+  pruneEmptyParents,
   renameBranch,
   type Worktree,
 } from "../git/index.ts";
@@ -107,7 +108,7 @@ export async function executeMove(
   params: MoveParams,
   progress: ProgressHandler = silentProgress,
 ): Promise<MoveResult> {
-  const { root, plan } = await inspectMove(params);
+  const { root, dir, plan } = await inspectMove(params);
 
   if (plan.isMain) {
     throw new Error("Refusing to rename the main worktree.");
@@ -120,6 +121,7 @@ export async function executeMove(
 
   const force = params.force ?? false;
   await moveWorktree(root, plan.oldPath, plan.worktreePath, force);
+  await pruneEmptyParents(dirname(plan.oldPath), dir);
   progress.log(`Moved ${plan.oldPath} -> ${plan.worktreePath}`);
 
   const { branch, branchRenamed } = await tryRenameBranch(root, plan, progress);
@@ -158,7 +160,9 @@ export async function executeMove(
  * validate the new name, resolve the destination, and reject a taken branch
  * name — all before anything is touched.
  */
-async function inspectMove(params: MoveTarget): Promise<{ root: string; plan: MovePlan }> {
+async function inspectMove(
+  params: MoveTarget,
+): Promise<{ root: string; dir: string; plan: MovePlan }> {
   const { root, dir, worktree } = await locateWorktree(params.oldName, params.repoPath);
   const oldName = getWorktreeName(worktree.path, dir);
 
@@ -184,6 +188,7 @@ async function inspectMove(params: MoveTarget): Promise<{ root: string; plan: Mo
 
   return {
     root,
+    dir,
     plan: {
       oldName,
       oldPath: worktree.path,

@@ -17,6 +17,7 @@ import {
   initBareRepo,
   transformToBare,
   ensureWorktreesDir,
+  shellQuote,
   type AddPlan,
   type ProgressHandler,
   type RemovePlan,
@@ -1636,7 +1637,7 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   } else {
     await initBareRepo(projectDir, "main");
     await createInitialCommit(projectDir);
-    await ensureWorktreesDir(projectDir, ".worktrees");
+    await ensureWorktreesDir(projectDir);
     await writeInitHook(projectDir, copyFiles, setupCommands);
 
     try {
@@ -1714,7 +1715,7 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
     // default to main
   }
 
-  await ensureWorktreesDir(bareDir, ".worktrees");
+  await ensureWorktreesDir(bareDir);
   await writeInitHook(bareDir, copyFiles, setupCommands);
 
   await executeAdd(
@@ -1771,16 +1772,17 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
       if (commitResult.exitCode !== 0) {
         return error(`git commit failed: ${commitResult.stderr.toString()}`, 500);
       }
-      await transformToBare(dirPath, "main", ".worktrees");
+      await transformToBare(dirPath, "main");
     } else {
       await initBareRepo(dirPath, "main");
       await createInitialCommit(dirPath);
-      await ensureWorktreesDir(dirPath, ".worktrees");
+      await ensureWorktreesDir(dirPath);
     }
 
     await writeInitHook(dirPath, copyFiles, setupCommands);
 
-    if (!existsSync(join(dirPath, ".worktrees", "main"))) {
+    const hasMain = (await listManagedWorktrees(dirPath)).some((wt) => wt.name === "main");
+    if (!hasMain) {
       try {
         await executeAdd(
           { name: "main", branch: "main", repoPath: dirPath, hookEnv: buildSpawnEnv() },
@@ -1835,7 +1837,7 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   }
 
   try {
-    await assertCanTransformToBare(dirPath, currentBranch, ".worktrees");
+    await assertCanTransformToBare(dirPath, currentBranch);
   } catch (err) {
     return error(describeError(err, "Repository cannot be converted"), 400);
   }
@@ -1844,7 +1846,7 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   ctx.teardownProject(dirPath);
 
   try {
-    await transformToBare(dirPath, currentBranch, ".worktrees");
+    await transformToBare(dirPath, currentBranch);
     await writeInitHook(dirPath, copyFiles, setupCommands);
   } catch (err) {
     try {
@@ -1875,11 +1877,6 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
 const INIT_HOOK_NAME = "init.wt.sh";
 /** Repo-root directory holding local-only files copied into new worktrees. */
 const LOCAL_RES_DIR = ".wt-local-res";
-
-/** Quote a value for safe interpolation into the generated bash hook. */
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
-}
 
 /**
  * Write the repo-root `init.wt.sh` hook that bootstraps every new worktree:

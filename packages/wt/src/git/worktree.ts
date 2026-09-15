@@ -1,4 +1,4 @@
-import { mkdir, realpath, stat } from "node:fs/promises";
+import { mkdir, realpath, rmdir, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { git, gitFailure, runGit } from "./run.ts";
@@ -207,6 +207,26 @@ export async function removeWorktree(root: string, path: string, force: boolean)
   const result = await runGit(args, root);
   if (result.exitCode === 0) return;
   throw new Error(`Failed to remove worktree at ${path}: ${gitFailure(result)}`);
+}
+
+/**
+ * Remove empty directories left between `from` and `stopAt` after a nested
+ * worktree is removed or moved away, so its name can be reused. `git worktree`
+ * never prunes the intermediate directories `feat/foo` needed.
+ */
+export async function pruneEmptyParents(from: string, stopAt: string): Promise<void> {
+  let cursor = resolve(from);
+  const stop = resolve(stopAt);
+  while (cursor !== stop && cursor.startsWith(`${stop}/`)) {
+    try {
+      await rmdir(cursor);
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? error.code : undefined;
+      if (code === "ENOTEMPTY" || code === "EEXIST") return;
+      if (code !== "ENOENT") throw error;
+    }
+    cursor = dirname(cursor);
+  }
 }
 
 /**

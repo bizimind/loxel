@@ -13,6 +13,7 @@ export { executeRemove, planRemove } from "./remove.ts";
 export type { RemoveParams, RemovePlan, RemoveResult } from "./remove.ts";
 export { currentManagedWorktree, listManagedWorktrees, resolveWorktreesDir } from "./worktrees.ts";
 export type { ManagedWorktree } from "./worktrees.ts";
+export { shellQuote } from "./shell-quote.ts";
 
 export { silentProgress } from "../progress.ts";
 export type { ProgressHandler } from "../progress.ts";

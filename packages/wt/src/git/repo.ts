@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { wrapError } from "@bizimind/cli-common";
 
 import { git, runGit } from "./run.ts";
-import { isWorktreeDirty, pathExists } from "./worktree.ts";
+import { canonicalWorktreesDir, isWorktreeDirty, pathExists } from "./worktree.ts";
 
 export type RepoType = "empty" | "bare" | "regular" | "worktree";
 
@@ -45,32 +45,34 @@ export async function initBareRepo(cwd: string, defaultBranch: string): Promise<
 
 /**
  * Convert a regular repository into a bare one, moving the existing working
- * tree into `<cwd>/<worktreesDir>/<currentBranch>`.
+ * tree into `<worktreesDir>/<currentBranch>`, where the worktrees directory
+ * is `$WT_DIR` or `<cwd>/.worktrees` (the same rule `wt add` uses).
+ *
+ * @returns The absolute path of the worktree the working tree moved to
  */
-export async function transformToBare(
-  cwd: string,
-  currentBranch: string,
-  worktreesDir: string,
-): Promise<void> {
-  await assertCanTransformToBare(cwd, currentBranch, worktreesDir);
+export async function transformToBare(cwd: string, currentBranch: string): Promise<string> {
+  const { dir, worktreePath } = await assertCanTransformToBare(cwd, currentBranch);
 
   const gitDir = join(cwd, ".git");
-  const worktreePath = join(cwd, worktreesDir, currentBranch);
   try {
-    await moveFilesToWorktree(cwd, worktreePath, worktreesDir);
+    await moveFilesToWorktree(cwd, worktreePath, dir);
     await convertToBareRepo(cwd, gitDir);
     await registerWorktree(cwd, worktreePath, currentBranch);
   } catch (err) {
     throw wrapError("Failed to transform to bare repository", err);
   }
+  return worktreePath;
 }
 
-/** Reject conversion before any files move when it cannot complete safely. */
+/**
+ * Reject conversion before any files move when it cannot complete safely.
+ *
+ * @returns The worktrees directory and the path the working tree would move to
+ */
 export async function assertCanTransformToBare(
   cwd: string,
   currentBranch: string,
-  worktreesDir: string,
-): Promise<void> {
+): Promise<{ dir: string; worktreePath: string }> {
   const worktreeList = await git(["worktree", "list", "--porcelain"], cwd);
   const worktreeCount = worktreeList
     .split("\n")
@@ -79,18 +81,23 @@ export async function assertCanTransformToBare(
     throw new Error("Cannot convert a repository that already has linked worktrees.");
   }
 
-  const worktreePath = join(cwd, worktreesDir, currentBranch);
+  const dir = await canonicalWorktreesDir(cwd);
+  const worktreePath = join(dir, currentBranch);
   if (await pathExists(worktreePath)) {
     throw new Error(`Cannot convert because the destination already exists: ${worktreePath}`);
   }
+  return { dir, worktreePath };
 }
 
-/** Create the worktrees directory if it does not exist. */
-export async function ensureWorktreesDir(cwd: string, worktreesDir: string): Promise<void> {
-  await mkdir(join(cwd, worktreesDir), { recursive: true });
+/** Create the worktrees directory (`$WT_DIR` or `<cwd>/.worktrees`) if it does not exist. */
+export async function ensureWorktreesDir(cwd: string): Promise<void> {
+  await mkdir(await canonicalWorktreesDir(cwd), { recursive: true });
 }
 
-/** Move working tree files into the worktree directory. */
+/**
+ * Move working tree files into the worktree directory, leaving `.git` and any
+ * top-level entry that contains the worktrees directory itself in place.
+ */
 async function moveFilesToWorktree(
   cwd: string,
   worktreePath: string,
@@ -99,7 +106,11 @@ async function moveFilesToWorktree(
   await mkdir(worktreePath, { recursive: true });
 
   const entries = await readdir(cwd);
-  const toMove = entries.filter((entry) => entry !== ".git" && entry !== worktreesDir);
+  const holdsWorktrees = (entry: string) => {
+    const full = join(cwd, entry);
+    return worktreesDir === full || worktreesDir.startsWith(`${full}/`);
+  };
+  const toMove = entries.filter((entry) => entry !== ".git" && !holdsWorktrees(entry));
 
   await Promise.all(toMove.map((entry) => rename(join(cwd, entry), join(worktreePath, entry))));
 }

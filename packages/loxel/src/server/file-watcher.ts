@@ -1,4 +1,4 @@
-import { realpathSync, watch, type FSWatcher } from "node:fs";
+import { realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 
 import { logger } from "./logger";
@@ -170,6 +170,8 @@ export function classifyGitChange(filename: string): WatchEvent[] {
 export class FileWatcher {
   private watchers: FSWatcher[] = [];
   private worktreesDirWatcher: FSWatcher | null = null;
+  /** Inode of the directory `worktreesDirWatcher` is bound to, to notice a recreated one. */
+  private worktreesDirIno: number | null = null;
   private commonDir: string | null = null;
   private gitRoot: string;
   private onEvent: (event: WatchEvent) => void;
@@ -221,6 +223,7 @@ export class FileWatcher {
     this.watchers = [];
     this.worktreesDirWatcher?.close();
     this.worktreesDirWatcher = null;
+    this.worktreesDirIno = null;
     this.commonDir = null;
     for (const timer of this.debounceTimers.values()) {
       clearTimeout(timer);
@@ -244,22 +247,54 @@ export class FileWatcher {
    * Idempotent and safe to call from the recursive watch handler: a stopped watcher has no
    * commonDir, so a late attach after stop() is a no-op. The directory is absent until the
    * repo's first worktree exists, which is expected rather than an error.
+   *
+   * Git deletes `worktrees/` when the last linked worktree goes away and recreates it on the
+   * next add. A watcher bound to the deleted directory dies silently (no `close`, no `error`),
+   * so the guard compares inodes rather than trusting a non-null handle: a recreated directory
+   * gets a fresh watcher, and the dead one is closed.
    */
   private attachWorktreesDirWatcher() {
-    if (this.worktreesDirWatcher) return;
     if (!this.commonDir) return;
 
     const dir = path.join(this.commonDir, "worktrees");
+    let ino: number;
     try {
-      this.worktreesDirWatcher = watch(dir, { recursive: false }, () => {
+      ino = statSync(dir).ino;
+    } catch {
+      log.debug("Worktrees directory absent, relying on git-dir watch until it appears", { dir });
+      return;
+    }
+    if (this.worktreesDirWatcher && this.worktreesDirIno === ino) return;
+
+    this.worktreesDirWatcher?.close();
+    try {
+      const watcher = watch(dir, { recursive: false }, () => {
         this.emitDebounced("worktrees");
       });
+      watcher.on("error", (error) => {
+        log.debug("Worktrees directory watcher failed; it will re-arm on the next change", {
+          dir,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        if (this.worktreesDirWatcher === watcher) this.dropWorktreesDirWatcher();
+      });
+      watcher.on("close", () => {
+        if (this.worktreesDirWatcher === watcher) this.dropWorktreesDirWatcher();
+      });
+      this.worktreesDirWatcher = watcher;
+      this.worktreesDirIno = ino;
     } catch (error) {
       log.debug("Worktrees directory not watchable yet, relying on git-dir watch", {
         dir,
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  private dropWorktreesDirWatcher() {
+    this.worktreesDirWatcher?.close();
+    this.worktreesDirWatcher = null;
+    this.worktreesDirIno = null;
   }
 
   private emitDebounced(event: WatchEvent) {

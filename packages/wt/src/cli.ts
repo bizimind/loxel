@@ -61,7 +61,8 @@ program
   .aliases(["rm", "delete"])
   .description("Remove a worktree, running clean.wt.sh first")
   .option("-f, --force", "Remove even with uncommitted or untracked changes")
-  .option("-d, --delete-branch", "Also delete the worktree's branch")
+  .option("-d, --delete-branch", "Also delete the worktree's branch (kept if unmerged)")
+  .option("-D, --force-branch", "Delete the branch even if it is unmerged (implies -d)")
   .option("--keep-branch", "Keep the branch (no prompt)")
   .option("-j, --json", "Output as JSON")
   .action(async (name: string | undefined, opts) => {

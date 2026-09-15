@@ -19,7 +19,8 @@ export function describeError(err: unknown, fallback: string): string {
 
 /** Read a trimmed `stderr` field off an error, if it has one (Bun.$ ShellError). */
 function readStderr(err: Error): string | null {
-  const raw: unknown = (err as unknown as { stderr?: unknown }).stderr;
+  if (!("stderr" in err)) return null;
+  const raw: unknown = err.stderr;
   const text =
     typeof raw === "string"
       ? raw
