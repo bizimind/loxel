@@ -51,12 +51,7 @@ wt update            # update the binary in place
 
 `wt` refuses to rename or remove the **main** worktree.
 
-**Migrating from the old config-based CLI.** `wt.yaml` is ignored. Map
-`worktrees_dir` to `WT_DIR`, move add/clean commands into repo-root
-`init.wt.sh`/`clean.wt.sh`, replace file/template rules with shell commands in
-`init.wt.sh`, derive ports and resource names from `WT_NAME`, and use
-`WT_AUTO_UPDATE=1` for automatic updates. `wt init`, `wt open`, generated port
-offsets/unique names, and the global `--repo` selector no longer exist.
+**Migrating from the old config-based CLI.** `wt.yaml` is ignored. Map `worktrees_dir` to `WT_DIR`, move add/clean commands into repo-root `init.wt.sh`/`clean.wt.sh`, replace file/template rules with shell commands in `init.wt.sh`, derive ports and resource names from `WT_NAME`, and use `WT_AUTO_UPDATE=1` for automatic updates. `wt init`, `wt open`, generated port offsets/unique names, and the global `--repo` selector no longer exist.
 
 ## Repo layout
 
