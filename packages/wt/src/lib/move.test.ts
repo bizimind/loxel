@@ -135,6 +135,18 @@ describe("planMove", () => {
     expect(await pathExists(join(repo.root, ".worktrees", "dst"))).toBe(false);
   });
 
+  test("rejects a --branch value that git would parse as an option", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "src", repoPath: repo.root });
+
+    await expect(
+      executeMove({ oldName: "src", name: "dst", repoPath: repo.root, branch: "--force" }),
+    ).rejects.toThrow("must not start with '-'");
+
+    expect(await pathExists(added.path)).toBe(true);
+    expect(await git(["rev-parse", "--abbrev-ref", "HEAD"], added.path)).toBe("src");
+  });
+
   test("lists available worktrees when the old name is unknown", async () => {
     repo = await createTestRepo({ bare: true });
     await executeAdd({ name: "feat/a", repoPath: repo.root });

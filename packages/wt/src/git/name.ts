@@ -22,6 +22,8 @@ export async function worktreeNameError(name: string, cwd?: string): Promise<str
 /** Why `name` is unusable as a branch name, or null if it is fine. */
 export async function branchNameError(name: string, cwd?: string): Promise<string | null> {
   if (!name) return "branch name must not be empty";
+  // check-ref-format accepts `--force`, but `git branch -m` would then parse it as an option.
+  if (name.startsWith("-")) return "branch name must not start with '-'";
   if (!(await gitSucceeds(["check-ref-format", `refs/heads/${name}`], cwd))) {
     return `'${name}' is not a valid git branch name`;
   }

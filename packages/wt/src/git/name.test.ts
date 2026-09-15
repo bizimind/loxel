@@ -82,6 +82,10 @@ describe("branchNameError", () => {
     expect(await branchNameError("", testCwd())).toBe("branch name must not be empty");
   });
 
+  test.each([["--force"], ["-x"]])("rejects a name starting with a dash: %p", async (name) => {
+    expect(await branchNameError(name, testCwd())).toBe("branch name must not start with '-'");
+  });
+
   test.each([["bad..name"], ["my branch"], ["feat/x/"]])(
     "rejects a name git refuses: %p",
     async (name) => {
