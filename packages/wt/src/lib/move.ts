@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   assertValidWorktreeName,
   branchExists,
+  branchNameError,
   DETACHED,
   getWorktreeName,
   moveWorktree,
@@ -10,7 +11,7 @@ import {
   renameBranch,
   type Worktree,
 } from "../git/index.ts";
-import { HOOK_RENAME, runHook } from "../hooks/run.ts";
+import { HOOK_RENAME, runHook, type HookContext } from "../hooks/run.ts";
 import { silentProgress, type ProgressHandler } from "../progress.ts";
 import { locateWorktree } from "./worktrees.ts";
 
@@ -60,7 +61,7 @@ export interface MoveParams {
    * Base environment for the rename hook (default: process.env). Use to provide
    * a resolved shell PATH when calling from a non-shell context (e.g. a GUI app).
    */
-  hookEnv?: Record<string, string>;
+  hookEnv?: HookContext["baseEnv"];
 }
 
 /** The subset of `MoveParams` that decides what a rename would do. */
@@ -172,6 +173,11 @@ async function inspectMove(params: MoveTarget): Promise<{ root: string; plan: Mo
   }
 
   const { newBranch, branchSkipReason } = planBranch(params, worktree, oldName);
+  // `--branch` bypasses the worktree-name validation above, so check it as a ref here.
+  if (params.branch && newBranch) {
+    const error = await branchNameError(newBranch, root);
+    if (error) throw new Error(error);
+  }
   if (newBranch && newBranch !== worktree.branch && (await branchExists(root, newBranch))) {
     throw new Error(`Branch '${newBranch}' already exists.`);
   }

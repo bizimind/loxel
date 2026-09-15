@@ -14,7 +14,7 @@ import {
   resolveRepoRoot,
   type Worktree,
 } from "../git/index.ts";
-import { HOOK_INIT, runHook } from "../hooks/run.ts";
+import { HOOK_INIT, runHook, type HookContext } from "../hooks/run.ts";
 import { silentProgress, type ProgressHandler } from "../progress.ts";
 
 /**
@@ -48,7 +48,7 @@ export interface AddParams {
    * Base environment for the init hook (default: process.env). Use to provide
    * a resolved shell PATH when calling from a non-shell context (e.g. a GUI app).
    */
-  hookEnv?: Record<string, string>;
+  hookEnv?: HookContext["baseEnv"];
 }
 
 export interface AddResult {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { runGit } from "../src/git/run.ts";
+import { runGit } from "../src/git/index.ts";
 
 describe("test safety preload", () => {
   test("git cannot discover the host repo from process.cwd()", async () => {

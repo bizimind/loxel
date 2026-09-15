@@ -116,7 +116,9 @@ async function convertToBareRepo(cwd: string, gitDir: string): Promise<void> {
  * Register the moved working tree with git's worktree tracking.
  *
  * `git worktree add` refuses a non-empty destination, so the admin entry is
- * written by hand and then validated with `git worktree repair`.
+ * written by hand, its pointers fixed up with `git worktree repair`, and an
+ * index created with `git reset` — `repair` never creates one, and without
+ * it every tracked file reads as staged-deleted plus untracked.
  */
 async function registerWorktree(cwd: string, worktreePath: string, branch: string): Promise<void> {
   const trackingDir = await availableTrackingDir(cwd, basename(worktreePath));
@@ -130,6 +132,8 @@ async function registerWorktree(cwd: string, worktreePath: string, branch: strin
   ]);
 
   await git(["worktree", "repair", worktreePath], cwd);
+  // Both callers guarantee a clean tree at this point, so resetting the index to HEAD is safe.
+  await git(["reset", "--quiet"], worktreePath);
 }
 
 /** Pick the same flat, collision-safe shape Git uses for worktree admin directories. */

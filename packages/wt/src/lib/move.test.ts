@@ -123,6 +123,18 @@ describe("planMove", () => {
     );
   });
 
+  test("rejects an invalid --branch name before anything moves", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "src", repoPath: repo.root });
+
+    await expect(
+      planMove({ oldName: "src", name: "dst", repoPath: repo.root, branch: "bad..name" }),
+    ).rejects.toThrow("not a valid git branch name");
+
+    expect(await pathExists(added.path)).toBe(true);
+    expect(await pathExists(join(repo.root, ".worktrees", "dst"))).toBe(false);
+  });
+
   test("lists available worktrees when the old name is unknown", async () => {
     repo = await createTestRepo({ bare: true });
     await executeAdd({ name: "feat/a", repoPath: repo.root });

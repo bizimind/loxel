@@ -26,6 +26,9 @@ describe("transformToBare", () => {
     expect(await git(["worktree", "list", "--porcelain"], repo.root)).toContain(
       `worktree ${worktreePath}`,
     );
+    // The hand-written admin entry has no index; without one every tracked file
+    // would read as staged-deleted plus untracked.
+    expect(await git(["status", "--porcelain"], worktreePath)).toBe("");
   });
 
   test("refuses conversion when linked worktrees already exist", async () => {

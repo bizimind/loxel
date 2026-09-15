@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { createTestDirectory, type TestDirectory } from "../test-repo.ts";
-import { structuralNameError, worktreeNameError } from "./name.ts";
+import { branchNameError, structuralNameError, worktreeNameError } from "./name.ts";
 
 let directory: TestDirectory | undefined;
 
@@ -71,4 +71,23 @@ describe("structuralNameError", () => {
     expect(structuralNameError("..")).not.toBeNull();
     expect(structuralNameError("-x")).not.toBeNull();
   });
+});
+
+describe("branchNameError", () => {
+  test("accepts a valid branch name", async () => {
+    expect(await branchNameError("feat/x", testCwd())).toBeNull();
+  });
+
+  test("rejects an empty name", async () => {
+    expect(await branchNameError("", testCwd())).toBe("branch name must not be empty");
+  });
+
+  test.each([["bad..name"], ["my branch"], ["feat/x/"]])(
+    "rejects a name git refuses: %p",
+    async (name) => {
+      expect(await branchNameError(name, testCwd())).toBe(
+        `'${name}' is not a valid git branch name`,
+      );
+    },
+  );
 });

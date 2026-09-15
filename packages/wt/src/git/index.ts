@@ -1,5 +1,10 @@
 export { branchExists, deleteBranch, getCurrentBranch, renameBranch } from "./branch.ts";
-export { assertValidWorktreeName, structuralNameError, worktreeNameError } from "./name.ts";
+export {
+  assertValidWorktreeName,
+  branchNameError,
+  structuralNameError,
+  worktreeNameError,
+} from "./name.ts";
 export {
   assertCanTransformToBare,
   detectRepoType,

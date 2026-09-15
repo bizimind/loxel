@@ -50,7 +50,7 @@ import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import { decrypt, encrypt, isEncrypted } from "./secret-store";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
-import { buildHookEnv, buildSpawnEnv } from "./shell-env";
+import { buildSpawnEnv } from "./shell-env";
 import * as storeDb from "./store-db";
 import { stress } from "./stress-detector";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
@@ -1641,7 +1641,7 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
 
     try {
       await executeAdd(
-        { name: "main", branch: "main", repoPath: projectDir, hookEnv: buildHookEnv() },
+        { name: "main", branch: "main", repoPath: projectDir, hookEnv: buildSpawnEnv() },
         wtProgress,
       );
     } catch (err) {
@@ -1718,7 +1718,7 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   await writeInitHook(bareDir, copyFiles, setupCommands);
 
   await executeAdd(
-    { name: baseBranch, branch: baseBranch, repoPath: bareDir, hookEnv: buildHookEnv() },
+    { name: baseBranch, branch: baseBranch, repoPath: bareDir, hookEnv: buildSpawnEnv() },
     wtProgress,
   );
 
@@ -1783,7 +1783,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     if (!existsSync(join(dirPath, ".worktrees", "main"))) {
       try {
         await executeAdd(
-          { name: "main", branch: "main", repoPath: dirPath, hookEnv: buildHookEnv() },
+          { name: "main", branch: "main", repoPath: dirPath, hookEnv: buildSpawnEnv() },
           wtProgress,
         );
       } catch (err) {
@@ -2109,7 +2109,7 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
   wtLog.info(`Creating worktree '${name}'`, { branch, branchResolution });
   try {
     const result = await executeAdd(
-      { name, branch, branchResolution, repoPath: project.cwd, hookEnv: buildHookEnv() },
+      { name, branch, branchResolution, repoPath: project.cwd, hookEnv: buildSpawnEnv() },
       wtProgress,
     );
     wtLog.info(`Worktree '${name}' created`, { path: result.path, branch: result.branch });
@@ -2165,7 +2165,7 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
         force,
         repoPath: project.cwd,
         expectedPath: wtPath,
-        hookEnv: buildHookEnv(),
+        hookEnv: buildSpawnEnv(),
       },
       wtProgress,
     );

@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 
 import { deleteBranch, isWorktreeDirty, removeWorktree } from "../git/index.ts";
-import { HOOK_CLEAN, runHook } from "../hooks/run.ts";
+import { HOOK_CLEAN, runHook, type HookContext } from "../hooks/run.ts";
 import { silentProgress, type ProgressHandler } from "../progress.ts";
 import { locateWorktree } from "./worktrees.ts";
 
@@ -34,7 +34,7 @@ export interface RemoveParams {
    * Base environment for the clean hook (default: process.env). Use to provide
    * a resolved shell PATH when calling from a non-shell context (e.g. a GUI app).
    */
-  hookEnv?: Record<string, string>;
+  hookEnv?: HookContext["baseEnv"];
 }
 
 export interface RemoveResult {

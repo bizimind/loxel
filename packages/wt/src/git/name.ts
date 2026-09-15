@@ -19,6 +19,15 @@ export async function worktreeNameError(name: string, cwd?: string): Promise<str
   return null;
 }
 
+/** Why `name` is unusable as a branch name, or null if it is fine. */
+export async function branchNameError(name: string, cwd?: string): Promise<string | null> {
+  if (!name) return "branch name must not be empty";
+  if (!(await gitSucceeds(["check-ref-format", `refs/heads/${name}`], cwd))) {
+    return `'${name}' is not a valid git branch name`;
+  }
+  return null;
+}
+
 /** The path-shape half of the check: synchronous, no git involved. */
 export function structuralNameError(name: string): string | null {
   if (!name) return "name must not be empty";
