@@ -56,6 +56,12 @@ export class ProjectFilesService {
     private worktreeCwd: string,
     private onDirChanged: (dir: string, entries: DirEntry[]) => void,
     private onFileChanged?: (filePath: string, nonces: string[]) => void,
+    /**
+     * Called after a working-tree change rebuilt the git status maps. Read-only git runs with
+     * GIT_OPTIONAL_LOCKS=0 and writes nothing under the git dir, so this is the only signal
+     * that an edit changed the status; the git-dir watcher only sees index/ref writes.
+     */
+    private onStatusChanged?: () => void,
   ) {
     this.syncService = new FilesSyncService({
       watchDir: worktreeCwd,
@@ -168,6 +174,7 @@ export class ProjectFilesService {
    */
   private async refreshCachedDirs(): Promise<void> {
     await this.buildStatusMaps();
+    this.onStatusChanged?.();
     for (const dir of Array.from(this.dirCache.keys())) {
       const oldEntries = this.dirCache.get(dir);
       this.dirCache.delete(dir);
@@ -221,6 +228,7 @@ export class ProjectFilesService {
     // Always rebuild git status so changes anywhere in the tree (including
     // collapsed directories) propagate correct colors to visible parents.
     await this.buildStatusMaps();
+    this.onStatusChanged?.();
 
     // Re-read cached directories that had direct children change
     for (const dir of parentDirs) {

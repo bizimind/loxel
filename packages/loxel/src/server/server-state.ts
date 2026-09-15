@@ -21,6 +21,25 @@ export interface ProjectState {
 }
 
 /**
+ * The project that owns `targetPath`: the one whose cwd or worktrees directory contains it,
+ * longest matching prefix winning. The worktrees dir matters because `WT_DIR` (or a symlinked
+ * `.worktrees`) can place a project's worktrees outside its cwd.
+ */
+export function findOwningProject<T extends Pick<ProjectState, "cwd" | "worktreesDir">>(
+  projects: Iterable<T>,
+  targetPath: string,
+): T | undefined {
+  let best: { project: T; prefix: string } | undefined;
+  for (const project of projects) {
+    for (const prefix of [project.cwd, project.worktreesDir]) {
+      if (targetPath !== prefix && !targetPath.startsWith(prefix + "/")) continue;
+      if (!best || prefix.length > best.prefix.length) best = { project, prefix };
+    }
+  }
+  return best?.project;
+}
+
+/**
  * Heavy per-worktree resources, created when a client subscribes and destroyed
  * when the last subscriber disconnects. Multiple worktrees can have active
  * resources simultaneously.

@@ -43,6 +43,7 @@ import { handleRequest } from "./routes";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
 import { createServerPerfMonitor } from "./server-perf-monitor";
+import { findOwningProject } from "./server-state";
 import type {
   ClientState,
   ProjectState,
@@ -68,15 +69,9 @@ const log = logger.child("server");
 const projects = new Map<string, ProjectState>();
 const wtResources = new Map<string, WorktreeResources>();
 
-/** Find the project whose cwd is a prefix of the given path (longest match). */
+/** Find the project that owns the given path: under its cwd or its worktrees dir. */
 export function findProjectForPath(targetPath: string): ProjectState | undefined {
-  let best: ProjectState | undefined;
-  for (const project of projects.values()) {
-    if (targetPath === project.cwd || targetPath.startsWith(project.cwd + "/")) {
-      if (!best || project.cwd.length > best.cwd.length) best = project;
-    }
-  }
-  return best;
+  return findOwningProject(projects.values(), targetPath);
 }
 
 /**
@@ -284,6 +279,8 @@ function createFilesService(wtPath: string): ProjectFilesService {
         data: { path: filePath, nonces },
       });
     },
+    // A working-tree edit is the one status change the git-dir watcher cannot see.
+    () => void handleStatusEvent(wtPath),
   );
 }
 
