@@ -283,6 +283,26 @@ describe("FileWatcher worktree lifecycle", () => {
     expect(await sawWorktrees(seen)).toBe(true);
   }, 60000);
 
+  test("survives git reusing the worktrees/ inode across remove and re-add cycles", async () => {
+    const { base, repo } = await makeRepo();
+    // Pre-created branches: `worktree add <path> <branch>` writes nothing before mkdir, so the
+    // freed inode is the first one handed back. A new-branch add would mask the reuse.
+    for (const b of ["b1", "b2", "b3"]) await Bun.$`git -C ${repo} branch ${b}`.quiet();
+    const { seen, watcher } = startWatcher(repo);
+    await watcher.start();
+    await Bun.sleep(ARM_MS);
+
+    for (const b of ["b1", "b2", "b3"]) {
+      const wt = path.join(base, b);
+      seen.length = 0;
+      await Bun.$`git -C ${repo} worktree add -q ${wt} ${b}`.quiet();
+      expect(await sawWorktrees(seen), `add ${b}`).toBe(true);
+      seen.length = 0;
+      await Bun.$`git -C ${repo} worktree remove --force ${wt}`.quiet();
+      expect(await sawWorktrees(seen), `remove ${b}`).toBe(true);
+    }
+  }, 90000);
+
   test("commits inside a worktree do not emit worktrees", async () => {
     const { base, repo } = await makeRepo();
     const wt = path.join(base, "noisy");

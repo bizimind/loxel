@@ -1,6 +1,12 @@
 import { createResult, runAction } from "@bizimind/cli-common";
 
-import { executeRemove, planRemove, type RemovePlan, type RemoveResult } from "../lib/index.ts";
+import {
+  executeRemove,
+  lockedMessage,
+  planRemove,
+  type RemovePlan,
+  type RemoveResult,
+} from "../lib/index.ts";
 import { confirmForceRemove, isTTY, selectRemoveAction } from "../prompt.ts";
 import type { AbortedResult } from "./aborted.ts";
 import { abortedResult } from "./aborted.ts";
@@ -28,6 +34,10 @@ export async function removeCommand(
 
     if (plan.isMain) {
       throw new Error("Refusing to remove the main worktree.");
+    }
+    // Refuse before any prompt: git rejects a locked worktree even with --force.
+    if (plan.locked) {
+      throw new Error(lockedMessage(plan.name, plan.worktreePath));
     }
 
     const deleteBranch = await decideBranchDeletion(plan, options);

@@ -53,7 +53,14 @@ beforeEach(() => {
   removeCalls = [];
   planRemoveCalls = [];
   branchDeleteSucceeds = true;
-  plan = { name: "feat-x", worktreePath: WT_PATH, branch: "feat-x", dirty: true, isMain: false };
+  plan = {
+    name: "feat-x",
+    worktreePath: WT_PATH,
+    branch: "feat-x",
+    dirty: true,
+    isMain: false,
+    locked: false,
+  };
   useWorktreeStore.setState({
     byProject: { [PROJECT]: { worktrees: [worktree] } },
     pendingRemovePlan: null,

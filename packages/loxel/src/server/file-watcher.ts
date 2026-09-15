@@ -1,4 +1,4 @@
-import { realpathSync, statSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 
 import { logger } from "./logger";
@@ -267,6 +267,10 @@ export class FileWatcher {
     try {
       ino = statSync(dir).ino;
     } catch {
+      // The directory is gone (last worktree removed). Forget the dead watcher now: git may
+      // hand the recreated directory the very same inode, which the check below would then
+      // mistake for the one still being watched.
+      this.dropWorktreesDirWatcher();
       return false;
     }
     if (this.worktreesDirWatcher && this.worktreesDirIno === ino) return false;
@@ -274,6 +278,11 @@ export class FileWatcher {
     this.worktreesDirWatcher?.close();
     try {
       const watcher = watch(dir, { recursive: false }, () => {
+        // Self-deletion is delivered as a rename of the directory itself; that watcher is
+        // dead from here on, so let it go rather than shadow the next attach.
+        if (!existsSync(dir) && this.worktreesDirWatcher === watcher) {
+          this.dropWorktreesDirWatcher();
+        }
         this.emitDebounced("worktrees");
       });
       watcher.on("error", (error) => {

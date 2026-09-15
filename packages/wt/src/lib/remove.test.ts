@@ -22,6 +22,7 @@ describe("planRemove", () => {
       branch: "feat/foo",
       dirty: false,
       isMain: false,
+      locked: false,
     });
   });
 
@@ -141,6 +142,21 @@ describe("executeRemove", () => {
     await expect(
       executeRemove({ name, repoPath: repo.root, deleteBranch: false, force: true }),
     ).rejects.toThrow("No worktrees exist yet");
+  });
+
+  test("refuses a locked worktree before running clean.wt.sh", async () => {
+    repo = await createTestRepo({ bare: true });
+    await writeHook(repo.root, "clean.wt.sh", 'touch "$WT_ROOT/torn-down"');
+    const added = await executeAdd({ name: "locked", repoPath: repo.root });
+    await git(["worktree", "lock", added.path], repo.root);
+
+    expect((await planRemove({ name: "locked", repoPath: repo.root })).locked).toBe(true);
+    await expect(
+      executeRemove({ name: "locked", repoPath: repo.root, deleteBranch: false, force: true }),
+    ).rejects.toThrow("git worktree unlock");
+
+    expect(await pathExists(join(repo.root, "torn-down"))).toBe(false);
+    expect(await pathExists(added.path)).toBe(true);
   });
 
   test("does not bypass a worktree lock when force is used for dirty files", async () => {

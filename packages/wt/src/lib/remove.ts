@@ -16,6 +16,8 @@ export interface RemovePlan {
   dirty: boolean;
   /** The main worktree, which cannot be removed */
   isMain: boolean;
+  /** Locked with `git worktree lock`; removal refuses until it is unlocked */
+  locked: boolean;
 }
 
 export interface RemoveParams {
@@ -60,14 +62,16 @@ export async function planRemove(params: { name: string; repoPath: string }): Pr
     branch: worktree.branch,
     dirty: await isWorktreeDirty(worktree.path),
     isMain: worktree.path === root,
+    locked: worktree.locked,
   };
 }
 
 /**
  * Run the clean hook, then remove the worktree and optionally its branch.
  *
- * Throws when the worktree is dirty and `force` is not set, or when it is the
- * main worktree.
+ * Throws when the worktree is dirty and `force` is not set, when it is the
+ * main worktree, or when it is locked. Every refusal happens before the clean
+ * hook runs, so a removal git would reject never tears down the environment.
  */
 export async function executeRemove(
   params: RemoveParams,
@@ -82,6 +86,9 @@ export async function executeRemove(
 
   if (worktree.path === root) {
     throw new Error("Refusing to remove the main worktree.");
+  }
+  if (worktree.locked) {
+    throw new Error(lockedMessage(name, worktree.path));
   }
   if (!force && (await isWorktreeDirty(worktree.path))) {
     throw new Error(
@@ -108,6 +115,11 @@ export async function executeRemove(
   );
 
   return { name, path: worktree.path, removed: true, branchDeleted, hookRan };
+}
+
+/** `git worktree remove` refuses a locked worktree even with --force; say what unlocks it. */
+export function lockedMessage(name: string, worktreePath: string): string {
+  return `Worktree '${name}' is locked. Run \`git worktree unlock ${worktreePath}\` first.`;
 }
 
 /** Branch deletion is recoverable, so a failure warns rather than throws. */
