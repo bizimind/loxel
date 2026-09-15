@@ -57,6 +57,17 @@ describe("Sidebar regular-repository worktrees", () => {
     expect(screen.getByText("Add worktree")).toBeDefined();
   });
 
+  test("does not offer 'Click to load worktrees' for a regular repo with none", () => {
+    useProjectStore.setState({ projects: [{ ...project, worktrees: [] }] });
+    useWorktreeStore.setState({
+      byProject: { [project.path]: { worktrees: [], worktreesDir: project.worktreesDir } },
+    });
+    render(<Sidebar />);
+
+    expect(screen.queryByText("Click to load worktrees")).toBeNull();
+    expect(screen.getByText("Add worktree")).toBeDefined();
+  });
+
   test("switches from a linked worktree back to the regular repository root", async () => {
     useWorktreeStore.setState({ activeWorktreePath: project.worktrees[0]!.path });
     render(<Sidebar />);

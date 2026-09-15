@@ -45,11 +45,11 @@ pnpm -C packages/<package> run typecheck       # Single package
 ```bash
 pnpm -C packages/<package> run test            # Run all tests in package (uses package.json script)
 
-# Run a single test file (bun test runner directly)
-bun test packages/wt/src/git/name.test.ts
+# Run a single test file (bun test runner directly; --cwd loads that package's bunfig.toml)
+bun test --cwd packages/wt src/git/name.test.ts
 
 # Run tests matching a pattern
-bun test packages/wt --test-name-pattern "validates"
+bun test --cwd packages/wt --test-name-pattern "validates"
 ```
 
 ## Architecture

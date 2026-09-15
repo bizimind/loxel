@@ -1,2 +1,0 @@
-[test]
-preload = ["./packages/wt/test/safety-preload.ts"]

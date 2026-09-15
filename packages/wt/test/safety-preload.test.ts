@@ -7,7 +7,8 @@ const checkoutRoot = resolve(import.meta.dir, "../../..");
 
 describe("test safety preload", () => {
   test("raw git cannot discover the host repo from below its root (ceiling)", async () => {
-    const result = await Bun.$`git -C ${process.cwd()} rev-parse --git-dir`.nothrow().quiet();
+    const below = resolve(checkoutRoot, "packages", "wt");
+    const result = await Bun.$`git -C ${below} rev-parse --git-dir`.nothrow().quiet();
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr.toString()).toContain("not a git repository");
   });

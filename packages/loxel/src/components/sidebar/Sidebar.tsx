@@ -854,7 +854,10 @@ function WorktreeList({ project }: { project: Project }) {
       >
         <SortableContext items={displayedIds} strategy={verticalListSortingStrategy}>
           <div>
-            {worktrees.length === 0 && (
+            {/* A bare repo's list is empty until its worktrees are fetched; a regular repo's
+                main checkout is never listed, so for it an empty list is the normal state and
+                the "Add worktree" row below is the affordance. */}
+            {project.isBare && worktrees.length === 0 && (
               <div
                 className="text-muted-foreground cursor-pointer py-1.5 text-[11px] italic hover:underline"
                 style={{ paddingLeft: "40px" }}

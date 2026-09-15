@@ -28,6 +28,10 @@ export async function removeCommand(
   options: RemoveOptions,
 ): Promise<void> {
   await runAction<RemoveCommandResult>(options, async (ctx) => {
+    if (options.keepBranch && (options.deleteBranch || options.forceBranch)) {
+      throw new Error("--keep-branch cannot be combined with --delete-branch or --force-branch.");
+    }
+
     const repoPath = process.cwd();
     const selected = await resolveWorktreeName(name, "remove", repoPath);
     const plan = await planRemove({ name: selected, repoPath });
@@ -63,8 +67,8 @@ async function decideBranchDeletion(
   plan: RemovePlan,
   options: RemoveOptions,
 ): Promise<boolean | "cancel"> {
-  if (options.deleteBranch || options.forceBranch) return true;
   if (options.keepBranch || !plan.branch) return false;
+  if (options.deleteBranch || options.forceBranch) return true;
   if (!isTTY()) return false;
 
   const action = await selectRemoveAction(plan.name, plan.branch);

@@ -496,7 +496,7 @@ pnpm -C packages/wt run typecheck
 pnpm -C packages/wt run build     # standalone binary at dist/wt
 ```
 
-The tests drive real git against temporary repositories created by `src/test-repo.ts`. Because wt removes worktrees and runs hooks, `test/safety-preload.ts` sandboxes every run: `GIT_CEILING_DIRECTORIES` and a guard around wt's git helpers keep git away from this checkout, ambient `GIT_*`, `WT_*`, shell-startup and temp-dir variables are cleared, and `process.chdir`/`process.exit` are blocked. Always build fixtures with `createTestRepo()`; never point a test at a real repository.
+The tests drive real git against temporary repositories created by `src/test-repo.ts`. Because wt removes worktrees and runs hooks, `test/safety-preload.ts` sandboxes every run. It is loaded by this package's `bunfig.toml`, so always run the tests with the package as cwd (`pnpm -C packages/wt run test`, or `bun test --cwd packages/wt <file>`); a `bun test packages/wt/...` from the repo root would skip it. The sandbox: `GIT_CEILING_DIRECTORIES` and a guard around wt's git helpers keep git away from this checkout, ambient `GIT_*`, `WT_*`, shell-startup and temp-dir variables are cleared, and `process.chdir`/`process.exit` are blocked. Always build fixtures with `createTestRepo()`; never point a test at a real repository.
 
 ---
 
