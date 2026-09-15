@@ -56,14 +56,11 @@ export async function runHook(
       stderr: "pipe",
     });
 
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
+    const [, , exitCode] = await Promise.all([
+      forwardLines(proc.stdout, progress),
+      forwardLines(proc.stderr, progress),
       proc.exited,
     ]);
-
-    const output = (stdout + stderr).trim();
-    if (output) progress.log(output);
 
     if (exitCode !== 0) {
       progress.warn(`Warning: ${hook} exited with code ${exitCode}; continuing`);
@@ -75,4 +72,24 @@ export async function runHook(
     progress.warn(`Warning: ${hook} failed to run: ${message}; continuing`);
     return false;
   }
+}
+
+/**
+ * Relay a hook's output line by line as it arrives, so a long install or
+ * container start shows progress instead of going silent until it exits.
+ */
+async function forwardLines(
+  stream: ReadableStream<Uint8Array>,
+  progress: ProgressHandler,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let pending = "";
+  for await (const chunk of stream) {
+    pending += decoder.decode(chunk, { stream: true });
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) if (line.trim()) progress.log(line);
+  }
+  pending += decoder.decode();
+  if (pending.trim()) progress.log(pending);
 }

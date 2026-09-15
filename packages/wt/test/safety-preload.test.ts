@@ -1,18 +1,28 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 
-import { runGit } from "../src/git/index.ts";
+import { git, gitSucceeds, runGit } from "../src/git/index.ts";
+
+const checkoutRoot = resolve(import.meta.dir, "../../..");
 
 describe("test safety preload", () => {
-  test("git cannot discover the host repo from process.cwd()", async () => {
-    const result = await runGit(["rev-parse", "--git-dir"]);
+  test("raw git cannot discover the host repo from below its root (ceiling)", async () => {
+    const result = await Bun.$`git -C ${process.cwd()} rev-parse --git-dir`.nothrow().quiet();
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("not a git repository");
+    expect(result.stderr.toString()).toContain("not a git repository");
   });
 
-  test("git cannot discover the host repo from an explicit cwd inside it", async () => {
-    const result = await runGit(["rev-parse", "--git-dir"], process.cwd());
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("not a git repository");
+  test("wt's git helpers refuse the checkout root itself", async () => {
+    await expect(runGit(["rev-parse", "--git-dir"], checkoutRoot)).rejects.toThrow("[TEST SAFETY]");
+    await expect(git(["rev-parse", "--git-dir"], checkoutRoot)).rejects.toThrow("[TEST SAFETY]");
+    await expect(gitSucceeds(["rev-parse"], checkoutRoot)).rejects.toThrow("[TEST SAFETY]");
+  });
+
+  test("wt's git helpers refuse a cwd inside the checkout, including the implicit one", async () => {
+    await expect(runGit(["rev-parse", "--git-dir"])).rejects.toThrow("[TEST SAFETY]");
+    await expect(runGit(["rev-parse", "--git-dir"], process.cwd())).rejects.toThrow(
+      "[TEST SAFETY]",
+    );
   });
 
   test("git works in a temp-directory test repo", async () => {

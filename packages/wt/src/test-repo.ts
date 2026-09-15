@@ -54,8 +54,10 @@ export async function createTestRepo(options: { bare?: boolean } = {}): Promise<
   const cleanup = () => directory.cleanup();
 
   try {
+    // Always pass a cwd: the safety preload rejects git calls that would inherit
+    // the test process's cwd inside this checkout.
     const seed = join(directory.root, "seed");
-    await git(["init", "--initial-branch=main", seed]);
+    await git(["init", "--initial-branch=main", seed], directory.root);
     await git(["config", "user.email", "test@example.com"], seed);
     await git(["config", "user.name", "Test"], seed);
     await Bun.write(join(seed, "README.md"), "# seed\n");
@@ -65,7 +67,7 @@ export async function createTestRepo(options: { bare?: boolean } = {}): Promise<
     if (!options.bare) return { root: seed, cleanup };
 
     const bare = join(directory.root, "bare.git");
-    await git(["clone", "--bare", seed, bare]);
+    await git(["clone", "--bare", seed, bare], directory.root);
     return { root: bare, cleanup };
   } catch (error) {
     await directory.cleanup();

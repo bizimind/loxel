@@ -122,7 +122,7 @@ export async function executeMove(
   await moveWorktree(root, plan.oldPath, plan.worktreePath, force);
   progress.log(`Moved ${plan.oldPath} -> ${plan.worktreePath}`);
 
-  const { branch, branchRenamed } = await tryRenameBranch(root, plan, force, progress);
+  const { branch, branchRenamed } = await tryRenameBranch(root, plan, progress);
 
   await runHook(
     HOOK_RENAME,
@@ -162,7 +162,7 @@ async function inspectMove(params: MoveTarget): Promise<{ root: string; plan: Mo
   const { root, dir, worktree } = await locateWorktree(params.oldName, params.repoPath);
   const oldName = getWorktreeName(worktree.path, dir);
 
-  await assertValidWorktreeName(params.name);
+  await assertValidWorktreeName(params.name, root);
 
   const worktreePath = join(dir, params.name);
   if (worktreePath === worktree.path) {
@@ -216,12 +216,12 @@ function planBranch(
  *
  * The directory has already moved by this point and the rename is recoverable
  * by hand, so a failure warns rather than throwing (as `tryDeleteBranch` does
- * in `remove`).
+ * in `remove`). `force` covers the locked-worktree move only; it never turns
+ * the rename into an overwriting `git branch -M`.
  */
 async function tryRenameBranch(
   root: string,
   plan: MovePlan,
-  force: boolean,
   progress: ProgressHandler,
 ): Promise<{ branch: string | null; branchRenamed: boolean }> {
   const { newBranch, oldBranch } = plan;
@@ -230,7 +230,7 @@ async function tryRenameBranch(
   }
 
   try {
-    await renameBranch(root, oldBranch, newBranch, force);
+    await renameBranch(root, oldBranch, newBranch);
     progress.log(`Renamed branch '${oldBranch}' -> '${newBranch}'`);
     return { branch: newBranch, branchRenamed: true };
   } catch (err) {

@@ -1,2 +1,4 @@
 [test]
 preload = ["./test/safety-preload.ts"]
+# Every test drives real git in a temp repo; the 5s default flakes on a loaded machine.
+timeout = 30000

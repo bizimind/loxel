@@ -41,8 +41,8 @@ export function structuralNameError(name: string): string | null {
   return null;
 }
 
-/** Throw if `name` is unusable as a worktree name. */
-export async function assertValidWorktreeName(name: string): Promise<void> {
-  const error = await worktreeNameError(name);
+/** Throw if `name` is unusable as a worktree name. `cwd` is where the git check runs. */
+export async function assertValidWorktreeName(name: string, cwd: string): Promise<void> {
+  const error = await worktreeNameError(name, cwd);
   if (error) throw new Error(error);
 }

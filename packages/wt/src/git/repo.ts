@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { wrapError } from "@bizimind/cli-common";
 
 import { git, runGit } from "./run.ts";
-import { pathExists } from "./worktree.ts";
+import { isWorktreeDirty, pathExists } from "./worktree.ts";
 
 export type RepoType = "empty" | "bare" | "regular" | "worktree";
 
@@ -13,11 +13,15 @@ export type RepoType = "empty" | "bare" | "regular" | "worktree";
  * Anything that is not a git repository is reported as "empty".
  */
 export async function detectRepoType(cwd: string): Promise<RepoType> {
-  const gitDir = await runGit(["rev-parse", "--git-dir"], cwd);
-  if (gitDir.exitCode !== 0) return "empty";
+  const dirs = await runGit(
+    ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+    cwd,
+  );
+  if (dirs.exitCode !== 0) return "empty";
 
-  // A linked worktree's git dir lives under the main repo's worktrees/ dir.
-  if (gitDir.stdout.includes("/worktrees/")) return "worktree";
+  // A linked worktree has its own git dir separate from the shared common dir.
+  const [gitDir, commonDir] = dirs.stdout.trim().split("\n");
+  if (gitDir !== commonDir) return "worktree";
 
   const isBare = await runGit(["rev-parse", "--is-bare-repository"], cwd);
   if (isBare.stdout.trim() === "true") return "bare";
@@ -26,10 +30,8 @@ export async function detectRepoType(cwd: string): Promise<RepoType> {
 }
 
 /** Whether the repository has staged, unstaged, or untracked changes. */
-export async function hasUncommittedChanges(cwd: string): Promise<boolean> {
-  const status = await runGit(["status", "--porcelain"], cwd);
-  if (status.exitCode !== 0) return false;
-  return status.stdout.trim().length > 0;
+export function hasUncommittedChanges(cwd: string): Promise<boolean> {
+  return isWorktreeDirty(cwd);
 }
 
 /** Initialize a bare git repository at `cwd`. */

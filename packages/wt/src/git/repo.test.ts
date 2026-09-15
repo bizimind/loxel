@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 
-import { createTestRepo, type TestRepo } from "../test-repo.ts";
+import { createTestDirectory, createTestRepo, type TestRepo } from "../test-repo.ts";
 import { detectRepoType, transformToBare } from "./repo.ts";
 import { git } from "./run.ts";
 
@@ -10,6 +10,27 @@ let repo: TestRepo | undefined;
 afterEach(async () => {
   await repo?.cleanup();
   repo = undefined;
+});
+
+describe("detectRepoType", () => {
+  test("does not mistake a regular repo under a 'worktrees' directory for a linked worktree", async () => {
+    const directory = await createTestDirectory();
+    try {
+      const nested = join(directory.root, "worktrees", "plain");
+      await git(["init", "--initial-branch=main", nested], directory.root);
+      expect(await detectRepoType(nested)).toBe("regular");
+      expect(await detectRepoType(join(nested, ".git"))).toBe("regular");
+    } finally {
+      await directory.cleanup();
+    }
+  });
+
+  test("classifies a linked worktree by its separate git dir", async () => {
+    repo = await createTestRepo();
+    const linked = join(repo.root, ".worktrees", "side");
+    await git(["worktree", "add", "-b", "side", linked], repo.root);
+    expect(await detectRepoType(linked)).toBe("worktree");
+  });
 });
 
 describe("transformToBare", () => {

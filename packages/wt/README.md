@@ -269,12 +269,14 @@ Also exported: `resolveWorktreesDir`, `listManagedWorktrees`,
 
 ```sh
 bun src/cli.ts add feature-x      # run from source
-pnpm -C packages/wt run test      # safety-gated tests (read TEST_SAFETY.md before changes)
+pnpm -C packages/wt run test
 pnpm -C packages/wt run typecheck
 pnpm -C packages/wt run build     # standalone binary at dist/wt
 ```
 
-The current behavioral suite uses real temporary Git repositories and generated hook scripts.
-Changes to tests or their safety infrastructure invalidate an approved hash and stop the suite
-before execution. Read [TEST_SAFETY.md](./TEST_SAFETY.md) for the required review and
-acknowledgement process.
+The tests drive real git against temporary repositories created by `src/test-repo.ts`.
+Because wt removes worktrees and runs hooks, `test/safety-preload.ts` sandboxes every run:
+`GIT_CEILING_DIRECTORIES` and a guard around wt's git helpers keep git away from this
+checkout, ambient `GIT_*`, `WT_*`, shell-startup and temp-dir variables are cleared, and
+`process.chdir`/`process.exit` are blocked. Always build fixtures with `createTestRepo()`;
+never point a test at a real repository.

@@ -22,8 +22,14 @@
  * 3. createTestDirectory() in test-repo.ts validates that the temp directory
  *    does not overlap the source checkout, and cleanup() refuses to delete
  *    paths that aren't wt-test-* children of tmpdir.
+ *
+ * 4. wt's own git helpers (runGit, git, gitSucceeds) are wrapped to reject any
+ *    cwd at or below the checkout root. The ceiling only stops git walking *up*
+ *    into the root; a command started exactly there still finds it.
  */
+import { mock } from "bun:test";
 import { execSync } from "node:child_process";
+import { resolve } from "node:path";
 
 // ---------------------------------------------------------------------------
 // 1. Git discovery guard
@@ -66,3 +72,36 @@ process.exit = ((code?: number) => {
     `[TEST SAFETY] process.exit(${code}) is blocked. Throw an error instead or use expect().toThrow().`,
   );
 }) as typeof process.exit;
+
+// ---------------------------------------------------------------------------
+// 4. Host-checkout guard on wt's git helpers
+// ---------------------------------------------------------------------------
+// Capture the real functions before mocking: after mock.module the namespace
+// import itself would resolve to the wrappers.
+const { runGit, git, gitSucceeds, gitFailure } = await import("../src/git/run.ts");
+
+function assertOutsideCheckout(cwd: string | undefined): void {
+  const target = resolve(cwd ?? process.cwd());
+  if (target === repoRoot || target.startsWith(`${repoRoot}/`)) {
+    throw new Error(
+      `[TEST SAFETY] git in ${target} targets this checkout. Build fixtures with createTestRepo().`,
+    );
+  }
+}
+
+// `async` so a violation rejects like any other git failure instead of throwing synchronously.
+mock.module("../src/git/run.ts", () => ({
+  gitFailure,
+  runGit: async (args: string[], cwd?: string) => {
+    assertOutsideCheckout(cwd);
+    return runGit(args, cwd);
+  },
+  git: async (args: string[], cwd?: string) => {
+    assertOutsideCheckout(cwd);
+    return git(args, cwd);
+  },
+  gitSucceeds: async (args: string[], cwd?: string) => {
+    assertOutsideCheckout(cwd);
+    return gitSucceeds(args, cwd);
+  },
+}));

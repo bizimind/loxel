@@ -10,14 +10,9 @@ export async function deleteBranch(cwd: string, branch: string, force: boolean):
   await git(["branch", force ? "-D" : "-d", branch], cwd);
 }
 
-/** Rename a local branch. Throws with git's stderr on failure. */
-export async function renameBranch(
-  cwd: string,
-  from: string,
-  to: string,
-  force: boolean,
-): Promise<void> {
-  await git(["branch", force ? "-M" : "-m", from, to], cwd);
+/** Rename a local branch without overwriting an existing one. Throws with git's stderr on failure. */
+export async function renameBranch(cwd: string, from: string, to: string): Promise<void> {
+  await git(["branch", "-m", from, to], cwd);
 }
 
 /** The current branch name. Throws when HEAD is detached or unavailable. */

@@ -81,10 +81,10 @@ export async function executeAdd(
   progress: ProgressHandler = silentProgress,
 ): Promise<AddResult> {
   const { name, repoPath } = params;
-  const { root, worktreePath, branchConflict } = await inspectAdd(name, repoPath);
+  const { root, worktreePath, branchConflict, worktrees } = await inspectAdd(name, repoPath);
 
   const branch = await createWorktree(
-    { root, sourceCwd: repoPath, worktreePath, name, branchConflict, params },
+    { root, sourceCwd: repoPath, worktreePath, name, branchConflict, worktrees, params },
     progress,
   );
 
@@ -106,6 +106,8 @@ interface AddContext {
   worktreePath: string;
   name: string;
   branchConflict?: BranchConflict;
+  /** Every worktree git knows about, for detecting an already checked-out `-b` branch */
+  worktrees: Worktree[];
   params: AddParams;
 }
 
@@ -115,8 +117,14 @@ async function createWorktree(ctx: AddContext, progress: ProgressHandler): Promi
   await mkdir(dirname(worktreePath), { recursive: true });
 
   if (params.branch) {
-    if (!(await branchExists(root, params.branch))) {
+    const conflict = await classifyBranchConflict(root, params.branch, ctx.worktrees);
+    if (!conflict) {
       throw new Error(`Branch '${params.branch}' does not exist.`);
+    }
+    if (conflict.kind === "used-by-worktree") {
+      throw new Error(
+        `Branch '${params.branch}' is already checked out at ${conflict.worktreePath}`,
+      );
     }
     await addWorktree(sourceCwd, worktreePath, { branch: params.branch });
     return params.branch;
@@ -154,10 +162,16 @@ async function createWorktree(ctx: AddContext, progress: ProgressHandler): Promi
 async function inspectAdd(
   name: string,
   repoPath: string,
-): Promise<{ root: string; worktreePath: string; name: string; branchConflict?: BranchConflict }> {
-  await assertValidWorktreeName(name);
-
+): Promise<{
+  root: string;
+  worktreePath: string;
+  name: string;
+  branchConflict?: BranchConflict;
+  worktrees: Worktree[];
+}> {
   const root = await resolveRepoRoot(repoPath);
+  await assertValidWorktreeName(name, root);
+
   const dir = await canonicalWorktreesDir(root);
   const worktreePath = join(dir, name);
   const worktrees = await listWorktrees(root);
@@ -173,7 +187,7 @@ async function inspectAdd(
   }
 
   const branchConflict = await classifyBranchConflict(root, name, worktrees);
-  return { root, worktreePath, name, ...(branchConflict ? { branchConflict } : {}) };
+  return { root, worktreePath, name, worktrees, ...(branchConflict ? { branchConflict } : {}) };
 }
 
 async function classifyBranchConflict(

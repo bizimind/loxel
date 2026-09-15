@@ -17,12 +17,14 @@ export async function resolveWorktreeName(
   if (managed.length === 0) {
     throw new Error(`No worktrees to ${action}.\n\nCreate one with: wt add <name>`);
   }
-  if (managed.length === 1 && managed[0]) return managed[0].name;
+  // Unattended callers must name the target explicitly: auto-picking the sole
+  // worktree would let a bare `wt remove` in a script delete it.
   if (!isTTY()) {
     throw new Error(
       `Worktree name required in non-interactive mode.\n\nUsage: wt ${action} <name>`,
     );
   }
+  if (managed.length === 1 && managed[0]) return managed[0].name;
 
   return pickWorktree(
     `Select a worktree to ${action}:`,

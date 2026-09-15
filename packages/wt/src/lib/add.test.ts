@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { realpath, symlink } from "node:fs/promises";
 import { join } from "node:path";
 
-import { git } from "../git/index.ts";
+import { git, pathExists } from "../git/index.ts";
 import { createTestRepo, writeHook, type TestRepo } from "../test-repo.ts";
 import { executeAdd, planAdd } from "./add.ts";
 import { listManagedWorktrees, resolveWorktreesDir } from "./worktrees.ts";
@@ -154,6 +154,16 @@ describe("executeAdd", () => {
     await expect(
       executeAdd({ name: "nope", repoPath: repo.root, branch: "missing" }),
     ).rejects.toThrow("Branch 'missing' does not exist.");
+  });
+
+  test("rejects an explicit branch that another worktree has checked out", async () => {
+    repo = await createTestRepo({ bare: true });
+    const holder = await executeAdd({ name: "holder", repoPath: repo.root });
+
+    await expect(
+      executeAdd({ name: "second", repoPath: repo.root, branch: "holder" }),
+    ).rejects.toThrow(`Branch 'holder' is already checked out at ${holder.path}`);
+    expect(await pathExists(join(repo.root, ".worktrees", "second"))).toBe(false);
   });
 
   test("requires a resolution for an existing branch", async () => {
