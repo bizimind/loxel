@@ -151,6 +151,16 @@ describe("findWorktree", () => {
     );
   });
 
+  test("prefers a managed worktree over an external basename collision", () => {
+    expect(
+      findWorktree(
+        [wt("/repo"), wt("/repo/.worktrees/foo"), wt("/outside/foo")],
+        "/repo/.worktrees",
+        "foo",
+      )?.path,
+    ).toBe("/repo/.worktrees/foo");
+  });
+
   test("rejects ambiguous external basenames", () => {
     expect(
       findWorktree(

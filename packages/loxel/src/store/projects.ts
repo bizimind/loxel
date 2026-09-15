@@ -13,10 +13,7 @@ import { serverProjectsStorage } from "./server-storage";
  * handles WT_DIR locations outside the repository; the boundary-aware prefix
  * remains a fallback for paths inside bare repositories.
  */
-export function deriveProject(
-  wtPath: string | null,
-  projects: Array<Project & { worktrees?: EnrichedProject["worktrees"] }>,
-): Project | null {
+export function deriveProject(wtPath: string | null, projects: EnrichedProject[]): Project | null {
   if (!wtPath) return null;
   return (
     projects

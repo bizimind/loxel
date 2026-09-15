@@ -138,6 +138,10 @@ export function findWorktree(
   worktreesDirPath: string,
   name: string,
 ): Worktree | undefined {
+  const base = worktreesDirPath.endsWith("/") ? worktreesDirPath : `${worktreesDirPath}/`;
+  const managed = worktrees.find((wt) => !wt.bare && wt.path === base + name);
+  if (managed) return managed;
+
   const matches = worktrees.filter(
     (wt) => !wt.bare && getWorktreeName(wt.path, worktreesDirPath) === name,
   );

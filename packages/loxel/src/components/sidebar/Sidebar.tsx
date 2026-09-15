@@ -219,14 +219,17 @@ export function Sidebar() {
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
 
-  // Auto-expand newly loaded projects so linked worktrees and the create action are visible.
+  // Auto-expand newly loaded projects once so worktrees and the create action are visible.
+  const autoExpandedRef = useRef(new Set<string>());
   useEffect(() => {
     const { expandedProjectIds: expanded, toggleProjectExpanded: toggle } =
       useProjectStore.getState();
     const expandedSet = new Set(expanded);
-    const toExpand = projects.filter((p) => !expandedSet.has(p.id));
-    for (const p of toExpand) {
-      toggle(p.id);
+    for (const p of projects) {
+      if (!expandedSet.has(p.id) && !autoExpandedRef.current.has(p.id)) {
+        toggle(p.id);
+      }
+      autoExpandedRef.current.add(p.id);
     }
   }, [projects]);
 
