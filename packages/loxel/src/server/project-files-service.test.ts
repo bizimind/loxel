@@ -24,26 +24,25 @@ async function seedRepo(): Promise<string> {
 describe("ProjectFilesService status notifications", () => {
   test("a working-tree edit reports a status change", async () => {
     const repo = await seedRepo();
-    let notified = 0;
-    const service = new ProjectFilesService(
-      repo,
-      () => {},
-      undefined,
-      () => {
-        notified++;
-      },
-    );
+    let fired = false;
+    let resolveFired: () => void = () => {};
+    const firedOnce = new Promise<"notified">((resolve) => {
+      resolveFired = () => {
+        fired = true;
+        resolve("notified");
+      };
+    });
+    const service = new ProjectFilesService(repo, () => {}, undefined, resolveFired);
     cleanups.push(() => service.stop());
     await service.start();
     // start() builds the maps but is not an edit; nothing should have fired yet.
-    expect(notified).toBe(0);
+    expect(fired).toBe(false);
     await Bun.sleep(300);
 
     await Bun.write(path.join(repo, "a.txt"), "changed\n");
 
-    const deadline = Date.now() + 8000;
-    while (notified === 0 && Date.now() < deadline) await Bun.sleep(100);
-    expect(notified).toBeGreaterThan(0);
+    const timeout = Bun.sleep(8000).then(() => "timeout" as const);
+    expect(await Promise.race([firedOnce, timeout])).toBe("notified");
   }, 20000);
 
   test("a git-dir driven refresh does not report a status change", async () => {
