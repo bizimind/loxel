@@ -280,6 +280,21 @@ describe("executeMove", () => {
     }
   });
 
+  test("a refused move leaves no empty parent directories at the destination", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "x", repoPath: repo.root });
+    await git(["worktree", "lock", added.path], repo.root);
+
+    await expect(executeMove({ oldName: "x", name: "a/b/c", repoPath: repo.root })).rejects.toThrow(
+      /locked/i,
+    );
+
+    expect(await pathExists(join(repo.root, ".worktrees", "a"))).toBe(false);
+    await git(["worktree", "unlock", added.path], repo.root);
+    const moved = await executeMove({ oldName: "x", name: "a/b", repoPath: repo.root });
+    expect(moved.path).toBe(join(repo.root, ".worktrees", "a", "b"));
+  });
+
   test("runs rename.wt.sh at the new path with the WT_OLD_* vars", async () => {
     repo = await createTestRepo({ bare: true });
     const added = await executeAdd({ name: "hooked", repoPath: repo.root });

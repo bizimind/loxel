@@ -184,6 +184,18 @@ describe("executeAdd", () => {
     ).rejects.toThrow("Branch 'missing' does not exist.");
   });
 
+  test("a rejected add leaves no empty parent directories behind", async () => {
+    repo = await createTestRepo({ bare: true });
+
+    await expect(
+      executeAdd({ name: "p/q/r", repoPath: repo.root, branch: "missing" }),
+    ).rejects.toThrow("Branch 'missing' does not exist.");
+
+    expect(await pathExists(join(repo.root, ".worktrees", "p"))).toBe(false);
+    const later = await executeAdd({ name: "p/q", repoPath: repo.root });
+    expect(later.created).toBe(true);
+  });
+
   test("rejects an explicit branch that another worktree has checked out", async () => {
     repo = await createTestRepo({ bare: true });
     const holder = await executeAdd({ name: "holder", repoPath: repo.root });

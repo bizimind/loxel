@@ -120,7 +120,14 @@ export async function executeMove(
   }
 
   const force = params.force ?? false;
-  await moveWorktree(root, plan.oldPath, plan.worktreePath, force);
+  try {
+    await moveWorktree(root, plan.oldPath, plan.worktreePath, force);
+  } catch (error) {
+    // The destination's parents were created for the move; drop the empty ones again so a
+    // refused rename (lock, submodules) leaves the name free.
+    await pruneEmptyParents(dirname(plan.worktreePath), dir);
+    throw error;
+  }
   await pruneEmptyParents(dirname(plan.oldPath), dir);
   progress.log(`Moved ${plan.oldPath} -> ${plan.worktreePath}`);
 

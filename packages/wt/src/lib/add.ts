@@ -1,5 +1,4 @@
-import { mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import {
   addWorktree,
@@ -115,8 +114,9 @@ interface AddContext {
 
 /** Create the worktree and return the branch it checked out. */
 async function createWorktree(ctx: AddContext, progress: ProgressHandler): Promise<string> {
+  // No mkdir here: `git worktree add` creates leading directories itself, and creating them
+  // early would leave empty parents behind when a check below rejects the add.
   const { root, sourceCwd, worktreePath, name, params } = ctx;
-  await mkdir(dirname(worktreePath), { recursive: true });
 
   if (params.branch) {
     const conflict = await classifyBranchConflict(root, params.branch, ctx.worktrees);
