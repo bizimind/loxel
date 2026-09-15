@@ -84,7 +84,7 @@ wt add main -b main       # check out the default branch as the first worktree
 wt add feature-x          # → .worktrees/feature-x
 ```
 
-`wt` also works in a **regular (non-bare) repo** — there `$WT_ROOT` is the main worktree's top level and added worktrees go in `<repo>/.worktrees/<name>` beside your code (add `.worktrees/` to `.gitignore`). The bare layout is preferred: every branch is symmetric, with no privileged checkout mixed into the worktrees dir.
+`wt` also works in a **regular (non-bare) repo** — there `$WT_ROOT` is the main worktree's top level and added worktrees go in `<repo>/.worktrees/<name>` beside your code; wt adds that directory to `.git/info/exclude` on first use so the main checkout's status stays clean. The bare layout is preferred: every branch is symmetric, with no privileged checkout mixed into the worktrees dir.
 
 Worktrees default to `<root>/.worktrees/<name>`; override with `WT_DIR`:
 

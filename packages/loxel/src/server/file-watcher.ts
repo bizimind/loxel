@@ -233,10 +233,14 @@ export class FileWatcher {
 
   private classifyChange(filename: string): WatchEvent[] {
     const events = classifyGitChange(filename);
-    // A repo that has never had a worktree has no `worktrees/` directory to watch at start().
-    // The recursive watch sees the first one being created, which is our cue to attach.
-    if (events.includes("worktrees")) {
-      this.attachWorktreesDirWatcher();
+    // A repo that has never had a worktree has no `worktrees/` directory to watch at start(),
+    // and git recreates it after the last worktree goes. Try to (re)attach on every event
+    // rather than only on a classified `worktrees` one: the recursive watch often misses the
+    // `gitdir`/`commondir` writes inside a brand-new subdirectory, so waiting for them can
+    // leave the directory watcher unarmed for good. Binding a fresh directory is itself the
+    // add we would otherwise have missed, so report it.
+    if (this.attachWorktreesDirWatcher() && !events.includes("worktrees")) {
+      return [...events, "worktrees"];
     }
     return events;
   }
@@ -252,19 +256,20 @@ export class FileWatcher {
    * next add. A watcher bound to the deleted directory dies silently (no `close`, no `error`),
    * so the guard compares inodes rather than trusting a non-null handle: a recreated directory
    * gets a fresh watcher, and the dead one is closed.
+   *
+   * @returns true when a watcher was bound to a directory it was not watching before
    */
-  private attachWorktreesDirWatcher() {
-    if (!this.commonDir) return;
+  private attachWorktreesDirWatcher(): boolean {
+    if (!this.commonDir) return false;
 
     const dir = path.join(this.commonDir, "worktrees");
     let ino: number;
     try {
       ino = statSync(dir).ino;
     } catch {
-      log.debug("Worktrees directory absent, relying on git-dir watch until it appears", { dir });
-      return;
+      return false;
     }
-    if (this.worktreesDirWatcher && this.worktreesDirIno === ino) return;
+    if (this.worktreesDirWatcher && this.worktreesDirIno === ino) return false;
 
     this.worktreesDirWatcher?.close();
     try {
@@ -283,11 +288,13 @@ export class FileWatcher {
       });
       this.worktreesDirWatcher = watcher;
       this.worktreesDirIno = ino;
+      return true;
     } catch (error) {
       log.debug("Worktrees directory not watchable yet, relying on git-dir watch", {
         dir,
         error: error instanceof Error ? error.message : String(error),
       });
+      return false;
     }
   }
 

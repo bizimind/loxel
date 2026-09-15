@@ -312,8 +312,11 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
 
   log.info(`Creating worktree resources for ${wtPath}`);
 
+  // A linked worktree keeps its own index/HEAD under <common>/worktrees/<name>, which the
+  // project-level watcher deliberately ignores, so it needs a status watcher of its own. That
+  // holds for regular repos too; only a regular repo's root is already covered by the project.
   let worktreeWatcher: FileWatcher | null = null;
-  if (project.isBare) {
+  if (wtPath !== project.cwd) {
     worktreeWatcher = createWorktreeWatcher(wtPath);
     await worktreeWatcher.start();
   }

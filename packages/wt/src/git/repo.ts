@@ -1,9 +1,9 @@
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 
 import { wrapError } from "@bizimind/cli-common";
 
-import { git, runGit } from "./run.ts";
+import { git, gitSucceeds, runGit } from "./run.ts";
 import { canonicalWorktreesDir, isWorktreeDirty, pathExists } from "./worktree.ts";
 
 export type RepoType = "empty" | "bare" | "regular" | "worktree";
@@ -87,6 +87,29 @@ export async function assertCanTransformToBare(
     throw new Error(`Cannot convert because the destination already exists: ${worktreePath}`);
   }
   return { dir, worktreePath };
+}
+
+/**
+ * In a regular repo the default worktrees directory sits inside the main working tree, where
+ * git would report every worktree as untracked and `git add .` would stage it as a gitlink.
+ * Add it to `.git/info/exclude` (local, never committed) unless it is already ignored. A bare
+ * repo or a worktrees directory outside the tree needs nothing.
+ */
+export async function excludeWorktreesDir(root: string, worktreesDirPath: string): Promise<void> {
+  const rel = relative(root, worktreesDirPath);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return;
+  if ((await git(["rev-parse", "--is-bare-repository"], root)) === "true") return;
+  // Trailing slash: the directory may not exist yet, and a `dir/` pattern only matches a path
+  // git knows to be a directory.
+  if (await gitSucceeds(["check-ignore", "-q", `${rel}/`], root)) return;
+
+  const commonDir = await git(["rev-parse", "--path-format=absolute", "--git-common-dir"], root);
+  const excludeFile = join(commonDir, "info", "exclude");
+  await mkdir(dirname(excludeFile), { recursive: true });
+  const file = Bun.file(excludeFile);
+  const existing = (await file.exists()) ? await file.text() : "";
+  const separator = existing && !existing.endsWith("\n") ? "\n" : "";
+  await Bun.write(excludeFile, `${existing}${separator}/${rel}/\n`);
 }
 
 /** Create the worktrees directory (`$WT_DIR` or `<cwd>/.worktrees`) if it does not exist. */

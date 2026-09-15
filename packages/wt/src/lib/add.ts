@@ -7,6 +7,7 @@ import {
   branchExists,
   canonicalWorktreesDir,
   deleteBranch,
+  excludeWorktreesDir,
   getManagedWorktrees,
   getWorktreeName,
   listWorktrees,
@@ -81,7 +82,8 @@ export async function executeAdd(
   progress: ProgressHandler = silentProgress,
 ): Promise<AddResult> {
   const { name, repoPath } = params;
-  const { root, worktreePath, branchConflict, worktrees } = await inspectAdd(name, repoPath);
+  const { root, dir, worktreePath, branchConflict, worktrees } = await inspectAdd(name, repoPath);
+  await excludeWorktreesDir(root, dir);
 
   const branch = await createWorktree(
     { root, sourceCwd: repoPath, worktreePath, name, branchConflict, worktrees, params },
@@ -164,6 +166,8 @@ async function inspectAdd(
   repoPath: string,
 ): Promise<{
   root: string;
+  /** Canonical worktrees directory */
+  dir: string;
   worktreePath: string;
   name: string;
   branchConflict?: BranchConflict;
@@ -187,7 +191,14 @@ async function inspectAdd(
   }
 
   const branchConflict = await classifyBranchConflict(root, name, worktrees);
-  return { root, worktreePath, name, worktrees, ...(branchConflict ? { branchConflict } : {}) };
+  return {
+    root,
+    dir,
+    worktreePath,
+    name,
+    worktrees,
+    ...(branchConflict ? { branchConflict } : {}),
+  };
 }
 
 async function classifyBranchConflict(

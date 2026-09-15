@@ -9,6 +9,7 @@ export {
   assertCanTransformToBare,
   detectRepoType,
   ensureWorktreesDir,
+  excludeWorktreesDir,
   hasUncommittedChanges,
   initBareRepo,
   transformToBare,

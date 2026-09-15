@@ -85,7 +85,7 @@ git fetch origin
 wt add main -b main        # check out the default branch as the first worktree
 ```
 
-`wt` also works in a regular (non-bare) repo: there the repo root is the main worktree's top level and added worktrees go in `<repo>/.worktrees/<name>` beside your code (add `.worktrees/` to `.gitignore`).
+`wt` also works in a regular (non-bare) repo: there the repo root is the main worktree's top level and added worktrees go in `<repo>/.worktrees/<name>` beside your code. wt adds that directory to `.git/info/exclude` on first use so the main checkout's status stays clean without a committed `.gitignore` entry.
 
 ### 2. Create worktrees
 

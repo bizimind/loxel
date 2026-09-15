@@ -99,6 +99,34 @@ describe("executeAdd", () => {
     expect(await git(["rev-parse", "--abbrev-ref", "HEAD"], result.path)).toBe("side");
   });
 
+  test("keeps a regular repo's status clean by excluding the worktrees dir locally", async () => {
+    repo = await createTestRepo();
+
+    await executeAdd({ name: "side", repoPath: repo.root });
+
+    expect(await git(["status", "--porcelain"], repo.root)).toBe("");
+    const exclude = await Bun.file(join(repo.root, ".git", "info", "exclude")).text();
+    expect(exclude).toContain("/.worktrees/\n");
+
+    // Idempotent: a second add does not append a duplicate entry.
+    await executeAdd({ name: "other", repoPath: repo.root });
+    const again = await Bun.file(join(repo.root, ".git", "info", "exclude")).text();
+    expect(again.split("/.worktrees/").length - 1).toBe(1);
+  });
+
+  test("does not touch info/exclude when the worktrees dir is already ignored", async () => {
+    repo = await createTestRepo();
+    await Bun.write(join(repo.root, ".gitignore"), ".worktrees/\n");
+    await git(["add", ".gitignore"], repo.root);
+    await git(["commit", "-m", "ignore worktrees"], repo.root);
+
+    await executeAdd({ name: "side", repoPath: repo.root });
+
+    expect(await git(["status", "--porcelain"], repo.root)).toBe("");
+    const exclude = await Bun.file(join(repo.root, ".git", "info", "exclude")).text();
+    expect(exclude).not.toContain(".worktrees");
+  });
+
   test("creates a new branch from the invoking linked worktree's HEAD", async () => {
     repo = await createTestRepo();
     const source = await executeAdd({ name: "source", repoPath: repo.root });
