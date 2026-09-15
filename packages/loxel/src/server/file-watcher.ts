@@ -237,8 +237,8 @@ export class FileWatcher {
     // and git recreates it after the last worktree goes. Try to (re)attach on every event
     // rather than only on a classified `worktrees` one: the recursive watch often misses the
     // `gitdir`/`commondir` writes inside a brand-new subdirectory, so waiting for them can
-    // leave the directory watcher unarmed for good. Binding a fresh directory is itself the
-    // add we would otherwise have missed, so report it.
+    // leave the directory watcher unarmed for good. A change in what is watched is itself the
+    // add or last-removal we would otherwise have missed, so report it.
     if (this.attachWorktreesDirWatcher() && !events.includes("worktrees")) {
       return [...events, "worktrees"];
     }
@@ -257,7 +257,9 @@ export class FileWatcher {
    * so the guard compares inodes rather than trusting a non-null handle: a recreated directory
    * gets a fresh watcher, and the dead one is closed.
    *
-   * @returns true when a watcher was bound to a directory it was not watching before
+   * @returns true when the watched directory changed: a fresh one was bound, or the one
+   *   being watched has disappeared (its queued events die with it, so the caller must treat
+   *   this as the removal it signals)
    */
   private attachWorktreesDirWatcher(): boolean {
     if (!this.commonDir) return false;
@@ -270,8 +272,9 @@ export class FileWatcher {
       // The directory is gone (last worktree removed). Forget the dead watcher now: git may
       // hand the recreated directory the very same inode, which the check below would then
       // mistake for the one still being watched.
+      const hadWatcher = this.worktreesDirWatcher !== null;
       this.dropWorktreesDirWatcher();
-      return false;
+      return hadWatcher;
     }
     if (this.worktreesDirWatcher && this.worktreesDirIno === ino) return false;
 
