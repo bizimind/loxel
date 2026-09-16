@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { branchExists, git, pathExists, worktreeStatus } from "../git/index.ts";
@@ -501,6 +501,53 @@ describe("executeRemove with submodules", () => {
       repoPath: repo.root,
       deleteBranch: false,
       force: true,
+    });
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
+  });
+
+  test("still sees local-only commits of a deinitialized submodule", async () => {
+    const { subUrl } = await repoWithSubmodule();
+    const added = await executeAdd({ name: "deinit-sub", repoPath: repo.root });
+    await addSubmoduleTo(added.path, subUrl);
+    const sub = join(added.path, "mysub");
+    await Bun.write(join(sub, "tracked.txt"), "v2\n");
+    await git(
+      ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-am", "local only"],
+      sub,
+    );
+    await git(
+      ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-am", "bump"],
+      added.path,
+    );
+    await git(["submodule", "deinit", "-f", "mysub"], added.path);
+
+    expect(await git(["status", "--porcelain", "--ignore-submodules=none"], added.path)).toBe("");
+    const plan = await planRemove({ name: "deinit-sub", repoPath: repo.root });
+    expect(plan.dirty).toBe(false);
+    expect(plan.localOnlySubmodules).toEqual(["mysub"]);
+    await expect(
+      executeRemove({ name: "deinit-sub", repoPath: repo.root, deleteBranch: false, force: false }),
+    ).rejects.toThrow(/mysub .* has commits no remote has/);
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).toContain(added.path);
+  });
+
+  test("removes a worktree whose modules directory holds no object store", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "empty-modules", repoPath: repo.root });
+    const gitDir = (
+      await git(["rev-parse", "--path-format=absolute", "--git-dir"], added.path)
+    ).trim();
+    await mkdir(join(gitDir, "modules"), { recursive: true });
+
+    const declined = await git(["worktree", "remove", added.path], repo.root).catch(
+      (error: unknown) => error,
+    );
+    expect(String(declined)).toContain("submodules cannot be moved or removed");
+    await executeRemove({
+      name: "empty-modules",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: false,
     });
     expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
   });

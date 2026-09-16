@@ -1,4 +1,4 @@
-import { mkdir, realpath, rmdir, stat } from "node:fs/promises";
+import { mkdir, readdir, realpath, rmdir, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { git, gitFailure, runGit } from "./run.ts";
@@ -207,9 +207,10 @@ export async function removeWorktree(root: string, path: string, force: boolean)
   const result = await runGit(args, root);
   if (result.exitCode === 0) return;
 
-  // Git refuses a non-force removal of any worktree with initialized
-  // submodules, clean or not. Escalate to --force only when nothing would be
-  // lost; --force itself skips that check, so it never refuses for this reason.
+  // Git refuses a non-force removal whenever the worktree's git dir has a
+  // `modules` directory, clean or not, populated or not. Escalate to --force
+  // only when nothing would be lost; --force itself skips that check, so it
+  // never refuses for this reason.
   const reason = gitFailure(result);
   if (force || !SUBMODULE_REFUSAL.test(reason)) {
     throw new Error(`Failed to remove worktree at ${path}: ${reason}`);
@@ -385,34 +386,68 @@ function parseStatus(output: string): StatusEntry[] {
 }
 
 /**
- * Paths of initialized submodules (recursively) holding commits absent from
- * every remote. A checkout that has disappeared has none left to lose.
+ * Submodules holding commits absent from every remote, named by their store
+ * under the worktree's `modules` directory (nested stores as `outer/inner`).
+ *
+ * Probing the stores rather than `git submodule foreach` also covers a
+ * submodule that was deinitialized or removed from the tree: git leaves its
+ * object store behind, and that store is deleted with the worktree. A
+ * checkout that has disappeared has none left to lose.
  */
 export async function submodulesWithLocalOnlyCommits(
   worktreePath: string,
 ): Promise<{ ok: true; paths: string[] } | { ok: false; reason: string }> {
   if (!(await pathExists(worktreePath))) return { ok: true, paths: [] };
-  const result = await runGit(
-    [
-      "submodule",
-      "foreach",
-      "--recursive",
-      "--quiet",
-      // Capture the exit status separately: a command substitution inside
-      // `[ -z ... ]` would turn a failed rev-list into an empty, "clean" result.
-      `local_only=$(git rev-list --all --not --remotes --max-count=1) || exit 1; [ -z "$local_only" ] || printf '%s\\n' "$displaypath"`,
-    ],
-    worktreePath,
-  );
-  if (result.exitCode !== 0) return { ok: false, reason: gitFailure(result) };
-  return { ok: true, paths: statusLines(result.stdout) };
+  const gitDir = await runGit(["rev-parse", "--path-format=absolute", "--git-dir"], worktreePath);
+  if (gitDir.exitCode !== 0) return { ok: false, reason: gitFailure(gitDir) };
+
+  const paths: string[] = [];
+  for (const store of await submoduleStores(join(gitDir.stdout.trim(), "modules"))) {
+    // An explicit work tree keeps git from honouring the store's own
+    // core.worktree, which may point at a directory that no longer exists.
+    const result = await runGit(
+      [
+        "--git-dir",
+        store.gitDir,
+        "--work-tree",
+        worktreePath,
+        "rev-list",
+        "--all",
+        "--not",
+        "--remotes",
+        "--max-count=1",
+      ],
+      worktreePath,
+    );
+    if (result.exitCode !== 0) return { ok: false, reason: gitFailure(result) };
+    if (result.stdout.trim().length > 0) paths.push(store.name);
+  }
+  return { ok: true, paths };
+}
+
+/** Submodule object stores below a `modules` directory, nested submodules included. */
+async function submoduleStores(
+  modulesDir: string,
+  prefix = "",
+): Promise<Array<{ name: string; gitDir: string }>> {
+  if (!(await pathExists(modulesDir))) return [];
+  const stores: Array<{ name: string; gitDir: string }> = [];
+  for (const entry of await readdir(modulesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const dir = join(modulesDir, entry.name);
+    const name = `${prefix}${entry.name}`;
+    if (await pathExists(join(dir, "HEAD"))) {
+      stores.push({ name, gitDir: dir });
+      stores.push(...(await submoduleStores(join(dir, "modules"), `${name}/`)));
+      continue;
+    }
+    // A submodule name containing slashes nests its store under those directories.
+    stores.push(...(await submoduleStores(dir, `${name}/`)));
+  }
+  return stores;
 }
 
 const SUBMODULE_MARKER = "@@";
-
-function statusLines(stdout: string): string[] {
-  return stdout.split("\n").filter((line) => line.trim().length > 0);
-}
 
 /** Commits ahead of / behind the upstream branch, or null when there is none. */
 export async function upstreamDivergence(
