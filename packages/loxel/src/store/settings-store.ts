@@ -285,12 +285,6 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     url: "https://json.schemastore.org/github-action",
     enabled: true,
   },
-  {
-    id: builtinId("**/wt.{yml,yaml}"),
-    glob: "**/wt.{yml,yaml}",
-    url: "__builtin:wt-json-schema__",
-    enabled: true,
-  },
 ];
 
 export const selectEffectiveSchemas = createBuiltinMergeSelector(
@@ -327,13 +321,6 @@ export interface SettingsState {
   // Transient UI state (not persisted)
   isOpen: boolean;
   activeSection: SettingsSection;
-
-  // Wt config editor state (transient — not persisted to localStorage)
-  // Keyed by projectId so switching projects preserves unsaved edits.
-  wtConfigSelectedProjectId: string | null;
-  wtConfigEditorContents: Record<string, string>;
-  wtConfigOriginalContents: Record<string, string>;
-  wtConfigErrors: Record<string, boolean>;
 
   // Model actions
   addModel: (model: Omit<ModelEntry, "id">) => void;
@@ -388,11 +375,6 @@ export interface SettingsState {
   setAutoRevealInExplorer: (enabled: boolean) => void;
 
   // Wt config actions
-  setWtConfigSelectedProject: (projectId: string | null) => void;
-  setWtConfigEditorContent: (projectId: string, content: string) => void;
-  setWtConfigOriginalContent: (projectId: string, content: string) => void;
-  setWtConfigHasErrors: (projectId: string, hasErrors: boolean) => void;
-  resetWtConfigState: () => void;
 
   // UI actions
   openSettings: (section?: SettingsSection) => void;
@@ -437,12 +419,6 @@ export const useSettingsStore = create<SettingsState>()(
 
       isOpen: false,
       activeSection: "general",
-
-      // Wt config editor state (transient)
-      wtConfigSelectedProjectId: null,
-      wtConfigEditorContents: {},
-      wtConfigOriginalContents: {},
-      wtConfigErrors: {},
 
       // -- Model CRUD --
 
@@ -694,27 +670,6 @@ export const useSettingsStore = create<SettingsState>()(
 
       setAutoRevealInExplorer: (enabled) => set({ autoRevealInExplorer: enabled }),
 
-      // -- Wt config --
-
-      setWtConfigSelectedProject: (projectId) => set({ wtConfigSelectedProjectId: projectId }),
-      setWtConfigEditorContent: (projectId, content) =>
-        set((s) => ({
-          wtConfigEditorContents: { ...s.wtConfigEditorContents, [projectId]: content },
-        })),
-      setWtConfigOriginalContent: (projectId, content) =>
-        set((s) => ({
-          wtConfigOriginalContents: { ...s.wtConfigOriginalContents, [projectId]: content },
-        })),
-      setWtConfigHasErrors: (projectId, hasErrors) =>
-        set((s) => ({ wtConfigErrors: { ...s.wtConfigErrors, [projectId]: hasErrors } })),
-      resetWtConfigState: () =>
-        set({
-          wtConfigSelectedProjectId: null,
-          wtConfigEditorContents: {},
-          wtConfigOriginalContents: {},
-          wtConfigErrors: {},
-        }),
-
       // -- UI --
 
       openSettings: (section) => set({ isOpen: true, ...(section && { activeSection: section }) }),
@@ -964,33 +919,6 @@ export function getEffectiveLayoutConfig(): EffectiveLayoutConfig {
   }
 
   return { zoneDefaults, zonePanelOrder };
-}
-
-/** Whether any wt.yaml editor has been modified from its original content. */
-export function selectIsWtConfigDirty(s: SettingsState): boolean {
-  for (const [pid, content] of Object.entries(s.wtConfigEditorContents)) {
-    if (content !== s.wtConfigOriginalContents[pid]) return true;
-  }
-  return false;
-}
-
-/** Whether any dirty wt config has validation errors. */
-export function selectWtConfigHasAnyErrors(s: SettingsState): boolean {
-  for (const [pid, content] of Object.entries(s.wtConfigEditorContents)) {
-    if (content !== s.wtConfigOriginalContents[pid] && s.wtConfigErrors[pid]) return true;
-  }
-  return false;
-}
-
-/** Return all dirty wt configs that are error-free and ready to save. */
-export function getDirtyWtConfigs(s: SettingsState): { projectId: string; content: string }[] {
-  const result: { projectId: string; content: string }[] = [];
-  for (const [pid, content] of Object.entries(s.wtConfigEditorContents)) {
-    if (content !== s.wtConfigOriginalContents[pid] && !s.wtConfigErrors[pid]) {
-      result.push({ projectId: pid, content });
-    }
-  }
-  return result;
 }
 
 /** Build toolbar entries from a zonePanelOrder config. Single source for this derivation. */

@@ -82,4 +82,4 @@ Open settings with `Cmd+,`. Panel layout is persisted server-side in `stores.db`
 | Terminal          | Scrollback buffer size (1,000–100,000 lines; default 3,000), notification sequences — see [Terminals](/docs/terminals)                   |
 | Editor            | Indentation, formatting per language or file extension, format-on-autosave — see [Editor](/docs/editor)                                  |
 | File Associations | Glob-to-language mappings for custom file types                                                                                          |
-| Schemas           | JSON and YAML schema mappings; `tsconfig.json`, `package.json`, GitHub workflow files, and `wt.yaml` are built in                        |
+| Schemas           | JSON and YAML schema mappings; `tsconfig.json`, `package.json`, and GitHub workflow files are built in                                   |

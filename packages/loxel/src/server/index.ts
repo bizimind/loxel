@@ -43,6 +43,7 @@ import { handleRequest } from "./routes";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
 import { createServerPerfMonitor } from "./server-perf-monitor";
+import { findOwningProject } from "./server-state";
 import type {
   ClientState,
   ProjectState,
@@ -68,15 +69,9 @@ const log = logger.child("server");
 const projects = new Map<string, ProjectState>();
 const wtResources = new Map<string, WorktreeResources>();
 
-/** Find the project whose cwd is a prefix of the given path (longest match). */
+/** Find the project that owns the given path: under its cwd or its worktrees dir. */
 export function findProjectForPath(targetPath: string): ProjectState | undefined {
-  let best: ProjectState | undefined;
-  for (const project of projects.values()) {
-    if (targetPath === project.cwd || targetPath.startsWith(project.cwd + "/")) {
-      if (!best || project.cwd.length > best.cwd.length) best = project;
-    }
-  }
-  return best;
+  return findOwningProject(projects.values(), targetPath);
 }
 
 /**
@@ -104,15 +99,6 @@ function resolveFilePath(absolutePath: string): ResolvedFilePath | null {
   }
 
   return null;
-}
-
-async function checkWtCli(): Promise<boolean> {
-  try {
-    Bun.spawnSync(["wt", "version"], { stdout: "ignore", stderr: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -293,6 +279,8 @@ function createFilesService(wtPath: string): ProjectFilesService {
         data: { path: filePath, nonces },
       });
     },
+    // A working-tree edit is the one status change the git-dir watcher cannot see.
+    () => void handleStatusEvent(wtPath),
   );
 }
 
@@ -321,8 +309,11 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
 
   log.info(`Creating worktree resources for ${wtPath}`);
 
+  // A linked worktree keeps its own index/HEAD under <common>/worktrees/<name>, which the
+  // project-level watcher deliberately ignores, so it needs a status watcher of its own. That
+  // holds for regular repos too; only a regular repo's root is already covered by the project.
   let worktreeWatcher: FileWatcher | null = null;
-  if (project.isBare) {
+  if (wtPath !== project.cwd) {
     worktreeWatcher = createWorktreeWatcher(wtPath);
     await worktreeWatcher.start();
   }
@@ -441,6 +432,8 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
 
   const watcher = new FileWatcher({
     gitRoot: cwd,
+    // Bare repos have no working tree, so status events are meaningless there.
+    // `undefined` allows every event (including "worktrees") for regular repos.
     allowedEvents: isBare ? new Set(["refs", "log", "worktrees"]) : undefined,
     onEvent: async (event) => {
       const project = projects.get(cwd);
@@ -469,23 +462,20 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
     debounceMs: 150,
   });
 
-  const hasWtConfig = isBare && existsSync(join(cwd, "wt.yaml"));
-
-  const [, reviewDb, authorName, , wtCliAvailable, worktreesDir] = await Promise.all([
+  const [, reviewDb, authorName, , worktreesDir, managed] = await Promise.all([
     pruneOrphanedTempWorktrees(cwd),
     ReviewDb.open(cwd),
     getGitAuthorName(cwd),
     watcher.start(),
-    isBare && hasWtConfig ? checkWtCli() : Promise.resolve(false),
-    hasWtConfig ? resolveWorktreesDir(cwd) : Promise.resolve(null),
+    resolveWorktreesDir(cwd),
+    listManagedWorktrees(cwd),
   ]);
 
   const localDb = openDatabase(join(config.stateDir, "localdb", hash12(cwd), "localdb.db"));
 
-  let filteredWorktrees: WorktreeEntry[] = [];
-  if (isBare && hasWtConfig) {
-    const managed = await listManagedWorktrees(cwd);
-    filteredWorktrees = managed.map((wt) => ({
+  const filteredWorktrees: WorktreeEntry[] = managed
+    .filter((wt) => !basename(wt.path).startsWith(INTERNAL_WORKTREE_PREFIX))
+    .map((wt) => ({
       path: wt.path,
       branch: wt.branch,
       commit: wt.head,
@@ -493,12 +483,6 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
       createdAt: null,
       wtName: wt.name,
     }));
-  } else if (isBare) {
-    const allWorktrees = await getWorktrees(cwd);
-    filteredWorktrees = allWorktrees.filter(
-      (wt) => !basename(wt.path).startsWith(INTERNAL_WORKTREE_PREFIX),
-    );
-  }
 
   const project: ProjectState = {
     cwd,
@@ -507,8 +491,6 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
     reviewDb,
     localDb,
     authorName,
-    hasWtConfig,
-    wtCliAvailable,
     worktreesDir,
   };
 
@@ -556,8 +538,7 @@ const agentManager = new AgentManager();
 const notificationStore = new NotificationStore();
 const schemaService = new SchemaService();
 const formatService = new FormatService();
-const wtSchemaUrl = `http://127.0.0.1:${config.port}/api/wt-json-schema`;
-const yamlLspManager = new YamlLspManager({ [wtSchemaUrl]: ["wt.yaml"] });
+const yamlLspManager = new YamlLspManager({});
 const tsLspManager = new TsLspManager();
 const dockerLspManager = new DockerLspManager();
 const terraformLspManager = new TerraformLspManager();

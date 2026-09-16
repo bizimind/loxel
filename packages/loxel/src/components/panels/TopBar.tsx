@@ -45,7 +45,6 @@ export function TopBar() {
   const windowFocused = useWindowFocused();
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const activeProject = useProjectStore((s) => deriveProject(activeWorktreePath, s.projects));
-  const isBare = activeProject?.isBare ?? false;
   const activeWorktree = useWorktreeStore((s) => {
     if (!s.activeWorktreePath || !activeProject) return null;
     const wts = s.byProject[activeProject.path]?.worktrees;
@@ -90,8 +89,8 @@ export function TopBar() {
             <span>{activeProject.name}</span>
           </div>
 
-          {/* Worktree (bare repos only) */}
-          {isBare && activeWorktreeName && (
+          {/* Worktree: only linked worktrees are listed, so a regular repo's root shows none */}
+          {activeWorktreeName && (
             <>
               <span className="text-muted-foreground mx-0.5 text-xs">/</span>
               <div className="text-muted-foreground flex items-center gap-1.5">

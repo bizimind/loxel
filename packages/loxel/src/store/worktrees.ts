@@ -51,10 +51,7 @@ export function getOrderedWorktrees(
 
 // ── Per-project state ────────────────────────────────────────────────────
 
-export type ProjectConfig = Pick<
-  EnrichedProject,
-  "hasWtConfig" | "wtCliAvailable" | "worktreesDir"
->;
+export type ProjectConfig = Pick<EnrichedProject, "worktreesDir">;
 
 export interface ProjectState extends Partial<ProjectConfig> {
   worktrees: WorktreeEntry[];
@@ -144,7 +141,8 @@ export const useWorktreeStore = create<WorktreeState>()(
           const isBare = project?.isBare ?? false;
           const projectPath = project?.path ?? null;
 
-          // Non-bare repos don't have worktree lists; activeWorktreePath = project root
+          // A regular repo's root checkout is a valid context on its own, so a
+          // fresh session starts there rather than in a `.worktrees/` entry.
           const activeWorktreePath =
             !isBare && !currentWtPath && projectPath ? projectPath : currentWtPath;
 
@@ -156,8 +154,6 @@ export const useWorktreeStore = create<WorktreeState>()(
               const validPaths = new Set(p.worktrees.map((wt) => wt.path));
               byProject[p.path] = {
                 worktrees: p.worktrees.length > 0 ? p.worktrees : (existing?.worktrees ?? []),
-                hasWtConfig: p.hasWtConfig,
-                wtCliAvailable: p.wtCliAvailable,
                 worktreesDir: p.worktreesDir,
                 // Prune stale entries from persisted lists
                 customOrder: existing?.customOrder?.filter((x) => validPaths.has(x)),
@@ -223,31 +219,25 @@ export const useWorktreeStore = create<WorktreeState>()(
         },
 
         createWorktree: async (projectPath, name, options) => {
-          const hasWtConfig = getProject(get(), projectPath).hasWtConfig ?? false;
+          const plan = await api.planAddWorktree(projectPath, name);
 
-          if (hasWtConfig) {
-            const plan = await api.planAddWorktree(projectPath, name);
-
-            if (plan.branchConflict) {
-              if (plan.branchConflict.kind === "used-by-worktree") {
-                throw new Error(
-                  `A worktree already exists for branch '${name}' at: ${plan.branchConflict.worktreePath}`,
-                );
-              }
-              set({ pendingAddPlan: { ...plan, projectPath } });
-              return;
+          if (plan.branchConflict) {
+            if (plan.branchConflict.kind === "used-by-worktree") {
+              throw new Error(
+                `A worktree already exists for branch '${plan.branch}' at: ${plan.branchConflict.worktreePath}`,
+              );
             }
+            set({ pendingAddPlan: { ...plan, projectPath } });
+            return;
+          }
 
-            addOptimisticEntry(set, projectPath, plan.worktreePath, name, true);
+          addOptimisticEntry(set, projectPath, plan.worktreePath, name);
 
-            try {
-              await api.createWorktree(projectPath, name, { branch: options?.branch });
-            } catch (err) {
-              removeOptimisticEntry(set, projectPath, plan.worktreePath);
-              throw err;
-            }
-          } else {
+          try {
             await api.createWorktree(projectPath, name, { branch: options?.branch });
+          } catch (err) {
+            removeOptimisticEntry(set, projectPath, plan.worktreePath);
+            throw err;
           }
 
           await get().refreshProjectWorktrees(projectPath);
@@ -258,10 +248,9 @@ export const useWorktreeStore = create<WorktreeState>()(
           if (!pendingAddPlan) return;
 
           const { name, worktreePath, projectPath } = pendingAddPlan;
-          const hasWtConfig = getProject(get(), projectPath).hasWtConfig ?? false;
           set({ pendingAddPlan: null });
 
-          addOptimisticEntry(set, projectPath, worktreePath, name, hasWtConfig);
+          addOptimisticEntry(set, projectPath, worktreePath, name);
 
           try {
             await api.createWorktree(projectPath, name, { branchResolution });
@@ -274,24 +263,8 @@ export const useWorktreeStore = create<WorktreeState>()(
         },
 
         requestRemoveWorktree: async (projectPath, wt) => {
-          const hasWtConfig = getProject(get(), projectPath).hasWtConfig ?? false;
-
-          if (hasWtConfig) {
-            const plan = await api.planRemoveWorktree(projectPath, wt.path);
-            set({ pendingRemovePlan: { ...plan, wtPath: wt.path, projectPath } });
-          } else {
-            optimisticRemove(set, projectPath, wt.path);
-            try {
-              await api.removeWorktreeByPath(projectPath, wt.path);
-            } catch (err) {
-              await get().refreshProjectWorktrees(projectPath);
-              throw err;
-            }
-            purgeWorktreeStores(wt.path);
-            purgeWorktreeCache(wt.path);
-            wsClient.unsubscribeWorktree(wt.path);
-            await get().refreshProjectWorktrees(projectPath);
-          }
+          const plan = await api.planRemoveWorktree(projectPath, wt.path);
+          set({ pendingRemovePlan: { ...plan, wtPath: wt.path, projectPath } });
         },
 
         confirmRemoveWorktree: async ({ deleteBranch, force }) => {
@@ -303,8 +276,9 @@ export const useWorktreeStore = create<WorktreeState>()(
 
           optimisticRemove(set, projectPath, worktreePath);
 
+          let result: Awaited<ReturnType<typeof api.removeWorktreeByWtPath>>;
           try {
-            await api.removeWorktreeByWtPath(projectPath, wtPath, { deleteBranch, force });
+            result = await api.removeWorktreeByWtPath(projectPath, wtPath, { deleteBranch, force });
           } catch (err) {
             await get().refreshProjectWorktrees(projectPath);
             throw err;
@@ -314,6 +288,12 @@ export const useWorktreeStore = create<WorktreeState>()(
           purgeWorktreeCache(worktreePath);
           wsClient.unsubscribeWorktree(worktreePath);
           await get().refreshProjectWorktrees(projectPath);
+
+          if (deleteBranch && !result.branchDeleted) {
+            throw new Error(
+              "The worktree was removed, but Git refused to delete its unmerged branch. The branch was kept.",
+            );
+          }
         },
 
         dismissPendingPlan: () => {
@@ -413,7 +393,6 @@ function addOptimisticEntry(
   projectPath: string,
   worktreePath: string,
   name: string,
-  hasWtConfig: boolean,
 ): void {
   const optimistic: WorktreeEntry = {
     path: worktreePath,
@@ -421,7 +400,7 @@ function addOptimisticEntry(
     commit: "",
     isMain: false,
     createdAt: new Date().toISOString(),
-    wtName: hasWtConfig ? name : undefined,
+    wtName: name,
     pending: true,
   };
   set((s) => ({

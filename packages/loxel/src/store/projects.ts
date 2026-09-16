@@ -2,22 +2,27 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import * as api from "@/api/client";
-import type { Project } from "@/api/project-model";
+import type { EnrichedProject, Project } from "@/api/project-model";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { toggleSet } from "@/lib/set-utils";
 
 import { serverProjectsStorage } from "./server-storage";
 
 /**
- * Derive the active project from a worktree path using longest-prefix match.
- * For non-bare repos, wtPath === project.path (exact match).
- * For bare repos, wtPath starts with project.path + '/'.
+ * Derive the active project from a worktree path. Explicit worktree membership
+ * handles WT_DIR locations outside the repository; the boundary-aware prefix
+ * remains a fallback for paths inside bare repositories.
  */
-export function deriveProject(wtPath: string | null, projects: Project[]): Project | null {
+export function deriveProject(wtPath: string | null, projects: EnrichedProject[]): Project | null {
   if (!wtPath) return null;
   return (
     projects
-      .filter((p) => wtPath === p.path || wtPath.startsWith(p.path + "/"))
+      .filter(
+        (p) =>
+          wtPath === p.path ||
+          p.worktrees?.some((worktree) => worktree.path === wtPath) ||
+          wtPath.startsWith(p.path + "/"),
+      )
       .sort((a, b) => b.path.length - a.path.length)[0] ?? null
   );
 }
@@ -39,7 +44,9 @@ async function removeAndSwitchProject(
     const remaining = get().projects;
     if (remaining.length > 0) {
       const target = remaining[0]!;
-      await wtStore.switchWorktree(target.path);
+      const targetPath = target.isBare ? target.worktrees[0]?.path : target.path;
+      if (targetPath) await wtStore.switchWorktree(targetPath);
+      else wtStore.reset();
     } else {
       wtStore.reset();
     }
@@ -49,11 +56,16 @@ async function removeAndSwitchProject(
 // --- Project store ---
 
 interface ProjectState {
-  projects: Project[];
+  projects: EnrichedProject[];
   sidebarExpanded: boolean;
 
   /** Per-project sidebar expand/collapse state (bare repos show worktrees when expanded). */
   expandedProjectIds: string[];
+  /**
+   * Projects the sidebar has auto-expanded once. Persisted alongside expandedProjectIds so a
+   * user's later collapse is not undone by a remount or the next fetch.
+   */
+  autoExpandedProjectIds: string[];
 
   fetchProjects: () => Promise<void>;
   addProject: (path: string, name?: string) => Promise<void>;
@@ -62,6 +74,8 @@ interface ProjectState {
   updateProject: (id: string, updates: { name?: string }) => Promise<void>;
   toggleSidebar: () => void;
   toggleProjectExpanded: (projectId: string) => void;
+  /** Record that these projects have had their one-time auto-expand. */
+  markAutoExpanded: (projectIds: string[]) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -70,18 +84,11 @@ export const useProjectStore = create<ProjectState>()(
       projects: [],
       sidebarExpanded: false,
       expandedProjectIds: [],
+      autoExpandedProjectIds: [],
 
       fetchProjects: async () => {
         const data = await api.getProjects();
-        set({
-          projects: data.projects.map((p) => ({
-            id: p.id,
-            path: p.path,
-            name: p.name,
-            addedAt: p.addedAt,
-            isBare: p.isBare,
-          })),
-        });
+        set({ projects: data.projects });
         // Update the worktree store with enriched data
         const { useWorktreeStore } = await import("./worktrees");
         useWorktreeStore.getState().applyEnrichedProjects(data.projects);
@@ -94,7 +101,9 @@ export const useProjectStore = create<ProjectState>()(
         // Server initializes the project during addProject (starts watcher).
         // Switch to the new project's worktree (or project root for non-bare).
         const { useWorktreeStore } = await import("./worktrees");
-        await useWorktreeStore.getState().switchWorktree(project.path);
+        const added = get().projects.find((candidate) => candidate.id === project.id);
+        const targetPath = added?.isBare ? added.worktrees[0]?.path : project.path;
+        if (targetPath) await useWorktreeStore.getState().switchWorktree(targetPath);
       },
 
       removeProject: async (id) => {
@@ -116,6 +125,15 @@ export const useProjectStore = create<ProjectState>()(
         set((s) => ({
           expandedProjectIds: [...toggleSet(new Set(s.expandedProjectIds), projectId)],
         })),
+
+      markAutoExpanded: (projectIds) =>
+        set((s) => {
+          const next = new Set(s.autoExpandedProjectIds);
+          for (const id of projectIds) next.add(id);
+          return next.size === s.autoExpandedProjectIds.length
+            ? {}
+            : { autoExpandedProjectIds: [...next] };
+        }),
     }),
     {
       name: `${STORAGE_PREFIX}-projects`,
@@ -123,6 +141,7 @@ export const useProjectStore = create<ProjectState>()(
       partialize: (state) => ({
         sidebarExpanded: state.sidebarExpanded,
         expandedProjectIds: state.expandedProjectIds,
+        autoExpandedProjectIds: state.autoExpandedProjectIds,
       }),
     },
   ),

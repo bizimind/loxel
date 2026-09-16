@@ -1,6 +1,3 @@
-/** Enables git's built-in fsmonitor daemon for commands that scan the working tree or index. */
-export const FSMONITOR = ["-c", "core.fsmonitor=true"];
-
 const COMMIT_HASH_PATTERN = /^[a-f0-9]{4,40}$/i;
 const REF_NAME_PATTERN = /^[a-zA-Z0-9_\-/.@]+$/;
 // oxlint-disable-next-line no-control-regex -- intentional: reject null bytes in paths

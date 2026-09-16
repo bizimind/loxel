@@ -5,7 +5,6 @@ import {
   CodeIcon,
   FileJson2Icon,
   FileTypeIcon,
-  GitBranchIcon,
   KeyboardIcon,
   PanelsLeftBottomIcon,
   SettingsIcon,
@@ -15,18 +14,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
-import * as api from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
-import { frontendLog } from "@/lib/frontend-logger";
 import { syncSchemas } from "@/lib/schema-sync";
 import type { SettingsState } from "@/store/settings-store";
-import {
-  getDirtyWtConfigs,
-  selectIsWtConfigDirty,
-  selectWtConfigHasAnyErrors,
-  useSettingsStore,
-} from "@/store/settings-store";
+import { useSettingsStore } from "@/store/settings-store";
 
 import { CodingAgentSection } from "./CodingAgentSection";
 import { EditorSection } from "./EditorSection";
@@ -37,7 +29,6 @@ import { LayoutSection } from "./LayoutSection";
 import { ModelsSection } from "./ModelsSection";
 import { SchemasSection } from "./SchemasSection";
 import { TerminalSection } from "./TerminalSection";
-import { WorktreesSection } from "./WorktreesSection";
 
 interface SectionDef {
   key: string;
@@ -55,14 +46,12 @@ const SECTIONS: SectionDef[] = [
   { key: "editor", label: "Editor", icon: CodeIcon },
   { key: "schemas", label: "Schemas", icon: FileJson2Icon },
   { key: "fileAssociations", label: "File Associations", icon: FileTypeIcon },
-  { key: "worktrees", label: "Worktrees", icon: GitBranchIcon },
 ];
 
 export function SettingsModal() {
   const isOpen = useSettingsStore((s) => s.isOpen);
   const activeSection = useSettingsStore((s) => s.activeSection);
   const closeSettings = useSettingsStore((s) => s.closeSettings);
-  const resetWtConfigState = useSettingsStore((s) => s.resetWtConfigState);
 
   // Live state for dirty tracking
   const models = useSettingsStore((s) => s.models);
@@ -72,10 +61,6 @@ export function SettingsModal() {
   const editor = useSettingsStore((s) => s.editor);
   const schemas = useSettingsStore((s) => s.schemas);
   const fileAssociations = useSettingsStore((s) => s.fileAssociations);
-
-  // Wt config dirty tracking
-  const isWtConfigDirty = useSettingsStore(selectIsWtConfigDirty);
-  const wtConfigHasAnyErrors = useSettingsStore(selectWtConfigHasAnyErrors);
 
   // Snapshot taken when modal opens
   const snapshotRef = useRef<string | null>(null);
@@ -93,12 +78,9 @@ export function SettingsModal() {
         schemas,
         fileAssociations,
       });
-      resetWtConfigState();
     } else {
       snapshotRef.current = null;
     }
-    // resetWtConfigState is stable — safe to omit
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   const isSettingsDirty = useMemo(() => {
@@ -116,26 +98,9 @@ export function SettingsModal() {
     );
   }, [models, codingAgent, layout, terminal, editor, schemas, fileAssociations]);
 
-  const isDirty = isSettingsDirty || isWtConfigDirty;
-  const saveDisabled = !isDirty || (isWtConfigDirty && !isSettingsDirty && wtConfigHasAnyErrors);
+  const saveDisabled = !isSettingsDirty;
 
-  const handleSave = useCallback(async () => {
-    // Save all dirty wt.yaml files (skipping those with errors)
-    const dirtyConfigs = getDirtyWtConfigs(useSettingsStore.getState());
-    for (const { projectId, content } of dirtyConfigs) {
-      try {
-        await api.saveWtConfigRaw(projectId, content);
-      } catch (err) {
-        frontendLog
-          .child("ui")
-          .error("Failed to save wt.yaml", {
-            projectId,
-            error: err instanceof Error ? err : undefined,
-          });
-        // TODO: surface error in UI (toast / inline banner)
-        return;
-      }
-    }
+  const handleSave = useCallback(() => {
     // Settings state is already in the store and auto-persisted — just close.
     // Trigger schema sync so changes take effect immediately.
     closeSettings();
@@ -161,7 +126,6 @@ export function SettingsModal() {
         );
       }
     }
-    // Wt config state is transient — resetWtConfigState happens on next open
     closeSettings();
   }, [closeSettings]);
 
@@ -264,10 +228,6 @@ export function SettingsModal() {
 
               <div id="settings-fileAssociations" className="border-border mt-8 border-t pt-8">
                 <FileAssociationsSection />
-              </div>
-
-              <div id="settings-worktrees" className="border-border mt-8 border-t pt-8">
-                <WorktreesSection />
               </div>
             </div>
           </div>

@@ -16,7 +16,7 @@ Open the Projects panel and click **Add project**. There are five paths:
 2. **Add** — after detection, confirm to register the repo in loxel's project list.
 3. **Clone** — paste a remote URL. Choose single-workspace (regular clone) or multi-workspace (bare repo + first worktree) before confirming.
 4. **Init** — initialize git in an existing folder that isn't yet a repo. Same single/multi choice as Clone.
-5. **Convert** — turn an existing regular repo into a bare repo with worktrees. Requires no uncommitted changes and no existing `wt.yaml`.
+5. **Convert** — turn an existing regular repo into a bare repo with worktrees. Requires a clean working tree and no existing linked worktrees.
 
 For most cases, Detect + Add is the fastest path. If you're planning to run multiple parallel workstreams on the same repo, choose the multi-workspace option during Clone or Init — it sets up a bare repo from the start. See [Worktrees & Projects](/docs/worktrees-and-projects) for the full breakdown.
 

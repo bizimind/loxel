@@ -3,6 +3,7 @@ import { $ } from "bun";
 import type { BranchInfo, RefInfo, StashInfo } from "@/api/git-models";
 
 import { parseBranchOutput, parseRefsOutput, parseStashOutput } from "../parsers/refs";
+import { readOnlyGitEnv } from "./git-env";
 
 let refsCache: { data: RefInfo[]; expiry: number; cwd: string } | null = null;
 
@@ -14,8 +15,10 @@ export async function getRefs(cwd: string): Promise<RefInfo[]> {
 
   const format = "%(objectname) %(refname) %(upstream) %(upstream:track)";
   const [result, head] = await Promise.all([
-    $`git -C ${cwd} for-each-ref --format=${format} refs/heads refs/remotes refs/tags`.text(),
-    $`git -C ${cwd} rev-parse HEAD`.nothrow().text(),
+    $`git -C ${cwd} for-each-ref --format=${format} refs/heads refs/remotes refs/tags`
+      .env(readOnlyGitEnv())
+      .text(),
+    $`git -C ${cwd} rev-parse HEAD`.env(readOnlyGitEnv()).nothrow().text(),
   ]);
   const refs = parseRefsOutput(result, head.trim());
   refsCache = { data: refs, expiry: now + 2000, cwd };
@@ -25,8 +28,8 @@ export async function getRefs(cwd: string): Promise<RefInfo[]> {
 export async function getBranches(cwd: string): Promise<BranchInfo[]> {
   const format = "%(objectname) %(refname) %(upstream) %(upstream:track)";
   const [result, headResult] = await Promise.all([
-    $`git -C ${cwd} for-each-ref --format=${format} refs/heads`.text(),
-    $`git -C ${cwd} symbolic-ref --short HEAD`.nothrow().text(),
+    $`git -C ${cwd} for-each-ref --format=${format} refs/heads`.env(readOnlyGitEnv()).text(),
+    $`git -C ${cwd} symbolic-ref --short HEAD`.env(readOnlyGitEnv()).nothrow().text(),
   ]);
   const headBranch = headResult.trim() || null;
 
@@ -42,7 +45,10 @@ export async function getBranches(cwd: string): Promise<BranchInfo[]> {
   const reflogResults = await Promise.all(
     localBranches.map(async (branch) => {
       const reflogResult =
-        await $`git -C ${cwd} reflog show ${branch} --format=${reflogFormat} -n 1`.nothrow().text();
+        await $`git -C ${cwd} reflog show ${branch} --format=${reflogFormat} -n 1`
+          .env(readOnlyGitEnv())
+          .nothrow()
+          .text();
       const timestamp = parseInt(reflogResult.trim(), 10);
       return { branch, timestamp: isNaN(timestamp) ? null : timestamp };
     }),
@@ -62,6 +68,7 @@ export async function getRecentBranchNames(cwd: string, days: number): Promise<s
   const sinceTimestamp = Math.floor(sinceDate.getTime() / 1000);
 
   const branchListResult = await $`git -C ${cwd} for-each-ref --format=%(refname:short) refs/heads`
+    .env(readOnlyGitEnv())
     .nothrow()
     .text();
   const localBranches = branchListResult
@@ -74,6 +81,7 @@ export async function getRecentBranchNames(cwd: string, days: number): Promise<s
     Promise.all(
       localBranches.map(async (branch) => {
         const reflogResult = await $`git -C ${cwd} reflog show ${branch} --format=%at -n 1`
+          .env(readOnlyGitEnv())
           .nothrow()
           .text();
         const timestamp = parseInt(reflogResult.trim(), 10);
@@ -81,7 +89,10 @@ export async function getRecentBranchNames(cwd: string, days: number): Promise<s
         return null;
       }),
     ),
-    $`git -C ${cwd} for-each-ref --format=${remoteFormat} refs/remotes`.nothrow().text(),
+    $`git -C ${cwd} for-each-ref --format=${remoteFormat} refs/remotes`
+      .env(readOnlyGitEnv())
+      .nothrow()
+      .text(),
   ]);
 
   const recentBranches = localResults.filter((b): b is string => b !== null);
@@ -102,6 +113,6 @@ export async function getRecentBranchNames(cwd: string, days: number): Promise<s
 }
 
 export async function getStashes(cwd: string): Promise<StashInfo[]> {
-  const result = await $`git -C ${cwd} stash list`.nothrow().text();
+  const result = await $`git -C ${cwd} stash list`.env(readOnlyGitEnv()).nothrow().text();
   return parseStashOutput(result);
 }

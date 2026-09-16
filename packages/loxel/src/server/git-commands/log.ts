@@ -3,6 +3,7 @@ import { $ } from "bun";
 import type { CommitInfo } from "@/api/git-models";
 
 import { LOG_FORMAT, parseLogOutput } from "../parsers/log";
+import { readOnlyGitEnv } from "./git-env";
 import { validateRefName } from "./validation";
 
 export async function getLog(
@@ -32,7 +33,7 @@ export async function getLog(
     args.push(...branches);
   }
 
-  const result = await $`git -C ${cwd} ${args}`.text();
+  const result = await $`git -C ${cwd} ${args}`.env(readOnlyGitEnv()).text();
   return parseLogOutput(result);
 }
 
@@ -42,7 +43,10 @@ export async function getBranchCommits(
 ): Promise<{ commits: CommitInfo[]; mergeBase: string | null }> {
   const { limit = 100 } = options;
 
-  const branchResult = await $`git -C ${cwd} symbolic-ref --short HEAD`.nothrow().text();
+  const branchResult = await $`git -C ${cwd} symbolic-ref --short HEAD`
+    .env(readOnlyGitEnv())
+    .nothrow()
+    .text();
   const currentBranch = branchResult.trim();
   if (!currentBranch) {
     const commits = await getLog(cwd, { limit: 1 });
@@ -51,7 +55,9 @@ export async function getBranchCommits(
 
   const refFormat = "%(refname)";
   const refsResult =
-    await $`git -C ${cwd} for-each-ref --format=${refFormat} refs/heads refs/remotes`.text();
+    await $`git -C ${cwd} for-each-ref --format=${refFormat} refs/heads refs/remotes`
+      .env(readOnlyGitEnv())
+      .text();
   const excludeRefs = new Set([
     `refs/heads/${currentBranch}`,
     `refs/remotes/origin/${currentBranch}`,
@@ -76,7 +82,7 @@ export async function getBranchCommits(
     "--not",
     ...otherRefs,
   ];
-  const result = await $`git -C ${cwd} ${args}`.nothrow().text();
+  const result = await $`git -C ${cwd} ${args}`.env(readOnlyGitEnv()).nothrow().text();
   const commits = parseLogOutput(result.trim());
 
   const oldest = commits[commits.length - 1];

@@ -1,22 +1,23 @@
 # wt - Git Worktree Manager
 
-A CLI for managing git worktrees with automatic port offsetting, unique resource naming, and lifecycle hooks. Built for parallel development workflows where you need multiple isolated environments running simultaneously.
+A CLI for managing git worktrees. Built for parallel development workflows where you need multiple isolated checkouts of one repository running simultaneously. **No config file, no state file**: git itself is the database (`git worktree list`), and everything a worktree needs beyond the checkout lives in three optional shell scripts at the repo root.
 
 ## Table of Contents
 
 - [Why wt?](#why-wt)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [Configuration Reference](#configuration-reference)
-- [Port Offsetting](#port-offsetting)
-- [Unique Naming](#unique-naming)
+- [Where Worktrees Live](#where-worktrees-live)
 - [Hooks](#hooks)
-  - [Files Configuration](#files-configuration)
-  - [Copy Source Directory](#copy-source-directory)
+- [Renaming](#renaming)
 - [CLI Reference](#cli-reference)
-- [Shell Completions](#shell-completions)
+- [JSON Mode](#json-mode)
+- [Shell Integration](#shell-integration)
 - [Real-World Examples](#real-world-examples)
-- [JSON Schema for IDE Autocomplete](#json-schema-for-ide-autocomplete)
+- [Library API](#library-api)
+- [Upgrading from the Config-Based CLI](#upgrading-from-the-config-based-cli)
+- [Development](#development)
+- [Requirements](#requirements)
 - [Roadmap](#roadmap)
 
 ---
@@ -32,30 +33,40 @@ Git worktrees let you check out multiple branches simultaneously in separate dir
 
 But raw `git worktree` commands are verbose and don't handle the real challenges:
 
-- **Port conflicts**: Each worktree needs different ports for dev servers
-- **Resource naming**: Docker containers, databases need unique names per worktree
-- **Environment setup**: Copying secrets, installing dependencies, configuring services
-- **Cleanup**: Stopping containers, removing resources when done
+- **Environment setup**: Copying secrets, installing dependencies, starting services
+- **Resource naming**: Docker containers, databases and ports need to be unique per worktree
+- **Renames**: Moving a worktree should move its branch, and fix up anything named after it
+- **Cleanup**: Stopping containers and removing resources when done
 
-`wt` solves all of this with a simple config file and automatic environment management.
+`wt` solves this with three plain shell hooks and nothing else to configure. Git is the only source of truth, so there is nothing to initialize and nothing to keep in sync.
 
 ---
 
 ## Installation
 
-```bash
-# From the loxel monorepo
-cd packages/wt
-bun install
-bun run build
+Download the released binary for your platform (listed in [the manifest](https://loxel.bizimind.io/wt/manifest.json)) and the shell helpers:
 
-# Install to your PATH and sign
-cp dist/wt ~/.local/bin/
+```bash
+mkdir -p ~/.local/bin ~/.local/share/wt
+curl -fsSL https://loxel.bizimind.io/wt/darwin-arm64/wt -o ~/.local/bin/wt && chmod +x ~/.local/bin/wt
+curl -fsSL https://loxel.bizimind.io/wt/wt.sh -o ~/.local/share/wt/wt.sh
+wt version
+```
+
+Or build from the loxel monorepo:
+
+```bash
+pnpm install
+pnpm -C packages/wt run build
+
+# Install to your PATH and sign (required on macOS or the binary gets SIGKILL'd)
+cp packages/wt/dist/wt ~/.local/bin/
 codesign -s - ~/.local/bin/wt
 
-# Verify installation
-wt --version
+wt version
 ```
+
+`wt update` upgrades the binary in place; set `WT_AUTO_UPDATE=1` to have it check before every command.
 
 ---
 
@@ -63,1063 +74,437 @@ wt --version
 
 ### 1. Set up a bare repository
 
-```bash
-# Clone as bare repo (recommended for worktree-based workflows)
-git clone --bare git@github.com:myorg/myproject.git myproject.git
-cd myproject.git
-
-# Create a "main" worktree for reference/copying
-git worktree add main main
-```
-
-### 2. Create wt.yaml
-
-Create `wt.yaml` in the bare repo root:
-
-```yaml
-editor: "code"
-worktrees_dir: ".worktrees"
-auto_branch: true
-base_branch: main
-
-port_offseting:
-  offset: 10
-  ports:
-    PORT: 3000
-
-hooks:
-  add:
-    files:
-      - "**/.env.local" # Copy files as-is
-      - template_file: ".env.template" # Process ${VAR} placeholders
-        dest: ".env"
-    run: |
-      npm install
-```
-
-### 3. Create worktrees
+`wt` is most commonly used with a **bare repo**: every checkout, including `main`, is a worktree under `.worktrees/`, so the root stays a stable home for git internals, local-only files and the hooks. A plain `git clone --bare` records no fetch refspec, so add one to get `origin/*` tracking branches:
 
 ```bash
-wt add feature-auth    # Creates .worktrees/feature-auth, opens VS Code
+git clone --bare git@github.com:myorg/myproject.git myproject
+cd myproject
+git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+git fetch origin
+
+wt add main -b main        # check out the default branch as the first worktree
+```
+
+`wt` also works in a regular (non-bare) repo: there the repo root is the main worktree's top level and added worktrees go in `<repo>/.worktrees/<name>` beside your code. wt adds that directory to `.git/info/exclude` on first use so the main checkout's status stays clean without a committed `.gitignore` entry.
+
+### 2. Create worktrees
+
+```bash
+wt add feature-auth        # creates .worktrees/feature-auth on branch feature-auth
 wt add feature-payments
 wt add bugfix-123
 
-wt list                # See all worktrees with their port offsets
+wt list                    # see all worktrees
 ```
 
-### 4. Work in parallel
+### 3. Work in parallel
 
-Each worktree has isolated ports:
+Each worktree is a full checkout on its own branch. Run one agent or dev server per worktree.
 
-- `feature-auth`: PORT=3000
-- `feature-payments`: PORT=3010
-- `bugfix-123`: PORT=3020
-
-### 5. Clean up
+### 4. Clean up
 
 ```bash
-wt remove feature-auth  # Runs clean hook, removes worktree, deletes branch
+wt remove feature-auth     # removes the worktree, offers to delete the branch
 ```
+
+### 5. Automate setup with a hook (optional)
+
+A fresh worktree has the tracked files but none of the local, git-ignored state that makes the repo runnable. If you put a script named `init.wt.sh` at the repo root, `wt add` runs it inside every new worktree. The contents are entirely yours. As an example, this one copies a local env file, installs dependencies and starts a database container named after the worktree:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+cp "$WT_ROOT/.env.local" .
+pnpm install
+docker run -d --name "myapp-$WT_NAME" -p 0:5432 postgres:15
+```
+
+A matching `clean.wt.sh` would remove that container before `wt remove` deletes the checkout. See [Hooks](#hooks) for the full set of hooks and the variables they receive, and [Real-World Examples](#real-world-examples) for complete hook sets.
 
 ---
 
-## Configuration Reference
+## Where Worktrees Live
 
-Create `wt.yaml` in your bare git repo root:
+New worktrees are created at `<repoRoot>/.worktrees/<name>`. The repo root is the main worktree's top level, or the git directory for a bare repo. Override the location with `WT_DIR`:
 
-```yaml
-# Editor command to open worktrees
-# Examples: 'code', 'cursor', 'zed', 'webstorm', 'nvim'
-editor: "code"
-
-# Directory for worktrees relative to this config
-worktrees_dir: ".worktrees"
-
-# Automatically open editor after creating worktree
-# Can be overridden with --open or --no-open flags
-auto_open: true
-
-# Automatically create a new branch when creating a worktree
-# Branch name will match the worktree name
-auto_branch: true
-
-# Base branch for new worktree branches
-base_branch: main
-
-# Port offsetting configuration
-port_offseting:
-  # Set to false to disable port offsetting entirely
-  enable: true
-
-  # Offset increment between worktrees
-  # First worktree gets offset 0, second gets 10, third gets 20, etc.
-  offset: 10
-
-  # Ports to offset - each becomes an env var in hooks
-  ports:
-    BACKEND_PORT: 3000
-    FRONTEND_PORT: 5173
-    POSTGRES_PORT: 5432
-    REDIS_PORT: 6379
-
-# Unique naming for resources that need globally unique identifiers
-unique_naming:
-  # Set to false to disable unique naming
-  enable: true
-
-  # Strategy for generating unique names:
-  # - 'worktree-name': Normalize worktree name (feature-auth -> feature-auth)
-  # - 'random': Random 8-char base62 string starting with a letter
-  strategy: worktree-name
-
-  # Environment variables with ${WT_UNIQUE_NAME} and ${WT_PORT_OFFSET} substitution
-  envs:
-    POSTGRES_CONTAINER_NAME: postgres-${WT_UNIQUE_NAME}
-    REDIS_CONTAINER_NAME: redis-${WT_UNIQUE_NAME}
-    NGROK_SUBDOMAIN: ${WT_UNIQUE_NAME}
-    DATABASE_NAME: myapp_${WT_UNIQUE_NAME}
-    COMPOSE_PROJECT_NAME: myapp_${WT_UNIQUE_NAME}_${WT_PORT_OFFSET}
-
-# Source directory for copy hook (default: .wt-local-res)
-# Path to directory (relative to repo root, absolute, or ~/...)
-copy_source: .wt-local-res
-
-# Lifecycle hooks
-hooks:
-  # Runs when creating a new worktree
-  add:
-    # Files to copy/template (source: copy_source setting)
-    files:
-      - "**/.env.local" # String: copy as-is
-      - source: "configs/**" # Copy with custom destination
-        dest: "configs/"
-      - template_file: ".env.template" # Template with ${VAR} substitution
-        dest: ".env"
-      - inline_template: | # Inline template content
-          PORT=${BACKEND_PORT}
-          NAME=${WT_UNIQUE_NAME}
-        dest: ".env.ports"
-
-    # Shell script to run after file processing
-    run: |
-      echo "Setting up worktree $WT_NAME..."
-      # Your setup commands here
-
-  # Runs when removing a worktree
-  clean:
-    run: |
-      echo "Cleaning up worktree $WT_NAME..."
-      # Your cleanup commands here
+```bash
+WT_DIR=~/wt/myrepo wt add feature-x
 ```
 
----
+A worktree's name is its path under the worktrees directory, so nested names work: `wt add feat/voice-input` creates `.worktrees/feat/voice-input` on branch `feat/voice-input`.
 
-## Port Offsetting
+`wt add <name>` creates a branch named after the worktree from the current `HEAD`. Pass `-b <branch>` to check out an existing branch instead. If a branch named after the worktree already exists, wt offers to reuse it or recreate it, unless another worktree has it checked out, which is an error.
 
-Port offsetting solves the problem of running multiple dev servers simultaneously. Each worktree gets a unique `WT_PORT_OFFSET` value, and configured ports are automatically adjusted.
+If a registered worktree's checkout directory disappears outside `wt`, it remains listable and removable. Git-dependent inspection reports no dirty changes or upstream divergence for that unavailable checkout, and a cleanup hook that cannot start there is skipped with a warning.
 
-### How It Works
+### Environment
 
-With `offset: 10`:
-
-| Worktree          | Index | WT_PORT_OFFSET | BACKEND_PORT (base 3000) | FRONTEND_PORT (base 5173) |
-| ----------------- | ----- | -------------- | ------------------------ | ------------------------- |
-| feature-auth      | 0     | 0              | 3000                     | 5173                      |
-| feature-payments  | 1     | 10             | 3010                     | 5183                      |
-| bugfix-123        | 2     | 20             | 3020                     | 5193                      |
-| feature-dashboard | 3     | 30             | 3030                     | 5203                      |
-
-When you remove a worktree, its index becomes available for reuse.
-
-### Environment Variables
-
-These variables are available in hooks:
-
-| Variable                    | Example                                 | Description                              |
-| --------------------------- | --------------------------------------- | ---------------------------------------- |
-| `WT_PORT_OFFSET`            | `10`                                    | The raw offset value                     |
-| `BACKEND_PORT`              | `3010`                                  | Each configured port with offset applied |
-| `WT_ALL_PORTS_OFFSETS`      | `BACKEND_PORT=3010\nFRONTEND_PORT=5183` | All ports as KEY=value lines             |
-| `WT_ALL_PORTS_OFFSETS_JSON` | `{"BACKEND_PORT":3010,...}`             | All ports as JSON (for jq)               |
-
-### Usage Examples
-
-#### 1. Append a specific port to .env
-
-```yaml
-hooks:
-  add:
-    run: |
-      echo "BACKEND_PORT=$BACKEND_PORT" >> .env
-```
-
-#### 2. Append all ports at once
-
-```yaml
-hooks:
-  add:
-    run: |
-      echo "$WT_ALL_PORTS_OFFSETS" >> .env
-```
-
-This appends:
-
-```
-BACKEND_PORT=3010
-FRONTEND_PORT=5183
-POSTGRES_PORT=5442
-```
-
-#### 3. Write to multiple .env files in a monorepo
-
-```yaml
-hooks:
-  add:
-    run: |
-      # Backend service
-      echo "PORT=$BACKEND_PORT" >> apps/backend/.env
-      echo "DATABASE_PORT=$POSTGRES_PORT" >> apps/backend/.env
-
-      # Frontend service
-      echo "PORT=$FRONTEND_PORT" >> apps/frontend/.env
-      echo "API_URL=http://localhost:$BACKEND_PORT" >> apps/frontend/.env
-```
-
-#### 4. Manual offset calculation (if you need a port not in config)
-
-```yaml
-hooks:
-  add:
-    run: |
-      # Calculate a custom port based on offset
-      CUSTOM_PORT=$((8080 + $WT_PORT_OFFSET))
-      echo "CUSTOM_PORT=$CUSTOM_PORT" >> .env
-```
-
-#### 5. Use with docker-compose
-
-```yaml
-hooks:
-  add:
-    run: |
-      # Create a docker-compose override with correct ports
-      cat > docker-compose.override.yml << EOF
-      services:
-        backend:
-          ports:
-            - "$BACKEND_PORT:3000"
-        frontend:
-          ports:
-            - "$FRONTEND_PORT:5173"
-        postgres:
-          ports:
-            - "$POSTGRES_PORT:5432"
-      EOF
-```
-
-#### 6. Configure Vite with the offset port
-
-```yaml
-hooks:
-  add:
-    run: |
-      # Update vite.config.ts server port
-      cat > vite.config.local.ts << EOF
-      export default {
-        server: {
-          port: $FRONTEND_PORT
-        }
-      }
-      EOF
-```
-
----
-
-## Unique Naming
-
-Some resources need globally unique names on your system - Docker containers, database names, ngrok subdomains, etc. The unique naming feature generates consistent identifiers.
-
-### Strategies
-
-#### `worktree-name` (default)
-
-Normalizes the worktree name:
-
-- Converts to lowercase
-- Replaces special characters with hyphens
-- Removes leading/trailing hyphens
-- Collapses consecutive hyphens
-
-| Worktree Name  | WT_UNIQUE_NAME |
-| -------------- | -------------- |
-| `feature-auth` | `feature-auth` |
-| `Feature_Auth` | `feature-auth` |
-| `feature/auth` | `feature-auth` |
-| `BUGFIX-123`   | `bugfix-123`   |
-
-#### `random`
-
-Generates a random 8-character base62 string that always starts with a letter:
-
-| Worktree Name  | WT_UNIQUE_NAME (example) |
-| -------------- | ------------------------ |
-| `feature-auth` | `xK7mP2nQ`               |
-| `bugfix-123`   | `aB3cD4eF`               |
-
-Use `random` when worktree names might conflict or when you want truly unique identifiers across machines.
-
-### Environment Variables
-
-| Variable         | Example                 | Description                           |
-| ---------------- | ----------------------- | ------------------------------------- |
-| `WT_UNIQUE_NAME` | `feature-auth`          | The computed unique name              |
-| Custom envs      | `postgres-feature-auth` | Each configured env with substitution |
-
-### Usage Examples
-
-#### 1. Named Docker containers
-
-```yaml
-unique_naming:
-  strategy: worktree-name
-  envs:
-    POSTGRES_CONTAINER: postgres-${WT_UNIQUE_NAME}
-    REDIS_CONTAINER: redis-${WT_UNIQUE_NAME}
-
-hooks:
-  add:
-    run: |
-      # Start containers with unique names
-      docker run -d --name $POSTGRES_CONTAINER \
-        -p $POSTGRES_PORT:5432 \
-        postgres:15
-
-      docker run -d --name $REDIS_CONTAINER \
-        -p $REDIS_PORT:6379 \
-        redis:7
-
-  clean:
-    run: |
-      # Stop and remove containers
-      docker stop $POSTGRES_CONTAINER $REDIS_CONTAINER || true
-      docker rm $POSTGRES_CONTAINER $REDIS_CONTAINER || true
-```
-
-#### 2. Unique database names
-
-```yaml
-unique_naming:
-  envs:
-    DATABASE_NAME: myapp_${WT_UNIQUE_NAME}
-
-hooks:
-  add:
-    run: |
-      # Create a unique database
-      createdb $DATABASE_NAME
-      echo "DATABASE_URL=postgres://localhost:$POSTGRES_PORT/$DATABASE_NAME" >> .env
-
-  clean:
-    run: |
-      # Drop the database
-      dropdb $DATABASE_NAME || true
-```
-
-#### 3. Ngrok subdomains for webhook testing
-
-```yaml
-unique_naming:
-  envs:
-    NGROK_SUBDOMAIN: ${WT_UNIQUE_NAME}
-
-hooks:
-  add:
-    run: |
-      # Start ngrok with unique subdomain
-      ngrok http $BACKEND_PORT --subdomain=$NGROK_SUBDOMAIN &
-      echo "WEBHOOK_URL=https://$NGROK_SUBDOMAIN.ngrok.io" >> .env
-```
-
-#### 4. Kubernetes namespaces
-
-```yaml
-unique_naming:
-  envs:
-    K8S_NAMESPACE: dev-${WT_UNIQUE_NAME}
-
-hooks:
-  add:
-    run: |
-      kubectl create namespace $K8S_NAMESPACE
-      kubectl config set-context --current --namespace=$K8S_NAMESPACE
-
-  clean:
-    run: |
-      kubectl delete namespace $K8S_NAMESPACE || true
-```
+| Var              | Effect                                                        |
+| ---------------- | ------------------------------------------------------------- |
+| `WT_DIR`         | Where worktrees are created (default `<repoRoot>/.worktrees`) |
+| `WT_AUTO_UPDATE` | Set to `1` to let wt update itself before running a command   |
 
 ---
 
 ## Hooks
 
-Hooks run shell scripts at key lifecycle points with all environment variables available.
+Optional scripts at the **repo root**, run with `bash` if present:
 
-### Add Hook
+| Script         | When                     | Runs in                          |
+| -------------- | ------------------------ | -------------------------------- |
+| `init.wt.sh`   | right after `wt add`     | the new worktree                 |
+| `clean.wt.sh`  | right before `wt remove` | the worktree being removed       |
+| `rename.wt.sh` | right after `wt mv`      | the worktree at its **new** path |
 
-Runs when creating a new worktree, after files are processed.
+Every hook gets:
 
-### Files Configuration
+| Var         | Value                                  |
+| ----------- | -------------------------------------- |
+| `WT_NAME`   | the worktree name                      |
+| `WT_PATH`   | absolute path to the worktree          |
+| `WT_ROOT`   | absolute path to the repo root         |
+| `WT_BRANCH` | the worktree's branch, or `(detached)` |
 
-The `files` array supports four item types for copying and templating files from the copy source directory:
+`rename.wt.sh` additionally gets `WT_OLD_NAME`, `WT_OLD_PATH` and `WT_OLD_BRANCH`, so it can fix up anything `init.wt.sh` named after the old worktree.
 
-#### 1. String (Simple Copy)
+Two things to know about paths. The script's working directory is the worktree (`$WT_PATH`), so `.` refers to it and `cp "$WT_ROOT/.env" .` copies into the worktree. And `$WT_ROOT` is the repo root, which in a bare setup is the bare repo itself, not a checkout: keep local-only files there, and take things that only exist in a checkout (built `node_modules`, submodule trees) from the main worktree at `$WT_ROOT/.worktrees/main`.
 
-Copy files matching a glob pattern, preserving directory structure:
+File copying, dependency installs, container setup, `.env` generation, port assignment: all of it lives in these scripts. wt has no opinion about any of it. Hook output streams to the terminal as it is produced. A failing hook prints a warning; it never aborts the add, rename or remove.
 
-```yaml
-hooks:
-  add:
-    files:
-      - "**/.env.local" # Copy all .env.local files
-      - "**/node_modules" # Copy node_modules (uses filesystem copy-on-write)
-      - ".venv" # Copy Python virtual environment
-```
+### Example: copying local resources
 
-#### 2. Copy Item (Custom Destination)
-
-Copy files with control over the destination path:
-
-```yaml
-hooks:
-  add:
-    files:
-      - source: "configs/production.json"
-        dest: "config.json" # Rename file
-
-      - source: "templates/**"
-        dest: "configs/" # Dest ending with / = directory
-```
-
-| `dest` format | Behavior                                |
-| ------------- | --------------------------------------- |
-| `"file.txt"`  | Copy to specific file path              |
-| `"dir/"`      | Copy into directory, preserve structure |
-| _(omitted)_   | Mirror source path                      |
-
-#### 3. Template File (File-Based Templates)
-
-Process a template file with `${VAR}` placeholder substitution:
-
-```yaml
-hooks:
-  add:
-    files:
-      - template_file: ".env.template"
-        dest: ".env" # Required destination
-
-      - template_file: "docker-compose.template.yml"
-        dest: "docker-compose.override.yml"
-```
-
-Example `.env.template`:
+This `init.wt.sh` shows the most common job: mirroring untracked files (env files, credentials, certs) from a directory at the repo root into the new worktree. The directory name is a convention, not something wt knows about:
 
 ```bash
-# Database
-DATABASE_URL=postgres://localhost:${POSTGRES_PORT}/${WT_UNIQUE_NAME}
-
-# Ports
-API_PORT=${BACKEND_PORT}
-WEB_PORT=${FRONTEND_PORT}
-
-# Container names
-POSTGRES_CONTAINER=${POSTGRES_CONTAINER}
+#!/usr/bin/env bash
+set -euo pipefail
+cp -R "$WT_ROOT/.wt-local-res/." .
 ```
 
-All hook environment variables are available for substitution. Unknown variables are preserved as-is.
+### Example: per-worktree ports and names
 
-#### 4. Inline Template (Config-Defined Templates)
-
-Define template content directly in the config file:
-
-```yaml
-hooks:
-  add:
-    files:
-      - inline_template: |
-          PORT=${BACKEND_PORT}
-          DATABASE_URL=postgres://localhost:${POSTGRES_PORT}/myapp_${WT_UNIQUE_NAME}
-          REDIS_URL=redis://localhost:${REDIS_PORT}
-        dest: ".env"
-
-      - inline_template: |
-          version: '3.8'
-          services:
-            postgres:
-              ports:
-                - "${POSTGRES_PORT}:5432"
-        dest: "docker-compose.override.yml"
-```
-
-#### Template Escape Syntax
-
-To output a literal `${VAR}` without substitution, use backslash escape:
-
-| Input       | Output                                  |
-| ----------- | --------------------------------------- |
-| `${PORT}`   | Substituted value (e.g., `3000`)        |
-| `\${PORT}`  | Literal `${PORT}`                       |
-| `\\${PORT}` | `\` + substituted value (e.g., `\3000`) |
-
-Example for shell scripts that need literal variable references:
-
-```yaml
-- inline_template: |
-    # This gets substituted by wt
-    STATIC_PORT=${BACKEND_PORT}
-
-    # This stays as a shell variable reference
-    DYNAMIC_PORT=\${PORT:-3000}
-  dest: ".env"
-```
-
-#### Run Script
-
-Execute commands after file processing:
-
-```yaml
-hooks:
-  add:
-    run: |
-      # Trust mise configuration
-      mise trust
-
-      # Install dependencies
-      pnpm install
-
-      # Set up environment
-      echo "$WT_ALL_PORTS_OFFSETS" >> .env
-
-      # Start background services
-      docker-compose up -d
-
-      # Run migrations
-      pnpm db:migrate
-```
-
-### Clean Hook
-
-Runs when removing a worktree, before the worktree is deleted.
-
-```yaml
-hooks:
-  clean:
-    run: |
-      # Stop and remove Docker containers
-      docker-compose down -v
-      docker stop $POSTGRES_CONTAINER $REDIS_CONTAINER || true
-      docker rm $POSTGRES_CONTAINER $REDIS_CONTAINER || true
-
-      # Drop test database
-      dropdb $DATABASE_NAME || true
-
-      # Clean up any background processes
-      pkill -f "ngrok.*$NGROK_SUBDOMAIN" || true
-```
-
-### All Available Environment Variables
-
-| Variable                    | Source          | Description                           |
-| --------------------------- | --------------- | ------------------------------------- |
-| `WT_NAME`                   | Core            | Worktree name                         |
-| `WT_PATH`                   | Core            | Absolute path to worktree             |
-| `WT_ROOT`                   | Core            | Absolute path to bare repo root       |
-| `WT_PORT_OFFSET`            | Port Offsetting | Raw offset value (0, 10, 20...)       |
-| `<PORT_NAME>`               | Port Offsetting | Each configured port with offset      |
-| `WT_ALL_PORTS_OFFSETS`      | Port Offsetting | All ports as KEY=value lines          |
-| `WT_ALL_PORTS_OFFSETS_JSON` | Port Offsetting | All ports as JSON                     |
-| `WT_UNIQUE_NAME`            | Unique Naming   | Computed unique identifier            |
-| `<UNIQUE_ENV>`              | Unique Naming   | Each configured env with substitution |
-
-### Copy Source Directory
-
-The `files` configuration copies/templates files from a source directory. By default, it uses `.wt-local-res` in the bare repo root.
-
-#### Default: Local Resources Directory
-
-Create the directory in your bare repo:
+wt assigns no ports and generates no names; hooks derive them from `WT_NAME`. This `init.wt.sh` shows one way to turn the name into a stable numeric offset for ports and a safe database name:
 
 ```bash
-cd myproject.git
-mkdir .wt-local-res
-cp /path/to/env-templates/.env.local .wt-local-res/
+#!/usr/bin/env bash
+set -euo pipefail
+# init.wt.sh
+OFFSET=$(( $(cksum <<<"$WT_NAME" | cut -d' ' -f1) % 100 * 10 ))
+echo "PORT=$((3000 + OFFSET))" >> .env.local
+echo "DATABASE_URL=postgres://localhost:$((5432 + OFFSET))/myapp_${WT_NAME//\//_}" >> .env.local
 ```
 
-#### Using Main Worktree
+---
 
-To copy from an existing worktree (e.g., your main worktree), point to its path:
+## Renaming
 
-```yaml
-copy_source: .worktrees/main
+`wt mv` renames the worktree's directory (`git worktree move`) and its branch (`git branch -m`) together:
+
+```bash
+wt mv new-name              # rename the worktree you're currently in
+wt mv old-name new-name     # rename another one
+wt mv                       # pick from a list, then type the new name
 ```
 
-#### Path Resolution
+The branch follows the worktree name only when the two are already in sync, which they are for anything made by `wt add`. When they have diverged (an existing branch adopted via `add -b`), `mv` moves the directory and leaves the branch alone, saying so; pass `--branch <b>` to rename it anyway, or `-B` to never touch it. A detached worktree moves with its HEAD untouched. Uncommitted changes ride along, so there is no dirty-tree prompt.
 
-- **Relative paths**: Resolved from bare repo root (where wt.yaml lives)
-- **Absolute paths**: Used as-is
-- **Home directory**: `~` expands to your home directory
+Every check runs before anything moves (the new name, the destination, the target branch), so a rejected rename leaves no half-applied state. The move is the only irreversible step: if the branch rename fails afterwards it warns and reports `branchRenamed: false` rather than failing.
 
-```yaml
-# Relative (recommended)
-copy_source: .wt-local-res
-
-# Absolute
-copy_source: /opt/shared/project-resources
-
-# Home directory
-copy_source: ~/my-project-resources
-```
+Renaming the worktree your shell is sitting in leaves that shell on a path that no longer exists. `wt mv` prints the `cd` you need (keeping the subdirectory you were in); the `wtm` helper from [Shell Integration](#shell-integration) does it for you. Other terminals and processes in the old path have to move themselves.
 
 ---
 
 ## CLI Reference
 
+Run interactively and wt prompts for the common decisions: the worktree name, what to do when the branch already exists, which worktree to act on, whether to force a dirty removal, and whether to delete the branch too. Pass everything as flags and it runs unattended; without a terminal a missing required value errors instead of blocking, and destructive commands never auto-select a target.
+
+| Flag                    | Commands | Meaning                                                    |
+| ----------------------- | -------- | ---------------------------------------------------------- |
+| `-j`, `--json`          | all      | JSON result on stdout; progress and prompts stay on stderr |
+| `-b`, `--branch <b>`    | `add`    | Check out an existing branch instead of creating one       |
+| `--branch <b>`          | `mv`     | Rename the branch to `<b>` instead of the new name         |
+| `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leaving the branch alone        |
+| `-f`, `--force`         | `mv`     | Move a locked worktree                                     |
+| `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes          |
+| `-d`, `--delete-branch` | `remove` | Also delete the worktree's branch; an unmerged one is kept |
+| `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)          |
+| `--keep-branch`         | `remove` | Keep the branch (no prompt)                                |
+
 ### `wt list` (alias: `ls`)
 
-List all managed worktrees.
+List every worktree git knows about, marking the main worktree.
 
 ```bash
 wt list
 ```
 
-Output:
-
 ```
-Worktrees:
-
-  feature-auth
-    Branch: feature-auth
-    Path:   /path/to/.worktrees/feature-auth [offset: 0]
-
-  feature-payments
-    Branch: feature-payments
-    Path:   /path/to/.worktrees/feature-payments [offset: 10]
+Name          Branch        Path
+------------  ------------  ----------------------------------------
+main          main          /path/to/myproject/.worktrees/main
+feature-auth  feature-auth  /path/to/myproject/.worktrees/feature-auth
 ```
 
-### `wt add <name>` (alias: `create`)
+### `wt add [name]` (alias: `create`)
 
-Create a new worktree.
+Create a worktree at `<worktreesDir>/<name>`, then run `init.wt.sh`. Prompts for the name when omitted.
 
 ```bash
-# Create worktree with new branch (default)
-wt add feature-auth
-
-# Create worktree from existing branch
-wt add feature-auth -b existing-branch
-wt add feature-auth --branch existing-branch
-
-# Create without opening editor
-wt add feature-auth --no-open
-
-# Force open editor (overrides auto_open: false)
-wt add feature-auth --open
+wt add feature-auth                    # new branch feature-auth from HEAD
+wt add feature-auth -b existing-branch # check out an existing branch instead
 ```
 
-### `wt open <name>`
+### `wt view [name]`
 
-Open an existing worktree in the configured editor.
+Show one worktree's branch, head, path, lock state, dirty file count and upstream divergence. Picks from a list when the name is omitted.
+
+### `wt mv [old] <new>` (aliases: `rename`, `move`)
+
+Rename a worktree and its branch, then run `rename.wt.sh`. See [Renaming](#renaming).
+
+### `wt remove [name]` (aliases: `rm`, `delete`)
+
+Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with unmerged commits (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused.
 
 ```bash
-wt open feature-auth
+wt remove feature-auth                 # prompts about the branch when interactive
+wt remove feature-auth -d              # also delete the branch, if merged
+wt remove feature-auth -D              # delete the branch even if unmerged
+wt remove feature-auth --force         # remove despite uncommitted changes
 ```
 
-### `wt remove <name>` (aliases: `rm`, `delete`)
+### `wt version`, `wt update`
 
-Remove a worktree, running the clean hook first.
+Print the installed version, or update the binary in place.
 
-```bash
-# Normal removal (fails if uncommitted changes)
-wt remove feature-auth
+---
 
-# Force removal
-wt remove feature-auth --force
-wt remove feature-auth -f
+## JSON Mode
+
+With `-j`, stdout carries only JSON. Progress, hook output and prompts go to stderr, so `wt add -j | jq` works while still being interactive.
+
+```jsonc
+// list
+{"worktrees":[{"name","path","branch","head","main","locked"}, ...]}
+// add
+{"name","path","branch","created":true,"hookRan":false}
+// mv
+{"name","path","branch","oldName","oldPath","oldBranch","moved":true,"branchRenamed":true}
+// view — `head` is abbreviated to 12 chars here, full in `list`; `ahead`/`behind` are null without an upstream
+{"name","path","branch","head","main","locked","dirty","ahead","behind"}
+// remove
+{"name","path","removed":true,"branchDeleted":false,"hookRan":true}
+// cancelled at a prompt, via Cancel or Ctrl+C (exit code 0)
+{"aborted":true,"reason":"User cancelled"}
 ```
 
-### `wt completions <shell>`
-
-Output shell completion script.
+Errors come back as `{"error":true,"message":"..."}` with exit code 1, and carry git's own stderr when git is what failed.
 
 ```bash
-wt completions bash
-wt completions zsh
-wt completions fish
+wt list -j | jq -r '.worktrees[] | select(.main|not) | .name'
+cd "$(wt add feature-x -j | jq -r .path)"
+cd "$(wt mv feature-x feature-y -j | jq -r .path)"
 ```
 
 ---
 
-## Shell Completions
+## Shell Integration
 
-Shell completions provide tab completion for commands, worktree names, and flags.
-
-### Bash
+`add`, `view` and `mv` report the worktree's absolute `.path`, but only a shell can change its own directory. `wt.sh` provides wrappers that do it (zsh and bash, needs `jq`). Source it from `~/.zshrc` or `~/.bashrc` after downloading it as shown in [Installation](#installation):
 
 ```bash
-# Option 1: Install to completions directory
-wt completions bash > ~/.local/share/bash-completion/completions/wt
-
-# Option 2: Add to .bashrc
-echo 'eval "$(wt completions bash)"' >> ~/.bashrc
+source ~/.local/share/wt/wt.sh
 ```
 
-### Zsh
+| Helper          | Does                                                                         |
+| --------------- | ---------------------------------------------------------------------------- |
+| `wta [name]`    | `wt add`, then cd into the new worktree                                      |
+| `wtv [name]`    | `wt view`, then cd into it (picker when no name)                             |
+| `wtr [name]`    | `wt remove`                                                                  |
+| `wtm [old] new` | `wt mv`, then follow the worktree to its new path, keeping your subdirectory |
 
-```bash
-# Create completions directory if needed
-mkdir -p ~/.zfunc
-
-# Install completion
-wt completions zsh > ~/.zfunc/_wt
-
-# Add to .zshrc (before compinit)
-# fpath=(~/.zfunc $fpath)
-# autoload -Uz compinit && compinit
-```
-
-### Fish
-
-```bash
-wt completions fish > ~/.config/fish/completions/wt.fish
-```
+They call `wt` on PATH; set `WT_BIN` before sourcing to point somewhere else (a locally built `dist/wt`, say). They live beside the CLI so the wrappers and the `-j` shapes they parse stay versioned together.
 
 ---
 
 ## Real-World Examples
 
-### Full-Stack Web App (Node.js + PostgreSQL + Redis)
+Each of these is an example set of hook scripts for one kind of project. None of it is required by wt; copy what fits and change the rest.
 
-```yaml
-editor: "code"
-worktrees_dir: ".worktrees"
-auto_branch: true
-base_branch: main
-
-port_offseting:
-  offset: 100
-  ports:
-    API_PORT: 3000
-    WEB_PORT: 3001
-    POSTGRES_PORT: 5432
-    REDIS_PORT: 6379
-
-unique_naming:
-  strategy: worktree-name
-  envs:
-    POSTGRES_CONTAINER: myapp-pg-${WT_UNIQUE_NAME}
-    REDIS_CONTAINER: myapp-redis-${WT_UNIQUE_NAME}
-    DB_NAME: myapp_${WT_UNIQUE_NAME}
-
-hooks:
-  add:
-    files:
-      - "**/.env.local"
-      - "**/node_modules"
-    run: |
-      # Start databases
-      docker run -d --name $POSTGRES_CONTAINER \
-        -e POSTGRES_PASSWORD=dev \
-        -e POSTGRES_DB=$DB_NAME \
-        -p $POSTGRES_PORT:5432 \
-        postgres:15
-
-      docker run -d --name $REDIS_CONTAINER \
-        -p $REDIS_PORT:6379 \
-        redis:7-alpine
-
-      # Wait for postgres
-      sleep 3
-
-      # Write environment
-      cat >> .env.local << EOF
-      DATABASE_URL=postgres://postgres:dev@localhost:$POSTGRES_PORT/$DB_NAME
-      REDIS_URL=redis://localhost:$REDIS_PORT
-      API_PORT=$API_PORT
-      WEB_PORT=$WEB_PORT
-      EOF
-
-      # Install and migrate
-      pnpm install
-      pnpm db:migrate
-
-  clean:
-    run: |
-      docker stop $POSTGRES_CONTAINER $REDIS_CONTAINER 2>/dev/null
-      docker rm $POSTGRES_CONTAINER $REDIS_CONTAINER 2>/dev/null
-```
-
-### Python Django Project
-
-```yaml
-editor: "cursor"
-worktrees_dir: ".worktrees"
-auto_branch: true
-base_branch: main
-
-port_offseting:
-  offset: 10
-  ports:
-    DJANGO_PORT: 8000
-    POSTGRES_PORT: 5432
-    CELERY_PORT: 5555
-
-unique_naming:
-  strategy: worktree-name
-  envs:
-    DB_NAME: django_${WT_UNIQUE_NAME}
-
-hooks:
-  add:
-    files:
-      - ".env.local"
-      - ".venv"
-    run: |
-      # Create venv if not copied
-      if [ ! -d ".venv" ]; then
-        python -m venv .venv
-      fi
-
-      source .venv/bin/activate
-      pip install -r requirements.txt
-
-      # Configure Django
-      cat >> .env.local << EOF
-      DJANGO_PORT=$DJANGO_PORT
-      DATABASE_URL=postgres://localhost:$POSTGRES_PORT/$DB_NAME
-      EOF
-
-      # Create database
-      createdb $DB_NAME 2>/dev/null || true
-      python manage.py migrate
-
-  clean:
-    run: |
-      dropdb $DB_NAME 2>/dev/null || true
-```
-
-### Microservices with Docker Compose
-
-```yaml
-editor: "code"
-worktrees_dir: ".worktrees"
-auto_branch: true
-base_branch: main
-
-port_offseting:
-  offset: 1000
-  ports:
-    GATEWAY_PORT: 3000
-    AUTH_PORT: 3001
-    USERS_PORT: 3002
-    ORDERS_PORT: 3003
-    POSTGRES_PORT: 5432
-
-unique_naming:
-  strategy: worktree-name
-  envs:
-    # Include port offset to ensure truly unique project names across all worktrees
-    COMPOSE_PROJECT_NAME: myapp-${WT_UNIQUE_NAME}-${WT_PORT_OFFSET}
-
-hooks:
-  add:
-    files:
-      - "**/.env.local"
-    run: |
-      # Generate docker-compose.override.yml with correct ports
-      cat > docker-compose.override.yml << EOF
-      version: '3.8'
-      services:
-        gateway:
-          ports:
-            - "$GATEWAY_PORT:3000"
-        auth:
-          ports:
-            - "$AUTH_PORT:3001"
-        users:
-          ports:
-            - "$USERS_PORT:3002"
-        orders:
-          ports:
-            - "$ORDERS_PORT:3003"
-        postgres:
-          ports:
-            - "$POSTGRES_PORT:5432"
-      EOF
-
-      # Start services
-      docker-compose up -d
-
-  clean:
-    run: |
-      docker-compose down -v
-```
-
-### Monorepo with Turborepo
-
-```yaml
-editor: "code"
-worktrees_dir: ".worktrees"
-auto_branch: true
-base_branch: main
-
-port_offseting:
-  offset: 100
-  ports:
-    WEB_PORT: 3000
-    DOCS_PORT: 3001
-    API_PORT: 4000
-    STORYBOOK_PORT: 6006
-
-hooks:
-  add:
-    files:
-      - "**/.env.local"
-      - "**/node_modules"
-      - "**/.turbo"
-    run: |
-      # Configure each app
-      echo "PORT=$WEB_PORT" >> apps/web/.env.local
-      echo "PORT=$DOCS_PORT" >> apps/docs/.env.local
-      echo "PORT=$API_PORT" >> apps/api/.env.local
-
-      # Install dependencies (fast with cached node_modules)
-      pnpm install
-```
-
-### AI Agent Parallel Development
-
-Perfect for running multiple Claude Code or Cursor instances:
-
-```yaml
-editor: "cursor"
-worktrees_dir: ".worktrees"
-auto_branch: true
-base_branch: main
-
-port_offseting:
-  offset: 100
-  ports:
-    DEV_PORT: 3000
-    DEBUG_PORT: 9229
-
-hooks:
-  add:
-    files:
-      - ".env.local"
-      - "node_modules"
-    run: |
-      echo "PORT=$DEV_PORT" >> .env.local
-      echo "DEBUG_PORT=$DEBUG_PORT" >> .env.local
-      npm install
-```
-
-Then run multiple agents:
+### Full-stack web app (Node.js + PostgreSQL + Redis)
 
 ```bash
-# Terminal 1
-wt add feature-auth
-# Opens Cursor at .worktrees/feature-auth with PORT=3000
+# init.wt.sh
+#!/usr/bin/env bash
+set -euo pipefail
+NAME=${WT_NAME//\//-}
+OFFSET=$(( $(cksum <<<"$WT_NAME" | cut -d' ' -f1) % 100 * 10 ))
 
-# Terminal 2
-wt add feature-payments
-# Opens Cursor at .worktrees/feature-payments with PORT=3100
+docker run -d --name "myapp-pg-$NAME" -e POSTGRES_PASSWORD=dev -p $((5432 + OFFSET)):5432 postgres:15
+docker run -d --name "myapp-redis-$NAME" -p $((6379 + OFFSET)):6379 redis:7-alpine
 
-# Terminal 3
-wt add feature-notifications
-# Opens Cursor at .worktrees/feature-notifications with PORT=3200
+cat >> .env.local <<EOF
+DATABASE_URL=postgres://postgres:dev@localhost:$((5432 + OFFSET))/postgres
+REDIS_URL=redis://localhost:$((6379 + OFFSET))
+API_PORT=$((3000 + OFFSET))
+EOF
+
+pnpm install
+pnpm db:migrate
 ```
 
-Each agent works in complete isolation with its own dev server ports.
-
-### Claude Code Settings Sharing
-
-Share `.claude/settings.local.json` across worktrees and sync permissions back on removal:
-
-```yaml
-editor: "zed"
-worktrees_dir: ".worktrees"
-auto_branch: true
-base_branch: main
-
-hooks:
-  add:
-    run: |
-      # Copy Claude Code local settings from bare repo
-      SRC="$WT_ROOT/.claude/settings.local.json"
-      if [ -f "$SRC" ]; then
-        mkdir -p .claude
-        cp "$SRC" .claude/settings.local.json
-        echo "  Copied .claude/settings.local.json"
-      fi
-
-  clean:
-    run: |
-      # Merge permissions back to bare repo
-      SRC=".claude/settings.local.json"
-      DST="$WT_ROOT/.claude/settings.local.json"
-
-      [ -f "$SRC" ] || exit 0
-      mkdir -p "$WT_ROOT/.claude"
-
-      if [ -f "$DST" ]; then
-        # Merge allow/deny arrays, dedupe and sort
-        jq -s '
-          .[0] as $dst | .[1] as $src |
-          ($dst // {}) * ($src // {}) * {
-            permissions: {
-              allow: ([$dst.permissions.allow // [], $src.permissions.allow // []] | add | unique | sort),
-              deny: ([$dst.permissions.deny // [], $src.permissions.deny // []] | add | unique | sort)
-            }
-          }
-          | .permissions |= with_entries(select(.value | length > 0))
-        ' "$DST" "$SRC" > "$DST.tmp" && mv "$DST.tmp" "$DST"
-        echo "  Merged .claude/settings.local.json"
-      else
-        cp "$SRC" "$DST"
-        echo "  Copied .claude/settings.local.json to bare repo"
-      fi
+```bash
+# clean.wt.sh
+#!/usr/bin/env bash
+NAME=${WT_NAME//\//-}
+docker rm -f "myapp-pg-$NAME" "myapp-redis-$NAME" 2>/dev/null || true
 ```
 
-This ensures:
+```bash
+# rename.wt.sh
+#!/usr/bin/env bash
+OLD=${WT_OLD_NAME//\//-}; NEW=${WT_NAME//\//-}
+docker rename "myapp-pg-$OLD" "myapp-pg-$NEW" 2>/dev/null || true
+docker rename "myapp-redis-$OLD" "myapp-redis-$NEW" 2>/dev/null || true
+```
 
-- New worktrees inherit your accumulated Claude Code permissions
-- Permissions granted during development are preserved when the worktree is removed
-- No manual syncing needed
+### Monorepo with cached dependencies
+
+Restore `node_modules` from the main checkout instead of re-downloading. On APFS, `cp -c` clones instantly with copy-on-write:
+
+```bash
+# init.wt.sh
+#!/usr/bin/env bash
+set -euo pipefail
+MAIN="$WT_ROOT/.worktrees/main"
+cp -Rc "$MAIN/node_modules" . 2>/dev/null || true
+cp "$WT_ROOT/.env" .
+pnpm install
+```
+
+### AI agent parallel development
+
+Each agent gets its own worktree, branch, dependencies and services from one shared repo:
+
+```bash
+wta feature-auth            # creates the worktree, runs init.wt.sh, cds into it
+claude                      # start an agent here
+
+# in another terminal
+wta feature-payments
+claude
+```
+
+When the work lands, `wtr feature-auth -d` tears down the services via `clean.wt.sh`, removes the worktree and deletes the branch.
+
+### Claude Code settings sharing
+
+Share `.claude/settings.local.json` across worktrees and merge permissions back on removal:
+
+```bash
+# init.wt.sh
+#!/usr/bin/env bash
+SRC="$WT_ROOT/.claude/settings.local.json"
+[ -f "$SRC" ] && mkdir -p .claude && cp "$SRC" .claude/settings.local.json
+```
+
+```bash
+# clean.wt.sh
+#!/usr/bin/env bash
+SRC=".claude/settings.local.json"
+DST="$WT_ROOT/.claude/settings.local.json"
+[ -f "$SRC" ] || exit 0
+mkdir -p "$WT_ROOT/.claude"
+if [ -f "$DST" ]; then
+  jq -s '
+    .[0] as $dst | .[1] as $src |
+    ($dst // {}) * ($src // {}) * {
+      permissions: {
+        allow: ([$dst.permissions.allow // [], $src.permissions.allow // []] | add | unique | sort),
+        deny: ([$dst.permissions.deny // [], $src.permissions.deny // []] | add | unique | sort)
+      }
+    }
+    | .permissions |= with_entries(select(.value | length > 0))
+  ' "$DST" "$SRC" > "$DST.tmp" && mv "$DST.tmp" "$DST"
+else
+  cp "$SRC" "$DST"
+fi
+```
+
+New worktrees inherit your accumulated Claude Code permissions, and permissions granted during development are preserved when the worktree is removed.
 
 ---
 
-## JSON Schema for IDE Autocomplete
+## Library API
 
-Generate a JSON schema for YAML autocomplete in your IDE:
+`@bizimind/wt/lib` exposes the same operations for programmatic use, with the plan/execute split that lets a UI resolve decisions before mutating anything:
+
+```ts
+import {
+  planAdd,
+  executeAdd,
+  planMove,
+  executeMove,
+  planRemove,
+  executeRemove,
+} from "@bizimind/wt/lib";
+
+const plan = await planAdd({ name: "feat/foo", repoPath });
+// plan.branchConflict?.kind === "used-by-worktree" | "exists"
+
+const added = await executeAdd(
+  { name: "feat/foo", repoPath, branchResolution: "use-existing" },
+  { log: console.log, warn: console.warn },
+);
+
+const move = await planMove({ oldName: "feat/foo", name: "feat/bar", repoPath });
+// move.newBranch === "feat/bar", or null with move.branchSkipReason set
+const moved = await executeMove({ oldName: "feat/foo", name: "feat/bar", repoPath });
+
+const removal = await planRemove({ name: "feat/bar", repoPath });
+if (!removal.dirty) {
+  await executeRemove({ name: "feat/bar", repoPath, deleteBranch: true, force: false });
+}
+```
+
+Also exported: `resolveWorktreesDir`, `listManagedWorktrees`, `currentManagedWorktree`, `getWorktreeName`, `detectRepoType`, `hasUncommittedChanges`, `getCurrentBranch`, `initBareRepo`, `transformToBare`, `ensureWorktreesDir`, the hook filename constants, and the `ProgressHandler` type.
+
+---
+
+## Upgrading from the Config-Based CLI
+
+`wt.yaml`, generated state files, `wt init`, `wt open`, `wt completions`, the global `--repo` selector, automatic port offsets, and generated unique names are no longer supported. Existing `wt.yaml` files are ignored, so migrate their behavior before relying on this version:
+
+- Replace `worktrees_dir` with the `WT_DIR` environment variable when the default `.worktrees` directory is not suitable.
+- Move `hooks.add.run` into repo-root `init.wt.sh`, and `hooks.clean.run` into `clean.wt.sh`.
+- Replace `hooks.add.files` and templates with ordinary shell copy/generation commands in `init.wt.sh`; the source directory remains your choice.
+- Derive ports and resource names from `WT_NAME` inside the hook scripts (see [Real-World Examples](#real-world-examples)).
+- Replace `automatic_updates: true` with `WT_AUTO_UPDATE=1`.
+- Use the shell helpers instead of `wt open` when you want the calling shell to change directory.
+
+Remove the obsolete `wt.yaml` after migrating. Existing git worktrees remain registered in git and are not modified by the upgrade.
+
+---
+
+## Development
 
 ```bash
-bun run packages/wt/src/config/json-schema.ts > wt.schema.json
+bun src/cli.ts add feature-x      # run from source
+pnpm -C packages/wt run test
+pnpm -C packages/wt run typecheck
+pnpm -C packages/wt run build     # standalone binary at dist/wt
 ```
 
-Reference it in your `wt.yaml`:
-
-```yaml
-# yaml-language-server: $schema=./wt.schema.json
-editor: "code"
-worktrees_dir: ".worktrees"
-# ... rest of config with autocomplete!
-```
+The tests drive real git against temporary repositories created by `src/test-repo.ts`. Because wt removes worktrees and runs hooks, `test/safety-preload.ts` sandboxes every run. It is loaded by this package's `bunfig.toml`, so always run the tests with the package as cwd (`pnpm -C packages/wt run test`, or `bun test --cwd packages/wt <file>`); a `bun test packages/wt/...` from the repo root would skip it. The sandbox: `GIT_CEILING_DIRECTORIES` and a guard around wt's git helpers keep git away from this checkout, ambient `GIT_*`, `WT_*`, shell-startup and temp-dir variables are cleared, and `process.chdir`/`process.exit` are blocked. Always build fixtures with `createTestRepo()`; never point a test at a real repository.
 
 ---
 
 ## Requirements
 
-- **Bun** 1.0+ (for running/building)
-- **Git** 2.5+ (for worktree support)
-- **Bare git repository** (regular repo support planned)
+- **Git** 2.31+ (`git worktree move` and `rev-parse --path-format`)
+- **bash** and **jq** for the hooks and shell helpers
+- **Bun** 1.0+ only when running or building from source
 
 ---
 
@@ -1127,12 +512,11 @@ worktrees_dir: ".worktrees"
 
 Future features under consideration:
 
-- [ ] **Regular repo support** - Work with non-bare repositories
-- [ ] **Shell environment auto-population** - Auto-generate `.envrc` with port/naming vars for direnv
+- [ ] **Shell environment auto-population** - Auto-generate `.envrc` with per-worktree vars for direnv
 - [ ] **Version management** - Different node/bun/python versions per worktree (mise/asdf integration)
 - [ ] **Session management** - tmux integration for persistent processes
 - [ ] **Status dashboard** - View all worktrees' git status at a glance
-- [ ] **Fuzzy finder** - Interactive worktree selection with fzf
+- [ ] **Shell completions** - Tab completion for commands and worktree names
 
 ---
 

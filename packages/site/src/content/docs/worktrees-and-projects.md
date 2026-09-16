@@ -38,7 +38,7 @@ Convert an existing regular repo to a bare + worktrees layout. Loxel performs th
 Two preconditions must be met before loxel will proceed:
 
 - No uncommitted changes (clean working tree)
-- No existing `wt.yaml` in the repo
+- No existing linked worktrees
 
 After conversion, the repo is restructured so worktrees can be created and managed through loxel's `wt` integration.
 
@@ -50,7 +50,7 @@ Use a bare repo when you plan to run multiple parallel workstreams on the same r
 
 Use a regular repo for solo work or when you only ever need one working tree checked out at a time.
 
-Loxel's `wt` integration handles branch planning and hook execution for managed worktrees. When you create a worktree through loxel, `wt` sets up the branch, runs the configured lifecycle hooks, and registers the worktree with the project.
+Loxel's configless `wt` integration handles branch planning and hook execution for managed worktrees in bare and regular repositories. When you create a worktree through loxel, `wt` sets up the branch, runs an optional repo-root `init.wt.sh` hook, and lets Git remain the source of truth.
 
 > **Note:** You can convert a regular repo to bare at any time via the Convert path — but you'll need a clean working tree. Commit everything first.
 

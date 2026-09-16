@@ -708,7 +708,7 @@ function DetectedRepoPanel({
         />
       </FieldGroup>
 
-      {!isBare && !detection.hasWtConfig && (
+      {!isBare && (
         <div className="space-y-2">
           <FieldGroup label="Workspace setup">
             <WorkspaceSetupPicker value={setup} onChange={onSetupChange} />

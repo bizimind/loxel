@@ -18,8 +18,7 @@ export type ProjectsData = z.infer<typeof ProjectsDataSchema>;
 /** Enriched project returned by GET /api/projects — includes inline worktrees + wt metadata. */
 export interface EnrichedProject extends Project {
   worktrees: WorktreeEntry[];
-  hasWtConfig: boolean;
-  wtCliAvailable: boolean;
+  /** Absolute path to the repo's worktrees directory (null when not yet initialized). */
   worktreesDir: string | null;
 }
 
@@ -44,7 +43,6 @@ export interface DetectPathResult {
   path: string;
   name: string;
   branch?: string;
-  hasWtConfig?: boolean;
   hasUncommittedChanges?: boolean;
 }
 
