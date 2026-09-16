@@ -97,6 +97,15 @@ describe("transformToBare", () => {
     );
   });
 
+  test("refuses conversion when HEAD is not on the requested branch", async () => {
+    repo = await createTestRepo();
+
+    await expect(transformToBare(repo.root, "other")).rejects.toThrow("HEAD is on 'main'");
+
+    expect(await detectRepoType(repo.root)).toBe("regular");
+    expect(await Bun.file(join(repo.root, "README.md")).exists()).toBe(true);
+  });
+
   test("honors WT_DIR for the converted working tree", async () => {
     repo = await createTestRepo();
     const trees = join(repo.root, "..", "trees");

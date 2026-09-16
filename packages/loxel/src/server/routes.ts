@@ -1632,7 +1632,7 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   mkdirSync(projectDir, { recursive: true });
 
   if (setup === "single") {
-    const result = Bun.spawnSync(["git", "init"], { cwd: projectDir });
+    const result = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: projectDir });
     if (result.exitCode !== 0) return error("git init failed", 500);
   } else {
     await initBareRepo(projectDir, "main");
@@ -1752,7 +1752,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
   }
 
   if (setup === "single") {
-    const result = Bun.spawnSync(["git", "init"], { cwd: dirPath });
+    const result = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath });
     if (result.exitCode !== 0) return error("git init failed", 500);
   } else {
     // For non-empty directories: init as regular repo first, then convert to bare.
@@ -1762,7 +1762,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     const hasFiles = entries.some((e) => !e.startsWith("."));
 
     if (hasFiles) {
-      const initResult = Bun.spawnSync(["git", "init"], { cwd: dirPath });
+      const initResult = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath });
       if (initResult.exitCode !== 0) return error("git init failed", 500);
       const addResult = Bun.spawnSync(["git", "add", "."], { cwd: dirPath });
       if (addResult.exitCode !== 0) return error("git add failed", 500);

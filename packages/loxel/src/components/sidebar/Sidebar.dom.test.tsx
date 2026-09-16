@@ -34,6 +34,7 @@ beforeEach(() => {
     projects: [project],
     sidebarExpanded: true,
     expandedProjectIds: [project.id],
+    autoExpandedProjectIds: [project.id],
   });
   useWorktreeStore.setState({
     activeWorktreePath: project.path,
@@ -44,7 +45,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  useProjectStore.setState({ projects: [], expandedProjectIds: [] });
+  useProjectStore.setState({ projects: [], expandedProjectIds: [], autoExpandedProjectIds: [] });
   useWorktreeStore.getState().reset();
 });
 
@@ -66,6 +67,20 @@ describe("Sidebar regular-repository worktrees", () => {
 
     expect(screen.queryByText("Click to load worktrees")).toBeNull();
     expect(screen.getByText("Add worktree")).toBeDefined();
+  });
+
+  test("auto-expands a project once and keeps a later collapse across remounts", () => {
+    useProjectStore.setState({ expandedProjectIds: [], autoExpandedProjectIds: [] });
+
+    const first = render(<Sidebar />);
+    expect(useProjectStore.getState().expandedProjectIds).toEqual([project.id]);
+    first.unmount();
+
+    // The user collapses it; the sidebar then remounts (as it does on the first worktree click).
+    useProjectStore.getState().toggleProjectExpanded(project.id);
+    render(<Sidebar />);
+
+    expect(useProjectStore.getState().expandedProjectIds).toEqual([]);
   });
 
   test("switches from a linked worktree back to the regular repository root", async () => {

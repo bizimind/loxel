@@ -48,10 +48,22 @@ _wt_is_under() {
 }
 
 # _wt_jump <subcommand> [args...] -- run it, then cd to the .path it reports.
+# _wt_passthrough [args...] -- true if any arg is a help/version flag, whose plain-text
+# output must reach the terminal untouched instead of being parsed as -j JSON.
+_wt_passthrough() {
+  for _wt_a in "$@"; do
+    case "$_wt_a" in
+      -h | --help | -V | --version) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 _wt_jump() {
   _wt_preflight || return 1
   _wt_cmd="$1"
   shift
+  if _wt_passthrough "$@"; then "$WT_BIN" "$_wt_cmd" "$@"; return; fi
   _wt_capture "$WT_BIN" "$_wt_cmd" -j "$@" || return
   _wt_path="$(printf '%s' "$_wt_out" | jq -r '.path // empty')"
   # Empty guard: a bare `cd` would silently send you home. Also covers the
@@ -75,6 +87,7 @@ wtr() { "$WT_BIN" remove "$@"; }
 # can reach them.
 wtm() {
   _wt_preflight || return 1
+  if _wt_passthrough "$@"; then "$WT_BIN" mv "$@"; return; fi
   # Capture the cwd first -- once the directory is renamed it can't be resolved.
   _wt_cur="$(pwd -P)"
   _wt_capture env WT_SHELL_WRAPPER=1 "$WT_BIN" mv -j "$@" || return

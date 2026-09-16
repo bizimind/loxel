@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, relative } from "node:path";
 
 import { wrapError } from "@bizimind/cli-common";
 
+import { getCurrentBranch } from "./branch.ts";
 import { git, gitSucceeds, runGit } from "./run.ts";
 import { canonicalWorktreesDir, isWorktreeDirty, pathExists } from "./worktree.ts";
 
@@ -77,6 +78,14 @@ export async function assertCanTransformToBare(
   currentBranch: string,
 ): Promise<{ dir: string; worktreePath: string }> {
   const cwd = await realpath(rawCwd);
+  // The moved working tree is registered on `currentBranch`; if HEAD is elsewhere the
+  // worktree would come up on an unborn ref with every file untracked.
+  const actualBranch = await getCurrentBranch(cwd);
+  if (actualBranch !== currentBranch) {
+    throw new Error(
+      `Cannot convert: HEAD is on '${actualBranch}', not '${currentBranch}'. Check out '${currentBranch}' first.`,
+    );
+  }
   const worktreeList = await git(["worktree", "list", "--porcelain"], cwd);
   const worktreeCount = worktreeList
     .split("\n")

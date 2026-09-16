@@ -220,17 +220,21 @@ export function Sidebar() {
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
 
   // Auto-expand newly loaded projects once so worktrees and the create action are visible.
-  const autoExpandedRef = useRef(new Set<string>());
+  // The "once" marker lives in the persisted store, not a ref: the sidebar remounts when the
+  // first worktree is selected, and a ref would forget which collapses were deliberate.
   useEffect(() => {
-    const { expandedProjectIds: expanded, toggleProjectExpanded: toggle } =
-      useProjectStore.getState();
+    const {
+      expandedProjectIds: expanded,
+      autoExpandedProjectIds: autoExpanded,
+      toggleProjectExpanded: toggle,
+      markAutoExpanded,
+    } = useProjectStore.getState();
     const expandedSet = new Set(expanded);
+    const autoExpandedSet = new Set(autoExpanded);
     for (const p of projects) {
-      if (!expandedSet.has(p.id) && !autoExpandedRef.current.has(p.id)) {
-        toggle(p.id);
-      }
-      autoExpandedRef.current.add(p.id);
+      if (!expandedSet.has(p.id) && !autoExpandedSet.has(p.id)) toggle(p.id);
     }
+    markAutoExpanded(projects.map((p) => p.id));
   }, [projects]);
 
   const [wizardOpen, setWizardOpen] = useState(false);

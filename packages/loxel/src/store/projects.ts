@@ -61,6 +61,11 @@ interface ProjectState {
 
   /** Per-project sidebar expand/collapse state (bare repos show worktrees when expanded). */
   expandedProjectIds: string[];
+  /**
+   * Projects the sidebar has auto-expanded once. Persisted alongside expandedProjectIds so a
+   * user's later collapse is not undone by a remount or the next fetch.
+   */
+  autoExpandedProjectIds: string[];
 
   fetchProjects: () => Promise<void>;
   addProject: (path: string, name?: string) => Promise<void>;
@@ -69,6 +74,8 @@ interface ProjectState {
   updateProject: (id: string, updates: { name?: string }) => Promise<void>;
   toggleSidebar: () => void;
   toggleProjectExpanded: (projectId: string) => void;
+  /** Record that these projects have had their one-time auto-expand. */
+  markAutoExpanded: (projectIds: string[]) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -77,6 +84,7 @@ export const useProjectStore = create<ProjectState>()(
       projects: [],
       sidebarExpanded: false,
       expandedProjectIds: [],
+      autoExpandedProjectIds: [],
 
       fetchProjects: async () => {
         const data = await api.getProjects();
@@ -117,6 +125,15 @@ export const useProjectStore = create<ProjectState>()(
         set((s) => ({
           expandedProjectIds: [...toggleSet(new Set(s.expandedProjectIds), projectId)],
         })),
+
+      markAutoExpanded: (projectIds) =>
+        set((s) => {
+          const next = new Set(s.autoExpandedProjectIds);
+          for (const id of projectIds) next.add(id);
+          return next.size === s.autoExpandedProjectIds.length
+            ? {}
+            : { autoExpandedProjectIds: [...next] };
+        }),
     }),
     {
       name: `${STORAGE_PREFIX}-projects`,
@@ -124,6 +141,7 @@ export const useProjectStore = create<ProjectState>()(
       partialize: (state) => ({
         sidebarExpanded: state.sidebarExpanded,
         expandedProjectIds: state.expandedProjectIds,
+        autoExpandedProjectIds: state.autoExpandedProjectIds,
       }),
     },
   ),
