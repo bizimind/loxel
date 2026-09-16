@@ -1,4 +1,4 @@
-import { mkdir, realpath, rm, rmdir, stat } from "node:fs/promises";
+import { mkdir, realpath, rmdir, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { git, gitFailure, runGit } from "./run.ts";
@@ -207,72 +207,40 @@ export async function removeWorktree(root: string, path: string, force: boolean)
   const result = await runGit(args, root);
   if (result.exitCode === 0) return;
 
+  // Git refuses a non-force removal of any worktree with initialized
+  // submodules, clean or not. Escalate to --force only when nothing would be
+  // lost; --force itself skips that check, so it never refuses for this reason.
   const reason = gitFailure(result);
-  if (!SUBMODULE_REFUSAL.test(reason)) {
+  if (force || !SUBMODULE_REFUSAL.test(reason)) {
     throw new Error(`Failed to remove worktree at ${path}: ${reason}`);
   }
 
-  if (!force) {
-    // Escalating to --force on the caller's behalf is only safe when the
-    // checkout is verifiably clean; an unreadable status must not count as clean.
-    const status = await worktreeStatus(path);
-    if (!status.ok) {
-      throw new Error(
-        `Failed to remove worktree at ${path}: cannot verify it is clean: ${status.reason}`,
-      );
-    }
-    if (status.changes.length > 0) {
-      throw new Error(`Failed to remove worktree at ${path}: it now has local changes`);
-    }
-    // A linked worktree keeps its submodules' object stores under its own git
-    // dir, so removal destroys any commit that only exists there.
-    const probe = await submodulesWithLocalOnlyCommits(path);
-    if (!probe.ok) {
-      throw new Error(
-        `Failed to remove worktree at ${path}: cannot inspect its submodules: ${probe.reason}`,
-      );
-    }
-    if (probe.paths.length > 0) {
-      throw new Error(
-        `Failed to remove worktree at ${path}: submodule ${probe.paths.join(", ")} has commits no remote has; pass --force to discard them`,
-      );
-    }
-    const escalated = await runGit(["worktree", "remove", "--force", path], root);
-    if (escalated.exitCode === 0) return;
-    const escalatedReason = gitFailure(escalated);
-    if (!SUBMODULE_REFUSAL.test(escalatedReason)) {
-      throw new Error(`Failed to remove worktree at ${path}: ${escalatedReason}`);
-    }
+  // An unreadable status must not count as clean.
+  const status = await worktreeStatus(path);
+  if (!status.ok) {
+    throw new Error(
+      `Failed to remove worktree at ${path}: cannot verify it is clean: ${status.reason}`,
+    );
   }
-
-  // Older Git versions may retain the blanket submodule refusal even with
-  // --force. Only that same refusal reaches the manual compatibility path.
-  await removeSubmoduleWorktreeManually(root, path);
-}
-
-/** Complete the older-Git compatibility path and report partial success. */
-export async function removeSubmoduleWorktreeManually(root: string, path: string): Promise<void> {
-  const [gitDirResult, commonDirResult] = await Promise.all([
-    runGit(["rev-parse", "--path-format=absolute", "--git-dir"], path),
-    runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], root),
-  ]);
-  if (gitDirResult.exitCode !== 0 || commonDirResult.exitCode !== 0) {
-    const reason =
-      gitDirResult.exitCode !== 0 ? gitFailure(gitDirResult) : gitFailure(commonDirResult);
-    throw new Error(`Failed to locate Git metadata for ${path}: ${reason}`);
+  if (status.changes.length > 0) {
+    throw new Error(`Failed to remove worktree at ${path}: it now has local changes`);
   }
-
-  const gitDir = await canonicalize(gitDirResult.stdout.trim());
-  const worktreeMetadataRoot = join(await canonicalize(commonDirResult.stdout.trim()), "worktrees");
-  if (dirname(gitDir) !== worktreeMetadataRoot) {
-    throw new Error(`Refusing to remove unexpected Git metadata path: ${gitDir}`);
+  // A linked worktree keeps its submodules' object stores under its own git
+  // dir, so removal destroys any commit that only exists there.
+  const probe = await submodulesWithLocalOnlyCommits(path);
+  if (!probe.ok) {
+    throw new Error(
+      `Failed to remove worktree at ${path}: cannot inspect its submodules: ${probe.reason}`,
+    );
   }
-
-  await rm(path, { recursive: true, force: true });
-  try {
-    await rm(gitDir, { recursive: true });
-  } catch (err) {
-    throw new Error(`Removed ${path}, but failed to remove its Git metadata`, { cause: err });
+  if (probe.paths.length > 0) {
+    throw new Error(
+      `Failed to remove worktree at ${path}: submodule ${probe.paths.join(", ")} has commits no remote has; pass --force to discard them`,
+    );
+  }
+  const escalated = await runGit(["worktree", "remove", "--force", path], root);
+  if (escalated.exitCode !== 0) {
+    throw new Error(`Failed to remove worktree at ${path}: ${gitFailure(escalated)}`);
   }
 }
 
