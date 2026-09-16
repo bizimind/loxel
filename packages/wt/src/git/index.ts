@@ -34,6 +34,7 @@ export {
   submodulesWithLocalOnlyCommits,
   upstreamDivergence,
   worktreeStatus,
+  type GitProbe,
   type WorktreeStatus,
   worktreeContaining,
   worktreesDir,

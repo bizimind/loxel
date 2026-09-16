@@ -58,7 +58,7 @@ export async function viewCommand(name?: string, options: ViewOptions = {}): Pro
       head: worktree.head.slice(0, 12),
       main: worktree.path === root,
       locked: worktree.locked,
-      dirty: status.ok ? status.changes.length : null,
+      dirty: status.ok ? status.value.length : null,
       ahead: divergence?.ahead ?? null,
       behind: divergence?.behind ?? null,
     };

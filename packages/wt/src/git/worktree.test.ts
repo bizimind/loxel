@@ -232,12 +232,12 @@ describe("worktreeStatus", () => {
 
     const status = await worktreeStatus(added.path);
     expect(status.ok).toBe(true);
-    if (status.ok) expect(status.changes).toEqual(["?? new.txt"]);
+    if (status.ok) expect(status.value).toEqual(["?? new.txt"]);
   });
 
   test("reports no changes for a checkout that has disappeared", async () => {
     repo = await createTestRepo({ bare: true });
-    expect(await worktreeStatus(join(repo.root, "..", "gone"))).toEqual({ ok: true, changes: [] });
+    expect(await worktreeStatus(join(repo.root, "..", "gone"))).toEqual({ ok: true, value: [] });
   });
 
   test("fails instead of reporting clean when git status cannot run", async () => {

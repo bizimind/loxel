@@ -91,7 +91,7 @@ async function inspectForceBlockers(worktreePath: string): Promise<ForceBlockers
   if (await isWorktreeDirty(worktreePath)) return { dirty: true, localOnlySubmodules: [] };
   const probe = await submodulesWithLocalOnlyCommits(worktreePath);
   if (!probe.ok) return { dirty: true, localOnlySubmodules: [] };
-  return { dirty: false, localOnlySubmodules: probe.paths };
+  return { dirty: false, localOnlySubmodules: probe.value };
 }
 
 /**

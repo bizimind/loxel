@@ -223,7 +223,7 @@ export async function removeWorktree(root: string, path: string, force: boolean)
       `Failed to remove worktree at ${path}: cannot verify it is clean: ${status.reason}`,
     );
   }
-  if (status.changes.length > 0) {
+  if (status.value.length > 0) {
     throw new Error(`Failed to remove worktree at ${path}: it now has local changes`);
   }
   // A linked worktree keeps its submodules' object stores under its own git
@@ -234,9 +234,9 @@ export async function removeWorktree(root: string, path: string, force: boolean)
       `Failed to remove worktree at ${path}: cannot inspect its submodules: ${probe.reason}`,
     );
   }
-  if (probe.paths.length > 0) {
+  if (probe.value.length > 0) {
     throw new Error(
-      `Failed to remove worktree at ${path}: submodule ${probe.paths.join(", ")} has commits no remote has; pass --force to discard them`,
+      `Failed to remove worktree at ${path}: submodule ${probe.value.join(", ")} has commits no remote has; pass --force to discard them`,
     );
   }
   const escalated = await runGit(["worktree", "remove", "--force", path], root);
@@ -303,10 +303,14 @@ export async function pathExists(path: string): Promise<boolean> {
  */
 export async function isWorktreeDirty(worktreePath: string): Promise<boolean> {
   const status = await worktreeStatus(worktreePath);
-  return status.ok ? status.changes.length > 0 : true;
+  return status.ok ? status.value.length > 0 : true;
 }
 
-export type WorktreeStatus = { ok: true; changes: string[] } | { ok: false; reason: string };
+/** A read-only git inspection that either yields a value or explains why it could not. */
+export type GitProbe<T> = { ok: true; value: T } | { ok: false; reason: string };
+
+/** Porcelain status lines of a worktree. */
+export type WorktreeStatus = GitProbe<string[]>;
 
 /**
  * Porcelain status lines (modified, staged and untracked), or the git failure
@@ -318,7 +322,7 @@ export type WorktreeStatus = { ok: true; changes: string[] } | { ok: false; reas
  * their changes.
  */
 export async function worktreeStatus(worktreePath: string): Promise<WorktreeStatus> {
-  if (!(await pathExists(worktreePath))) return { ok: true, changes: [] };
+  if (!(await pathExists(worktreePath))) return { ok: true, value: [] };
   const top = await runGit(["status", ...STATUS_ARGS], worktreePath);
   if (top.exitCode !== 0) return { ok: false, reason: gitFailure(top) };
   const nested = await runGit(
@@ -344,7 +348,7 @@ export async function worktreeStatus(worktreePath: string): Promise<WorktreeStat
         ? `${entry.code} ${entry.path}`
         : `${entry.code} ${entry.from} -> ${entry.path}`,
     );
-  return { ok: true, changes };
+  return { ok: true, value: changes };
 }
 
 // NUL-separated output keeps paths raw: the porcelain v1 text format C-quotes
@@ -396,8 +400,8 @@ function parseStatus(output: string): StatusEntry[] {
  */
 export async function submodulesWithLocalOnlyCommits(
   worktreePath: string,
-): Promise<{ ok: true; paths: string[] } | { ok: false; reason: string }> {
-  if (!(await pathExists(worktreePath))) return { ok: true, paths: [] };
+): Promise<GitProbe<string[]>> {
+  if (!(await pathExists(worktreePath))) return { ok: true, value: [] };
   const gitDir = await runGit(["rev-parse", "--path-format=absolute", "--git-dir"], worktreePath);
   if (gitDir.exitCode !== 0) return { ok: false, reason: gitFailure(gitDir) };
 
@@ -422,7 +426,7 @@ export async function submodulesWithLocalOnlyCommits(
     if (result.exitCode !== 0) return { ok: false, reason: gitFailure(result) };
     if (result.stdout.trim().length > 0) paths.push(store.name);
   }
-  return { ok: true, paths };
+  return { ok: true, value: paths };
 }
 
 /** Submodule object stores below a `modules` directory, nested submodules included. */

@@ -453,7 +453,7 @@ describe("executeRemove with submodules", () => {
 
     expect(await worktreeStatus(added.path)).toEqual({
       ok: true,
-      changes: ["?? mysub/untracked.txt"],
+      value: ["?? mysub/untracked.txt"],
     });
   });
 
@@ -465,7 +465,7 @@ describe("executeRemove with submodules", () => {
 
     expect(await worktreeStatus(added.path)).toEqual({
       ok: true,
-      changes: ["?? my sub dir/untracked.txt"],
+      value: ["?? my sub dir/untracked.txt"],
     });
   });
 
@@ -477,7 +477,7 @@ describe("executeRemove with submodules", () => {
 
     expect(await worktreeStatus(added.path)).toEqual({
       ok: true,
-      changes: ["R  mysub/tracked.txt -> mysub/renamed.txt"],
+      value: ["R  mysub/tracked.txt -> mysub/renamed.txt"],
     });
   });
 
