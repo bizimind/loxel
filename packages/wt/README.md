@@ -267,7 +267,7 @@ Rename a worktree and its branch, then run `rename.wt.sh`. See [Renaming](#renam
 
 Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with unmerged commits (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused.
 
-Clean worktrees with initialized submodules can be removed without `--force`. Changes inside submodules are checked explicitly, even when the repository config sets `submodule.<name>.ignore=all`; those removals still require `--force`. The older-Git compatibility fallback removes only the selected worktree's metadata; it does not prune other unavailable worktrees from the repository.
+Clean worktrees with initialized submodules can be removed without `--force`. Changes inside submodules, nested ones included, are checked explicitly, even when `submodule.<name>.ignore=all` is configured; those removals still require `--force`, as does a submodule holding commits that no remote has, since a linked worktree's submodule objects live under its own git directory and are deleted with it. The older-Git compatibility fallback removes only the selected worktree's metadata; it does not prune other unavailable worktrees from the repository.
 
 ```bash
 wt remove feature-auth                 # prompts about the branch when interactive

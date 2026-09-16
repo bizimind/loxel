@@ -224,6 +224,14 @@ export async function removeWorktree(root: string, path: string, force: boolean)
     if (status.changes.length > 0) {
       throw new Error(`Failed to remove worktree at ${path}: it now has local changes`);
     }
+    // A linked worktree keeps its submodules' object stores under its own git
+    // dir, so removal destroys any commit that only exists there.
+    const unpushed = await submodulesWithLocalOnlyCommits(path);
+    if (unpushed.length > 0) {
+      throw new Error(
+        `Failed to remove worktree at ${path}: submodule ${unpushed.join(", ")} has commits no remote has; pass --force to discard them`,
+      );
+    }
     const escalated = await runGit(["worktree", "remove", "--force", path], root);
     if (escalated.exitCode === 0) return;
     const escalatedReason = gitFailure(escalated);
@@ -323,13 +331,64 @@ export async function worktreeChanges(worktreePath: string): Promise<string[]> {
   return status.ok ? status.changes : [];
 }
 
-/** Porcelain status lines, or the git failure when the status cannot be determined. */
+/**
+ * Porcelain status lines, or the git failure when the status cannot be determined.
+ *
+ * Initialized submodules are walked explicitly and recursively; `git status`
+ * alone honours `submodule.<name>.ignore` for nested levels, which would hide
+ * their changes.
+ */
 export async function worktreeStatus(
   worktreePath: string,
 ): Promise<{ ok: true; changes: string[] } | { ok: false; reason: string }> {
-  const result = await runGit(["status", "--porcelain", "--ignore-submodules=none"], worktreePath);
-  if (result.exitCode !== 0) return { ok: false, reason: gitFailure(result) };
-  return { ok: true, changes: result.stdout.split("\n").filter((line) => line.trim().length > 0) };
+  const top = await runGit(["status", "--porcelain", "--ignore-submodules=none"], worktreePath);
+  if (top.exitCode !== 0) return { ok: false, reason: gitFailure(top) };
+  const nested = await runGit(
+    [
+      "submodule",
+      "foreach",
+      "--recursive",
+      "--quiet",
+      `printf '%s\\n' "${SUBMODULE_MARKER}$displaypath"; git status --porcelain --ignore-submodules=none`,
+    ],
+    worktreePath,
+  );
+  if (nested.exitCode !== 0) return { ok: false, reason: gitFailure(nested) };
+
+  const changes = statusLines(top.stdout);
+  let submodule = "";
+  for (const line of statusLines(nested.stdout)) {
+    if (line.startsWith(SUBMODULE_MARKER)) {
+      submodule = line.slice(SUBMODULE_MARKER.length);
+      continue;
+    }
+    changes.push(`${line.slice(0, 3)}${submodule}/${line.slice(3)}`);
+  }
+  return { ok: true, changes };
+}
+
+/** Paths of initialized submodules (recursively) holding commits absent from every remote. */
+export async function submodulesWithLocalOnlyCommits(worktreePath: string): Promise<string[]> {
+  const result = await runGit(
+    [
+      "submodule",
+      "foreach",
+      "--recursive",
+      "--quiet",
+      `[ -z "$(git rev-list --all --not --remotes --max-count=1)" ] || printf '%s\\n' "$displaypath"`,
+    ],
+    worktreePath,
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to inspect submodules in ${worktreePath}: ${gitFailure(result)}`);
+  }
+  return statusLines(result.stdout);
+}
+
+const SUBMODULE_MARKER = "@@";
+
+function statusLines(stdout: string): string[] {
+  return stdout.split("\n").filter((line) => line.trim().length > 0);
 }
 
 /** Commits ahead of / behind the upstream branch, or null when there is none. */

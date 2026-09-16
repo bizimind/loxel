@@ -371,6 +371,72 @@ describe("executeRemove with submodules", () => {
     expect(await Bun.file(join(added.path, "mysub", "untracked-secret")).text()).toBe("keep me\n");
   });
 
+  test("refuses to escalate when a submodule holds commits no remote has", async () => {
+    const { subUrl } = await repoWithSubmodule();
+    const added = await executeAdd({ name: "unpushed-sub", repoPath: repo.root });
+    await addSubmoduleTo(added.path, subUrl);
+    const sub = join(added.path, "mysub");
+    await Bun.write(join(sub, "tracked.txt"), "v2\n");
+    await git(
+      ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-am", "local only"],
+      sub,
+    );
+    await git(
+      ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-am", "bump"],
+      added.path,
+    );
+
+    expect((await planRemove({ name: "unpushed-sub", repoPath: repo.root })).dirty).toBe(false);
+    await expect(
+      executeRemove({
+        name: "unpushed-sub",
+        repoPath: repo.root,
+        deleteBranch: false,
+        force: false,
+      }),
+    ).rejects.toThrow(/mysub has commits no remote has/);
+    expect(await Bun.file(join(sub, "tracked.txt")).text()).toBe("v2\n");
+
+    await executeRemove({
+      name: "unpushed-sub",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: true,
+    });
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
+  });
+
+  test("detects changes in a nested submodule hidden by a committed ignore=all", async () => {
+    const { subUrl: deepUrl } = await repoWithSubmodule();
+    const midUrl = join(dirname(repo.root), "mid-origin");
+    await git(["init", "--initial-branch=main", midUrl], dirname(repo.root));
+    await git(["-c", "protocol.file.allow=always", "submodule", "add", deepUrl, "deep"], midUrl);
+    await git(["config", "-f", ".gitmodules", "submodule.deep.ignore", "all"], midUrl);
+    await git(
+      ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-am", "add deep"],
+      midUrl,
+    );
+
+    const added = await executeAdd({ name: "nested-sub", repoPath: repo.root });
+    await git(["-c", "protocol.file.allow=always", "submodule", "add", midUrl, "mid"], added.path);
+    await git(
+      ["-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive"],
+      added.path,
+    );
+    await git(
+      ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-am", "add mid"],
+      added.path,
+    );
+    await Bun.write(join(added.path, "mid", "deep", "precious.txt"), "keep me\n");
+
+    expect(await git(["status", "--porcelain", "--ignore-submodules=none"], added.path)).toBe("");
+    expect((await planRemove({ name: "nested-sub", repoPath: repo.root })).dirty).toBe(true);
+    await expect(
+      executeRemove({ name: "nested-sub", repoPath: repo.root, deleteBranch: false, force: false }),
+    ).rejects.toThrow(/uncommitted or untracked/i);
+    expect(await Bun.file(join(added.path, "mid", "deep", "precious.txt")).exists()).toBe(true);
+  });
+
   test("does not escalate a locked worktree", async () => {
     repo = await createTestRepo({ bare: true });
     const added = await executeAdd({ name: "locked", repoPath: repo.root });

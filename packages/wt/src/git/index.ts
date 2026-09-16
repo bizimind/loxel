@@ -31,6 +31,7 @@ export {
   pruneEmptyParents,
   removeWorktree,
   resolveRepoRoot,
+  submodulesWithLocalOnlyCommits,
   upstreamDivergence,
   worktreeChanges,
   worktreeStatus,
