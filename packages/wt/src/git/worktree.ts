@@ -320,34 +320,31 @@ export async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-/** Whether a worktree has uncommitted or untracked changes. */
-export async function isWorktreeDirty(worktreePath: string): Promise<boolean> {
-  return (await worktreeChanges(worktreePath)).length > 0;
-}
-
 /**
- * Porcelain status lines for a worktree (modified, staged and untracked).
+ * Whether a worktree has uncommitted or untracked changes.
  *
- * A checkout that has disappeared reports no changes; any other status failure
- * throws so that no caller mistakes an unreadable checkout for a clean one.
+ * An unreadable status counts as dirty so that every guard fails closed; a
+ * caller's `force` is the only way past it. A checkout that has disappeared
+ * has nothing left to lose and is clean.
  */
-export async function worktreeChanges(worktreePath: string): Promise<string[]> {
-  if (!(await pathExists(worktreePath))) return [];
+export async function isWorktreeDirty(worktreePath: string): Promise<boolean> {
   const status = await worktreeStatus(worktreePath);
-  if (!status.ok) throw new Error(`Failed to read the status of ${worktreePath}: ${status.reason}`);
-  return status.changes;
+  return status.ok ? status.changes.length > 0 : true;
 }
 
+export type WorktreeStatus = { ok: true; changes: string[] } | { ok: false; reason: string };
+
 /**
- * Porcelain status lines, or the git failure when the status cannot be determined.
+ * Porcelain status lines (modified, staged and untracked), or the git failure
+ * when the status cannot be determined. A checkout that has disappeared
+ * reports no changes.
  *
  * Initialized submodules are walked explicitly and recursively; `git status`
  * alone honours `submodule.<name>.ignore` for nested levels, which would hide
  * their changes.
  */
-export async function worktreeStatus(
-  worktreePath: string,
-): Promise<{ ok: true; changes: string[] } | { ok: false; reason: string }> {
+export async function worktreeStatus(worktreePath: string): Promise<WorktreeStatus> {
+  if (!(await pathExists(worktreePath))) return { ok: true, changes: [] };
   const top = await runGit(["status", "--porcelain", "--ignore-submodules=none"], worktreePath);
   if (top.exitCode !== 0) return { ok: false, reason: gitFailure(top) };
   const nested = await runGit(
@@ -379,8 +376,12 @@ export async function worktreeStatus(
   return { ok: true, changes: expanded };
 }
 
-/** Paths of initialized submodules (recursively) holding commits absent from every remote. */
+/**
+ * Paths of initialized submodules (recursively) holding commits absent from
+ * every remote. A checkout that has disappeared has none left to lose.
+ */
 export async function submodulesWithLocalOnlyCommits(worktreePath: string): Promise<string[]> {
+  if (!(await pathExists(worktreePath))) return [];
   const result = await runGit(
     [
       "submodule",

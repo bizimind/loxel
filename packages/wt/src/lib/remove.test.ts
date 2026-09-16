@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { branchExists, git, pathExists, worktreeChanges } from "../git/index.ts";
+import { branchExists, git, pathExists, worktreeStatus } from "../git/index.ts";
 import { createTestRepo, writeHook, type TestRepo } from "../test-repo.ts";
 import { executeAdd } from "./add.ts";
 import { executeRemove, planRemove } from "./remove.ts";
@@ -21,6 +21,7 @@ describe("planRemove", () => {
       worktreePath: added.path,
       branch: "feat/foo",
       dirty: false,
+      localOnlySubmodules: [],
       isMain: false,
       locked: false,
     });
@@ -386,7 +387,11 @@ describe("executeRemove with submodules", () => {
       added.path,
     );
 
-    expect((await planRemove({ name: "unpushed-sub", repoPath: repo.root })).dirty).toBe(false);
+    await writeHook(repo.root, "clean.wt.sh", 'touch "$WT_ROOT/clean-ran"');
+
+    const plan = await planRemove({ name: "unpushed-sub", repoPath: repo.root });
+    expect(plan.dirty).toBe(false);
+    expect(plan.localOnlySubmodules).toEqual(["mysub"]);
     await expect(
       executeRemove({
         name: "unpushed-sub",
@@ -394,8 +399,10 @@ describe("executeRemove with submodules", () => {
         deleteBranch: false,
         force: false,
       }),
-    ).rejects.toThrow(/mysub has commits no remote has/);
+    ).rejects.toThrow(/mysub .* has commits no remote has/);
     expect(await Bun.file(join(sub, "tracked.txt")).text()).toBe("v2\n");
+    // Refused before the clean hook, so the environment is still up.
+    expect(await pathExists(join(repo.root, "clean-ran"))).toBe(false);
 
     await executeRemove({
       name: "unpushed-sub",
@@ -443,7 +450,26 @@ describe("executeRemove with submodules", () => {
     await addSubmoduleTo(added.path, subUrl);
     await Bun.write(join(added.path, "mysub", "untracked.txt"), "x\n");
 
-    expect(await worktreeChanges(added.path)).toEqual(["?? mysub/untracked.txt"]);
+    expect(await worktreeStatus(added.path)).toEqual({
+      ok: true,
+      changes: ["?? mysub/untracked.txt"],
+    });
+  });
+
+  test("an unreadable status needs force but does not block a forced removal", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "broken", repoPath: repo.root });
+    const gitDir = await git(["rev-parse", "--path-format=absolute", "--git-dir"], added.path);
+    await Bun.write(join(gitDir.trim(), "index"), "");
+
+    const plan = await planRemove({ name: "broken", repoPath: repo.root });
+    expect(plan.dirty).toBe(true);
+    await expect(
+      executeRemove({ name: "broken", repoPath: repo.root, deleteBranch: false, force: false }),
+    ).rejects.toThrow(/uncommitted or untracked/i);
+
+    await executeRemove({ name: "broken", repoPath: repo.root, deleteBranch: false, force: true });
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
   });
 
   test("does not escalate a locked worktree", async () => {

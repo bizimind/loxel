@@ -257,7 +257,7 @@ wt add feature-auth -b existing-branch # check out an existing branch instead
 
 ### `wt view [name]`
 
-Show one worktree's branch, head, path, lock state, dirty file count and upstream divergence. Picks from a list when the name is omitted.
+Show one worktree's branch, head, path, lock state, dirty file count and upstream divergence. Picks from a list when the name is omitted. The dirty count includes changes inside initialized submodules and is `null` when the status cannot be read.
 
 ### `wt mv [old] <new>` (aliases: `rename`, `move`)
 
