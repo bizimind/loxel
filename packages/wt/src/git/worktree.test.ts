@@ -14,6 +14,7 @@ import {
   pathExists,
   removeSubmoduleWorktreeManually,
   resolveRepoRoot,
+  worktreeChanges,
   worktreeStatus,
   worktreesDir,
   type Worktree,
@@ -278,5 +279,24 @@ describe("worktreeStatus", () => {
     const status = await worktreeStatus(missing);
     expect(status.ok).toBe(false);
     if (!status.ok) expect(status.reason).toContain(missing);
+  });
+});
+
+describe("worktreeChanges", () => {
+  let repo: TestRepo;
+
+  afterEach(() => repo.cleanup());
+
+  test("is empty for a checkout that has disappeared", async () => {
+    repo = await createTestRepo({ bare: true });
+    expect(await worktreeChanges(join(repo.root, "..", "gone"))).toEqual([]);
+  });
+
+  test("throws instead of reporting clean when the status is unreadable", async () => {
+    repo = await createTestRepo({ bare: true });
+    const notRepo = join(repo.root, "..", "not-a-repository");
+    await Bun.write(join(notRepo, "work.txt"), "unsaved");
+
+    await expect(worktreeChanges(notRepo)).rejects.toThrow(/Failed to read the status/);
   });
 });

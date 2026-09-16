@@ -325,10 +325,17 @@ export async function isWorktreeDirty(worktreePath: string): Promise<boolean> {
   return (await worktreeChanges(worktreePath)).length > 0;
 }
 
-/** Porcelain status lines for a worktree (modified, staged and untracked); empty when unreadable. */
+/**
+ * Porcelain status lines for a worktree (modified, staged and untracked).
+ *
+ * A checkout that has disappeared reports no changes; any other status failure
+ * throws so that no caller mistakes an unreadable checkout for a clean one.
+ */
 export async function worktreeChanges(worktreePath: string): Promise<string[]> {
+  if (!(await pathExists(worktreePath))) return [];
   const status = await worktreeStatus(worktreePath);
-  return status.ok ? status.changes : [];
+  if (!status.ok) throw new Error(`Failed to read the status of ${worktreePath}: ${status.reason}`);
+  return status.changes;
 }
 
 /**
@@ -355,16 +362,21 @@ export async function worktreeStatus(
   );
   if (nested.exitCode !== 0) return { ok: false, reason: gitFailure(nested) };
 
-  const changes = statusLines(top.stdout);
+  const inner: string[] = [];
   let submodule = "";
   for (const line of statusLines(nested.stdout)) {
     if (line.startsWith(SUBMODULE_MARKER)) {
       submodule = line.slice(SUBMODULE_MARKER.length);
       continue;
     }
-    changes.push(`${line.slice(0, 3)}${submodule}/${line.slice(3)}`);
+    inner.push(`${line.slice(0, 3)}${submodule}/${line.slice(3)}`);
   }
-  return { ok: true, changes };
+  // A gitlink line for a submodule whose own changes are listed would count
+  // the same work twice; keep it only when nothing inside explains it.
+  const expanded = statusLines(top.stdout)
+    .concat(inner)
+    .filter((line) => !inner.some((change) => change.slice(3).startsWith(`${line.slice(3)}/`)));
+  return { ok: true, changes: expanded };
 }
 
 /** Paths of initialized submodules (recursively) holding commits absent from every remote. */

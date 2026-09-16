@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { branchExists, git, pathExists } from "../git/index.ts";
+import { branchExists, git, pathExists, worktreeChanges } from "../git/index.ts";
 import { createTestRepo, writeHook, type TestRepo } from "../test-repo.ts";
 import { executeAdd } from "./add.ts";
 import { executeRemove, planRemove } from "./remove.ts";
@@ -435,6 +435,15 @@ describe("executeRemove with submodules", () => {
       executeRemove({ name: "nested-sub", repoPath: repo.root, deleteBranch: false, force: false }),
     ).rejects.toThrow(/uncommitted or untracked/i);
     expect(await Bun.file(join(added.path, "mid", "deep", "precious.txt")).exists()).toBe(true);
+  });
+
+  test("counts a change inside a submodule once", async () => {
+    const { subUrl } = await repoWithSubmodule();
+    const added = await executeAdd({ name: "counted-sub", repoPath: repo.root });
+    await addSubmoduleTo(added.path, subUrl);
+    await Bun.write(join(added.path, "mysub", "untracked.txt"), "x\n");
+
+    expect(await worktreeChanges(added.path)).toEqual(["?? mysub/untracked.txt"]);
   });
 
   test("does not escalate a locked worktree", async () => {
