@@ -1,4 +1,4 @@
-import { createResult, formatKeyValue, runAction } from "@bizimind/cli-common";
+import { createResult, formatKeyValue } from "@bizimind/cli-common";
 
 import {
   canonicalWorktreesDir,
@@ -9,6 +9,7 @@ import {
   upstreamDivergence,
   worktreeChanges,
 } from "../git/index.ts";
+import { runCommand } from "./aborted.ts";
 import { resolveWorktreeName } from "./select.ts";
 
 interface ViewOptions {
@@ -33,7 +34,7 @@ export interface ViewResult {
 
 /** Show one worktree's details. */
 export async function viewCommand(name?: string, options: ViewOptions = {}): Promise<void> {
-  await runAction<ViewResult>(options, async () => {
+  await runCommand<ViewResult>(options, async () => {
     const repoPath = process.cwd();
     const selected = await resolveWorktreeName(name, "view", repoPath);
 

@@ -16,17 +16,36 @@ function promptConfig() {
   return process.stdout.isTTY === true ? {} : { output: process.stderr };
 }
 
+/** The user left a prompt with Ctrl+C. Commands report it as an aborted result, not an error. */
+export class PromptCancelled extends Error {
+  constructor() {
+    super("User cancelled");
+    this.name = "PromptCancelled";
+  }
+}
+
+/**
+ * Map inquirer's SIGINT rejection (`ExitPromptError`, matched by name since
+ * `@inquirer/core` is not a direct dependency) to `PromptCancelled`.
+ */
+export function cancellable<T>(prompt: Promise<T>): Promise<T> {
+  return prompt.catch((err: unknown) => {
+    if (err instanceof Error && err.name === "ExitPromptError") throw new PromptCancelled();
+    throw err;
+  });
+}
+
 export const select: typeof inquirerSelect = (config, context) =>
-  inquirerSelect(config, { ...promptConfig(), ...context });
+  cancellable(inquirerSelect(config, { ...promptConfig(), ...context }));
 
 export const confirm: typeof inquirerConfirm = (config, context) =>
-  inquirerConfirm(config, { ...promptConfig(), ...context });
+  cancellable(inquirerConfirm(config, { ...promptConfig(), ...context }));
 
 export const search: typeof inquirerSearch = (config, context) =>
-  inquirerSearch(config, { ...promptConfig(), ...context });
+  cancellable(inquirerSearch(config, { ...promptConfig(), ...context }));
 
 export const input: typeof inquirerInput = (config, context) =>
-  inquirerInput(config, { ...promptConfig(), ...context });
+  cancellable(inquirerInput(config, { ...promptConfig(), ...context }));
 
 /** Whether stdin is a terminal, i.e. whether prompting is possible. */
 export function isTTY(): boolean {

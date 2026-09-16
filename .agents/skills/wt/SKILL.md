@@ -44,7 +44,7 @@ wt update            # update the binary in place
 | `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)           |
 | `--keep-branch`         | `remove` | Keep the branch (don't prompt)                              |
 
-**Interactive vs. unattended.** At a terminal `wt` prompts for missing values — the worktree name, which worktree to act on (type-to-filter picker: type to narrow, ↑/↓, Enter; Ctrl+C cancels), whether to reuse an existing branch, whether to force a dirty removal, whether to delete the branch. Pass everything as flags to run unattended; with no terminal (scripts, CI, agents) a missing required value errors instead of blocking. Cancelling a prompt is not an error — it returns `{"aborted":true,"reason":"..."}` with exit code 0.
+**Interactive vs. unattended.** At a terminal `wt` prompts for missing values — the worktree name, which worktree to act on (type-to-filter picker: type to narrow, ↑/↓, Enter; Ctrl+C cancels), whether to reuse an existing branch, whether to force a dirty removal, whether to delete the branch. Pass everything as flags to run unattended; with no terminal (scripts, CI, agents) a missing required value errors instead of blocking. Cancelling a prompt, whether by choosing **Cancel** or by pressing Ctrl+C, is not an error — it returns `{"aborted":true,"reason":"..."}` with exit code 0.
 
 **Branch behavior.** `wt add <name>` creates a branch named after the worktree off the current `HEAD`. If that branch already exists, `wt` offers to reuse or recreate it (or, non-interactively, tells you to pass `-b`); if another worktree has it checked out, that's an error. Use `-b <branch>` to check out an existing branch instead.
 

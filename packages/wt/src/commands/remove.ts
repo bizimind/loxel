@@ -1,4 +1,4 @@
-import { createResult, runAction } from "@bizimind/cli-common";
+import { createResult } from "@bizimind/cli-common";
 
 import {
   executeRemove,
@@ -9,7 +9,7 @@ import {
 } from "../lib/index.ts";
 import { confirmForceRemove, isTTY, selectRemoveAction } from "../prompt.ts";
 import type { AbortedResult } from "./aborted.ts";
-import { abortedResult } from "./aborted.ts";
+import { abortedResult, runCommand } from "./aborted.ts";
 import { resolveWorktreeName } from "./select.ts";
 
 interface RemoveOptions {
@@ -27,7 +27,7 @@ export async function removeCommand(
   name: string | undefined,
   options: RemoveOptions,
 ): Promise<void> {
-  await runAction<RemoveCommandResult>(options, async (ctx) => {
+  await runCommand<RemoveCommandResult>(options, async (ctx) => {
     if (options.keepBranch && (options.deleteBranch || options.forceBranch)) {
       throw new Error("--keep-branch cannot be combined with --delete-branch or --force-branch.");
     }

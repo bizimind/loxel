@@ -295,7 +295,7 @@ With `-j`, stdout carries only JSON. Progress, hook output and prompts go to std
 {"name","path","branch","head","main","locked","dirty","ahead","behind"}
 // remove
 {"name","path","removed":true,"branchDeleted":false,"hookRan":true}
-// cancelled at a prompt (exit code 0)
+// cancelled at a prompt, via Cancel or Ctrl+C (exit code 0)
 {"aborted":true,"reason":"User cancelled"}
 ```
 

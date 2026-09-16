@@ -1,4 +1,4 @@
-import { createResult, runAction } from "@bizimind/cli-common";
+import { createResult } from "@bizimind/cli-common";
 
 import {
   currentManagedWorktree,
@@ -11,7 +11,7 @@ import {
 import type { ProgressHandler } from "../progress.ts";
 import { confirmRename, inputNewWorktreeName, isTTY } from "../prompt.ts";
 import type { AbortedResult } from "./aborted.ts";
-import { abortedResult } from "./aborted.ts";
+import { abortedResult, runCommand } from "./aborted.ts";
 import { resolveWorktreeName } from "./select.ts";
 
 interface MoveOptions {
@@ -25,7 +25,7 @@ type MoveCommandResult = MoveResult | AbortedResult;
 
 /** Rename a worktree and its branch, then run rename.wt.sh at the new path. */
 export async function mvCommand(names: string[], options: MoveOptions): Promise<void> {
-  await runAction<MoveCommandResult>(options, async (ctx) => {
+  await runCommand<MoveCommandResult>(options, async (ctx) => {
     if (names.length > 2) {
       throw new Error("Usage: wt mv [<old>] <new>");
     }

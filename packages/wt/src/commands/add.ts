@@ -1,10 +1,10 @@
-import { createResult, runAction } from "@bizimind/cli-common";
+import { createResult } from "@bizimind/cli-common";
 
 import type { AddResult } from "../lib/index.ts";
 import { executeAdd, planAdd } from "../lib/index.ts";
 import { inputWorktreeName, isTTY, selectBranchExistsAction } from "../prompt.ts";
 import type { AbortedResult } from "./aborted.ts";
-import { abortedResult } from "./aborted.ts";
+import { abortedResult, runCommand } from "./aborted.ts";
 
 interface AddOptions {
   branch?: string;
@@ -18,7 +18,7 @@ export async function addCommand(
   providedName: string | undefined,
   options: AddOptions,
 ): Promise<void> {
-  await runAction<AddCommandResult>(options, async (ctx) => {
+  await runCommand<AddCommandResult>(options, async (ctx) => {
     const name = providedName ?? (await promptForName());
     const repoPath = process.cwd();
 
