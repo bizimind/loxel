@@ -19,8 +19,9 @@ export interface RemovePlan {
   /** Branch name, or null when detached */
   branch: string | null;
   /**
-   * Uncommitted or untracked files present, or the status could not be read.
-   * `git worktree remove` refuses both without force.
+   * Uncommitted or untracked files present, or the checkout could not be
+   * inspected (unreadable status, submodule refs that cannot be walked).
+   * Removal refuses without force in every case.
    */
   dirty: boolean;
   /**
@@ -85,11 +86,12 @@ type ForceBlockers = Pick<RemovePlan, "dirty" | "localOnlySubmodules">;
 
 /** The conditions under which git, or wt on its behalf, refuses a removal without force. */
 async function inspectForceBlockers(worktreePath: string): Promise<ForceBlockers> {
-  const dirty = await isWorktreeDirty(worktreePath);
-  // A dirty (or unreadable) checkout already needs force; do not let a second
-  // probe of the same broken submodules turn the force escape hatch into an error.
-  const localOnlySubmodules = dirty ? [] : await submodulesWithLocalOnlyCommits(worktreePath);
-  return { dirty, localOnlySubmodules };
+  // Nothing here throws: a checkout that cannot be inspected needs force, and
+  // planning must still succeed so that force stays reachable.
+  if (await isWorktreeDirty(worktreePath)) return { dirty: true, localOnlySubmodules: [] };
+  const probe = await submodulesWithLocalOnlyCommits(worktreePath);
+  if (!probe.ok) return { dirty: true, localOnlySubmodules: [] };
+  return { dirty: false, localOnlySubmodules: probe.paths };
 }
 
 /**

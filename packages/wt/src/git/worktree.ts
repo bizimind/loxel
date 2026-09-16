@@ -226,10 +226,15 @@ export async function removeWorktree(root: string, path: string, force: boolean)
     }
     // A linked worktree keeps its submodules' object stores under its own git
     // dir, so removal destroys any commit that only exists there.
-    const unpushed = await submodulesWithLocalOnlyCommits(path);
-    if (unpushed.length > 0) {
+    const probe = await submodulesWithLocalOnlyCommits(path);
+    if (!probe.ok) {
       throw new Error(
-        `Failed to remove worktree at ${path}: submodule ${unpushed.join(", ")} has commits no remote has; pass --force to discard them`,
+        `Failed to remove worktree at ${path}: cannot inspect its submodules: ${probe.reason}`,
+      );
+    }
+    if (probe.paths.length > 0) {
+      throw new Error(
+        `Failed to remove worktree at ${path}: submodule ${probe.paths.join(", ")} has commits no remote has; pass --force to discard them`,
       );
     }
     const escalated = await runGit(["worktree", "remove", "--force", path], root);
@@ -415,8 +420,10 @@ function parseStatus(output: string): StatusEntry[] {
  * Paths of initialized submodules (recursively) holding commits absent from
  * every remote. A checkout that has disappeared has none left to lose.
  */
-export async function submodulesWithLocalOnlyCommits(worktreePath: string): Promise<string[]> {
-  if (!(await pathExists(worktreePath))) return [];
+export async function submodulesWithLocalOnlyCommits(
+  worktreePath: string,
+): Promise<{ ok: true; paths: string[] } | { ok: false; reason: string }> {
+  if (!(await pathExists(worktreePath))) return { ok: true, paths: [] };
   const result = await runGit(
     [
       "submodule",
@@ -429,10 +436,8 @@ export async function submodulesWithLocalOnlyCommits(worktreePath: string): Prom
     ],
     worktreePath,
   );
-  if (result.exitCode !== 0) {
-    throw new Error(`Failed to inspect submodules in ${worktreePath}: ${gitFailure(result)}`);
-  }
-  return statusLines(result.stdout);
+  if (result.exitCode !== 0) return { ok: false, reason: gitFailure(result) };
+  return { ok: true, paths: statusLines(result.stdout) };
 }
 
 const SUBMODULE_MARKER = "@@";

@@ -489,13 +489,20 @@ describe("executeRemove with submodules", () => {
     const subGitDir = (await git(["rev-parse", "--path-format=absolute", "--git-dir"], sub)).trim();
     await Bun.write(join(subGitDir, "refs", "heads", "broken"), "0".repeat(40) + "\n");
 
-    await expect(planRemove({ name: "broken-sub", repoPath: repo.root })).rejects.toThrow(
-      /Failed to inspect submodules/,
-    );
+    // Unverifiable counts as dirty: refused without force, but force stays reachable.
+    expect((await planRemove({ name: "broken-sub", repoPath: repo.root })).dirty).toBe(true);
     await expect(
       executeRemove({ name: "broken-sub", repoPath: repo.root, deleteBranch: false, force: false }),
-    ).rejects.toThrow(/Failed to inspect submodules/);
+    ).rejects.toThrow(/uncommitted or untracked/i);
     expect(await Bun.file(join(sub, "tracked.txt")).exists()).toBe(true);
+
+    await executeRemove({
+      name: "broken-sub",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: true,
+    });
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
   });
 
   test("an unreadable status needs force but does not block a forced removal", async () => {
