@@ -33,6 +33,7 @@ export {
   resolveRepoRoot,
   upstreamDivergence,
   worktreeChanges,
+  worktreeStatus,
   worktreeContaining,
   worktreesDir,
   type Worktree,

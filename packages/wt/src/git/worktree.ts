@@ -212,11 +212,18 @@ export async function removeWorktree(root: string, path: string, force: boolean)
     throw new Error(`Failed to remove worktree at ${path}: ${reason}`);
   }
 
-  if (!force && (await isWorktreeDirty(path))) {
-    throw new Error(`Failed to remove worktree at ${path}: it now has local changes`);
-  }
-
   if (!force) {
+    // Escalating to --force on the caller's behalf is only safe when the
+    // checkout is verifiably clean; an unreadable status must not count as clean.
+    const status = await worktreeStatus(path);
+    if (!status.ok) {
+      throw new Error(
+        `Failed to remove worktree at ${path}: cannot verify it is clean: ${status.reason}`,
+      );
+    }
+    if (status.changes.length > 0) {
+      throw new Error(`Failed to remove worktree at ${path}: it now has local changes`);
+    }
     const escalated = await runGit(["worktree", "remove", "--force", path], root);
     if (escalated.exitCode === 0) return;
     const escalatedReason = gitFailure(escalated);
@@ -310,11 +317,19 @@ export async function isWorktreeDirty(worktreePath: string): Promise<boolean> {
   return (await worktreeChanges(worktreePath)).length > 0;
 }
 
-/** Porcelain status lines for a worktree (modified, staged and untracked). */
+/** Porcelain status lines for a worktree (modified, staged and untracked); empty when unreadable. */
 export async function worktreeChanges(worktreePath: string): Promise<string[]> {
+  const status = await worktreeStatus(worktreePath);
+  return status.ok ? status.changes : [];
+}
+
+/** Porcelain status lines, or the git failure when the status cannot be determined. */
+export async function worktreeStatus(
+  worktreePath: string,
+): Promise<{ ok: true; changes: string[] } | { ok: false; reason: string }> {
   const result = await runGit(["status", "--porcelain", "--ignore-submodules=none"], worktreePath);
-  if (result.exitCode !== 0) return [];
-  return result.stdout.split("\n").filter((line) => line.trim().length > 0);
+  if (result.exitCode !== 0) return { ok: false, reason: gitFailure(result) };
+  return { ok: true, changes: result.stdout.split("\n").filter((line) => line.trim().length > 0) };
 }
 
 /** Commits ahead of / behind the upstream branch, or null when there is none. */

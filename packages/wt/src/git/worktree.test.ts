@@ -14,6 +14,7 @@ import {
   pathExists,
   removeSubmoduleWorktreeManually,
   resolveRepoRoot,
+  worktreeStatus,
   worktreesDir,
   type Worktree,
 } from "./worktree.ts";
@@ -252,5 +253,30 @@ describe("removeSubmoduleWorktreeManually", () => {
       /Failed to locate Git metadata/,
     );
     expect(await pathExists(target)).toBe(true);
+  });
+});
+
+describe("worktreeStatus", () => {
+  let repo: TestRepo;
+
+  afterEach(() => repo.cleanup());
+
+  test("reports changes for a readable checkout", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "status", repoPath: repo.root });
+    await Bun.write(join(added.path, "new.txt"), "x");
+
+    const status = await worktreeStatus(added.path);
+    expect(status.ok).toBe(true);
+    if (status.ok) expect(status.changes).toEqual(["?? new.txt"]);
+  });
+
+  test("fails instead of reporting clean when git status cannot run", async () => {
+    repo = await createTestRepo({ bare: true });
+    const missing = join(repo.root, "..", "missing-worktree");
+
+    const status = await worktreeStatus(missing);
+    expect(status.ok).toBe(false);
+    if (!status.ok) expect(status.reason).toContain(missing);
   });
 });
