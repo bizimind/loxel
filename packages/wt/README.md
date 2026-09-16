@@ -450,6 +450,7 @@ import {
   executeMove,
   planRemove,
   executeRemove,
+  forceReason,
 } from "@bizimind/wt/lib";
 
 const plan = await planAdd({ name: "feat/foo", repoPath });
@@ -465,12 +466,14 @@ const move = await planMove({ oldName: "feat/foo", name: "feat/bar", repoPath })
 const moved = await executeMove({ oldName: "feat/foo", name: "feat/bar", repoPath });
 
 const removal = await planRemove({ name: "feat/bar", repoPath });
-if (!removal.dirty) {
+// removal.dirty, or removal.localOnlySubmodules non-empty, means git (or wt on
+// its behalf) refuses without force; forceReason() phrases that for a prompt.
+if (!forceReason("feat/bar", removal)) {
   await executeRemove({ name: "feat/bar", repoPath, deleteBranch: true, force: false });
 }
 ```
 
-Also exported: `resolveWorktreesDir`, `listManagedWorktrees`, `currentManagedWorktree`, `getWorktreeName`, `detectRepoType`, `hasUncommittedChanges`, `getCurrentBranch`, `initBareRepo`, `transformToBare`, `ensureWorktreesDir`, the hook filename constants, and the `ProgressHandler` type.
+Also exported: `forceReason`, `lockedMessage`, `resolveWorktreesDir`, `listManagedWorktrees`, `currentManagedWorktree`, `getWorktreeName`, `detectRepoType`, `hasUncommittedChanges`, `getCurrentBranch`, `initBareRepo`, `transformToBare`, `ensureWorktreesDir`, the hook filename constants, and the `ProgressHandler` type.
 
 ---
 

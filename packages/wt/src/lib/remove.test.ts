@@ -299,11 +299,12 @@ describe("executeRemove with submodules", () => {
     return { subUrl: subDir };
   }
 
-  async function addSubmoduleTo(worktreePath: string, subUrl: string): Promise<void> {
-    await git(
-      ["-c", "protocol.file.allow=always", "submodule", "add", subUrl, "mysub"],
-      worktreePath,
-    );
+  async function addSubmoduleTo(
+    worktreePath: string,
+    subUrl: string,
+    name = "mysub",
+  ): Promise<void> {
+    await git(["-c", "protocol.file.allow=always", "submodule", "add", subUrl, name], worktreePath);
     await git(
       [
         "-c",
@@ -454,6 +455,47 @@ describe("executeRemove with submodules", () => {
       ok: true,
       changes: ["?? mysub/untracked.txt"],
     });
+  });
+
+  test("counts changes once in a submodule whose path contains a space", async () => {
+    const { subUrl } = await repoWithSubmodule();
+    const added = await executeAdd({ name: "spaced-sub", repoPath: repo.root });
+    await addSubmoduleTo(added.path, subUrl, "my sub dir");
+    await Bun.write(join(added.path, "my sub dir", "untracked.txt"), "x\n");
+
+    expect(await worktreeStatus(added.path)).toEqual({
+      ok: true,
+      changes: ["?? my sub dir/untracked.txt"],
+    });
+  });
+
+  test("prefixes both halves of a rename inside a submodule", async () => {
+    const { subUrl } = await repoWithSubmodule();
+    const added = await executeAdd({ name: "renamed-in-sub", repoPath: repo.root });
+    await addSubmoduleTo(added.path, subUrl);
+    await git(["mv", "tracked.txt", "renamed.txt"], join(added.path, "mysub"));
+
+    expect(await worktreeStatus(added.path)).toEqual({
+      ok: true,
+      changes: ["R  mysub/tracked.txt -> mysub/renamed.txt"],
+    });
+  });
+
+  test("fails closed when a submodule's refs cannot be walked", async () => {
+    const { subUrl } = await repoWithSubmodule();
+    const added = await executeAdd({ name: "broken-sub", repoPath: repo.root });
+    await addSubmoduleTo(added.path, subUrl);
+    const sub = join(added.path, "mysub");
+    const subGitDir = (await git(["rev-parse", "--path-format=absolute", "--git-dir"], sub)).trim();
+    await Bun.write(join(subGitDir, "refs", "heads", "broken"), "0".repeat(40) + "\n");
+
+    await expect(planRemove({ name: "broken-sub", repoPath: repo.root })).rejects.toThrow(
+      /Failed to inspect submodules/,
+    );
+    await expect(
+      executeRemove({ name: "broken-sub", repoPath: repo.root, deleteBranch: false, force: false }),
+    ).rejects.toThrow(/Failed to inspect submodules/);
+    expect(await Bun.file(join(sub, "tracked.txt")).exists()).toBe(true);
   });
 
   test("an unreadable status needs force but does not block a forced removal", async () => {

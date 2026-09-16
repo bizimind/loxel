@@ -345,7 +345,7 @@ export type WorktreeStatus = { ok: true; changes: string[] } | { ok: false; reas
  */
 export async function worktreeStatus(worktreePath: string): Promise<WorktreeStatus> {
   if (!(await pathExists(worktreePath))) return { ok: true, changes: [] };
-  const top = await runGit(["status", "--porcelain", "--ignore-submodules=none"], worktreePath);
+  const top = await runGit(["status", ...STATUS_ARGS], worktreePath);
   if (top.exitCode !== 0) return { ok: false, reason: gitFailure(top) };
   const nested = await runGit(
     [
@@ -353,27 +353,62 @@ export async function worktreeStatus(worktreePath: string): Promise<WorktreeStat
       "foreach",
       "--recursive",
       "--quiet",
-      `printf '%s\\n' "${SUBMODULE_MARKER}$displaypath"; git status --porcelain --ignore-submodules=none`,
+      `printf '%s\\0' "${SUBMODULE_MARKER}$displaypath"; git status ${STATUS_ARGS.join(" ")}`,
     ],
     worktreePath,
   );
   if (nested.exitCode !== 0) return { ok: false, reason: gitFailure(nested) };
 
-  const inner: string[] = [];
-  let submodule = "";
-  for (const line of statusLines(nested.stdout)) {
-    if (line.startsWith(SUBMODULE_MARKER)) {
-      submodule = line.slice(SUBMODULE_MARKER.length);
-      continue;
-    }
-    inner.push(`${line.slice(0, 3)}${submodule}/${line.slice(3)}`);
-  }
+  const inner = parseStatus(nested.stdout);
   // A gitlink line for a submodule whose own changes are listed would count
   // the same work twice; keep it only when nothing inside explains it.
-  const expanded = statusLines(top.stdout)
+  const changes = parseStatus(top.stdout)
     .concat(inner)
-    .filter((line) => !inner.some((change) => change.slice(3).startsWith(`${line.slice(3)}/`)));
-  return { ok: true, changes: expanded };
+    .filter((entry) => !inner.some((change) => change.path.startsWith(`${entry.path}/`)))
+    .map((entry) =>
+      entry.from === undefined
+        ? `${entry.code} ${entry.path}`
+        : `${entry.code} ${entry.from} -> ${entry.path}`,
+    );
+  return { ok: true, changes };
+}
+
+// NUL-separated output keeps paths raw: the porcelain v1 text format C-quotes
+// paths with spaces or non-ASCII characters, which would never match the raw
+// `$displaypath` of `git submodule foreach`.
+const STATUS_ARGS = ["--porcelain", "-z", "--ignore-submodules=none"];
+
+interface StatusEntry {
+  /** The two-character XY status code. */
+  code: string;
+  /** Path relative to the worktree root, through any enclosing submodules. */
+  path: string;
+  /** The original path of a rename or copy. */
+  from?: string;
+}
+
+/** Parse `git status --porcelain -z` output, with submodule markers setting the path prefix. */
+function parseStatus(output: string): StatusEntry[] {
+  const fields = output.split("\0");
+  const entries: StatusEntry[] = [];
+  let prefix = "";
+  for (let i = 0; i < fields.length; i += 1) {
+    const field = fields[i]!;
+    if (field.startsWith(SUBMODULE_MARKER)) {
+      prefix = `${field.slice(SUBMODULE_MARKER.length)}/`;
+      continue;
+    }
+    if (field.length < 4) continue;
+    const code = field.slice(0, 2);
+    const entry: StatusEntry = { code, path: `${prefix}${field.slice(3)}` };
+    // A rename or copy is followed by its original path as a separate field.
+    if (code.includes("R") || code.includes("C")) {
+      i += 1;
+      entry.from = `${prefix}${fields[i] ?? ""}`;
+    }
+    entries.push(entry);
+  }
+  return entries;
 }
 
 /**
@@ -388,7 +423,9 @@ export async function submodulesWithLocalOnlyCommits(worktreePath: string): Prom
       "foreach",
       "--recursive",
       "--quiet",
-      `[ -z "$(git rev-list --all --not --remotes --max-count=1)" ] || printf '%s\\n' "$displaypath"`,
+      // Capture the exit status separately: a command substitution inside
+      // `[ -z ... ]` would turn a failed rev-list into an empty, "clean" result.
+      `local_only=$(git rev-list --all --not --remotes --max-count=1) || exit 1; [ -z "$local_only" ] || printf '%s\\n' "$displaypath"`,
     ],
     worktreePath,
   );
