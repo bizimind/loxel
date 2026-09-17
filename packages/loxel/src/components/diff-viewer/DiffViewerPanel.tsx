@@ -37,7 +37,7 @@ export function DiffViewerPanel() {
   const diffSource = useRepositoryStore((s) => s.diffSource);
   const { data: diff, isLoading } = useDiffQuery(diffSource);
   const diffViewMode = useUIStore((s) => s.diffViewMode);
-  const { commitHash, parentHash, worktreePath } = useReviewContext();
+  const { commitHash, worktreePath } = useReviewContext();
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -54,7 +54,10 @@ export function DiffViewerPanel() {
           diff={diff}
           viewMode={diffViewMode}
           commitHash={commitHash}
-          parentHash={parentHash}
+          // The base comes from the diff the server actually produced, already
+          // resolved to a SHA. Deriving it a second time here is what made the
+          // old side resolve `HEAD` in the wrong repository.
+          baseRef={diff.baseRef ?? undefined}
           worktreePath={worktreePath}
         />
       )}
@@ -66,13 +69,13 @@ function DiffContent({
   diff,
   viewMode,
   commitHash,
-  parentHash,
+  baseRef,
   worktreePath,
 }: {
   diff: DiffInfo;
   viewMode: "split" | "unified";
   commitHash?: string;
-  parentHash?: string;
+  baseRef?: string;
   worktreePath?: string;
 }) {
   const selectedFile = useWorktreeUI((s) => s.selectedDiffFile);
@@ -87,11 +90,11 @@ function DiffContent({
     return diff.files.map((f) => ({
       oldPath: f.oldPath || f.newPath,
       newPath: f.newPath || f.oldPath,
-      oldRef: parentHash ?? null,
+      oldRef: baseRef ?? null,
       newRef: commitHash ?? null,
       worktreePath,
     }));
-  }, [diff.files, parentHash, commitHash, worktreePath]);
+  }, [diff.files, baseRef, commitHash, worktreePath]);
 
   useEffect(() => {
     if (selectedReviewIds.length > 0 && diffFiles.length > 0) {
@@ -209,7 +212,7 @@ function DiffContent({
             file={currentFile}
             viewMode={viewMode}
             commitHash={commitHash}
-            parentHash={parentHash}
+            baseRef={baseRef}
             worktreePath={worktreePath}
           />
         )}
@@ -279,13 +282,13 @@ function FileDiffView({
   file,
   viewMode,
   commitHash,
-  parentHash,
+  baseRef,
   worktreePath,
 }: {
   file: FileDiff;
   viewMode: "split" | "unified";
   commitHash?: string;
-  parentHash?: string;
+  baseRef?: string;
   worktreePath?: string;
 }) {
   const useTrueSideBySide = viewMode === "split" && (commitHash || worktreePath);
@@ -312,7 +315,7 @@ function FileDiffView({
         <div className="flex-1 overflow-hidden">
           <SideBySideDiffView
             file={file}
-            oldRef={parentHash}
+            oldRef={baseRef}
             newRef={commitHash}
             worktreePath={worktreePath}
           />
@@ -322,12 +325,7 @@ function FileDiffView({
   }
 
   return (
-    <HunkBasedDiffView
-      file={file}
-      viewMode={viewMode}
-      commitHash={commitHash}
-      parentHash={parentHash}
-    />
+    <HunkBasedDiffView file={file} viewMode={viewMode} commitHash={commitHash} baseRef={baseRef} />
   );
 }
 
@@ -335,12 +333,12 @@ function HunkBasedDiffView({
   file,
   viewMode,
   commitHash,
-  parentHash,
+  baseRef,
 }: {
   file: FileDiff;
   viewMode: "split" | "unified";
   commitHash?: string;
-  parentHash?: string;
+  baseRef?: string;
 }) {
   const highlighted = useSyntaxHighlight(file);
   const [expandedGaps, setExpandedGaps] = useState<Set<number>>(new Set());
@@ -422,12 +420,12 @@ function HunkBasedDiffView({
         </span>
       </div>
 
-      {viewMode === "split" && (parentHash || commitHash) && (
+      {viewMode === "split" && (baseRef || commitHash) && (
         <div className="border-border bg-muted/20 flex border-b text-[10px]">
           <div className="border-border flex-1 border-r px-2 py-1">
             <span className="text-muted-foreground">@ </span>
-            <span className="text-foreground font-mono">{parentHash?.slice(0, 7) ?? "..."}</span>
-            <span className="text-muted-foreground ml-1">(parent)</span>
+            <span className="text-foreground font-mono">{baseRef?.slice(0, 7) ?? "..."}</span>
+            <span className="text-muted-foreground ml-1">(base)</span>
           </div>
           <div className="flex-1 px-2 py-1">
             <span className="text-muted-foreground">@ </span>
