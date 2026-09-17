@@ -32,6 +32,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(WINDOW_FOCUS_CHANGE, handler);
   },
   openFolderDialog: () => ipcRenderer.invoke(OPEN_FOLDER_DIALOG),
-  supportsChromeAuthentication: process.platform === "darwin",
+  supportsChromeAuthentication: process.platform === "darwin" || process.platform === "linux",
   authenticateInChrome: (url) => ipcRenderer.invoke(AUTHENTICATE_IN_CHROME, url),
 });

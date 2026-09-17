@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { cookieDomainMatches, mapChromeCookie, validateTargetUrl } from "./chrome-auth";
+import {
+  chromeExecutableCandidates,
+  cookieDomainMatches,
+  mapChromeCookie,
+  validateTargetUrl,
+} from "./chrome-auth";
 
 function chromeCookie(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -100,7 +105,20 @@ describe("mapChromeCookie", () => {
         HTTPS_EXAMPLE,
       ]),
     ).toBeNull();
+    expect(
+      mapChromeCookie(chromeCookie({ partitionKey: "https://example.com" }), [HTTPS_EXAMPLE]),
+    ).toBeNull();
     expect(mapChromeCookie(chromeCookie({ partitionKeyOpaque: true }), [HTTPS_EXAMPLE])).toBeNull();
+  });
+
+  test("keeps cookies whose partition key is present but empty", () => {
+    // Chrome reports the key on ordinary cookies too; only a populated one is partitioned.
+    expect(
+      mapChromeCookie(chromeCookie({ partitionKey: { topLevelSite: "" } }), [HTTPS_EXAMPLE], 1_000),
+    ).not.toBeNull();
+    expect(
+      mapChromeCookie(chromeCookie({ partitionKey: "" }), [HTTPS_EXAMPLE], 1_000),
+    ).not.toBeNull();
   });
 
   test("enforces secure cookie prefix and SameSite requirements", () => {
@@ -124,5 +142,33 @@ describe("mapChromeCookie", () => {
     expect(
       mapChromeCookie(chromeCookie({ sameSite: "None" }), [HTTPS_EXAMPLE], 1_000)?.sameSite,
     ).toBe("no_restriction");
+  });
+});
+
+describe("chromeExecutableCandidates", () => {
+  test("an explicit path overrides discovery on every platform", () => {
+    expect(
+      chromeExecutableCandidates("linux", { LOXEL_CHROME_PATH: "/opt/chromium/chrome" }),
+    ).toEqual(["/opt/chromium/chrome"]);
+    expect(chromeExecutableCandidates("win32", { LOXEL_CHROME_PATH: "C:\\chrome.exe" })).toEqual([
+      "C:\\chrome.exe",
+    ]);
+  });
+
+  test("looks in the application folders on macOS", () => {
+    const candidates = chromeExecutableCandidates("darwin", {});
+    expect(candidates[0]).toBe("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+    expect(candidates).toHaveLength(2);
+  });
+
+  test("searches PATH for Chrome and Chromium on Linux", () => {
+    const candidates = chromeExecutableCandidates("linux", { PATH: "/usr/bin:/usr/local/bin" });
+    expect(candidates).toContain("/usr/bin/google-chrome");
+    expect(candidates).toContain("/usr/local/bin/chromium");
+    expect(candidates.at(-1)).toBe("/opt/google/chrome/chrome");
+  });
+
+  test("has no candidates on unsupported platforms", () => {
+    expect(chromeExecutableCandidates("win32", {})).toEqual([]);
   });
 });

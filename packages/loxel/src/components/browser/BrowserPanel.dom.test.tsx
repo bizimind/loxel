@@ -99,7 +99,7 @@ describe("BrowserPanel Chrome authentication", () => {
     const authenticateInChrome = mock(async () => ({
       status: "error" as const,
       code: "chrome-not-found" as const,
-      message: "Google Chrome was not found in Applications.",
+      message: "Google Chrome was not found.",
     }));
     window.electronAPI = electronApi(authenticateInChrome);
 
@@ -108,7 +108,7 @@ describe("BrowserPanel Chrome authentication", () => {
     loadURL.mockClear();
     fireEvent.click(screen.getByTitle("Authenticate in Chrome"));
 
-    expect(await screen.findByText("Google Chrome was not found in Applications.")).toBeVisible();
+    expect(await screen.findByText("Google Chrome was not found.")).toBeVisible();
     expect(loadURL).not.toHaveBeenCalled();
   });
 });

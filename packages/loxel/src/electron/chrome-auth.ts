@@ -13,10 +13,9 @@ import type { CookiesSetDetails } from "electron";
 import { isHttpUrl } from "../url-utils";
 import { ChromeCdpPipe } from "./chrome-cdp";
 
-const CHROME_EXECUTABLES = [
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  path.join(os.homedir(), "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-];
+/** Overrides discovery; lets a user point at Chromium, Chrome Beta or a non-standard install. */
+const CHROME_PATH_ENV = "LOXEL_CHROME_PATH";
+const SUPPORTED_PLATFORMS: ReadonlySet<NodeJS.Platform> = new Set(["darwin", "linux"]);
 const PROFILE_PREFIX = "loxel-chrome-auth-";
 const STARTUP_TIMEOUT_MS = 10_000;
 
@@ -84,10 +83,10 @@ export class ChromeAuthManager {
     confirmation: ChromeAuthConfirmation,
     ownerSignal?: AbortSignal,
   ): Promise<ChromeAuthResult> {
-    if (process.platform !== "darwin") {
+    if (!SUPPORTED_PLATFORMS.has(process.platform)) {
       return errorResult(
         "unsupported-platform",
-        "Chrome authentication is currently available on macOS only.",
+        "Chrome authentication is currently available on macOS and Linux only.",
       );
     }
     if (this.activeFlow) {
@@ -302,7 +301,7 @@ export function mapChromeCookie(
 ): ElectronCookieDetails | null {
   if (!value || typeof value !== "object") return null;
   const cookie = value as Record<string, unknown>;
-  if ("partitionKey" in cookie || cookie.partitionKeyOpaque === true) return null;
+  if (isPartitioned(cookie)) return null;
   if (typeof cookie.name !== "string" || cookie.name.length === 0) return null;
   if (typeof cookie.value !== "string" || typeof cookie.domain !== "string") return null;
   if (typeof cookie.path !== "string" || !cookie.path.startsWith("/")) return null;
@@ -349,8 +348,46 @@ export function mapChromeCookie(
   return details;
 }
 
+/**
+ * Partitioned (CHIPS) cookies cannot be imported: Electron's cookie setter has
+ * no way to carry the partition key, and importing them unpartitioned would
+ * silently widen their scope. Chrome may report an empty `partitionKey` on an
+ * ordinary cookie, so only a populated key counts.
+ */
+function isPartitioned(cookie: Record<string, unknown>): boolean {
+  if (cookie.partitionKeyOpaque === true) return true;
+  const key = cookie.partitionKey;
+  if (typeof key === "string") return key.length > 0;
+  if (!key || typeof key !== "object") return false;
+  const topLevelSite = (key as Record<string, unknown>).topLevelSite;
+  return typeof topLevelSite === "string" && topLevelSite.length > 0;
+}
+
+/** Candidate Chrome executables, most specific first; `LOXEL_CHROME_PATH` wins outright. */
+export function chromeExecutableCandidates(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const override = env[CHROME_PATH_ENV];
+  if (override) return [override];
+
+  if (platform === "darwin") {
+    const bundle = "Google Chrome.app/Contents/MacOS/Google Chrome";
+    return [path.join("/Applications", bundle), path.join(os.homedir(), "Applications", bundle)];
+  }
+  if (platform === "linux") {
+    const names = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"];
+    const pathDirs = (env.PATH ?? "").split(path.delimiter).filter((dir) => dir.length > 0);
+    return [
+      ...names.flatMap((name) => pathDirs.map((dir) => path.join(dir, name))),
+      "/opt/google/chrome/chrome",
+    ];
+  }
+  return [];
+}
+
 async function findChromeExecutable(): Promise<string | null> {
-  for (const executable of CHROME_EXECUTABLES) {
+  for (const executable of chromeExecutableCandidates()) {
     try {
       const info = await stat(executable);
       if (!info.isFile()) continue;
@@ -622,7 +659,10 @@ function reportUnexpectedFailure(caught: unknown, flow: ActiveFlow, stage: strin
 function mapFailure(caught: unknown, flow: ActiveFlow): ChromeAuthResult {
   if (flow.abortController.signal.aborted) return { status: "cancelled" };
   if (caught instanceof ChromeNotFoundError) {
-    return errorResult("chrome-not-found", "Google Chrome was not found in Applications.");
+    return errorResult(
+      "chrome-not-found",
+      `Google Chrome was not found. Install it, or set ${CHROME_PATH_ENV} to a Chrome or Chromium executable.`,
+    );
   }
   if (
     caught instanceof ChromeClosedError ||
