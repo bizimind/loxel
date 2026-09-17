@@ -5,12 +5,14 @@ import {
   ArrowRightIcon,
   BugIcon,
   GlobeIcon,
+  KeyRoundIcon,
   LoaderIcon,
   RefreshCwIcon,
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { showToast } from "@/components/ui/toast";
 import { useActionHandler } from "@/hooks/useActionHandler";
 import { cn } from "@/lib/utils";
 import { inputToKeyCombo } from "@/store/keybindings/keybinding-schema";
@@ -123,6 +125,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   const [canGoForward, setCanGoForward] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // Attach webview event listeners
   useEffect(() => {
@@ -282,6 +285,39 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     }
   }, []);
 
+  const authenticateInChrome = useCallback(async () => {
+    const authenticate = window.electronAPI?.authenticateInChrome;
+    if (!authenticate || isAuthenticating) return;
+
+    setIsAuthenticating(true);
+    setLoadError(null);
+    try {
+      const result = await authenticate(currentUrl);
+      if (result.status === "cancelled") return;
+      if (result.status === "error") {
+        setLoadError(result.message);
+        return;
+      }
+
+      if (result.persistence === "session-only") {
+        showToast(
+          `Imported ${result.importedCount} cookies for this session, but could not persist them to disk.`,
+          "info",
+        );
+      } else if (result.skippedCount > 0) {
+        showToast(
+          `Imported ${result.importedCount} cookies; skipped ${result.skippedCount} unsupported cookies.`,
+          "info",
+        );
+      }
+      navigate(result.finalUrl);
+    } catch {
+      setLoadError("Chrome authentication failed. Please try again.");
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }, [currentUrl, isAuthenticating, navigate]);
+
   const handleUrlKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Enter") {
@@ -349,6 +385,20 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             spellCheck={false}
           />
         </div>
+
+        {window.electronAPI?.supportsChromeAuthentication && (
+          <NavButton
+            onClick={() => void authenticateInChrome()}
+            disabled={isAuthenticating}
+            title="Authenticate in Chrome"
+          >
+            {isAuthenticating ? (
+              <LoaderIcon className="size-3.5 animate-spin" />
+            ) : (
+              <KeyRoundIcon className="size-3.5" />
+            )}
+          </NavButton>
+        )}
 
         <NavButton
           onClick={toggleDevTools}
