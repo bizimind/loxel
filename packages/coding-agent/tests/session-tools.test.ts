@@ -208,7 +208,7 @@ describe("Session tools", () => {
   // Current behavior: when a tool handler returns err() (policy violation,
   // validation failure), the AI SDK's execute function throws. The SDK
   // converts this to an internal tool-error and calls the model again with
-  // the error context. However, the orchestrator's onStepFinish only
+  // the error context. However, the orchestrator's onStepEnd only
   // processes successful tool-results, so no tool.call.result event is
   // emitted for errors. The tool.call.requested event IS emitted because
   // it's triggered by the raw model stream chunk.
