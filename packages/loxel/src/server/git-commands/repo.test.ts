@@ -41,8 +41,10 @@ describe("resolveDefaultBranchRef", () => {
     const repo = await createRepo();
     try {
       await commit(repo.path, "A", { "a.txt": "a" });
-      await $`git -C ${repo.path} update-ref refs/remotes/upstream/trunk HEAD`.quiet();
-      await $`git -C ${repo.path} symbolic-ref refs/remotes/upstream/HEAD refs/remotes/upstream/trunk`.quiet();
+      // `fork` sorts before `origin` in for-each-ref output, so this only
+      // passes if origin is chosen deliberately rather than by list order.
+      await $`git -C ${repo.path} update-ref refs/remotes/fork/trunk HEAD`.quiet();
+      await $`git -C ${repo.path} symbolic-ref refs/remotes/fork/HEAD refs/remotes/fork/trunk`.quiet();
       await $`git -C ${repo.path} update-ref refs/remotes/origin/main HEAD`.quiet();
       await $`git -C ${repo.path} symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main`.quiet();
 
