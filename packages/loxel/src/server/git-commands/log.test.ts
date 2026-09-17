@@ -149,6 +149,26 @@ describe("getBranchCommits", () => {
     }
   });
 
+  test("unborn branch in a repo with history returns an empty list", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "first", { "a.txt": "a" });
+      await Bun.$`git -C ${repo.path} switch --orphan fresh`.quiet();
+      expect(await getBranchCommits(repo.path)).toEqual({ commits: [], mergeBase: null });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("repository with no commits at all returns an empty list", async () => {
+    const repo = await createRepo();
+    try {
+      expect(await getBranchCommits(repo.path)).toEqual({ commits: [], mergeBase: null });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
   test("single branch repo returns recent commits", async () => {
     const repo = await createRepo();
     try {

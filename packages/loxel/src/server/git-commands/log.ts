@@ -3,6 +3,7 @@ import { $ } from "bun";
 import type { CommitInfo } from "@/api/git-models";
 
 import { LOG_FORMAT, parseLogOutput } from "../parsers/log";
+import { resolveCommit, resolveMergeBase } from "./diff";
 import { readOnlyGitEnv } from "./git-env";
 import { resolveDefaultBranchRef } from "./repo";
 import { validateRefName } from "./validation";
@@ -63,6 +64,11 @@ export async function getBranchCommits(
 ): Promise<{ commits: CommitInfo[]; mergeBase: string | null }> {
   const { limit = 100 } = options;
 
+  // An unborn branch (`switch --orphan`, a fresh linked worktree) has a name
+  // but no commit, and `git log` refuses it outright rather than printing
+  // nothing. That is an empty branch, not an error.
+  if ((await resolveCommit(cwd, "HEAD")) === null) return { commits: [], mergeBase: null };
+
   const branchResult = await $`git -C ${cwd} symbolic-ref --short HEAD`
     .env(readOnlyGitEnv())
     .nothrow()
@@ -78,11 +84,7 @@ export async function getBranchCommits(
     return { commits: await recentCommits(cwd, limit), mergeBase: null };
   }
 
-  const mergeBaseResult = await $`git -C ${cwd} merge-base ${defaultRef} HEAD`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
-  const mergeBase = mergeBaseResult.trim();
+  const mergeBase = await resolveMergeBase(cwd, defaultRef, "HEAD");
   if (!mergeBase) {
     // Unrelated histories, or the default ref is gone since we resolved it.
     return { commits: await recentCommits(cwd, limit), mergeBase: null };

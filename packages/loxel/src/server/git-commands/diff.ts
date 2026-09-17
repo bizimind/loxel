@@ -16,7 +16,7 @@ import { validateWorktreePath } from "./worktree";
  * `HEAD` in the project repository are different commits; the SHA they resolve
  * to is the same object in the shared store.
  */
-async function resolveCommit(cwd: string, rev: string): Promise<string | null> {
+export async function resolveCommit(cwd: string, rev: string): Promise<string | null> {
   const spec = `${rev}^{commit}`;
   const result = await $`git -C ${cwd} rev-parse --verify --quiet ${spec}`
     .env(readOnlyGitEnv())
@@ -25,7 +25,11 @@ async function resolveCommit(cwd: string, rev: string): Promise<string | null> {
   return result.trim() || null;
 }
 
-async function resolveMergeBase(cwd: string, left: string, right: string): Promise<string | null> {
+export async function resolveMergeBase(
+  cwd: string,
+  left: string,
+  right: string,
+): Promise<string | null> {
   const result = await $`git -C ${cwd} merge-base ${left} ${right}`
     .env(readOnlyGitEnv())
     .nothrow()

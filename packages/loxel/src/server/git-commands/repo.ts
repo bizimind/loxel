@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { $ } from "bun";
 
+import { resolveCommit } from "./diff";
 import { readOnlyGitEnv } from "./git-env";
 
 export async function isBareRepo(cwd: string): Promise<boolean> {
@@ -95,11 +96,7 @@ async function isBareRepositoryConfig(cwd: string): Promise<boolean> {
 }
 
 async function refExists(cwd: string, ref: string): Promise<boolean> {
-  const result = await $`git -C ${cwd} rev-parse --verify --quiet ${`${ref}^{commit}`}`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
-  return result.trim() !== "";
+  return (await resolveCommit(cwd, ref)) !== null;
 }
 
 export async function getGitRoot(cwd: string): Promise<string> {
