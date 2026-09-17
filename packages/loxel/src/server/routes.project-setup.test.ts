@@ -70,6 +70,8 @@ describe("project conversion preflight", () => {
       getProject: () => undefined,
       findProjectForPath: () => undefined,
       getWorktreeResources: () => undefined,
+      suspendWorktreeWatchers: async () => async () => {},
+      completeWorktreeRemoval: () => {},
       resolveFilePath: () => null,
       initializeProject: onInitialize,
       teardownProject: onTeardown,

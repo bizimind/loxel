@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
 import type { WsMessage } from "@/api/ws-protocol";
+import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { dispatchOpenFile } from "@/lib/open-file";
 import { consumeSavedContent } from "@/lib/save-editor-content";
@@ -19,6 +20,8 @@ import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { queryKeys } from "./query-keys";
+
+const log = frontendLog.child("files");
 
 /**
  * Bridges WebSocket messages to TanStack React Query cache operations.
@@ -139,8 +142,66 @@ export function useWsBridge(): void {
                   editorStore.handleDiskChange(changedPath, nonces, data.content);
                   queryClient.setQueryData(queryKey, data);
                 })
-                .catch(() => {});
+                .catch((error: unknown) => {
+                  log.error("Failed to refresh editor after external file change", {
+                    error,
+                    path: changedPath,
+                    projectPath,
+                    worktreePath: message.wtPath,
+                  });
+                });
             }
+          }
+          break;
+        }
+
+        case "worktree_files_resynced": {
+          const { projectPath } = message;
+          const editorStore = useEditorStateStore.getState();
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.status(projectPath, message.wtPath),
+          });
+          queryClient.invalidateQueries({ queryKey: queryKeys.worktreeStatuses(projectPath) });
+          queryClient.invalidateQueries({ queryKey: ["diff", projectPath] });
+          queryClient.invalidateQueries({ queryKey: ["dirContents", projectPath] });
+          queryClient.invalidateQueries({
+            predicate: (query) => {
+              const key = query.queryKey;
+              return (
+                key[0] === "fileContent" &&
+                key[1] === projectPath &&
+                key[3] === undefined &&
+                key[4] === message.wtPath
+              );
+            },
+          });
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.detachedFiles(projectPath, message.wtPath),
+          });
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.externalFiles(projectPath, message.wtPath),
+          });
+
+          // A broad query invalidation refreshes clean editors. Dirty/saving editors
+          // need the same conflict-aware state-machine path as a normal file event.
+          for (const [path, entry] of editorStore.files) {
+            if (entry.state === "clean") continue;
+            const queryKey = queryKeys.fileContent(projectPath, path, undefined, message.wtPath);
+            if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;
+            api
+              .getFileContentByPath(path, message.wtPath)
+              .then((data) => {
+                editorStore.handleDiskChange(path, [], data.content);
+                queryClient.setQueryData(queryKey, data);
+              })
+              .catch((error: unknown) => {
+                log.error("Failed to refresh dirty editor after worktree resync", {
+                  error,
+                  path,
+                  projectPath,
+                  worktreePath: message.wtPath,
+                });
+              });
           }
           break;
         }
