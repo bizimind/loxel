@@ -1,4 +1,3 @@
-import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access, chmod, mkdtemp, rm, stat } from "node:fs/promises";
@@ -26,6 +25,18 @@ export interface ChromeCookieStore {
   flushStore(): Promise<void>;
 }
 
+export type ChromeAuthErrorCode =
+  | "unsupported-platform"
+  | "invalid-url"
+  | "chrome-not-found"
+  | "launch-failed"
+  | "busy"
+  | "chrome-closed"
+  | "not-ready"
+  | "extra-tabs"
+  | "no-cookies"
+  | "failed";
+
 export type ChromeAuthResult =
   | {
       status: "success";
@@ -35,30 +46,36 @@ export type ChromeAuthResult =
       persistence: "persistent" | "session-only";
     }
   | { status: "cancelled" }
-  | {
-      status: "error";
-      code:
-        | "unsupported-platform"
-        | "invalid-url"
-        | "chrome-not-found"
-        | "busy"
-        | "chrome-closed"
-        | "no-cookies"
-        | "failed";
-      message: string;
-    };
+  | { status: "error"; code: ChromeAuthErrorCode; message: string };
 
 export interface ChromeAuthConfirmation {
   confirmImport(originalOrigin: string): Promise<boolean>;
   confirmOriginChange(originalOrigin: string, finalOrigin: string): Promise<boolean>;
 }
 
+/** The subset of a spawned Chrome the flow needs; lets tests substitute a scripted browser. */
+export interface ChromeProcess {
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+  /** DevTools Protocol pipe: commands go out here, responses arrive on `responseStream`. */
+  readonly commandStream: Writable;
+  readonly responseStream: Readable;
+  kill(signal: NodeJS.Signals): void;
+  on(event: "exit" | "error", listener: () => void): void;
+  off(event: "exit" | "error", listener: () => void): void;
+}
+
+export interface ChromeLauncher {
+  findExecutable(): Promise<string | null>;
+  launch(executable: string, profileDir: string, targetUrl: string): ChromeProcess;
+}
+
 interface ActiveFlow {
   abortController: AbortController;
-  child: ChildProcess | null;
+  child: ChromeProcess | null;
   cdp: ChromeCdpPipe | null;
   profileDir: string | null;
-  cleanupPromise: Promise<void> | null;
+  launchFailed: boolean;
   finishedPromise: Promise<void>;
   finish: () => void;
 }
@@ -72,7 +89,10 @@ interface TargetInfo {
 export class ChromeAuthManager {
   private activeFlow: ActiveFlow | null = null;
 
-  constructor(private readonly cookieStore: ChromeCookieStore) {}
+  constructor(
+    private readonly cookieStore: ChromeCookieStore,
+    private readonly launcher: ChromeLauncher = systemChromeLauncher,
+  ) {}
 
   get isActive(): boolean {
     return this.activeFlow !== null;
@@ -112,7 +132,7 @@ export class ChromeAuthManager {
       child: null,
       cdp: null,
       profileDir: null,
-      cleanupPromise: null,
+      launchFailed: false,
       finishedPromise,
       finish,
     };
@@ -122,15 +142,17 @@ export class ChromeAuthManager {
     ownerSignal?.addEventListener("abort", abortFromOwner, { once: true });
     if (ownerSignal?.aborted) abortFromOwner();
 
-    const handleChildProcessError = () => {
-      // CDP closure maps launch failures to a renderer-safe result.
+    // A spawn failure emits `error` and never `exit`; remember it so the
+    // result says Chrome could not launch rather than that it closed.
+    const handleLaunchError = () => {
+      flow.launchFailed = true;
     };
 
     let result: ChromeAuthResult;
     let stage = "locating Chrome";
     try {
       throwIfAborted(flow.abortController.signal);
-      const chromeExecutable = await findChromeExecutable();
+      const chromeExecutable = await this.launcher.findExecutable();
       throwIfAborted(flow.abortController.signal);
       if (!chromeExecutable) throw new ChromeNotFoundError();
 
@@ -139,10 +161,9 @@ export class ChromeAuthManager {
       throwIfAborted(flow.abortController.signal);
 
       stage = "launching Chrome";
-      flow.child = spawnChrome(chromeExecutable, flow.profileDir, canonicalUrl.href);
-      flow.child.on("error", handleChildProcessError);
-      const { commandStream, responseStream } = getCdpStreams(flow.child);
-      flow.cdp = new ChromeCdpPipe(commandStream, responseStream);
+      flow.child = this.launcher.launch(chromeExecutable, flow.profileDir, canonicalUrl.href);
+      flow.child.on("error", handleLaunchError);
+      flow.cdp = new ChromeCdpPipe(flow.child.commandStream, flow.child.responseStream);
 
       stage = "waiting for Chrome";
       await waitForChromeReady(flow.cdp, flow.child, flow.abortController.signal);
@@ -177,20 +198,21 @@ export class ChromeAuthManager {
           stage = "importing cookies";
           result = await this.importCookies(
             flow.cdp,
-            finalTarget.targetId,
             [canonicalUrl, finalUrl],
             flow.abortController.signal,
           );
-          if (result.status === "success") result.finalUrl = finalUrl.href;
         }
       }
     } catch (caught) {
       reportUnexpectedFailure(caught, flow, stage);
       result = mapFailure(caught, flow);
     } finally {
+      // The flow is the only owner of its resources: cancellation just aborts
+      // and waits for this block, so nothing created after an early cleanup
+      // can be missed.
       ownerSignal?.removeEventListener("abort", abortFromOwner);
-      flow.child?.removeListener("error", handleChildProcessError);
-      await this.cleanup(flow);
+      flow.child?.off("error", handleLaunchError);
+      await cleanupFlow(flow);
       if (this.activeFlow === flow) this.activeFlow = null;
       flow.finish();
     }
@@ -198,26 +220,21 @@ export class ChromeAuthManager {
     return result;
   }
 
+  /** Abort the active flow, if any, and wait until it has cleaned up. */
   async cancelActive(): Promise<void> {
     const flow = this.activeFlow;
     if (!flow) return;
     flow.abortController.abort();
-    await this.cleanup(flow);
     await flow.finishedPromise;
   }
 
   private async importCookies(
     cdp: ChromeCdpPipe,
-    targetId: string,
     allowedUrls: URL[],
     signal: AbortSignal,
   ): Promise<ChromeAuthResult> {
-    const attachResult = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-    const sessionId = readStringProperty(attachResult, "sessionId");
-    if (!sessionId) throw new Error("Chrome page connection failed");
-
-    await cdp.send("Network.enable", {}, { sessionId });
-    const cookieResult = await cdp.send("Network.getAllCookies", {}, { sessionId });
+    // Browser-level cookies need no page attachment and include partition keys.
+    const cookieResult = await cdp.send("Storage.getCookies");
     const cookies = readCookies(cookieResult);
     throwIfAborted(signal);
 
@@ -233,7 +250,6 @@ export class ChromeAuthManager {
 
     // Once mutation starts, complete every write and flush before honoring process shutdown.
     // This avoids leaving the persistent partition half-written on cancellation.
-    throwIfAborted(signal);
     let importedCount = 0;
     for (const cookie of supported) {
       try {
@@ -264,12 +280,6 @@ export class ChromeAuthManager {
       skippedCount,
       persistence,
     };
-  }
-
-  private cleanup(flow: ActiveFlow): Promise<void> {
-    if (flow.cleanupPromise) return flow.cleanupPromise;
-    flow.cleanupPromise = cleanupFlow(flow);
-    return flow.cleanupPromise;
   }
 }
 
@@ -406,35 +416,48 @@ async function createPrivateProfileDirectory(): Promise<string> {
   return profileDir;
 }
 
-function spawnChrome(executable: string, profileDir: string, targetUrl: string): ChildProcess {
-  const child = spawn(
-    executable,
-    [
-      `--user-data-dir=${profileDir}`,
-      "--remote-debugging-pipe",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-sync",
-      "--disable-background-mode",
-      "--new-window",
-      targetUrl,
-    ],
-    { shell: false, stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] },
-  );
-  child.stderr?.resume();
-  return child;
-}
-
-function getCdpStreams(child: ChildProcess): { commandStream: Writable; responseStream: Readable } {
-  const commandStream = child.stdio[3];
-  const responseStream = child.stdio[4];
-  if (!commandStream || !responseStream) throw new Error("Chrome debugging pipes are unavailable");
-  return { commandStream: commandStream as Writable, responseStream: responseStream as Readable };
-}
+const systemChromeLauncher: ChromeLauncher = {
+  findExecutable: findChromeExecutable,
+  launch(executable, profileDir, targetUrl) {
+    const child = spawn(
+      executable,
+      [
+        `--user-data-dir=${profileDir}`,
+        "--remote-debugging-pipe",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-sync",
+        "--disable-background-mode",
+        "--new-window",
+        targetUrl,
+      ],
+      { shell: false, stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] },
+    );
+    child.stderr?.resume();
+    // Chrome reads DevTools commands from fd 3 and writes responses to fd 4.
+    const commandStream = child.stdio[3];
+    const responseStream = child.stdio[4];
+    if (!commandStream || !responseStream)
+      throw new Error("Chrome debugging pipes are unavailable");
+    return {
+      get exitCode() {
+        return child.exitCode;
+      },
+      get signalCode() {
+        return child.signalCode;
+      },
+      commandStream: commandStream as Writable,
+      responseStream: responseStream as Readable,
+      kill: (signal) => void child.kill(signal),
+      on: (event, listener) => void child.on(event, listener),
+      off: (event, listener) => void child.off(event, listener),
+    };
+  },
+};
 
 async function waitForChromeReady(
   cdp: ChromeCdpPipe,
-  child: ChildProcess,
+  child: ChromeProcess,
   signal: AbortSignal,
 ): Promise<void> {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
@@ -452,7 +475,7 @@ async function waitForChromeReady(
       await delay(100, undefined, { signal });
     }
   }
-  throw new Error("Chrome did not become ready");
+  throw new ChromeAuthUserError("not-ready", "Chrome did not become ready. Please try again.");
 }
 
 async function findInitialPageTarget(
@@ -470,7 +493,7 @@ async function findInitialPageTarget(
     if (pages.length === 1) return pages[0]!;
     await delay(100, undefined, { signal });
   }
-  throw new Error("Chrome page did not become ready");
+  throw new ChromeAuthUserError("not-ready", "The Chrome page did not open. Please try again.");
 }
 
 async function getTargets(cdp: ChromeCdpPipe): Promise<TargetInfo[]> {
@@ -495,7 +518,10 @@ async function resolveFinalPageTarget(
   const initialTarget = pages.find((target) => target.targetId === initialTargetId);
   if (initialTarget && replacementPages.length === 0) return initialTarget;
   if (pages.length === 1) return pages[0]!;
-  throw new Error("Close extra Chrome tabs before importing the session");
+  throw new ChromeAuthUserError(
+    "extra-tabs",
+    "Close the extra Chrome tabs, leaving only the signed-in page, then try again.",
+  );
 }
 
 function parseTargetInfo(value: unknown): TargetInfo | null {
@@ -522,12 +548,6 @@ function readCookies(value: unknown): unknown[] {
   return cookies;
 }
 
-function readStringProperty(value: unknown, key: string): string | null {
-  if (!value || typeof value !== "object") return null;
-  const property = (value as Record<string, unknown>)[key];
-  return typeof property === "string" ? property : null;
-}
-
 function mapSameSite(value: unknown): ElectronCookieDetails["sameSite"] {
   switch (value) {
     case "Strict":
@@ -549,15 +569,17 @@ async function cleanupFlow(flow: ActiveFlow): Promise<void> {
       // Chrome may already be gone.
     }
     flow.cdp.close();
+    flow.cdp = null;
   }
 
   const child = flow.child;
-  if (child && child.exitCode === null && child.signalCode === null) {
+  if (child && !hasExited(child)) {
     if (!(await waitForExit(child, 1_000))) {
       child.kill("SIGTERM");
       if (!(await waitForExit(child, 1_000))) child.kill("SIGKILL");
     }
   }
+  flow.child = null;
 
   if (flow.profileDir && isOwnedProfileDirectory(flow.profileDir)) {
     try {
@@ -566,6 +588,11 @@ async function cleanupFlow(flow: ActiveFlow): Promise<void> {
       // The OS temporary directory is the final containment boundary after cleanup retries.
     }
   }
+  flow.profileDir = null;
+}
+
+function hasExited(child: ChromeProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
 }
 
 function isOwnedProfileDirectory(profileDir: string): boolean {
@@ -574,8 +601,8 @@ function isOwnedProfileDirectory(profileDir: string): boolean {
   );
 }
 
-function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+function waitForExit(child: ChromeProcess, timeoutMs: number): Promise<boolean> {
+  if (hasExited(child)) return Promise.resolve(true);
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       child.off("exit", onExit);
@@ -583,9 +610,10 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
     }, timeoutMs);
     const onExit = () => {
       clearTimeout(timeout);
+      child.off("exit", onExit);
       resolve(true);
     };
-    child.once("exit", onExit);
+    child.on("exit", onExit);
   });
 }
 
@@ -636,10 +664,7 @@ function isIpAddress(hostname: string): boolean {
   return isIP(unwrapped) !== 0;
 }
 
-function errorResult(
-  code: Extract<ChromeAuthResult, { status: "error" }>["code"],
-  message: string,
-): ChromeAuthResult {
+function errorResult(code: ChromeAuthErrorCode, message: string): ChromeAuthResult {
   return { status: "error", code, message };
 }
 
@@ -647,13 +672,14 @@ function reportUnexpectedFailure(caught: unknown, flow: ActiveFlow, stage: strin
   if (
     flow.abortController.signal.aborted ||
     caught instanceof ChromeNotFoundError ||
-    caught instanceof ChromeClosedError
+    caught instanceof ChromeClosedError ||
+    caught instanceof ChromeAuthUserError
   ) {
     return;
   }
 
-  const errorType = caught instanceof Error ? caught.name : typeof caught;
-  console.error(`[electron] Chrome authentication failed while ${stage} (${errorType})`);
+  const description = caught instanceof Error ? `${caught.name}: ${caught.message}` : typeof caught;
+  console.error(`[electron] Chrome authentication failed while ${stage} (${description})`);
 }
 
 function mapFailure(caught: unknown, flow: ActiveFlow): ChromeAuthResult {
@@ -664,13 +690,22 @@ function mapFailure(caught: unknown, flow: ActiveFlow): ChromeAuthResult {
       `Google Chrome was not found. Install it, or set ${CHROME_PATH_ENV} to a Chrome or Chromium executable.`,
     );
   }
-  if (
-    caught instanceof ChromeClosedError ||
-    (flow.child && (flow.child.exitCode !== null || flow.child.signalCode !== null))
-  ) {
+  if (caught instanceof ChromeAuthUserError) return errorResult(caught.code, caught.message);
+  if (flow.launchFailed) return errorResult("launch-failed", "Chrome could not be launched.");
+  if (caught instanceof ChromeClosedError || (flow.child && hasExited(flow.child))) {
     return errorResult("chrome-closed", "Chrome closed before the session was imported.");
   }
   return errorResult("failed", "Chrome authentication failed. Please try again.");
+}
+
+/** A known condition with a message safe to show the user as is. */
+class ChromeAuthUserError extends Error {
+  constructor(
+    readonly code: ChromeAuthErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 class ChromeNotFoundError extends Error {}

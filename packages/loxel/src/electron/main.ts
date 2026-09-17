@@ -18,7 +18,6 @@ const UPDATES_DIR = path.join(os.homedir(), ".local", "state", "loxel", "loxel",
 
 let serverProcess: ChildProcess | null = null;
 let chromeAuthManager: ChromeAuthManager | null = null;
-let isQuittingAfterChromeCleanup = false;
 
 /** Whether this Electron process spawned the server (and should handle updates). */
 let isServerOwner = false;
@@ -807,10 +806,11 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
-  // Give an active private Chrome flow time to close and remove its temporary profile.
-  if (!isQuittingAfterChromeCleanup && chromeAuthManager?.isActive) {
+  // Give an active private Chrome flow time to close and remove its temporary
+  // profile. Once cancelActive() resolves the flow is gone, so the quit that
+  // follows passes straight through here.
+  if (chromeAuthManager?.isActive) {
     event.preventDefault();
-    isQuittingAfterChromeCleanup = true;
     void chromeAuthManager.cancelActive().finally(() => app.quit());
   }
 
