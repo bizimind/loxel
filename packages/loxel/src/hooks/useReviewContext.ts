@@ -7,7 +7,7 @@ import { useWorktreeUI } from "@/store/worktree-ui";
 
 /**
  * Computes the ReviewContext and default review name from the current diff source.
- * Used by CommentsPanel (header ReviewSelector).
+ * Used by CommentsPanel (header ReviewSelector) and DiffContent (placed-threads fetch).
  *
  * `parentHash` here is a best-effort label for naming a review, not the base a
  * diff is rendered against. It can be a symbolic ref, and the commit lookup can
