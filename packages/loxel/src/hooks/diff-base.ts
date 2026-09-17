@@ -13,7 +13,8 @@ import type { CommitInfo } from "@/api/git-models";
  * The branch's merge base is the newest commit the two sides share, which is
  * what a pull request compares against. A selection that stops short of the
  * bottom is a genuine sub-range, so the parent of its oldest commit is still
- * right there.
+ * right there. `branchCommits` is capped by the endpoint's limit, so on a
+ * branch longer than that a full selection falls back to the parent as well.
  */
 export function resolveDiffBase(
   oldest: CommitInfo,
