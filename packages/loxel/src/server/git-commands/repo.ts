@@ -23,11 +23,10 @@ export async function isBareRepo(cwd: string): Promise<boolean> {
  * which is useless as a base.
  */
 export async function resolveDefaultBranchRef(cwd: string): Promise<string | null> {
-  const originHead = await $`git -C ${cwd} symbolic-ref --short refs/remotes/origin/HEAD`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
-  if (originHead.trim()) return originHead.trim();
+  // A remote's HEAD is the forge's own answer. `origin` wins when several
+  // remotes have one; a fork-plus-upstream layout usually keeps them in sync.
+  const remoteHead = await resolveRemoteHead(cwd);
+  if (remoteHead) return remoteHead;
 
   // Some clones never get origin/HEAD (it is set at clone time and is easy to
   // lose), so fall back to the conventional names before giving up.
@@ -45,11 +44,39 @@ export async function resolveDefaultBranchRef(cwd: string): Promise<string | nul
     if (head.trim()) return head.trim();
   }
 
-  for (const candidate of ["main", "master"]) {
+  // A repository created locally with a custom init.defaultBranch has no
+  // remote to learn the name from, but the config still records it.
+  const configured = await $`git -C ${cwd} config --get init.defaultBranch`
+    .env(readOnlyGitEnv())
+    .nothrow()
+    .text();
+  const candidates = [configured.trim(), "main", "master"].filter((name) => name.length > 0);
+  for (const candidate of candidates) {
     if (await refExists(cwd, candidate)) return candidate;
   }
 
   return null;
+}
+
+/** The short ref a remote HEAD points at (`origin/main`), preferring `origin`. */
+async function resolveRemoteHead(cwd: string): Promise<string | null> {
+  const format = "%(refname) %(symref)";
+  const output = await $`git -C ${cwd} for-each-ref --format=${format} refs/remotes`
+    .env(readOnlyGitEnv())
+    .nothrow()
+    .text();
+  const heads = output
+    .trim()
+    .split("\n")
+    .map((line) => line.split(" "))
+    .filter(
+      (parts): parts is [string, string] =>
+        parts.length === 2 &&
+        /^refs\/remotes\/[^/]+\/HEAD$/.test(parts[0]!) &&
+        parts[1]!.startsWith("refs/remotes/"),
+    );
+  const chosen = heads.find(([ref]) => ref === "refs/remotes/origin/HEAD") ?? heads[0];
+  return chosen ? chosen[1].slice("refs/remotes/".length) : null;
 }
 
 async function refExists(cwd: string, ref: string): Promise<boolean> {

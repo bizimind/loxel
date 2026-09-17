@@ -24,6 +24,47 @@ describe("resolveDefaultBranchRef", () => {
     }
   });
 
+  test("uses another remote's HEAD when origin has none", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "A", { "a.txt": "a" });
+      await $`git -C ${repo.path} update-ref refs/remotes/upstream/trunk HEAD`.quiet();
+      await $`git -C ${repo.path} symbolic-ref refs/remotes/upstream/HEAD refs/remotes/upstream/trunk`.quiet();
+
+      expect(await resolveDefaultBranchRef(repo.path)).toBe("upstream/trunk");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("prefers origin's HEAD over another remote's", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "A", { "a.txt": "a" });
+      await $`git -C ${repo.path} update-ref refs/remotes/upstream/trunk HEAD`.quiet();
+      await $`git -C ${repo.path} symbolic-ref refs/remotes/upstream/HEAD refs/remotes/upstream/trunk`.quiet();
+      await $`git -C ${repo.path} update-ref refs/remotes/origin/main HEAD`.quiet();
+      await $`git -C ${repo.path} symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main`.quiet();
+
+      expect(await resolveDefaultBranchRef(repo.path)).toBe("origin/main");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("honours a local init.defaultBranch before the conventional names", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "A", { "a.txt": "a" });
+      await $`git -C ${repo.path} branch -m main trunk`.quiet();
+      await $`git -C ${repo.path} config init.defaultBranch trunk`.quiet();
+
+      expect(await resolveDefaultBranchRef(repo.path)).toBe("trunk");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
   test("falls back to origin/main when origin/HEAD is missing", async () => {
     const repo = await createRepo();
     try {
