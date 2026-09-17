@@ -257,7 +257,7 @@ wt add feature-auth -b existing-branch # check out an existing branch instead
 
 ### `wt view [name]`
 
-Show one worktree's branch, head, path, lock state, dirty file count and upstream divergence. Picks from a list when the name is omitted.
+Show one worktree's branch, head, path, lock state, dirty file count and upstream divergence. Picks from a list when the name is omitted. The dirty count includes changes inside initialized submodules and is `null` when the status cannot be read.
 
 ### `wt mv [old] <new>` (aliases: `rename`, `move`)
 
@@ -266,6 +266,8 @@ Rename a worktree and its branch, then run `rename.wt.sh`. See [Renaming](#renam
 ### `wt remove [name]` (aliases: `rm`, `delete`)
 
 Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with unmerged commits (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused.
+
+Clean worktrees with initialized submodules can be removed without `--force`. Changes inside submodules, nested ones included, are checked explicitly, even when `submodule.<name>.ignore=all` is configured; those removals still require `--force`, as does a submodule holding commits that no remote has, even one since deinitialized or removed from the tree, since a linked worktree's submodule objects live under its own git directory and are deleted with it.
 
 ```bash
 wt remove feature-auth                 # prompts about the branch when interactive
@@ -448,6 +450,7 @@ import {
   executeMove,
   planRemove,
   executeRemove,
+  forceReason,
 } from "@bizimind/wt/lib";
 
 const plan = await planAdd({ name: "feat/foo", repoPath });
@@ -463,12 +466,14 @@ const move = await planMove({ oldName: "feat/foo", name: "feat/bar", repoPath })
 const moved = await executeMove({ oldName: "feat/foo", name: "feat/bar", repoPath });
 
 const removal = await planRemove({ name: "feat/bar", repoPath });
-if (!removal.dirty) {
+// removal.dirty, or removal.localOnlySubmodules non-empty, means git (or wt on
+// its behalf) refuses without force; forceReason() phrases that for a prompt.
+if (!forceReason("feat/bar", removal)) {
   await executeRemove({ name: "feat/bar", repoPath, deleteBranch: true, force: false });
 }
 ```
 
-Also exported: `resolveWorktreesDir`, `listManagedWorktrees`, `currentManagedWorktree`, `getWorktreeName`, `detectRepoType`, `hasUncommittedChanges`, `getCurrentBranch`, `initBareRepo`, `transformToBare`, `ensureWorktreesDir`, the hook filename constants, and the `ProgressHandler` type.
+Also exported: `forceReason`, `lockedMessage`, `resolveWorktreesDir`, `listManagedWorktrees`, `currentManagedWorktree`, `getWorktreeName`, `detectRepoType`, `hasUncommittedChanges`, `getCurrentBranch`, `initBareRepo`, `transformToBare`, `ensureWorktreesDir`, the hook filename constants, and the `ProgressHandler` type.
 
 ---
 

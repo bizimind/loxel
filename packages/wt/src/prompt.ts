@@ -111,11 +111,8 @@ export function selectRemoveAction(name: string, branch: string | null): Promise
 }
 
 /** Confirm removing a worktree that has uncommitted or untracked changes. */
-export function confirmForceRemove(name: string): Promise<boolean> {
-  return confirm({
-    message: `Worktree '${name}' has uncommitted or untracked changes. Remove it anyway?`,
-    default: false,
-  });
+export function confirmForceRemove(reason: string): Promise<boolean> {
+  return confirm({ message: `${reason}. Remove it anyway?`, default: false });
 }
 
 /** Type-to-filter picker over worktree names. */

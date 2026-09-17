@@ -7,7 +7,7 @@ import {
   listWorktrees,
   resolveRepoRoot,
   upstreamDivergence,
-  worktreeChanges,
+  worktreeStatus,
 } from "../git/index.ts";
 import { runCommand } from "./aborted.ts";
 import { resolveWorktreeName } from "./select.ts";
@@ -24,8 +24,8 @@ export interface ViewResult {
   main: boolean;
   /** Whether the worktree is locked */
   locked: boolean;
-  /** Number of uncommitted or untracked files */
-  dirty: number;
+  /** Number of uncommitted or untracked files, or null when the status could not be read */
+  dirty: number | null;
   /** Commits ahead of upstream, or null when there is no upstream */
   ahead: number | null;
   /** Commits behind upstream, or null when there is no upstream */
@@ -34,7 +34,7 @@ export interface ViewResult {
 
 /** Show one worktree's details. */
 export async function viewCommand(name?: string, options: ViewOptions = {}): Promise<void> {
-  await runCommand<ViewResult>(options, async () => {
+  await runCommand<ViewResult>(options, async (ctx) => {
     const repoPath = process.cwd();
     const selected = await resolveWorktreeName(name, "view", repoPath);
 
@@ -45,10 +45,11 @@ export async function viewCommand(name?: string, options: ViewOptions = {}): Pro
       throw new Error(`Worktree '${selected}' not found.`);
     }
 
-    const [changes, divergence] = await Promise.all([
-      worktreeChanges(worktree.path),
+    const [status, divergence] = await Promise.all([
+      worktreeStatus(worktree.path),
       upstreamDivergence(worktree.path),
     ]);
+    if (!status.ok) ctx.warn(`Could not read the status of ${worktree.path}: ${status.reason}`);
 
     const result: ViewResult = {
       name: selected,
@@ -57,7 +58,7 @@ export async function viewCommand(name?: string, options: ViewOptions = {}): Pro
       head: worktree.head.slice(0, 12),
       main: worktree.path === root,
       locked: worktree.locked,
-      dirty: changes.length,
+      dirty: status.ok ? status.value.length : null,
       ahead: divergence?.ahead ?? null,
       behind: divergence?.behind ?? null,
     };
@@ -73,7 +74,7 @@ function formatViewResult(result: ViewResult): string {
     path: result.path,
     main: result.main ? "yes" : "no",
     locked: result.locked ? "yes" : "no",
-    dirty: `${result.dirty} change(s)`,
+    dirty: result.dirty === null ? "unknown" : `${result.dirty} change(s)`,
   };
   if (result.ahead !== null && result.behind !== null) {
     info.upstream = `+${result.ahead} / -${result.behind}`;

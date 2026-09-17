@@ -2,6 +2,7 @@ import { createResult } from "@bizimind/cli-common";
 
 import {
   executeRemove,
+  forceReason,
   lockedMessage,
   planRemove,
   type RemovePlan,
@@ -76,15 +77,14 @@ async function decideBranchDeletion(
   return action === "remove-with-branch";
 }
 
-/** A dirty worktree needs --force, or a confirmation when interactive. */
+/** A removal git would refuse needs --force, or a confirmation when interactive. */
 async function decideForce(plan: RemovePlan, options: RemoveOptions): Promise<boolean | "cancel"> {
   if (options.force) return true;
-  if (!plan.dirty) return false;
+  const reason = forceReason(plan.name, plan);
+  if (!reason) return false;
 
   if (!isTTY()) {
-    throw new Error(
-      `Worktree '${plan.name}' has uncommitted or untracked changes. Use --force to remove it.`,
-    );
+    throw new Error(`${reason}. Use --force to remove it.`);
   }
-  return (await confirmForceRemove(plan.name)) ? true : "cancel";
+  return (await confirmForceRemove(reason)) ? true : "cancel";
 }

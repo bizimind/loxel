@@ -1072,7 +1072,9 @@ function RemoveWorktreeDialog({
   const [force, setForce] = useState(false);
 
   const branch = plan.branch;
-  const blocked = plan.dirty && !force;
+  const localOnly = plan.localOnlySubmodules.length > 0;
+  const needsForce = plan.dirty || localOnly;
+  const blocked = needsForce && !force;
 
   return (
     <DialogShell open onCancel={onCancel} className="w-96">
@@ -1105,8 +1107,17 @@ function RemoveWorktreeDialog({
           </div>
         )}
 
+        {localOnly && (
+          <div className="border-warning/20 bg-warning/5 mt-3 rounded-md border p-2.5">
+            <p className="text-warning text-[11px] font-medium">
+              Submodule {plan.localOnlySubmodules.join(", ")} has commits no remote has. They will
+              be lost.
+            </p>
+          </div>
+        )}
+
         <div className="mt-3 flex flex-col gap-1.5">
-          {plan.dirty && (
+          {needsForce && (
             <label className="text-muted-foreground flex items-center gap-2 text-[11px]">
               <input
                 type="checkbox"

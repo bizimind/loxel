@@ -9,7 +9,7 @@ export { executeAdd, planAdd } from "./add.ts";
 export type { AddParams, AddPlan, AddResult, BranchConflict } from "./add.ts";
 export { executeMove, planMove } from "./move.ts";
 export type { BranchSkipReason, MoveParams, MovePlan, MoveResult, MoveTarget } from "./move.ts";
-export { executeRemove, lockedMessage, planRemove } from "./remove.ts";
+export { executeRemove, forceReason, lockedMessage, planRemove } from "./remove.ts";
 export type { RemoveParams, RemovePlan, RemoveResult } from "./remove.ts";
 export { currentManagedWorktree, listManagedWorktrees, resolveWorktreesDir } from "./worktrees.ts";
 export type { ManagedWorktree } from "./worktrees.ts";

@@ -1,15 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 
+import { executeAdd } from "../lib/index.ts";
 import { createTestDirectory, createTestRepo, type TestRepo } from "../test-repo.ts";
 import {
   findWorktree,
   getManagedWorktrees,
   getWorktreeName,
+  isWorktreeDirty,
   listWorktrees,
   parseWorktreeList,
   pathExists,
   resolveRepoRoot,
+  worktreeStatus,
   worktreesDir,
   type Worktree,
 } from "./worktree.ts";
@@ -214,5 +217,55 @@ describe("listWorktrees", () => {
     const worktrees = await listWorktrees(repo.root);
     expect(worktrees).toHaveLength(1);
     expect(worktrees[0]?.bare).toBe(true);
+  });
+});
+
+describe("worktreeStatus", () => {
+  let repo: TestRepo;
+
+  afterEach(() => repo.cleanup());
+
+  test("reports changes for a readable checkout", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "status", repoPath: repo.root });
+    await Bun.write(join(added.path, "new.txt"), "x");
+
+    const status = await worktreeStatus(added.path);
+    expect(status.ok).toBe(true);
+    if (status.ok) expect(status.value).toEqual(["?? new.txt"]);
+  });
+
+  test("reports no changes for a checkout that has disappeared", async () => {
+    repo = await createTestRepo({ bare: true });
+    expect(await worktreeStatus(join(repo.root, "..", "gone"))).toEqual({ ok: true, value: [] });
+  });
+
+  test("fails instead of reporting clean when git status cannot run", async () => {
+    repo = await createTestRepo({ bare: true });
+    const notRepo = join(repo.root, "..", "not-a-repository");
+    await Bun.write(join(notRepo, "work.txt"), "unsaved");
+
+    const status = await worktreeStatus(notRepo);
+    expect(status.ok).toBe(false);
+    if (!status.ok) expect(status.reason).toMatch(/not a git repository/i);
+  });
+});
+
+describe("isWorktreeDirty", () => {
+  let repo: TestRepo;
+
+  afterEach(() => repo.cleanup());
+
+  test("is false for a checkout that has disappeared", async () => {
+    repo = await createTestRepo({ bare: true });
+    expect(await isWorktreeDirty(join(repo.root, "..", "gone"))).toBe(false);
+  });
+
+  test("fails closed when the status is unreadable", async () => {
+    repo = await createTestRepo({ bare: true });
+    const notRepo = join(repo.root, "..", "not-a-repository");
+    await Bun.write(join(notRepo, "work.txt"), "unsaved");
+
+    expect(await isWorktreeDirty(notRepo)).toBe(true);
   });
 });
