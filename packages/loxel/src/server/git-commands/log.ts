@@ -53,7 +53,9 @@ export async function getLog(
  * `mergeBase` is null when there is nothing to compare against — a detached
  * HEAD, a repository with no recognizable default branch, or HEAD being the
  * default branch itself — and the commits are then the most recent ones, since
- * an empty panel is worse than a rough answer.
+ * an empty panel is worse than a rough answer. A branch that exists but has
+ * no commits of its own yet is different: it reports an empty list with its
+ * merge base, never the default branch's history under its own name.
  */
 export async function getBranchCommits(
   cwd: string,
@@ -96,11 +98,6 @@ export async function getBranchCommits(
   ];
   const result = await $`git -C ${cwd} ${args}`.env(readOnlyGitEnv()).nothrow().text();
   const commits = parseLogOutput(result.trim());
-
-  // HEAD sitting on the default branch has no commits of its own to show.
-  if (commits.length === 0) {
-    return { commits: await recentCommits(cwd, limit), mergeBase: null };
-  }
 
   return { commits, mergeBase };
 }

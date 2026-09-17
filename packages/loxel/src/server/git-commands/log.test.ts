@@ -273,6 +273,41 @@ describe("getBranchCommits — base is the default branch, not 'unique to this b
     }
   });
 
+  test("a branch with no commits of its own yet reports an empty list", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "A", { "a.txt": "a" });
+      await commit(repo.path, "B", { "b.txt": "b" });
+      await Bun.$`git -C ${repo.path} checkout -q -b fresh`.quiet();
+
+      // The old code returned [] here too; showing main's history under the
+      // branch's name would be a regression.
+      const { commits, mergeBase } = await getBranchCommits(repo.path);
+      expect(commits).toEqual([]);
+      expect(mergeBase).toBe(
+        (await Bun.$`git -C ${repo.path} rev-parse main`.quiet().text()).trim(),
+      );
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("unrelated histories fall back to recent commits", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "A", { "a.txt": "a" });
+      await Bun.$`git -C ${repo.path} checkout -q --orphan orphan`.quiet();
+      await Bun.$`git -C ${repo.path} rm -rfq .`.quiet();
+      await commit(repo.path, "O1", { "o.txt": "o" });
+
+      const { commits, mergeBase } = await getBranchCommits(repo.path);
+      expect(mergeBase).toBeNull();
+      expect(commits.map((c) => c.message)).toEqual(["O1"]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
   test("on the default branch itself, falls back to recent commits", async () => {
     const repo = await createRepo();
     try {

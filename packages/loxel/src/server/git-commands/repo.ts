@@ -34,10 +34,17 @@ export async function resolveDefaultBranchRef(cwd: string): Promise<string | nul
     if (await refExists(cwd, candidate)) return candidate;
   }
 
-  // A bare repository's own HEAD *is* the default branch. In a worktree it is
-  // merely the checked-out branch, so this only applies when bare.
-  if (await isBareRepo(cwd)) {
-    const head = await $`git -C ${cwd} symbolic-ref --short HEAD`
+  // A bare repository's own HEAD *is* the default branch, and it is shared by
+  // every linked worktree through the common git dir. A worktree's own HEAD
+  // is merely the checked-out branch, so this only applies when the
+  // repository itself is bare (core.bare is inherited by linked worktrees,
+  // where --is-bare-repository would say false).
+  if (await isBareRepositoryConfig(cwd)) {
+    const commonDir = await $`git -C ${cwd} rev-parse --path-format=absolute --git-common-dir`
+      .env(readOnlyGitEnv())
+      .nothrow()
+      .text();
+    const head = await $`git -C ${commonDir.trim()} symbolic-ref --short HEAD`
       .env(readOnlyGitEnv())
       .nothrow()
       .text();
@@ -77,6 +84,14 @@ async function resolveRemoteHead(cwd: string): Promise<string | null> {
     );
   const chosen = heads.find(([ref]) => ref === "refs/remotes/origin/HEAD") ?? heads[0];
   return chosen ? chosen[1].slice("refs/remotes/".length) : null;
+}
+
+async function isBareRepositoryConfig(cwd: string): Promise<boolean> {
+  const result = await $`git -C ${cwd} config --get core.bare`
+    .env(readOnlyGitEnv())
+    .nothrow()
+    .text();
+  return result.trim() === "true";
 }
 
 async function refExists(cwd: string, ref: string): Promise<boolean> {

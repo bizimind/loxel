@@ -56,11 +56,31 @@ describe("resolveDefaultBranchRef", () => {
     const repo = await createRepo();
     try {
       await commit(repo.path, "A", { "a.txt": "a" });
-      await $`git -C ${repo.path} branch -m main trunk`.quiet();
+      // `main` still exists; the configured name must win over it.
+      await $`git -C ${repo.path} branch trunk`.quiet();
       await $`git -C ${repo.path} config init.defaultBranch trunk`.quiet();
 
       expect(await resolveDefaultBranchRef(repo.path)).toBe("trunk");
     } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("resolves a bare repository's HEAD from one of its linked worktrees", async () => {
+    const repo = await createBareRepo();
+    const worktree = `${repo.path}-wt`;
+    try {
+      await $`git -C ${repo.path} symbolic-ref HEAD refs/heads/develop`.quiet();
+      await $`git -C ${repo.path} worktree add --orphan -b develop ${worktree}`.quiet();
+      await $`git -C ${worktree} config user.email "test@loxel.dev"`.quiet();
+      await $`git -C ${worktree} config user.name "Test"`.quiet();
+      await commit(worktree, "A", { "a.txt": "a" });
+      await $`git -C ${worktree} checkout -q -b topic`.quiet();
+
+      // From the worktree, --is-bare-repository is false; core.bare still says true.
+      expect(await resolveDefaultBranchRef(worktree)).toBe("develop");
+    } finally {
+      await $`git -C ${repo.path} worktree remove --force ${worktree}`.quiet().nothrow();
       await repo.cleanup();
     }
   });
