@@ -111,11 +111,37 @@ describe("resolveDefaultBranchRef", () => {
 
   test("uses a bare repository's own HEAD", async () => {
     const repo = await createBareRepo();
+    const worktree = `${repo.path}-wt`;
     try {
       // A bare repo's HEAD is the default branch, unlike a worktree's.
       await $`git -C ${repo.path} symbolic-ref HEAD refs/heads/trunk`.quiet();
+      await $`git -C ${repo.path} worktree add --orphan -b trunk ${worktree}`.quiet();
+      await $`git -C ${worktree} config user.email "test@loxel.dev"`.quiet();
+      await $`git -C ${worktree} config user.name "Test"`.quiet();
+      await commit(worktree, "A", { "a.txt": "a" });
       expect(await resolveDefaultBranchRef(repo.path)).toBe("trunk");
     } finally {
+      await $`git -C ${repo.path} worktree remove --force ${worktree}`.quiet().nothrow();
+      await repo.cleanup();
+    }
+  });
+
+  test("skips a bare repository's dangling HEAD and falls through to main", async () => {
+    // `git init --bare` leaves HEAD -> master; pushing main never moves it.
+    const repo = await createBareRepo();
+    const worktree = `${repo.path}-wt`;
+    try {
+      await $`git -C ${repo.path} symbolic-ref HEAD refs/heads/master`.quiet();
+      await $`git -C ${repo.path} worktree add --orphan -b main ${worktree}`.quiet();
+      await $`git -C ${worktree} config user.email "test@loxel.dev"`.quiet();
+      await $`git -C ${worktree} config user.name "Test"`.quiet();
+      await commit(worktree, "A", { "a.txt": "a" });
+      await $`git -C ${worktree} checkout -q -b topic`.quiet();
+
+      expect(await resolveDefaultBranchRef(worktree)).toBe("main");
+      expect(await resolveDefaultBranchRef(repo.path)).toBe("main");
+    } finally {
+      await $`git -C ${repo.path} worktree remove --force ${worktree}`.quiet().nothrow();
       await repo.cleanup();
     }
   });

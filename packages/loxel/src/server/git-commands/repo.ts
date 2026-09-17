@@ -49,7 +49,11 @@ export async function resolveDefaultBranchRef(cwd: string): Promise<string | nul
       .env(readOnlyGitEnv())
       .nothrow()
       .text();
-    if (head.trim()) return head.trim();
+    // HEAD is set once at creation and never rewritten, so it dangles after
+    // `init --bare` followed by a push of `main`, or a `master` -> `main`
+    // rename upstream. Only a branch that exists can be a base.
+    const bareHead = head.trim();
+    if (bareHead && (await refExists(cwd, bareHead))) return bareHead;
   }
 
   // A repository created locally with a custom init.defaultBranch has no
