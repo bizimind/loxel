@@ -15,6 +15,21 @@ export interface CommitInfo {
   uncommitted?: UncommittedInfo;
 }
 
+/**
+ * The commits a branch adds on top of the default branch, newest first.
+ *
+ * `mergeBase` is null when there is nothing to compare against (detached HEAD,
+ * no recognizable default branch, or HEAD is the default branch), in which
+ * case `commits` are simply recent ones. `truncated` is true when the branch
+ * has more commits than were returned, so the last entry is not the bottom of
+ * the branch.
+ */
+export interface BranchCommits {
+  commits: CommitInfo[];
+  mergeBase: string | null;
+  truncated: boolean;
+}
+
 /** A git reference (branch, tag, HEAD) */
 export interface RefInfo {
   name: string;

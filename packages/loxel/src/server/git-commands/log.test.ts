@@ -154,7 +154,11 @@ describe("getBranchCommits", () => {
     try {
       await commit(repo.path, "first", { "a.txt": "a" });
       await Bun.$`git -C ${repo.path} switch --orphan fresh`.quiet();
-      expect(await getBranchCommits(repo.path)).toEqual({ commits: [], mergeBase: null });
+      expect(await getBranchCommits(repo.path)).toEqual({
+        commits: [],
+        mergeBase: null,
+        truncated: false,
+      });
     } finally {
       await repo.cleanup();
     }
@@ -163,7 +167,32 @@ describe("getBranchCommits", () => {
   test("repository with no commits at all returns an empty list", async () => {
     const repo = await createRepo();
     try {
-      expect(await getBranchCommits(repo.path)).toEqual({ commits: [], mergeBase: null });
+      expect(await getBranchCommits(repo.path)).toEqual({
+        commits: [],
+        mergeBase: null,
+        truncated: false,
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("reports truncation when the branch is longer than the limit", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "base", { "a.txt": "a" });
+      await branch(repo.path, "long");
+      await commit(repo.path, "one", { "1.txt": "1" });
+      await commit(repo.path, "two", { "2.txt": "2" });
+      await commit(repo.path, "three", { "3.txt": "3" });
+
+      const truncated = await getBranchCommits(repo.path, { limit: 2 });
+      expect(truncated.commits.map((c) => c.message)).toEqual(["three", "two"]);
+      expect(truncated.truncated).toBe(true);
+
+      const complete = await getBranchCommits(repo.path, { limit: 3 });
+      expect(complete.commits).toHaveLength(3);
+      expect(complete.truncated).toBe(false);
     } finally {
       await repo.cleanup();
     }

@@ -49,14 +49,14 @@ export function useDiffSource(): void {
       const oldest = lookup.oldest(realHashes);
 
       if (oldest) {
-        const base = resolveDiffBase(oldest, branchData?.commits ?? [], branchData?.mergeBase);
+        const base = resolveDiffBase({ oldest, newest: null }, branchData);
         setDiffSource({ type: "uncommitted", worktree, base: base ?? oldest.hash });
       }
     } else {
       const newest = lookup.newest(hashes);
       const oldest = lookup.oldest(hashes);
       if (newest && oldest) {
-        const base = resolveDiffBase(oldest, branchData?.commits ?? [], branchData?.mergeBase);
+        const base = resolveDiffBase({ oldest, newest }, branchData);
         setDiffSource({ type: "range", range: `${base ?? ""}..${newest.hash}` });
       }
     }

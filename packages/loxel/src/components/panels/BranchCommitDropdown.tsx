@@ -157,7 +157,8 @@ export function BranchCommitDropdown() {
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 pl-1">
             <span className="truncate text-xs">All branch changes</span>
             <span className="text-muted-foreground text-[10px]">
-              {branchCommits.length} commit{branchCommits.length !== 1 ? "s" : ""}
+              {branchCommits.length}
+              {branchData?.truncated ? "+" : ""} commit{branchCommits.length !== 1 ? "s" : ""}
               {hasLocalChanges ? " and local changes" : ""}
             </span>
           </div>
