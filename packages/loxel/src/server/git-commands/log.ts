@@ -1,6 +1,6 @@
 import { $ } from "bun";
 
-import type { CommitInfo } from "@/api/git-models";
+import type { BranchCommits, CommitInfo } from "@/api/git-models";
 
 import { LOG_FORMAT, parseLogOutput } from "../parsers/log";
 import { resolveCommit, resolveMergeBase } from "./diff";
@@ -57,17 +57,22 @@ export async function getLog(
  * an empty panel is worse than a rough answer. A branch that exists but has
  * no commits of its own yet is different: it reports an empty list with its
  * merge base, never the default branch's history under its own name.
+ *
+ * `truncated` tells the caller the list stops short of the merge base, so the
+ * last commit cannot be taken for the bottom of the branch.
  */
 export async function getBranchCommits(
   cwd: string,
   options: { limit?: number } = {},
-): Promise<{ commits: CommitInfo[]; mergeBase: string | null }> {
+): Promise<BranchCommits> {
   const { limit = 100 } = options;
 
   // An unborn branch (`switch --orphan`, a fresh linked worktree) has a name
   // but no commit, and `git log` refuses it outright rather than printing
   // nothing. That is an empty branch, not an error.
-  if ((await resolveCommit(cwd, "HEAD")) === null) return { commits: [], mergeBase: null };
+  if ((await resolveCommit(cwd, "HEAD")) === null) {
+    return { commits: [], mergeBase: null, truncated: false };
+  }
 
   const branchResult = await $`git -C ${cwd} symbolic-ref --short HEAD`
     .env(readOnlyGitEnv())
@@ -76,32 +81,35 @@ export async function getBranchCommits(
   const currentBranch = branchResult.trim();
   if (!currentBranch) {
     const commits = await getLog(cwd, { limit: 1 });
-    return { commits, mergeBase: null };
+    return { commits, mergeBase: null, truncated: false };
   }
 
   const defaultRef = await resolveDefaultBranchRef(cwd);
   if (!defaultRef || defaultRef === currentBranch || defaultRef.endsWith(`/${currentBranch}`)) {
-    return { commits: await recentCommits(cwd, limit), mergeBase: null };
+    return { commits: await recentCommits(cwd, limit), mergeBase: null, truncated: false };
   }
 
   const mergeBase = await resolveMergeBase(cwd, defaultRef, "HEAD");
   if (!mergeBase) {
     // Unrelated histories, or the default ref is gone since we resolved it.
-    return { commits: await recentCommits(cwd, limit), mergeBase: null };
+    return { commits: await recentCommits(cwd, limit), mergeBase: null, truncated: false };
   }
 
+  // Ask for one more than the limit: that is the cheapest way to learn whether
+  // the branch continues past what we return.
   const args = [
     "log",
     `--format=${LOG_FORMAT}`,
     "-n",
-    String(limit),
+    String(limit + 1),
     "--topo-order",
     `${mergeBase}..HEAD`,
   ];
   const result = await $`git -C ${cwd} ${args}`.env(readOnlyGitEnv()).nothrow().text();
   const commits = parseLogOutput(result.trim());
+  const truncated = commits.length > limit;
 
-  return { commits, mergeBase };
+  return { commits: truncated ? commits.slice(0, limit) : commits, mergeBase, truncated };
 }
 
 function recentCommits(cwd: string, limit: number): Promise<CommitInfo[]> {

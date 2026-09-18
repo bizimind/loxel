@@ -3,6 +3,7 @@ import type { FormattingSettings } from "@/lib/formatting-model";
 import type { TypeScriptDiagnostic } from "./diagnostics-model";
 import type { DiffInfo } from "./diff-model";
 import type {
+  BranchCommits,
   BranchInfo,
   CommitInfo,
   GraphData,
@@ -129,9 +130,7 @@ export async function getGraph(wt: string, options?: LogQueryOptions) {
 
 export async function getBranchCommits(wt: string, options?: { limit?: number }) {
   const limitParam = options?.limit ? `?limit=${options.limit}` : "";
-  return fetchJson<{ commits: CommitInfo[]; mergeBase: string | null }>(
-    withScope(`/branch-commits${limitParam}`, { wt }),
-  );
+  return fetchJson<BranchCommits>(withScope(`/branch-commits${limitParam}`, { wt }));
 }
 
 export async function getStatus(wt: string) {

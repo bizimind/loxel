@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 
 import { UNCOMMITTED_PREFIX, isUncommittedHash } from "@/api/git-models";
+import { resolveDiffBase } from "@/hooks/diff-base";
 import { useCommitLookup } from "@/hooks/useCommitLookup";
+import { useBranchCommitsQuery } from "@/queries/use-repo-queries";
 import { useRepositoryStore } from "@/store/worktree-repository";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -18,6 +20,7 @@ export function useDiffSource(): void {
   const selectedCommits = useRepositoryStore((s) => s.selectedCommits);
   const setDiffSource = useRepositoryStore((s) => s.setDiffSource);
   const lookup = useCommitLookup();
+  const { data: branchData } = useBranchCommitsQuery();
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
 
   // Auto-select the uncommitted entry when nothing is selected (default state)
@@ -46,16 +49,16 @@ export function useDiffSource(): void {
       const oldest = lookup.oldest(realHashes);
 
       if (oldest) {
-        const base = oldest.parents[0];
+        const base = resolveDiffBase({ oldest, newest: null }, branchData);
         setDiffSource({ type: "uncommitted", worktree, base: base ?? oldest.hash });
       }
     } else {
       const newest = lookup.newest(hashes);
       const oldest = lookup.oldest(hashes);
       if (newest && oldest) {
-        const base = oldest.parents[0];
+        const base = resolveDiffBase({ oldest, newest }, branchData);
         setDiffSource({ type: "range", range: `${base ?? ""}..${newest.hash}` });
       }
     }
-  }, [selectedCommits, lookup, setDiffSource, selectCommit, activeWorktreePath]);
+  }, [selectedCommits, lookup, branchData, setDiffSource, selectCommit, activeWorktreePath]);
 }
