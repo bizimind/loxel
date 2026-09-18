@@ -104,7 +104,7 @@ All per-file TS/JS language features are delivered by the official TypeScript 7 
 Full git client via context menus and inline forms:
 
 - **Commit graph** — interactive DAG with branch/tag labels, multi-select, search with filters (branch, author, date range, file paths), and an "uncommitted changes" virtual row
-- **Changes panel** — defaults to showing local changes (staged + unstaged + untracked) when no commits are selected. Includes a branch commit dropdown for selecting commits unique to the current branch, with multi-select, "All branch changes" shortcut, and bidirectional sync with the Git graph
+- **Changes panel** — defaults to showing local changes (staged + unstaged + untracked) when no commits are selected. Includes a branch commit dropdown for selecting the commits this branch adds on top of the repository's default branch (`merge-base(default, HEAD)..HEAD` — the same range a pull request shows, so a branch stacked on another reports its whole range), with multi-select, "All branch changes" shortcut, and bidirectional sync with the Git graph
 - **Staging** — file-level and hunk-level staging, unstaging, discard
 - **Commits** — create, cherry-pick, revert (single and multi-select)
 - **Branches** — create, delete, rename, checkout, favorites, upstream tracking (ahead/behind)
