@@ -4,8 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { Menu, app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { Menu, app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 
+import { ChromeAuthManager, type ChromeAuthResult } from "./chrome-auth";
 import { loadOrCreateDek } from "./dek";
 import { IS_DEV } from "./env";
 const SERVER_PORT = IS_DEV ? 7434 : 7433;
@@ -16,6 +17,7 @@ const EXTERNAL_RESOURCES = path.join(os.homedir(), ".local", "share", "loxel", "
 const UPDATES_DIR = path.join(os.homedir(), ".local", "state", "loxel", "loxel", "updates");
 
 let serverProcess: ChildProcess | null = null;
+let chromeAuthManager: ChromeAuthManager | null = null;
 
 /** Whether this Electron process spawned the server (and should handle updates). */
 let isServerOwner = false;
@@ -24,6 +26,7 @@ let isServerOwner = false;
 let metaKeyHeld = false;
 
 import {
+  AUTHENTICATE_IN_CHROME,
   OPEN_FOLDER_DIALOG,
   OPEN_IN_BROWSER_TAB,
   SET_DOCK_BADGE,
@@ -120,7 +123,7 @@ function startServer(options: { dekBase64: string }): void {
 
     // Exit code 42 signals an update is ready to install
     if (code === 42 && !IS_DEV) {
-      handlePendingUpdateSync();
+      void handlePendingUpdate();
       return;
     }
 
@@ -161,6 +164,20 @@ function isLocal(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function chromeAuthError(message: string): ChromeAuthResult {
+  return { status: "error", code: "failed", message };
+}
+
+function getChromeAuthManager(): ChromeAuthManager {
+  if (chromeAuthManager) return chromeAuthManager;
+  const cookies = session.fromPartition("persist:browser").cookies;
+  chromeAuthManager = new ChromeAuthManager({
+    set: (details) => cookies.set(details),
+    flushStore: () => cookies.flushStore(),
+  });
+  return chromeAuthManager;
 }
 
 /**
@@ -341,9 +358,9 @@ function sha256File(filePath: string): string {
 
 /**
  * Apply a pending update after the server exits with code 42.
- * All operations are synchronous to avoid race conditions with Electron lifecycle events.
+ * File operations stay synchronous to avoid races; Chrome cleanup is awaited before relaunch.
  */
-function handlePendingUpdateSync(): void {
+async function handlePendingUpdate(): Promise<void> {
   const pendingPath = path.join(UPDATES_DIR, "pending.json");
   const backupDir = path.join(UPDATES_DIR, "backup");
 
@@ -419,6 +436,7 @@ function handlePendingUpdateSync(): void {
     }
 
     console.log(`[electron] Update v${pending.version} installed, relaunching...`);
+    await chromeAuthManager?.cancelActive();
     app.relaunch();
     app.exit(0);
   } catch (err) {
@@ -610,8 +628,8 @@ async function ensureServer(): Promise<void> {
   if (!IS_DEV) {
     const pendingPath = path.join(UPDATES_DIR, "pending.json");
     if (fs.existsSync(pendingPath)) {
-      handlePendingUpdateSync();
-      // handlePendingUpdateSync may relaunch the app — if it didn't,
+      await handlePendingUpdate();
+      // handlePendingUpdate may relaunch the app — if it didn't,
       // the update either failed or there was no archive, so continue to spawn.
     }
   }
@@ -654,6 +672,71 @@ ipcMain.handle(OPEN_FOLDER_DIALOG, async (event) => {
     title: "Select Project Folder",
   });
   return result.canceled ? null : (result.filePaths[0] ?? null);
+});
+
+// Authenticate in an isolated Chrome profile and import scoped cookies into browser tabs.
+ipcMain.handle(AUTHENTICATE_IN_CHROME, async (event, targetUrl: unknown) => {
+  const frame = event.senderFrame;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (
+    typeof targetUrl !== "string" ||
+    !win ||
+    win.isDestroyed() ||
+    !frame ||
+    frame.isDestroyed() ||
+    frame !== event.sender.mainFrame ||
+    !isLocal(frame.url)
+  ) {
+    return chromeAuthError("Chrome authentication is unavailable for this page.");
+  }
+
+  const ownerAbort = new AbortController();
+  const abortForClosedWindow = () => ownerAbort.abort();
+  win.once("closed", abortForClosedWindow);
+
+  try {
+    return await getChromeAuthManager().authenticate(
+      targetUrl,
+      {
+        confirmImport: async (originalOrigin) => {
+          if (win.isDestroyed()) return false;
+          const { response } = await dialog.showMessageBox(win, {
+            type: "info",
+            title: "Authenticate in Chrome",
+            message: "Finish signing in with Google Chrome",
+            detail:
+              `A private Chrome window opened for ${originalOrigin}. Complete sign-in there, ` +
+              "navigate to the site you want to use in Loxel, then return here to import its cookies. " +
+              "This does not read your normal Chrome profile.",
+            buttons: ["Import cookies and reload", "Cancel"],
+            defaultId: 0,
+            cancelId: 1,
+            noLink: true,
+          });
+          return response === 0;
+        },
+        confirmOriginChange: async (originalOrigin, finalOrigin) => {
+          if (win.isDestroyed()) return false;
+          const { response } = await dialog.showMessageBox(win, {
+            type: "warning",
+            title: "Confirm Cookie Import",
+            message: "The Chrome tab finished on a different site",
+            detail:
+              `Chrome started at ${originalOrigin} and is now at ${finalOrigin}. ` +
+              "Import cookies that apply to these sites into Loxel?",
+            buttons: ["Import cookies", "Cancel"],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+          });
+          return response === 0;
+        },
+      },
+      ownerAbort.signal,
+    );
+  } finally {
+    win.removeListener("closed", abortForClosedWindow);
+  }
 });
 
 // macOS: show notification count on dock icon
@@ -722,7 +805,15 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  // Give an active private Chrome flow time to close and remove its temporary
+  // profile. Once cancelActive() resolves the flow is gone, so the quit that
+  // follows passes straight through here.
+  if (chromeAuthManager?.isActive) {
+    event.preventDefault();
+    void chromeAuthManager.cancelActive().finally(() => app.quit());
+  }
+
   // Server self-terminates via idle shutdown when all clients disconnect.
   // Don't kill it here — other Electron windows may still be connected.
 });

@@ -6,6 +6,7 @@ const OPEN_IN_BROWSER_TAB = "open-in-browser-tab";
 const SET_DOCK_BADGE = "set-dock-badge";
 const WINDOW_FOCUS_CHANGE = "window:focus-change";
 const OPEN_FOLDER_DIALOG = "dialog:open-folder";
+const AUTHENTICATE_IN_CHROME = "browser:authenticate-in-chrome";
 
 // Per-window identity assigned by main when this BrowserWindow was created.
 // Stable across renderer reloads (Cmd+R) — different per BrowserWindow.
@@ -31,4 +32,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(WINDOW_FOCUS_CHANGE, handler);
   },
   openFolderDialog: () => ipcRenderer.invoke(OPEN_FOLDER_DIALOG),
+  supportsChromeAuthentication: process.platform === "darwin" || process.platform === "linux",
+  authenticateInChrome: (url) => ipcRenderer.invoke(AUTHENTICATE_IN_CHROME, url),
 });
