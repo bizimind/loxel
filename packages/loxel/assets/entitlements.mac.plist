@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- Hardened-runtime entitlements Electron needs (electron-builder's defaults). -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!--
+      Passkeys: the keychain access group Chromium's Touch ID authenticator stores
+      WebAuthn credentials under (see src/electron/webauthn.ts). A restricted
+      entitlement — the build must embed a Developer ID provisioning profile that
+      grants it, or macOS refuses to launch the app.
+    -->
+    <key>keychain-access-groups</key>
+    <array>
+      <string>JJ88G244AR.com.bizimind.loxel.webauthn</string>
+    </array>
+  </dict>
+</plist>

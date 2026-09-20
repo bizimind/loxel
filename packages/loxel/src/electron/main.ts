@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { Menu, app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { Menu, app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 
 import { loadOrCreateDek } from "./dek";
 import { IS_DEV } from "./env";
@@ -30,6 +30,10 @@ import {
   WINDOW_FOCUS_CHANGE,
 } from "./ipc-channels";
 import { startMainProcessMonitor } from "./main-perf-monitor";
+import { configurePasskeys, installAccountChooser } from "./webauthn";
+
+/** Session shared by every browser panel `<webview partition="persist:browser">`. */
+const BROWSER_PARTITION = "persist:browser";
 
 /** Send a URL to the focused window's renderer to open in a browser panel tab. */
 function openInBrowserTab(url: string): void {
@@ -686,9 +690,36 @@ function startServerHealthCheck(): void {
   }, 5000);
 }
 
+// Must run before `ready`; a no-op unless this is a provisioned macOS build.
+const passkeysEnabled = configurePasskeys({
+  platform: process.platform,
+  isPackaged: app.isPackaged,
+  appPath: app.getAppPath(),
+  configureWebAuthn: (options) => app.configureWebAuthn(options),
+});
+
+/** Ask which passkey to use when a site matches several. */
+async function promptForAccount(relyingPartyId: string, labels: string[]): Promise<number | null> {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const options: Electron.MessageBoxOptions = {
+    type: "question",
+    title: "Choose a passkey",
+    message: `Which account do you want to use for ${relyingPartyId}?`,
+    buttons: [...labels, "Cancel"],
+    cancelId: labels.length,
+  };
+  const { response } = win
+    ? await dialog.showMessageBox(win, options)
+    : await dialog.showMessageBox(options);
+  return response < labels.length ? response : null;
+}
+
 app.whenReady().then(async () => {
   try {
     await ensureServer();
+
+    if (passkeysEnabled) console.log("[electron] Passkeys enabled for browser panels");
+    installAccountChooser(session.fromPartition(BROWSER_PARTITION), promptForAccount);
 
     buildAppMenu();
     await createWindow();

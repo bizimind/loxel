@@ -282,11 +282,26 @@ jobs:
         env:
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY }}
 
+      # The keychain-access-groups entitlement (passkeys) is only honoured when a
+      # Developer ID provisioning profile granting it is embedded in the bundle;
+      # without one macOS refuses to launch the app, so fail here instead.
+      - name: Decode provisioning profile
+        run: |
+          if [ -z "$LOXEL_PROVISIONING_PROFILE_BASE64" ]; then
+            echo "LOXEL_PROVISIONING_PROFILE secret is not set" >&2
+            exit 1
+          fi
+          echo "$LOXEL_PROVISIONING_PROFILE_BASE64" | base64 --decode > /tmp/loxel.provisionprofile
+          security cms -D -i /tmp/loxel.provisionprofile > /dev/null
+        env:
+          LOXEL_PROVISIONING_PROFILE_BASE64: ${{ secrets.LOXEL_PROVISIONING_PROFILE }}
+
       - name: Build Electron app
         run: |
           cd packages/loxel
           ELECTRON=1 pnpm exec vite build
-          pnpm exec electron-builder --mac --${{ matrix.arch }}
+          pnpm exec electron-builder --mac --${{ matrix.arch }} \
+            --config.mac.provisioningProfile=/tmp/loxel.provisionprofile
         env:
           CSC_LINK: ${{ secrets.LOXEL_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.LOXEL_CERTIFICATE_PWD }}
