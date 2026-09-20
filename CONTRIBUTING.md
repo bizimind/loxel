@@ -48,7 +48,7 @@ To create or renew the profile:
 2. Under **Profiles**, create a **Developer ID Application** profile (not Development or App Store) for that App ID and the release certificate, then download it.
 3. Check it with `security cms -D -i Loxel.provisionprofile` and confirm `application-identifier` and `keychain-access-groups` are present.
 4. Store it as the repository secret: `base64 -i Loxel.provisionprofile | pbcopy`, then paste into `LOXEL_PROVISIONING_PROFILE`.
-5. For a passkey-capable local build, copy the file to `packages/loxel/build/embedded.provisionprofile` and run `pnpm -C packages/loxel run build:app:local`. Without it, that script signs with `assets/entitlements.mac.unprovisioned.plist` so the app still launches, with passkeys disabled.
+5. For a passkey-capable local build, copy the file to `packages/loxel/build/embedded.provisionprofile` and run `pnpm -C packages/loxel run build:app:local` (or `build:app` for DMG/zip). Without it, `scripts/build-app.ts` signs with `assets/entitlements.mac.unprovisioned.plist` so the app still launches, with passkeys disabled.
 
 Developer ID profiles expire; renew before the date shown in the portal or the next release build fails at the profile check.
 

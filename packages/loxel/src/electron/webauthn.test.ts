@@ -56,25 +56,30 @@ describe("configurePasskeys", () => {
   });
 
   test("configures nothing off macOS, in dev, or without a provisioning profile", () => {
-    // A bundle of our own, so an installed Loxel's profile cannot leak in.
-    const bundle = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "loxel-"));
+    // Bundles of our own, so an installed Loxel's profile cannot leak in.
+    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "loxel-"));
     try {
-      const unprovisioned = path.join(bundle, "Contents", "Resources", "app.asar");
-      fs.mkdirSync(path.dirname(unprovisioned), { recursive: true });
+      const provisioned = path.join(root, "provisioned", "Contents");
+      fs.mkdirSync(path.join(provisioned, "Resources"), { recursive: true });
+      fs.writeFileSync(path.join(provisioned, "embedded.provisionprofile"), "");
+      const unprovisioned = path.join(root, "unprovisioned", "Contents");
+      fs.mkdirSync(path.join(unprovisioned, "Resources"), { recursive: true });
+
       const calls: unknown[] = [];
       const configureWebAuthn = (options: unknown) => calls.push(options);
-      for (const host of [
-        { platform: "linux" as const, isPackaged: true },
-        { platform: "darwin" as const, isPackaged: false },
-        { platform: "darwin" as const, isPackaged: true },
-      ]) {
-        expect(configurePasskeys({ ...host, appPath: unprovisioned, configureWebAuthn })).toBe(
-          false,
-        );
+      // The first two have a profile, so only the platform / packaged guard can reject them.
+      const hosts = [
+        { platform: "linux" as const, isPackaged: true, contents: provisioned },
+        { platform: "darwin" as const, isPackaged: false, contents: provisioned },
+        { platform: "darwin" as const, isPackaged: true, contents: unprovisioned },
+      ];
+      for (const { contents, ...host } of hosts) {
+        const appPath = path.join(contents, "Resources", "app.asar");
+        expect(configurePasskeys({ ...host, appPath, configureWebAuthn })).toBe(false);
       }
       expect(calls).toEqual([]);
     } finally {
-      fs.rmSync(bundle, { recursive: true, force: true });
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 

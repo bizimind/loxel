@@ -292,8 +292,8 @@ jobs:
             exit 1
           fi
           echo "$LOXEL_PROVISIONING_PROFILE_BASE64" | base64 --decode > /tmp/loxel.provisionprofile
-          APP_ID=$(security cms -D -i /tmp/loxel.provisionprofile \
-            | plutil -extract Entitlements.com.apple.application-identifier raw -o - -)
+          security cms -D -i /tmp/loxel.provisionprofile -o /tmp/loxel.profile.plist
+          APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' /tmp/loxel.profile.plist)
           if [ "$APP_ID" != "JJ88G244AR.com.bizimind.loxel" ]; then
             echo "Provisioning profile is for '$APP_ID', expected JJ88G244AR.com.bizimind.loxel" >&2
             exit 1
