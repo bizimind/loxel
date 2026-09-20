@@ -298,6 +298,13 @@ jobs:
             echo "Provisioning profile is for '$APP_ID', expected JJ88G244AR.com.bizimind.loxel" >&2
             exit 1
           fi
+          # Only present when Keychain Sharing was enabled on the App ID before the
+          # profile was generated; the app carries the entitlement either way.
+          if ! /usr/libexec/PlistBuddy -c 'Print :Entitlements:keychain-access-groups' /tmp/loxel.profile.plist \
+            | grep -q 'JJ88G244AR\.'; then
+            echo "Provisioning profile does not grant keychain-access-groups; enable Keychain Sharing on the App ID" >&2
+            exit 1
+          fi
         env:
           LOXEL_PROVISIONING_PROFILE_BASE64: ${{ secrets.LOXEL_PROVISIONING_PROFILE }}
 
