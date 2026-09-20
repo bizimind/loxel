@@ -49,7 +49,9 @@ export interface PasskeyHost {
 
 /**
  * Enable the Touch ID platform authenticator when this build can use it.
- * Returns whether it did, so the caller can log the outcome.
+ * Call after `ready`: the prompt reason is stored in Chromium's resource
+ * bundle, which does not exist before the browser process starts. Returns
+ * whether it did, so the caller can log the outcome.
  */
 export function configurePasskeys(host: PasskeyHost): boolean {
   if (host.platform !== "darwin" || !host.isPackaged) return false;

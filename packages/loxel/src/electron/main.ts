@@ -698,14 +698,6 @@ function startServerHealthCheck(): void {
   }, 5000);
 }
 
-// Must run before `ready`; a no-op unless this is a provisioned macOS build.
-const passkeysEnabled = configurePasskeys({
-  platform: process.platform,
-  isPackaged: app.isPackaged,
-  appPath: app.getAppPath(),
-  configureWebAuthn: (options) => app.configureWebAuthn(options),
-});
-
 /** The window showing a webview frame, or the best guess once the frame is gone. */
 function windowForFrame(frame: WebFrameMain | null): BrowserWindow | undefined {
   const contents = frame ? webContents.fromFrame(frame) : undefined;
@@ -741,6 +733,15 @@ app.whenReady().then(async () => {
   try {
     await ensureServer();
 
+    // After `ready`: with a prompt reason, configureWebAuthn writes to Chromium's
+    // resource bundle, which only exists once the browser process has started.
+    // A no-op unless this is a provisioned macOS build.
+    const passkeysEnabled = configurePasskeys({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      appPath: app.getAppPath(),
+      configureWebAuthn: (options) => app.configureWebAuthn(options),
+    });
     if (passkeysEnabled) console.log("[electron] Passkeys enabled for browser panels");
     installAccountChooser(session.fromPartition(BROWSER_PARTITION), promptForAccount);
 

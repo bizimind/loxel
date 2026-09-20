@@ -23,8 +23,8 @@ function account(credentialId: string, fields: Partial<WebAuthnAccount> = {}): W
 }
 
 describe("build configuration", () => {
-  test("the entitlements grant the access group the app configures", () => {
-    const plist = fs.readFileSync(path.join(packageRoot, "assets/entitlements.mac.plist"), "utf8");
+  test("the entitlements grant the access group the app configures", async () => {
+    const plist = await Bun.file(path.join(packageRoot, "assets/entitlements.mac.plist")).text();
     expect(plist).toContain("<key>keychain-access-groups</key>");
     expect(plist).toContain(`<string>${WEBAUTHN_KEYCHAIN_ACCESS_GROUP}</string>`);
     // The identifier the provisioning profile is issued for.
@@ -32,16 +32,15 @@ describe("build configuration", () => {
     expect(plist).toContain(`<string>${APPLE_TEAM_ID}.${APP_BUNDLE_ID}</string>`);
   });
 
-  test("the unprovisioned entitlements grant no access group", () => {
-    const plist = fs.readFileSync(
+  test("the unprovisioned entitlements grant no access group", async () => {
+    const plist = await Bun.file(
       path.join(packageRoot, "assets/entitlements.mac.unprovisioned.plist"),
-      "utf8",
-    );
+    ).text();
     expect(plist).not.toContain("keychain-access-groups");
   });
 
-  test("the access group is derived from the bundle id electron-builder uses", () => {
-    const config = fs.readFileSync(path.join(packageRoot, "electron-builder.yml"), "utf8");
+  test("the access group is derived from the bundle id electron-builder uses", async () => {
+    const config = await Bun.file(path.join(packageRoot, "electron-builder.yml")).text();
     expect(config).toMatch(new RegExp(`^appId: ${APP_BUNDLE_ID.replaceAll(".", "\\.")}$`, "m"));
   });
 });

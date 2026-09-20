@@ -293,15 +293,19 @@ jobs:
           fi
           echo "$LOXEL_PROVISIONING_PROFILE_BASE64" | base64 --decode > /tmp/loxel.provisionprofile
           security cms -D -i /tmp/loxel.provisionprofile -o /tmp/loxel.profile.plist
+          # The entitlements file is the one source of truth for the identifier.
+          EXPECTED_APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :com.apple.application-identifier' \
+            packages/loxel/assets/entitlements.mac.plist)
+          TEAM_ID=${EXPECTED_APP_ID%%.*}
           APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' /tmp/loxel.profile.plist)
-          if [ "$APP_ID" != "JJ88G244AR.com.bizimind.loxel" ]; then
-            echo "Provisioning profile is for '$APP_ID', expected JJ88G244AR.com.bizimind.loxel" >&2
+          if [ "$APP_ID" != "$EXPECTED_APP_ID" ]; then
+            echo "Provisioning profile is for '$APP_ID', expected $EXPECTED_APP_ID" >&2
             exit 1
           fi
           # Only present when Keychain Sharing was enabled on the App ID before the
           # profile was generated; the app carries the entitlement either way.
           if ! /usr/libexec/PlistBuddy -c 'Print :Entitlements:keychain-access-groups' /tmp/loxel.profile.plist \
-            | grep -q 'JJ88G244AR\.'; then
+            | grep -q "$TEAM_ID\."; then
             echo "Provisioning profile does not grant keychain-access-groups; enable Keychain Sharing on the App ID" >&2
             exit 1
           fi
