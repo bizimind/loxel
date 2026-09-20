@@ -4,7 +4,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { Menu, app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
+import {
+  Menu,
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  session,
+  shell,
+  type WebFrameMain,
+  webContents,
+} from "electron";
 
 import { loadOrCreateDek } from "./dek";
 import { IS_DEV } from "./env";
@@ -23,6 +33,7 @@ let isServerOwner = false;
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
 
+import { BROWSER_PARTITION } from "./browser-partition";
 import {
   OPEN_FOLDER_DIALOG,
   OPEN_IN_BROWSER_TAB,
@@ -31,9 +42,6 @@ import {
 } from "./ipc-channels";
 import { startMainProcessMonitor } from "./main-perf-monitor";
 import { configurePasskeys, installAccountChooser } from "./webauthn";
-
-/** Session shared by every browser panel `<webview partition="persist:browser">`. */
-const BROWSER_PARTITION = "persist:browser";
 
 /** Send a URL to the focused window's renderer to open in a browser panel tab. */
 function openInBrowserTab(url: string): void {
@@ -698,9 +706,24 @@ const passkeysEnabled = configurePasskeys({
   configureWebAuthn: (options) => app.configureWebAuthn(options),
 });
 
+/** The window showing a webview frame, or the best guess once the frame is gone. */
+function windowForFrame(frame: WebFrameMain | null): BrowserWindow | undefined {
+  const contents = frame ? webContents.fromFrame(frame) : undefined;
+  const host = contents?.hostWebContents ?? contents;
+  return (
+    (host && BrowserWindow.fromWebContents(host)) ??
+    BrowserWindow.getFocusedWindow() ??
+    BrowserWindow.getAllWindows()[0]
+  );
+}
+
 /** Ask which passkey to use when a site matches several. */
-async function promptForAccount(relyingPartyId: string, labels: string[]): Promise<number | null> {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+async function promptForAccount(
+  frame: WebFrameMain | null,
+  relyingPartyId: string,
+  labels: string[],
+): Promise<number | null> {
+  const win = windowForFrame(frame);
   const options: Electron.MessageBoxOptions = {
     type: "question",
     title: "Choose a passkey",

@@ -40,8 +40,9 @@ mac:
   category: public.app-category.developer-tools
   hardenedRuntime: true
   notarize: true
-  # Grants the passkey keychain access group; release builds must also pass
-  # --config.mac.provisioningProfile (see .github/workflows/release-loxel.yml).
+  # electron-builder would pick this file up from buildResources on its own; it is
+  # named here because it carries restricted entitlements (passkeys) that release
+  # builds must back with --config.mac.provisioningProfile (see release-loxel.yml).
   entitlements: assets/entitlements.mac.plist
   target:
     - target: dmg

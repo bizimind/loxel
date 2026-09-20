@@ -3,15 +3,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { WebAuthnAccount } from "electron";
+import type { SelectWebauthnAccountDetails, Session, WebAuthnAccount } from "electron";
 
 import {
   APP_BUNDLE_ID,
+  APPLE_TEAM_ID,
   WEBAUTHN_KEYCHAIN_ACCESS_GROUP,
   accountLabel,
   chooseAccount,
   configurePasskeys,
   embeddedProvisioningProfilePath,
+  installAccountChooser,
 } from "./webauthn";
 
 const packageRoot = path.resolve(import.meta.dirname, "..", "..");
@@ -25,6 +27,9 @@ describe("build configuration", () => {
     const plist = fs.readFileSync(path.join(packageRoot, "assets/entitlements.mac.plist"), "utf8");
     expect(plist).toContain("<key>keychain-access-groups</key>");
     expect(plist).toContain(`<string>${WEBAUTHN_KEYCHAIN_ACCESS_GROUP}</string>`);
+    // The identifier the provisioning profile is issued for.
+    expect(plist).toContain("<key>com.apple.application-identifier</key>");
+    expect(plist).toContain(`<string>${APPLE_TEAM_ID}.${APP_BUNDLE_ID}</string>`);
   });
 
   test("the unprovisioned entitlements grant no access group", () => {
@@ -51,19 +56,26 @@ describe("configurePasskeys", () => {
   });
 
   test("configures nothing off macOS, in dev, or without a provisioning profile", () => {
-    const calls: unknown[] = [];
-    const configureWebAuthn = (options: unknown) => calls.push(options);
-    expect(
-      configurePasskeys({ platform: "linux", isPackaged: true, appPath, configureWebAuthn }),
-    ).toBe(false);
-    expect(
-      configurePasskeys({ platform: "darwin", isPackaged: false, appPath, configureWebAuthn }),
-    ).toBe(false);
-    // Packaged on macOS, but this path has no embedded.provisionprofile.
-    expect(
-      configurePasskeys({ platform: "darwin", isPackaged: true, appPath, configureWebAuthn }),
-    ).toBe(false);
-    expect(calls).toEqual([]);
+    // A bundle of our own, so an installed Loxel's profile cannot leak in.
+    const bundle = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "loxel-"));
+    try {
+      const unprovisioned = path.join(bundle, "Contents", "Resources", "app.asar");
+      fs.mkdirSync(path.dirname(unprovisioned), { recursive: true });
+      const calls: unknown[] = [];
+      const configureWebAuthn = (options: unknown) => calls.push(options);
+      for (const host of [
+        { platform: "linux" as const, isPackaged: true },
+        { platform: "darwin" as const, isPackaged: false },
+        { platform: "darwin" as const, isPackaged: true },
+      ]) {
+        expect(configurePasskeys({ ...host, appPath: unprovisioned, configureWebAuthn })).toBe(
+          false,
+        );
+      }
+      expect(calls).toEqual([]);
+    } finally {
+      fs.rmSync(bundle, { recursive: true, force: true });
+    }
   });
 
   test("configures the Touch ID authenticator for a provisioned macOS build", () => {
@@ -169,5 +181,52 @@ describe("chooseAccount", () => {
     const accounts = [account("first"), account("second")];
     expect(await chooseAccount(accounts, () => Promise.resolve(null))).toBeNull();
     expect(await chooseAccount(accounts, () => Promise.resolve(7))).toBeNull();
+  });
+});
+
+describe("installAccountChooser", () => {
+  type Listener = (
+    event: unknown,
+    details: SelectWebauthnAccountDetails,
+    callback: (credentialId?: string | null) => void,
+  ) => Promise<void>;
+
+  /** A stand-in for the session: captures the listener so tests can fire the event. */
+  function fakeSession(): { session: Session; fire: Listener } {
+    let listener: Listener | undefined;
+    const session = {
+      on: (_event: string, fn: Listener) => {
+        listener = fn;
+      },
+    } as unknown as Session;
+    return { session, fire: (event, details, callback) => listener!(event, details, callback) };
+  }
+
+  const details = (accounts: WebAuthnAccount[]): SelectWebauthnAccountDetails => ({
+    relyingPartyId: "example.com",
+    accounts,
+    frame: null,
+  });
+
+  test("answers with the chosen credential exactly once", async () => {
+    const { session, fire } = fakeSession();
+    installAccountChooser(session, () => Promise.resolve(1));
+    const answers: unknown[] = [];
+    await fire(null, details([account("first"), account("second")]), (id) => answers.push(id));
+    expect(answers).toEqual(["second"]);
+  });
+
+  test("a failing prompt cancels the request, still exactly once", async () => {
+    const { session, fire } = fakeSession();
+    installAccountChooser(session, () => Promise.reject(new Error("dialog failed")));
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      const answers: unknown[] = [];
+      await fire(null, details([account("first"), account("second")]), (id) => answers.push(id));
+      expect(answers).toEqual([null]);
+    } finally {
+      console.error = originalError;
+    }
   });
 });

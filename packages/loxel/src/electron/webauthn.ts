@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { Session, WebAuthnAccount } from "electron";
+import type { Session, WebAuthnAccount, WebFrameMain } from "electron";
 
 /**
  * Passkeys in the browser panels.
@@ -101,14 +101,23 @@ export async function chooseAccount(
  */
 export function installAccountChooser(
   browserSession: Session,
-  prompt: (relyingPartyId: string, labels: string[]) => Promise<number | null>,
+  prompt: (
+    frame: WebFrameMain | null,
+    relyingPartyId: string,
+    labels: string[],
+  ) => Promise<number | null>,
 ): void {
-  browserSession.on("select-webauthn-account", (_event, details, callback) => {
-    void chooseAccount(details.accounts, (labels) => prompt(details.relyingPartyId, labels))
-      .then((credentialId) => callback(credentialId))
-      .catch((err: unknown) => {
-        console.error("[electron] WebAuthn account selection failed:", err);
-        callback(null);
-      });
+  browserSession.on("select-webauthn-account", async (_event, details, callback) => {
+    // Electron requires the callback exactly once, so it lives in `finally`.
+    let credentialId: string | null = null;
+    try {
+      credentialId = await chooseAccount(details.accounts, (labels) =>
+        prompt(details.frame, details.relyingPartyId, labels),
+      );
+    } catch (err) {
+      console.error("[electron] WebAuthn account selection failed:", err);
+    } finally {
+      callback(credentialId);
+    }
   });
 }

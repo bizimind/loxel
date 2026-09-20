@@ -11,10 +11,16 @@
     <true/>
     <!--
       Passkeys: the keychain access group Chromium's Touch ID authenticator stores
-      WebAuthn credentials under (see src/electron/webauthn.ts). A restricted
-      entitlement — the build must embed a Developer ID provisioning profile that
-      grants it, or macOS refuses to launch the app.
+      WebAuthn credentials under (see src/electron/webauthn.ts). The application
+      identifier ties the signature to the embedded Developer ID provisioning
+      profile, which must grant these restricted entitlements or macOS refuses to
+      launch the app. osx-sign only injects the identifier for sandboxed apps, so
+      it is spelled out here.
     -->
+    <key>com.apple.application-identifier</key>
+    <string>JJ88G244AR.com.bizimind.loxel</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>JJ88G244AR</string>
     <key>keychain-access-groups</key>
     <array>
       <string>JJ88G244AR.com.bizimind.loxel.webauthn</string>
