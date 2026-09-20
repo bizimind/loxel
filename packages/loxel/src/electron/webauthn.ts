@@ -54,13 +54,20 @@ export interface PasskeyHost {
 export function configurePasskeys(host: PasskeyHost): boolean {
   if (host.platform !== "darwin" || !host.isPackaged) return false;
   if (!fs.existsSync(embeddedProvisioningProfilePath(host.appPath))) return false;
-  host.configureWebAuthn({
-    touchID: {
-      keychainAccessGroup: WEBAUTHN_KEYCHAIN_ACCESS_GROUP,
-      promptReason: WEBAUTHN_PROMPT_REASON,
-    },
-  });
-  return true;
+  try {
+    host.configureWebAuthn({
+      touchID: {
+        keychainAccessGroup: WEBAUTHN_KEYCHAIN_ACCESS_GROUP,
+        promptReason: WEBAUTHN_PROMPT_REASON,
+      },
+    });
+    return true;
+  } catch (err) {
+    // The API declares no error contract. Launching without passkeys beats
+    // not launching, so log the cause and carry on with security keys only.
+    console.error("[electron] Passkeys unavailable: configureWebAuthn failed:", err);
+    return false;
+  }
 }
 
 /** A line the user can recognise an account by. */

@@ -94,6 +94,34 @@ describe("configurePasskeys", () => {
   });
 });
 
+describe("configurePasskeys when Electron rejects the configuration", () => {
+  test("logs and reports passkeys disabled instead of throwing", () => {
+    const bundle = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "loxel-"));
+    const originalError = console.error;
+    const logged: unknown[][] = [];
+    console.error = (...args: unknown[]) => logged.push(args);
+    try {
+      const contents = path.join(bundle, "Contents");
+      fs.mkdirSync(path.join(contents, "Resources"), { recursive: true });
+      fs.writeFileSync(path.join(contents, "embedded.provisionprofile"), "");
+      const enabled = configurePasskeys({
+        platform: "darwin",
+        isPackaged: true,
+        appPath: path.join(contents, "Resources", "app.asar"),
+        configureWebAuthn: () => {
+          throw new Error("bad access group");
+        },
+      });
+      expect(enabled).toBe(false);
+      expect(logged).toHaveLength(1);
+      expect(String(logged[0]![1])).toContain("bad access group");
+    } finally {
+      console.error = originalError;
+      fs.rmSync(bundle, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("accountLabel", () => {
   test("combines display name and account name when they differ", () => {
     expect(accountLabel(account("a", { name: "ori@example.com", displayName: "Ori" }))).toBe(
