@@ -4,7 +4,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { Menu, app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import {
+  Menu,
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  session,
+  shell,
+  type WebFrameMain,
+  webContents,
+} from "electron";
 
 import { loadOrCreateDek } from "./dek";
 import { IS_DEV } from "./env";
@@ -23,6 +33,7 @@ let isServerOwner = false;
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
 
+import { BROWSER_PARTITION } from "./browser-partition";
 import {
   OPEN_FOLDER_DIALOG,
   OPEN_IN_BROWSER_TAB,
@@ -30,6 +41,7 @@ import {
   WINDOW_FOCUS_CHANGE,
 } from "./ipc-channels";
 import { startMainProcessMonitor } from "./main-perf-monitor";
+import { configurePasskeys, installAccountChooser } from "./webauthn";
 
 /** Send a URL to the focused window's renderer to open in a browser panel tab. */
 function openInBrowserTab(url: string): void {
@@ -686,9 +698,52 @@ function startServerHealthCheck(): void {
   }, 5000);
 }
 
+/** The window showing a webview frame, or the best guess once the frame is gone. */
+function windowForFrame(frame: WebFrameMain | null): BrowserWindow | undefined {
+  const contents = frame ? webContents.fromFrame(frame) : undefined;
+  const host = contents?.hostWebContents ?? contents;
+  return (
+    (host && BrowserWindow.fromWebContents(host)) ??
+    BrowserWindow.getFocusedWindow() ??
+    BrowserWindow.getAllWindows()[0]
+  );
+}
+
+/** Ask which passkey to use when a site matches several. */
+async function promptForAccount(
+  frame: WebFrameMain | null,
+  relyingPartyId: string,
+  labels: string[],
+): Promise<number | null> {
+  const win = windowForFrame(frame);
+  const options: Electron.MessageBoxOptions = {
+    type: "question",
+    title: "Choose a passkey",
+    message: `Which account do you want to use for ${relyingPartyId}?`,
+    buttons: [...labels, "Cancel"],
+    cancelId: labels.length,
+  };
+  const { response } = win
+    ? await dialog.showMessageBox(win, options)
+    : await dialog.showMessageBox(options);
+  return response < labels.length ? response : null;
+}
+
 app.whenReady().then(async () => {
   try {
     await ensureServer();
+
+    // After `ready`: with a prompt reason, configureWebAuthn writes to Chromium's
+    // resource bundle, which only exists once the browser process has started.
+    // A no-op unless this is a provisioned macOS build.
+    const passkeysEnabled = configurePasskeys({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      appPath: app.getAppPath(),
+      configureWebAuthn: (options) => app.configureWebAuthn(options),
+    });
+    if (passkeysEnabled) console.log("[electron] Passkeys enabled for browser panels");
+    installAccountChooser(session.fromPartition(BROWSER_PARTITION), promptForAccount);
 
     buildAppMenu();
     await createWindow();

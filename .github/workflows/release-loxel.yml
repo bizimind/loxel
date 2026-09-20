@@ -282,11 +282,42 @@ jobs:
         env:
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY }}
 
+      # The keychain-access-groups entitlement (passkeys) is only honoured when a
+      # Developer ID provisioning profile granting it is embedded in the bundle;
+      # without one macOS refuses to launch the app, so fail here instead.
+      - name: Decode provisioning profile
+        run: |
+          if [ -z "$LOXEL_PROVISIONING_PROFILE_BASE64" ]; then
+            echo "LOXEL_PROVISIONING_PROFILE secret is not set" >&2
+            exit 1
+          fi
+          echo "$LOXEL_PROVISIONING_PROFILE_BASE64" | base64 --decode > /tmp/loxel.provisionprofile
+          security cms -D -i /tmp/loxel.provisionprofile -o /tmp/loxel.profile.plist
+          # The entitlements file is the one source of truth for the identifier.
+          EXPECTED_APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :com.apple.application-identifier' \
+            packages/loxel/assets/entitlements.mac.plist)
+          TEAM_ID=${EXPECTED_APP_ID%%.*}
+          APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' /tmp/loxel.profile.plist)
+          if [ "$APP_ID" != "$EXPECTED_APP_ID" ]; then
+            echo "Provisioning profile is for '$APP_ID', expected $EXPECTED_APP_ID" >&2
+            exit 1
+          fi
+          # Only present when Keychain Sharing was enabled on the App ID before the
+          # profile was generated; the app carries the entitlement either way.
+          if ! /usr/libexec/PlistBuddy -c 'Print :Entitlements:keychain-access-groups' /tmp/loxel.profile.plist \
+            | grep -q "$TEAM_ID\."; then
+            echo "Provisioning profile does not grant keychain-access-groups; enable Keychain Sharing on the App ID" >&2
+            exit 1
+          fi
+        env:
+          LOXEL_PROVISIONING_PROFILE_BASE64: ${{ secrets.LOXEL_PROVISIONING_PROFILE }}
+
       - name: Build Electron app
         run: |
           cd packages/loxel
           ELECTRON=1 pnpm exec vite build
-          pnpm exec electron-builder --mac --${{ matrix.arch }}
+          pnpm exec electron-builder --mac --${{ matrix.arch }} \
+            --config.mac.provisioningProfile=/tmp/loxel.provisionprofile
         env:
           CSC_LINK: ${{ secrets.LOXEL_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.LOXEL_CERTIFICATE_PWD }}

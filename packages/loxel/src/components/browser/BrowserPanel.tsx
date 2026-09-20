@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { BROWSER_PARTITION } from "@/electron/browser-partition";
 import { useActionHandler } from "@/hooks/useActionHandler";
 import { cn } from "@/lib/utils";
 import { inputToKeyCombo } from "@/store/keybindings/keybinding-schema";
@@ -370,7 +371,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       <webview
         ref={webviewRef as React.Ref<HTMLElement>}
         src="about:blank"
-        partition="persist:browser"
+        partition={BROWSER_PARTITION}
         className="flex-1"
         style={{ display: "flex" }}
       />

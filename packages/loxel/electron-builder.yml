@@ -40,6 +40,10 @@ mac:
   category: public.app-category.developer-tools
   hardenedRuntime: true
   notarize: true
+  # electron-builder would pick this file up from buildResources on its own; it is
+  # named here because it carries restricted entitlements (passkeys) that release
+  # builds must back with --config.mac.provisioningProfile (see release-loxel.yml).
+  entitlements: assets/entitlements.mac.plist
   target:
     - target: dmg
       arch:
