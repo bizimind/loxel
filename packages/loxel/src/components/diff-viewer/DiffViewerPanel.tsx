@@ -540,10 +540,8 @@ function ExpandedContextUnified({ lines, startLine }: { lines: string[]; startLi
             <td className="border-border text-muted-foreground/50 w-10 border-r px-2 text-right select-none">
               {startLine + i}
             </td>
-            <td className="text-muted-foreground/70 px-2 whitespace-pre">
-              <span className="mr-2 select-none"> </span>
-              {line}
-            </td>
+            <td className="w-5 pl-2" />
+            <td className="text-muted-foreground/70 px-2 whitespace-pre">{line}</td>
           </tr>
         ))}
       </tbody>
@@ -624,16 +622,16 @@ function UnifiedHunkView({
             >
               {line.newLineNumber ?? ""}
             </td>
+            {/* Marker lives in its own cell: HunkLineContent must be the first content of its
+                block container so its ghost layer shares the real text's tab-stop origin. */}
+            <td className="text-muted-foreground w-5 pl-2 select-none">
+              {line.type === "add" ? (
+                <PlusIcon className="inline size-3" />
+              ) : line.type === "delete" ? (
+                <MinusIcon className="inline size-3" />
+              ) : null}
+            </td>
             <td className="px-2 whitespace-pre">
-              <span className="text-muted-foreground mr-2 select-none">
-                {line.type === "add" ? (
-                  <PlusIcon className="inline size-3" />
-                ) : line.type === "delete" ? (
-                  <MinusIcon className="inline size-3" />
-                ) : (
-                  " "
-                )}
-              </span>
               <HunkLineContent
                 line={line}
                 highlighted={highlighted}

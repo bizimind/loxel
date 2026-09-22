@@ -260,7 +260,7 @@ There is no fixed word or character granularity. Each modification block (a run 
 ### Rendering
 
 - Side-by-side (Monaco) view: `inlineClassName` decorations on the text layer, above the whole-line background.
-- Hunk-based split and unified views: a transparent copy of the line is positioned under the syntax-highlighted text and carries the highlight spans, so the highlighter's HTML is untouched and tabs align.
+- Hunk-based split and unified views: a transparent copy of the line is positioned under the syntax-highlighted text and carries the highlight spans, so the highlighter's HTML is untouched. Tabs align only when the line content is the first content of its table cell, because the absolutely positioned copy measures tab stops from its own edge; the `+`/`-` markers therefore live in their own cell.
 
 ### Key Files
 

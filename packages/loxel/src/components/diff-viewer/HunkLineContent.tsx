@@ -77,7 +77,12 @@ interface HunkLineContentProps {
  *
  * The highlights are drawn by a transparent copy of the line positioned underneath the real
  * (possibly syntax-highlighted) text. Both layers share the same font and whitespace handling,
- * so span positions match exactly, including tabs, without touching the highlighter's HTML.
+ * so span positions match exactly without touching the highlighter's HTML.
+ *
+ * Tab alignment constraint: the absolutely positioned ghost is its own block container, so its
+ * tab stops are measured from its own left edge, while the real text's tab stops are measured
+ * from the enclosing cell. The component must therefore be the first (and only inline) content
+ * of its cell; markers or gutters belong in a separate cell.
  */
 export function HunkLineContent({ line, highlighted, segments }: HunkLineContentProps) {
   const text =
