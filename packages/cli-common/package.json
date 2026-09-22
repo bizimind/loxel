@@ -27,7 +27,7 @@
     "@types/bun": "1.4.0",
     "@types/node": "^24.0.0"
   },
-  "peerDependencies": {
+  "engines": {
     "bun": ">=1.0.0"
   }
 }
