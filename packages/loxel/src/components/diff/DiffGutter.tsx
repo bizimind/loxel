@@ -2,9 +2,10 @@ import type { editor } from "monaco-editor";
 import type { RefObject } from "react";
 import { useEffect, useRef } from "react";
 
+import type { ScrollBy } from "@/hooks/useMonacoSyncScroll";
 import { cn } from "@/lib/utils";
 
-import type { ChangePair } from "./change-regions";
+import type { ChangePair, ScrollSide } from "./change-regions";
 import type { CollapsibleRegion } from "./unchanged-regions";
 import { VIEW_ZONE_HEIGHT } from "./unchanged-regions";
 
@@ -22,6 +23,8 @@ interface DiffGutterProps {
   subscribeToScroll: (callback: (left: number, right: number) => void) => () => void;
   /** Re-notify scroll subscribers after layout changes */
   flushScroll: () => void;
+  /** Scroll both panels by a wheel delta, with `source` being the panel under the pointer */
+  scrollBy: ScrollBy;
   /** Editor instances for getTopForLineNumber (accounts for hidden areas) */
   leftEditor: IStandaloneCodeEditor | null;
   rightEditor: IStandaloneCodeEditor | null;
@@ -75,6 +78,14 @@ function buildWavySegment(xStart: number, xEnd: number, baseY: number, move: boo
     d += ` Q ${cpX} ${cpY}, ${endX} ${baseY}`;
   }
   return d;
+}
+
+/**
+ * Resolve which panel a pointer is over. `boundary` is the zero-width gutter wrapper that
+ * sits between the two panel containers, so its left edge is the left/right split.
+ */
+export function wheelSideForPointer(clientX: number, boundary: Element): ScrollSide {
+  return clientX < boundary.getBoundingClientRect().left ? "left" : "right";
 }
 
 /** Estimate SVG text width for a label string at 10px Inter */
@@ -138,12 +149,14 @@ export function DiffGutter({
   lineHeight,
   subscribeToScroll,
   flushScroll,
+  scrollBy,
   leftEditor,
   rightEditor,
   collapseRegions,
   expandedSet,
   toggleRegion,
 }: DiffGutterProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const gutterWidth = LINE_NUM_COL_WIDTH * 2; // 128px — both custom LineNumbersColumns
 
@@ -343,21 +356,26 @@ export function DiffGutter({
     return () => svg.removeEventListener("click", handleClick);
   }, [toggleRegion]);
 
-  // Forward wheel events from collapse connectors to the editor panel so scrolling
-  // doesn't stall when the mouse is over a "hidden lines" squiggly indicator
+  // The collapse connectors (pointer-events: all) sit above both panels but outside their
+  // containers, so the panels' wheel listeners never see wheel events over them. Route those
+  // events into the sync-scroll hook directly, using the panel under the pointer as the
+  // source: scroll translation is not symmetric, so forwarding to a fixed side causes jumps.
+  // Non-passive so the original event can be cancelled and never scrolls an ancestor.
   useEffect(() => {
     const svg = svgRef.current;
-    const target = leftPanelRef.current;
-    if (!svg || !target) return;
+    const wrapper = wrapperRef.current;
+    if (!svg || !wrapper) return;
     const handleWheel = (e: WheelEvent) => {
-      target.dispatchEvent(new WheelEvent("wheel", e));
+      e.preventDefault();
+      e.stopPropagation();
+      scrollBy(wheelSideForPointer(e.clientX, wrapper), e.deltaX, e.deltaY);
     };
-    svg.addEventListener("wheel", handleWheel, { passive: true });
+    svg.addEventListener("wheel", handleWheel, { passive: false });
     return () => svg.removeEventListener("wheel", handleWheel);
-  }, [leftPanelRef]);
+  }, [scrollBy]);
 
   return (
-    <div className="pointer-events-none relative z-10 w-0 shrink-0">
+    <div ref={wrapperRef} className="pointer-events-none relative z-10 w-0 shrink-0">
       <svg
         ref={svgRef}
         className="absolute top-0 bottom-0 overflow-visible"

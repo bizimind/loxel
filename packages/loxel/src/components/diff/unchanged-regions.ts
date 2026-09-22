@@ -203,9 +203,9 @@ export function computeHiddenRanges(
 /**
  * Adjust alignment sections to account for hidden lines.
  *
- * Hidden lines are removed from sections (splitting/shrinking as needed),
- * and a small 1-line aligned section is inserted at each collapse point
- * to represent the view zone height in the scroll model.
+ * Hidden lines are removed from sections (shrinking as needed) and line numbers are
+ * remapped to the visual line numbers Monaco uses after hiding. The collapse view zones
+ * (VIEW_ZONE_HEIGHT each) are not represented in the scroll model.
  */
 export function adjustAlignmentSections(
   sections: ScrollAlignmentSection[],

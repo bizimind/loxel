@@ -318,8 +318,11 @@ for each change section (in top-to-bottom order):
 
 4. **Symmetry**: The algorithm is symmetric - scrolling left vs right just swaps which side is source/follower
 
+5. **Source side must be the panel under the pointer**: The mapping is not a bijection (the follower can be paused or clamped, and collapsed regions can leave one side with no scroll range at all). Re-translating from the wrong side is therefore not the inverse and produces jumps. Overlays that intercept wheel events outside the panel containers (the collapse indicator in `DiffGutter`) must call `scrollBy(side, deltaX, deltaY)` from `useMonacoSyncScroll` with the side resolved from the pointer position, never forward to a fixed side.
+
 ### Key Files
 
 - `src/components/diff/change-regions.ts` - ScrollAlignmentSection type and buildScrollAlignment()
-- `src/hooks/useSyncScroll.ts` - Scroll synchronization hook using CSS transforms
-- `src/components/diff/DiffGutter.tsx` - SVG connector visualization
+- `src/hooks/useMonacoSyncScroll.ts` - Monaco scroll synchronization hook; exposes `scrollBy` for overlays
+- `src/components/diff/unchanged-regions.ts` - Collapsible unchanged regions and alignment adjustment for hidden lines
+- `src/components/diff/DiffGutter.tsx` - SVG connector and collapse indicator visualization
