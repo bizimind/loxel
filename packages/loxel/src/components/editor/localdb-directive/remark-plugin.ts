@@ -99,6 +99,8 @@ function toLocalDbBlock(node: ContainerDirective, source: string | null): LocalD
   const indent = (node.position?.start.column ?? 1) - 1;
   const dedent = (line: string) => line.slice(Math.min(indent, /^\s*/.exec(line)![0].length));
   const inner = lines.slice(1);
+  // A last line of `:::` is taken as the closing fence. For an unclosed fence swallowed to EOF
+  // whose final content line is literally `:::` this drops that line — accepted as ambiguous.
   const closed = inner.length > 0 && CLOSING_FENCE.test(inner[inner.length - 1] ?? "");
   block.raw = (closed ? inner.slice(0, -1) : inner).map(dedent).join("\n");
   return block;
@@ -120,7 +122,8 @@ function unwrapDirective(node: Directive, source: string | null): RootContent[] 
 
   const out: RootContent[] = [paragraph(opening, lineRange(node.position, "start")), ...body];
   if (closing !== undefined && CLOSING_FENCE.test(closing)) {
-    out.push(paragraph(closing, lineRange(node.position, "end")));
+    const column = (/^\s*/.exec(closing)?.[0].length ?? 0) + 1;
+    out.push(paragraph(closing, lineRange(node.position, "end", column)));
   }
   return out;
 }
@@ -160,11 +163,15 @@ function plainText(node: RootContent): string {
   return "";
 }
 
-function lineRange(position: Position | undefined, edge: "start" | "end"): Position | undefined {
+function lineRange(
+  position: Position | undefined,
+  edge: "start" | "end",
+  column = 1,
+): Position | undefined {
   if (!position) return undefined;
   const line = position[edge].line;
   return {
-    start: edge === "start" ? position.start : { line, column: 1 },
+    start: edge === "start" ? position.start : { line, column },
     end: edge === "end" ? position.end : { line, column: Number.MAX_SAFE_INTEGER },
   };
 }

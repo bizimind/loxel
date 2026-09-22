@@ -31,6 +31,13 @@ describe("localdb directive schema helpers", () => {
     expect(extra).toBe("color: red\n\nafter paragraph\n# heading");
   });
 
+  it("keeps repeated known keys in extra instead of overwriting the first", () => {
+    const { attrs, extra } = parseDirectiveBody("table: first\ntable: second\nview: table\n");
+
+    expect(attrs).toEqual({ table: "first", view: "table" });
+    expect(extra).toBe("table: second");
+  });
+
   it("keeps the swallowed remainder of an unclosed fence", () => {
     const { attrs, extra } = parseDirectiveBody("table: tasks\n\nafter paragraph\n");
 

@@ -60,7 +60,7 @@ export const localDbBlockSchema = $nodeSchema("localdb-block", () => ({
   parseMarkdown: {
     match: ({ type }: { type: string }) => type === "localdb-block",
     runner: (state: ParserState, node: MarkdownNode, type: NodeType) => {
-      const raw = (node as unknown as LocalDbBlockNode).raw ?? extractDirectiveText(node);
+      const raw = rawBodyOf(node) ?? extractDirectiveText(node);
       const { attrs, extra } = parseDirectiveBody(raw);
       state.addNode(type, {
         table: attrs["table"] ?? "",
@@ -87,6 +87,12 @@ export const localDbBlockSchema = $nodeSchema("localdb-block", () => ({
   },
 }));
 
+/** Verbatim body attached by remarkLocalDbDirective when the source was available. */
+function rawBodyOf(node: MarkdownNode): string | null {
+  const raw: unknown = (node as Partial<LocalDbBlockNode>).raw;
+  return typeof raw === "string" ? raw : null;
+}
+
 export function extractDirectiveText(node: MarkdownNode): string {
   const children = (node as { children?: MarkdownNode[] }).children;
   if (!children) return "";
@@ -103,8 +109,10 @@ export function parseDirectiveBody(text: string): { attrs: Record<string, string
   const rest: string[] = [];
   for (const line of text.split("\n")) {
     const match = /^\s*([A-Za-z_][\w-]*)\s*:(.*)$/.exec(line);
-    if (match && KNOWN_KEYS.has(match[1]!)) {
-      attrs[match[1]!] = match[2]!.trim();
+    const key = match?.[1];
+    // A repeated known key is kept in `extra` rather than overwriting (and losing) the first.
+    if (match && key !== undefined && KNOWN_KEYS.has(key) && !(key in attrs)) {
+      attrs[key] = match[2]!.trim();
       continue;
     }
     rest.push(line);
