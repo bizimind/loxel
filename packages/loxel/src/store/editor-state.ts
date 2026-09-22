@@ -460,8 +460,10 @@ function tryAutoMerge(
   // until the next user edit rather than re-saving, which could loop format → save → format.)
   const noop = result.merged === ours;
   const programmatic = !!options?.matchedNonces && result.merged === diskContent;
-  const canonicalized = noop ? null : applyMergedContent(result.merged, programmatic);
-  const newBase = noop ? diskContent : (canonicalized ?? diskContent);
+  const newBase = noop ? diskContent : applyMergedContent(result.merged, programmatic);
+  // null means the editor could not apply the merge (e.g. the merged body failed to parse) —
+  // fall through to diverged rather than pretending the editor now matches disk.
+  if (newBase === null) return false;
 
   setFn((s) => {
     const e = s.files.get(filePath);

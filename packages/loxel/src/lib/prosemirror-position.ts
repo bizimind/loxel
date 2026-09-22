@@ -15,9 +15,15 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 import type { Node as UnistNode } from "unist";
 
+import { remarkLocalDbDirective } from "@/components/editor/localdb-directive/remark-plugin";
+
 import { splitFrontmatter } from "./frontmatter";
 
-const remarkProcessor = unified().use(remarkParse).use(remarkGfm);
+// Same parser configuration as the editor so the mdast tree mirrors the ProseMirror doc.
+const remarkProcessor = unified().use(remarkParse).use(remarkGfm).use(remarkLocalDbDirective);
+
+/** mdast nodes rendered as atoms in ProseMirror — their text has no PM counterpart. */
+const PM_ATOM_TYPES = new Set(["localdb-block"]);
 
 /** mdast node types that produce visible text in ProseMirror. */
 const PM_TEXT_TYPES = new Set(["text", "inlineCode", "code"]);
@@ -59,7 +65,7 @@ export function rawLineToProsePosition(
   // Navigation failure is recoverable — fall back to proportional estimate.
   let tree;
   try {
-    tree = remarkProcessor.parse(body);
+    tree = remarkProcessor.runSync(remarkProcessor.parse(body), body);
   } catch {
     return proportionalFallback(bodyLine, body, doc.content.size);
   }
@@ -159,6 +165,7 @@ function findDeepestNodeAt(node: UnistNode, line: number, column: number): Unist
 
 /** Find the first text/inlineCode/code leaf within an mdast subtree. */
 function findFirstTextLeaf(node: UnistNode): UnistNode | null {
+  if (PM_ATOM_TYPES.has(node.type)) return null;
   if (PM_TEXT_TYPES.has(node.type) && isStringValue(node)) return node;
   if (hasChildren(node)) {
     for (const child of node.children) {
@@ -171,6 +178,7 @@ function findFirstTextLeaf(node: UnistNode): UnistNode | null {
 
 /** Recursively collect mdast leaf nodes that produce PM text, in document order. */
 function collectTextLeaves(node: UnistNode, out: TextLeaf[]): void {
+  if (PM_ATOM_TYPES.has(node.type)) return;
   if (PM_TEXT_TYPES.has(node.type) && isStringValue(node)) {
     out.push({ node, value: node.value });
     return;

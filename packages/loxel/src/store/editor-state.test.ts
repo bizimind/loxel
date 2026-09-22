@@ -515,3 +515,21 @@ describe("clearPendingNonce", () => {
     expect(before).toBe(after);
   });
 });
+
+describe("auto-merge apply failure", () => {
+  test("applyMergedContent returning null falls through to diverged", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.setBaseContent(FILE, "a\nb\nc");
+    store.registerEditorCallbacks(
+      FILE,
+      () => "X\nb\nc",
+      () => null, // editor could not apply the merge (e.g. body failed to parse)
+    );
+    store.markDirty(FILE);
+    store.handleDiskChange(FILE, [], "a\nb\nZ");
+    expect(getEntry()!.state).toBe("diverged");
+    expect(getEntry()!.diskContent).toBe("a\nb\nZ");
+    expect(getEntry()!.baseContent).toBe("a\nb\nc");
+  });
+});

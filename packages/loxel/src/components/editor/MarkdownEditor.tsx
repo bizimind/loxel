@@ -397,11 +397,17 @@ export function MarkdownEditor({
     const portalledElements = new Set<HTMLElement>();
     let popoverObserver: MutationObserver | undefined;
     let portalRoot: HTMLDivElement | undefined;
+    let created = false;
 
     crepe
       .create()
       .then(() => {
-        if (cancelled) return;
+        created = true;
+        if (cancelled) {
+          // Cleanup already ran and skipped destroy because creation was still pending.
+          crepe.destroy();
+          return;
+        }
 
         const milkdownEl = crepe.editor.action((ctx) => {
           const view = ctx.get(editorViewCtx);
@@ -580,7 +586,9 @@ export function MarkdownEditor({
       }
       popoverObserver?.disconnect();
       portalRoot?.remove();
-      crepe.destroy();
+      // crepe.destroy() retries forever while create() is still pending (status stuck at
+      // OnCreate if it rejected), so only destroy once creation has settled successfully.
+      if (created) crepe.destroy();
       crepeRef.current = null;
     };
     // Re-create when crepeKey changes (accept disk version), content first loads,
@@ -636,7 +644,7 @@ export function MarkdownEditor({
     if (diskFm !== frontmatterRef.current) {
       frontmatterRef.current = diskFm;
       setFrontmatter(diskFm);
-    }
+    };
 
     try {
       // The debounced change listener may not have reported a just-made edit yet, so the store
@@ -731,7 +739,12 @@ export function MarkdownEditor({
   // Frontmatter change handler — merge with current body and propagate
   const handleFrontmatterChange = useCallback(
     (yaml: string | null) => {
-      const rawBody = crepeRef.current?.getMarkdown();
+      let rawBody: string | undefined;
+      try {
+        rawBody = crepeRef.current?.getMarkdown();
+      } catch {
+        return; // editor failed to create — nothing to merge the frontmatter into
+      }
       if (rawBody === undefined) return; // editor not yet ready — skip to avoid persisting empty body
       const body = normalizeTrailingNewline(rawBody);
       frontmatterRef.current = yaml;
