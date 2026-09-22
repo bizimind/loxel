@@ -1,4 +1,12 @@
-export { branchExists, deleteBranch, getCurrentBranch, renameBranch } from "./branch.ts";
+export {
+  branchExists,
+  deleteBranch,
+  getCurrentBranch,
+  isMergedInto,
+  renameBranch,
+  resolveCommit,
+  resolveRemoteDefault,
+} from "./branch.ts";
 export {
   assertValidWorktreeName,
   branchNameError,

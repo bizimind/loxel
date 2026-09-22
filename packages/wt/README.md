@@ -134,7 +134,7 @@ WT_DIR=~/wt/myrepo wt add feature-x
 
 A worktree's name is its path under the worktrees directory, so nested names work: `wt add feat/voice-input` creates `.worktrees/feat/voice-input` on branch `feat/voice-input`.
 
-`wt add <name>` creates a branch named after the worktree from the current `HEAD`. Pass `-b <branch>` to check out an existing branch instead. If a branch named after the worktree already exists, wt offers to reuse it or recreate it, unless another worktree has it checked out, which is an error.
+`wt add <name>` creates a branch named after the worktree, started from the remote default branch as of your last fetch (`origin/main`, read from `origin/HEAD` or by name). This keeps a bare setup honest: local `main` is a mirror that only moves when someone pulls inside the `main` worktree, while `origin/main` moves on any fetch or pull from any worktree. wt never fetches for you; run `git fetch` when you want a newer base. The new branch does not track `origin/main`. Pass `--base <ref>` to start from any ref or commit instead (`--base HEAD` gives plain `git worktree add` behaviour), and `-b <branch>` to check out an existing branch. A repository with no `origin` default, local-only, a bare clone that never fetched with a refspec, or one whose only remote has another name, starts from `HEAD` like git does. A new branch never tracks its start point, even with `--base origin/foo`; set an upstream yourself if you want one. If a branch named after the worktree already exists, wt offers to reuse it or recreate it, unless another worktree has it checked out, which is an error.
 
 If a registered worktree's checkout directory disappears outside `wt`, it remains listable and removable. Git-dependent inspection reports no dirty changes or upstream divergence for that unavailable checkout, and a cleanup hook that cannot start there is skipped with a warning.
 
@@ -219,17 +219,18 @@ Renaming the worktree your shell is sitting in leaves that shell on a path that 
 
 Run interactively and wt prompts for the common decisions: the worktree name, what to do when the branch already exists, which worktree to act on, whether to force a dirty removal, and whether to delete the branch too. Pass everything as flags and it runs unattended; without a terminal a missing required value errors instead of blocking, and destructive commands never auto-select a target.
 
-| Flag                    | Commands | Meaning                                                    |
-| ----------------------- | -------- | ---------------------------------------------------------- |
-| `-j`, `--json`          | all      | JSON result on stdout; progress and prompts stay on stderr |
-| `-b`, `--branch <b>`    | `add`    | Check out an existing branch instead of creating one       |
-| `--branch <b>`          | `mv`     | Rename the branch to `<b>` instead of the new name         |
-| `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leaving the branch alone        |
-| `-f`, `--force`         | `mv`     | Move a locked worktree                                     |
-| `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes          |
-| `-d`, `--delete-branch` | `remove` | Also delete the worktree's branch; an unmerged one is kept |
-| `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)          |
-| `--keep-branch`         | `remove` | Keep the branch (no prompt)                                |
+| Flag                    | Commands | Meaning                                                                      |
+| ----------------------- | -------- | ---------------------------------------------------------------------------- |
+| `-j`, `--json`          | all      | JSON result on stdout; progress and prompts stay on stderr                   |
+| `-b`, `--branch <b>`    | `add`    | Check out an existing branch instead of creating one                         |
+| `--base <ref>`          | `add`    | Start the new branch from `<ref>` instead of the remote default              |
+| `--branch <b>`          | `mv`     | Rename the branch to `<b>` instead of the new name                           |
+| `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leaving the branch alone                          |
+| `-f`, `--force`         | `mv`     | Move a locked worktree                                                       |
+| `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes                            |
+| `-d`, `--delete-branch` | `remove` | Also delete the branch; kept unless merged into `HEAD` or the remote default |
+| `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)                            |
+| `--keep-branch`         | `remove` | Keep the branch (no prompt)                                                  |
 
 ### `wt list` (alias: `ls`)
 
@@ -251,7 +252,8 @@ feature-auth  feature-auth  /path/to/myproject/.worktrees/feature-auth
 Create a worktree at `<worktreesDir>/<name>`, then run `init.wt.sh`. Prompts for the name when omitted.
 
 ```bash
-wt add feature-auth                    # new branch feature-auth from HEAD
+wt add feature-auth                    # new branch feature-auth from origin/main (as last fetched)
+wt add feature-auth --base HEAD        # ... from the current HEAD instead
 wt add feature-auth -b existing-branch # check out an existing branch instead
 ```
 
@@ -265,7 +267,7 @@ Rename a worktree and its branch, then run `rename.wt.sh`. See [Renaming](#renam
 
 ### `wt remove [name]` (aliases: `rm`, `delete`)
 
-Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with unmerged commits (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused.
+Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with commits merged into neither `HEAD` nor the remote default branch (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Judging against the remote default matters for a bare setup, where `HEAD` is the local `main` mirror and may lag the `origin/main` a branch started from. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused.
 
 Clean worktrees with initialized submodules can be removed without `--force`. Changes inside submodules, nested ones included, are checked explicitly, even when `submodule.<name>.ignore=all` is configured; those removals still require `--force`, as does a submodule holding commits that no remote has, even one since deinitialized or removed from the tree, since a linked worktree's submodule objects live under its own git directory and are deleted with it.
 
@@ -290,7 +292,7 @@ With `-j`, stdout carries only JSON. Progress, hook output and prompts go to std
 // list
 {"worktrees":[{"name","path","branch","head","main","locked"}, ...]}
 // add
-{"name","path","branch","created":true,"hookRan":false}
+{"name","path","branch","created":true,"base":"origin/main","hookRan":false}
 // mv
 {"name","path","branch","oldName","oldPath","oldBranch","moved":true,"branchRenamed":true}
 // view — `head` is abbreviated to 12 chars here, full in `list`; `ahead`/`behind` are null without an upstream

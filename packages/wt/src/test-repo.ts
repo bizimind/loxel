@@ -75,6 +75,22 @@ export async function createTestRepo(options: { bare?: boolean } = {}): Promise<
   }
 }
 
+/**
+ * Give a bare test clone the `origin/*` tracking refs a real clone has: add
+ * the fetch refspec, fetch, and record `origin/HEAD`. `createTestRepo({ bare:
+ * true })` clones the `seed` repo, so `seed` acts as the remote.
+ */
+export async function enableOriginTracking(root: string): Promise<void> {
+  await git(["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], root);
+  await git(["fetch", "--quiet", "origin"], root);
+  await git(["remote", "set-head", "origin", "-a"], root);
+}
+
+/** Path of the `seed` repository a bare test clone was made from. */
+export function seedPath(bareRoot: string): string {
+  return join(dirname(bareRoot), "seed");
+}
+
 /** Write an executable-by-bash hook script at the repo root. */
 export async function writeHook(root: string, hook: string, body: string): Promise<void> {
   await Bun.write(join(root, hook), `#!/usr/bin/env bash\nset -euo pipefail\n${body}\n`);

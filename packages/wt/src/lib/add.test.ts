@@ -2,8 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { realpath, symlink } from "node:fs/promises";
 import { join } from "node:path";
 
-import { git, pathExists } from "../git/index.ts";
-import { createTestRepo, writeHook, type TestRepo } from "../test-repo.ts";
+import { git, gitSucceeds, pathExists, runGit } from "../git/index.ts";
+import type { ProgressHandler } from "../progress.ts";
+import {
+  createTestRepo,
+  enableOriginTracking,
+  seedPath,
+  writeHook,
+  type TestRepo,
+} from "../test-repo.ts";
 import { executeAdd, planAdd } from "./add.ts";
 import { listManagedWorktrees, resolveWorktreesDir } from "./worktrees.ts";
 
@@ -83,6 +90,7 @@ describe("executeAdd", () => {
       name: "feat/foo",
       path: join(repo.root, ".worktrees", "feat", "foo"),
       branch: "feat/foo",
+      base: "HEAD",
       created: true,
       hookRan: false,
     });
@@ -127,7 +135,7 @@ describe("executeAdd", () => {
     expect(exclude).not.toContain(".worktrees");
   });
 
-  test("creates a new branch from the invoking linked worktree's HEAD", async () => {
+  test("without a remote, creates a new branch from the invoking linked worktree's HEAD", async () => {
     repo = await createTestRepo();
     const source = await executeAdd({ name: "source", repoPath: repo.root });
     await Bun.write(join(source.path, "source.txt"), "source commit\n");
@@ -140,6 +148,169 @@ describe("executeAdd", () => {
 
     expect(await git(["rev-parse", "HEAD"], result.path)).toBe(sourceHead);
     expect(await Bun.file(join(result.path, "source.txt")).text()).toBe("source commit\n");
+    expect(result.base).toBe("HEAD");
+  });
+
+  test("a bare clone without tracking refs uses HEAD silently", async () => {
+    repo = await createTestRepo({ bare: true });
+    const progress = recordingProgress();
+
+    const result = await executeAdd({ name: "plain", repoPath: repo.root }, progress);
+
+    expect(result.base).toBe("HEAD");
+    expect(progress.warnings).toEqual([]);
+    expect(progress.logs.some((l) => l.includes("from HEAD"))).toBe(true);
+  });
+
+  test("bases a new branch on the remote default as last fetched, without tracking it", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    // Advance the remote and fetch, so origin/main is ahead of the bare HEAD (local main).
+    const seed = seedPath(repo.root);
+    await Bun.write(join(seed, "remote.txt"), "remote commit\n");
+    await git(["add", "remote.txt"], seed);
+    await git(["commit", "-m", "remote commit"], seed);
+    await git(["fetch", "--quiet", "origin"], repo.root);
+    const remoteHead = await git(["rev-parse", "origin/main"], repo.root);
+    expect(remoteHead).not.toBe(await git(["rev-parse", "HEAD"], repo.root));
+
+    const result = await executeAdd({ name: "fresh", repoPath: repo.root });
+
+    expect(result.base).toBe("origin/main");
+    expect(await git(["rev-parse", "HEAD"], result.path)).toBe(remoteHead);
+    expect(await Bun.file(join(result.path, "remote.txt")).text()).toBe("remote commit\n");
+    // --no-track: the new branch must not adopt origin/main as its upstream.
+    expect(await gitConfig(result.path, "branch.fresh.merge")).toBe("");
+  });
+
+  test("does not fetch: an unfetched remote commit is not part of the base", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    const fetched = await git(["rev-parse", "origin/main"], repo.root);
+    const seed = seedPath(repo.root);
+    await Bun.write(join(seed, "later.txt"), "later\n");
+    await git(["add", "later.txt"], seed);
+    await git(["commit", "-m", "later"], seed);
+
+    const result = await executeAdd({ name: "stale-ok", repoPath: repo.root });
+
+    expect(result.base).toBe("origin/main");
+    expect(await git(["rev-parse", "HEAD"], result.path)).toBe(fetched);
+  });
+
+  test("an explicit base wins over the remote default", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    await git(["tag", "pinned", "HEAD"], repo.root);
+    const seed = seedPath(repo.root);
+    await Bun.write(join(seed, "newer.txt"), "newer\n");
+    await git(["add", "newer.txt"], seed);
+    await git(["commit", "-m", "newer"], seed);
+    await git(["fetch", "--quiet", "origin"], repo.root);
+    const pinned = await git(["rev-parse", "pinned"], repo.root);
+
+    const result = await executeAdd({ name: "from-tag", repoPath: repo.root, base: "pinned" });
+
+    expect(result.base).toBe("pinned");
+    expect(await git(["rev-parse", "HEAD"], result.path)).toBe(pinned);
+  });
+
+  test("an explicit remote-tracking base still sets no upstream", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+
+    const result = await executeAdd({ name: "explicit", repoPath: repo.root, base: "origin/main" });
+
+    expect(result.base).toBe("origin/main");
+    expect(await gitConfig(result.path, "branch.explicit.merge")).toBe("");
+  });
+
+  test("rejects a base that does not resolve", async () => {
+    repo = await createTestRepo({ bare: true });
+    await expect(
+      executeAdd({ name: "nowhere", repoPath: repo.root, base: "no-such-ref" }),
+    ).rejects.toThrow("Base 'no-such-ref' does not resolve to a commit");
+  });
+
+  test("a base starting with a dash is a ref, not an option", async () => {
+    repo = await createTestRepo({ bare: true });
+    await expect(
+      executeAdd({ name: "dashy", repoPath: repo.root, base: "--lock" }),
+    ).rejects.toThrow("does not resolve");
+    expect(await pathExists(join(repo.root, ".worktrees", "dashy"))).toBe(false);
+  });
+
+  test("a bad base is rejected before an existing branch is recreated", async () => {
+    repo = await createTestRepo({ bare: true });
+    await git(["branch", "parked"], repo.root);
+
+    await expect(
+      executeAdd({
+        name: "parked",
+        repoPath: repo.root,
+        base: "orign/main",
+        branchResolution: "delete-and-create",
+      }),
+    ).rejects.toThrow("Base 'orign/main' does not resolve");
+
+    expect(await gitSucceeds(["rev-parse", "--verify", "refs/heads/parked"], repo.root)).toBe(true);
+  });
+
+  test("a base naming the branch being recreated is pinned before the delete", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "feature", repoPath: repo.root });
+    await git(["config", "user.email", "test@example.com"], added.path);
+    await git(["config", "user.name", "Test"], added.path);
+    await Bun.write(join(added.path, "one.txt"), "1\n");
+    await git(["add", "."], added.path);
+    await git(["commit", "-m", "one"], added.path);
+    const keep = await git(["rev-parse", "HEAD"], added.path);
+    await Bun.write(join(added.path, "two.txt"), "2\n");
+    await git(["add", "."], added.path);
+    await git(["commit", "-m", "two"], added.path);
+    await git(["worktree", "remove", "--force", added.path], repo.root);
+
+    const result = await executeAdd({
+      name: "feature",
+      repoPath: repo.root,
+      base: "feature~1",
+      branchResolution: "delete-and-create",
+    });
+
+    expect(result.base).toBe("feature~1");
+    expect(await git(["rev-parse", "HEAD"], result.path)).toBe(keep);
+    expect(await pathExists(join(result.path, "two.txt"))).toBe(false);
+  });
+
+  test("recreating an existing branch also starts from the base", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    await git(["branch", "parked"], repo.root);
+    const seed = seedPath(repo.root);
+    await Bun.write(join(seed, "ahead.txt"), "ahead\n");
+    await git(["add", "ahead.txt"], seed);
+    await git(["commit", "-m", "ahead"], seed);
+    await git(["fetch", "--quiet", "origin"], repo.root);
+    const remoteHead = await git(["rev-parse", "origin/main"], repo.root);
+
+    const result = await executeAdd({
+      name: "parked",
+      repoPath: repo.root,
+      branchResolution: "delete-and-create",
+    });
+
+    expect(result.base).toBe("origin/main");
+    expect(await git(["rev-parse", "HEAD"], result.path)).toBe(remoteHead);
+  });
+
+  test("checking out an existing branch reports no base", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    await git(["branch", "existing"], repo.root);
+
+    const result = await executeAdd({ name: "wt", repoPath: repo.root, branch: "existing" });
+
+    expect(result.base).toBeUndefined();
   });
 
   test("honors WT_DIR", async () => {
@@ -276,3 +447,23 @@ describe("executeAdd", () => {
     expect(warnings.join("\n")).toContain("init.wt.sh exited with code 3");
   });
 });
+
+function recordingProgress(): ProgressHandler & { logs: string[]; warnings: string[] } {
+  const logs: string[] = [];
+  const warnings: string[] = [];
+  return {
+    logs,
+    warnings,
+    log: (msg: string) => {
+      logs.push(msg);
+    },
+    warn: (msg: string) => {
+      warnings.push(msg);
+    },
+  };
+}
+
+/** A git config value, or "" when unset. */
+async function gitConfig(cwd: string, key: string): Promise<string> {
+  return (await runGit(["config", "--get", key], cwd)).stdout.trim();
+}

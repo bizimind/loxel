@@ -8,6 +8,7 @@ import { abortedResult, runCommand } from "./aborted.ts";
 
 interface AddOptions {
   branch?: string;
+  base?: string;
   json?: boolean;
 }
 
@@ -19,21 +20,28 @@ export async function addCommand(
   options: AddOptions,
 ): Promise<void> {
   await runCommand<AddCommandResult>(options, async (ctx) => {
+    if (options.branch && options.base) {
+      throw new Error("--base only applies to a new branch; it cannot be combined with -b");
+    }
     const name = providedName ?? (await promptForName());
     const repoPath = process.cwd();
 
     const plan = await planAdd({ name, repoPath });
     const resolution = await resolveBranchConflict(plan, options);
     if (resolution === "cancel") return abortedResult("User cancelled");
+    if (resolution === "use-existing" && options.base) {
+      ctx.warn(`Reusing existing branch '${plan.branch}'; --base ${options.base} is ignored`);
+    }
 
     const result = await executeAdd(
-      { name, repoPath, branch: options.branch, branchResolution: resolution },
+      { name, repoPath, branch: options.branch, base: options.base, branchResolution: resolution },
       { log: ctx.log, warn: ctx.warn },
     );
 
     return createResult<AddResult>(
       result,
-      (data) => `\nWorktree '${data.name}' is ready at ${data.path}`,
+      (data) =>
+        `\nWorktree '${data.name}' is ready at ${data.path}${data.base ? ` (from ${data.base})` : ""}`,
     );
   });
 }

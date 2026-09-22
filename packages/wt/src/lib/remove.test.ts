@@ -3,7 +3,13 @@ import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { branchExists, git, pathExists, worktreeStatus } from "../git/index.ts";
-import { createTestRepo, writeHook, type TestRepo } from "../test-repo.ts";
+import {
+  createTestRepo,
+  enableOriginTracking,
+  seedPath,
+  writeHook,
+  type TestRepo,
+} from "../test-repo.ts";
 import { executeAdd } from "./add.ts";
 import { executeRemove, planRemove } from "./remove.ts";
 
@@ -244,6 +250,77 @@ describe("executeRemove", () => {
     expect(result.branchDeleted).toBe(false);
     expect(warnings.join("\n")).toContain("could not delete branch 'unmerged'");
     expect(await branchExists(repo.root, "unmerged")).toBe(true);
+  });
+
+  test("deletes an untouched branch based on origin/main even when local main lags", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    const seed = seedPath(repo.root);
+    await Bun.write(join(seed, "ahead.txt"), "ahead\n");
+    await git(["add", "ahead.txt"], seed);
+    await git(["commit", "-m", "ahead"], seed);
+    await git(["fetch", "--quiet", "origin"], repo.root);
+    const added = await executeAdd({ name: "untouched", repoPath: repo.root });
+    expect(added.base).toBe("origin/main");
+    // Local main (the bare HEAD) is behind origin/main, so `git branch -d` alone would refuse.
+    expect(await git(["rev-parse", "HEAD"], repo.root)).not.toBe(
+      await git(["rev-parse", "origin/main"], repo.root),
+    );
+    const warnings: string[] = [];
+
+    const result = await executeRemove(
+      { name: "untouched", repoPath: repo.root, deleteBranch: true, force: false },
+      { log: () => {}, warn: (message) => warnings.push(message) },
+    );
+
+    expect(result.branchDeleted).toBe(true);
+    expect(warnings).toEqual([]);
+    expect(await branchExists(repo.root, "untouched")).toBe(false);
+  });
+
+  test("warns instead of throwing when the merged-into-remote fallback delete fails", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    const seed = seedPath(repo.root);
+    await Bun.write(join(seed, "ahead.txt"), "ahead\n");
+    await git(["add", "ahead.txt"], seed);
+    await git(["commit", "-m", "ahead"], seed);
+    await git(["fetch", "--quiet", "origin"], repo.root);
+    await executeAdd({ name: "held", repoPath: repo.root });
+    // A stale lock file makes both -d and -D fail while --is-ancestor still works.
+    await Bun.write(join(repo.root, "refs", "heads", "held.lock"), "");
+    const warnings: string[] = [];
+
+    const result = await executeRemove(
+      { name: "held", repoPath: repo.root, deleteBranch: true, force: false },
+      { log: () => {}, warn: (message) => warnings.push(message) },
+    );
+
+    expect(result.removed).toBe(true);
+    expect(result.branchDeleted).toBe(false);
+    expect(warnings.join("\n")).toContain("could not delete branch 'held'");
+    expect(await branchExists(repo.root, "held")).toBe(true);
+  });
+
+  test("still keeps a branch with commits beyond origin/main", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    const added = await executeAdd({ name: "real-work", repoPath: repo.root });
+    await git(["config", "user.email", "test@example.com"], added.path);
+    await git(["config", "user.name", "Test"], added.path);
+    await Bun.write(join(added.path, "new.txt"), "work\n");
+    await git(["add", "."], added.path);
+    await git(["commit", "-m", "work"], added.path);
+
+    const result = await executeRemove({
+      name: "real-work",
+      repoPath: repo.root,
+      deleteBranch: true,
+      force: false,
+    });
+
+    expect(result.branchDeleted).toBe(false);
+    expect(await branchExists(repo.root, "real-work")).toBe(true);
   });
 
   test("force-deletes an unmerged branch with forceBranch", async () => {

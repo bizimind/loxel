@@ -148,14 +148,23 @@ export function findWorktree(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-/** Create a worktree, either on a new branch or checking out an existing one. */
+/**
+ * Create a worktree, either on a new branch or checking out an existing one.
+ *
+ * A new branch starts at `startPoint` (default: the cwd's HEAD). `--no-track`
+ * keeps a branch started from a remote-tracking ref such as `origin/main` from
+ * adopting it as upstream, which would send `git pull` to main and make `git
+ * push` refuse under the default push policy.
+ */
 export async function addWorktree(
   root: string,
   path: string,
-  options: { newBranch?: string; branch?: string },
+  options: { newBranch?: string; branch?: string; startPoint?: string },
 ): Promise<void> {
   if (options.newBranch) {
-    await git(["worktree", "add", "-b", options.newBranch, path], root);
+    // `--` keeps a start point that begins with `-` from being read as an option.
+    const start = options.startPoint ? ["--", options.startPoint] : [];
+    await git(["worktree", "add", "--no-track", "-b", options.newBranch, path, ...start], root);
     return;
   }
   if (options.branch) {
