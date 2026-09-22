@@ -184,6 +184,7 @@ export function SideBySideDiffView({
     onRightEditorMount: onRightEditorMountScroll,
     subscribeToScroll,
     flushScroll,
+    scrollBy,
     leftContainerRef,
     rightContainerRef,
   } = useMonacoSyncScroll({ alignmentSections, lineHeight: LINE_HEIGHT });
@@ -430,6 +431,7 @@ export function SideBySideDiffView({
               lineHeight={LINE_HEIGHT}
               subscribeToScroll={subscribeToScroll}
               flushScroll={flushScroll}
+              scrollBy={scrollBy}
               leftEditor={leftEditor}
               rightEditor={rightEditor}
               collapseRegions={collapsibleRegions}

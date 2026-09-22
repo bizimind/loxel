@@ -122,6 +122,9 @@ export function buildLineChangeMap(regions: ChangeRegion[]): Map<number, ChangeT
  * Scroll alignment section - tracks how lines on left and right panels align.
  * Used for smart synchronized scrolling.
  */
+/** Which panel of the side-by-side diff is being scrolled (the "source"). */
+export type ScrollSide = "left" | "right";
+
 export interface ScrollAlignmentSection {
   /** Type of alignment:
    * - "aligned": Both sides have same number of lines, scroll together 1:1
@@ -331,7 +334,7 @@ export function buildScrollAlignment(
  * @param viewportHeight - Height of the visible viewport in pixels
  */
 export function translateScrollPosition(
-  fromSide: "left" | "right",
+  fromSide: ScrollSide,
   scrollTop: number,
   sections: ScrollAlignmentSection[],
   lineHeight: number,

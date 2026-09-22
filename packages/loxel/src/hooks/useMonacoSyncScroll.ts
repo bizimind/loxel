@@ -2,7 +2,7 @@ import type { editor } from "monaco-editor";
 import type { RefObject } from "react";
 import { useCallback, useEffect, useRef } from "react";
 
-import type { ScrollAlignmentSection } from "@/components/diff/change-regions";
+import type { ScrollAlignmentSection, ScrollSide } from "@/components/diff/change-regions";
 import { translateScrollPosition } from "@/components/diff/change-regions";
 
 type IStandaloneCodeEditor = editor.IStandaloneCodeEditor;
@@ -12,12 +12,21 @@ interface UseMonacoSyncScrollOptions {
   lineHeight: number;
 }
 
+/** Scroll both editors by a wheel delta, treating `source` as the panel being scrolled. */
+export type ScrollBy = (source: ScrollSide, deltaX: number, deltaY: number) => void;
+
 interface UseMonacoSyncScrollResult {
   onLeftEditorMount: (editor: IStandaloneCodeEditor) => void;
   onRightEditorMount: (editor: IStandaloneCodeEditor) => void;
   subscribeToScroll: (cb: (left: number, right: number) => void) => () => void;
   /** Re-notify all scroll subscribers with current positions (e.g. after layout changes) */
   flushScroll: () => void;
+  /**
+   * Apply a wheel delta programmatically. Used by overlays that sit outside the panel
+   * containers (e.g. the collapse indicator in DiffGutter) so they can scroll the panel
+   * under the pointer without re-dispatching DOM events.
+   */
+  scrollBy: ScrollBy;
   leftContainerRef: RefObject<HTMLDivElement | null>;
   rightContainerRef: RefObject<HTMLDivElement | null>;
 }
@@ -28,6 +37,11 @@ interface UseMonacoSyncScrollResult {
  * Since Monaco editors have `handleMouseWheel: false`, we intercept wheel events
  * on container divs and use `editor.setScrollTop()` / `editor.setScrollLeft()`
  * to position both editors according to the alignment sections.
+ *
+ * The source side matters: scroll translation is not a bijection (the follower can be
+ * paused or clamped), so the source must always be the panel the user is actually
+ * scrolling. Overlays outside the containers must report the side under the pointer
+ * via `scrollBy` rather than forwarding to a fixed side.
  */
 export function useMonacoSyncScroll(
   options: UseMonacoSyncScrollOptions,
@@ -57,12 +71,9 @@ export function useMonacoSyncScroll(
     }
   }, []);
 
-  // Wheel event handler — intercepts wheel on container, drives both editors
-  const handleWheel = useCallback(
-    (e: WheelEvent, source: "left" | "right") => {
-      e.preventDefault();
-      e.stopPropagation();
-
+  // Core scroll logic — drives both editors from a delta on the source side
+  const scrollBy = useCallback<ScrollBy>(
+    (source, deltaX, deltaY) => {
       const leftEditor = leftEditorRef.current;
       const rightEditor = rightEditorRef.current;
       if (!leftEditor || !rightEditor) return;
@@ -74,9 +85,9 @@ export function useMonacoSyncScroll(
       if (viewportHeight === 0) return;
 
       // Vertical scrolling — alignment-based
-      if (e.deltaY !== 0) {
+      if (deltaY !== 0) {
         const currentScrollTop = sourceEditor.getScrollTop();
-        const newSourceScroll = Math.max(0, currentScrollTop + e.deltaY);
+        const newSourceScroll = Math.max(0, currentScrollTop + deltaY);
 
         const { leftScroll, rightScroll } = translateScrollPosition(
           source,
@@ -93,14 +104,24 @@ export function useMonacoSyncScroll(
       }
 
       // Horizontal scrolling — mirror deltaX to both editors
-      if (e.deltaX !== 0) {
+      if (deltaX !== 0) {
         const sourceScrollLeft = sourceEditor.getScrollLeft();
-        const newScrollLeft = Math.max(0, sourceScrollLeft + e.deltaX);
+        const newScrollLeft = Math.max(0, sourceScrollLeft + deltaX);
         leftEditor.setScrollLeft(newScrollLeft);
         rightEditor.setScrollLeft(newScrollLeft);
       }
     },
     [options.alignmentSections, options.lineHeight, notifySubscribers],
+  );
+
+  // Wheel event handler — intercepts wheel on container, drives both editors
+  const handleWheel = useCallback(
+    (e: WheelEvent, source: ScrollSide) => {
+      e.preventDefault();
+      e.stopPropagation();
+      scrollBy(source, e.deltaX, e.deltaY);
+    },
+    [scrollBy],
   );
 
   // Set up wheel listeners on container divs
@@ -140,6 +161,7 @@ export function useMonacoSyncScroll(
     onRightEditorMount,
     subscribeToScroll,
     flushScroll,
+    scrollBy,
     leftContainerRef,
     rightContainerRef,
   };
