@@ -1,16 +1,15 @@
 import { useMemo } from "react";
 
-import type { ColumnRange } from "@/components/diff/inline-changes";
-import { computeInlineChanges, rangesByLine } from "@/components/diff/inline-changes";
+import type { DiffLine } from "@/api/diff-model";
+import type { ColumnRange, InlineChangeBudget } from "@/components/diff/inline-changes";
+import {
+  computeInlineChanges,
+  createInlineChangeBudget,
+  rangesByLine,
+} from "@/components/diff/inline-changes";
 
 /** A line of a hunk as rendered by the hunk-based diff views, optionally syntax-highlighted */
-export interface HunkLine {
-  type: "normal" | "add" | "delete";
-  content: string;
-  html?: string;
-  oldLineNumber?: number;
-  newLineNumber?: number;
-}
+export type HunkLine = DiffLine & { html?: string };
 
 export interface HunkData {
   header: string;
@@ -22,9 +21,13 @@ export type HunkInlineSegments = Map<number, ColumnRange[]>;
 
 /**
  * Compute inline change spans for a hunk. Consecutive delete lines followed by consecutive
- * add lines form a modification block; each block is refined to character ranges.
+ * add lines form a modification block; each block is refined to character ranges. Blocks
+ * draw from the given budget, which callers share across all hunks of a file.
  */
-export function buildHunkInlineSegments(lines: HunkLine[]): HunkInlineSegments {
+export function buildHunkInlineSegments(
+  lines: HunkLine[],
+  budget: InlineChangeBudget = createInlineChangeBudget(),
+): HunkInlineSegments {
   const segments: HunkInlineSegments = new Map();
   let deleted: number[] = [];
   let added: number[] = [];
@@ -33,7 +36,7 @@ export function buildHunkInlineSegments(lines: HunkLine[]): HunkInlineSegments {
     if (deleted.length > 0 && added.length > 0) {
       const oldLines = deleted.map((i) => lines[i]!.content);
       const newLines = added.map((i) => lines[i]!.content);
-      const changes = computeInlineChanges(oldLines, newLines);
+      const changes = computeInlineChanges(oldLines, newLines, budget);
       rangesByLine(changes.old, oldLines).forEach((spans, i) => {
         if (spans.length > 0) segments.set(deleted[i]!, spans);
       });
@@ -61,8 +64,19 @@ export function buildHunkInlineSegments(lines: HunkLine[]): HunkInlineSegments {
   return segments;
 }
 
-export function useHunkInlineSegments(lines: HunkLine[]): HunkInlineSegments {
-  return useMemo(() => buildHunkInlineSegments(lines), [lines]);
+/** Inline change spans for every hunk of a file, computed under one shared time budget */
+export function buildFileInlineSegments(hunks: HunkData[]): HunkInlineSegments[] {
+  const budget = createInlineChangeBudget();
+  return hunks.map((hunk) => buildHunkInlineSegments(hunk.lines, budget));
+}
+
+/**
+ * Memoized per-file inline segments. Key on the raw diff hunks rather than the highlighted
+ * copies: the line contents are identical, so the pass runs once per file instead of again
+ * when syntax highlighting resolves.
+ */
+export function useFileInlineSegments(hunks: HunkData[]): HunkInlineSegments[] {
+  return useMemo(() => buildFileInlineSegments(hunks), [hunks]);
 }
 
 interface HunkLineContentProps {

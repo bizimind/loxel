@@ -29,8 +29,22 @@ export interface ColumnRange {
 const MAX_BLOCK_LINES = 500;
 /** If more than this fraction of a block's characters changed, inline highlights are noise */
 const MAX_CHANGED_RATIO = 0.7;
-/** Upper bound for the character diff of a single block */
-const MAX_COMPUTATION_MS = 200;
+/** Upper bound for all character diffs of one file, shared by every block */
+const MAX_FILE_COMPUTATION_MS = 200;
+
+/**
+ * A deadline shared by every block of one file. Each block receives only the remaining time,
+ * so a file full of pathological blocks degrades to plain modifications instead of stacking
+ * per-block timeouts into a frozen frame.
+ */
+export interface InlineChangeBudget {
+  /** Absolute `performance.now()` timestamp after which no more diffs are computed */
+  readonly deadline: number;
+}
+
+export function createInlineChangeBudget(totalMs = MAX_FILE_COMPUTATION_MS): InlineChangeBudget {
+  return { deadline: performance.now() + totalMs };
+}
 
 const EMPTY: InlineChanges = { old: [], new: [] };
 
@@ -64,16 +78,26 @@ function changedRatio(ranges: InlineRange[], lines: string[]): number {
  * word extend to the whole word, boundaries slide to token edges). Single-character edits such
  * as a fixed typo stay single-character; rewritten identifiers highlight as whole words.
  *
- * Returns empty ranges when the block is too large, the diff timed out, or most of the block
- * changed, so near-total rewrites render as plain modifications instead of solid highlights.
+ * Returns empty ranges when the block is too large, the budget is exhausted or the diff timed
+ * out, or most of the block changed, so near-total rewrites render as plain modifications
+ * instead of solid highlights.
  */
-export function computeInlineChanges(oldLines: string[], newLines: string[]): InlineChanges {
+export function computeInlineChanges(
+  oldLines: string[],
+  newLines: string[],
+  budget: InlineChangeBudget = createInlineChangeBudget(),
+): InlineChanges {
   if (oldLines.length === 0 || newLines.length === 0) return EMPTY;
   if (oldLines.length > MAX_BLOCK_LINES || newLines.length > MAX_BLOCK_LINES) return EMPTY;
 
+  // Monaco treats maxComputationTimeMs === 0 as "no limit", so an exhausted budget must
+  // short-circuit here rather than be passed through.
+  const remainingMs = Math.ceil(budget.deadline - performance.now());
+  if (remainingMs <= 0) return EMPTY;
+
   const result = computer.computeDiff(oldLines, newLines, {
     ignoreTrimWhitespace: false,
-    maxComputationTimeMs: MAX_COMPUTATION_MS,
+    maxComputationTimeMs: remainingMs,
     computeMoves: false,
   });
   if (result.hitTimeout) return EMPTY;
@@ -103,12 +127,13 @@ function offsetRanges(ranges: InlineRange[], lineOffset: number): InlineRange[] 
 
 /**
  * Compute inline changes for every modification pair of a file, with ranges expressed in
- * absolute line numbers of the old and new file contents.
+ * absolute line numbers of the old and new file contents. All pairs share one time budget.
  */
 export function buildInlineChangesForPairs(
   pairs: ChangePair[],
   oldLines: string[],
   newLines: string[],
+  budget: InlineChangeBudget = createInlineChangeBudget(),
 ): InlineChanges {
   const old: InlineRange[] = [];
   const updated: InlineRange[] = [];
@@ -117,6 +142,7 @@ export function buildInlineChangesForPairs(
     const changes = computeInlineChanges(
       oldLines.slice(pair.oldStart - 1, pair.oldEnd),
       newLines.slice(pair.newStart - 1, pair.newEnd),
+      budget,
     );
     old.push(...offsetRanges(changes.old, pair.oldStart - 1));
     updated.push(...offsetRanges(changes.new, pair.newStart - 1));

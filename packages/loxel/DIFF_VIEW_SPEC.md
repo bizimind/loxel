@@ -255,7 +255,8 @@ There is no fixed word or character granularity. Each modification block (a run 
 
 - Blocks larger than 500 lines on either side are not refined.
 - If more than 70% of a block's characters changed on either side, the block gets no inline highlights and renders as a plain modification.
-- The character diff for one block is capped at 200 ms; on timeout the block gets no inline highlights.
+- All blocks of a file share one 200 ms budget. Each block receives only the remaining time, and once the budget is exhausted the remaining blocks get no inline highlights, so a pathological file degrades to plain modifications instead of freezing the frame.
+- The hunk-based views compute the pass once per file from the raw hunks, so it does not run again when syntax highlighting resolves.
 
 ### Rendering
 

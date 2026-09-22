@@ -3,7 +3,12 @@ import { describe, expect, it } from "bun:test";
 import { DefaultLinesDiffComputer } from "monaco-editor/editor/common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer";
 
 import type { ChangePair } from "./change-regions";
-import { buildInlineChangesForPairs, computeInlineChanges, rangesByLine } from "./inline-changes";
+import {
+  buildInlineChangesForPairs,
+  computeInlineChanges,
+  createInlineChangeBudget,
+  rangesByLine,
+} from "./inline-changes";
 
 function slice(line: string, r: { startColumn: number; endColumn: number }): string {
   return line.slice(r.startColumn - 1, r.endColumn - 1);
@@ -79,6 +84,30 @@ describe("computeInlineChanges", () => {
   it("returns nothing when either side is empty", () => {
     expect(computeInlineChanges([], ["a"])).toEqual({ old: [], new: [] });
     expect(computeInlineChanges(["a"], [])).toEqual({ old: [], new: [] });
+  });
+});
+
+describe("inline change budget", () => {
+  it("skips blocks once the shared budget is exhausted", () => {
+    const exhausted = createInlineChangeBudget(0);
+    expect(computeInlineChanges(["const foo = 5;"], ["const bar = 42;"], exhausted)).toEqual({
+      old: [],
+      new: [],
+    });
+  });
+
+  it("shares one budget across all pairs of a file", () => {
+    const pairs: ChangePair[] = [
+      { type: "modify", oldStart: 1, oldEnd: 1, newStart: 1, newEnd: 1 },
+      { type: "modify", oldStart: 2, oldEnd: 2, newStart: 2, newEnd: 2 },
+    ];
+    const result = buildInlineChangesForPairs(
+      pairs,
+      ["const foo = 5;", "let a = 1;"],
+      ["const bar = 42;", "let b = 1;"],
+      createInlineChangeBudget(0),
+    );
+    expect(result).toEqual({ old: [], new: [] });
   });
 });
 

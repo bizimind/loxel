@@ -32,7 +32,8 @@ import {
   type HunkData,
   type HunkLine,
   HunkLineContent,
-  useHunkInlineSegments,
+  type HunkInlineSegments,
+  useFileInlineSegments,
 } from "./HunkLineContent";
 
 /**
@@ -359,6 +360,7 @@ function HunkBasedDiffView({
   }, [file.newPath, file.oldPath]);
 
   const gaps = useMemo(() => calculateHunkGaps(file.hunks), [file.hunks]);
+  const inlineSegments = useFileInlineSegments(file.hunks);
   const gapsByAfterIndex = useMemo(() => {
     const map = new Map<number, HunkGap>();
     for (const gap of gaps) {
@@ -460,9 +462,17 @@ function HunkBasedDiffView({
               {hunk.header}
             </div>
             {viewMode === "unified" ? (
-              <UnifiedHunkView hunk={hunk} highlighted={!!highlighted} />
+              <UnifiedHunkView
+                hunk={hunk}
+                highlighted={!!highlighted}
+                inlineSegments={inlineSegments[i]}
+              />
             ) : (
-              <SplitHunkView hunk={hunk} highlighted={!!highlighted} />
+              <SplitHunkView
+                hunk={hunk}
+                highlighted={!!highlighted}
+                inlineSegments={inlineSegments[i]}
+              />
             )}
           </div>
 
@@ -588,11 +598,12 @@ function ExpandedContextSplit({ lines, startLine }: { lines: string[]; startLine
 function UnifiedHunkView({
   hunk,
   highlighted,
+  inlineSegments,
 }: {
   hunk: HunkData | HighlightedHunk;
   highlighted: boolean;
+  inlineSegments: HunkInlineSegments | undefined;
 }) {
-  const inlineSegments = useHunkInlineSegments(hunk.lines);
   return (
     <table className="w-full border-collapse">
       <tbody>
@@ -635,7 +646,7 @@ function UnifiedHunkView({
               <HunkLineContent
                 line={line}
                 highlighted={highlighted}
-                segments={inlineSegments.get(i)}
+                segments={inlineSegments?.get(i)}
               />
             </td>
           </tr>
@@ -652,12 +663,12 @@ type BufferedLine = { line: HunkLine; index: number };
 function SplitHunkView({
   hunk,
   highlighted,
+  inlineSegments,
 }: {
   hunk: HunkData | HighlightedHunk;
   highlighted: boolean;
+  inlineSegments: HunkInlineSegments | undefined;
 }) {
-  const inlineSegments = useHunkInlineSegments(hunk.lines);
-
   const leftLines: SplitRow[] = [];
   const rightLines: SplitRow[] = [];
 
@@ -703,7 +714,7 @@ function SplitHunkView({
       <HunkLineContent
         line={row.line}
         highlighted={highlighted}
-        segments={inlineSegments.get(row.index)}
+        segments={inlineSegments?.get(row.index)}
       />
     );
   };
