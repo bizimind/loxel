@@ -315,10 +315,39 @@ export class OxfmtLspBackend implements FormatterBackend {
         return "javascript";
       case "jsx":
         return "javascriptreact";
+      case "mts":
+      case "cts":
+        return "typescript";
+      case "mjs":
+      case "cjs":
+        return "javascript";
       case "css":
         return "css";
+      case "scss":
+        return "scss";
+      case "less":
+        return "less";
       case "json":
         return "json";
+      case "jsonc":
+      case "json5":
+        return "jsonc";
+      case "md":
+      case "mdx":
+      case "markdown":
+        return "markdown";
+      case "yaml":
+      case "yml":
+        return "yaml";
+      case "toml":
+        return "toml";
+      case "html":
+        return "html";
+      case "vue":
+        return "vue";
+      case "graphql":
+      case "gql":
+        return "graphql";
       default:
         return "plaintext";
     }
