@@ -1,10 +1,10 @@
 export {
   branchExists,
-  commitExists,
   deleteBranch,
   getCurrentBranch,
   isMergedInto,
   renameBranch,
+  resolveCommit,
   resolveRemoteDefault,
 } from "./branch.ts";
 export {

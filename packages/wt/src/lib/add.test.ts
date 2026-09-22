@@ -256,6 +256,32 @@ describe("executeAdd", () => {
     expect(await gitSucceeds(["rev-parse", "--verify", "refs/heads/parked"], repo.root)).toBe(true);
   });
 
+  test("a base naming the branch being recreated is pinned before the delete", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "feature", repoPath: repo.root });
+    await git(["config", "user.email", "test@example.com"], added.path);
+    await git(["config", "user.name", "Test"], added.path);
+    await Bun.write(join(added.path, "one.txt"), "1\n");
+    await git(["add", "."], added.path);
+    await git(["commit", "-m", "one"], added.path);
+    const keep = await git(["rev-parse", "HEAD"], added.path);
+    await Bun.write(join(added.path, "two.txt"), "2\n");
+    await git(["add", "."], added.path);
+    await git(["commit", "-m", "two"], added.path);
+    await git(["worktree", "remove", "--force", added.path], repo.root);
+
+    const result = await executeAdd({
+      name: "feature",
+      repoPath: repo.root,
+      base: "feature~1",
+      branchResolution: "delete-and-create",
+    });
+
+    expect(result.base).toBe("feature~1");
+    expect(await git(["rev-parse", "HEAD"], result.path)).toBe(keep);
+    expect(await pathExists(join(result.path, "two.txt"))).toBe(false);
+  });
+
   test("recreating an existing branch also starts from the base", async () => {
     repo = await createTestRepo({ bare: true });
     await enableOriginTracking(repo.root);

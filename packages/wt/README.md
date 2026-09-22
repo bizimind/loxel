@@ -219,18 +219,18 @@ Renaming the worktree your shell is sitting in leaves that shell on a path that 
 
 Run interactively and wt prompts for the common decisions: the worktree name, what to do when the branch already exists, which worktree to act on, whether to force a dirty removal, and whether to delete the branch too. Pass everything as flags and it runs unattended; without a terminal a missing required value errors instead of blocking, and destructive commands never auto-select a target.
 
-| Flag                    | Commands | Meaning                                                         |
-| ----------------------- | -------- | --------------------------------------------------------------- |
-| `-j`, `--json`          | all      | JSON result on stdout; progress and prompts stay on stderr      |
-| `-b`, `--branch <b>`    | `add`    | Check out an existing branch instead of creating one            |
-| `--base <ref>`          | `add`    | Start the new branch from `<ref>` instead of the remote default |
-| `--branch <b>`          | `mv`     | Rename the branch to `<b>` instead of the new name              |
-| `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leaving the branch alone             |
-| `-f`, `--force`         | `mv`     | Move a locked worktree                                          |
-| `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes               |
-| `-d`, `--delete-branch` | `remove` | Also delete the worktree's branch; an unmerged one is kept      |
-| `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)               |
-| `--keep-branch`         | `remove` | Keep the branch (no prompt)                                     |
+| Flag                    | Commands | Meaning                                                                      |
+| ----------------------- | -------- | ---------------------------------------------------------------------------- |
+| `-j`, `--json`          | all      | JSON result on stdout; progress and prompts stay on stderr                   |
+| `-b`, `--branch <b>`    | `add`    | Check out an existing branch instead of creating one                         |
+| `--base <ref>`          | `add`    | Start the new branch from `<ref>` instead of the remote default              |
+| `--branch <b>`          | `mv`     | Rename the branch to `<b>` instead of the new name                           |
+| `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leaving the branch alone                          |
+| `-f`, `--force`         | `mv`     | Move a locked worktree                                                       |
+| `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes                            |
+| `-d`, `--delete-branch` | `remove` | Also delete the branch; kept unless merged into `HEAD` or the remote default |
+| `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)                            |
+| `--keep-branch`         | `remove` | Keep the branch (no prompt)                                                  |
 
 ### `wt list` (alias: `ls`)
 

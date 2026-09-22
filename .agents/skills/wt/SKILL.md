@@ -41,7 +41,7 @@ wt update            # update the binary in place
 | `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leave the branch alone                                            |
 | `-f`, `--force`         | `mv`     | Move a locked worktree                                                                       |
 | `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes                                            |
-| `-d`, `--delete-branch` | `remove` | Also delete the branch; an unmerged one is kept (warns)                                      |
+| `-d`, `--delete-branch` | `remove` | Also delete the branch; kept (warns) unless merged into `HEAD` or the remote default         |
 | `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)                                            |
 | `--keep-branch`         | `remove` | Keep the branch (don't prompt)                                                               |
 

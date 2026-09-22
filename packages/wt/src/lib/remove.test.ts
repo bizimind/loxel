@@ -278,6 +278,30 @@ describe("executeRemove", () => {
     expect(await branchExists(repo.root, "untouched")).toBe(false);
   });
 
+  test("warns instead of throwing when the merged-into-remote fallback delete fails", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    const seed = seedPath(repo.root);
+    await Bun.write(join(seed, "ahead.txt"), "ahead\n");
+    await git(["add", "ahead.txt"], seed);
+    await git(["commit", "-m", "ahead"], seed);
+    await git(["fetch", "--quiet", "origin"], repo.root);
+    await executeAdd({ name: "held", repoPath: repo.root });
+    // A stale lock file makes both -d and -D fail while --is-ancestor still works.
+    await Bun.write(join(repo.root, "refs", "heads", "held.lock"), "");
+    const warnings: string[] = [];
+
+    const result = await executeRemove(
+      { name: "held", repoPath: repo.root, deleteBranch: true, force: false },
+      { log: () => {}, warn: (message) => warnings.push(message) },
+    );
+
+    expect(result.removed).toBe(true);
+    expect(result.branchDeleted).toBe(false);
+    expect(warnings.join("\n")).toContain("could not delete branch 'held'");
+    expect(await branchExists(repo.root, "held")).toBe(true);
+  });
+
   test("still keeps a branch with commits beyond origin/main", async () => {
     repo = await createTestRepo({ bare: true });
     await enableOriginTracking(repo.root);

@@ -43,12 +43,16 @@ export async function resolveRemoteDefault(cwd: string): Promise<string | null> 
   return null;
 }
 
-/** Whether `rev` names a commit here. `--end-of-options` keeps a leading `-` from being read as a flag. */
-export function commitExists(cwd: string, rev: string): Promise<boolean> {
-  return gitSucceeds(
+/**
+ * The commit `rev` names here, or null when it does not resolve to one.
+ * `--end-of-options` keeps a leading `-` from being read as a flag.
+ */
+export async function resolveCommit(cwd: string, rev: string): Promise<string | null> {
+  const result = await runGit(
     ["rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`],
     cwd,
   );
+  return result.exitCode === 0 ? result.stdout.trim() : null;
 }
 
 /** Whether `branch` is an ancestor of (merged into) `target`. */

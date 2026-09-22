@@ -5,13 +5,13 @@ import {
   assertValidWorktreeName,
   branchExists,
   canonicalWorktreesDir,
-  commitExists,
   deleteBranch,
   excludeWorktreesDir,
   getManagedWorktrees,
   getWorktreeName,
   listWorktrees,
   pathExists,
+  resolveCommit,
   resolveRemoteDefault,
   resolveRepoRoot,
   type Worktree,
@@ -155,8 +155,8 @@ async function createWorktree(
   const conflict = ctx.branchConflict;
   if (!conflict) {
     const base = await resolveBase(root, sourceCwd, params.base);
-    await addWorktree(sourceCwd, worktreePath, { newBranch: name, startPoint: base });
-    return { branch: name, base };
+    await addWorktree(sourceCwd, worktreePath, { newBranch: name, startPoint: base.commit });
+    return { branch: name, base: base.name };
   }
 
   if (conflict.kind === "used-by-worktree") {
@@ -172,13 +172,14 @@ async function createWorktree(
     return { branch: name };
   }
 
-  // Resolve (and validate) the base before the force-delete: a typo in --base
-  // must not cost an unmerged branch.
+  // Pin the base to a commit before the force-delete: a typo in --base must
+  // not cost an unmerged branch, and a base naming the branch itself
+  // (`--base <name>~1`) must still resolve once that branch is gone.
   const base = await resolveBase(root, sourceCwd, params.base);
   progress.log(`Deleting existing branch '${name}'...`);
   await deleteBranch(root, name, true);
-  await addWorktree(sourceCwd, worktreePath, { newBranch: name, startPoint: base });
-  return { branch: name, base };
+  await addWorktree(sourceCwd, worktreePath, { newBranch: name, startPoint: base.commit });
+  return { branch: name, base: base.name };
 }
 
 /**
@@ -188,19 +189,21 @@ async function createWorktree(
  * remote default (local-only, or a bare clone that never fetched with a
  * refspec) simply behaves like `git worktree add`.
  *
- * An explicit base is verified in `sourceCwd` (where the worktree is added, so
- * `HEAD` means the same thing) before anything is mutated.
+ * Returns the human-readable name for reporting and the commit it pins to.
+ * Resolution happens in `sourceCwd` (where the worktree is added, so `HEAD`
+ * means the same thing) before anything is mutated, and the commit, not the
+ * name, is what `git worktree add` receives: the name may stop resolving once
+ * the branch it refers to is deleted.
  */
 async function resolveBase(
   root: string,
   sourceCwd: string,
   explicit: string | undefined,
-): Promise<string> {
-  if (!explicit) return (await resolveRemoteDefault(root)) ?? "HEAD";
-  if (!(await commitExists(sourceCwd, explicit))) {
-    throw new Error(`Base '${explicit}' does not resolve to a commit.`);
-  }
-  return explicit;
+): Promise<{ name: string; commit: string }> {
+  const name = explicit ?? (await resolveRemoteDefault(root)) ?? "HEAD";
+  const commit = await resolveCommit(sourceCwd, name);
+  if (!commit) throw new Error(`Base '${name}' does not resolve to a commit.`);
+  return { name, commit };
 }
 
 /**

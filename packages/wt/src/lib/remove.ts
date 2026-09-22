@@ -186,9 +186,14 @@ async function tryDeleteBranch(
     // HEAD in a bare root is the local main mirror, which may lag; so an
     // untouched branch can look unmerged. Judge it against the remote default.
     if (!force && (await mergedIntoRemoteDefault(root, branch))) {
-      await deleteBranch(root, branch, true);
-      progress.log(`Deleted branch '${branch}' (merged into the remote default branch)`);
-      return true;
+      try {
+        await deleteBranch(root, branch, true);
+        progress.log(`Deleted branch '${branch}' (merged into the remote default branch)`);
+        return true;
+      } catch {
+        // Fall through and report the original refusal; the worktree is
+        // already gone and branch deletion stays recoverable.
+      }
     }
     const message = err instanceof Error ? err.message : String(err);
     progress.warn(`Warning: could not delete branch '${branch}': ${message}`);
