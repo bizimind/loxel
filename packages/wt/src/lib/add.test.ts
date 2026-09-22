@@ -215,6 +215,28 @@ describe("executeAdd", () => {
     expect(await git(["rev-parse", "HEAD"], result.path)).toBe(pinned);
   });
 
+  test("an explicit remote-tracking base still sets no upstream", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+
+    const result = await executeAdd({ name: "explicit", repoPath: repo.root, base: "origin/main" });
+
+    expect(result.base).toBe("origin/main");
+    expect(await gitConfig(result.path, "branch.explicit.merge")).toBe("");
+  });
+
+  test("rejects a base that does not resolve", async () => {
+    repo = await createTestRepo({ bare: true });
+    await expect(
+      executeAdd({ name: "nowhere", repoPath: repo.root, base: "no-such-ref" }),
+    ).rejects.toThrow("invalid reference");
+  });
+
+  test("a base starting with a dash is a ref, not an option", async () => {
+    repo = await createTestRepo({ bare: true });
+    await expect(executeAdd({ name: "dashy", repoPath: repo.root, base: "-q" })).rejects.toThrow();
+  });
+
   test("recreating an existing branch also starts from the base", async () => {
     repo = await createTestRepo({ bare: true });
     await enableOriginTracking(repo.root);

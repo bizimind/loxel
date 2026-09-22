@@ -23,21 +23,26 @@ export async function getCurrentBranch(cwd: string): Promise<string> {
 }
 
 /**
- * The remote default branch as a remote-tracking ref (`origin/main`), or null
- * when the repository has none: no remote, or a remote that was never fetched
- * with a refspec (a plain `git clone --bare` records no `origin/*` refs).
+ * The `origin` default branch as a remote-tracking ref (`origin/main`), or
+ * null when the repository has none: no `origin` remote, or one that was never
+ * fetched with a refspec (a plain `git clone --bare` records no `origin/*`).
  *
  * Purely local: reads `origin/HEAD` when the clone recorded it, otherwise
- * falls back to the conventional names. Never touches the network.
+ * falls back to the conventional names. Never touches the network. `origin/HEAD`
+ * is only trusted when its target still exists: it is a symref that git does
+ * not retarget when the remote deletes or renames that branch.
  */
 export async function resolveRemoteDefault(cwd: string): Promise<string | null> {
   const head = await runGit(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd);
-  if (head.exitCode === 0 && head.stdout.trim()) return head.stdout.trim();
+  const recorded = head.exitCode === 0 ? head.stdout.trim() : "";
+  if (recorded && (await remoteRefExists(cwd, recorded))) return recorded;
 
   for (const candidate of ["origin/main", "origin/master"]) {
-    if (await gitSucceeds(["rev-parse", "--verify", "--quiet", `refs/remotes/${candidate}`], cwd)) {
-      return candidate;
-    }
+    if (await remoteRefExists(cwd, candidate)) return candidate;
   }
   return null;
+}
+
+function remoteRefExists(cwd: string, ref: string): Promise<boolean> {
+  return gitSucceeds(["rev-parse", "--verify", "--quiet", `refs/remotes/${ref}`], cwd);
 }

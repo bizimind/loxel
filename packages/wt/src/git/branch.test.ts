@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { createTestRepo, enableOriginTracking, type TestRepo } from "../test-repo.ts";
+import { createTestRepo, enableOriginTracking, seedPath, type TestRepo } from "../test-repo.ts";
 import { getCurrentBranch, resolveRemoteDefault } from "./branch.ts";
 import { git } from "./run.ts";
 
@@ -38,7 +38,37 @@ describe("resolveRemoteDefault", () => {
   test("reads origin/HEAD when recorded", async () => {
     repo = await createTestRepo({ bare: true });
     await enableOriginTracking(repo.root);
+    await git(["branch", "develop"], seedPath(repo.root));
+    await git(["fetch", "--quiet", "origin"], repo.root);
+    await git(["remote", "set-head", "origin", "develop"], repo.root);
+    expect(await resolveRemoteDefault(repo.root)).toBe("origin/develop");
+  });
+
+  test("ignores a dangling origin/HEAD and falls back by name", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    await git(["branch", "develop"], seedPath(repo.root));
+    await git(["fetch", "--quiet", "origin"], repo.root);
+    await git(["remote", "set-head", "origin", "develop"], repo.root);
+    // The remote deletes the branch; a prune drops origin/develop but not the symref.
+    await git(["branch", "-D", "develop"], seedPath(repo.root));
+    await git(
+      ["-c", "remote.origin.followRemoteHEAD=never", "fetch", "--quiet", "--prune", "origin"],
+      repo.root,
+    );
+    expect(await git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], repo.root)).toBe(
+      "origin/develop",
+    );
     expect(await resolveRemoteDefault(repo.root)).toBe("origin/main");
+  });
+
+  test("falls back to origin/master when that is the only conventional ref", async () => {
+    repo = await createTestRepo({ bare: true });
+    await enableOriginTracking(repo.root);
+    await git(["remote", "set-head", "origin", "-d"], repo.root);
+    await git(["update-ref", "refs/remotes/origin/master", "refs/remotes/origin/main"], repo.root);
+    await git(["update-ref", "-d", "refs/remotes/origin/main"], repo.root);
+    expect(await resolveRemoteDefault(repo.root)).toBe("origin/master");
   });
 
   test("falls back to origin/main by existence when origin/HEAD is unset", async () => {

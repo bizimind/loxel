@@ -20,12 +20,18 @@ export async function addCommand(
   options: AddOptions,
 ): Promise<void> {
   await runCommand<AddCommandResult>(options, async (ctx) => {
+    if (options.branch && options.base) {
+      throw new Error("--base only applies to a new branch; it cannot be combined with -b");
+    }
     const name = providedName ?? (await promptForName());
     const repoPath = process.cwd();
 
     const plan = await planAdd({ name, repoPath });
     const resolution = await resolveBranchConflict(plan, options);
     if (resolution === "cancel") return abortedResult("User cancelled");
+    if (resolution === "use-existing" && options.base) {
+      ctx.warn(`Reusing existing branch '${plan.branch}'; --base ${options.base} is ignored`);
+    }
 
     const result = await executeAdd(
       { name, repoPath, branch: options.branch, base: options.base, branchResolution: resolution },

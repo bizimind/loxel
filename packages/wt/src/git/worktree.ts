@@ -162,7 +162,8 @@ export async function addWorktree(
   options: { newBranch?: string; branch?: string; startPoint?: string },
 ): Promise<void> {
   if (options.newBranch) {
-    const start = options.startPoint ? [options.startPoint] : [];
+    // `--` keeps a start point that begins with `-` from being read as an option.
+    const start = options.startPoint ? ["--", options.startPoint] : [];
     await git(["worktree", "add", "--no-track", "-b", options.newBranch, path, ...start], root);
     return;
   }
