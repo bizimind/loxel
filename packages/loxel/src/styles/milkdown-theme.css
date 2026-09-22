@@ -65,9 +65,10 @@
 }
 
 .milkdown .ProseMirror {
+  --milkdown-prose-inline-padding: 48px;
   max-width: 960px;
   margin: 0 auto;
-  padding: 32px 48px;
+  padding: 32px var(--milkdown-prose-inline-padding);
   caret-color: var(--crepe-color-on-background);
   --prosemirror-virtual-cursor-color: var(--crepe-color-on-background);
 }
@@ -447,6 +448,85 @@
 .milkdown .ProseMirror hr {
   background-color: color-mix(in srgb, var(--crepe-color-outline), transparent 60%);
   margin: 24px 0;
+}
+
+/* ── Tables — content-sized columns, header emphasis, row dividers, horizontal scroll ── */
+
+.milkdown .milkdown-table-block {
+  margin: 8px 0;
+}
+
+/*
+ * Scroll wrapper. Bleeds into the right prose padding (never past the .ProseMirror edge) and
+ * scrolls when the table is still wider. Intentionally left unpositioned: the col/row
+ * `.cell-handle`s are siblings of this wrapper, and the `.drag-preview` / `.line-handle`s inside
+ * it are position:absolute against `.milkdown`, so this overflow clip does not apply to any of
+ * them. Adding a positioned ancestor here would break Crepe's `offsetParent`-based preview math.
+ * Known limitation: while the wrapper is scrolled horizontally, the column-drag ghost is offset
+ * by `scrollLeft` (Crepe mixes `offsetLeft` with client rects); drop targets stay correct.
+ */
+.milkdown .milkdown-table-block .table-wrapper {
+  overflow-x: auto;
+  margin-right: calc(-1 * var(--milkdown-prose-inline-padding));
+  scrollbar-width: thin;
+  scrollbar-color: var(--crepe-color-outline) transparent;
+}
+
+/* Content table only (`.children`); the drag-preview table keeps the vendor fixed layout and
+   100% width so the cloned row/column fills the preview box (its column boundaries are
+   approximate, it is a 40%-opacity ghost). `font-size` here is what the `ch` clamps on cells
+   resolve against. `min-width` keeps compact tables from looking like a stray inline fragment
+   without stretching them to full width. */
+.milkdown .milkdown-table-block table.children {
+  table-layout: auto;
+  width: auto;
+  min-width: 55%;
+  font-size: 14px;
+}
+
+/* Cells are border-box (prosemirror-tables), so the `ch` clamps include the inline padding.
+   `overflow-wrap: break-word` (not `anywhere`) keeps whole words as the min-content width so a
+   many-column table scrolls instead of squeezing every column to the minimum and breaking words
+   mid-way; a single long token is still broken at the max-width cap. */
+.milkdown .milkdown-table-block th,
+.milkdown .milkdown-table-block td {
+  --milkdown-cell-inline-padding: 12px;
+  min-width: calc(6ch + 2 * var(--milkdown-cell-inline-padding));
+  max-width: calc(42ch + 2 * var(--milkdown-cell-inline-padding));
+  padding: 6px var(--milkdown-cell-inline-padding);
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--crepe-color-outline), transparent 75%);
+  overflow-wrap: break-word;
+}
+
+/* The theme's `.ProseMirror p` uses fixed px sizes and the vendor reset pads paragraphs, so
+   cell paragraphs need their own metrics. */
+.milkdown .milkdown-table-block th p,
+.milkdown .milkdown-table-block td p {
+  font-size: 14px;
+  line-height: 22px;
+  padding: 0;
+}
+
+/* Header row. Tints derive from the foreground (not `surface-low`, which equals the editor
+   surface in light mode) so they are visible in both themes. */
+.milkdown .milkdown-table-block th {
+  font-weight: 600;
+  color: var(--crepe-color-on-background);
+  background: color-mix(in srgb, var(--crepe-color-on-background), transparent 94%);
+  border-bottom-color: color-mix(in srgb, var(--crepe-color-outline), transparent 50%);
+}
+
+/* Subtle zebra on every other body row (row 1 is the header and has no `td`) */
+.milkdown .milkdown-table-block table.children > tbody > tr:nth-child(2n + 1) > td {
+  background: color-mix(in srgb, var(--crepe-color-on-background), transparent 97%);
+}
+
+/* Alignment comes from the cell's inline style, emitted by @milkdown/preset-gfm exactly as
+   `text-align: left|center|right` (its only hook). Right-aligned columns are usually numeric. */
+.milkdown .milkdown-table-block th[style*="text-align: right"],
+.milkdown .milkdown-table-block td[style*="text-align: right"] {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Crepe floating UI: align vendor overlays with Loxel dropdown chrome ── */
