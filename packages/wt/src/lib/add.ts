@@ -11,6 +11,7 @@ import {
   getWorktreeName,
   listWorktrees,
   pathExists,
+  resolveRemoteDefault,
   resolveRepoRoot,
   type Worktree,
 } from "../git/index.ts";
@@ -42,6 +43,12 @@ export interface AddParams {
   repoPath: string;
   /** Check out this existing branch instead of creating one named after the worktree */
   branch?: string;
+  /**
+   * Start a newly created branch from this ref or commit instead of the
+   * default (the remote default branch as last fetched, else HEAD). Ignored
+   * when an existing branch is checked out.
+   */
+  base?: string;
   /** Required when planAdd reported a branchConflict of kind "exists" */
   branchResolution?: "use-existing" | "delete-and-create";
   /**
@@ -57,6 +64,11 @@ export interface AddResult {
   branch: string;
   /** The worktree was created */
   created: boolean;
+  /**
+   * The ref the new branch was started from (`origin/main`, `HEAD`, or the
+   * explicit `base`). Absent when an existing branch was checked out.
+   */
+  base?: string;
   /** init.wt.sh existed and succeeded */
   hookRan: boolean;
 }
@@ -84,12 +96,13 @@ export async function executeAdd(
   const { root, dir, worktreePath, branchConflict, worktrees } = await inspectAdd(name, repoPath);
   await excludeWorktreesDir(root, dir);
 
-  const branch = await createWorktree(
+  const { branch, base } = await createWorktree(
     { root, sourceCwd: repoPath, worktreePath, name, branchConflict, worktrees, params },
     progress,
   );
 
-  progress.log(`Created worktree '${name}' [${branch}] at ${worktreePath}`);
+  const from = base ? ` from ${base}` : "";
+  progress.log(`Created worktree '${name}' [${branch}]${from} at ${worktreePath}`);
 
   const hookRan = await runHook(
     HOOK_INIT,
@@ -97,12 +110,12 @@ export async function executeAdd(
     progress,
   );
 
-  return { name, path: worktreePath, branch, created: true, hookRan };
+  return { name, path: worktreePath, branch, created: true, ...(base ? { base } : {}), hookRan };
 }
 
 interface AddContext {
   root: string;
-  /** Invocation path whose HEAD is the base for a newly created branch. */
+  /** Invocation path; its HEAD is the base for a new branch when no remote default exists. */
   sourceCwd: string;
   worktreePath: string;
   name: string;
@@ -112,8 +125,14 @@ interface AddContext {
   params: AddParams;
 }
 
-/** Create the worktree and return the branch it checked out. */
-async function createWorktree(ctx: AddContext, progress: ProgressHandler): Promise<string> {
+/**
+ * Create the worktree and return the branch it checked out, plus the start
+ * point when that branch was newly created.
+ */
+async function createWorktree(
+  ctx: AddContext,
+  progress: ProgressHandler,
+): Promise<{ branch: string; base?: string }> {
   // No mkdir here: `git worktree add` creates leading directories itself, and creating them
   // early would leave empty parents behind when a check below rejects the add.
   const { root, sourceCwd, worktreePath, name, params } = ctx;
@@ -129,13 +148,14 @@ async function createWorktree(ctx: AddContext, progress: ProgressHandler): Promi
       );
     }
     await addWorktree(sourceCwd, worktreePath, { branch: params.branch });
-    return params.branch;
+    return { branch: params.branch };
   }
 
   const conflict = ctx.branchConflict;
   if (!conflict) {
-    await addWorktree(sourceCwd, worktreePath, { newBranch: name });
-    return name;
+    const base = await resolveBase(root, params.base);
+    await addWorktree(sourceCwd, worktreePath, { newBranch: name, startPoint: base });
+    return { branch: name, base };
   }
 
   if (conflict.kind === "used-by-worktree") {
@@ -148,13 +168,26 @@ async function createWorktree(ctx: AddContext, progress: ProgressHandler): Promi
   }
   if (params.branchResolution === "use-existing") {
     await addWorktree(sourceCwd, worktreePath, { branch: name });
-    return name;
+    return { branch: name };
   }
 
   progress.log(`Deleting existing branch '${name}'...`);
   await deleteBranch(root, name, true);
-  await addWorktree(sourceCwd, worktreePath, { newBranch: name });
-  return name;
+  const base = await resolveBase(root, params.base);
+  await addWorktree(sourceCwd, worktreePath, { newBranch: name, startPoint: base });
+  return { branch: name, base };
+}
+
+/**
+ * Where a new branch starts: the explicit base, else the remote default branch
+ * as last fetched (`origin/main`), else HEAD. Nothing here touches the network;
+ * fetching stays the user's explicit act, as with git itself. A repo without a
+ * remote default (local-only, or a bare clone that never fetched with a
+ * refspec) simply behaves like `git worktree add`.
+ */
+async function resolveBase(root: string, explicit: string | undefined): Promise<string> {
+  if (explicit) return explicit;
+  return (await resolveRemoteDefault(root)) ?? "HEAD";
 }
 
 /**

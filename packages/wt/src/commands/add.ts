@@ -8,6 +8,7 @@ import { abortedResult, runCommand } from "./aborted.ts";
 
 interface AddOptions {
   branch?: string;
+  base?: string;
   json?: boolean;
 }
 
@@ -27,13 +28,14 @@ export async function addCommand(
     if (resolution === "cancel") return abortedResult("User cancelled");
 
     const result = await executeAdd(
-      { name, repoPath, branch: options.branch, branchResolution: resolution },
+      { name, repoPath, branch: options.branch, base: options.base, branchResolution: resolution },
       { log: ctx.log, warn: ctx.warn },
     );
 
     return createResult<AddResult>(
       result,
-      (data) => `\nWorktree '${data.name}' is ready at ${data.path}`,
+      (data) =>
+        `\nWorktree '${data.name}' is ready at ${data.path}${data.base ? ` (from ${data.base})` : ""}`,
     );
   });
 }

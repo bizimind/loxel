@@ -32,21 +32,22 @@ wt version           # print the installed version
 wt update            # update the binary in place
 ```
 
-| Flag                    | Commands | Meaning                                                     |
-| ----------------------- | -------- | ----------------------------------------------------------- |
-| `-j`, `--json`          | all      | JSON result on stdout; prompts/progress stay on stderr      |
-| `-b`, `--branch <b>`    | `add`    | Check out an existing branch instead of creating a new one  |
-| `--branch <b>`          | `mv`     | Rename the branch to `<b>` instead of the new worktree name |
-| `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leave the branch alone           |
-| `-f`, `--force`         | `mv`     | Move a locked worktree                                      |
-| `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes           |
-| `-d`, `--delete-branch` | `remove` | Also delete the branch; an unmerged one is kept (warns)     |
-| `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)           |
-| `--keep-branch`         | `remove` | Keep the branch (don't prompt)                              |
+| Flag                    | Commands | Meaning                                                                                      |
+| ----------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `-j`, `--json`          | all      | JSON result on stdout; prompts/progress stay on stderr                                       |
+| `-b`, `--branch <b>`    | `add`    | Check out an existing branch instead of creating a new one                                   |
+| `--base <ref>`          | `add`    | Start the new branch from `<ref>` (default: `origin/<default>` as last fetched, else `HEAD`) |
+| `--branch <b>`          | `mv`     | Rename the branch to `<b>` instead of the new worktree name                                  |
+| `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leave the branch alone                                            |
+| `-f`, `--force`         | `mv`     | Move a locked worktree                                                                       |
+| `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes                                            |
+| `-d`, `--delete-branch` | `remove` | Also delete the branch; an unmerged one is kept (warns)                                      |
+| `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)                                            |
+| `--keep-branch`         | `remove` | Keep the branch (don't prompt)                                                               |
 
 **Interactive vs. unattended.** At a terminal `wt` prompts for missing values — the worktree name, which worktree to act on (type-to-filter picker: type to narrow, ↑/↓, Enter; Ctrl+C cancels), whether to reuse an existing branch, whether to force a dirty removal, whether to delete the branch. Pass everything as flags to run unattended; with no terminal (scripts, CI, agents) a missing required value errors instead of blocking. Cancelling a prompt, whether by choosing **Cancel** or by pressing Ctrl+C, is not an error — it returns `{"aborted":true,"reason":"..."}` with exit code 0.
 
-**Branch behavior.** `wt add <name>` creates a branch named after the worktree off the current `HEAD`. If that branch already exists, `wt` offers to reuse or recreate it (or, non-interactively, tells you to pass `-b`); if another worktree has it checked out, that's an error. Use `-b <branch>` to check out an existing branch instead.
+**Branch behavior.** `wt add <name>` creates a branch named after the worktree, started from the remote default branch as last fetched (`origin/main`; falls back to `HEAD` when the repo has no remote default). It never fetches, so run `git fetch` first for a newer base, and the new branch does not track `origin/main`. `--base <ref>` starts from any ref instead (`--base HEAD` for git's own behaviour). If that branch already exists, `wt` offers to reuse or recreate it (or, non-interactively, tells you to pass `-b`); if another worktree has it checked out, that's an error. Use `-b <branch>` to check out an existing branch instead.
 
 **Renaming.** `wt mv <new>` renames the worktree you're currently in; `wt mv <old> <new>` renames another; `wt mv` picks from a list and prompts for the new name. It moves the directory _and_ renames the branch — but only when the branch still matches the worktree name (as `wt add` leaves it). If they've diverged, the directory moves and the branch is left alone unless you pass `--branch <b>`; `-B` never touches it; a detached worktree moves with HEAD untouched. Uncommitted changes ride along. All checks run before anything moves, so a rejected rename leaves nothing half-applied; if the branch rename fails _after_ the move it warns and reports `branchRenamed: false`. Renaming the worktree a shell is sitting in strands that shell on a dead path — `wt` prints the `cd` (keeping your subdirectory), and the `wtm` helper below runs it for you. Other terminals in the old path must `cd` themselves.
 
@@ -77,7 +78,7 @@ Set this up once. A plain `git clone --bare` only records the remote URL — it 
 git clone --bare git@github.com:you/myrepo.git myrepo
 cd myrepo
 git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
-git fetch origin          # now origin/* tracking branches exist
+git fetch origin          # now origin/* tracking branches exist; wt add bases new branches on origin/<default>
 
 wt add main -b main       # check out the default branch as the first worktree
 # drop your .env, init.wt.sh, etc. at the repo root, then:
@@ -179,7 +180,7 @@ Result shapes:
 // list
 {"worktrees":[{"name","path","branch","head","main","locked"}, ...]}
 // add
-{"name","path","branch","created":true,"hookRan":true|false}
+{"name","path","branch","created":true,"base":"origin/main","hookRan":true|false}
 // view
 {"name","path","branch","head","main","locked","dirty","ahead","behind"}
 // mv

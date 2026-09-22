@@ -28,6 +28,10 @@ program
   .alias("create")
   .description("Create a worktree in .worktrees/ (or $WT_DIR) and run init.wt.sh")
   .option("-b, --branch <branch>", "Check out an existing branch instead of creating one")
+  .option(
+    "--base <ref>",
+    "Start the new branch from this ref (default: origin/<default> as last fetched, else HEAD)",
+  )
   .option("-j, --json", "Output as JSON")
   .action(async (name, opts) => {
     const { addCommand } = await import("./commands/add.ts");

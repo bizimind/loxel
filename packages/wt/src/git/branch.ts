@@ -1,4 +1,4 @@
-import { git, gitSucceeds } from "./run.ts";
+import { git, gitSucceeds, runGit } from "./run.ts";
 
 /** Whether a local branch exists. */
 export function branchExists(cwd: string, branch: string): Promise<boolean> {
@@ -20,4 +20,24 @@ export async function getCurrentBranch(cwd: string): Promise<string> {
   const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
   if (branch === "HEAD") throw new Error("Cannot determine a branch from detached HEAD.");
   return branch;
+}
+
+/**
+ * The remote default branch as a remote-tracking ref (`origin/main`), or null
+ * when the repository has none: no remote, or a remote that was never fetched
+ * with a refspec (a plain `git clone --bare` records no `origin/*` refs).
+ *
+ * Purely local: reads `origin/HEAD` when the clone recorded it, otherwise
+ * falls back to the conventional names. Never touches the network.
+ */
+export async function resolveRemoteDefault(cwd: string): Promise<string | null> {
+  const head = await runGit(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd);
+  if (head.exitCode === 0 && head.stdout.trim()) return head.stdout.trim();
+
+  for (const candidate of ["origin/main", "origin/master"]) {
+    if (await gitSucceeds(["rev-parse", "--verify", "--quiet", `refs/remotes/${candidate}`], cwd)) {
+      return candidate;
+    }
+  }
+  return null;
 }
