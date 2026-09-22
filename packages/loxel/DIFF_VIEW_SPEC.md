@@ -238,6 +238,37 @@ When scrolling down through the modification:
 
 ---
 
+## Intra-line Highlights
+
+Modified lines keep their whole-line blue background and additionally highlight the characters that changed: red on the old side, green on the new side. For example `const foo = 5` changed to `const bar = 42` marks `foo` and `5` in red and `bar` and `42` in green.
+
+### Granularity
+
+There is no fixed word or character granularity. Each modification block (a run of deleted lines followed by a run of added lines) is diffed at character level and then refined by the heuristics VS Code uses in its own diff editor, which Monaco bundles:
+
+- Short unchanged runs between two edits are merged into one edit, so `foo_bar` to `baz_qux` is one highlight instead of confetti around the `_`.
+- An edit covering most of a word extends to the whole word, so `foo` to `bar` highlights the whole identifier.
+- Edits covering a small part of a word stay at character level, so `item` to `items` highlights only the `s` and `color` to `colour` only the `u`.
+- Edit boundaries slide to token boundaries where the text allows.
+
+### Limits
+
+- Blocks larger than 500 lines on either side are not refined.
+- If more than 70% of a block's characters changed on either side, the block gets no inline highlights and renders as a plain modification.
+- The character diff for one block is capped at 200 ms; on timeout the block gets no inline highlights.
+
+### Rendering
+
+- Side-by-side (Monaco) view: `inlineClassName` decorations on the text layer, above the whole-line background.
+- Hunk-based split and unified views: a transparent copy of the line is positioned under the syntax-highlighted text and carries the highlight spans, so the highlighter's HTML is untouched and tabs align.
+
+### Key Files
+
+- `src/components/diff/inline-changes.ts` - Adapter over Monaco's `DefaultLinesDiffComputer` producing per-side ranges
+- `src/components/diff-viewer/HunkLineContent.tsx` - Ghost-layer renderer for the hunk-based views
+
+---
+
 ## Gutter Connector Visualization
 
 The center gutter shows SVG connectors between corresponding regions:

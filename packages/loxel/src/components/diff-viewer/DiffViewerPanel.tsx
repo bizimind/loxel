@@ -28,6 +28,13 @@ import { useReviewStore } from "@/store/worktree-reviews";
 import { useWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
+import {
+  type HunkData,
+  type HunkLine,
+  HunkLineContent,
+  useHunkInlineSegments,
+} from "./HunkLineContent";
+
 /**
  * Standalone diff viewer panel for the center zone.
  * Reads diffSource from the repository store and renders the diff content
@@ -580,16 +587,6 @@ function ExpandedContextSplit({ lines, startLine }: { lines: string[]; startLine
   );
 }
 
-type HunkLine = {
-  type: "normal" | "add" | "delete";
-  content: string;
-  html?: string;
-  oldLineNumber?: number;
-  newLineNumber?: number;
-};
-
-type HunkData = { header: string; lines: HunkLine[] };
-
 function UnifiedHunkView({
   hunk,
   highlighted,
@@ -597,6 +594,7 @@ function UnifiedHunkView({
   hunk: HunkData | HighlightedHunk;
   highlighted: boolean;
 }) {
+  const inlineSegments = useHunkInlineSegments(hunk.lines);
   return (
     <table className="w-full border-collapse">
       <tbody>
@@ -636,11 +634,11 @@ function UnifiedHunkView({
                   " "
                 )}
               </span>
-              {highlighted && "html" in line && line.html ? (
-                <span dangerouslySetInnerHTML={{ __html: line.html }} />
-              ) : (
-                line.content
-              )}
+              <HunkLineContent
+                line={line}
+                highlighted={highlighted}
+                segments={inlineSegments.get(i)}
+              />
             </td>
           </tr>
         ))}
@@ -649,6 +647,10 @@ function UnifiedHunkView({
   );
 }
 
+/** A rendered row in the split hunk view; `index` is the line's position in `hunk.lines` */
+type SplitRow = { line: HunkLine | null; index: number; lineNumber: number | null };
+type BufferedLine = { line: HunkLine; index: number };
+
 function SplitHunkView({
   hunk,
   highlighted,
@@ -656,47 +658,56 @@ function SplitHunkView({
   hunk: HunkData | HighlightedHunk;
   highlighted: boolean;
 }) {
-  const leftLines: Array<{ line: HunkLine | null; lineNumber: number | null }> = [];
-  const rightLines: Array<{ line: HunkLine | null; lineNumber: number | null }> = [];
+  const inlineSegments = useHunkInlineSegments(hunk.lines);
 
-  let leftBuffer: HunkLine[] = [];
-  let rightBuffer: HunkLine[] = [];
+  const leftLines: SplitRow[] = [];
+  const rightLines: SplitRow[] = [];
 
-  for (const line of hunk.lines) {
+  let leftBuffer: BufferedLine[] = [];
+  let rightBuffer: BufferedLine[] = [];
+
+  const flushBuffers = () => {
+    const maxLen = Math.max(leftBuffer.length, rightBuffer.length);
+    for (let i = 0; i < maxLen; i++) {
+      const left = leftBuffer[i];
+      const right = rightBuffer[i];
+      leftLines.push({
+        line: left?.line ?? null,
+        index: left?.index ?? -1,
+        lineNumber: left?.line.oldLineNumber ?? null,
+      });
+      rightLines.push({
+        line: right?.line ?? null,
+        index: right?.index ?? -1,
+        lineNumber: right?.line.newLineNumber ?? null,
+      });
+    }
+    leftBuffer = [];
+    rightBuffer = [];
+  };
+
+  hunk.lines.forEach((line, index) => {
     if (line.type === "delete") {
-      leftBuffer.push(line);
+      leftBuffer.push({ line, index });
     } else if (line.type === "add") {
-      rightBuffer.push(line);
+      rightBuffer.push({ line, index });
     } else {
-      const maxLen = Math.max(leftBuffer.length, rightBuffer.length);
-      for (let i = 0; i < maxLen; i++) {
-        const leftLine = leftBuffer[i];
-        const rightLine = rightBuffer[i];
-        leftLines.push({ line: leftLine ?? null, lineNumber: leftLine?.oldLineNumber ?? null });
-        rightLines.push({ line: rightLine ?? null, lineNumber: rightLine?.newLineNumber ?? null });
-      }
-      leftBuffer = [];
-      rightBuffer = [];
-
-      leftLines.push({ line, lineNumber: line.oldLineNumber ?? null });
-      rightLines.push({ line, lineNumber: line.newLineNumber ?? null });
+      flushBuffers();
+      leftLines.push({ line, index, lineNumber: line.oldLineNumber ?? null });
+      rightLines.push({ line, index, lineNumber: line.newLineNumber ?? null });
     }
-  }
+  });
+  flushBuffers();
 
-  const maxLen = Math.max(leftBuffer.length, rightBuffer.length);
-  for (let i = 0; i < maxLen; i++) {
-    const leftLine = leftBuffer[i];
-    const rightLine = rightBuffer[i];
-    leftLines.push({ line: leftLine ?? null, lineNumber: leftLine?.oldLineNumber ?? null });
-    rightLines.push({ line: rightLine ?? null, lineNumber: rightLine?.newLineNumber ?? null });
-  }
-
-  const renderContent = (line: HunkLine | null) => {
-    if (!line) return "";
-    if (highlighted && "html" in line && line.html) {
-      return <span dangerouslySetInnerHTML={{ __html: line.html }} />;
-    }
-    return line.content;
+  const renderContent = (row: SplitRow) => {
+    if (!row.line) return "";
+    return (
+      <HunkLineContent
+        line={row.line}
+        highlighted={highlighted}
+        segments={inlineSegments.get(row.index)}
+      />
+    );
   };
 
   return (
@@ -720,7 +731,7 @@ function SplitHunkView({
                 >
                   {item.lineNumber ?? ""}
                 </td>
-                <td className="px-2 whitespace-pre">{renderContent(item.line)}</td>
+                <td className="px-2 whitespace-pre">{renderContent(item)}</td>
               </tr>
             ))}
           </tbody>
@@ -748,7 +759,7 @@ function SplitHunkView({
                 >
                   {item.lineNumber ?? ""}
                 </td>
-                <td className="px-2 whitespace-pre">{renderContent(item.line)}</td>
+                <td className="px-2 whitespace-pre">{renderContent(item)}</td>
               </tr>
             ))}
           </tbody>

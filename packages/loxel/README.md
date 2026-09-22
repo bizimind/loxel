@@ -80,6 +80,7 @@ JetBrains-style split diff with synchronized scrolling:
 
 - **Content-aware scroll alignment** — unchanged lines stay aligned; insertions/deletions use pause-and-catch-up mechanics with a 50% viewport center rule
 - **Monaco Editor** with syntax highlighting (Shiki), diff decorations, and collapsible unchanged regions
+- **Intra-line highlights** — modified lines (blue) additionally mark the changed characters in red and green, using the VS Code diff heuristics bundled with Monaco; applies to the side-by-side, split, and unified views
 - **Gutter connector** SVG showing line relationships between panels
 - **Split and unified** view modes
 - **Server-resolved bases** — both panes use the exact commit that produced the diff, including

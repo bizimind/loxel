@@ -138,6 +138,8 @@
   --diff-del-bg: #f5d4d4;
   --diff-del-gutter: #f5d4d4;
   --diff-del-text: #cf222e;
+  --diff-add-inline-bg: #abf2bc;
+  --diff-del-inline-bg: #ffb3b5;
 
   /* Comment colors (light mode) */
   --comment-bg: rgba(255, 213, 79, 0.12);
@@ -244,6 +246,8 @@
   --diff-del-bg: #3b2b2b99;
   --diff-del-gutter: #3b2b2b99;
   --diff-del-text: #fa6675;
+  --diff-add-inline-bg: #2ea04366;
+  --diff-del-inline-bg: #f8514966;
 
   /* Comment colors (dark mode) */
   --comment-bg: rgba(255, 213, 79, 0.08);
@@ -389,6 +393,22 @@
 .diff-gutter-modify {
   background-color: var(--diff-modify-gutter);
   color: var(--diff-modify-text);
+}
+
+/* Intra-line changes inside modification blocks (rendered above the line background) */
+.diff-inline-add {
+  background-color: var(--diff-add-inline-bg);
+  border-radius: 2px;
+}
+.diff-inline-del {
+  background-color: var(--diff-del-inline-bg);
+  border-radius: 2px;
+}
+/* Transparent copy of a hunk line that carries the inline spans under the highlighted text.
+ * Must not inherit the body text-shadow, or the ghost glyphs would paint a faint second shadow. */
+.diff-inline-ghost {
+  color: transparent;
+  text-shadow: none;
 }
 
 /* Suggest widget (auto-complete popover) */

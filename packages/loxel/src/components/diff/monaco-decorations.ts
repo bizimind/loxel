@@ -1,6 +1,7 @@
 import type { editor } from "monaco-editor";
 
 import type { ChangeRegion } from "./change-regions";
+import type { InlineRange } from "./inline-changes";
 
 /**
  * Convert ChangeRegion[] to Monaco editor decorations.
@@ -26,4 +27,16 @@ export function buildMonacoDecorations(regions: ChangeRegion[]): editor.IModelDe
       options: { isWholeLine: true, className },
     };
   });
+}
+
+/**
+ * Convert intra-line change ranges to Monaco inline decorations. These render as spans on the
+ * text layer, so they sit above the whole-line modification background.
+ */
+export function buildInlineDecorations(
+  ranges: InlineRange[],
+  side: "old" | "new",
+): editor.IModelDeltaDecoration[] {
+  const inlineClassName = side === "old" ? "diff-inline-del" : "diff-inline-add";
+  return ranges.map((range) => ({ range, options: { inlineClassName } }));
 }
