@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { realpath, symlink } from "node:fs/promises";
 import { join } from "node:path";
 
-import { git, pathExists, runGit } from "../git/index.ts";
+import { git, gitSucceeds, pathExists, runGit } from "../git/index.ts";
 import type { ProgressHandler } from "../progress.ts";
 import {
   createTestRepo,
@@ -229,12 +229,31 @@ describe("executeAdd", () => {
     repo = await createTestRepo({ bare: true });
     await expect(
       executeAdd({ name: "nowhere", repoPath: repo.root, base: "no-such-ref" }),
-    ).rejects.toThrow("invalid reference");
+    ).rejects.toThrow("Base 'no-such-ref' does not resolve to a commit");
   });
 
   test("a base starting with a dash is a ref, not an option", async () => {
     repo = await createTestRepo({ bare: true });
-    await expect(executeAdd({ name: "dashy", repoPath: repo.root, base: "-q" })).rejects.toThrow();
+    await expect(
+      executeAdd({ name: "dashy", repoPath: repo.root, base: "--lock" }),
+    ).rejects.toThrow("does not resolve");
+    expect(await pathExists(join(repo.root, ".worktrees", "dashy"))).toBe(false);
+  });
+
+  test("a bad base is rejected before an existing branch is recreated", async () => {
+    repo = await createTestRepo({ bare: true });
+    await git(["branch", "parked"], repo.root);
+
+    await expect(
+      executeAdd({
+        name: "parked",
+        repoPath: repo.root,
+        base: "orign/main",
+        branchResolution: "delete-and-create",
+      }),
+    ).rejects.toThrow("Base 'orign/main' does not resolve");
+
+    expect(await gitSucceeds(["rev-parse", "--verify", "refs/heads/parked"], repo.root)).toBe(true);
   });
 
   test("recreating an existing branch also starts from the base", async () => {

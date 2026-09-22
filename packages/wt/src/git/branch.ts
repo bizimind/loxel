@@ -43,6 +43,19 @@ export async function resolveRemoteDefault(cwd: string): Promise<string | null> 
   return null;
 }
 
+/** Whether `rev` names a commit here. `--end-of-options` keeps a leading `-` from being read as a flag. */
+export function commitExists(cwd: string, rev: string): Promise<boolean> {
+  return gitSucceeds(
+    ["rev-parse", "--verify", "--quiet", "--end-of-options", `${rev}^{commit}`],
+    cwd,
+  );
+}
+
+/** Whether `branch` is an ancestor of (merged into) `target`. */
+export function isMergedInto(cwd: string, branch: string, target: string): Promise<boolean> {
+  return gitSucceeds(["merge-base", "--is-ancestor", branch, target], cwd);
+}
+
 function remoteRefExists(cwd: string, ref: string): Promise<boolean> {
   return gitSucceeds(["rev-parse", "--verify", "--quiet", `refs/remotes/${ref}`], cwd);
 }

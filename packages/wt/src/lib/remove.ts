@@ -2,9 +2,11 @@ import { dirname, resolve } from "node:path";
 
 import {
   deleteBranch,
+  isMergedInto,
   isWorktreeDirty,
   pruneEmptyParents,
   removeWorktree,
+  resolveRemoteDefault,
   submodulesWithLocalOnlyCommits,
 } from "../git/index.ts";
 import { HOOK_CLEAN, runHook, type HookContext } from "../hooks/run.ts";
@@ -179,8 +181,23 @@ async function tryDeleteBranch(
     progress.log(`Deleted branch '${branch}'`);
     return true;
   } catch (err) {
+    // `git branch -d` only counts a branch as merged into its upstream or HEAD.
+    // Branches from `wt add` start at the remote default with no upstream, and
+    // HEAD in a bare root is the local main mirror, which may lag; so an
+    // untouched branch can look unmerged. Judge it against the remote default.
+    if (!force && (await mergedIntoRemoteDefault(root, branch))) {
+      await deleteBranch(root, branch, true);
+      progress.log(`Deleted branch '${branch}' (merged into the remote default branch)`);
+      return true;
+    }
     const message = err instanceof Error ? err.message : String(err);
     progress.warn(`Warning: could not delete branch '${branch}': ${message}`);
     return false;
   }
+}
+
+async function mergedIntoRemoteDefault(root: string, branch: string): Promise<boolean> {
+  const remoteDefault = await resolveRemoteDefault(root);
+  if (!remoteDefault) return false;
+  return isMergedInto(root, branch, remoteDefault);
 }

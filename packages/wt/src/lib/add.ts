@@ -5,6 +5,7 @@ import {
   assertValidWorktreeName,
   branchExists,
   canonicalWorktreesDir,
+  commitExists,
   deleteBranch,
   excludeWorktreesDir,
   getManagedWorktrees,
@@ -153,7 +154,7 @@ async function createWorktree(
 
   const conflict = ctx.branchConflict;
   if (!conflict) {
-    const base = await resolveBase(root, params.base);
+    const base = await resolveBase(root, sourceCwd, params.base);
     await addWorktree(sourceCwd, worktreePath, { newBranch: name, startPoint: base });
     return { branch: name, base };
   }
@@ -171,9 +172,11 @@ async function createWorktree(
     return { branch: name };
   }
 
+  // Resolve (and validate) the base before the force-delete: a typo in --base
+  // must not cost an unmerged branch.
+  const base = await resolveBase(root, sourceCwd, params.base);
   progress.log(`Deleting existing branch '${name}'...`);
   await deleteBranch(root, name, true);
-  const base = await resolveBase(root, params.base);
   await addWorktree(sourceCwd, worktreePath, { newBranch: name, startPoint: base });
   return { branch: name, base };
 }
@@ -184,10 +187,20 @@ async function createWorktree(
  * fetching stays the user's explicit act, as with git itself. A repo without a
  * remote default (local-only, or a bare clone that never fetched with a
  * refspec) simply behaves like `git worktree add`.
+ *
+ * An explicit base is verified in `sourceCwd` (where the worktree is added, so
+ * `HEAD` means the same thing) before anything is mutated.
  */
-async function resolveBase(root: string, explicit: string | undefined): Promise<string> {
-  if (explicit) return explicit;
-  return (await resolveRemoteDefault(root)) ?? "HEAD";
+async function resolveBase(
+  root: string,
+  sourceCwd: string,
+  explicit: string | undefined,
+): Promise<string> {
+  if (!explicit) return (await resolveRemoteDefault(root)) ?? "HEAD";
+  if (!(await commitExists(sourceCwd, explicit))) {
+    throw new Error(`Base '${explicit}' does not resolve to a commit.`);
+  }
+  return explicit;
 }
 
 /**
