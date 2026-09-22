@@ -8,7 +8,8 @@ import { getMonacoThemeName } from "@/lib/monaco-theme";
 
 import { buildCommentDecorations } from "../comments/comment-decorations";
 import type { ChangeRegion } from "./change-regions";
-import { buildMonacoDecorations } from "./monaco-decorations";
+import type { InlineRange } from "./inline-changes";
+import { buildInlineDecorations, buildMonacoDecorations } from "./monaco-decorations";
 import type { LineRange } from "./unchanged-regions";
 
 type IStandaloneCodeEditor = monacoEditor.IStandaloneCodeEditor;
@@ -36,6 +37,8 @@ interface EditorPanelProps {
   /** Disambiguate URI when left/right panels show the same file+ref. */
   side?: "old" | "new";
   changeRegions: ChangeRegion[];
+  /** Intra-line changes within modification blocks, in this side's line numbers */
+  inlineChanges?: InlineRange[];
   darkMode: boolean;
   diagnostics?: TypeScriptDiagnostic[];
   hiddenRanges?: LineRange[];
@@ -56,6 +59,7 @@ export function EditorPanel({
   gitRef,
   side,
   changeRegions,
+  inlineChanges,
   darkMode,
   diagnostics,
   hiddenRanges,
@@ -68,6 +72,7 @@ export function EditorPanel({
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<IStandaloneCodeEditor | null>(null);
   const decorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
+  const inlineDecorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
   const commentDecorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
   const selectionHighlightRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
 
@@ -124,6 +129,9 @@ export function EditorPanel({
     decorationsRef.current = editor.createDecorationsCollection(
       buildMonacoDecorations(changeRegions),
     );
+    inlineDecorationsRef.current = editor.createDecorationsCollection(
+      buildInlineDecorations(inlineChanges ?? [], side ?? "new"),
+    );
     commentDecorationsRef.current = editor.createDecorationsCollection([]);
     selectionHighlightRef.current = editor.createDecorationsCollection([]);
 
@@ -149,6 +157,7 @@ export function EditorPanel({
     return () => {
       commentDecorationsRef.current = null;
       selectionHighlightRef.current = null;
+      inlineDecorationsRef.current = null;
       decorationsRef.current = null;
       editorRef.current = null;
       const editorModel = editor.getModel();
@@ -190,6 +199,13 @@ export function EditorPanel({
       decorationsRef.current.set(buildMonacoDecorations(changeRegions));
     }
   }, [changeRegions]);
+
+  // Update inline (intra-line) change decorations
+  useEffect(() => {
+    if (inlineDecorationsRef.current) {
+      inlineDecorationsRef.current.set(buildInlineDecorations(inlineChanges ?? [], side ?? "new"));
+    }
+  }, [inlineChanges, side]);
 
   // Update comment decorations
   useEffect(() => {

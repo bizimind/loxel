@@ -238,6 +238,38 @@ When scrolling down through the modification:
 
 ---
 
+## Intra-line Highlights
+
+Modified lines keep their whole-line blue background and additionally highlight the characters that changed: red on the old side, green on the new side. For example `const foo = 5` changed to `const bar = 42` marks `foo` and `5` in red and `bar` and `42` in green.
+
+### Granularity
+
+There is no fixed word or character granularity. Each modification block (a run of deleted lines followed by a run of added lines) is diffed at character level and then refined by the heuristics VS Code uses in its own diff editor, which Monaco bundles:
+
+- Short unchanged runs between two edits are merged into one edit, so `foo_bar` to `baz_qux` is one highlight instead of confetti around the `_`.
+- An edit covering most of a word extends to the whole word, so `foo` to `bar` highlights the whole identifier.
+- Edits covering a small part of a word stay at character level, so `item` to `items` highlights only the `s` and `color` to `colour` only the `u`.
+- Edit boundaries slide to token boundaries where the text allows.
+
+### Limits
+
+- Blocks larger than 500 lines on either side are not refined.
+- If more than 70% of a block's characters changed on either side, the block gets no inline highlights and renders as a plain modification.
+- All blocks of a file share one 200 ms budget. Each block receives only the remaining time, and once the budget is exhausted the remaining blocks get no inline highlights, so a pathological file degrades to plain modifications instead of freezing the frame.
+- The hunk-based views compute the pass once per file from the raw hunks, so it does not run again when syntax highlighting resolves.
+
+### Rendering
+
+- Side-by-side (Monaco) view: `inlineClassName` decorations on the text layer, above the whole-line background.
+- Hunk-based split and unified views: a transparent copy of the line is positioned under the syntax-highlighted text and carries the highlight spans, so the highlighter's HTML is untouched. Tabs align only when the line content is the first content of its table cell, because the absolutely positioned copy measures tab stops from its own edge; the `+`/`-` markers therefore live in their own cell.
+
+### Key Files
+
+- `src/components/diff/inline-changes.ts` - Adapter over Monaco's `DefaultLinesDiffComputer` producing per-side ranges
+- `src/components/diff-viewer/HunkLineContent.tsx` - Ghost-layer renderer for the hunk-based views
+
+---
+
 ## Gutter Connector Visualization
 
 The center gutter shows SVG connectors between corresponding regions:

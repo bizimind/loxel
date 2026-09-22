@@ -22,6 +22,7 @@ import { buildChangeRegions, buildScrollAlignment } from "./change-regions";
 import { DiffGutter } from "./DiffGutter";
 import type { ViewZoneDescriptor } from "./EditorPanel";
 import { EditorPanel } from "./EditorPanel";
+import { buildInlineChangesForPairs } from "./inline-changes";
 import { LineNumbersColumn } from "./LineNumbersColumn";
 import { VIEW_ZONE_HEIGHT, adjustAlignmentSections } from "./unchanged-regions";
 
@@ -119,6 +120,12 @@ export function SideBySideDiffView({
 
   // Build change regions from hunks (for rendering highlights)
   const changeRegions = useMemo(() => buildChangeRegions(file.hunks), [file.hunks]);
+
+  // Intra-line changes within modification blocks (inline red/green over the blue lines)
+  const inlineChanges = useMemo(
+    () => buildInlineChangesForPairs(changeRegions.pairs, oldLines, newLines),
+    [changeRegions.pairs, oldLines, newLines],
+  );
 
   // Build scroll alignment sections (for smart synchronized scrolling)
   const rawAlignmentSections = useMemo(
@@ -370,6 +377,7 @@ export function SideBySideDiffView({
                   gitRef={oldRef}
                   side="old"
                   changeRegions={changeRegions.old}
+                  inlineChanges={inlineChanges.old}
                   darkMode={darkMode}
                   diagnostics={oldDiagnostics}
                   hiddenRanges={oldHiddenRanges}
@@ -478,6 +486,7 @@ export function SideBySideDiffView({
                   gitRef={newRef}
                   side="new"
                   changeRegions={changeRegions.new}
+                  inlineChanges={inlineChanges.new}
                   darkMode={darkMode}
                   diagnostics={newDiagnostics}
                   hiddenRanges={newHiddenRanges}
