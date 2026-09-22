@@ -37,6 +37,8 @@ import { frontendLog } from "@/lib/frontend-logger";
 import { mergeFrontmatter, splitFrontmatter } from "@/lib/frontmatter";
 import { dispatchOpenFile } from "@/lib/open-file";
 import { rawLineToProsePosition } from "@/lib/prosemirror-position";
+import { createMinimalReplaceTransaction } from "@/lib/prosemirror-replace";
+import { threeWayMerge } from "@/lib/three-way-merge";
 import { useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
@@ -81,6 +83,31 @@ const identity = (s: string) => s;
  */
 function normalizeTrailingNewline(s: string): string {
   return s.replace(/\n+$/, "\n");
+}
+
+/**
+ * Replace the live document with `body`, touching only the changed region so the caret is
+ * mapped through the change rather than restored from an absolute offset.
+ *
+ * Compares normalized markdown first: parse(serialize(doc)) is not structurally identical to
+ * the live doc (empty paragraphs vanish on the round trip), so a doc-level diff alone would
+ * rewrite content the user has not changed.
+ *
+ * Returns the normalized serialized body after the replace, or null when nothing was applied.
+ */
+export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
+  const currentBody = normalizeTrailingNewline(crepe.getMarkdown());
+  if (normalizeTrailingNewline(body) === currentBody) return null;
+  const dispatched = crepe.editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx);
+    const parser = ctx.get(parserCtx);
+    const tr = createMinimalReplaceTransaction(view.state, parser(body));
+    if (!tr) return false;
+    view.dispatch(tr);
+    return true;
+  });
+  if (!dispatched) return null;
+  return normalizeTrailingNewline(crepe.getMarkdown());
 }
 
 /** CodeMirror theme matching loxel's JetBrains dark palette. */
@@ -171,8 +198,9 @@ export function MarkdownEditor({
   onCreateNewRef.current = onCreateNew;
 
   // Merge callbacks for 3-way auto-merge. Refs populated in the Crepe mount effect.
-  // ProseMirror normalizes markdown on round-trip, so applyContent MUST set isProgrammaticRef
-  // and re-arm autosave explicitly. Returns canonicalized content for baseContent.
+  // ProseMirror normalizes markdown on round-trip, so applyContent records what it applied
+  // (lastAppliedBodyRef) and re-arms autosave explicitly. Returns canonicalized content for
+  // baseContent.
   const mergeGetRef = useRef<(() => string | null) | null>(null);
   const mergeApplyRef = useRef<((s: string, programmatic: boolean) => string | null) | null>(null);
   const mergeCallbacks = useMemo<MergeCallbacks>(
@@ -220,6 +248,18 @@ export function MarkdownEditor({
   const [frontmatter, setFrontmatter] = useState<string | null>(null);
   const frontmatterRef = useRef<string | null>(null);
 
+  // Normalized body of the last programmatic replace. Programmatic transactions carry
+  // addToHistory:false, which @milkdown/plugin-listener ignores, so the replace itself never
+  // reaches markdownUpdated. But the listener is debounced (200ms): when a user edit is still
+  // pending at the time of the replace, the callback fires afterwards with the applied doc.
+  // A synchronous "programmatic" flag would already be reset by then and the callback would be
+  // reported as a user edit (→ autosave → echo → feedback loop). Instead the listener skips
+  // exactly one callback whose markdown equals what was applied and clears the ref on every
+  // callback; any callback with different markdown is a genuine user edit and is never swallowed.
+  const lastAppliedBodyRef = useRef<string | null>(null);
+  /** Body of the disk content the sync effect last processed — merge base for clean-state syncs. */
+  const lastSyncedDiskBodyRef = useRef<string | null>(null);
+
   // Set getSerializedContent — reads current markdown from crepe, merged with frontmatter.
   // normalizeTrailingNewline collapses trailing whitespace to a single \n because
   // milkdown's trailing plugin appends an empty paragraph after block nodes (lists,
@@ -263,6 +303,7 @@ export function MarkdownEditor({
     const { frontmatter: initialFm, body: initialBody } = splitFrontmatter(initialContent);
     frontmatterRef.current = initialFm;
     setFrontmatter(initialFm);
+    lastSyncedDiskBodyRef.current = splitFrontmatter(effectDiskContent).body;
 
     const crepe = new Crepe({
       root: containerRef.current,
@@ -310,7 +351,11 @@ export function MarkdownEditor({
       crepeApi.markdownUpdated((_ctx, markdown) => {
         const merged = mergeFrontmatter(frontmatterRef.current, markdown);
         editorContentCache.set(effectCacheKey, merged);
-        if (isProgrammaticRef.current) return;
+        const isProgrammaticEcho =
+          lastAppliedBodyRef.current !== null &&
+          normalizeTrailingNewline(markdown) === lastAppliedBodyRef.current;
+        lastAppliedBodyRef.current = null;
+        if (isProgrammaticEcho) return;
         handleChange(merged);
       });
     });
@@ -383,30 +428,17 @@ export function MarkdownEditor({
         mergeApplyRef.current = (merged, programmaticMerge) => {
           try {
             const { frontmatter: mergedFm, body: mergedBody } = splitFrontmatter(merged);
-            isProgrammaticRef.current = true;
-            crepe.editor.action((ctx) => {
-              const view = ctx.get(editorViewCtx);
-              const parser = ctx.get(parserCtx);
-              const savedAnchor = view.state.selection.anchor;
-              const newDoc = parser(mergedBody);
-              const { tr } = view.state;
-              tr.replaceWith(0, view.state.doc.content.size, newDoc.content);
-              view.dispatch(tr);
-              const pos = Math.min(savedAnchor, view.state.doc.content.size);
-              view.dispatch(
-                view.state.tr.setSelection(Selection.near(view.state.doc.resolve(pos))),
-              );
-            });
+            const appliedBody = applyBodyToEditor(crepe, mergedBody);
+            if (appliedBody !== null) lastAppliedBodyRef.current = appliedBody;
             if (mergedFm !== frontmatterRef.current) {
               frontmatterRef.current = mergedFm;
               setFrontmatter(mergedFm);
             }
-            isProgrammaticRef.current = false;
-            // Re-read canonicalized content (ProseMirror may normalize)
-            const canonicalBody = normalizeTrailingNewline(crepe.getMarkdown());
+            // Canonicalized content (ProseMirror may normalize on round-trip)
+            const canonicalBody = appliedBody ?? normalizeTrailingNewline(crepe.getMarkdown());
             const canonicalized = mergeFrontmatter(frontmatterRef.current, canonicalBody);
             editorContentCache.set(effectCacheKey, canonicalized);
-            // Re-arm autosave for external changes (isProgrammaticRef suppressed handleChange).
+            // Re-arm autosave for external changes (the listener skips the programmatic echo).
             // Skip for format-echo merges — content is already on disk.
             if (!programmaticMerge) {
               if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
@@ -414,7 +446,6 @@ export function MarkdownEditor({
             }
             return canonicalized;
           } catch {
-            isProgrammaticRef.current = false;
             return null;
           }
         };
@@ -547,51 +578,49 @@ export function MarkdownEditor({
     const crepe = crepeRef.current;
     if (!crepe) return;
 
+    const { frontmatter: diskFm, body: diskBody } = splitFrontmatter(diskContent);
+    // Track the previous disk body even when not syncing (dirty/saving merges have already
+    // reconciled the editor against it), so the next clean-state sync has the right base.
+    const prevDiskBody = lastSyncedDiskBodyRef.current;
+    lastSyncedDiskBodyRef.current = diskBody;
+
     if (useEditorStateStore.getState().files.get(filePath)?.state !== "clean") return;
 
-    const { frontmatter: diskFm, body: diskBody } = splitFrontmatter(diskContent);
-
-    let currentBody: string;
-    try {
-      currentBody = normalizeTrailingNewline(crepe.getMarkdown());
-    } catch {
-      return;
-    }
-
-    // Update frontmatter state if it changed
     if (diskFm !== frontmatterRef.current) {
       frontmatterRef.current = diskFm;
       setFrontmatter(diskFm);
     }
 
-    if (currentBody === diskBody) {
-      // Body unchanged but frontmatter may have changed — update cache
-      editorContentCache.set(cacheKey, diskContent);
-      return;
-    }
-
-    isProgrammaticRef.current = true;
     try {
-      crepe.editor.action((ctx) => {
-        const view = ctx.get(editorViewCtx);
-        const parser = ctx.get(parserCtx);
-        const savedAnchor = view.state.selection.anchor;
-        const newDoc = parser(diskBody);
-        const { tr } = view.state;
-        tr.replaceWith(0, view.state.doc.content.size, newDoc.content);
-        view.dispatch(tr);
-        // Restore cursor near its previous position (clamped to new doc size).
-        // This preserves caret location when external changes don't affect the
-        // area around the cursor (e.g. agent edits at end of file).
-        const pos = Math.min(savedAnchor, view.state.doc.content.size);
-        view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(pos))));
-      });
-      editorContentCache.set(cacheKey, diskContent);
+      // The debounced change listener may not have reported a just-made edit yet, so the store
+      // still reads "clean" while the live doc is newer than the previous disk content
+      // (typically our own save echo racing the next keystrokes). Replacing with disk content
+      // would discard that edit, and deferring would drop the disk change once the listener
+      // flips the state to dirty. Instead 3-way merge live edits onto the disk change, keeping
+      // ours on conflict — the user is actively editing and their text must not vanish.
+      const liveBody = normalizeTrailingNewline(crepe.getMarkdown());
+      let target = diskBody;
+      if (prevDiskBody !== null && liveBody !== prevDiskBody && liveBody !== diskBody) {
+        const merge = threeWayMerge(prevDiskBody, liveBody, diskBody, { preferOurs: true });
+        target = merge.ok ? merge.merged : liveBody;
+      }
+
+      // No-op when the body already matches (e.g. own echo); otherwise replaces only the
+      // changed region so the caret keeps its place when the edit is elsewhere.
+      const appliedBody = applyBodyToEditor(crepe, target);
+      if (appliedBody !== null) lastAppliedBodyRef.current = appliedBody;
+      const canonicalBody = appliedBody ?? liveBody;
+      editorContentCache.set(cacheKey, mergeFrontmatter(diskFm, canonicalBody));
+      // Merged result is not on disk yet — the pending listener callback will mark dirty, but
+      // it may be swallowed as the programmatic echo, so arm autosave explicitly.
+      if (normalizeTrailingNewline(canonicalBody) !== normalizeTrailingNewline(diskBody)) {
+        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = setTimeout(() => save(), AUTOSAVE_DEBOUNCE_MS);
+      }
     } catch {
       // Editor may have been destroyed between the ref check and the action
-    } finally {
-      isProgrammaticRef.current = false;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diskContent, cacheKey, filePath]);
 
   // Keyboard shortcuts

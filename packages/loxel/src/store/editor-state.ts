@@ -449,10 +449,19 @@ function tryAutoMerge(
   if (!result.ok) return false;
 
   // Apply merged content to editor DOM — returns canonicalized form.
-  // Format-echo merges (matchedNonces present) are programmatic — content is already on disk.
-  const programmatic = !!options?.matchedNonces;
-  const canonicalized = applyMergedContent(result.merged, programmatic);
-  const newBase = canonicalized ?? diskContent;
+  // When the merge resolves to the editor's own content (e.g. an own echo whose base equals
+  // the disk content because the user kept typing after the save started), there is nothing
+  // to apply: touching the doc would only disturb the caret and re-trigger the change listener.
+  // In that case the disk content is the common ancestor of the live doc and any future
+  // external change, so it becomes the merge base.
+  // Format-echo merges (matchedNonces present) are programmatic only when the merged content
+  // is exactly what is on disk — otherwise the editor must re-arm autosave to persist the rest.
+  // (If the editor canonicalizes that on-disk content differently, the file stays "dirty"
+  // until the next user edit rather than re-saving, which could loop format → save → format.)
+  const noop = result.merged === ours;
+  const programmatic = !!options?.matchedNonces && result.merged === diskContent;
+  const canonicalized = noop ? null : applyMergedContent(result.merged, programmatic);
+  const newBase = noop ? diskContent : (canonicalized ?? diskContent);
 
   setFn((s) => {
     const e = s.files.get(filePath);
