@@ -1,11 +1,41 @@
 import { describe, expect, it } from "bun:test";
 
+import { DefaultLinesDiffComputer } from "monaco-editor/editor/common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer";
+
 import type { ChangePair } from "./change-regions";
 import { buildInlineChangesForPairs, computeInlineChanges, rangesByLine } from "./inline-changes";
 
 function slice(line: string, r: { startColumn: number; endColumn: number }): string {
   return line.slice(r.startColumn - 1, r.endColumn - 1);
 }
+
+describe("Monaco DefaultLinesDiffComputer (internal module shape)", () => {
+  // The module is untyped upstream; this guards the surface declared in
+  // monaco-lines-diff-computer.d.ts so a Monaco upgrade that renames it fails here, not silently.
+  it("exposes computeDiff returning changes with innerChanges and a hitTimeout flag", () => {
+    const result = new DefaultLinesDiffComputer().computeDiff(["a b"], ["a c"], {
+      ignoreTrimWhitespace: false,
+      maxComputationTimeMs: 1000,
+      computeMoves: false,
+    });
+    expect(typeof result.hitTimeout).toBe("boolean");
+    expect(result.hitTimeout).toBe(false);
+    expect(Array.isArray(result.changes)).toBe(true);
+    const inner = result.changes[0]?.innerChanges?.[0];
+    expect(inner?.originalRange).toEqual({
+      startLineNumber: 1,
+      startColumn: 3,
+      endLineNumber: 1,
+      endColumn: 4,
+    });
+    expect(inner?.modifiedRange).toEqual({
+      startLineNumber: 1,
+      startColumn: 3,
+      endLineNumber: 1,
+      endColumn: 4,
+    });
+  });
+});
 
 describe("computeInlineChanges", () => {
   it("highlights whole replaced tokens", () => {
