@@ -119,6 +119,13 @@ export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
     const tr = createMinimalReplaceTransaction(view.state, parser(body));
     if (!tr) return false;
     view.dispatch(tr);
+    // addToHistory:false also hides the transaction from @milkdown/plugin-listener, whose
+    // prevDoc only advances inside its debounced handler. Left stale, a later user edit that
+    // restores a doc equal to prevDoc (e.g. deleting the line an agent just added) would never
+    // fire markdownUpdated and would be lost. Dispatch a stepless, listener-visible transaction
+    // (storedMarksSet, no doc change, nothing for history) so prevDoc resyncs; the resulting
+    // callback matches lastAppliedBodyRef and is swallowed by the echo guard.
+    view.dispatch(view.state.tr.setStoredMarks(view.state.storedMarks));
     return true;
   });
   if (!dispatched) return null;

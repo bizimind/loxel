@@ -58,6 +58,62 @@ function caretContext(): string {
   });
 }
 
+/** Wait past @milkdown/plugin-listener's 200ms debounce. */
+function settleListener(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 300);
+  });
+}
+
+describe("listener sync after programmatic replace", () => {
+  test("a user edit restoring the pre-replace doc is still reported", async () => {
+    // Own editor so a markdownUpdated listener can be registered before create().
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const editor = new Crepe({ root: el, defaultValue: "hello\n\nworld\n" });
+    const updates: string[] = [];
+    editor.on((api) => {
+      api.markdownUpdated((_ctx, markdown) => {
+        updates.push(markdown);
+      });
+    });
+    await editor.create();
+    try {
+      // External change applied programmatically (excluded from history/listener).
+      expect(applyBodyToEditor(editor, "hello\n\nworld\n\nagent line\n")).not.toBeNull();
+      await settleListener();
+      // The resync transaction surfaces exactly the applied content (echo guard territory).
+      expect(updates).toEqual(["hello\n\nworld\n\nagent line\n"]);
+
+      // User deletes the agent line in one normal transaction → doc equals the pre-replace doc.
+      editor.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const { doc } = view.state;
+        const last = doc.lastChild!;
+        view.dispatch(view.state.tr.delete(doc.content.size - last.nodeSize, doc.content.size));
+      });
+      await settleListener();
+      expect(updates).toEqual(["hello\n\nworld\n\nagent line\n", "hello\n\nworld\n"]);
+
+      // Undo still skips the programmatic replace: it undoes the deletion only.
+      const undone = editor.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        return undo(view.state, view.dispatch);
+      });
+      expect(undone).toBe(true);
+      expect(editor.getMarkdown()).toBe("hello\n\nworld\n\nagent line\n");
+      const undoneAgain = editor.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        return undo(view.state, view.dispatch);
+      });
+      expect(undoneAgain).toBe(false);
+    } finally {
+      await editor.destroy();
+      el.remove();
+    }
+  });
+});
+
 describe("canonicalizeBody", () => {
   test("returns the serializer form of raw disk markdown", () => {
     expect(canonicalizeBody(crepe, "# Title\n\n* one\n* two\n")).toBe("# Title\n\n- one\n- two\n");
