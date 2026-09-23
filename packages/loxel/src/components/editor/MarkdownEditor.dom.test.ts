@@ -152,6 +152,12 @@ describe("applyBodyToEditor", () => {
     expect(after).toBe(before);
   });
 
+  test("external append after an empty heading does not duplicate the heading", () => {
+    applyBodyToEditor(crepe, "hello\n\n##\n");
+    const applied = applyBodyToEditor(crepe, "hello\n\n##\n\nfrom agent\n");
+    expect(applied).toBe("hello\n\n##\n\nfrom agent\n");
+  });
+
   test("programmatic replace is excluded from undo history", () => {
     const applied = applyBodyToEditor(crepe, "hello\n\nworld\n\nmore\n");
     expect(applied).not.toBeNull();

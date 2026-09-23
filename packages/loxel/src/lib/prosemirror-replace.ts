@@ -54,22 +54,27 @@ export function createMinimalReplaceTransaction(
     .setMeta("addToHistory", false);
 }
 
-function isEmptyTextblock(node: ProseMirrorNode | null): boolean {
-  return node !== null && node.isTextblock && node.content.size === 0;
+/** The empty paragraph @milkdown/plugin-trailing keeps at the end of the document. */
+function isTrailingEmptyParagraph(node: ProseMirrorNode | null): boolean {
+  return node !== null && node.type.name === "paragraph" && node.content.size === 0;
 }
 
 /**
  * Milkdown's trailing plugin keeps an empty paragraph after a last block that is not a
- * paragraph/heading; the markdown parser never produces one. Without this, findDiffEnd
- * finds no common suffix and the "minimal" replace spans the whole document, dragging the
- * caret to the end. Carry the live doc's trailing empty paragraph over to the target so the
- * suffix matches (the plugin would re-append it anyway).
+ * paragraph/heading; the markdown parser never produces an empty paragraph. Without this,
+ * findDiffEnd finds no common suffix and the "minimal" replace spans the whole document,
+ * dragging the caret to the end. Carry the live doc's trailing empty paragraph over to the
+ * target so the suffix matches. Only an empty *paragraph* qualifies: an empty heading or code
+ * block is real content the target may still contain mid-document, and appending it again
+ * would duplicate it.
  */
 function withTrailingEmptyParagraph(
   oldDoc: ProseMirrorNode,
   newDoc: ProseMirrorNode,
 ): ProseMirrorNode {
   const trailing = oldDoc.lastChild;
-  if (!isEmptyTextblock(trailing) || isEmptyTextblock(newDoc.lastChild)) return newDoc;
+  if (!isTrailingEmptyParagraph(trailing) || isTrailingEmptyParagraph(newDoc.lastChild)) {
+    return newDoc;
+  }
   return newDoc.copy(newDoc.content.addToEnd(trailing!));
 }

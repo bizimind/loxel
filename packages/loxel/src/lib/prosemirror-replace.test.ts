@@ -9,12 +9,17 @@ const schema = new Schema({
   nodes: {
     doc: { content: "block+" },
     paragraph: { content: "inline*", group: "block", toDOM: () => ["p", 0] },
+    heading: { content: "inline*", group: "block", toDOM: () => ["h1", 0] },
+    code_block: { content: "text*", group: "block", code: true, toDOM: () => ["pre", 0] },
     text: { group: "inline" },
   },
 });
 
 const p = (text?: string) =>
   schema.nodes.paragraph.create(null, text ? schema.text(text) : undefined);
+const h = (text?: string) =>
+  schema.nodes.heading.create(null, text ? schema.text(text) : undefined);
+const code = (text: string) => schema.nodes.code_block.create(null, schema.text(text));
 const doc = (...children: ReturnType<typeof p>[]) => schema.nodes.doc.create(null, children);
 
 function stateWithCaret(d: ReturnType<typeof doc>, pos: number): EditorState {
@@ -80,6 +85,34 @@ describe("createMinimalReplaceTransaction", () => {
     expect(next.doc.eq(doc(p("a much longer first"), p("second"), p()))).toBe(true);
     expect(next.doc.textBetween(next.selection.from - 2, next.selection.from)).toBe("se");
     expect(next.selection.$from.parent.textContent).toBe("second");
+  });
+
+  test("keeps caret in a code block edited-above doc with the trailing paragraph", () => {
+    const before = doc(p("intro"), code("x = 1"), p());
+    const state = stateWithCaret(before, 7 + 1 + 3); // inside "x =|"
+    const after = doc(p("changed intro"), code("x = 1"));
+    const next = state.apply(createMinimalReplaceTransaction(state, after)!);
+    expect(next.doc.eq(doc(p("changed intro"), code("x = 1"), p()))).toBe(true);
+    expect(next.selection.$from.parent.type.name).toBe("code_block");
+    expect(next.selection.$from.parentOffset).toBe(3);
+  });
+
+  test("does not duplicate a trailing empty heading the target still contains", () => {
+    // An in-progress empty heading is a stable last block (the trailing plugin does not
+    // append after headings). External change appends a paragraph after it.
+    const before = doc(p("hello"), h());
+    const state = stateWithCaret(before, 8);
+    const after = doc(p("hello"), h(), p("from agent"));
+    const next = state.apply(createMinimalReplaceTransaction(state, after)!);
+    expect(next.doc.eq(after)).toBe(true);
+  });
+
+  test("does not resurrect a trailing empty heading the target removed", () => {
+    const before = doc(p("hello"), h());
+    const state = stateWithCaret(before, 3);
+    const after = doc(p("hello"));
+    const next = state.apply(createMinimalReplaceTransaction(state, after)!);
+    expect(next.doc.eq(after)).toBe(true);
   });
 
   test("handles overlapping prefix/suffix (repeated character deletion)", () => {

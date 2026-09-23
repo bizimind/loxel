@@ -440,10 +440,15 @@ export function MarkdownEditor({
         });
 
         editorReadyRef.current = true;
-        lastSyncedDiskBodyRef.current = canonicalizeBody(
-          crepe,
-          splitFrontmatter(effectDiskContent).body,
-        );
+        try {
+          lastSyncedDiskBodyRef.current = canonicalizeBody(
+            crepe,
+            splitFrontmatter(effectDiskContent).body,
+          );
+        } catch {
+          // Parser may reject unsupported syntax; a null base disables the 3-way merge branch.
+          lastSyncedDiskBodyRef.current = null;
+        }
 
         // Set merge callbacks for 3-way auto-merge
         mergeGetRef.current = () => {
