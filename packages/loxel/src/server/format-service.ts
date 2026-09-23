@@ -43,6 +43,38 @@ const OXFMT_CONFIG_FILES = [
   ".oxfmtrc.cjs",
 ];
 
+/**
+ * Extensions both prettier and oxfmt format out of the box (verified against prettier 3.9
+ * `--support-info` and oxfmt 0.68.0 via `--stdin-filepath` and `--lsp`). Alias spellings
+ * (yml, mjs, scss, mdx, ...) are listed explicitly so that a project with both formatters
+ * routes the whole language to the same formatter, not just the canonical extension.
+ */
+const SHARED_FORMAT_EXTENSIONS = [
+  "ts",
+  "tsx",
+  "mts",
+  "cts",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "css",
+  "scss",
+  "less",
+  "json",
+  "jsonc",
+  "json5",
+  "md",
+  "mdx",
+  "markdown",
+  "yaml",
+  "yml",
+  "html",
+  "vue",
+  "graphql",
+  "gql",
+];
+
 /** Config files to check and the formatter they imply. */
 const DETECTION_RULES: {
   /** Config file paths relative to worktree root (globs not supported — exact names). */
@@ -82,37 +114,8 @@ const DETECTION_RULES: {
     formatter: {
       command: "prettier",
       args: "--stdin-filepath {file}",
-      // Every extension prettier formats out of the box (`prettier --support-info`, verified
-      // against prettier 3.9). Alias spellings (yml, mjs, scss, mdx, ...) are listed so that a
-      // project with both prettier and oxfmt routes the whole language to prettier, not just the
-      // canonical extension. `toml` is intentionally absent: prettier has no TOML support.
-      extensions: [
-        "ts",
-        "tsx",
-        "mts",
-        "cts",
-        "js",
-        "jsx",
-        "mjs",
-        "cjs",
-        "css",
-        "scss",
-        "less",
-        "json",
-        "jsonc",
-        "json5",
-        "md",
-        "mdx",
-        "markdown",
-        "yaml",
-        "yml",
-        "html",
-        "vue",
-        "svelte",
-        "astro",
-        "graphql",
-        "gql",
-      ],
+      // `toml` is intentionally absent: prettier has no TOML support.
+      extensions: [...SHARED_FORMAT_EXTENSIONS, "svelte", "astro"],
       backendMode: "library",
     },
   },
@@ -125,36 +128,9 @@ const DETECTION_RULES: {
     formatter: {
       command: "oxfmt",
       args: "--stdin-filepath={file}",
-      // Verified against oxfmt 0.68.0: every extension below formats successfully both via
-      // `--stdin-filepath` and in `--lsp` mode. Deliberately excluded: `svelte` (disabled unless
-      // the project enables the `svelte` config option and installs `svelte`) and `astro`
-      // (unsupported).
-      extensions: [
-        "ts",
-        "tsx",
-        "mts",
-        "cts",
-        "js",
-        "jsx",
-        "mjs",
-        "cjs",
-        "css",
-        "scss",
-        "less",
-        "json",
-        "jsonc",
-        "json5",
-        "md",
-        "mdx",
-        "markdown",
-        "yaml",
-        "yml",
-        "toml",
-        "html",
-        "vue",
-        "graphql",
-        "gql",
-      ],
+      // Deliberately excluded (oxfmt 0.68.0): `svelte` (disabled unless the project enables the
+      // `svelte` config option and installs `svelte`) and `astro` (unsupported).
+      extensions: [...SHARED_FORMAT_EXTENSIONS, "toml"],
       backendMode: "lsp",
     },
   },
