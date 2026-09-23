@@ -630,8 +630,17 @@ export function MarkdownEditor({
     let canonicalDiskBody: string;
     try {
       canonicalDiskBody = canonicalizeBody(crepe, diskBody);
-    } catch {
-      return; // Editor destroyed
+    } catch (err) {
+      // Parser rejected the disk body, or the editor was destroyed. The editor keeps its
+      // previous document and frontmatter; the file stays clean, so the next local edit will
+      // overwrite the external change — surface that.
+      frontendLog
+        .child("ui")
+        .warn("Failed to parse external change for markdown editor", {
+          filePath,
+          error: err instanceof Error ? err : undefined,
+        });
+      return;
     }
     // Track the previous disk body even when not syncing (dirty/saving merges have already
     // reconciled the editor against it), so the next clean-state sync has the right base.
@@ -639,11 +648,6 @@ export function MarkdownEditor({
     lastSyncedDiskBodyRef.current = canonicalDiskBody;
 
     if (useEditorStateStore.getState().files.get(filePath)?.state !== "clean") return;
-
-    if (diskFm !== frontmatterRef.current) {
-      frontmatterRef.current = diskFm;
-      setFrontmatter(diskFm);
-    };
 
     try {
       // The debounced change listener may not have reported a just-made edit yet, so the store
@@ -667,6 +671,12 @@ export function MarkdownEditor({
       const appliedBody = applyBodyToEditor(crepe, target);
       if (appliedBody !== null) lastAppliedBodyRef.current = appliedBody;
       const canonicalBody = appliedBody ?? liveBody;
+      // Swap frontmatter only once the body is in sync, so a failed apply leaves the editor
+      // consistent with what is still shown.
+      if (diskFm !== frontmatterRef.current) {
+        frontmatterRef.current = diskFm;
+        setFrontmatter(diskFm);
+      }
       editorContentCache.set(cacheKey, mergeFrontmatter(diskFm, canonicalBody));
       // Merged result is not on disk yet — the pending listener callback will mark dirty, but
       // it may be swallowed as the programmatic echo, so arm autosave explicitly.
@@ -674,8 +684,15 @@ export function MarkdownEditor({
         if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = setTimeout(() => save(), AUTOSAVE_DEBOUNCE_MS);
       }
-    } catch {
-      // Editor may have been destroyed between the ref check and the action
+    } catch (err) {
+      // Merged body failed to parse, or the editor was destroyed between the ref check and
+      // the action. The editor keeps its previous document — surface that.
+      frontendLog
+        .child("ui")
+        .warn("Failed to sync external change into markdown editor", {
+          filePath,
+          error: err instanceof Error ? err : undefined,
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diskContent, cacheKey, filePath]);
