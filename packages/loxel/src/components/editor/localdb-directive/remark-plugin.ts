@@ -1,13 +1,11 @@
 import { $remark } from "@milkdown/kit/utils";
 import type { Html, Paragraph, Root, RootContent } from "mdast";
-import type { ContainerDirective, LeafDirective, TextDirective } from "mdast-util-directive";
+import type { ContainerDirective, Directives } from "mdast-util-directive";
 import { directiveFromMarkdown } from "mdast-util-directive";
 import { directive } from "micromark-extension-directive";
 import type { Plugin } from "unified";
 import type { Position } from "unist";
 import { SKIP, visit } from "unist-util-visit";
-
-type Directive = ContainerDirective | LeafDirective | TextDirective;
 
 /** mdast node produced for `:::localdb` containers, consumed by localDbBlockSchema. */
 export interface LocalDbBlockNode {
@@ -60,7 +58,7 @@ function sourceOf(file: unknown): string | null {
   return null;
 }
 
-function isDirective(node: { type: string }): node is Directive {
+function isDirective(node: { type: string }): node is Directives {
   return (
     node.type === "containerDirective" ||
     node.type === "leafDirective" ||
@@ -113,7 +111,10 @@ function toLocalDbBlock(node: ContainerDirective, source: string | null): LocalD
  * from whatever precedes the opening fence on its own source line converted to its continuation
  * form: block-quote markers are kept, list markers become indentation of the same width.
  */
-function containerPrefixStripper(node: Directive, source: string | null): (line: string) => string {
+function containerPrefixStripper(
+  node: Directives,
+  source: string | null,
+): (line: string) => string {
   const start = node.position?.start.offset;
   if (source === null || start === undefined) return (line) => line;
   const lineStart = source.lastIndexOf("\n", start - 1) + 1;
@@ -132,7 +133,7 @@ function containerPrefixStripper(node: Directive, source: string | null): (line:
 }
 
 /** Replaces a non-localdb directive with plain nodes that reproduce its source. */
-function unwrapDirective(node: Directive, source: string | null): RootContent[] {
+function unwrapDirective(node: Directives, source: string | null): RootContent[] {
   if (node.type === "textDirective") {
     return [verbatim(sourceText(node, source) ?? reconstructOpening(node), node.position)];
   }
@@ -164,20 +165,20 @@ function isDirectiveLabel(node: RootContent): boolean {
   return node.type === "paragraph" && node.data?.directiveLabel === true;
 }
 
-function sourceText(node: Directive, source: string | null): string | null {
+function sourceText(node: Directives, source: string | null): string | null {
   const start = node.position?.start.offset;
   const end = node.position?.end.offset;
   if (source === null || start === undefined || end === undefined) return null;
   return source.slice(start, end);
 }
 
-function sourceLines(node: Directive, source: string | null): string[] | null {
+function sourceLines(node: Directives, source: string | null): string[] | null {
   const raw = sourceText(node, source);
   return raw === null ? null : raw.split(/\r?\n/);
 }
 
 /** Rebuilds `:name[label]{attrs}` when the source text is unavailable. */
-function reconstructOpening(node: Directive): string {
+function reconstructOpening(node: Directives): string {
   const colons =
     node.type === "containerDirective" ? ":::" : node.type === "leafDirective" ? "::" : ":";
   const labelNodes =
