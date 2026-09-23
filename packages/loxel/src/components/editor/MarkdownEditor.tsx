@@ -26,8 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
-import { localDbDirectivePlugins } from "@/components/editor/localdb-directive/index.ts";
-import { localDbBlockSchema } from "@/components/editor/localdb-directive/schema.ts";
+import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
 import {
   type MergeCallbacks,
   AUTOSAVE_DEBOUNCE_MS,

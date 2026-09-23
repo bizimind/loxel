@@ -77,6 +77,25 @@ describe("remarkLocalDbDirective", () => {
     expect(block.raw).toBe("table: tasks");
   });
 
+  it("strips the block-quote prefix from a localdb body and round-trips it byte-identically", () => {
+    const md = "> :::localdb\n> table: tasks\n>\n> view: kanban\n> :::\n";
+    const quote = parse(md).children[0] as { children: Array<{ type: string; raw?: string }> };
+    expect(quote.children[0]!.type).toBe("localdb-block");
+    expect(quote.children[0]!.raw).toBe("table: tasks\n\nview: kanban");
+  });
+
+  it("keeps the closing fence of unwrapped directives inside block quotes and lists", () => {
+    expect(roundTrip("> :::note\n> hi\n> :::\n\nafter\n")).toBe(
+      "> :::note\n>\n> hi\n>\n> :::\n\nafter\n",
+    );
+    expect(roundTrip("1. one\n2. two\n   :::note\n   hi\n   :::\n")).toBe(
+      "1. one\n2. two\n\n   :::note\n\n   hi\n\n   :::\n",
+    );
+    expect(roundTrip("- item\n  :::note\n  hi\n  :::\n")).toBe(
+      "- item\n\n  :::note\n\n  hi\n\n  :::\n",
+    );
+  });
+
   it("unwraps other container directives into paragraphs that survive a round-trip", () => {
     const md = ":::note[Label]{a=1}\nhi *there*\n\n- x\n:::\n";
     const tree = parse(md);

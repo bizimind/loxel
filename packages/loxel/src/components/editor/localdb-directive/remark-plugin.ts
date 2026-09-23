@@ -94,16 +94,35 @@ function toLocalDbBlock(node: ContainerDirective, source: string | null): LocalD
   const lines = sourceLines(node, source);
   if (!lines) return block;
 
-  // Inner lines carry the container's indentation (e.g. inside a list item); the opening fence
-  // line does not, since the node's start offset points at the first colon.
-  const indent = (node.position?.start.column ?? 1) - 1;
-  const dedent = (line: string) => line.slice(Math.min(indent, /^\s*/.exec(line)![0].length));
-  const inner = lines.slice(1);
+  const inner = lines.slice(1).map(containerPrefixStripper(node, source));
   // A last line of `:::` is taken as the closing fence. For an unclosed fence swallowed to EOF
   // whose final content line is literally `:::` this drops that line — accepted as ambiguous.
   const closed = inner.length > 0 && CLOSING_FENCE.test(inner[inner.length - 1] ?? "");
-  block.raw = (closed ? inner.slice(0, -1) : inner).map(dedent).join("\n");
+  block.raw = (closed ? inner.slice(0, -1) : inner).join("\n");
   return block;
+}
+
+/**
+ * Continuation lines of a directive carry the enclosing container's prefix (`> ` in a block
+ * quote, indentation in a list item), while the opening fence line does not because the node's
+ * start offset points at the first colon. Returns a function that strips that prefix, derived
+ * from whatever precedes the opening fence on its own source line.
+ */
+function containerPrefixStripper(node: Directive, source: string | null): (line: string) => string {
+  const start = node.position?.start.offset;
+  if (source === null || start === undefined) return (line) => line;
+  const lineStart = source.lastIndexOf("\n", start - 1) + 1;
+  const prefix = source.slice(lineStart, start);
+  if (!prefix) return (line) => line;
+  const blankPrefix = prefix.trimEnd();
+  return (line) => {
+    if (line.startsWith(prefix)) return line.slice(prefix.length);
+    // A list marker (`- `, `1. `) is replaced by equivalent indentation on continuation lines.
+    if (/^\s*$/.test(line.slice(0, prefix.length))) return line.slice(prefix.length);
+    // Blank block-quote lines are a bare `>` without the trailing space.
+    if (blankPrefix && line.startsWith(blankPrefix)) return line.slice(blankPrefix.length);
+    return line;
+  };
 }
 
 /** Replaces a non-localdb directive with plain nodes that reproduce its source. */
@@ -117,13 +136,20 @@ function unwrapDirective(node: Directive, source: string | null): RootContent[] 
 
   const lines = sourceLines(node, source);
   const opening = lines?.[0] ?? reconstructOpening(node);
-  const closing = lines === null ? ":::" : lines.length > 1 ? lines[lines.length - 1] : undefined;
+  const lastLine = lines !== null && lines.length > 1 ? lines[lines.length - 1] : undefined;
+  const closing =
+    lines === null
+      ? ":::"
+      : lastLine === undefined
+        ? undefined
+        : containerPrefixStripper(node, source)(lastLine);
   const body = node.children.filter((child) => !isDirectiveLabel(child));
 
   const out: RootContent[] = [paragraph(opening, lineRange(node.position, "start")), ...body];
   if (closing !== undefined && CLOSING_FENCE.test(closing)) {
-    const column = (/^\s*/.exec(closing)?.[0].length ?? 0) + 1;
-    out.push(paragraph(closing, lineRange(node.position, "end", column)));
+    // The closing fence sits at the same container column as the opening one.
+    const column = node.position?.start.column ?? 1;
+    out.push(paragraph(closing.trim(), lineRange(node.position, "end", column)));
   }
   return out;
 }

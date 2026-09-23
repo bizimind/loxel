@@ -15,7 +15,7 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 import type { Node as UnistNode } from "unist";
 
-import { remarkLocalDbDirective } from "@/components/editor/localdb-directive/remark-plugin";
+import { remarkLocalDbDirective } from "@/components/editor/localdb-directive";
 
 import { splitFrontmatter } from "./frontmatter";
 
