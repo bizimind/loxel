@@ -14,6 +14,12 @@ export interface LocalDbBlockNode {
   type: "localdb-block";
   /** Verbatim inner source of the fence (without the fence lines), when the source was available. */
   raw?: string;
+  /**
+   * False when the fence had no closing `:::` of its own — either swallowed to EOF, or nested in
+   * another 3-colon container whose closing fence micromark attributes to the ancestor. The
+   * serializer then omits the closing fence so a round-trip does not manufacture a new one.
+   */
+  closed?: boolean;
   children: RootContent[];
   position?: Position;
 }
@@ -98,7 +104,10 @@ function toLocalDbBlock(node: ContainerDirective, source: string | null): LocalD
   // A last line of `:::` is taken as the closing fence. For an unclosed fence swallowed to EOF
   // whose final content line is literally `:::` this drops that line — accepted as ambiguous.
   const closed = inner.length > 0 && CLOSING_FENCE.test(inner[inner.length - 1] ?? "");
-  block.raw = (closed ? inner.slice(0, -1) : inner).join("\n");
+  // An unclosed fence's end offset sits after the final newline, leaving a trailing empty line.
+  const body = closed || inner[inner.length - 1] !== "" ? inner : inner.slice(0, -1);
+  block.raw = (closed ? body.slice(0, -1) : body).join("\n");
+  block.closed = closed;
   return block;
 }
 

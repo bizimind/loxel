@@ -741,8 +741,15 @@ export function MarkdownEditor({
       let rawBody: string | undefined;
       try {
         rawBody = crepeRef.current?.getMarkdown();
-      } catch {
-        return; // editor failed to create — nothing to merge the frontmatter into
+      } catch (err) {
+        // Editor failed to create or was destroyed mid-action — the frontmatter edit is dropped.
+        frontendLog
+          .child("ui")
+          .warn("Failed to read markdown editor body for frontmatter change", {
+            filePath,
+            error: err instanceof Error ? err : undefined,
+          });
+        return;
       }
       if (rawBody === undefined) return; // editor not yet ready — skip to avoid persisting empty body
       const body = normalizeTrailingNewline(rawBody);
@@ -752,7 +759,7 @@ export function MarkdownEditor({
       editorContentCache.set(cacheKey, merged);
       handleChange(merged);
     },
-    [cacheKey, handleChange],
+    [cacheKey, filePath, handleChange],
   );
 
   const [copied, setCopied] = useState(false);

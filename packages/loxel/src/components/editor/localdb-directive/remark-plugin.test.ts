@@ -63,9 +63,35 @@ describe("remarkLocalDbDirective", () => {
 
   it("keeps the swallowed remainder of an unclosed :::localdb fence in the block body", () => {
     const md = "before\n\n:::localdb\ntable: tasks\n\nafter paragraph\n";
-    const block = parse(md).children[1] as unknown as { type: string; raw: string };
+    const block = parse(md).children[1] as unknown as {
+      type: string;
+      raw: string;
+      closed: boolean;
+    };
     expect(block.type).toBe("localdb-block");
-    expect(block.raw).toBe("table: tasks\n\nafter paragraph\n");
+    expect(block.raw).toBe("table: tasks\n\nafter paragraph");
+    expect(block.closed).toBe(false);
+  });
+
+  it("marks a localdb fence whose closing ::: belongs to an outer container as unclosed", () => {
+    const tree = parse(":::a\n:::localdb\ntable: t\n:::\n:::\n");
+    const block = tree.children[1] as unknown as { type: string; raw: string; closed: boolean };
+    expect(block.type).toBe("localdb-block");
+    expect(block.raw).toBe("table: t");
+    expect(block.closed).toBe(false);
+    // micromark closes the outer container with the first `:::`; the second is a stray paragraph.
+    expect(nodeTypes(tree)).toEqual([
+      "root",
+      "paragraph",
+      "text",
+      "localdb-block",
+      "paragraph",
+      "text",
+      "paragraph",
+      "text",
+      "paragraph",
+      "text",
+    ]);
   });
 
   it("dedents a localdb block nested in a list", () => {

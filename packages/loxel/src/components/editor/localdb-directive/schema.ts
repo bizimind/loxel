@@ -16,6 +16,8 @@ const KNOWN_KEYS = new Set(["table", "view", "viewId"]);
  *   viewId   — numeric id of a saved ViewDef (optional, null if unset)
  *   extra    — remaining directive body lines the widget does not understand, kept verbatim so
  *              a round-trip through the editor never drops content
+ *   closed   — whether the source fence had its own closing `:::`; when false the serializer
+ *              omits it (see LocalDbBlockNode.closed)
  */
 export const localDbBlockSchema = $nodeSchema("localdb-block", () => ({
   inline: false,
@@ -30,6 +32,7 @@ export const localDbBlockSchema = $nodeSchema("localdb-block", () => ({
     view: { default: "table", validate: "string" },
     viewId: { default: null },
     extra: { default: "", validate: "string" },
+    closed: { default: true, validate: "boolean" },
   },
   parseDOM: [
     {
@@ -43,6 +46,7 @@ export const localDbBlockSchema = $nodeSchema("localdb-block", () => ({
             ? Number(dom.getAttribute("data-view-id"))
             : null,
           extra: dom.getAttribute("data-extra") ?? "",
+          closed: dom.getAttribute("data-closed") !== "false",
         };
       },
     },
@@ -55,18 +59,20 @@ export const localDbBlockSchema = $nodeSchema("localdb-block", () => ({
       "data-view": node.attrs.view as string,
       "data-view-id": node.attrs.viewId !== null ? String(node.attrs.viewId) : "",
       "data-extra": node.attrs.extra as string,
+      "data-closed": String(node.attrs.closed as boolean),
     },
   ],
   parseMarkdown: {
     match: ({ type }: { type: string }) => type === "localdb-block",
     runner: (state: ParserState, node: MarkdownNode, type: NodeType) => {
-      const raw = rawBodyOf(node) ?? extractDirectiveText(node);
-      const { attrs, extra } = parseDirectiveBody(raw);
+      const { raw, closed } = sourceBodyOf(node);
+      const { attrs, extra } = parseDirectiveBody(raw ?? extractDirectiveText(node));
       state.addNode(type, {
         table: attrs["table"] ?? "",
         view: attrs["view"] ?? "table",
         viewId: attrs["viewId"] !== undefined ? Number(attrs["viewId"]) : null,
         extra,
+        closed,
       });
     },
   },
@@ -78,19 +84,25 @@ export const localDbBlockSchema = $nodeSchema("localdb-block", () => ({
         lines.push(`viewId: ${node.attrs.viewId as number}`);
       const extra = node.attrs.extra as string;
       if (extra) lines.push(extra);
-      state.openNode("containerDirective", undefined, { name: "localdb" });
       // An `html` node is written verbatim by mdast-util-to-markdown, whereas `text` would be
       // escaped (e.g. `# heading` → `\# heading`) and could corrupt preserved lines.
+      if (node.attrs.closed === false) {
+        // No closing fence of its own in the source (see LocalDbBlockNode.closed): emit the
+        // opening fence and body verbatim instead of letting the directive handler close it.
+        state.addNode("html", undefined, [":::localdb", ...lines].join("\n"));
+        return;
+      }
+      state.openNode("containerDirective", undefined, { name: "localdb" });
       state.addNode("html", undefined, lines.join("\n"));
       state.closeNode();
     },
   },
 }));
 
-/** Verbatim body attached by remarkLocalDbDirective when the source was available. */
-function rawBodyOf(node: MarkdownNode): string | null {
-  const raw: unknown = (node as Partial<LocalDbBlockNode>).raw;
-  return typeof raw === "string" ? raw : null;
+/** Verbatim body and fence state attached by remarkLocalDbDirective when the source was available. */
+function sourceBodyOf(node: MarkdownNode): { raw: string | null; closed: boolean } {
+  const { raw, closed }: Partial<LocalDbBlockNode> = node as Partial<LocalDbBlockNode>;
+  return { raw: typeof raw === "string" ? raw : null, closed: closed !== false };
 }
 
 export function extractDirectiveText(node: MarkdownNode): string {
