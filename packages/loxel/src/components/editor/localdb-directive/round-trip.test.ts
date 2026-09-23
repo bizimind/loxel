@@ -80,6 +80,7 @@ describe("localdb directive Milkdown round-trip", () => {
   it("leaves prose with colons and other directives intact", async () => {
     await expectFixedPoint("Meeting at 10:30am, key:value\n", "Meeting at 10:30am, key:value\n");
     await expectFixedPoint("a\n\n::hr\n\nb\n", "a\n\n::hr\n\nb\n");
+    await expectFixedPoint(":::note[Title]\nbody\n:::\n", ":::note[Title]\n\nbody\n\n:::\n");
     await expectFixedPoint(
       "> :::localdb\n> table: tasks\n> view: kanban\n> :::\n",
       "> :::localdb\n> table: tasks\n> view: kanban\n> :::\n",

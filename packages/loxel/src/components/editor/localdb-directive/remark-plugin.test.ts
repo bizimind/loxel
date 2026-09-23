@@ -81,15 +81,17 @@ describe("remarkLocalDbDirective", () => {
     expect(block.raw).toBe("table: t");
     expect(block.closed).toBe(false);
     // micromark closes the outer container with the first `:::`; the second is a stray paragraph.
+    // Synthesized fence lines are html leaves; the localdb node keeps its parsed children
+    // (`table: t`) and the stray paragraph is ordinary text.
     expect(nodeTypes(tree)).toEqual([
       "root",
       "paragraph",
-      "text",
+      "html",
       "localdb-block",
       "paragraph",
       "text",
       "paragraph",
-      "text",
+      "html",
       "paragraph",
       "text",
     ]);
@@ -159,9 +161,20 @@ describe("remarkLocalDbDirective", () => {
     // Block-level content is canonicalized like any other paragraph (blank lines between
     // blocks, `[` escaped), but nothing is lost and the result is stable on re-serialize.
     const once = roundTrip(md);
-    expect(once).toBe(":::note\\[Label]{a=1}\n\nhi _there_\n\n- x\n\n:::\n");
+    expect(once).toBe(":::note[Label]{a=1}\n\nhi _there_\n\n- x\n\n:::\n");
     expect(roundTrip(once)).toBe(once);
     expect(nodeTypes(parse(once))).not.toContain("containerDirective");
+  });
+
+  it("does not escape directive labels or attributes on the fence line", () => {
+    expect(roundTrip(":::note[Title]\nbody\n:::\n")).toBe(":::note[Title]\n\nbody\n\n:::\n");
+    expect(roundTrip(":::tip[Read *this*]\nbody\n:::\n")).toBe(
+      ":::tip[Read *this*]\n\nbody\n\n:::\n",
+    );
+    expect(roundTrip(':::note[a_b_c]{.cls key="v"}\nbody\n:::\n')).toBe(
+      ':::note[a_b_c]{.cls key="v"}\n\nbody\n\n:::\n',
+    );
+    expect(roundTrip("::note[Title]\n")).toBe("::note[Title]\n");
   });
 
   it("unwraps leaf directives and unclosed containers without losing text", () => {
@@ -170,7 +183,7 @@ describe("remarkLocalDbDirective", () => {
     expect(nodeTypes(parse(":::note\nhi\n"))).toEqual([
       "root",
       "paragraph",
-      "text",
+      "html",
       "paragraph",
       "text",
     ]);
@@ -220,7 +233,7 @@ describe("remarkLocalDbDirective", () => {
     };
     transformDirectives(tree, null);
     expect(processor.stringify(tree)).toBe(
-      ':::note\\[Lbl]{a="1" flag}\n\nhi\n\n:::\n\n::hr\n\na :b\\[c]\n',
+      ':::note[Lbl]{a="1" flag}\n\nhi\n\n:::\n\n::hr\n\na :b[c]\n',
     );
   });
 

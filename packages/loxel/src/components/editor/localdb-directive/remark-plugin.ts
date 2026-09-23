@@ -1,5 +1,5 @@
 import { $remark } from "@milkdown/kit/utils";
-import type { Paragraph, Root, RootContent, Text } from "mdast";
+import type { Html, Paragraph, Root, RootContent } from "mdast";
 import type { ContainerDirective, LeafDirective, TextDirective } from "mdast-util-directive";
 import { directiveFromMarkdown } from "mdast-util-directive";
 import { directive } from "micromark-extension-directive";
@@ -134,7 +134,7 @@ function containerPrefixStripper(node: Directive, source: string | null): (line:
 /** Replaces a non-localdb directive with plain nodes that reproduce its source. */
 function unwrapDirective(node: Directive, source: string | null): RootContent[] {
   if (node.type === "textDirective") {
-    return [text(sourceText(node, source) ?? reconstructOpening(node), node.position)];
+    return [verbatim(sourceText(node, source) ?? reconstructOpening(node), node.position)];
   }
   if (node.type === "leafDirective") {
     return [paragraph(sourceText(node, source) ?? reconstructOpening(node), node.position)];
@@ -208,12 +208,17 @@ function lineRange(
   };
 }
 
-function text(value: string, position?: Position): Text {
-  return position ? { type: "text", value, position } : { type: "text", value };
+/**
+ * Inline `html` node: mdast-util-to-markdown writes it unescaped (a `text` node would turn
+ * `:::note[Title]` into `:::note\[Title]`, breaking the directive for other tools) and Milkdown
+ * renders it as a span showing the value.
+ */
+function verbatim(value: string, position?: Position): Html {
+  return position ? { type: "html", value, position } : { type: "html", value };
 }
 
 function paragraph(value: string, position?: Position): Paragraph {
-  const node: Paragraph = { type: "paragraph", children: [text(value, position)] };
+  const node: Paragraph = { type: "paragraph", children: [verbatim(value, position)] };
   if (position) node.position = position;
   return node;
 }
