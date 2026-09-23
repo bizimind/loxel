@@ -31,6 +31,50 @@ interface DetectionCache {
   formatters: DetectedFormatter[];
 }
 
+/** Config files oxfmt discovers on its own (see `oxfmt --help`, "Config Options"). */
+const OXFMT_CONFIG_FILES = [
+  ".oxfmtrc.json",
+  ".oxfmtrc.jsonc",
+  ".oxfmtrc.ts",
+  ".oxfmtrc.mts",
+  ".oxfmtrc.cts",
+  ".oxfmtrc.js",
+  ".oxfmtrc.mjs",
+  ".oxfmtrc.cjs",
+];
+
+/**
+ * Extensions both prettier and oxfmt format out of the box (verified against prettier 3.9
+ * `--support-info` and oxfmt 0.68.0 via `--stdin-filepath` and `--lsp`). Alias spellings
+ * (yml, mjs, scss, mdx, ...) are listed explicitly so that a project with both formatters
+ * routes the whole language to the same formatter, not just the canonical extension.
+ */
+const SHARED_FORMAT_EXTENSIONS = [
+  "ts",
+  "tsx",
+  "mts",
+  "cts",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "css",
+  "scss",
+  "less",
+  "json",
+  "jsonc",
+  "json5",
+  "md",
+  "mdx",
+  "markdown",
+  "yaml",
+  "yml",
+  "html",
+  "vue",
+  "graphql",
+  "gql",
+];
+
 /** Config files to check and the formatter they imply. */
 const DETECTION_RULES: {
   /** Config file paths relative to worktree root (globs not supported — exact names). */
@@ -39,7 +83,10 @@ const DETECTION_RULES: {
   check: (wtRoot: string) => boolean;
   formatter: Omit<DetectedFormatter, "extensions"> & { extensions: string[] };
 }[] = [
-  // NOTE: backendMode is set per rule — "lsp" for oxfmt, "library" for prettier, "command" for others
+  // NOTE: backendMode is set per rule — "lsp" for oxfmt, "library" for prettier, "command" for others.
+  // Rules are evaluated in array order and `format()` picks the first detected formatter whose
+  // extension set contains the file's extension. Prettier is listed first, so when a project has
+  // both a prettier config and oxfmt, prettier handles every extension it claims (e.g. `md`, `json`).
   {
     files: [
       ".prettierrc",
@@ -67,33 +114,23 @@ const DETECTION_RULES: {
     formatter: {
       command: "prettier",
       args: "--stdin-filepath {file}",
-      extensions: [
-        "ts",
-        "tsx",
-        "js",
-        "jsx",
-        "css",
-        "json",
-        "md",
-        "yaml",
-        "html",
-        "vue",
-        "svelte",
-        "astro",
-      ],
+      // `toml` is intentionally absent: prettier has no TOML support.
+      extensions: [...SHARED_FORMAT_EXTENSIONS, "svelte", "astro"],
       backendMode: "library",
     },
   },
   {
-    files: ["oxfmt.toml"],
+    files: OXFMT_CONFIG_FILES,
     check: (wtRoot) => {
-      if (existsSync(join(wtRoot, "oxfmt.toml"))) return true;
+      if (OXFMT_CONFIG_FILES.some((f) => existsSync(join(wtRoot, f)))) return true;
       return packageJsonHasDep(wtRoot, "oxfmt");
     },
     formatter: {
       command: "oxfmt",
       args: "--stdin-filepath={file}",
-      extensions: ["ts", "tsx", "js", "jsx", "css"],
+      // Deliberately excluded (oxfmt 0.68.0): `svelte` (disabled unless the project enables the
+      // `svelte` config option and installs `svelte`) and `astro` (unsupported).
+      extensions: [...SHARED_FORMAT_EXTENSIONS, "toml"],
       backendMode: "lsp",
     },
   },
