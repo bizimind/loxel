@@ -6,11 +6,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { Crepe } from "@milkdown/crepe";
-import { editorViewCtx } from "@milkdown/kit/core";
+import { editorViewCtx, remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import { undo } from "@milkdown/kit/prose/history";
 import { TextSelection } from "@milkdown/kit/prose/state";
 
-import { applyBodyToEditor } from "./MarkdownEditor";
+import { applyBodyToEditor, canonicalizeBody } from "./MarkdownEditor";
 
 let root: HTMLDivElement;
 let crepe: Crepe;
@@ -19,6 +19,14 @@ beforeEach(async () => {
   root = document.createElement("div");
   document.body.appendChild(root);
   crepe = new Crepe({ root, defaultValue: "hello\n\nworld\n" });
+  // Mirror the component's stringify config so canonical forms match production.
+  crepe.editor.config((ctx) => {
+    ctx.set(remarkStringifyOptionsCtx, {
+      ...ctx.get(remarkStringifyOptionsCtx),
+      bullet: "-",
+      rule: "-",
+    });
+  });
   await crepe.create();
 });
 
@@ -49,6 +57,28 @@ function caretContext(): string {
     return $from.parent.textContent.slice(0, $from.parentOffset);
   });
 }
+
+describe("canonicalizeBody", () => {
+  test("returns the serializer form of raw disk markdown", () => {
+    expect(canonicalizeBody(crepe, "# Title\n\n* one\n* two\n")).toBe("# Title\n\n- one\n- two\n");
+    expect(canonicalizeBody(crepe, "Title\n=====\n\nbody\n")).toBe("# Title\n\nbody\n");
+    expect(canonicalizeBody(crepe, "1) one\n2) two\n")).toBe("1. one\n2. two\n");
+  });
+
+  test("is a fixed point of the live document", () => {
+    const live = crepe.getMarkdown();
+    expect(canonicalizeBody(crepe, live)).toBe(live);
+    expect(crepe.getMarkdown()).toBe(live); // does not touch the editor
+  });
+
+  test("untouched non-canonical file yields no spurious edit against an external change", () => {
+    const base = canonicalizeBody(crepe, "# Title\n\n* one\n* two\n");
+    const live = base; // user typed nothing
+    const theirs = canonicalizeBody(crepe, "# Title\n\n* one\n* three\n");
+    expect(live === base).toBe(true); // predicate does not trip → disk wins as-is
+    expect(theirs).toBe("# Title\n\n- one\n- three\n");
+  });
+});
 
 describe("applyBodyToEditor", () => {
   test("own echo with identical markdown leaves the doc and caret untouched", () => {

@@ -12,6 +12,7 @@ import {
   editorViewCtx,
   parserCtx,
   remarkStringifyOptionsCtx,
+  serializerCtx,
 } from "@milkdown/kit/core";
 import {
   addBlockTypeCommand,
@@ -83,6 +84,20 @@ const identity = (s: string) => s;
  */
 function normalizeTrailingNewline(s: string): string {
   return s.replace(/\n+$/, "\n");
+}
+
+/**
+ * Round-trip `body` through the editor's parser and serializer so it is in the same form as
+ * `crepe.getMarkdown()`. Markdown does not round-trip byte-exactly (`*` bullets become `-`,
+ * setext headings become ATX, ...), so raw disk bytes must never be compared with, or used as
+ * a merge base against, the live serialized document.
+ */
+export function canonicalizeBody(crepe: Crepe, body: string): string {
+  return crepe.editor.action((ctx) => {
+    const parser = ctx.get(parserCtx);
+    const serializer = ctx.get(serializerCtx);
+    return normalizeTrailingNewline(serializer(parser(body)));
+  });
 }
 
 /**
@@ -257,7 +272,8 @@ export function MarkdownEditor({
   // exactly one callback whose markdown equals what was applied and clears the ref on every
   // callback; any callback with different markdown is a genuine user edit and is never swallowed.
   const lastAppliedBodyRef = useRef<string | null>(null);
-  /** Body of the disk content the sync effect last processed — merge base for clean-state syncs. */
+  /** Canonicalized body of the disk content the sync effect last processed — merge base for
+   *  clean-state syncs. Always in serializer form so it compares against `crepe.getMarkdown()`. */
   const lastSyncedDiskBodyRef = useRef<string | null>(null);
 
   // Set getSerializedContent — reads current markdown from crepe, merged with frontmatter.
@@ -303,7 +319,6 @@ export function MarkdownEditor({
     const { frontmatter: initialFm, body: initialBody } = splitFrontmatter(initialContent);
     frontmatterRef.current = initialFm;
     setFrontmatter(initialFm);
-    lastSyncedDiskBodyRef.current = splitFrontmatter(effectDiskContent).body;
 
     const crepe = new Crepe({
       root: containerRef.current,
@@ -415,6 +430,10 @@ export function MarkdownEditor({
         });
 
         editorReadyRef.current = true;
+        lastSyncedDiskBodyRef.current = canonicalizeBody(
+          crepe,
+          splitFrontmatter(effectDiskContent).body,
+        );
 
         // Set merge callbacks for 3-way auto-merge
         mergeGetRef.current = () => {
@@ -579,10 +598,16 @@ export function MarkdownEditor({
     if (!crepe) return;
 
     const { frontmatter: diskFm, body: diskBody } = splitFrontmatter(diskContent);
+    let canonicalDiskBody: string;
+    try {
+      canonicalDiskBody = canonicalizeBody(crepe, diskBody);
+    } catch {
+      return; // Editor destroyed
+    }
     // Track the previous disk body even when not syncing (dirty/saving merges have already
     // reconciled the editor against it), so the next clean-state sync has the right base.
     const prevDiskBody = lastSyncedDiskBodyRef.current;
-    lastSyncedDiskBodyRef.current = diskBody;
+    lastSyncedDiskBodyRef.current = canonicalDiskBody;
 
     if (useEditorStateStore.getState().files.get(filePath)?.state !== "clean") return;
 
@@ -598,10 +623,13 @@ export function MarkdownEditor({
       // would discard that edit, and deferring would drop the disk change once the listener
       // flips the state to dirty. Instead 3-way merge live edits onto the disk change, keeping
       // ours on conflict — the user is actively editing and their text must not vanish.
+      // All three sides are in serializer form so formatting round-trip noise is not an edit.
       const liveBody = normalizeTrailingNewline(crepe.getMarkdown());
       let target = diskBody;
-      if (prevDiskBody !== null && liveBody !== prevDiskBody && liveBody !== diskBody) {
-        const merge = threeWayMerge(prevDiskBody, liveBody, diskBody, { preferOurs: true });
+      if (prevDiskBody !== null && liveBody !== prevDiskBody && liveBody !== canonicalDiskBody) {
+        const merge = threeWayMerge(prevDiskBody, liveBody, canonicalDiskBody, {
+          preferOurs: true,
+        });
         target = merge.ok ? merge.merged : liveBody;
       }
 
@@ -613,7 +641,7 @@ export function MarkdownEditor({
       editorContentCache.set(cacheKey, mergeFrontmatter(diskFm, canonicalBody));
       // Merged result is not on disk yet — the pending listener callback will mark dirty, but
       // it may be swallowed as the programmatic echo, so arm autosave explicitly.
-      if (normalizeTrailingNewline(canonicalBody) !== normalizeTrailingNewline(diskBody)) {
+      if (canonicalBody !== canonicalDiskBody) {
         if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = setTimeout(() => save(), AUTOSAVE_DEBOUNCE_MS);
       }
