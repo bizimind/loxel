@@ -82,19 +82,36 @@ const DETECTION_RULES: {
     formatter: {
       command: "prettier",
       args: "--stdin-filepath {file}",
+      // Every extension prettier formats out of the box (`prettier --support-info`, verified
+      // against prettier 3.9). Alias spellings (yml, mjs, scss, mdx, ...) are listed so that a
+      // project with both prettier and oxfmt routes the whole language to prettier, not just the
+      // canonical extension. `toml` is intentionally absent: prettier has no TOML support.
       extensions: [
         "ts",
         "tsx",
+        "mts",
+        "cts",
         "js",
         "jsx",
+        "mjs",
+        "cjs",
         "css",
+        "scss",
+        "less",
         "json",
+        "jsonc",
+        "json5",
         "md",
+        "mdx",
+        "markdown",
         "yaml",
+        "yml",
         "html",
         "vue",
         "svelte",
         "astro",
+        "graphql",
+        "gql",
       ],
       backendMode: "library",
     },

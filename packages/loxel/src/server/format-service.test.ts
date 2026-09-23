@@ -61,8 +61,17 @@ describe("FormatService auto-detection", () => {
     const detected = service.getDetectedFormatters(wt);
     expect(detected.map((f) => f.command)).toEqual(["prettier", "oxfmt"]);
 
-    const firstForMd = detected.find((f) => f.extensions.includes("md"));
-    expect(firstForMd?.command).toBe("prettier");
+    // Every extension oxfmt claims that prettier can also format must route to prettier, so
+    // alias spellings (yml, mjs, scss, mdx, ...) do not silently diverge from the canonical ones.
+    const oxfmt = findFormatter(service, wt, "oxfmt")!;
+    const prettier = findFormatter(service, wt, "prettier")!;
+    for (const ext of oxfmt.extensions) {
+      const first = detected.find((f) => f.extensions.includes(ext));
+      expect(first?.command, `first formatter for .${ext}`).toBe(
+        ext === "toml" ? "oxfmt" : "prettier",
+      );
+    }
+    expect(prettier.extensions).toContain("md");
   });
 
   test("detects nothing in an empty worktree", async () => {
