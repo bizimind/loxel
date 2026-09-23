@@ -24,7 +24,6 @@ import type { DockviewPanelApi } from "dockview-react";
 import { CheckIcon, ClipboardIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbDirectivePlugins } from "@/components/editor/localdb-directive/index.ts";
@@ -199,7 +198,6 @@ export function MarkdownEditor({
   panelApi,
 }: MarkdownEditorProps) {
   const darkMode = useUIStore((s) => s.darkMode);
-  const worktreePath = usePanelWorktreePath();
   const containerRef = useRef<HTMLDivElement>(null);
   const crepeRef = useRef<Crepe | null>(null);
 
@@ -366,7 +364,7 @@ export function MarkdownEditor({
     }
 
     // Images: render relative paths via /api/file-raw, upload pasted/dropped files
-    installMarkdownImages(crepe.editor, { filePath, worktreePath });
+    installMarkdownImages(crepe.editor, { filePath });
     const stopImageErrorObserver = observeImageLoadErrors(containerRef.current);
 
     // Align remark-stringify output with oxfmt/Prettier markdown defaults.

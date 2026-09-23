@@ -25,14 +25,11 @@ const EXTERNAL_URL_PATTERN = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
  * Turn a markdown image `src` into a URL the DOM can load.
  * - Absolute/protocol/data URLs pass through untouched.
  * - Everything else is a file path: relative ones resolve against the markdown file's
- *   directory, then get served through `/api/file-raw`. Paths inside the worktree use the
- *   relative form (`path=<rel>&wt=`) so the server never registers them as external files.
+ *   directory, then get served through `/api/file-raw?path=<absolute>`. No `wt` hint is sent,
+ *   so the server only serves paths it already owns (worktree tree or drafts dir) and never
+ *   registers unknown paths as external files.
  */
-export function resolveImageSrc(
-  src: string,
-  markdownFilePath: string,
-  worktreePath: string | null,
-): string {
+export function resolveImageSrc(src: string, markdownFilePath: string): string {
   if (!src || EXTERNAL_URL_PATTERN.test(src)) return src;
 
   const dir = markdownFilePath.substring(0, markdownFilePath.lastIndexOf("/"));
@@ -46,14 +43,7 @@ export function resolveImageSrc(
     return src;
   }
 
-  const params = new URLSearchParams();
-  if (worktreePath && absolute.startsWith(`${worktreePath}/`)) {
-    params.set("path", absolute.slice(worktreePath.length + 1));
-    params.set("wt", worktreePath);
-  } else {
-    params.set("path", absolute);
-  }
-  return `/api/file-raw?${params.toString()}`;
+  return `/api/file-raw?${new URLSearchParams({ path: absolute }).toString()}`;
 }
 
 /** Build a markdown alt text from the uploaded file name (stem only, no extension). */
@@ -104,14 +94,11 @@ export function createImageUploader(filePath: string) {
  * Register image rendering and upload on a Crepe editor. Call before `create()`.
  * The inline image node view applies `proxyDomURL` to the DOM only; markdown is untouched.
  */
-export function installMarkdownImages(
-  editor: Editor,
-  options: { filePath: string; worktreePath: string | null },
-): void {
+export function installMarkdownImages(editor: Editor, options: { filePath: string }): void {
   editor.use(imageInlineComponent).config((ctx) => {
     ctx.update(inlineImageConfig.key, (prev) => ({
       ...prev,
-      proxyDomURL: (url: string) => resolveImageSrc(url, options.filePath, options.worktreePath),
+      proxyDomURL: (url: string) => resolveImageSrc(url, options.filePath),
       // The empty-image "Upload" button: the default returns a blob: URL, which must never be
       // persisted. An empty string makes the node view keep the input open.
       onUpload: async (file: File) => (await uploadImageFile(options.filePath, file)) ?? "",

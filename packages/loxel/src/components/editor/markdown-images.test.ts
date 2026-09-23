@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import { altFromFileName, observeImageLoadErrors, resolveImageSrc } from "./markdown-images";
 
 const md = "/repo/wt/docs/plan.md";
-const wt = "/repo/wt";
 
 describe("resolveImageSrc", () => {
   test("passes absolute, data, blob and protocol-relative URLs through", () => {
@@ -15,51 +14,42 @@ describe("resolveImageSrc", () => {
       "//cdn.example.com/a.png",
       "",
     ]) {
-      expect(resolveImageSrc(src, md, wt)).toBe(src);
+      expect(resolveImageSrc(src, md)).toBe(src);
     }
   });
 
-  test("resolves relative paths inside the worktree to the relative file-raw form", () => {
-    expect(resolveImageSrc("./assets/a.png", md, wt)).toBe(
-      "/api/file-raw?path=docs%2Fassets%2Fa.png&wt=%2Frepo%2Fwt",
+  test("resolves relative paths against the markdown file's directory", () => {
+    expect(resolveImageSrc("./assets/a.png", md)).toBe(
+      "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2Fassets%2Fa.png",
     );
-    expect(resolveImageSrc("a.png", md, wt)).toBe(
-      "/api/file-raw?path=docs%2Fa.png&wt=%2Frepo%2Fwt",
+    expect(resolveImageSrc("a.png", md)).toBe("/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2Fa.png");
+    expect(resolveImageSrc("../img/a.png", md)).toBe(
+      "/api/file-raw?path=%2Frepo%2Fwt%2Fimg%2Fa.png",
     );
-    expect(resolveImageSrc("../img/a.png", md, wt)).toBe(
-      "/api/file-raw?path=img%2Fa.png&wt=%2Frepo%2Fwt",
-    );
+    expect(resolveImageSrc("/abs/x.png", md)).toBe("/api/file-raw?path=%2Fabs%2Fx.png");
   });
 
   test("treats URL-significant characters in the directory path as literal", () => {
-    expect(resolveImageSrc("./a.png", "/repo/wt/docs#1/plan.md", wt)).toBe(
-      "/api/file-raw?path=docs%231%2Fa.png&wt=%2Frepo%2Fwt",
+    expect(resolveImageSrc("./a.png", "/repo/wt/docs#1/plan.md")).toBe(
+      "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%231%2Fa.png",
     );
-    expect(resolveImageSrc("./a.png", "/repo/wt/d?x/plan.md", wt)).toBe(
-      "/api/file-raw?path=d%3Fx%2Fa.png&wt=%2Frepo%2Fwt",
+    expect(resolveImageSrc("./a.png", "/repo/wt/d?x/plan.md")).toBe(
+      "/api/file-raw?path=%2Frepo%2Fwt%2Fd%3Fx%2Fa.png",
     );
-    expect(resolveImageSrc("./a.png", "/repo/wt/100%/plan.md", wt)).toBe(
-      "/api/file-raw?path=100%25%2Fa.png&wt=%2Frepo%2Fwt",
+    expect(resolveImageSrc("./a.png", "/repo/wt/100%/plan.md")).toBe(
+      "/api/file-raw?path=%2Frepo%2Fwt%2F100%25%2Fa.png",
     );
   });
 
   test("decodes percent-encoded markdown sources", () => {
-    expect(resolveImageSrc("./my%20shot.png", md, wt)).toBe(
-      "/api/file-raw?path=docs%2Fmy+shot.png&wt=%2Frepo%2Fwt",
+    expect(resolveImageSrc("./my%20shot.png", md)).toBe(
+      "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2Fmy+shot.png",
     );
   });
 
-  test("uses the absolute form without a worktree hint for drafts and outside paths", () => {
-    const draft = "/state/detached/abc/Note 1.md";
-    expect(resolveImageSrc("./shot.png", draft, wt)).toBe(
+  test("never sends a worktree hint, so drafts resolve by ownership only", () => {
+    expect(resolveImageSrc("./shot.png", "/state/detached/abc/Note 1.md")).toBe(
       "/api/file-raw?path=%2Fstate%2Fdetached%2Fabc%2Fshot.png",
-    );
-    expect(resolveImageSrc("../../outside.png", md, wt)).toBe(
-      "/api/file-raw?path=%2Frepo%2Foutside.png",
-    );
-    expect(resolveImageSrc("/abs/x.png", md, wt)).toBe("/api/file-raw?path=%2Fabs%2Fx.png");
-    expect(resolveImageSrc("./a.png", md, null)).toBe(
-      "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2Fa.png",
     );
   });
 });
