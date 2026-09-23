@@ -9,11 +9,18 @@ import {
   serializerCtx,
 } from "@milkdown/kit/core";
 import { commonmark } from "@milkdown/kit/preset/commonmark";
+import type { Root } from "mdast";
+import remarkParse from "remark-parse";
+import remarkStringify from "remark-stringify";
+import { unified } from "unified";
 
 import type { MarkdownOutputSettings } from "@/lib/formatting-model";
 import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS } from "@/lib/formatting-model";
 
-import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
+import {
+  buildRemarkStringifyOptions,
+  remarkForgetSourceMarkers,
+} from "./markdown-stringify-options";
 
 // Every marker deliberately differs from the defaults so the test proves the settings win
 // over what was parsed from the source (Milkdown remembers source markers per node).
@@ -63,6 +70,7 @@ async function roundTrip({
       );
     })
     .use(commonmark)
+    .use(remarkForgetSourceMarkers)
     .create();
   editors.push(editor);
   return editor.action((ctx) => ctx.get(serializerCtx)(ctx.get(editorViewCtx).state.doc));
@@ -116,6 +124,15 @@ describe("buildRemarkStringifyOptions through Milkdown", () => {
     expect(out).toBe("a _b_ c __d__ (_e_)\n");
   });
 
+  test("adjacent same-style runs merge instead of fusing their markers", async () => {
+    const out = await roundTrip({
+      emphasis: "_",
+      strong: "*",
+      source: "*foo*_bar_\n\n**foo**__bar__\n",
+    });
+    expect(out).toBe("_foobar_\n\n**foobar**\n");
+  });
+
   test("list, fence, rule, and heading options apply", async () => {
     const out = await roundTrip({
       bullet: "*",
@@ -131,5 +148,45 @@ describe("buildRemarkStringifyOptions through Milkdown", () => {
     expect(out).toContain("\n1)  first\n1)  second\n");
     expect(out).toContain("\n~~~\ncode\n~~~\n");
     expect(out).toContain("\n***\n");
+  });
+});
+
+describe("buildRemarkStringifyOptions handlers on a bare mdast tree", () => {
+  const adjacentRuns: Root = {
+    type: "root",
+    children: [
+      {
+        type: "paragraph",
+        children: [
+          { type: "emphasis", children: [{ type: "text", value: "foo" }] },
+          { type: "emphasis", children: [{ type: "text", value: "bar" }] },
+          { type: "text", value: " " },
+          { type: "strong", children: [{ type: "text", value: "foo" }] },
+          { type: "strong", children: [{ type: "text", value: "bar" }] },
+        ],
+      },
+    ],
+  };
+
+  test.each([
+    { emphasis: "_", strong: "*" },
+    { emphasis: "*", strong: "_" },
+  ] as const)("adjacent runs keep distinct delimiters with %o", (markers) => {
+    const processor = unified().use(
+      remarkStringify,
+      buildRemarkStringifyOptions({}, { ...DEFAULT_MARKDOWN_OUTPUT_SETTINGS, ...markers }),
+    );
+    const out = processor.stringify(adjacentRuns);
+    expect(out).not.toContain("&#");
+    const reparsed = unified().use(remarkParse).parse(out);
+    const paragraph = reparsed.children[0];
+    if (paragraph?.type !== "paragraph") throw new Error("expected a paragraph");
+    expect(paragraph.children.map((child) => child.type)).toEqual([
+      "emphasis",
+      "emphasis",
+      "text",
+      "strong",
+      "strong",
+    ]);
   });
 });
