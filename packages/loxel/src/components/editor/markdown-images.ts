@@ -59,32 +59,39 @@ export function altFromFileName(fileName: string): string {
   return stem || "image";
 }
 
-interface UploaderOptions {
-  filePath: string;
+/**
+ * Upload one image for the markdown file at `filePath` and return the relative `src` to
+ * insert, or `null` after showing a toast if the upload failed. Never throws, so callers never
+ * fall back to a blob:/data: URL.
+ */
+export async function uploadImageFile(filePath: string, file: File): Promise<string | null> {
+  try {
+    const { src } = await api.uploadFile({ path: filePath, file, nonce: crypto.randomUUID() });
+    return src;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Upload failed";
+    log.warn("Image upload failed", { error: err instanceof Error ? err : undefined });
+    showToast(`Image upload failed: ${message}`);
+    return null;
+  }
 }
 
 /**
- * Uploader for `@milkdown/kit/plugin/upload`. Uploads each image file, then returns inline
- * `image` nodes pointing at the stored relative path. Files that fail to upload are skipped
- * (with a toast) so a blob:/data: URL is never inserted. Never throws: the upload plugin
- * only removes its placeholder widget on a resolved promise.
+ * Uploader for `@milkdown/kit/plugin/upload` (paste/drop). Returns inline `image` nodes for
+ * the files that uploaded; failed ones are skipped. Never rejects: the upload plugin only
+ * removes its placeholder widget on a resolved promise.
  */
-export function createImageUploader({ filePath }: UploaderOptions) {
+export function createImageUploader(filePath: string) {
   return async (files: FileList, schema: Schema): Promise<ProseNode[]> => {
     const imageType = schema.nodes["image"];
     if (!imageType) return [];
     const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
     const nodes: ProseNode[] = [];
     for (const file of images) {
-      try {
-        const { src } = await api.uploadFile({ path: filePath, file, nonce: crypto.randomUUID() });
-        const node = imageType.createAndFill({ src, alt: altFromFileName(file.name) });
-        if (node) nodes.push(node);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Upload failed";
-        log.warn("Image upload failed", { error: err instanceof Error ? err : undefined });
-        showToast(`Image upload failed: ${message}`);
-      }
+      const src = await uploadImageFile(filePath, file);
+      if (!src) continue;
+      const node = imageType.createAndFill({ src, alt: altFromFileName(file.name) });
+      if (node) nodes.push(node);
     }
     return nodes;
   };
@@ -102,10 +109,13 @@ export function installMarkdownImages(
     ctx.update(inlineImageConfig.key, (prev) => ({
       ...prev,
       proxyDomURL: (url: string) => resolveImageSrc(url, options.filePath, options.worktreePath),
+      // The empty-image "Upload" button: the default returns a blob: URL, which must never be
+      // persisted. An empty string makes the node view keep the input open.
+      onUpload: async (file: File) => (await uploadImageFile(options.filePath, file)) ?? "",
     }));
     ctx.update(uploadConfig.key, (prev) => ({
       ...prev,
-      uploader: createImageUploader({ filePath: options.filePath }),
+      uploader: createImageUploader(options.filePath),
     }));
   });
 }
