@@ -224,16 +224,15 @@ describe("remarkLocalDbDirective", () => {
     );
   });
 
-  it("serializes localdb-block content through the containerDirective handler", () => {
-    const tree = parse("x\n");
-    tree.children.push({
-      type: "containerDirective",
-      name: "localdb",
-      attributes: {},
-      children: [{ type: "html", value: "table: t\nview: table\n\n# not escaped" }],
+  it("writes html nodes verbatim, including inside list items", () => {
+    const tree = parse("- x\n");
+    const item = (tree.children[0] as { children: Array<{ children: unknown[] }> }).children[0]!;
+    item.children.push({
+      type: "html",
+      value: "::::localdb\ntable: t\n\n# not escaped\n:::\n::::",
     });
     expect(processor.stringify(tree)).toBe(
-      "x\n\n:::localdb\ntable: t\nview: table\n\n# not escaped\n:::\n",
+      "- x\n  ::::localdb\n  table: t\n\n  # not escaped\n  :::\n  ::::\n",
     );
   });
 });

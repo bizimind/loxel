@@ -84,20 +84,28 @@ export const localDbBlockSchema = $nodeSchema("localdb-block", () => ({
         lines.push(`viewId: ${node.attrs.viewId as number}`);
       const extra = node.attrs.extra as string;
       if (extra) lines.push(extra);
-      // An `html` node is written verbatim by mdast-util-to-markdown, whereas `text` would be
-      // escaped (e.g. `# heading` → `\# heading`) and could corrupt preserved lines.
-      if (node.attrs.closed === false) {
-        // No closing fence of its own in the source (see LocalDbBlockNode.closed): emit the
-        // opening fence and body verbatim instead of letting the directive handler close it.
-        state.addNode("html", undefined, [":::localdb", ...lines].join("\n"));
-        return;
-      }
-      state.openNode("containerDirective", undefined, { name: "localdb" });
-      state.addNode("html", undefined, lines.join("\n"));
-      state.closeNode();
+      // The whole block is emitted as one `html` node, which mdast-util-to-markdown writes
+      // verbatim: `text` would escape preserved lines (`# heading` → `\# heading`), and the
+      // directive handler would always write a 3-colon fence that a `:::` line in the preserved
+      // body could close early. The fence is widened past any colon run in the body instead.
+      const fence = fenceFor(lines);
+      const block = [`${fence}localdb`, ...lines];
+      // No closing fence of its own in the source (see LocalDbBlockNode.closed).
+      if (node.attrs.closed !== false) block.push(fence);
+      state.addNode("html", undefined, block.join("\n"));
     },
   },
 }));
+
+/** A fence wider than any colon run in the body so the body cannot close it. */
+function fenceFor(lines: string[]): string {
+  let longest = 0;
+  for (const line of lines.join("\n").split("\n")) {
+    const run = /^\s*(:{3,})/.exec(line)?.[1]?.length ?? 0;
+    if (run > longest) longest = run;
+  }
+  return ":".repeat(Math.max(3, longest + 1));
+}
 
 /** Verbatim body and fence state attached by remarkLocalDbDirective when the source was available. */
 function sourceBodyOf(node: MarkdownNode): { raw: string | null; closed: boolean } {

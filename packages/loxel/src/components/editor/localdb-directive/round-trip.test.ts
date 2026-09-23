@@ -66,6 +66,17 @@ describe("localdb directive Milkdown round-trip", () => {
     }
   });
 
+  it("widens the fence so ::: lines preserved in the body cannot close the block early", async () => {
+    await expectFixedPoint(
+      "::::localdb\ntable: t\nnote\n:::\nend\n::::\n",
+      "::::localdb\ntable: t\nview: table\nnote\n:::\nend\n::::\n",
+    );
+    await expectFixedPoint(
+      "::::localdb\ntable: t\n\n:::note\nhi\n:::\n",
+      "::::localdb\ntable: t\nview: table\n\n:::note\nhi\n:::\n",
+    );
+  });
+
   it("leaves prose with colons and other directives intact", async () => {
     await expectFixedPoint("Meeting at 10:30am, key:value\n", "Meeting at 10:30am, key:value\n");
     await expectFixedPoint("a\n\n::hr\n\nb\n", "a\n\n::hr\n\nb\n");

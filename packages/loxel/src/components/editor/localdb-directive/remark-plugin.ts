@@ -1,7 +1,7 @@
 import { $remark } from "@milkdown/kit/utils";
 import type { Paragraph, Root, RootContent, Text } from "mdast";
 import type { ContainerDirective, LeafDirective, TextDirective } from "mdast-util-directive";
-import { directiveFromMarkdown, directiveToMarkdown } from "mdast-util-directive";
+import { directiveFromMarkdown } from "mdast-util-directive";
 import { directive } from "micromark-extension-directive";
 import type { Plugin } from "unified";
 import type { Position } from "unist";
@@ -34,22 +34,17 @@ const CLOSING_FENCE = /^\s*:::+\s*$/;
  * - `:::localdb` containers become `localdb-block` nodes carrying their verbatim inner source.
  * - Every other directive is unwrapped into plain paragraphs reproducing its source so no text is
  *   lost and Milkdown's transformer never sees an unknown node type.
- * - Serialization keeps the `containerDirective` handler (used by localDbBlockSchema) but drops
- *   remark-directive's `:` escaping rules, which only matter when text directives are parsed.
+ * - No serializer extension is installed: localDbBlockSchema writes its block as verbatim text,
+ *   and remark-directive's `:` escaping rules only matter when text directives are parsed.
  */
 export const remarkLocalDbDirective: Plugin<[], Root> = function remarkLocalDbDirective() {
   const data = this.data();
   const micromarkExtensions = data.micromarkExtensions ?? (data.micromarkExtensions = []);
   const fromMarkdownExtensions = data.fromMarkdownExtensions ?? (data.fromMarkdownExtensions = []);
-  const toMarkdownExtensions = data.toMarkdownExtensions ?? (data.toMarkdownExtensions = []);
 
   const { flow } = directive();
   micromarkExtensions.push({ flow });
   fromMarkdownExtensions.push(directiveFromMarkdown());
-  const containerDirective = directiveToMarkdown().handlers?.containerDirective;
-  if (!containerDirective)
-    throw new Error("mdast-util-directive has no containerDirective handler");
-  toMarkdownExtensions.push({ handlers: { containerDirective } });
 
   return (tree, file) => transformDirectives(tree, sourceOf(file));
 };
