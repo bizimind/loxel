@@ -115,21 +115,23 @@ function toLocalDbBlock(node: ContainerDirective, source: string | null): LocalD
  * Continuation lines of a directive carry the enclosing container's prefix (`> ` in a block
  * quote, indentation in a list item), while the opening fence line does not because the node's
  * start offset points at the first colon. Returns a function that strips that prefix, derived
- * from whatever precedes the opening fence on its own source line.
+ * from whatever precedes the opening fence on its own source line converted to its continuation
+ * form: block-quote markers are kept, list markers become indentation of the same width.
  */
 function containerPrefixStripper(node: Directive, source: string | null): (line: string) => string {
   const start = node.position?.start.offset;
   if (source === null || start === undefined) return (line) => line;
   const lineStart = source.lastIndexOf("\n", start - 1) + 1;
-  const prefix = source.slice(lineStart, start);
-  if (!prefix) return (line) => line;
+  const opening = source.slice(lineStart, start);
+  if (!opening) return (line) => line;
+  const prefix = opening.replace(/[-*+]|\d+[.)]/g, (marker) => " ".repeat(marker.length));
   const blankPrefix = prefix.trimEnd();
   return (line) => {
     if (line.startsWith(prefix)) return line.slice(prefix.length);
-    // A list marker (`- `, `1. `) is replaced by equivalent indentation on continuation lines.
-    if (/^\s*$/.test(line.slice(0, prefix.length))) return line.slice(prefix.length);
     // Blank block-quote lines are a bare `>` without the trailing space.
     if (blankPrefix && line.startsWith(blankPrefix)) return line.slice(blankPrefix.length);
+    // Lazy continuation with less indentation than the marker width.
+    if (/^\s*$/.test(line.slice(0, prefix.length))) return line.slice(prefix.length);
     return line;
   };
 }

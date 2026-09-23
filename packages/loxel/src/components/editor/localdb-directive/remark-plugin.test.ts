@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkStringify from "remark-stringify";
 import { unified } from "unified";
+import { visit } from "unist-util-visit";
 
 import { remarkLocalDbDirective, transformDirectives } from "./remark-plugin";
 
@@ -108,6 +109,35 @@ describe("remarkLocalDbDirective", () => {
     const quote = parse(md).children[0] as { children: Array<{ type: string; raw?: string }> };
     expect(quote.children[0]!.type).toBe("localdb-block");
     expect(quote.children[0]!.raw).toBe("table: tasks\n\nview: kanban");
+  });
+
+  it("strips mixed block-quote and list prefixes from a localdb body", () => {
+    for (const md of [
+      "> - :::localdb\n>   table: t\n>   :::\n",
+      "- > :::localdb\n  > table: t\n  > :::\n",
+      "> 1. :::localdb\n>    table: t\n>    :::\n",
+    ]) {
+      const blocks: Array<{ raw?: string; closed?: boolean }> = [];
+      visit(parse(md), "localdb-block", (node) => {
+        blocks.push(node as { raw?: string; closed?: boolean });
+      });
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0]!.raw).toBe("table: t");
+      expect(blocks[0]!.closed).toBe(true);
+    }
+  });
+
+  it("keeps the closing fence of unwrapped directives under mixed container prefixes", () => {
+    for (const md of [
+      "> - :::note\n>   hi\n>   :::\n",
+      "- > :::note\n  > hi\n  > :::\n",
+      "> 1. :::note\n>    hi\n>    :::\n",
+    ]) {
+      const once = roundTrip(md);
+      expect(once).toContain(":::note");
+      expect(once.trimEnd().endsWith(":::")).toBe(true);
+      expect(roundTrip(once)).toBe(once);
+    }
   });
 
   it("keeps the closing fence of unwrapped directives inside block quotes and lists", () => {

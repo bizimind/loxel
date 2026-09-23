@@ -53,6 +53,19 @@ describe("localdb directive Milkdown round-trip", () => {
     );
   });
 
+  it("keeps the table binding of a localdb block under mixed container prefixes", async () => {
+    for (const md of [
+      "> - :::localdb\n>   table: t\n>   :::\n",
+      "- > :::localdb\n  > table: t\n  > :::\n",
+      "> 1. :::localdb\n>    table: t\n>    :::\n",
+    ]) {
+      const once = await roundTrip(md);
+      expect(once).toContain("table: t\n");
+      expect(once.match(/:::/g)).toHaveLength(2);
+      expect(await roundTrip(once)).toBe(once);
+    }
+  });
+
   it("leaves prose with colons and other directives intact", async () => {
     await expectFixedPoint("Meeting at 10:30am, key:value\n", "Meeting at 10:30am, key:value\n");
     await expectFixedPoint("a\n\n::hr\n\nb\n", "a\n\n::hr\n\nb\n");
