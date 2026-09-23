@@ -31,6 +31,18 @@ describe("resolveImageSrc", () => {
     );
   });
 
+  test("treats URL-significant characters in the directory path as literal", () => {
+    expect(resolveImageSrc("./a.png", "/repo/wt/docs#1/plan.md", wt)).toBe(
+      "/api/file-raw?path=docs%231%2Fa.png&wt=%2Frepo%2Fwt",
+    );
+    expect(resolveImageSrc("./a.png", "/repo/wt/d?x/plan.md", wt)).toBe(
+      "/api/file-raw?path=d%3Fx%2Fa.png&wt=%2Frepo%2Fwt",
+    );
+    expect(resolveImageSrc("./a.png", "/repo/wt/100%/plan.md", wt)).toBe(
+      "/api/file-raw?path=100%25%2Fa.png&wt=%2Frepo%2Fwt",
+    );
+  });
+
   test("decodes percent-encoded markdown sources", () => {
     expect(resolveImageSrc("./my%20shot.png", md, wt)).toBe(
       "/api/file-raw?path=docs%2Fmy+shot.png&wt=%2Frepo%2Fwt",

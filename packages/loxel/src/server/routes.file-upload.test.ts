@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -85,6 +85,7 @@ describe("POST /api/file-upload", () => {
   });
 
   afterEach(async () => {
+    setSystemTime();
     service.stop();
     await rm(root, { recursive: true, force: true });
   });
@@ -111,10 +112,12 @@ describe("POST /api/file-upload", () => {
   });
 
   test("never overwrites: a same-second clash gets a numbered suffix", async () => {
+    setSystemTime(new Date(2026, 8, 22, 19, 21, 30));
     const path = join(wt, "docs", "plan.md");
     const first = await (await upload({ path, file: png("shot.png") })).json();
     const second = await (await upload({ path, file: png("shot.png") })).json();
-    expect(second.src).toBe(first.src.replace(/\.png$/, "-2.png"));
+    expect(first.src).toBe("./assets/shot-20260922-192130.png");
+    expect(second.src).toBe("./assets/shot-20260922-192130-2.png");
 
     const draft = join(detachedDir, "Note 1.md");
     const d1 = await (await upload({ path: draft, file: png("shot.png") })).json();

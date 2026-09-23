@@ -38,7 +38,10 @@ export function resolveImageSrc(
   const dir = markdownFilePath.substring(0, markdownFilePath.lastIndexOf("/"));
   let absolute: string;
   try {
-    absolute = decodeURIComponent(new URL(src, `file://${dir}/`).pathname);
+    // Encode each directory segment so `#`, `?` and `%` in the path (worktree names come from
+    // branch names) are literal, not URL syntax.
+    const base = `file://${dir.split("/").map(encodeURIComponent).join("/")}/`;
+    absolute = decodeURIComponent(new URL(src, base).pathname);
   } catch {
     return src;
   }
