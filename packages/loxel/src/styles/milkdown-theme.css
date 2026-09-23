@@ -22,8 +22,8 @@
   --crepe-color-on-secondary: var(--secondary-foreground);
   --crepe-color-inverse: var(--foreground);
   --crepe-color-on-inverse: var(--background);
-  --crepe-color-inline-code: var(--primary);
-  --crepe-color-inline-area: color-mix(in srgb, var(--primary), transparent 88%);
+  --crepe-color-inline-code: color-mix(in oklch, var(--foreground) 85%, var(--muted-foreground));
+  --crepe-color-inline-area: color-mix(in srgb, var(--foreground) 7%, transparent);
   --crepe-color-hover: color-mix(in oklch, var(--primary) 50%, transparent);
   --crepe-color-selected: var(--primary);
   --crepe-font-default:
@@ -47,8 +47,8 @@
   --crepe-color-on-secondary: var(--secondary-foreground);
   --crepe-color-inverse: var(--foreground);
   --crepe-color-on-inverse: var(--background);
-  --crepe-color-inline-code: #56a8f5;
-  --crepe-color-inline-area: rgba(86, 168, 245, 0.12);
+  --crepe-color-inline-code: color-mix(in oklch, var(--foreground) 85%, var(--muted-foreground));
+  --crepe-color-inline-area: color-mix(in srgb, var(--foreground) 9%, transparent);
   --crepe-color-hover: color-mix(in oklch, var(--primary) 50%, transparent);
   --crepe-color-selected: var(--primary);
   --crepe-shadow-1: 0px 1px 2px 0px rgba(0, 0, 0, 0.4), 0px 1px 3px 1px rgba(0, 0, 0, 0.2);
@@ -168,16 +168,17 @@
   line-height: 26px;
 }
 
-/* ── Inline code — subtle, bluish tint ── */
+/* ── Inline code — neutral gray tint, sized relative to surrounding text ── */
 
 .milkdown .ProseMirror code {
   color: var(--crepe-color-inline-code);
   background: var(--crepe-color-inline-area);
   font-family: var(--crepe-font-code);
-  font-size: 12.5px;
-  padding: 1px 5px;
+  font-size: 0.85em;
+  line-height: 1.3;
+  padding: 0.05em 0.35em;
   border-radius: 3px;
-  border: 1px solid color-mix(in srgb, var(--crepe-color-outline), transparent 70%);
+  vertical-align: baseline;
 }
 
 /* ── Lists — brighter glyphs ── */
