@@ -44,6 +44,8 @@ import { useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
+import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
+
 import "@/styles/milkdown-theme.css";
 
 /**
@@ -368,10 +370,10 @@ export function MarkdownEditor({
     // Markers the serializer emits (Settings > Editor > Markdown output). Milkdown builds
     // remark-stringify at init, so changes recreate the editor via the effect deps below.
     crepe.editor.config((ctx) => {
-      ctx.set(remarkStringifyOptionsCtx, {
-        ...ctx.get(remarkStringifyOptionsCtx),
-        ...markdownOutput,
-      });
+      ctx.set(
+        remarkStringifyOptionsCtx,
+        buildRemarkStringifyOptions(ctx.get(remarkStringifyOptionsCtx), markdownOutput),
+      );
     });
 
     // On every change: merge with frontmatter, update cache + trigger autosave

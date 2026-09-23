@@ -323,8 +323,8 @@ export function EditorSection() {
 // Markdown output selects
 // ---------------------------------------------------------------------------
 
-interface MarkdownOutputField<K extends MarkdownOutputChoiceKey = MarkdownOutputChoiceKey> {
-  key: K;
+interface MarkdownOutputField {
+  key: MarkdownOutputChoiceKey;
   label: string;
   /** Display label per choice value; falls back to the raw value. */
   labels?: Record<string, string>;
@@ -344,14 +344,14 @@ const MARKDOWN_OUTPUT_FIELDS: MarkdownOutputField[] = [
   },
 ];
 
-function MarkdownOutputSelect<K extends MarkdownOutputChoiceKey>({
+function MarkdownOutputSelect({
   field,
   value,
   onChange,
 }: {
-  field: MarkdownOutputField<K>;
-  value: MarkdownOutputSettings[K];
-  onChange: (value: MarkdownOutputSettings[K]) => void;
+  field: MarkdownOutputField;
+  value: MarkdownOutputSettings[MarkdownOutputChoiceKey];
+  onChange: (value: MarkdownOutputSettings[MarkdownOutputChoiceKey]) => void;
 }) {
   const choices: readonly string[] = MARKDOWN_OUTPUT_CHOICES[field.key];
   return (
