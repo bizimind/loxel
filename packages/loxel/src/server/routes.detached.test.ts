@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -86,6 +86,46 @@ describe("detached file project destinations", () => {
     });
 
     expect(res.status).toBe(400);
+  });
+
+  test("move carries images referenced by relative path along with the draft", async () => {
+    await writeFile(join(detachedDir, "Shot.md"), "![a](./shot-1.png)\n![b](missing.png)\n");
+    await writeFile(join(detachedDir, "shot-1.png"), "png");
+    await writeFile(join(detachedDir, "unrelated.png"), "png");
+
+    const res = await post("/api/detached-file-move", {
+      wt,
+      path: join(detachedDir, "Shot.md"),
+      destPath: "src",
+    });
+
+    expect(res.status).toBe(200);
+    expect((await readdir(join(wt, "src"))).sort()).toEqual(["Shot.md", "shot-1.png"]);
+    expect((await readdir(detachedDir)).sort()).toEqual(["Draft.md", "unrelated.png"]);
+  });
+
+  test("copy keeps the draft and its images, and refuses to overwrite either", async () => {
+    await writeFile(join(detachedDir, "Shot.md"), "![a](./shot-1.png)");
+    await writeFile(join(detachedDir, "shot-1.png"), "png");
+    await writeFile(join(wt, "src", "shot-1.png"), "existing");
+
+    const clash = await post("/api/detached-file-copy-to-project", {
+      wt,
+      path: join(detachedDir, "Shot.md"),
+      destPath: "src",
+    });
+    expect(clash.status).toBe(500);
+    expect(await readdir(join(wt, "src"))).toEqual(["shot-1.png"]);
+
+    await rm(join(wt, "src", "shot-1.png"));
+    const res = await post("/api/detached-file-copy-to-project", {
+      wt,
+      path: join(detachedDir, "Shot.md"),
+      destPath: "src",
+    });
+    expect(res.status).toBe(200);
+    expect((await readdir(join(wt, "src"))).sort()).toEqual(["Shot.md", "shot-1.png"]);
+    expect((await readdir(detachedDir)).sort()).toEqual(["Draft.md", "Shot.md", "shot-1.png"]);
   });
 
   function post(path: string, body: unknown): Promise<Response> {

@@ -1,10 +1,11 @@
 import { constants, copyFile, mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 
 import type { DirEntry } from "@/api/project-files-model";
 
 import type { FileChange } from "./file-sync-service";
 import { FilesSyncService } from "./file-sync-service";
+import { extractRelativeImageRefs } from "./image-upload";
 import { logger } from "./logger";
 
 const log = logger.child("detached");
@@ -124,6 +125,35 @@ export class DetachedFilesService {
     }
   }
 
+  /** Create a new file exclusively (throws `EEXIST` if it exists), with nonce tracking. */
+  async writeNewFile(name: string, content: Uint8Array, nonce: string): Promise<void> {
+    await this.syncService.writeWithNonce(name, nonce, () =>
+      writeFile(join(this.dir, name), content, { flag: "wx" }),
+    );
+    this.cachedEntries = await this.readDir();
+    this.onListChanged(this.cachedEntries);
+  }
+
+  /**
+   * Images referenced by relative path from a markdown draft (`![alt](./x.png)`).
+   * Drafts are a flat directory, so only bare filenames that exist there qualify.
+   * Non-markdown files never carry companions.
+   */
+  private async findCompanionImages(name: string): Promise<string[]> {
+    if (extname(name).toLowerCase() !== ".md") return [];
+    let content: string;
+    try {
+      content = await this.readFileContent(name);
+    } catch {
+      return [];
+    }
+    this.cachedEntries = await this.readDir();
+    const existing = new Set(this.cachedEntries.map((e) => e.name));
+    return extractRelativeImageRefs(content).filter(
+      (ref) => ref !== name && !ref.includes("/") && existing.has(ref),
+    );
+  }
+
   async renameFile(oldName: string, newName: string): Promise<void> {
     const src = join(this.dir, oldName);
     const dest = join(this.dir, newName);
@@ -149,12 +179,25 @@ export class DetachedFilesService {
    * Returns the absolute path of the new file.
    */
   async copyToProject(name: string, destDir: string, worktreeCwd: string): Promise<string> {
-    const src = join(this.dir, name);
     const targetDir = destDir ? join(worktreeCwd, destDir) : worktreeCwd;
     await mkdir(targetDir, { recursive: true });
-    const dest = join(targetDir, name);
-    await copyFile(src, dest, constants.COPYFILE_EXCL);
-    return dest;
+    const companions = await this.findCompanionImages(name);
+    await this.assertNoneExist([name, ...companions], targetDir, destDir);
+    for (const file of [name, ...companions]) {
+      await copyFile(join(this.dir, file), join(targetDir, file), constants.COPYFILE_EXCL);
+    }
+    return join(targetDir, name);
+  }
+
+  /** Reject the move/copy up front so a name clash never leaves a half-moved draft. */
+  private async assertNoneExist(names: string[], targetDir: string, destDir: string) {
+    for (const file of names) {
+      const exists = await stat(join(targetDir, file)).then(
+        () => true,
+        () => false,
+      );
+      if (exists) throw new Error(`File already exists: ${destDir ? `${destDir}/${file}` : file}`);
+    }
   }
 
   /**
@@ -162,30 +205,17 @@ export class DetachedFilesService {
    * Returns the absolute path of the new file.
    */
   async moveToProject(name: string, destDir: string, worktreeCwd: string): Promise<string> {
-    const src = join(this.dir, name);
     const targetDir = destDir ? join(worktreeCwd, destDir) : worktreeCwd;
     await mkdir(targetDir, { recursive: true });
-    const dest = join(targetDir, name);
+    const companions = await this.findCompanionImages(name);
     // Prevent silently overwriting existing project files
-    const exists = await stat(dest).then(
-      () => true,
-      () => false,
-    );
-    if (exists) throw new Error(`File already exists: ${destDir ? `${destDir}/${name}` : name}`);
-    try {
-      await rename(src, dest);
-    } catch (err: unknown) {
-      // rename() fails across filesystem boundaries (EXDEV) — fall back to copy+delete
-      if ((err as NodeJS.ErrnoException).code === "EXDEV") {
-        await copyFile(src, dest, constants.COPYFILE_EXCL);
-        await rm(src);
-      } else {
-        throw err;
-      }
+    await this.assertNoneExist([name, ...companions], targetDir, destDir);
+    for (const file of [name, ...companions]) {
+      await moveFile(join(this.dir, file), join(targetDir, file));
     }
     this.cachedEntries = await this.readDir();
     this.onListChanged(this.cachedEntries);
-    return dest;
+    return join(targetDir, name);
   }
 
   private async readDir(): Promise<DirEntry[]> {
@@ -231,6 +261,17 @@ export class DetachedFilesService {
         }
       }
     }
+  }
+}
+
+/** rename() fails across filesystem boundaries (EXDEV) — fall back to copy+delete. */
+async function moveFile(src: string, dest: string): Promise<void> {
+  try {
+    await rename(src, dest);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+    await copyFile(src, dest, constants.COPYFILE_EXCL);
+    await rm(src);
   }
 }
 

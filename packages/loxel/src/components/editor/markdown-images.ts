@@ -1,0 +1,135 @@
+/**
+ * Image support for the markdown editor: resolves relative `![]()` sources against the file's
+ * directory for display (the markdown keeps the original URL), uploads pasted/dropped images
+ * via `POST /api/file-upload`, and flags images that fail to load.
+ *
+ * Uses the inline `image` node from the commonmark preset (which round-trips alt/title
+ * verbatim) rather than Crepe's ImageBlock, whose serializer overwrites alt with an aspect
+ * ratio on every save.
+ */
+import { imageInlineComponent, inlineImageConfig } from "@milkdown/kit/component/image-inline";
+import type { Editor } from "@milkdown/kit/core";
+import { uploadConfig } from "@milkdown/kit/plugin/upload";
+import type { Node as ProseNode, Schema } from "@milkdown/kit/prose/model";
+
+import * as api from "@/api/client";
+import { showToast } from "@/components/ui/toast";
+import { frontendLog } from "@/lib/frontend-logger";
+
+const log = frontendLog.child("ui");
+
+/** `scheme:` (http, https, data, blob, file, ...) or protocol-relative `//`. */
+const EXTERNAL_URL_PATTERN = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
+
+/**
+ * Turn a markdown image `src` into a URL the DOM can load.
+ * - Absolute/protocol/data URLs pass through untouched.
+ * - Everything else is a file path: relative ones resolve against the markdown file's
+ *   directory, then get served through `/api/file-raw`. Paths inside the worktree use the
+ *   relative form (`path=<rel>&wt=`) so the server never registers them as external files.
+ */
+export function resolveImageSrc(
+  src: string,
+  markdownFilePath: string,
+  worktreePath: string | null,
+): string {
+  if (!src || EXTERNAL_URL_PATTERN.test(src)) return src;
+
+  const dir = markdownFilePath.substring(0, markdownFilePath.lastIndexOf("/"));
+  let absolute: string;
+  try {
+    absolute = decodeURIComponent(new URL(src, `file://${dir}/`).pathname);
+  } catch {
+    return src;
+  }
+
+  const params = new URLSearchParams();
+  if (worktreePath && absolute.startsWith(`${worktreePath}/`)) {
+    params.set("path", absolute.slice(worktreePath.length + 1));
+    params.set("wt", worktreePath);
+  } else {
+    params.set("path", absolute);
+  }
+  return `/api/file-raw?${params.toString()}`;
+}
+
+/** Build a markdown alt text from the uploaded file name (stem only, no extension). */
+export function altFromFileName(fileName: string): string {
+  const stem = fileName.replace(/\.[^.]+$/, "");
+  return stem || "image";
+}
+
+interface UploaderOptions {
+  filePath: string;
+}
+
+/**
+ * Uploader for `@milkdown/kit/plugin/upload`. Uploads each image file, then returns inline
+ * `image` nodes pointing at the stored relative path. Files that fail to upload are skipped
+ * (with a toast) so a blob:/data: URL is never inserted. Never throws: the upload plugin
+ * only removes its placeholder widget on a resolved promise.
+ */
+export function createImageUploader({ filePath }: UploaderOptions) {
+  return async (files: FileList, schema: Schema): Promise<ProseNode[]> => {
+    const imageType = schema.nodes["image"];
+    if (!imageType) return [];
+    const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    const nodes: ProseNode[] = [];
+    for (const file of images) {
+      try {
+        const { src } = await api.uploadFile({ path: filePath, file, nonce: crypto.randomUUID() });
+        const node = imageType.createAndFill({ src, alt: altFromFileName(file.name) });
+        if (node) nodes.push(node);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Upload failed";
+        log.warn("Image upload failed", { error: err instanceof Error ? err : undefined });
+        showToast(`Image upload failed: ${message}`);
+      }
+    }
+    return nodes;
+  };
+}
+
+/**
+ * Register image rendering and upload on a Crepe editor. Call before `create()`.
+ * The inline image node view applies `proxyDomURL` to the DOM only; markdown is untouched.
+ */
+export function installMarkdownImages(
+  editor: Editor,
+  options: { filePath: string; worktreePath: string | null },
+): void {
+  editor.use(imageInlineComponent).config((ctx) => {
+    ctx.update(inlineImageConfig.key, (prev) => ({
+      ...prev,
+      proxyDomURL: (url: string) => resolveImageSrc(url, options.filePath, options.worktreePath),
+    }));
+    ctx.update(uploadConfig.key, (prev) => ({
+      ...prev,
+      uploader: createImageUploader({ filePath: options.filePath }),
+    }));
+  });
+}
+
+/**
+ * Mark `<img>` elements that fail to load with a `broken` class on their node-view wrapper
+ * (styled in milkdown-theme.css). Returns a cleanup function.
+ */
+export function observeImageLoadErrors(root: HTMLElement): () => void {
+  const onError = (e: Event) => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement)) return;
+    img.closest(".milkdown-image-inline")?.classList.add("broken");
+  };
+  const onLoad = (e: Event) => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement)) return;
+    img.closest(".milkdown-image-inline")?.classList.remove("broken");
+  };
+  // `error`/`load` do not bubble; capture phase catches them from descendants.
+  root.addEventListener("error", onError, true);
+  root.addEventListener("load", onLoad, true);
+  return () => {
+    root.removeEventListener("error", onError, true);
+    root.removeEventListener("load", onLoad, true);
+  };
+}

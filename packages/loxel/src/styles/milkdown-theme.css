@@ -827,3 +827,47 @@
   display: block;
   margin: 16px 0;
 }
+
+/* ── Images ── */
+
+.milkdown .milkdown-image-inline {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.milkdown .milkdown-image-inline img.image-inline {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+/* An image that is the only content of its paragraph renders as a centered block. */
+.milkdown p > .milkdown-image-inline:only-child {
+  display: block;
+  margin: 16px auto;
+  text-align: center;
+}
+
+.milkdown p > .milkdown-image-inline:only-child img.image-inline {
+  display: block;
+  margin: 0 auto;
+}
+
+.milkdown .milkdown-image-inline.selected img.image-inline {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Broken image: keep a visible placeholder with the alt text instead of a blank gap. */
+.milkdown .milkdown-image-inline.broken img.image-inline {
+  display: inline-flex;
+  align-items: center;
+  min-width: 120px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px dashed var(--destructive, #e5484d);
+  color: var(--destructive, #e5484d);
+  font-size: 12px;
+  background: color-mix(in srgb, var(--destructive, #e5484d), transparent 92%);
+}
