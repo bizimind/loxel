@@ -5,7 +5,7 @@ import type { DirEntry } from "@/api/project-files-model";
 
 import type { FileChange } from "./file-sync-service";
 import { FilesSyncService } from "./file-sync-service";
-import { extractRelativeImageRefs } from "./image-upload";
+import { extractRelativeImageRefs, isImageExtension } from "./image-upload";
 import { logger } from "./logger";
 
 const log = logger.child("detached");
@@ -150,7 +150,11 @@ export class DetachedFilesService {
     this.cachedEntries = await this.readDir();
     const existing = new Set(this.cachedEntries.map((e) => e.name));
     return extractRelativeImageRefs(content).filter(
-      (ref) => ref !== name && !ref.includes("/") && existing.has(ref),
+      (ref) =>
+        ref !== name &&
+        !ref.includes("/") &&
+        isImageExtension(extname(ref).slice(1)) &&
+        existing.has(ref),
     );
   }
 

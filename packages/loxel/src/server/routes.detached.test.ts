@@ -104,6 +104,22 @@ describe("detached file project destinations", () => {
     expect((await readdir(detachedDir)).sort()).toEqual(["Draft.md", "unrelated.png"]);
   });
 
+  test("move ignores non-image files referenced with image syntax", async () => {
+    await writeFile(join(detachedDir, "Note.md"), "![x](./todo.md) ![y](./secrets.txt)");
+    await writeFile(join(detachedDir, "todo.md"), "todo");
+    await writeFile(join(detachedDir, "secrets.txt"), "s");
+
+    const res = await post("/api/detached-file-move", {
+      wt,
+      path: join(detachedDir, "Note.md"),
+      destPath: "src",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await readdir(join(wt, "src"))).toEqual(["Note.md"]);
+    expect((await readdir(detachedDir)).sort()).toEqual(["Draft.md", "secrets.txt", "todo.md"]);
+  });
+
   test("copy keeps the draft and its images, and refuses to overwrite either", async () => {
     await writeFile(join(detachedDir, "Shot.md"), "![a](./shot-1.png)");
     await writeFile(join(detachedDir, "shot-1.png"), "png");

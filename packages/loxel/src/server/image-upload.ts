@@ -10,7 +10,15 @@ export const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
 /** Directory (relative to the markdown file) where uploaded images are stored in a project. */
 export const IMAGE_ASSETS_DIR = "assets";
 
-export type ImageExtension = "png" | "jpg" | "gif" | "webp" | "avif" | "bmp" | "svg";
+const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg"] as const;
+
+/** Image extensions the editor stores and carries along with drafts. */
+export type ImageExtension = (typeof IMAGE_EXTENSIONS)[number];
+
+/** Whether a file extension (without the dot, any case) is one of the supported image types. */
+export function isImageExtension(ext: string): ext is ImageExtension {
+  return (IMAGE_EXTENSIONS as readonly string[]).includes(ext.toLowerCase());
+}
 
 function startsWith(bytes: Uint8Array, signature: number[], offset = 0): boolean {
   if (bytes.length < offset + signature.length) return false;

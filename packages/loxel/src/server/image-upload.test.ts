@@ -5,6 +5,7 @@ import {
   detectImageExtension,
   extractRelativeImageRefs,
   formatUploadTimestamp,
+  isImageExtension,
   slugifyImageName,
 } from "./image-upload";
 
@@ -81,5 +82,16 @@ describe("extractRelativeImageRefs", () => {
       "assets/y.png",
       "../up.png",
     ]);
+  });
+});
+
+describe("isImageExtension", () => {
+  test("accepts supported image extensions case-insensitively and rejects others", () => {
+    expect(isImageExtension("png")).toBe(true);
+    expect(isImageExtension("JPEG")).toBe(true);
+    expect(isImageExtension("svg")).toBe(true);
+    expect(isImageExtension("md")).toBe(false);
+    expect(isImageExtension("txt")).toBe(false);
+    expect(isImageExtension("")).toBe(false);
   });
 });
