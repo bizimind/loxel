@@ -43,14 +43,17 @@ afterEach(async () => {
   await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
 });
 
-/** Round-trip SOURCE through a headless Milkdown editor configured like MarkdownEditor. */
-async function roundTrip(options: Partial<MarkdownOutputSettings>): Promise<string> {
+/** Round-trip markdown through a headless Milkdown editor configured like MarkdownEditor. */
+async function roundTrip({
+  source = SOURCE,
+  ...options
+}: Partial<MarkdownOutputSettings> & { source?: string }): Promise<string> {
   const root = document.createElement("div");
   document.body.append(root);
   const editor = await Editor.make()
     .config((ctx) => {
       ctx.set(rootCtx, root);
-      ctx.set(defaultValueCtx, SOURCE);
+      ctx.set(defaultValueCtx, source);
       ctx.set(
         remarkStringifyOptionsCtx,
         buildRemarkStringifyOptions(ctx.get(remarkStringifyOptionsCtx), {
@@ -94,6 +97,23 @@ describe("buildRemarkStringifyOptions through Milkdown", () => {
     expect(out).toContain("*em* __strong__");
     const swapped = await roundTrip({ emphasis: "_", strong: "*" });
     expect(swapped).toContain("_em_ **strong**");
+  });
+
+  test("intra-word emphasis/strong fall back to * instead of character references", async () => {
+    const intraWord = ["a*b*c", "A file*name*here.", "*em*text", "a**b**c", ""].join("\n");
+    for (const markers of [
+      { emphasis: "_", strong: "_" },
+      { emphasis: "*", strong: "*" },
+    ] as const) {
+      const out = await roundTrip({ ...markers, source: intraWord });
+      expect(out).toBe(intraWord);
+      expect(out).not.toContain("&#");
+    }
+  });
+
+  test("whitespace-delimited emphasis keeps the configured marker", async () => {
+    const out = await roundTrip({ emphasis: "_", strong: "_", source: "a *b* c **d** (*e*)\n" });
+    expect(out).toBe("a _b_ c __d__ (_e_)\n");
   });
 
   test("list, fence, rule, and heading options apply", async () => {
