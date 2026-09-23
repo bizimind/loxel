@@ -367,6 +367,136 @@ describe("superseded echo — stale own-echo must not merge", () => {
   });
 });
 
+describe("own echo while typing — merge resolves to editor content", () => {
+  test("saving state: does not apply, clears nonce, goes dirty with disk as base", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.setBaseContent(FILE, "a\nb\nc");
+    let editorContent = "a\nb\nc";
+    let applyCalls = 0;
+    store.registerEditorCallbacks(
+      FILE,
+      () => editorContent,
+      (merged) => {
+        applyCalls++;
+        editorContent = merged;
+        return merged;
+      },
+    );
+    store.markSaving(FILE, "nonce-A"); // snapshot "a\nb\nc"
+    // User keeps typing while the save is in flight; the debounced change listener
+    // has not fired yet, so state is still "saving".
+    editorContent = "a\nb\nc\ntyped";
+
+    store.handleDiskChange(FILE, ["nonce-A"], "a\nb\nc");
+
+    const entry = getEntry()!;
+    expect(applyCalls).toBe(0); // editor doc untouched — caret stays put
+    expect(editorContent).toBe("a\nb\nc\ntyped");
+    expect(entry.pendingNonces.has("nonce-A")).toBe(false);
+    expect(entry.savedSnapshots.has("nonce-A")).toBe(false);
+    expect(entry.state).toBe("dirty"); // newer chars still need saving
+    expect(entry.baseContent).toBe("a\nb\nc"); // disk is the common ancestor
+    expect(entry.diskContent).toBeNull();
+  });
+
+  test("dirty state: does not apply and keeps dirty", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.setBaseContent(FILE, "a");
+    let editorContent = "a";
+    let applyCalls = 0;
+    store.registerEditorCallbacks(
+      FILE,
+      () => editorContent,
+      (merged) => {
+        applyCalls++;
+        return merged;
+      },
+    );
+    store.markSaving(FILE, "nonce-A");
+    editorContent = "a\nmore";
+    store.markDirty(FILE);
+    store.handleDiskChange(FILE, ["nonce-A"], "a");
+    expect(applyCalls).toBe(0);
+    expect(getEntry()!.state).toBe("dirty");
+    expect(getEntry()!.pendingNonces.size).toBe(0);
+    expect(getEntry()!.baseContent).toBe("a");
+  });
+
+  test("later external change merges against the disk base without losing typed text", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.setBaseContent(FILE, "a\nb\nc");
+    let editorContent = "a\nb\nc";
+    let applied = "" as string;
+    store.registerEditorCallbacks(
+      FILE,
+      () => editorContent,
+      (merged) => {
+        applied = merged;
+        editorContent = merged;
+        return merged;
+      },
+    );
+    store.markSaving(FILE, "nonce-A");
+    editorContent = "a\nb\nc\ntyped";
+    store.handleDiskChange(FILE, ["nonce-A"], "a\nb\nc");
+    expect(applied).toBe("");
+
+    // Agent edits the top of the file on disk before the next autosave lands.
+    store.handleDiskChange(FILE, [], "X\nb\nc");
+    expect(applied).toBe("X\nb\nc\ntyped");
+    expect(getEntry()!.state).toBe("dirty");
+  });
+
+  test("format echo that differs from the live doc is applied non-programmatically", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.setBaseContent(FILE, "a\nb\nc");
+    let editorContent = "a\nb\nc";
+    const programmaticFlags: boolean[] = [];
+    store.registerEditorCallbacks(
+      FILE,
+      () => editorContent,
+      (merged, programmatic) => {
+        programmaticFlags.push(programmatic);
+        editorContent = merged;
+        return merged;
+      },
+    );
+    store.markSaving(FILE, "nonce-A");
+    editorContent = "a\nb\nc\nU";
+    store.handleDiskChange(FILE, ["nonce-A"], "A\nB\nC");
+    expect(editorContent).toBe("A\nB\nC\nU");
+    // Merged content is not what is on disk → editor must re-arm autosave.
+    expect(programmaticFlags).toEqual([false]);
+    expect(getEntry()!.state).toBe("dirty");
+  });
+
+  test("format echo matching the live doc after merge is applied programmatically", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.setBaseContent(FILE, "a\nb\nc");
+    let editorContent = "a\nb\nc";
+    const programmaticFlags: boolean[] = [];
+    store.registerEditorCallbacks(
+      FILE,
+      () => editorContent,
+      (merged, programmatic) => {
+        programmaticFlags.push(programmatic);
+        editorContent = merged;
+        return merged;
+      },
+    );
+    store.markSaving(FILE, "nonce-A");
+    store.handleDiskChange(FILE, ["nonce-A"], "A\nB\nC");
+    expect(editorContent).toBe("A\nB\nC");
+    expect(programmaticFlags).toEqual([true]);
+    expect(getEntry()!.state).toBe("clean");
+  });
+});
+
 describe("clearPendingNonce", () => {
   test("clears specific nonce when present", () => {
     useEditorStateStore.getState().openFile(FILE);
