@@ -35,15 +35,35 @@ export function resolveImageSrc(src: string, markdownFilePath: string): string {
   const dir = markdownFilePath.substring(0, markdownFilePath.lastIndexOf("/"));
   let absolute: string;
   try {
-    // Encode each directory segment so `#`, `?` and `%` in the path (worktree names come from
-    // branch names) are literal, not URL syntax.
-    const base = `file://${dir.split("/").map(encodeURIComponent).join("/")}/`;
-    absolute = decodeURIComponent(new URL(src, base).pathname);
+    // Encode every path segment (directory and src alike) so `#`, `?` and `%` in file or
+    // worktree names (which come from branch names) are literal, not URL syntax.
+    const base = `file://${encodePathSegments(dir)}/`;
+    absolute = decodeURIComponent(
+      new URL(encodePathSegments(decodePathSegments(src)), base).pathname,
+    );
   } catch {
     return src;
   }
 
   return `/api/file-raw?${new URLSearchParams({ path: absolute }).toString()}`;
+}
+
+function encodePathSegments(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+/** Decode `%XX` escapes a markdown author may have used; a malformed escape stays literal. */
+function decodePathSegments(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join("/");
 }
 
 /** Build a markdown alt text from the uploaded file name (stem only, no extension). */

@@ -41,6 +41,22 @@ describe("resolveImageSrc", () => {
     );
   });
 
+  test("treats URL-significant characters in the src as literal", () => {
+    // remark strips the `<...>` form, so `![](<./Screenshot #1.png>)` reaches us without brackets.
+    expect(resolveImageSrc("./Screenshot #1.png", md)).toBe(
+      "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2FScreenshot+%231.png",
+    );
+    expect(resolveImageSrc("./a?b.png", md)).toBe(
+      "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2Fa%3Fb.png",
+    );
+    expect(resolveImageSrc("./100%.png", md)).toBe(
+      "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2F100%25.png",
+    );
+    expect(resolveImageSrc("./sub#dir/a.png", md)).toBe(
+      "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2Fsub%23dir%2Fa.png",
+    );
+  });
+
   test("decodes percent-encoded markdown sources", () => {
     expect(resolveImageSrc("./my%20shot.png", md)).toBe(
       "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2Fmy+shot.png",
