@@ -33,7 +33,7 @@ The primary workflow: manage multiple repositories and worktrees from a single w
 
 Tools for thinking and communicating before (and during) agent work:
 
-- **Markdown editor** — Milkdown/Crepe-based rich editor with CodeMirror syntax highlighting. Persisted to disk as `.md` files with capped debounced autosave (250ms idle / 5s max wait). Search results navigate to the matched position using remark AST source-position mapping with ordinal text-node matching
+- **Markdown editor** — Milkdown/Crepe-based rich editor with CodeMirror syntax highlighting. Persisted to disk as `.md` files with capped debounced autosave (250ms idle / 5s max wait). Search results navigate to the matched position using remark AST source-position mapping with ordinal text-node matching. Tables size columns to content (no persisted widths — markdown cannot store them), wrap long cells at ~42 characters, may extend into the right prose padding, and scroll horizontally beyond that; the header row is emphasized, rows are separated by dividers only, and cell alignment follows the markdown alignment markers
 - **Excalidraw drawing editor** — full whiteboarding canvas for architecture diagrams, flow sketches, and visual planning. Persisted to disk as `.excalidraw` JSON files with autosave
 - **Drafts** — new editors create files in a detached "Drafts" directory (scoped per project + worktree, stored outside the repo in `~/.local/state/loxel/loxel/detached/`). Drafts appear in a dedicated section at the top of the project files panel
 - **Drag to project** — drag draft files from the Drafts section into any project directory to move them into the repo. Editors continue working seamlessly after the move
