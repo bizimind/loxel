@@ -123,6 +123,35 @@ describe("applyBodyToEditor", () => {
     expect(caretContext()).toBe("wor");
   });
 
+  test("external edit above the caret in a list-terminated doc keeps the caret", () => {
+    // The trailing plugin appends an empty paragraph after the list; the parser never
+    // produces one, so a naive diff would span the whole document.
+    applyBodyToEditor(crepe, "# Title\n\n- one\n- two\n");
+    crepe.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      expect(view.state.doc.lastChild?.content.size).toBe(0);
+      // <h1>Title</h1>(7) <ul><li><p>o|ne
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 7 + 3 + 1)));
+    });
+    expect(caretContext()).toBe("o");
+
+    const applied = applyBodyToEditor(crepe, "# Changed title\n\n- one\n- two\n");
+    expect(applied).toBe("# Changed title\n\n- one\n- two\n");
+    expect(caretContext()).toBe("o");
+    crepe.editor.action((ctx) => {
+      expect(ctx.get(editorViewCtx).state.selection.$from.parent.textContent).toBe("one");
+    });
+  });
+
+  test("canonical disk body of an unchanged non-canonical file is a no-op", () => {
+    applyBodyToEditor(crepe, "# Notes\n\n- one\n- two\n");
+    const before = crepe.editor.action((ctx) => ctx.get(editorViewCtx).state.selection.from);
+    const canonical = canonicalizeBody(crepe, "# Notes\n\n* one\n* two\n");
+    expect(applyBodyToEditor(crepe, canonical)).toBeNull();
+    const after = crepe.editor.action((ctx) => ctx.get(editorViewCtx).state.selection.from);
+    expect(after).toBe(before);
+  });
+
   test("programmatic replace is excluded from undo history", () => {
     const applied = applyBodyToEditor(crepe, "hello\n\nworld\n\nmore\n");
     expect(applied).not.toBeNull();

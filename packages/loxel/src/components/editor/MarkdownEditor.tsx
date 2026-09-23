@@ -264,13 +264,16 @@ export function MarkdownEditor({
   const frontmatterRef = useRef<string | null>(null);
 
   // Normalized body of the last programmatic replace. Programmatic transactions carry
-  // addToHistory:false, which @milkdown/plugin-listener ignores, so the replace itself never
-  // reaches markdownUpdated. But the listener is debounced (200ms): when a user edit is still
-  // pending at the time of the replace, the callback fires afterwards with the applied doc.
-  // A synchronous "programmatic" flag would already be reset by then and the callback would be
-  // reported as a user edit (→ autosave → echo → feedback loop). Instead the listener skips
-  // exactly one callback whose markdown equals what was applied and clears the ref on every
-  // callback; any callback with different markdown is a genuine user edit and is never swallowed.
+  // addToHistory:false, which @milkdown/plugin-listener ignores, so the replace itself does not
+  // schedule markdownUpdated (a follow-up appendTransaction, e.g. from the trailing plugin,
+  // may). But the listener is debounced (200ms): when a user edit is still pending at the time
+  // of the replace, the callback fires afterwards — and since programmatic replaces derive from
+  // the live doc, that pending edit is already part of what was applied. A synchronous
+  // "programmatic" flag would already be reset by then and the callback would be reported as a
+  // new user edit (→ autosave → echo → feedback loop). Instead the listener compares the live
+  // doc against what was applied: equal means the edit was already accounted for by the apply
+  // path (which arms autosave itself when needed) and the callback is skipped; anything else is
+  // a genuine user edit and is never swallowed. The ref is cleared on every callback.
   const lastAppliedBodyRef = useRef<string | null>(null);
   /** Canonicalized body of the disk content the sync effect last processed — merge base for
    *  clean-state syncs. Always in serializer form so it compares against `crepe.getMarkdown()`. */
@@ -363,12 +366,19 @@ export function MarkdownEditor({
 
     // On every change: merge with frontmatter, update cache + trigger autosave
     crepe.on((crepeApi) => {
-      crepeApi.markdownUpdated((_ctx, markdown) => {
-        const merged = mergeFrontmatter(frontmatterRef.current, markdown);
+      crepeApi.markdownUpdated(() => {
+        // The callback's markdown argument is serialized from the last listener-visible
+        // transaction, which excludes programmatic replaces (addToHistory:false) and so can be
+        // stale. Read the live doc so the cache and the echo comparison reflect reality.
+        let body: string;
+        try {
+          body = normalizeTrailingNewline(crepe.getMarkdown());
+        } catch {
+          return;
+        }
+        const merged = mergeFrontmatter(frontmatterRef.current, body);
         editorContentCache.set(effectCacheKey, merged);
-        const isProgrammaticEcho =
-          lastAppliedBodyRef.current !== null &&
-          normalizeTrailingNewline(markdown) === lastAppliedBodyRef.current;
+        const isProgrammaticEcho = body === lastAppliedBodyRef.current;
         lastAppliedBodyRef.current = null;
         if (isProgrammaticEcho) return;
         handleChange(merged);
@@ -625,7 +635,7 @@ export function MarkdownEditor({
       // ours on conflict — the user is actively editing and their text must not vanish.
       // All three sides are in serializer form so formatting round-trip noise is not an edit.
       const liveBody = normalizeTrailingNewline(crepe.getMarkdown());
-      let target = diskBody;
+      let target = canonicalDiskBody;
       if (prevDiskBody !== null && liveBody !== prevDiskBody && liveBody !== canonicalDiskBody) {
         const merge = threeWayMerge(prevDiskBody, liveBody, canonicalDiskBody, {
           preferOurs: true,

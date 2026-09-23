@@ -16,9 +16,10 @@ import { type EditorState, type Transaction, Selection } from "@milkdown/kit/pro
 
 export function createMinimalReplaceTransaction(
   state: EditorState,
-  newDoc: ProseMirrorNode,
+  parsedDoc: ProseMirrorNode,
 ): Transaction | null {
   const oldDoc = state.doc;
+  const newDoc = withTrailingEmptyParagraph(oldDoc, parsedDoc);
   const start = oldDoc.content.findDiffStart(newDoc.content);
   if (start === null) return null;
 
@@ -45,10 +46,30 @@ export function createMinimalReplaceTransaction(
   // different tree at block boundaries. The editor must end up exactly at `newDoc`, so fall
   // back to a whole-document replace. Mapping through that step would push the caret to the
   // end of the doc, so restore it near its previous absolute offset instead (best effort).
-  const anchor = state.selection.anchor;
+  const { anchor } = state.selection;
   const fallback = state.tr.replaceWith(0, oldDoc.content.size, newDoc.content);
   const pos = Math.min(anchor, fallback.doc.content.size);
   return fallback
     .setSelection(Selection.near(fallback.doc.resolve(pos)))
     .setMeta("addToHistory", false);
+}
+
+function isEmptyTextblock(node: ProseMirrorNode | null): boolean {
+  return node !== null && node.isTextblock && node.content.size === 0;
+}
+
+/**
+ * Milkdown's trailing plugin keeps an empty paragraph after a last block that is not a
+ * paragraph/heading; the markdown parser never produces one. Without this, findDiffEnd
+ * finds no common suffix and the "minimal" replace spans the whole document, dragging the
+ * caret to the end. Carry the live doc's trailing empty paragraph over to the target so the
+ * suffix matches (the plugin would re-append it anyway).
+ */
+function withTrailingEmptyParagraph(
+  oldDoc: ProseMirrorNode,
+  newDoc: ProseMirrorNode,
+): ProseMirrorNode {
+  const trailing = oldDoc.lastChild;
+  if (!isEmptyTextblock(trailing) || isEmptyTextblock(newDoc.lastChild)) return newDoc;
+  return newDoc.copy(newDoc.content.addToEnd(trailing!));
 }

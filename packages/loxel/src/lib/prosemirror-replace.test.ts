@@ -71,6 +71,17 @@ describe("createMinimalReplaceTransaction", () => {
     expect(next.doc.eq(after)).toBe(true);
   });
 
+  test("keeps caret when the live doc ends in a trailing empty paragraph", () => {
+    // Milkdown's trailing plugin appends an empty paragraph that the parser never produces.
+    const before = doc(p("first"), p("second"), p());
+    const state = stateWithCaret(before, 7 + 1 + 2); // "se|cond"
+    const after = doc(p("a much longer first"), p("second"));
+    const next = state.apply(createMinimalReplaceTransaction(state, after)!);
+    expect(next.doc.eq(doc(p("a much longer first"), p("second"), p()))).toBe(true);
+    expect(next.doc.textBetween(next.selection.from - 2, next.selection.from)).toBe("se");
+    expect(next.selection.$from.parent.textContent).toBe("second");
+  });
+
   test("handles overlapping prefix/suffix (repeated character deletion)", () => {
     const before = doc(p("aaa"));
     const state = stateWithCaret(before, 3);
