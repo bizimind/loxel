@@ -144,7 +144,8 @@ export class DetachedFilesService {
     let content: string;
     try {
       content = await this.readFileContent(name);
-    } catch {
+    } catch (err) {
+      log.warn("Failed to read draft content for companion images", { name, error: err });
       return [];
     }
     this.cachedEntries = await this.readDir();

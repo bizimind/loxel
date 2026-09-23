@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -97,7 +97,7 @@ describe("POST /api/file-upload", () => {
     const body = await res.json();
     expect(body.src).toMatch(/^\.\/assets\/shot-one-\d{8}-\d{6}\.png$/);
     expect(body.path).toBe(join(wt, "docs", body.src.slice(2)));
-    expect(new Uint8Array(await readFile(body.path))).toEqual(PNG);
+    expect(await Bun.file(body.path).bytes()).toEqual(PNG);
     expect(nonceWrites).toEqual([`docs/${body.src.slice(2)}:nonce-1`]);
   });
 
