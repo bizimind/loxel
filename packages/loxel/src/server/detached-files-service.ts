@@ -136,27 +136,39 @@ export class DetachedFilesService {
 
   /**
    * Images referenced by relative path from a markdown draft (`![alt](./x.png)`).
-   * Drafts are a flat directory, so only bare filenames that exist there qualify.
-   * Non-markdown files never carry companions.
+   * Drafts are a flat directory, so only bare image filenames that exist there qualify.
+   * Non-markdown files never carry companions. Read-only: does not touch `cachedEntries`.
    */
   private async findCompanionImages(name: string): Promise<string[]> {
     if (extname(name).toLowerCase() !== ".md") return [];
-    let content: string;
-    try {
-      content = await this.readFileContent(name);
-    } catch (err) {
-      log.warn("Failed to read draft content for companion images", { name, error: err });
-      return [];
-    }
-    this.cachedEntries = await this.readDir();
-    const existing = new Set(this.cachedEntries.map((e) => e.name));
-    return extractRelativeImageRefs(content).filter(
+    const refs = await this.readImageRefs(name);
+    const existing = new Set((await this.readDir()).map((e) => e.name));
+    return refs.filter(
       (ref) =>
         ref !== name &&
         !ref.includes("/") &&
         isImageExtension(extname(ref).slice(1)) &&
         existing.has(ref),
     );
+  }
+
+  /** Image names that markdown drafts other than `name` still reference. */
+  private async imagesReferencedByOtherDrafts(name: string): Promise<Set<string>> {
+    const shared = new Set<string>();
+    for (const entry of await this.readDir()) {
+      if (entry.name === name || extname(entry.name).toLowerCase() !== ".md") continue;
+      for (const ref of await this.readImageRefs(entry.name)) shared.add(ref);
+    }
+    return shared;
+  }
+
+  private async readImageRefs(name: string): Promise<string[]> {
+    try {
+      return extractRelativeImageRefs(await this.readFileContent(name));
+    } catch (err) {
+      log.warn("Failed to read draft content for companion images", { name, error: err });
+      return [];
+    }
   }
 
   async renameFile(oldName: string, newName: string): Promise<void> {
@@ -215,8 +227,15 @@ export class DetachedFilesService {
     const companions = await this.findCompanionImages(name);
     // Prevent silently overwriting existing project files
     await this.assertNoneExist([name, ...companions], targetDir, destDir);
-    for (const file of [name, ...companions]) {
-      await moveFile(join(this.dir, file), join(targetDir, file));
+    // Images another draft still references are copied so that draft keeps rendering.
+    const shared = await this.imagesReferencedByOtherDrafts(name);
+    await moveFile(join(this.dir, name), join(targetDir, name));
+    for (const file of companions) {
+      if (shared.has(file)) {
+        await copyFile(join(this.dir, file), join(targetDir, file), constants.COPYFILE_EXCL);
+      } else {
+        await moveFile(join(this.dir, file), join(targetDir, file));
+      }
     }
     this.cachedEntries = await this.readDir();
     this.onListChanged(this.cachedEntries);

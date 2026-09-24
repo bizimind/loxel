@@ -975,8 +975,9 @@ async function handleFileUpload(req: Request, ctx: RouteContext): Promise<Respon
     return json({ path: join(detachedFilesService.dir, name), src: `./${name}` });
   }
 
+  // `relativePath` comes from resolveFilePath, which already normalized the path and proved it
+  // sits inside the worktree — no git-argument validation needed for a plain fs write.
   const relativeDir = join(dirname(resolved.relativePath), IMAGE_ASSETS_DIR);
-  git.validatePath(relativeDir);
   const wtPath = resolved.wtPath;
   await mkdir(join(wtPath, relativeDir), { recursive: true });
   const name = await writeWithUniqueName(file.name, ext, (candidate) =>

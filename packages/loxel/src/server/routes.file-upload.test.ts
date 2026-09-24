@@ -135,6 +135,14 @@ describe("POST /api/file-upload", () => {
     expect((await res.json()).src).toMatch(/^\.\/assets\/evil-\d{8}-\d{6}\.png$/);
   });
 
+  test("accepts directory names with characters git argument validation would reject", async () => {
+    await mkdir(join(wt, "Q1: planning?"), { recursive: true });
+    await writeFile(join(wt, "Q1: planning?", "roadmap.md"), "# q1");
+    const res = await upload({ path: join(wt, "Q1: planning?", "roadmap.md"), file: png("a.png") });
+    expect(res.status).toBe(200);
+    expect((await res.json()).path.startsWith(join(wt, "Q1: planning?", "assets"))).toBe(true);
+  });
+
   test("rejects path traversal and paths outside active worktrees", async () => {
     for (const path of [
       join(wt, "..", "outside.md"),
