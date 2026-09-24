@@ -511,10 +511,12 @@
   padding: 0;
 }
 
-/* Header row: weight and a stronger divider only, no background tint. Body rows are plain
-   (no zebra); the row dividers carry the structure. */
+/* Header row: bold, full-brightness text (body text is dimmed at `.ProseMirror`, and header
+   cells hold a plain paragraph, not a `strong` mark) and a stronger divider. No background
+   tint. Body rows are plain (no zebra); the row dividers carry the structure. */
 .milkdown .milkdown-table-block th {
   font-weight: 600;
+  color: var(--crepe-color-on-background);
   border-bottom-color: color-mix(in srgb, var(--crepe-color-outline), transparent 45%);
 }
 
