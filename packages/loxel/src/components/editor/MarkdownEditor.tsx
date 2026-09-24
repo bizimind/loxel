@@ -26,8 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
-import { localDbDirectivePlugins } from "@/components/editor/localdb-directive/index.ts";
-import { localDbBlockSchema } from "@/components/editor/localdb-directive/schema.ts";
+import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
 import {
   type MergeCallbacks,
   AUTOSAVE_DEBOUNCE_MS,
@@ -397,11 +396,17 @@ export function MarkdownEditor({
     const portalledElements = new Set<HTMLElement>();
     let popoverObserver: MutationObserver | undefined;
     let portalRoot: HTMLDivElement | undefined;
+    let created = false;
 
     crepe
       .create()
       .then(() => {
-        if (cancelled) return;
+        created = true;
+        if (cancelled) {
+          // Cleanup already ran and skipped destroy because creation was still pending.
+          crepe.destroy();
+          return;
+        }
 
         const milkdownEl = crepe.editor.action((ctx) => {
           const view = ctx.get(editorViewCtx);
@@ -580,7 +585,9 @@ export function MarkdownEditor({
       }
       popoverObserver?.disconnect();
       portalRoot?.remove();
-      crepe.destroy();
+      // crepe.destroy() retries forever while create() is still pending (status stuck at
+      // OnCreate if it rejected), so only destroy once creation has settled successfully.
+      if (created) crepe.destroy();
       crepeRef.current = null;
     };
     // Re-create when crepeKey changes (accept disk version), content first loads,
@@ -623,8 +630,17 @@ export function MarkdownEditor({
     let canonicalDiskBody: string;
     try {
       canonicalDiskBody = canonicalizeBody(crepe, diskBody);
-    } catch {
-      return; // Editor destroyed
+    } catch (err) {
+      // Parser rejected the disk body, or the editor was destroyed. The editor keeps its
+      // previous document and frontmatter; the file stays clean, so the next local edit will
+      // overwrite the external change — surface that.
+      frontendLog
+        .child("ui")
+        .warn("Failed to parse external change for markdown editor", {
+          filePath,
+          error: err instanceof Error ? err : undefined,
+        });
+      return;
     }
     // Track the previous disk body even when not syncing (dirty/saving merges have already
     // reconciled the editor against it), so the next clean-state sync has the right base.
@@ -632,11 +648,6 @@ export function MarkdownEditor({
     lastSyncedDiskBodyRef.current = canonicalDiskBody;
 
     if (useEditorStateStore.getState().files.get(filePath)?.state !== "clean") return;
-
-    if (diskFm !== frontmatterRef.current) {
-      frontmatterRef.current = diskFm;
-      setFrontmatter(diskFm);
-    }
 
     try {
       // The debounced change listener may not have reported a just-made edit yet, so the store
@@ -660,6 +671,12 @@ export function MarkdownEditor({
       const appliedBody = applyBodyToEditor(crepe, target);
       if (appliedBody !== null) lastAppliedBodyRef.current = appliedBody;
       const canonicalBody = appliedBody ?? liveBody;
+      // Swap frontmatter only once the body is in sync, so a failed apply leaves the editor
+      // consistent with what is still shown.
+      if (diskFm !== frontmatterRef.current) {
+        frontmatterRef.current = diskFm;
+        setFrontmatter(diskFm);
+      }
       editorContentCache.set(cacheKey, mergeFrontmatter(diskFm, canonicalBody));
       // Merged result is not on disk yet — the pending listener callback will mark dirty, but
       // it may be swallowed as the programmatic echo, so arm autosave explicitly.
@@ -667,8 +684,15 @@ export function MarkdownEditor({
         if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = setTimeout(() => save(), AUTOSAVE_DEBOUNCE_MS);
       }
-    } catch {
-      // Editor may have been destroyed between the ref check and the action
+    } catch (err) {
+      // Merged body failed to parse, or the editor was destroyed between the ref check and
+      // the action. The editor keeps its previous document — surface that.
+      frontendLog
+        .child("ui")
+        .warn("Failed to sync external change into markdown editor", {
+          filePath,
+          error: err instanceof Error ? err : undefined,
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diskContent, cacheKey, filePath]);
@@ -731,7 +755,19 @@ export function MarkdownEditor({
   // Frontmatter change handler — merge with current body and propagate
   const handleFrontmatterChange = useCallback(
     (yaml: string | null) => {
-      const rawBody = crepeRef.current?.getMarkdown();
+      let rawBody: string | undefined;
+      try {
+        rawBody = crepeRef.current?.getMarkdown();
+      } catch (err) {
+        // Editor failed to create or was destroyed mid-action — the frontmatter edit is dropped.
+        frontendLog
+          .child("ui")
+          .warn("Failed to read markdown editor body for frontmatter change", {
+            filePath,
+            error: err instanceof Error ? err : undefined,
+          });
+        return;
+      }
       if (rawBody === undefined) return; // editor not yet ready — skip to avoid persisting empty body
       const body = normalizeTrailingNewline(rawBody);
       frontmatterRef.current = yaml;
@@ -740,7 +776,7 @@ export function MarkdownEditor({
       editorContentCache.set(cacheKey, merged);
       handleChange(merged);
     },
-    [cacheKey, handleChange],
+    [cacheKey, filePath, handleChange],
   );
 
   const [copied, setCopied] = useState(false);
