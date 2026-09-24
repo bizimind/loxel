@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -86,6 +86,79 @@ describe("detached file project destinations", () => {
     });
 
     expect(res.status).toBe(400);
+  });
+
+  test("move carries images referenced by relative path along with the draft", async () => {
+    await writeFile(join(detachedDir, "Shot.md"), "![a](./shot-1.png)\n![b](missing.png)\n");
+    await writeFile(join(detachedDir, "shot-1.png"), "png");
+    await writeFile(join(detachedDir, "unrelated.png"), "png");
+
+    const res = await post("/api/detached-file-move", {
+      wt,
+      path: join(detachedDir, "Shot.md"),
+      destPath: "src",
+    });
+
+    expect(res.status).toBe(200);
+    expect((await readdir(join(wt, "src"))).sort()).toEqual(["Shot.md", "shot-1.png"]);
+    expect((await readdir(detachedDir)).sort()).toEqual(["Draft.md", "unrelated.png"]);
+  });
+
+  test("move copies (not moves) images another draft still references", async () => {
+    await writeFile(join(detachedDir, "A.md"), "![s](./shared.png) ![o](./own.png)");
+    await writeFile(join(detachedDir, "B.md"), "![s](./shared.png)");
+    await writeFile(join(detachedDir, "shared.png"), "png");
+    await writeFile(join(detachedDir, "own.png"), "png");
+
+    const res = await post("/api/detached-file-move", {
+      wt,
+      path: join(detachedDir, "A.md"),
+      destPath: "src",
+    });
+
+    expect(res.status).toBe(200);
+    expect((await readdir(join(wt, "src"))).sort()).toEqual(["A.md", "own.png", "shared.png"]);
+    expect((await readdir(detachedDir)).sort()).toEqual(["B.md", "Draft.md", "shared.png"]);
+  });
+
+  test("move ignores non-image files referenced with image syntax", async () => {
+    await writeFile(join(detachedDir, "Note.md"), "![x](./todo.md) ![y](./secrets.txt)");
+    await writeFile(join(detachedDir, "todo.md"), "todo");
+    await writeFile(join(detachedDir, "secrets.txt"), "s");
+
+    const res = await post("/api/detached-file-move", {
+      wt,
+      path: join(detachedDir, "Note.md"),
+      destPath: "src",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await readdir(join(wt, "src"))).toEqual(["Note.md"]);
+    expect((await readdir(detachedDir)).sort()).toEqual(["Draft.md", "secrets.txt", "todo.md"]);
+  });
+
+  test("copy keeps the draft and its images, and refuses to overwrite either", async () => {
+    await writeFile(join(detachedDir, "Shot.md"), "![a](./shot-1.png)");
+    await writeFile(join(detachedDir, "shot-1.png"), "png");
+    await writeFile(join(wt, "src", "shot-1.png"), "existing");
+
+    const clash = await post("/api/detached-file-copy-to-project", {
+      wt,
+      path: join(detachedDir, "Shot.md"),
+      destPath: "src",
+    });
+    expect(clash.status).toBe(500);
+    expect(await readdir(join(wt, "src"))).toEqual(["shot-1.png"]);
+
+    await rm(join(wt, "src", "shot-1.png"));
+    const res = await post("/api/detached-file-copy-to-project", {
+      wt,
+      path: join(detachedDir, "Shot.md"),
+      destPath: "src",
+    });
+    expect(res.status).toBe(200);
+    expect((await readdir(join(wt, "src"))).sort()).toEqual(["Shot.md", "shot-1.png"]);
+    expect((await readdir(detachedDir)).sort()).toEqual(["Draft.md", "Shot.md", "shot-1.png"]);
   });
 
   function post(path: string, body: unknown): Promise<Response> {

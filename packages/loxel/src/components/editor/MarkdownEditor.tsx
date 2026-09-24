@@ -28,6 +28,7 @@ import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbDirectivePlugins } from "@/components/editor/localdb-directive/index.ts";
 import { localDbBlockSchema } from "@/components/editor/localdb-directive/schema.ts";
+import { installMarkdownImages, observeImageLoadErrors } from "@/components/editor/markdown-images";
 import {
   type MergeCallbacks,
   AUTOSAVE_DEBOUNCE_MS,
@@ -362,6 +363,10 @@ export function MarkdownEditor({
       crepe.editor.use(plugin);
     }
 
+    // Images: render relative paths via /api/file-raw, upload pasted/dropped files
+    installMarkdownImages(crepe.editor, { filePath });
+    const stopImageErrorObserver = observeImageLoadErrors(containerRef.current);
+
     // Align remark-stringify output with oxfmt/Prettier markdown defaults.
     crepe.editor.config((ctx) => {
       ctx.set(remarkStringifyOptionsCtx, {
@@ -580,6 +585,7 @@ export function MarkdownEditor({
       }
       popoverObserver?.disconnect();
       portalRoot?.remove();
+      stopImageErrorObserver();
       crepe.destroy();
       crepeRef.current = null;
     };

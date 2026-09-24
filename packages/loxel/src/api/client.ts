@@ -220,6 +220,31 @@ export async function writeFileContent(options: {
   });
 }
 
+/**
+ * Upload an image pasted/dropped into the markdown editor at `path`.
+ * Returns the stored absolute path and the markdown-relative `src` to insert.
+ */
+export async function uploadFile(options: {
+  path: string;
+  file: File;
+  nonce: string;
+}): Promise<{ path: string; src: string }> {
+  const form = new FormData();
+  form.set("path", options.path);
+  form.set("nonce", options.nonce);
+  form.set("file", options.file, options.file.name);
+  const response = await fetch(`${API_BASE}/file-upload`, { method: "POST", body: form });
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const message =
+      typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
+        ? body.error
+        : "Upload failed";
+    throw new Error(message);
+  }
+  return response.json();
+}
+
 export interface DetectedFormatter {
   command: string;
   extensions: string[];
