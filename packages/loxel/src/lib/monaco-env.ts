@@ -1,9 +1,11 @@
 import { shikiToMonaco } from "@shikijs/monaco";
 import * as monaco from "monaco-editor";
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker.js?worker";
-import cssWorker from "monaco-editor/esm/vs/language/css/css.worker.js?worker";
-import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker.js?worker";
-import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker.js?worker";
+// Worker specifiers go through Monaco 0.56's export map (no `esm/vs/` prefix). The aliased
+// `monaco-editor/esm/vs/...` form breaks in dev: Vite pre-bundles it without the worker wrapper.
+import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
+import cssWorker from "monaco-editor/language/css/css.worker.js?worker";
+import htmlWorker from "monaco-editor/language/html/html.worker.js?worker";
+import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
 
 import { useWorktreeStore } from "@/store/worktrees";
 
