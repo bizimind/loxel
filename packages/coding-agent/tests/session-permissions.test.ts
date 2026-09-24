@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
+import { SessionStore } from "../src/session/store.ts";
 import {
   type TestEnv,
   Session,
@@ -11,6 +12,13 @@ import {
   textStreamParts,
   toolCallStreamParts,
 } from "./helpers/mock-session.ts";
+
+async function persistedProtocolEventTypes(sessionId: string): Promise<string[]> {
+  const events = await new SessionStore().readEvents(sessionId);
+  return events.flatMap((event) =>
+    event.type === "protocol.event" ? [String(event.payload.event_type)] : [],
+  );
+}
 
 describe("Session permissions", () => {
   let env: TestEnv;
@@ -32,12 +40,12 @@ describe("Session permissions", () => {
   // -------------------------------------------------------------------------
 
   describe("approval flow", () => {
-    test("Write triggers approval.requested, auto-allow proceeds", async () => {
+    test("approval handlers can respond synchronously", async () => {
       let approvalCount = 0;
       const events = collectEvents({
         "approval.requested": (e) => {
           approvalCount++;
-          setTimeout(() => e.respond("allow"), 50);
+          e.respond("allow");
         },
       });
 
@@ -58,6 +66,53 @@ describe("Session permissions", () => {
 
       expect(approvalCount).toBeGreaterThan(0);
       expect(await Bun.file(targetPath).text()).toBe("ok");
+      const eventTypes = await persistedProtocolEventTypes(session.id);
+      expect(eventTypes.indexOf("approval.requested")).toBeLessThan(
+        eventTypes.indexOf("approval.granted"),
+      );
+    });
+
+    test("human input handlers can respond synchronously", async () => {
+      let questionCount = 0;
+      const events = collectEvents({
+        "human.input.requested": (e) => {
+          questionCount++;
+          e.respond({ choice: ["A"] });
+        },
+      });
+
+      session = await Session.create({
+        workspaceRoot: env.workspaceRoot,
+        handlers: events.handlers,
+      });
+      patchSessionModel(
+        session,
+        createMockModel([
+          toolCallStreamParts("AskUserQuestion", {
+            questions: [
+              {
+                id: "choice",
+                question: "Pick one?",
+                header: "Choice",
+                options: [
+                  { label: "A (Recommended)", description: "First choice" },
+                  { label: "B", description: "Second choice" },
+                ],
+              },
+            ],
+          }),
+          textStreamParts("Thanks"),
+        ]),
+      );
+
+      const result = await session.send("ask me");
+
+      expect(questionCount).toBe(1);
+      expect(result.text).toBe("Thanks");
+      const eventTypes = await persistedProtocolEventTypes(session.id);
+      expect(eventTypes.indexOf("human.input.requested")).toBeLessThan(
+        eventTypes.indexOf("human.input.response"),
+      );
     });
 
     test("deny decision prevents file creation", async () => {

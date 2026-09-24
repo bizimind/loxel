@@ -346,7 +346,13 @@ export class TaskManager {
     return existing;
   }
 
-  async getOutput(taskId: string, block: boolean, timeoutMs: number): Promise<ManagedTask | null> {
+  async getOutput(
+    taskId: string,
+    block: boolean,
+    timeoutMs: number,
+    abortSignal?: AbortSignal,
+  ): Promise<ManagedTask | null> {
+    abortSignal?.throwIfAborted();
     const running = this.running.get(taskId);
     if (!running) {
       return this.history.get(taskId) ?? (await this.readTaskFromDisk(taskId));
@@ -358,12 +364,14 @@ export class TaskManager {
 
     const started = Date.now();
     while (this.running.has(taskId)) {
+      abortSignal?.throwIfAborted();
       if (Date.now() - started >= timeoutMs) {
         return this.running.get(taskId)?.task ?? null;
       }
       await Bun.sleep(100);
     }
 
+    abortSignal?.throwIfAborted();
     return this.history.get(taskId) ?? null;
   }
 
