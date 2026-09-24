@@ -451,10 +451,12 @@
   margin: 24px 0;
 }
 
-/* ── Tables — content-sized columns, header emphasis, row dividers, horizontal scroll ── */
+/* ── Tables — content-sized columns, row dividers, horizontal scroll ── */
 
+/* Vertical breathing room so a table reads as its own block, not as part of the paragraphs
+   around it. */
 .milkdown .milkdown-table-block {
-  margin: 8px 0;
+  margin: 20px 0;
 }
 
 /*
@@ -491,10 +493,10 @@
    mid-way; a single long token is still broken at the max-width cap. */
 .milkdown .milkdown-table-block th,
 .milkdown .milkdown-table-block td {
-  --milkdown-cell-inline-padding: 12px;
+  --milkdown-cell-inline-padding: 16px;
   min-width: calc(6ch + 2 * var(--milkdown-cell-inline-padding));
   max-width: calc(42ch + 2 * var(--milkdown-cell-inline-padding));
-  padding: 6px var(--milkdown-cell-inline-padding);
+  padding: 10px var(--milkdown-cell-inline-padding);
   border: none;
   border-bottom: 1px solid color-mix(in srgb, var(--crepe-color-outline), transparent 75%);
   overflow-wrap: break-word;
@@ -509,18 +511,13 @@
   padding: 0;
 }
 
-/* Header row. Tints derive from the foreground (not `surface-low`, which equals the editor
-   surface in light mode) so they are visible in both themes. */
+/* Header row: bold, full-brightness text (body text is dimmed at `.ProseMirror`, and header
+   cells hold a plain paragraph, not a `strong` mark) and a stronger divider. No background
+   tint. Body rows are plain (no zebra); the row dividers carry the structure. */
 .milkdown .milkdown-table-block th {
   font-weight: 600;
   color: var(--crepe-color-on-background);
-  background: color-mix(in srgb, var(--crepe-color-on-background), transparent 94%);
-  border-bottom-color: color-mix(in srgb, var(--crepe-color-outline), transparent 50%);
-}
-
-/* Subtle zebra on every other body row (row 1 is the header and has no `td`) */
-.milkdown .milkdown-table-block table.children > tbody > tr:nth-child(2n + 1) > td {
-  background: color-mix(in srgb, var(--crepe-color-on-background), transparent 97%);
+  border-bottom-color: color-mix(in srgb, var(--crepe-color-outline), transparent 45%);
 }
 
 /* Alignment comes from the cell's inline style, emitted by @milkdown/preset-gfm exactly as
