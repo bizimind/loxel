@@ -10,7 +10,12 @@ import { editorViewCtx, remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import { undo } from "@milkdown/kit/prose/history";
 import { TextSelection } from "@milkdown/kit/prose/state";
 
-import { applyBodyToEditor, canonicalizeBody } from "./MarkdownEditor";
+import {
+  applyBodyToEditor,
+  serializeBody,
+  setSourceBaseline,
+  toEditorBody,
+} from "./MarkdownEditor";
 
 let root: HTMLDivElement;
 let crepe: Crepe;
@@ -114,25 +119,155 @@ describe("listener sync after programmatic replace", () => {
   });
 });
 
-describe("canonicalizeBody", () => {
-  test("returns the serializer form of raw disk markdown", () => {
-    expect(canonicalizeBody(crepe, "# Title\n\n* one\n* two\n")).toBe("# Title\n\n- one\n- two\n");
-    expect(canonicalizeBody(crepe, "Title\n=====\n\nbody\n")).toBe("# Title\n\nbody\n");
-    expect(canonicalizeBody(crepe, "1) one\n2) two\n")).toBe("1. one\n2. two\n");
+describe("toEditorBody", () => {
+  test("keeps the source bytes of markdown the editor represents unchanged", () => {
+    expect(toEditorBody(crepe, "# Title\n\n* one\n* two\n")).toBe("# Title\n\n* one\n* two\n");
+    expect(toEditorBody(crepe, "Title\n=====\n\nbody\n")).toBe("Title\n=====\n\nbody\n");
+    expect(toEditorBody(crepe, "1) one\n2) two\n")).toBe("1) one\n2) two\n");
+  });
+
+  test("collapses trailing newlines", () => {
+    expect(toEditorBody(crepe, "hello\n\n\n")).toBe("hello\n");
   });
 
   test("is a fixed point of the live document", () => {
-    const live = crepe.getMarkdown();
-    expect(canonicalizeBody(crepe, live)).toBe(live);
-    expect(crepe.getMarkdown()).toBe(live); // does not touch the editor
+    const live = serializeBody(crepe);
+    expect(toEditorBody(crepe, live)).toBe(live);
+    expect(serializeBody(crepe)).toBe(live); // does not touch the editor
+  });
+});
+
+/** Replace the text of the first textblock whose content is `from` with `to`, as a user edit. */
+function editText(from: string, to: string): void {
+  crepe.editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx);
+    let found = false;
+    view.state.doc.descendants((node, pos) => {
+      if (found || !node.isTextblock || node.textContent !== from) return !found;
+      found = true;
+      view.dispatch(view.state.tr.insertText(to, pos + 1, pos + 1 + from.length));
+      return false;
+    });
+    expect(found).toBe(true);
+  });
+}
+
+/** Delete the first top-level block whose text is `text`, as a user edit. */
+function deleteBlock(text: string): void {
+  crepe.editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx);
+    let target: { from: number; to: number } | null = null;
+    view.state.doc.forEach((node, offset) => {
+      if (!target && node.textContent === text)
+        target = { from: offset, to: offset + node.nodeSize };
+    });
+    expect(target).not.toBeNull();
+    const { from, to } = target!;
+    view.dispatch(view.state.tr.delete(from, to));
+  });
+}
+
+describe("serializeBody source preservation", () => {
+  const source = [
+    "Title",
+    "=====",
+    "",
+    "* one",
+    "* two",
+    "",
+    "Some *emphasis* and __strong__ text.",
+    "",
+    "",
+    "",
+    "last paragraph",
+    "",
+  ].join("\n");
+
+  beforeEach(() => {
+    applyBodyToEditor(crepe, source);
   });
 
-  test("untouched non-canonical file yields no spurious edit against an external change", () => {
-    const base = canonicalizeBody(crepe, "# Title\n\n* one\n* two\n");
-    const live = base; // user typed nothing
-    const theirs = canonicalizeBody(crepe, "# Title\n\n* one\n* three\n");
-    expect(live === base).toBe(true); // predicate does not trip → disk wins as-is
-    expect(theirs).toBe("# Title\n\n- one\n- three\n");
+  test("a freshly loaded non-canonical file serializes to its source bytes", async () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    // Ends with a list, so the trailing plugin appends an empty paragraph on load.
+    const loaded = "Intro\n-----\n\n1) first\n2) second\n\n* a\n* b\n";
+    const editor = new Crepe({ root: el, defaultValue: loaded });
+    try {
+      await editor.create();
+      expect(editor.getMarkdown()).not.toBe(loaded); // the serializer alone would rewrite it
+      setSourceBaseline(editor, loaded);
+      expect(serializeBody(editor)).toBe(loaded);
+    } finally {
+      await editor.destroy();
+      el.remove();
+    }
+  });
+
+  test("an untouched document serializes to its source bytes", () => {
+    expect(serializeBody(crepe)).toBe(source);
+  });
+
+  test("editing one block leaves every other block byte-identical", () => {
+    editText("last paragraph", "last paragraph, edited");
+    expect(serializeBody(crepe)).toBe(source.replace("last paragraph", "last paragraph, edited"));
+  });
+
+  test("an edited block and its separators use the serializer form", () => {
+    editText("two", "two, edited");
+    // The list is rewritten (`-` bullets); the setext heading and the rest keep their bytes.
+    expect(serializeBody(crepe)).toBe(
+      "Title\n=====\n\n- one\n- two, edited\n\nSome *emphasis* and __strong__ text.\n\n\n\nlast paragraph\n",
+    );
+  });
+
+  test("undoing an edit restores the source bytes", () => {
+    editText("one", "one, edited");
+    crepe.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      expect(undo(view.state, view.dispatch)).toBe(true);
+    });
+    expect(serializeBody(crepe)).toBe(source);
+  });
+
+  test("deleting a block keeps its neighbours", () => {
+    deleteBlock("Some emphasis and strong text.");
+    expect(serializeBody(crepe)).toBe("Title\n=====\n\n* one\n* two\n\nlast paragraph\n");
+  });
+
+  test("link reference definitions between untouched blocks are kept", () => {
+    const withRefs = "See [the docs][docs].\n\n[docs]: https://example.com\n\nlast paragraph\n";
+    applyBodyToEditor(crepe, withRefs);
+    expect(serializeBody(crepe)).toBe(withRefs);
+    editText("last paragraph", "last paragraph, edited");
+    expect(serializeBody(crepe)).toBe(withRefs.replace("last paragraph", "last paragraph, edited"));
+  });
+
+  test("falls back to the serializer form when preserved bytes would change meaning", () => {
+    // Deleting the paragraph makes the two source lists adjacent; kept verbatim they would
+    // merge into one list, so the output must not be the naive concatenation.
+    applyBodyToEditor(crepe, "* a\n\nbetween\n\n* b\n");
+    deleteBlock("between");
+    const output = serializeBody(crepe);
+    expect(output).not.toBe("* a\n\n* b\n");
+    expect(toEditorBody(crepe, output)).toBe(output);
+    crepe.editor.action((ctx) => {
+      // Still two separate lists after a round trip.
+      const lists = [] as string[];
+      ctx.get(editorViewCtx).state.doc.forEach((node) => lists.push(node.type.name));
+      expect(lists.filter((name) => name === "bullet_list")).toHaveLength(2);
+    });
+  });
+
+  test("an own echo of the preserved body is a no-op", () => {
+    editText("last paragraph", "last paragraph, edited");
+    expect(applyBodyToEditor(crepe, serializeBody(crepe))).toBeNull();
+  });
+
+  test("an external change only rewrites the blocks it touched", () => {
+    const external = source.replace("last paragraph", "last paragraph\n\n+ appended by an agent");
+    applyBodyToEditor(crepe, external);
+    expect(serializeBody(crepe)).toBe(external);
   });
 });
 
@@ -199,11 +334,12 @@ describe("applyBodyToEditor", () => {
     });
   });
 
-  test("canonical disk body of an unchanged non-canonical file is a no-op", () => {
+  test("a marker-only change on disk keeps the caret and adopts the new bytes", () => {
     applyBodyToEditor(crepe, "# Notes\n\n- one\n- two\n");
     const before = crepe.editor.action((ctx) => ctx.get(editorViewCtx).state.selection.from);
-    const canonical = canonicalizeBody(crepe, "# Notes\n\n* one\n* two\n");
-    expect(applyBodyToEditor(crepe, canonical)).toBeNull();
+    const reformatted = toEditorBody(crepe, "# Notes\n\n* one\n* two\n");
+    applyBodyToEditor(crepe, reformatted);
+    expect(serializeBody(crepe)).toBe("# Notes\n\n* one\n* two\n");
     const after = crepe.editor.action((ctx) => ctx.get(editorViewCtx).state.selection.from);
     expect(after).toBe(before);
   });
