@@ -951,7 +951,8 @@ async function handleFileUpload(req: Request, ctx: RouteContext): Promise<Respon
   if (typeof nonce !== "string" || !nonce) return error("Missing nonce", 400);
   if (!(file instanceof File)) return error("Missing file", 400);
   if (file.size > MAX_IMAGE_UPLOAD_BYTES) return error("Image too large", 413);
-  if (!file.type.startsWith("image/")) return error("Only image files can be uploaded", 415);
+  // The declared MIME type is not consulted: Bun derives File.type from the filename, so it
+  // says nothing about the content. `detectImageExtension` decides from the bytes below.
 
   // Only files already owned by a worktree (project tree or drafts) can receive images.
   // Deliberately not using resolveFilePathWithHint: it would register unknown paths as

@@ -4,20 +4,21 @@
  */
 import { basename, extname } from "node:path";
 
+import { IMAGE_EXTENSIONS, SVG_EXTENSION } from "@/lib/media-extensions";
+
 /** Maximum accepted upload size (10 MB). */
 export const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 /** Directory (relative to the markdown file) where uploaded images are stored in a project. */
 export const IMAGE_ASSETS_DIR = "assets";
 
-const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg"] as const;
+/** Formats `detectImageExtension` can recognise from content; the stored file extension. */
+export type ImageExtension = "png" | "jpg" | "gif" | "webp" | "avif" | "bmp" | "svg";
 
-/** Image extensions the editor stores and carries along with drafts. */
-export type ImageExtension = (typeof IMAGE_EXTENSIONS)[number];
-
-/** Whether a file extension (without the dot, any case) is one of the supported image types. */
-export function isImageExtension(ext: string): ext is ImageExtension {
-  return (IMAGE_EXTENSIONS as readonly string[]).includes(ext.toLowerCase());
+/** Whether a file extension (without the dot, any case) is one the media viewer treats as an image. */
+export function isImageExtension(ext: string): boolean {
+  const lower = ext.toLowerCase();
+  return IMAGE_EXTENSIONS.has(lower) || lower === SVG_EXTENSION;
 }
 
 function startsWith(bytes: Uint8Array, signature: number[], offset = 0): boolean {
@@ -129,10 +130,13 @@ export async function writeWithUniqueName(
  */
 export function extractRelativeImageRefs(markdown: string): string[] {
   const refs = new Set<string>();
-  const pattern = /!\[[^\]]*\]\(\s*<?([^\s()<>"]+)>?(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
+  // Destination is either `<...>` (may contain spaces) or a bare path (no whitespace or
+  // unescaped parens; `\(` / `\)` escapes allowed), optionally followed by a title.
+  const pattern =
+    /!\[[^\]]*\]\(\s*(?:<([^<>\n]*)>|((?:[^\s()<>"\\]|\\.)+))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
   for (const match of markdown.matchAll(pattern)) {
-    const raw = match[1]!;
-    if (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(raw)) continue;
+    const raw = (match[1] ?? match[2] ?? "").replace(/\\(.)/g, "$1");
+    if (!raw || /^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(raw)) continue;
     let decoded: string;
     try {
       decoded = decodeURIComponent(raw);

@@ -155,13 +155,16 @@ describe("POST /api/file-upload", () => {
     expect(res.status).toBe(400);
   });
 
-  test("rejects non-image mime types and non-image content", async () => {
-    const mime = await upload({
+  test("accepts image bytes regardless of the declared mime or missing extension", async () => {
+    const res = await upload({
       path: join(wt, "docs", "plan.md"),
-      file: new File([PNG], "a.png", { type: "text/plain" }),
+      file: new File([PNG], "pasted", { type: "" }),
     });
-    expect(mime.status).toBe(415);
+    expect(res.status).toBe(200);
+    expect((await res.json()).src).toMatch(/^\.\/assets\/pasted-\d{8}-\d{6}\.png$/);
+  });
 
+  test("rejects non-image content even when declared as an image", async () => {
     const content = await upload({
       path: join(wt, "docs", "plan.md"),
       file: new File(["<script>alert(1)</script>"], "a.png", { type: "image/png" }),

@@ -77,6 +77,14 @@ describe("extractRelativeImageRefs", () => {
     expect(extractRelativeImageRefs(md)).toEqual(["one.png", "two.png", "sp ace.png"]);
   });
 
+  test("handles the angle-bracket form with spaces and escaped parens in bare paths", () => {
+    expect(extractRelativeImageRefs("![a](<my shot.png>)")).toEqual(["my shot.png"]);
+    expect(extractRelativeImageRefs('![a](<./Screenshot #1.png> "t")')).toEqual([
+      "Screenshot #1.png",
+    ]);
+    expect(extractRelativeImageRefs("![a](./a\\(1\\).png)")).toEqual(["a(1).png"]);
+  });
+
   test("keeps nested relative paths", () => {
     expect(extractRelativeImageRefs("![x](./assets/y.png) ![z](../up.png)")).toEqual([
       "assets/y.png",
@@ -90,6 +98,7 @@ describe("isImageExtension", () => {
     expect(isImageExtension("png")).toBe(true);
     expect(isImageExtension("JPEG")).toBe(true);
     expect(isImageExtension("svg")).toBe(true);
+    expect(isImageExtension("tiff")).toBe(true);
     expect(isImageExtension("md")).toBe(false);
     expect(isImageExtension("txt")).toBe(false);
     expect(isImageExtension("")).toBe(false);
