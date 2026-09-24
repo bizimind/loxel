@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
+import type { FormatOnSaveSettings, FormatterOverride } from "@/lib/formatting-model";
 
 import type { BackendMode, FormatterBackend } from "./formatter-backends";
 import { logger } from "./logger";
@@ -189,7 +189,7 @@ export class FormatService {
     content: string,
     filePath: string,
     worktreePath: string | undefined,
-    settings: FormattingSettings,
+    settings: FormatOnSaveSettings,
   ): Promise<string | null> {
     if (!settings.enabled) return null;
     if (content.length > MAX_FORMAT_SIZE) return null;
