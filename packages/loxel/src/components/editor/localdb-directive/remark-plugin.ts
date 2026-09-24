@@ -32,8 +32,10 @@ const CLOSING_FENCE = /^\s*:::+\s*$/;
  * - `:::localdb` containers become `localdb-block` nodes carrying their verbatim inner source.
  * - Every other directive is unwrapped into plain paragraphs reproducing its source so no text is
  *   lost and Milkdown's transformer never sees an unknown node type.
- * - No serializer extension is installed: localDbBlockSchema writes its block as verbatim text,
- *   and remark-directive's `:` escaping rules only matter when text directives are parsed.
+ * - On serialize only the flow-directive escape is installed (a line-initial `::` in prose
+ *   becomes `\::`), so text typed as `:::localdb` cannot turn into a directive on the next load.
+ *   remark-directive's phrasing `:` rule is omitted since text directives are never parsed;
+ *   localDbBlockSchema writes its own block as verbatim text.
  */
 export const remarkLocalDbDirective: Plugin<[], Root> = function remarkLocalDbDirective() {
   const data = this.data();
@@ -43,6 +45,8 @@ export const remarkLocalDbDirective: Plugin<[], Root> = function remarkLocalDbDi
   const { flow } = directive();
   micromarkExtensions.push({ flow });
   fromMarkdownExtensions.push(directiveFromMarkdown());
+  const toMarkdownExtensions = data.toMarkdownExtensions ?? (data.toMarkdownExtensions = []);
+  toMarkdownExtensions.push({ unsafe: [{ atBreak: true, character: ":", after: ":" }] });
 
   return (tree, file) => transformDirectives(tree, sourceOf(file));
 };
@@ -150,7 +154,12 @@ function unwrapDirective(node: Directives, source: string | null): RootContent[]
       : lastLine === undefined
         ? undefined
         : containerPrefixStripper(node, source)(lastLine);
-  const body = node.children.filter((child) => !isDirectiveLabel(child));
+  // Block-level html children must be wrapped like Milkdown's remarkHtmlTransformer does for
+  // other containers (its `html` node is inline); that transformer skipped them here because
+  // their parent was still a containerDirective when it ran.
+  const body = node.children
+    .filter((child) => !isDirectiveLabel(child))
+    .map((child) => (child.type === "html" ? wrapBlockHtml(child) : child));
 
   const out: RootContent[] = [paragraph(opening, lineRange(node.position, "start")), ...body];
   if (closing !== undefined && CLOSING_FENCE.test(closing)) {
@@ -159,6 +168,12 @@ function unwrapDirective(node: Directives, source: string | null): RootContent[]
     out.push(paragraph(closing.trim(), lineRange(node.position, "end", column)));
   }
   return out;
+}
+
+function wrapBlockHtml(node: Html): Paragraph {
+  const wrapped: Paragraph = { type: "paragraph", children: [node] };
+  if (node.position) wrapped.position = node.position;
+  return wrapped;
 }
 
 function isDirectiveLabel(node: RootContent): boolean {
