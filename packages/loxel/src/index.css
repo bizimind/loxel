@@ -246,8 +246,8 @@
   --diff-del-bg: #3b2b2b99;
   --diff-del-gutter: #3b2b2b99;
   --diff-del-text: #fa6675;
-  --diff-add-inline-bg: #2ea04366;
-  --diff-del-inline-bg: #f8514966;
+  --diff-add-inline-bg: #246c1c57;
+  --diff-del-inline-bg: #ff3d2f42;
 
   /* Comment colors (dark mode) */
   --comment-bg: rgba(255, 213, 79, 0.08);
