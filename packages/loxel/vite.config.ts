@@ -46,8 +46,11 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         "@": path.resolve(import.meta.dirname, "./src"),
-        // Monaco 0.56 exposes its worker modules through paths that Rolldown cannot resolve
-        // through the package export map; keep those browser worker imports on concrete files.
+        // Monaco 0.56's export map resolves every subpath under `esm/vs/`, so the legacy
+        // `monaco-editor/esm/vs/...` specifiers (still used for Monaco internals in
+        // CodeEditorPanel) need this alias to reach concrete files. Worker `?worker` imports must
+        // NOT use it: in dev the dependency optimizer pre-bundles aliased `?worker` imports as the
+        // raw worker code with no default export. See src/lib/monaco-env.ts.
         "monaco-editor/esm/vs": path.resolve(
           import.meta.dirname,
           "node_modules/monaco-editor/esm/vs",
