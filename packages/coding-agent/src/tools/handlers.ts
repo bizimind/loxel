@@ -975,7 +975,20 @@ async function runBash(
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    proc.kill();
+    // Kill the entire process group so child processes don't keep stdout open
+    try {
+      process.kill(-proc.pid, "SIGTERM");
+    } catch {
+      proc.kill();
+    }
+    // Hard-kill after 2s if the group doesn't exit
+    setTimeout(() => {
+      try {
+        process.kill(-proc.pid, "SIGKILL");
+      } catch {
+        // already dead
+      }
+    }, 2000);
   }, timeoutMs);
 
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -1214,17 +1227,12 @@ async function runWebFetch(
   const input = parsed.data;
 
   const started = Date.now();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), WEB_LIMITS.fetchTimeoutMs);
+  const signal = AbortSignal.timeout(WEB_LIMITS.fetchTimeoutMs);
 
   let response: Response;
   try {
-    response = await fetch(input.url, {
-      signal: controller.signal,
-      headers: { "user-agent": "coding-agent/0.1.0" },
-    });
+    response = await fetch(input.url, { signal, headers: { "user-agent": "coding-agent/0.1.0" } });
   } catch {
-    clearTimeout(timer);
     return err(
       "TOOL_TIMEOUT",
       `WebFetch timed out for ${input.url}`,
@@ -1233,9 +1241,17 @@ async function runWebFetch(
     );
   }
 
-  clearTimeout(timer);
-
-  const body = await response.text();
+  let body: string;
+  try {
+    body = await response.text();
+  } catch {
+    return err(
+      "TOOL_TIMEOUT",
+      `WebFetch body read timed out for ${input.url}`,
+      true,
+      "Retry with a stable URL",
+    );
+  }
   const fullBytes = Buffer.byteLength(body, "utf8");
   const truncated = fullBytes > READ_LIMITS.maxBytes;
   const content = truncated ? body.slice(0, READ_LIMITS.maxBytes) : body;
