@@ -15,7 +15,7 @@ import remarkStringify from "remark-stringify";
 import { unified } from "unified";
 
 import type { MarkdownOutputSettings } from "@/lib/formatting-model";
-import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS } from "@/lib/formatting-model";
+import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS, MARKDOWN_OUTPUT_CHOICES } from "@/lib/formatting-model";
 
 import {
   buildRemarkStringifyOptions,
@@ -148,6 +148,47 @@ describe("buildRemarkStringifyOptions through Milkdown", () => {
     expect(out).toContain("\n1)  first\n1)  second\n");
     expect(out).toContain("\n~~~\ncode\n~~~\n");
     expect(out).toContain("\n***\n");
+  });
+});
+
+/** Structural fingerprint of parsed markdown: node types and text, positions ignored. */
+function shape(markdown: string): unknown {
+  const strip = (node: unknown): unknown => {
+    if (typeof node !== "object" || node === null) return node;
+    const { type, value, children } = node as {
+      type?: unknown;
+      value?: unknown;
+      children?: unknown[];
+    };
+    return { type, value, children: children?.map(strip) };
+  };
+  return strip(unified().use(remarkParse).parse(markdown));
+}
+
+const MARKER_COMBINATIONS = MARKDOWN_OUTPUT_CHOICES.emphasis.flatMap((emphasis) =>
+  MARKDOWN_OUTPUT_CHOICES.strong.map((strong) => ({ emphasis, strong })),
+);
+
+describe("adjacent runs round-trip through Milkdown with every marker combination", () => {
+  const fixtures = [
+    // strong | emphasis | word character (reviewer case A)
+    "**bold**_(x)_&#x79;",
+    // strong | emphasis | strong (reviewer case B)
+    "**bold**_it_**bold**",
+    "*a*__b__",
+    "__b__*a*",
+    "**a**_b_**c**_d_",
+    "x*a*__b__y",
+    "(*a*)__b__",
+  ];
+
+  test.each(MARKER_COMBINATIONS)("%o", async (markers) => {
+    for (const source of fixtures) {
+      const out = await roundTrip({ ...markers, source: `${source}\n` });
+      expect(shape(out), source).toEqual(shape(source));
+      // Serializing the output again must be stable.
+      expect(await roundTrip({ ...markers, source: out }), source).toBe(out);
+    }
   });
 });
 
