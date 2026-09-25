@@ -18,11 +18,17 @@
  * node attributes after load (heading ids, list labels), and undo or programmatic replaces
  * create new node objects for unchanged content, so identity would report false changes.
  *
- * The result is always validated: it must parse to the same document as the canonical output.
- * Anything that would change meaning (for example two preserved lists becoming adjacent and
- * merging) falls back to the canonical output, so preservation can only ever be skipped, never
- * produce a different document.
+ * The result is always validated: loading it and serializing it back must reproduce the
+ * canonical output exactly. Anything that would change meaning (for example two preserved lists
+ * becoming adjacent and merging) falls back to the canonical output, so preservation can only
+ * ever be skipped, never produce a different document.
+ *
+ * Cost: a source that is already in canonical form (anything the editor or a formatter wrote)
+ * needs no reconciliation and costs nothing extra. Otherwise each changed document costs one
+ * block split and one validation round trip on top of the serializer, memoized per document.
  */
+
+import { diffArrays } from "diff";
 
 /** Half-open character range of one top-level block within a markdown string. */
 export interface BlockRange {
@@ -30,7 +36,11 @@ export interface BlockRange {
   end: number;
 }
 
-/** The editor's markdown pipeline, injected so the algorithm stays independent of Milkdown. */
+/**
+ * The editor's markdown pipeline, injected so the algorithm stays independent of Milkdown.
+ * Canonical strings passed to and returned from this module must be normalized the same way
+ * (the editor collapses trailing newlines), so equal documents compare equal as strings.
+ */
 export interface MarkdownBlockCodec {
   /**
    * Top-level block ranges of `markdown`, as parsed by the same remark pipeline the editor
@@ -39,8 +49,6 @@ export interface MarkdownBlockCodec {
   blockRanges: (markdown: string) => BlockRange[] | null;
   /** Serializer form of `markdown`: serialize(parse(markdown)). May throw on unparseable input. */
   canonicalize: (markdown: string) => string;
-  /** Whether two markdown strings parse to the same editor document. */
-  equivalent: (a: string, b: string) => boolean;
 }
 
 /** The source text the editor content was last loaded from, split into blocks. */
@@ -52,9 +60,6 @@ export interface SourceBaseline {
   /** Serializer form of the whole source. */
   canonical: string;
 }
-
-/** Above this many cells, the alignment of the changed middle section is skipped. */
-const MAX_ALIGNMENT_CELLS = 1_000_000;
 
 /**
  * Split `source` into blocks and record each block's serializer form. Returns null when the
@@ -92,7 +97,10 @@ export function preserveSource(
   baseline: SourceBaseline | null,
   codec: MarkdownBlockCodec,
 ): string {
-  if (!baseline) return canonical;
+  // A canonical source has nothing to preserve: unchanged blocks already serialize to their bytes.
+  if (!baseline || baseline.source === baseline.canonical) return canonical;
+  // Nothing changed since the source was loaded; canonicalize(source) === canonical by construction.
+  if (canonical === baseline.canonical) return baseline.source;
   const cached = memo.get(baseline);
   if (cached?.canonical === canonical) return cached.output;
   const output = computePreserved(canonical, baseline, codec);
@@ -105,11 +113,6 @@ function computePreserved(
   baseline: SourceBaseline,
   codec: MarkdownBlockCodec,
 ): string {
-  if (canonical === baseline.canonical) {
-    // Nothing changed since the source was loaded.
-    return validated(baseline.source, canonical, codec);
-  }
-
   const ranges = codec.blockRanges(canonical);
   if (!ranges || ranges.length === 0 || baseline.blocks.length === 0) return canonical;
 
@@ -179,9 +182,14 @@ function sourceOrigins(match: readonly number[], sourceCount: number): number[] 
   return origin;
 }
 
+/** Keep `output` only if loading it back yields exactly the document `canonical` describes. */
 function validated(output: string, canonical: string, codec: MarkdownBlockCodec): string {
   if (output === canonical) return canonical;
-  return codec.equivalent(output, canonical) ? output : canonical;
+  try {
+    return codec.canonicalize(output) === canonical ? output : canonical;
+  } catch {
+    return canonical;
+  }
 }
 
 /**
@@ -191,49 +199,16 @@ function validated(output: string, canonical: string, codec: MarkdownBlockCodec)
  */
 export function alignBlocks(prev: readonly string[], next: readonly string[]): number[] {
   const match = Array.from({ length: next.length }, () => -1);
-
-  // Most edits touch one region: match the common prefix and suffix directly.
-  let head = 0;
-  while (head < prev.length && head < next.length && prev[head] === next[head]) {
-    match[head] = head;
-    head++;
-  }
-  let tail = 0;
-  while (
-    tail < prev.length - head &&
-    tail < next.length - head &&
-    prev[prev.length - 1 - tail] === next[next.length - 1 - tail]
-  ) {
-    match[next.length - 1 - tail] = prev.length - 1 - tail;
-    tail++;
-  }
-
-  const rows = prev.length - head - tail;
-  const cols = next.length - head - tail;
-  if (rows === 0 || cols === 0 || rows * cols > MAX_ALIGNMENT_CELLS) return match;
-
-  // lcs[i][j] = LCS length of prev[head + i ..] and next[head + j ..] within the middle section.
-  const width = cols + 1;
-  const lcs = new Uint32Array((rows + 1) * width);
-  for (let i = rows - 1; i >= 0; i--) {
-    for (let j = cols - 1; j >= 0; j--) {
-      lcs[i * width + j] =
-        prev[head + i] === next[head + j]
-          ? lcs[(i + 1) * width + j + 1]! + 1
-          : Math.max(lcs[(i + 1) * width + j]!, lcs[i * width + j + 1]!);
-    }
-  }
-  let i = 0;
-  let j = 0;
-  while (i < rows && j < cols) {
-    if (prev[head + i] === next[head + j]) {
-      match[head + j] = head + i;
-      i++;
-      j++;
-    } else if (lcs[(i + 1) * width + j]! >= lcs[i * width + j + 1]!) {
-      i++;
+  let p = 0;
+  let n = 0;
+  for (const change of diffArrays([...prev], [...next])) {
+    const count = change.count ?? change.value.length;
+    if (change.removed) {
+      p += count;
+    } else if (change.added) {
+      n += count;
     } else {
-      j++;
+      for (let k = 0; k < count; k++) match[n++] = p++;
     }
   }
   return match;

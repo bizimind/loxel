@@ -62,8 +62,8 @@ describe("topLevelBlockRanges", () => {
 });
 
 /**
- * Minimal codec over plain remark: canonical form lowercases text and normalizes `*` bullets
- * to `-`, and equivalence compares canonical forms. Enough to exercise the reconciliation.
+ * Minimal codec over plain remark: the canonical form normalizes `*` bullets to `-` and
+ * collapses blank-line runs. Enough to exercise the reconciliation.
  */
 function testCodec(): MarkdownBlockCodec {
   const processor = unified().use(remarkParse);
@@ -74,11 +74,7 @@ function testCodec(): MarkdownBlockCodec {
       .filter(Boolean)
       .join("\n\n")
       .concat("\n");
-  return {
-    blockRanges: (md) => topLevelBlockRanges(processor.parse(md)),
-    canonicalize,
-    equivalent: (a, b) => canonicalize(a) === canonicalize(b),
-  };
+  return { blockRanges: (md) => topLevelBlockRanges(processor.parse(md)), canonicalize };
 }
 
 describe("preserveSource", () => {
@@ -108,9 +104,24 @@ describe("preserveSource", () => {
 
   test("returns the canonical text when validation fails", () => {
     const baseline = createSourceBaseline(source, codec);
-    const strict: MarkdownBlockCodec = { ...codec, equivalent: () => false };
+    // A codec whose round trip never reproduces the canonical text rejects every preservation.
+    const strict: MarkdownBlockCodec = {
+      ...codec,
+      canonicalize: (md) => `${codec.canonicalize(md)}x`,
+    };
     const edited = "- one\n- two\n\npara edited\n\n- three\n";
     expect(preserveSource(edited, baseline, strict)).toBe(edited);
+  });
+
+  test("a source already in canonical form is returned as the canonical text", () => {
+    const canonicalSource = "- one\n\npara\n";
+    const baseline = createSourceBaseline(canonicalSource, codec);
+    const blockRanges = () => {
+      throw new Error("no reconciliation expected");
+    };
+    expect(preserveSource("- one\n\npara edited\n", baseline, { ...codec, blockRanges })).toBe(
+      "- one\n\npara edited\n",
+    );
   });
 
   test("without a baseline returns the canonical text", () => {

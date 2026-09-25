@@ -107,17 +107,9 @@ function editorCodec(crepe: Crepe): MarkdownBlockCodec {
       }
     },
     canonicalize: (markdown) =>
-      crepe.editor.action((ctx) => ctx.get(serializerCtx)(ctx.get(parserCtx)(markdown))),
-    equivalent: (a, b) => {
-      try {
-        return crepe.editor.action((ctx) => {
-          const parser = ctx.get(parserCtx);
-          return parser(a).eq(parser(b));
-        });
-      } catch {
-        return false;
-      }
-    },
+      normalizeTrailingNewline(
+        crepe.editor.action((ctx) => ctx.get(serializerCtx)(ctx.get(parserCtx)(markdown))),
+      ),
   };
 }
 
@@ -131,7 +123,7 @@ const sourceBaselines = new WeakMap<Crepe, SourceBaseline>();
 export function setSourceBaseline(crepe: Crepe, body: string): void {
   let baseline: SourceBaseline | null = null;
   try {
-    baseline = createSourceBaseline(body, editorCodec(crepe));
+    baseline = createSourceBaseline(normalizeTrailingNewline(body), editorCodec(crepe));
   } catch {
     // Unparseable source: fall back to canonical output for this document.
   }
@@ -145,7 +137,9 @@ export function setSourceBaseline(crepe: Crepe, body: string): void {
  * of `crepe.getMarkdown()` so edits only rewrite the blocks they touch.
  */
 export function serializeBody(crepe: Crepe): string {
-  const canonical = crepe.getMarkdown();
+  // Normalize before reconciling: the trailing plugin's empty paragraph adds a newline that
+  // would otherwise make every output differ from the canonical text and defeat the fast paths.
+  const canonical = normalizeTrailingNewline(crepe.getMarkdown());
   const baseline = sourceBaselines.get(crepe) ?? null;
   return normalizeTrailingNewline(preserveSource(canonical, baseline, editorCodec(crepe)));
 }
@@ -159,7 +153,7 @@ export function serializeBody(crepe: Crepe): string {
  */
 export function toEditorBody(crepe: Crepe, body: string): string {
   const codec = editorCodec(crepe);
-  const baseline = createSourceBaseline(body, codec);
+  const baseline = createSourceBaseline(normalizeTrailingNewline(body), codec);
   const canonical = baseline?.canonical ?? codec.canonicalize(body);
   return normalizeTrailingNewline(preserveSource(canonical, baseline, codec));
 }
