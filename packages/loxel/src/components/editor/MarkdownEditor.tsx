@@ -11,6 +11,7 @@ import {
   commandsCtx,
   editorViewCtx,
   parserCtx,
+  remarkCtx,
   remarkStringifyOptionsCtx,
   serializerCtx,
 } from "@milkdown/kit/core";
@@ -35,6 +36,13 @@ import {
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { frontendLog } from "@/lib/frontend-logger";
 import { mergeFrontmatter, splitFrontmatter } from "@/lib/frontmatter";
+import {
+  type MarkdownBlockCodec,
+  type SourceBaseline,
+  createSourceBaseline,
+  preserveSource,
+  topLevelBlockRanges,
+} from "@/lib/markdown-source-preservation";
 import { dispatchOpenFile } from "@/lib/open-file";
 import { rawLineToProsePosition } from "@/lib/prosemirror-position";
 import { createMinimalReplaceTransaction } from "@/lib/prosemirror-replace";
@@ -85,32 +93,84 @@ function normalizeTrailingNewline(s: string): string {
   return s.replace(/\n+$/, "\n");
 }
 
+/** The editor's markdown pipeline, for block-level source preservation. */
+function editorCodec(crepe: Crepe): MarkdownBlockCodec {
+  return {
+    blockRanges: (markdown) => {
+      try {
+        return crepe.editor.action((ctx) => {
+          const remark = ctx.get(remarkCtx);
+          return topLevelBlockRanges(remark.runSync(remark.parse(markdown), markdown));
+        });
+      } catch {
+        return null;
+      }
+    },
+    canonicalize: (markdown) =>
+      normalizeTrailingNewline(
+        crepe.editor.action((ctx) => ctx.get(serializerCtx)(ctx.get(parserCtx)(markdown))),
+      ),
+  };
+}
+
+/** Source text each editor's content was last loaded from (see markdown-source-preservation). */
+const sourceBaselines = new WeakMap<Crepe, SourceBaseline>();
+
 /**
- * Round-trip `body` through the editor's parser and serializer so it is in the same form as
- * `crepe.getMarkdown()`. Markdown does not round-trip byte-exactly (`*` bullets become `-`,
- * setext headings become ATX, ...), so raw disk bytes must never be compared with, or used as
- * a merge base against, the live serialized document.
+ * Record `body` as the source the editor now represents, so blocks the user does not edit are
+ * written back with their original bytes instead of the serializer's canonical form.
  */
-export function canonicalizeBody(crepe: Crepe, body: string): string {
-  return crepe.editor.action((ctx) => {
-    const parser = ctx.get(parserCtx);
-    const serializer = ctx.get(serializerCtx);
-    return normalizeTrailingNewline(serializer(parser(body)));
-  });
+export function setSourceBaseline(crepe: Crepe, body: string): void {
+  let baseline: SourceBaseline | null = null;
+  try {
+    baseline = createSourceBaseline(normalizeTrailingNewline(body), editorCodec(crepe));
+  } catch {
+    // Unparseable source: fall back to canonical output for this document.
+  }
+  if (baseline) sourceBaselines.set(crepe, baseline);
+  else sourceBaselines.delete(crepe);
+}
+
+/**
+ * The editor's markdown body as it should be written to disk: the serializer's output, with
+ * every block that is unchanged since the source baseline kept byte-for-byte. Use this instead
+ * of `crepe.getMarkdown()` so edits only rewrite the blocks they touch.
+ */
+export function serializeBody(crepe: Crepe): string {
+  // Normalize before reconciling: the trailing plugin's empty paragraph adds a newline that
+  // would otherwise make every output differ from the canonical text and defeat the fast paths.
+  const canonical = normalizeTrailingNewline(crepe.getMarkdown());
+  const baseline = sourceBaselines.get(crepe) ?? null;
+  return normalizeTrailingNewline(preserveSource(canonical, baseline, editorCodec(crepe)));
+}
+
+/**
+ * The form `body` takes when loaded into the editor and serialized back without edits — the
+ * form `serializeBody` produces. With source preservation this is normally `body` itself;
+ * blocks whose source bytes cannot be preserved are canonicalized (`*` bullets become `-`, ...).
+ * Raw disk bytes must be converted before being compared with, or used as a merge base against,
+ * the live serialized document. Does not touch the editor. Throws on unparseable input.
+ */
+export function toEditorBody(crepe: Crepe, body: string): string {
+  const codec = editorCodec(crepe);
+  const baseline = createSourceBaseline(normalizeTrailingNewline(body), codec);
+  const canonical = baseline?.canonical ?? codec.canonicalize(body);
+  return normalizeTrailingNewline(preserveSource(canonical, baseline, codec));
 }
 
 /**
  * Replace the live document with `body`, touching only the changed region so the caret is
- * mapped through the change rather than restored from an absolute offset.
+ * mapped through the change rather than restored from an absolute offset. Afterwards `body` is
+ * the editor's source baseline, so its bytes are kept for blocks the user does not edit.
  *
- * Compares normalized markdown first: parse(serialize(doc)) is not structurally identical to
+ * Compares serialized markdown first: parse(serialize(doc)) is not structurally identical to
  * the live doc (empty paragraphs vanish on the round trip), so a doc-level diff alone would
  * rewrite content the user has not changed.
  *
- * Returns the normalized serialized body after the replace, or null when nothing was applied.
+ * Returns the serialized body after the replace, or null when no transaction was dispatched.
  */
 export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
-  const currentBody = normalizeTrailingNewline(crepe.getMarkdown());
+  const currentBody = serializeBody(crepe);
   if (normalizeTrailingNewline(body) === currentBody) return null;
   const dispatched = crepe.editor.action((ctx) => {
     const view = ctx.get(editorViewCtx);
@@ -127,8 +187,11 @@ export function applyBodyToEditor(crepe: Crepe, body: string): string | null {
     view.dispatch(view.state.tr.setStoredMarks(view.state.storedMarks));
     return true;
   });
+  // Rebase even when the documents were structurally identical (e.g. a formatter only changed
+  // list markers on disk): the editor now represents `body`, and its bytes should be kept.
+  setSourceBaseline(crepe, body);
   if (!dispatched) return null;
-  return normalizeTrailingNewline(crepe.getMarkdown());
+  return serializeBody(crepe);
 }
 
 /** CodeMirror theme matching loxel's JetBrains dark palette. */
@@ -281,19 +344,17 @@ export function MarkdownEditor({
   // path (which arms autosave itself when needed) and the callback is skipped; anything else is
   // a genuine user edit and is never swallowed. The ref is cleared on every callback.
   const lastAppliedBodyRef = useRef<string | null>(null);
-  /** Canonicalized body of the disk content the sync effect last processed — merge base for
-   *  clean-state syncs. Always in serializer form so it compares against `crepe.getMarkdown()`. */
+  /** Editor form (toEditorBody) of the disk content the sync effect last processed — merge base
+   *  for clean-state syncs, so it compares against `serializeBody`. */
   const lastSyncedDiskBodyRef = useRef<string | null>(null);
 
-  // Set getSerializedContent — reads current markdown from crepe, merged with frontmatter.
-  // normalizeTrailingNewline collapses trailing whitespace to a single \n because
-  // milkdown's trailing plugin appends an empty paragraph after block nodes (lists,
-  // code blocks, etc.) which serializes as an extra \n.
+  // Set getSerializedContent — reads the current body from crepe (unchanged blocks keep their
+  // source bytes), merged with frontmatter.
   getSerializedContentRef.current = () => {
+    const crepe = crepeRef.current;
+    if (!crepe) return null;
     try {
-      const body = crepeRef.current?.getMarkdown() ?? null;
-      if (body === null) return null;
-      return mergeFrontmatter(frontmatterRef.current, normalizeTrailingNewline(body));
+      return mergeFrontmatter(frontmatterRef.current, serializeBody(crepe));
     } catch {
       return null;
     }
@@ -378,7 +439,7 @@ export function MarkdownEditor({
         // stale. Read the live doc so the cache and the echo comparison reflect reality.
         let body: string;
         try {
-          body = normalizeTrailingNewline(crepe.getMarkdown());
+          body = serializeBody(crepe);
         } catch {
           return;
         }
@@ -452,8 +513,10 @@ export function MarkdownEditor({
         });
 
         editorReadyRef.current = true;
+        // Before anything serializes: blocks the user does not edit keep their source bytes.
+        setSourceBaseline(crepe, initialBody);
         try {
-          lastSyncedDiskBodyRef.current = canonicalizeBody(
+          lastSyncedDiskBodyRef.current = toEditorBody(
             crepe,
             splitFrontmatter(effectDiskContent).body,
           );
@@ -465,7 +528,7 @@ export function MarkdownEditor({
         // Set merge callbacks for 3-way auto-merge
         mergeGetRef.current = () => {
           try {
-            const body = normalizeTrailingNewline(crepe.getMarkdown());
+            const body = serializeBody(crepe);
             return mergeFrontmatter(frontmatterRef.current, body);
           } catch {
             return null;
@@ -480,8 +543,8 @@ export function MarkdownEditor({
               frontmatterRef.current = mergedFm;
               setFrontmatter(mergedFm);
             }
-            // Canonicalized content (ProseMirror may normalize on round-trip)
-            const canonicalBody = appliedBody ?? normalizeTrailingNewline(crepe.getMarkdown());
+            // Serialized content: edited blocks in serializer form, the rest in source bytes
+            const canonicalBody = appliedBody ?? serializeBody(crepe);
             const canonicalized = mergeFrontmatter(frontmatterRef.current, canonicalBody);
             editorContentCache.set(effectCacheKey, canonicalized);
             // Re-arm autosave for external changes (the listener skips the programmatic echo).
@@ -578,7 +641,7 @@ export function MarkdownEditor({
           const view = ctx.get(editorViewCtx);
           editorSelectionCache.set(effectCacheKey, view.state.selection.anchor);
         });
-        const body = normalizeTrailingNewline(crepe.getMarkdown());
+        const body = serializeBody(crepe);
         editorContentCache.set(effectCacheKey, mergeFrontmatter(frontmatterRef.current, body));
       } catch {
         // Editor may already be partially destroyed
@@ -629,7 +692,7 @@ export function MarkdownEditor({
     const { frontmatter: diskFm, body: diskBody } = splitFrontmatter(diskContent);
     let canonicalDiskBody: string;
     try {
-      canonicalDiskBody = canonicalizeBody(crepe, diskBody);
+      canonicalDiskBody = toEditorBody(crepe, diskBody);
     } catch (err) {
       // Parser rejected the disk body, or the editor was destroyed. The editor keeps its
       // previous document and frontmatter; the file stays clean, so the next local edit will
@@ -656,8 +719,8 @@ export function MarkdownEditor({
       // would discard that edit, and deferring would drop the disk change once the listener
       // flips the state to dirty. Instead 3-way merge live edits onto the disk change, keeping
       // ours on conflict — the user is actively editing and their text must not vanish.
-      // All three sides are in serializer form so formatting round-trip noise is not an edit.
-      const liveBody = normalizeTrailingNewline(crepe.getMarkdown());
+      // All three sides are in editor form so formatting round-trip noise is not an edit.
+      const liveBody = serializeBody(crepe);
       let target = canonicalDiskBody;
       if (prevDiskBody !== null && liveBody !== prevDiskBody && liveBody !== canonicalDiskBody) {
         const merge = threeWayMerge(prevDiskBody, liveBody, canonicalDiskBody, {
@@ -670,7 +733,9 @@ export function MarkdownEditor({
       // changed region so the caret keeps its place when the edit is elsewhere.
       const appliedBody = applyBodyToEditor(crepe, target);
       if (appliedBody !== null) lastAppliedBodyRef.current = appliedBody;
-      const canonicalBody = appliedBody ?? liveBody;
+      // Re-serialize rather than reuse liveBody: the apply rebases the source baseline even when
+      // no transaction was needed (e.g. a formatter only changed markers on disk).
+      const canonicalBody = appliedBody ?? serializeBody(crepe);
       // Swap frontmatter only once the body is in sync, so a failed apply leaves the editor
       // consistent with what is still shown.
       if (diskFm !== frontmatterRef.current) {
@@ -755,9 +820,11 @@ export function MarkdownEditor({
   // Frontmatter change handler — merge with current body and propagate
   const handleFrontmatterChange = useCallback(
     (yaml: string | null) => {
-      let rawBody: string | undefined;
+      const crepe = crepeRef.current;
+      if (!crepe) return; // editor not yet ready — skip to avoid persisting empty body
+      let body: string;
       try {
-        rawBody = crepeRef.current?.getMarkdown();
+        body = serializeBody(crepe);
       } catch (err) {
         // Editor failed to create or was destroyed mid-action — the frontmatter edit is dropped.
         frontendLog
@@ -768,8 +835,6 @@ export function MarkdownEditor({
           });
         return;
       }
-      if (rawBody === undefined) return; // editor not yet ready — skip to avoid persisting empty body
-      const body = normalizeTrailingNewline(rawBody);
       frontmatterRef.current = yaml;
       setFrontmatter(yaml);
       const merged = mergeFrontmatter(yaml, body);
