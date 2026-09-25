@@ -25,6 +25,7 @@ The primary workflow: manage multiple repositories and worktrees from a single w
 
 - **Project sidebar** — add and switch between git repositories
 - **Worktree sidebar** — view and switch between worktrees, in bare and regular repos alike (managed by `wt`, under `.worktrees/`)
+- **Sidebar sizing** — collapses to an icon rail or expands to a list; when expanded, drag its right edge to resize (200–560px, double-click to reset). The width is global, not per worktree, and is persisted with the other sidebar preferences
 - **Per-context layouts** — each project + worktree combination remembers its own panel layout, so switching back restores exactly where you left off
 - **Cross-worktree awareness** — see dirty status across all worktrees of the same repo at a glance
 - **Shared review database** — code review comments are stored per-repo (keyed by git's common dir), so reviews are visible from any worktree

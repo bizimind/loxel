@@ -55,9 +55,21 @@ async function removeAndSwitchProject(
 
 // --- Project store ---
 
+export const SIDEBAR_MIN_WIDTH = 200;
+export const SIDEBAR_MAX_WIDTH = 560;
+export const SIDEBAR_DEFAULT_WIDTH = 240;
+
+/** Clamp an expanded-sidebar width to the allowed range; non-finite values fall back to the default. */
+export function clampSidebarWidth(width: number): number {
+  if (!Number.isFinite(width)) return SIDEBAR_DEFAULT_WIDTH;
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+}
+
 interface ProjectState {
   projects: EnrichedProject[];
   sidebarExpanded: boolean;
+  /** Width of the sidebar when expanded (the collapsed width is fixed). */
+  sidebarWidth: number;
 
   /** Per-project sidebar expand/collapse state (bare repos show worktrees when expanded). */
   expandedProjectIds: string[];
@@ -73,6 +85,7 @@ interface ProjectState {
   deleteProject: (id: string) => Promise<void>;
   updateProject: (id: string, updates: { name?: string }) => Promise<void>;
   toggleSidebar: () => void;
+  setSidebarWidth: (width: number) => void;
   toggleProjectExpanded: (projectId: string) => void;
   /** Record that these projects have had their one-time auto-expand. */
   markAutoExpanded: (projectIds: string[]) => void;
@@ -83,6 +96,7 @@ export const useProjectStore = create<ProjectState>()(
     (set, get) => ({
       projects: [],
       sidebarExpanded: false,
+      sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
       expandedProjectIds: [],
       autoExpandedProjectIds: [],
 
@@ -121,6 +135,8 @@ export const useProjectStore = create<ProjectState>()(
 
       toggleSidebar: () => set((s) => ({ sidebarExpanded: !s.sidebarExpanded })),
 
+      setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
+
       toggleProjectExpanded: (projectId) =>
         set((s) => ({
           expandedProjectIds: [...toggleSet(new Set(s.expandedProjectIds), projectId)],
@@ -140,6 +156,7 @@ export const useProjectStore = create<ProjectState>()(
       storage: createJSONStorage(() => serverProjectsStorage),
       partialize: (state) => ({
         sidebarExpanded: state.sidebarExpanded,
+        sidebarWidth: state.sidebarWidth,
         expandedProjectIds: state.expandedProjectIds,
         autoExpandedProjectIds: state.autoExpandedProjectIds,
       }),
