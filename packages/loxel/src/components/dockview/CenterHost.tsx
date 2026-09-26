@@ -12,6 +12,7 @@ import { wsClient } from "@/api/client";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { frontendLog } from "@/lib/frontend-logger";
 import { useAgentDevToolsStore } from "@/store/agent-devtools";
+import { reattachActiveContent } from "@/store/layout-actions";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { setCenterApi } from "@/store/tools-bar";
@@ -40,6 +41,14 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
 
     // Populate terminal instances from restored layout
     syncTerminalsFromLayout(api);
+
+    // Background `renderer: "always"` tabs (browser panels) blank their group when added.
+    // Moves re-add panels with add events suppressed, so they're covered by the move event.
+    api.onDidAddPanel((panel) => reattachActiveContent(panel.group));
+    api.onDidMovePanel(({ from, to }) => {
+      reattachActiveContent(from);
+      reattachActiveContent(to);
+    });
 
     api.onDidRemovePanel((event) => {
       // Skip during layout swaps — both the center's own swap (worktree switch
@@ -102,6 +111,7 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
 
   const handleLayoutRestored = useCallback((api: DockviewApi) => {
     syncTerminalsFromLayout(api);
+    for (const group of api.groups) reattachActiveContent(group);
   }, []);
 
   const handleClear = useCallback((api: DockviewApi) => {

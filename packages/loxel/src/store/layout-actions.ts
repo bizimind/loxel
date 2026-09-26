@@ -10,7 +10,7 @@
  * This module is deliberately separate from default-layout.ts to avoid a circular
  * dependency: tools-bar.ts → layout-actions.ts, default-layout.ts → tools-bar.ts.
  */
-import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
+import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from "dockview-react";
 
 import { isCenterPanel } from "./panel-config";
 import type { SidebarZone } from "./settings-store";
@@ -74,6 +74,40 @@ export function findAdjacentCenterGroup(
   }
 
   return best;
+}
+
+/**
+ * Make `panel` the active panel without re-rendering its content.
+ *
+ * `panel.api.setActive()` routes through dockview's `group.model.openPanel()`, which — when the
+ * panel is already its group's active tab — detaches and re-appends the panel's content element.
+ * Re-attaching an Electron `<webview>` reloads the guest page, so focusing a visible browser panel
+ * in another group would refresh it. When the panel is already its group's active tab, activating
+ * the group is equivalent and leaves the DOM untouched.
+ */
+export function activatePanel(api: DockviewApi, panel: IDockviewPanel): void {
+  if (panel.group.activePanel !== panel) {
+    panel.api.setActive();
+    return;
+  }
+  // Mirror dockview's setActivePanel: activating a group hidden behind a maximized one un-maximizes.
+  if (api.hasMaximizedGroup() && !panel.group.api.isMaximized()) api.exitMaximizedGroup();
+  panel.group.api.setActive();
+}
+
+/**
+ * Re-attach a group's active panel content if dockview evicted it.
+ *
+ * dockview's `ContentContainer.renderPanel(panel, { asActive: false })` — used when a
+ * `renderer: "always"` panel is added as a background tab (layout restore, moves) or has its
+ * renderer changed — removes the group's currently displayed content before pointing at the new
+ * panel, leaving the group blank. Re-opening the active panel through the group model re-renders
+ * it without activating the group.
+ */
+export function reattachActiveContent(group: DockviewGroupPanel): void {
+  const active = group.activePanel;
+  if (!active || active.view.content.element.parentElement !== null) return;
+  group.model.openPanel(active, { skipSetGroupActive: true });
 }
 
 /**

@@ -5,19 +5,21 @@
  * click-to-navigate in the notification center overlay.
  */
 import type { ServerNotification } from "@/api/notification-model";
+import { activatePanel } from "@/store/layout-actions";
 import { getCenterApi } from "@/store/tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
 /** Try to activate a panel, retrying once after a short delay if not found. */
-function activatePanel(panelId: string, retries = 1): void {
-  const panel = getCenterApi()?.panels.find((p) => p.id === panelId);
-  if (panel) {
-    panel.api.setActive();
+function activatePanelById(panelId: string, retries = 1): void {
+  const api = getCenterApi();
+  const panel = api?.panels.find((p) => p.id === panelId);
+  if (api && panel) {
+    activatePanel(api, panel);
     return;
   }
   // Panel may not be mounted yet after worktree switch — retry after layout settles
   if (retries > 0) {
-    setTimeout(() => activatePanel(panelId, retries - 1), 150);
+    setTimeout(() => activatePanelById(panelId, retries - 1), 150);
   }
 }
 
@@ -35,12 +37,12 @@ export function navigateToNotification(notification: ServerNotification): void {
     void wtStore
       .switchWorktree(worktreePath)
       .then(() => {
-        requestAnimationFrame(() => activatePanel(panelId));
+        requestAnimationFrame(() => activatePanelById(panelId));
       })
       .catch((err) => {
         console.error("Failed to switch worktree for notification navigation", err);
       });
   } else {
-    activatePanel(panelId);
+    activatePanelById(panelId);
   }
 }

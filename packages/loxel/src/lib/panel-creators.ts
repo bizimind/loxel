@@ -19,6 +19,7 @@ import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
 import { useEditorStateStore } from "@/store/editor-state";
+import { activatePanel } from "@/store/layout-actions";
 import { getCenterPanelDefByType } from "@/store/panel-config";
 import { getCenterApi } from "@/store/tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
@@ -170,6 +171,8 @@ export function createBrowser(url?: string, split?: SplitPosition): void {
     title,
     params: { url: targetUrl },
     position: panelPosition(cApi, split),
+    // Keep the <webview> attached while hidden or moved: re-attaching it reloads the page.
+    renderer: "always",
   });
   uiLog.info("Panel created", { panelType: "browser", panelId });
 }
@@ -213,7 +216,7 @@ export function openForkedAgent(
     );
   });
   if (existing) {
-    existing.api.setActive();
+    activatePanel(cApi, existing);
     return;
   }
 
@@ -240,7 +243,7 @@ export function openAgentDevtools(sessionId: string): void {
   const panelId = `agentdevtools-${sessionId}`;
   const existing = dv.getPanel(panelId);
   if (existing) {
-    existing.api.setActive();
+    activatePanel(dv, existing);
     return;
   }
 
@@ -310,7 +313,7 @@ export function openFileBacked(
   const panelId = `${def.idPrefix}${filePath}`;
   const existing = cApi.getPanel(panelId);
   if (existing) {
-    existing.api.setActive();
+    activatePanel(cApi, existing);
     if (extra?.line) {
       existing.api.updateParameters({ line: extra.line, column: extra.column });
     }
@@ -384,7 +387,7 @@ export function openDiff(): void {
 
   const existing = cApi.getPanel("diff");
   if (existing) {
-    existing.api.setActive();
+    activatePanel(cApi, existing);
     return;
   }
 
@@ -405,7 +408,7 @@ export function openLocalDb(): void {
 
   const existing = cApi.getPanel("localdb-main");
   if (existing) {
-    existing.api.setActive();
+    activatePanel(cApi, existing);
     return;
   }
 
