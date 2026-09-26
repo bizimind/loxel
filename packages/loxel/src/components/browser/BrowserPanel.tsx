@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
 import { useActionHandler } from "@/hooks/useActionHandler";
+import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { cn } from "@/lib/utils";
 import { inputToKeyCombo } from "@/store/keybindings/keybinding-schema";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
@@ -124,6 +125,17 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   const [canGoForward, setCanGoForward] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+
+  // Hand keyboard focus to the page when the panel is activated (e.g. directional focus).
+  // Skip when focus is already inside the panel so clicking the URL bar keeps its focus.
+  usePanelActivationFocus(
+    panelApi,
+    useCallback(() => {
+      const webview = webviewRef.current;
+      if (!webview || webview.parentElement?.contains(document.activeElement)) return;
+      webview.focus();
+    }, []),
+  );
 
   // Attach webview event listeners
   useEffect(() => {
