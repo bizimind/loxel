@@ -12,7 +12,7 @@ import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
 import type { ActionId } from "@/store/keybindings/action-registry";
-import { findAdjacentCenterGroup } from "@/store/layout-actions";
+import { activatePanel, findAdjacentCenterGroup } from "@/store/layout-actions";
 import { getCenterPanelDef, getCreateEventForAction } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { deriveProject, useProjectStore } from "@/store/projects";
@@ -105,7 +105,8 @@ export function useActionHandler(): (actionId: ActionId) => void {
         const activeIdx = allPanels.findIndex((p) => p.api.isActive);
         const dir = actionId === "panel.next" ? 1 : -1;
         const nextIdx = (activeIdx + dir + allPanels.length) % allPanels.length;
-        allPanels[nextIdx]?.api.setActive();
+        const next = allPanels[nextIdx];
+        if (next) activatePanel(api, next);
         break;
       }
 
@@ -122,7 +123,8 @@ export function useActionHandler(): (actionId: ActionId) => void {
         const api = getCenterApi();
         if (!api) break;
         const idx = Number(actionId.split(".").pop()) - 1;
-        if (api.panels[idx]) api.panels[idx].api.setActive();
+        const target = api.panels[idx];
+        if (target) activatePanel(api, target);
         break;
       }
 
@@ -152,7 +154,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
         } else {
           splitOrPromote(active, position);
         }
-        requestAnimationFrame(() => active.api.setActive());
+        requestAnimationFrame(() => activatePanel(api, active));
         break;
       }
 
@@ -176,7 +178,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
           const nextIdx = idx + step;
           const sibling = idx >= 0 ? panels[nextIdx] : undefined;
           if (sibling) {
-            sibling.api.setActive();
+            activatePanel(api, sibling);
             break;
           }
         }
@@ -185,7 +187,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
         const adjacent = findAdjacentCenterGroup(api, active.group, direction);
         if (adjacent) {
           const target = adjacent.activePanel ?? adjacent.panels[0];
-          if (target) target.api.setActive();
+          if (target) activatePanel(api, target);
         }
         break;
       }
@@ -207,7 +209,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
           "panel.move.newDown": "bottom",
         } as const;
         splitOrPromote(active, posMap[actionId]);
-        requestAnimationFrame(() => active.api.setActive());
+        requestAnimationFrame(() => activatePanel(api, active));
         break;
       }
 
