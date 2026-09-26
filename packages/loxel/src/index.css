@@ -101,9 +101,6 @@
   --ring: oklch(0.709 0.01 56.259);
   --radius: 0.5rem;
 
-  /* Active resize handle (dockview sashes and the projects sidebar edge) */
-  --sash-active: #467ff2;
-
   /* Editor surface (diff panels) */
   --editor-surface: oklch(0.97 0 0);
 
@@ -292,7 +289,6 @@
   --font-mono:
     "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --color-ring: var(--ring);
-  --color-sash-active: var(--sash-active);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
