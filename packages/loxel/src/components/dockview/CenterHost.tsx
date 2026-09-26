@@ -42,9 +42,9 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
     // Populate terminal instances from restored layout
     syncTerminalsFromLayout(api);
 
-    // Background `renderer: "always"` tabs (browser panels) blank their group when added.
-    // Moves re-add panels with add events suppressed, so they're covered by the move event.
-    api.onDidAddPanel((panel) => reattachActiveContent(panel.group));
+    // Background `renderer: "always"` tabs (browser panels) blank their group when re-added by a
+    // move. The move event fires once the move has settled; add events are suppressed during moves
+    // and fire before the active panel switches, so they can't be used here.
     api.onDidMovePanel(({ from, to }) => {
       reattachActiveContent(from);
       reattachActiveContent(to);
