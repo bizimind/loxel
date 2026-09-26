@@ -94,6 +94,23 @@ describe("reattachActiveContent", () => {
     expect(isAttached(dockview, "editor")).toBe(true);
   });
 
+  test("restores content blanked by merging a group with a background always-rendered tab", () => {
+    const dockview = createDockview();
+    dockview.addPanel({ id: "editor", component: "c" });
+    dockview.addPanel({ id: "browser", component: "c", renderer: "always" });
+    dockview.addPanel({ id: "other", component: "c", position: { direction: "right" } });
+    const editor = dockview.getGroupPanel("editor");
+    const other = dockview.getGroupPanel("other");
+    if (!editor || !other) throw new Error("panels missing");
+    editor.api.setActive();
+
+    editor.group.api.moveTo({ group: other.group, position: "center" });
+    expect(isAttached(dockview, "editor")).toBe(false);
+
+    reattachActiveContent(editor.group);
+    expect(isAttached(dockview, "editor")).toBe(true);
+  });
+
   test("restores content blanked by upgrading a background tab's renderer", () => {
     const dockview = createDockview();
     dockview.addPanel({ id: "browser", component: "c" });

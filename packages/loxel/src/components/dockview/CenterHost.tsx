@@ -43,7 +43,12 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
     syncTerminalsFromLayout(api);
 
     // Background `renderer: "always"` tabs (browser panels) blank their group when added.
+    // Moves re-add panels with add events suppressed, so they're covered by the move event.
     api.onDidAddPanel((panel) => reattachActiveContent(panel.group));
+    api.onDidMovePanel(({ from, to }) => {
+      reattachActiveContent(from);
+      reattachActiveContent(to);
+    });
 
     api.onDidRemovePanel((event) => {
       // Skip during layout swaps — both the center's own swap (worktree switch
