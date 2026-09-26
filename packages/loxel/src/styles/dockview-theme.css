@@ -167,7 +167,7 @@
 }
 
 .dockview-theme-abyss .dv-resize-container .dv-sash.active {
-  background-color: #467ff2;
+  background-color: var(--sash-active);
 }
 
 /* Panel content fills container */

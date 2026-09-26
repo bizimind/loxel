@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 
 import type { EnrichedProject } from "@/api/project-model";
 
-import { deriveProject } from "./projects";
+import {
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  clampSidebarWidth,
+  deriveProject,
+} from "./projects";
 
 function project(path: string, worktreePaths: string[]): EnrichedProject {
   return {
@@ -32,5 +38,22 @@ describe("deriveProject", () => {
 
   test("does not match a sibling path with the same string prefix", () => {
     expect(deriveProject("/repos/project-other/topic", [project("/repos/project", [])])).toBeNull();
+  });
+});
+
+describe("clampSidebarWidth", () => {
+  test("keeps widths inside the allowed range", () => {
+    expect(clampSidebarWidth(320)).toBe(320);
+    expect(clampSidebarWidth(SIDEBAR_MIN_WIDTH - 50)).toBe(SIDEBAR_MIN_WIDTH);
+    expect(clampSidebarWidth(SIDEBAR_MAX_WIDTH + 50)).toBe(SIDEBAR_MAX_WIDTH);
+  });
+
+  test("rounds fractional pointer widths", () => {
+    expect(clampSidebarWidth(300.6)).toBe(301);
+  });
+
+  test("falls back to the default for non-finite values", () => {
+    expect(clampSidebarWidth(Number.NaN)).toBe(SIDEBAR_DEFAULT_WIDTH);
+    expect(clampSidebarWidth(Number.POSITIVE_INFINITY)).toBe(SIDEBAR_DEFAULT_WIDTH);
   });
 });

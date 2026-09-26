@@ -50,12 +50,18 @@ import { FileTypeIcon } from "@/lib/file-icons";
 import { frontendLog } from "@/lib/frontend-logger";
 import { cn } from "@/lib/utils";
 import { hasWorktreeNotification, usePanelNotificationStore } from "@/store/panel-notifications";
-import { deriveProject, useProjectStore } from "@/store/projects";
+import {
+  clampSidebarWidth,
+  deriveProject,
+  SIDEBAR_DEFAULT_WIDTH,
+  useProjectStore,
+} from "@/store/projects";
 import { getOrderedWorktrees, useWorktreeStore } from "@/store/worktrees";
 
 import { AddProjectWizard } from "../projects/AddProjectWizard";
 import { ProjectIcon } from "../projects/ProjectIcon";
 import { WorktreeIcon } from "../worktrees/WorktreeIcon";
+import { SidebarResizeHandle } from "./SidebarResizeHandle";
 
 // ── Project icon with folder badge ──────────────────────────────────────
 
@@ -84,7 +90,6 @@ function ProjectIconWithBadge({
 }
 
 const COLLAPSED_WIDTH = 48;
-const EXPANDED_WIDTH = 240;
 const EMPTY_STRINGS: string[] = [];
 const EMPTY_WORKTREES: WorktreeEntry[] = [];
 
@@ -208,6 +213,8 @@ function worktreeSubtitle(wt: WorktreeEntry): string {
 export function Sidebar() {
   const projects = useProjectStore((s) => s.projects);
   const sidebarExpanded = useProjectStore((s) => s.sidebarExpanded);
+  const sidebarWidth = useProjectStore((s) => s.sidebarWidth);
+  const setSidebarWidth = useProjectStore((s) => s.setSidebarWidth);
   const expandedProjectIds = useProjectStore((s) => s.expandedProjectIds);
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
   const toggleProjectExpanded = useProjectStore((s) => s.toggleProjectExpanded);
@@ -236,6 +243,23 @@ export function Sidebar() {
     }
     markAutoExpanded(projects.map((p) => p.id));
   }, [projects]);
+
+  // Live width while dragging the resize handle; committed to the store on release.
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const expandedWidth = clampSidebarWidth(dragWidth ?? sidebarWidth);
+
+  const handleResizeEnd = useCallback(
+    (width: number) => {
+      setDragWidth(null);
+      setSidebarWidth(width);
+    },
+    [setSidebarWidth],
+  );
+
+  const handleResizeReset = useCallback(
+    () => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH),
+    [setSidebarWidth],
+  );
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -337,9 +361,21 @@ export function Sidebar() {
 
   return (
     <div
-      className="bg-card border-border flex flex-col border-r transition-[width] duration-150 ease-out"
-      style={{ width: sidebarExpanded ? EXPANDED_WIDTH : COLLAPSED_WIDTH }}
+      className={cn(
+        "bg-card border-border relative flex flex-col border-r",
+        // Animate expand/collapse, but track the pointer directly while resizing
+        dragWidth === null && "transition-[width] duration-150 ease-out",
+      )}
+      style={{ width: sidebarExpanded ? expandedWidth : COLLAPSED_WIDTH }}
     >
+      {sidebarExpanded && (
+        <SidebarResizeHandle
+          width={expandedWidth}
+          onResize={setDragWidth}
+          onResizeEnd={handleResizeEnd}
+          onReset={handleResizeReset}
+        />
+      )}
       {/* Toggle button */}
       <button
         onClick={toggleSidebar}

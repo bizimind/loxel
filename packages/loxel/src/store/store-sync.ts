@@ -142,7 +142,11 @@ const syncTargets: Record<string, SyncTarget> = {
   projects: {
     getState: () => {
       const s = useProjectStore.getState();
-      return { sidebarExpanded: s.sidebarExpanded, expandedProjectIds: s.expandedProjectIds };
+      return {
+        sidebarExpanded: s.sidebarExpanded,
+        sidebarWidth: s.sidebarWidth,
+        expandedProjectIds: s.expandedProjectIds,
+      };
     },
     setState: (partial) => useProjectStore.setState(partial),
   },
