@@ -96,6 +96,21 @@ export function activatePanel(api: DockviewApi, panel: IDockviewPanel): void {
 }
 
 /**
+ * Re-attach a group's active panel content if dockview evicted it.
+ *
+ * dockview's `ContentContainer.renderPanel(panel, { asActive: false })` — used when a
+ * `renderer: "always"` panel is added as a background tab (layout restore, moves) or has its
+ * renderer changed — removes the group's currently displayed content before pointing at the new
+ * panel, leaving the group blank. Re-opening the active panel through the group model re-renders
+ * it without activating the group.
+ */
+export function reattachActiveContent(group: DockviewGroupPanel): void {
+  const active = group.activePanel;
+  if (!active || active.view.content.element.parentElement !== null) return;
+  group.model.openPanel(active, { skipSetGroupActive: true });
+}
+
+/**
  * Determine which zone a dockview group is in, based on its physical position
  * relative to the center group. This is the ground truth — it reads from the
  * actual DOM layout, not from any store.

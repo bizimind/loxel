@@ -17,6 +17,7 @@ import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { cn } from "@/lib/utils";
 import { inputToKeyCombo } from "@/store/keybindings/keybinding-schema";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
+import { reattachActiveContent } from "@/store/layout-actions";
 import { useSettingsStore } from "@/store/settings-store";
 
 const isElectron = navigator.userAgent.includes("Electron");
@@ -129,7 +130,9 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   // Layouts saved before browser panels used the "always" renderer restore with the default
   // renderer; upgrade them so hidden tabs stay attached (see createBrowser).
   useEffect(() => {
-    if (panelApi.renderer !== "always") panelApi.setRenderer("always");
+    if (panelApi.renderer === "always") return;
+    panelApi.setRenderer("always");
+    reattachActiveContent(panelApi.group);
   }, [panelApi]);
 
   // Hand keyboard focus to the page when the panel is activated (e.g. directional focus).
