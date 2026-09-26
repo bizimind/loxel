@@ -126,6 +126,12 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
 
+  // Layouts saved before browser panels used the "always" renderer restore with the default
+  // renderer; upgrade them so hidden tabs stay attached (see createBrowser).
+  useEffect(() => {
+    if (panelApi.renderer !== "always") panelApi.setRenderer("always");
+  }, [panelApi]);
+
   // Hand keyboard focus to the page when the panel is activated (e.g. directional focus).
   // Skip when focus is already inside the panel so clicking the URL bar keeps its focus.
   usePanelActivationFocus(

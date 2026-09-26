@@ -171,6 +171,8 @@ export function createBrowser(url?: string, split?: SplitPosition): void {
     title,
     params: { url: targetUrl },
     position: panelPosition(cApi, split),
+    // Keep the <webview> attached while hidden or moved: re-attaching it reloads the page.
+    renderer: "always",
   });
   uiLog.info("Panel created", { panelType: "browser", panelId });
 }
