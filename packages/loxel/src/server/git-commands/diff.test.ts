@@ -427,6 +427,27 @@ describe("getWorkingTreeDiff untracked files", () => {
     }
   });
 
+  test("fall back to per-file diffs when the combined diff cannot read a file", async () => {
+    const repo = await template.copy();
+    try {
+      await writeFile(repo.path, "hello.txt", "changed\n");
+      await writeFile(repo.path, "readable.txt", "r\n");
+      // A textconv driver that is not installed: `add -N` succeeds, the combined diff dies.
+      await writeFile(repo.path, ".gitattributes", "*.pdf diff=pdf\n");
+      await $`git -C ${repo.path} config diff.pdf.textconv loxel-missing-textconv-helper`.quiet();
+      await writeFile(repo.path, "doc.pdf", "not really a pdf\n");
+
+      const diff = await getWorkingTreeDiff(repo.path, repo.path);
+
+      const paths = diff.files.map((file) => file.newPath);
+      expect(paths).toContain("hello.txt");
+      expect(paths).toContain("readable.txt");
+      expect(paths).toContain(".gitattributes");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
   test("fall back to per-file diffs when git refuses to add the paths", async () => {
     const repo = await template.copy();
     try {

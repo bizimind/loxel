@@ -70,6 +70,8 @@ export class WorktreeStatusTracker {
   private timerDueAt = 0;
   private lastSweepStartedAt = Number.NEGATIVE_INFINITY;
   private lastSweepFinishedAt = Number.NEGATIVE_INFINITY;
+  /** When activity last asked for a sweep; one that began before it does not cover it. */
+  private lastActivityAt = Number.NEGATIVE_INFINITY;
   private lastPublished: string | null = null;
   private disposed = false;
 
@@ -136,6 +138,7 @@ export class WorktreeStatusTracker {
    * not its start: a sweep slower than the interval would otherwise run back to back.
    */
   private scheduleActivitySweep(): void {
+    this.lastActivityAt = Date.now();
     const readyAt =
       Math.max(this.lastSweepStartedAt, this.lastSweepFinishedAt) + this.activityIntervalMs;
     this.schedule(Math.max(this.urgentDelayMs, readyAt - Date.now()));
@@ -181,10 +184,14 @@ export class WorktreeStatusTracker {
     }
 
     this.clearTimer();
-    this.lastSweepStartedAt = Date.now();
+    const startedAt = Date.now();
+    this.lastSweepStartedAt = startedAt;
     const generation = this.generation;
     const promise = this.runSweep(generation).finally(() => {
       this.inFlight = null;
+      // Activity during a long sweep may have armed a timer that fired mid-sweep and joined it;
+      // that sweep began too early to cover the activity, so schedule the one it asked for.
+      if (!this.disposed && this.lastActivityAt > startedAt) this.scheduleActivitySweep();
     });
     this.inFlight = { generation, promise };
     return promise;

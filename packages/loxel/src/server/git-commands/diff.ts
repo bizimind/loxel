@@ -196,14 +196,23 @@ async function getUntrackedDiff(worktreePath: string): Promise<FileDiff[]> {
         });
         continue;
       }
-      return parseDiffOutput(await $`git -C ${worktreePath} diff`.env(env).text());
+      // `add -N` never reads contents, so an unreadable file or a missing textconv helper only
+      // fails here; the per-file fallback below then loses just that file, not the whole diff.
+      const diff = await $`git -C ${worktreePath} diff`.env(env).nothrow().quiet();
+      if (diff.exitCode === 0) return parseDiffOutput(diff.stdout.toString());
+      log.debug("Diff of intent-to-add untracked files failed", {
+        path: worktreePath,
+        stderr: diff.stderr.toString().trim(),
+      });
+      break;
     }
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
 
-  // Something `git add` refuses outright (e.g. a path outside a sparse-checkout cone): fall
-  // back to one diff per file, so a rare edge case costs speed rather than missing files.
+  // Something `git add` refuses outright (e.g. a path outside a sparse-checkout cone), or a file
+  // the combined `git diff` cannot read: fall back to one diff per file, so a rare edge case
+  // costs speed rather than missing files.
   // Deterministic for a given checkout (it repeats on every refetch), so not warn-level.
   log.debug("Falling back to per-file untracked diffs", {
     path: worktreePath,

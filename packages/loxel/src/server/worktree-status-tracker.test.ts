@@ -204,6 +204,28 @@ describe("WorktreeStatusTracker", () => {
     expect(git.sweeps).toBe(3);
   });
 
+  test("activity during a sweep longer than the interval still gets its own sweep", async () => {
+    const git = fakeGit();
+    const { tracker, published } = makeTracker(git);
+    await tracker.get();
+
+    const release = git.hold();
+    tracker.invalidate();
+    await Bun.sleep(20);
+    expect(git.sweeps).toBe(2);
+    // An unwatched worktree changes after the slow sweep already read it, then the user edits.
+    git.state.set(OTHER, dirty(OTHER, ["late"]));
+    tracker.update(MAIN, status());
+    await Bun.sleep(300); // the activity timer fires mid-sweep and joins it
+    release();
+
+    await Bun.sleep(100);
+    expect(git.sweeps).toBe(2); // spaced from the end of the slow sweep
+    await Bun.sleep(200);
+    expect(git.sweeps).toBe(3);
+    expect(published.at(-1)).toEqual([dirty(OTHER, ["late"])]);
+  });
+
   test("a sweep does not undo a newer live status", async () => {
     const git = fakeGit();
     const live = new Map<string, StatusInfo>();
