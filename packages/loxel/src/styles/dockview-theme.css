@@ -156,20 +156,6 @@
   box-shadow: inset 0 -2px 0 #467ff2;
 }
 
-/* Sash (resize handle) styling */
-.dockview-theme-abyss .dv-resize-container .dv-sash {
-  background-color: transparent;
-  transition: background-color 150ms ease;
-}
-
-.dockview-theme-abyss .dv-resize-container .dv-sash:hover {
-  background-color: var(--dv-separator-border);
-}
-
-.dockview-theme-abyss .dv-resize-container .dv-sash.active {
-  background-color: var(--sash-active);
-}
-
 /* Panel content fills container */
 .dockview-theme-abyss .dv-groupview .dv-groupview-panel {
   overflow: hidden;
