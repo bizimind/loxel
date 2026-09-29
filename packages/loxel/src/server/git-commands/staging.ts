@@ -1,7 +1,6 @@
 import { $ } from "bun";
 
 import { logger } from "../logger";
-import { FSMONITOR } from "./git-env";
 import { validatePath } from "./validation";
 
 const log = logger.child("git");
@@ -12,7 +11,7 @@ export async function stageFiles(cwd: string, files: string[]): Promise<void> {
   for (const file of files) {
     validatePath(file);
   }
-  await $`git ${FSMONITOR} -C ${cwd} add -- ${files}`.quiet();
+  await $`git -C ${cwd} add -- ${files}`.quiet();
 }
 
 export async function unstageFiles(cwd: string, files: string[]): Promise<void> {
@@ -21,11 +20,11 @@ export async function unstageFiles(cwd: string, files: string[]): Promise<void> 
   for (const file of files) {
     validatePath(file);
   }
-  await $`git ${FSMONITOR} -C ${cwd} restore --staged -- ${files}`.quiet();
+  await $`git -C ${cwd} restore --staged -- ${files}`.quiet();
 }
 
 export async function stageHunk(cwd: string, patch: string): Promise<void> {
-  const proc = Bun.spawn(["git", ...FSMONITOR, "-C", cwd, "apply", "--cached", "-"], {
+  const proc = Bun.spawn(["git", "-C", cwd, "apply", "--cached", "-"], {
     stdin: "pipe",
     stderr: "pipe",
   });
@@ -39,7 +38,7 @@ export async function stageHunk(cwd: string, patch: string): Promise<void> {
 }
 
 export async function unstageHunk(cwd: string, patch: string): Promise<void> {
-  const proc = Bun.spawn(["git", ...FSMONITOR, "-C", cwd, "apply", "--cached", "--reverse", "-"], {
+  const proc = Bun.spawn(["git", "-C", cwd, "apply", "--cached", "--reverse", "-"], {
     stdin: "pipe",
     stderr: "pipe",
   });
@@ -58,5 +57,5 @@ export async function discardChanges(cwd: string, files: string[]): Promise<void
   for (const file of files) {
     validatePath(file);
   }
-  await $`git ${FSMONITOR} -C ${cwd} checkout -- ${files}`.quiet();
+  await $`git -C ${cwd} checkout -- ${files}`.quiet();
 }

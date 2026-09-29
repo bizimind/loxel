@@ -365,8 +365,7 @@ async function handleDiff(req: Request, ctx: RouteContext): Promise<Response> {
 async function handleWorktreeStatuses(req: Request, ctx: RouteContext): Promise<Response> {
   const resolved = resolveProjectFromReq(req, ctx);
   if (resolved instanceof Response) return resolved;
-  const statuses = await git.getDirtyWorktreeStatuses(resolved.cwd);
-  return json(statuses);
+  return json(await resolved.project.worktreeStatuses.get());
 }
 
 // GET /api/branches

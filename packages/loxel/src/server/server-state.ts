@@ -7,6 +7,7 @@ import type { FileOperationsService } from "./file-operations-service";
 import type { FileWatcher } from "./file-watcher";
 import type { ProjectFilesService } from "./project-files-service";
 import type { ReviewDb } from "./review-db";
+import type { WorktreeStatusTracker } from "./worktree-status-tracker";
 
 /** Lightweight, always-running state per registered project. */
 export interface ProjectState {
@@ -18,6 +19,8 @@ export interface ProjectState {
   authorName: string | null;
   /** Absolute path to the directory holding this repo's worktrees (`.worktrees`). */
   worktreesDir: string;
+  /** Cached dirty status of every worktree, pushed as `worktree_status_changed`. */
+  worktreeStatuses: WorktreeStatusTracker;
 }
 
 /**
@@ -47,7 +50,7 @@ export function findOwningProject<T extends Pick<ProjectState, "cwd" | "worktree
 export interface WorktreeResources {
   /** Key into the projects map (resolved git root). */
   projectPath: string;
-  /** Watches the worktree's .git dir for status events. Null for non-bare repos. */
+  /** Watches a linked worktree's git dir for status events. Null for a regular repo's root. */
   worktreeWatcher: FileWatcher | null;
   filesService: ProjectFilesService;
   fileOpsService: FileOperationsService;
@@ -55,8 +58,6 @@ export interface WorktreeResources {
   externalFilesService: ExternalFilesService;
   /** Connected clients subscribing to this worktree's events. */
   subscribers: Set<ServerWebSocket<WsData>>;
-  /** Per-worktree git status suppress timer to prevent retrigger loops. */
-  statusSuppressUntil: number;
 }
 
 /** Result of resolving an absolute file path to its owning worktree + service. */

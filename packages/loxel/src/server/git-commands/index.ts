@@ -11,7 +11,7 @@ export {
   getWorkingTreeFileContent,
   writeWorkingTreeFileContent,
 } from "./file-content";
-export { FSMONITOR, readOnlyGitEnv } from "./git-env";
+export { readOnlyGitEnv } from "./git-env";
 export { getBranchCommits, getLog } from "./log";
 export {
   checkout,
@@ -33,9 +33,11 @@ export { discardChanges, stageFiles, stageHunk, unstageFiles, unstageHunk } from
 export { getStatus } from "./status";
 export { validatePath } from "./validation";
 export {
-  getDirtyWorktreeStatuses,
   getWorktrees,
-  getWorktreeStatus,
+  listWorktrees,
   parseWorktreeListOutput,
+  readWorktreeStatuses,
+  toDirtyWorktreeStatus,
   validateWorktreePath,
 } from "./worktree";
+export type { WorktreeStatusProbe } from "./worktree";

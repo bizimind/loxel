@@ -112,7 +112,7 @@ Full git client via context menus and inline forms:
 - **Branches** — create, delete, rename, checkout, favorites, upstream tracking (ahead/behind)
 - **Reset** — soft, mixed, hard to any commit
 - **Stash** — create, apply, pop, drop
-- **Worktree status** — dirty status across all worktrees
+- **Worktree status** — dirty status across all worktrees. The active worktree updates live from its own watchers; the others are re-read after commits, checkouts and worktree add/remove, and at most every 5 seconds while you work in the active one (see [WATCHERS.md](WATCHERS.md#status-refresh-pipeline))
 
 ### Code Editor & File Explorer
 
