@@ -1,14 +1,13 @@
 import { $ } from "bun";
 
 import { logger } from "../logger";
-import { FSMONITOR } from "./git-env";
 import { validateCommitHash, validateRefName } from "./validation";
 
 const log = logger.child("git");
 
 export async function createCommit(cwd: string, message: string): Promise<string> {
   log.debug(`Creating commit (${message.length} char message)`);
-  await $`git ${FSMONITOR} -C ${cwd} commit -m ${message}`.quiet();
+  await $`git -C ${cwd} commit -m ${message}`.quiet();
   const result = await $`git -C ${cwd} rev-parse HEAD`.text();
   return result.trim();
 }
@@ -16,7 +15,7 @@ export async function createCommit(cwd: string, message: string): Promise<string
 export async function checkout(cwd: string, ref: string): Promise<void> {
   validateRefName(ref);
   log.debug(`Checking out ${ref}`);
-  await $`git ${FSMONITOR} -C ${cwd} checkout ${ref}`.quiet();
+  await $`git -C ${cwd} checkout ${ref}`.quiet();
 }
 
 export async function reset(
@@ -26,7 +25,7 @@ export async function reset(
 ): Promise<void> {
   validateCommitHash(commit);
   log.debug(`Resetting --${mode} to ${commit.slice(0, 8)}`);
-  await $`git ${FSMONITOR} -C ${cwd} reset --${mode} ${commit}`.quiet();
+  await $`git -C ${cwd} reset --${mode} ${commit}`.quiet();
 }
 
 export async function cherryPick(cwd: string, commits: string[]): Promise<void> {
@@ -36,7 +35,7 @@ export async function cherryPick(cwd: string, commits: string[]): Promise<void> 
   log.debug(
     `Cherry-picking ${commits.length} commit(s): ${commits.map((c) => c.slice(0, 8)).join(", ")}`,
   );
-  await $`git ${FSMONITOR} -C ${cwd} cherry-pick ${commits}`.quiet();
+  await $`git -C ${cwd} cherry-pick ${commits}`.quiet();
 }
 
 export async function revert(cwd: string, commits: string[]): Promise<void> {
@@ -46,7 +45,7 @@ export async function revert(cwd: string, commits: string[]): Promise<void> {
   log.debug(
     `Reverting ${commits.length} commit(s): ${commits.map((c) => c.slice(0, 8)).join(", ")}`,
   );
-  await $`git ${FSMONITOR} -C ${cwd} revert --no-commit ${commits}`.quiet();
+  await $`git -C ${cwd} revert --no-commit ${commits}`.quiet();
 }
 
 export async function createBranch(cwd: string, name: string, startPoint?: string): Promise<void> {
@@ -76,18 +75,18 @@ export async function renameBranch(cwd: string, oldName: string, newName: string
 
 export async function stash(cwd: string, message?: string): Promise<void> {
   if (message) {
-    await $`git ${FSMONITOR} -C ${cwd} stash push -m ${message}`.quiet();
+    await $`git -C ${cwd} stash push -m ${message}`.quiet();
   } else {
-    await $`git ${FSMONITOR} -C ${cwd} stash push`.quiet();
+    await $`git -C ${cwd} stash push`.quiet();
   }
 }
 
 export async function stashApply(cwd: string, index: number): Promise<void> {
-  await $`git ${FSMONITOR} -C ${cwd} stash apply stash@{${index}}`.quiet();
+  await $`git -C ${cwd} stash apply stash@{${index}}`.quiet();
 }
 
 export async function stashPop(cwd: string, index: number): Promise<void> {
-  await $`git ${FSMONITOR} -C ${cwd} stash pop stash@{${index}}`.quiet();
+  await $`git -C ${cwd} stash pop stash@{${index}}`.quiet();
 }
 
 export async function stashDrop(cwd: string, index: number): Promise<void> {

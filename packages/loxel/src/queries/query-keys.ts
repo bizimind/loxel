@@ -37,3 +37,28 @@ export const queryKeys = {
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
 };
+
+const WORKING_TREE_DIFF_TYPES: ReadonlySet<unknown> = new Set<DiffSource["type"]>([
+  "staged",
+  "unstaged",
+  "uncommitted",
+]);
+
+/**
+ * Whether a query key is a diff of `projectPath` whose content follows the working tree or the
+ * index. Commit and range diffs are keyed by full SHAs, so their content never changes and a
+ * status or ref change has no reason to refetch them.
+ */
+export function isWorkingTreeDiffKey(
+  queryKey: readonly unknown[],
+  projectPath: string | null,
+): boolean {
+  if (queryKey[0] !== "diff" || queryKey[1] !== projectPath) return false;
+  const source = queryKey[2];
+  return (
+    typeof source === "object" &&
+    source !== null &&
+    "type" in source &&
+    WORKING_TREE_DIFF_TYPES.has(source.type)
+  );
+}

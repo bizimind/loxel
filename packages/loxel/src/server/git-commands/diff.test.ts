@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { chmod, mkdir, symlink } from "node:fs/promises";
 import path from "node:path";
 
 import { $ } from "bun";
 
+import { parseDiffOutput } from "../parsers/diff";
 import {
   getCommitDiff,
   getRangeDiff,
@@ -313,6 +315,152 @@ describe("getWorkingTreeDiff", () => {
       const paths = diff.files.map((f) => f.newPath);
       expect(paths).toContain("second.txt");
       expect(paths).toContain("third.txt");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+describe("getWorkingTreeDiff untracked files", () => {
+  /** The old implementation: one `git diff --no-index` per file, in `ls-files` order. */
+  async function perFileDiffs(repoPath: string, files: string[]) {
+    const diffs = [];
+    for (const file of files) {
+      const out = await $`git -C ${repoPath} diff --no-index -- /dev/null ${file}`.nothrow().text();
+      diffs.push(...parseDiffOutput(out));
+    }
+    return diffs;
+  }
+
+  test("match per-file `git diff --no-index` output for every kind of file", async () => {
+    const repo = await template.copy();
+    try {
+      const names = [
+        ":colon.txt",
+        "bin.dat",
+        "empty.txt",
+        "exec.sh",
+        "link",
+        "no-newline.txt",
+        'q"uote.txt',
+        "sp ace/f g.txt",
+        "st*ar.txt",
+        "text.txt",
+        "ünï.txt",
+      ];
+      await writeFile(repo.path, "text.txt", "a\nb\n");
+      await writeFile(repo.path, "no-newline.txt", "no newline");
+      await writeFile(repo.path, "empty.txt", "");
+      await Bun.write(path.join(repo.path, "bin.dat"), new Uint8Array([120, 0, 121]));
+      await writeFile(repo.path, "exec.sh", "#!/bin/sh\n");
+      await chmod(path.join(repo.path, "exec.sh"), 0o755);
+      await symlink("text.txt", path.join(repo.path, "link"));
+      for (const name of [":colon.txt", 'q"uote.txt', "sp ace/f g.txt", "st*ar.txt", "ünï.txt"]) {
+        await writeFile(repo.path, name, `${name}\n`);
+      }
+
+      const diff = await getWorkingTreeDiff(repo.path, repo.path);
+
+      expect(diff.files.map((file) => file.newPath)).toEqual(names);
+      expect(diff.files).toEqual(await perFileDiffs(repo.path, names));
+      expect(diff.files.find((file) => file.newPath === "bin.dat")?.isBinary).toBe(true);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("leave nested repositories out, as before", async () => {
+    const repo = await template.copy();
+    try {
+      await writeFile(repo.path, "nested/n.txt", "n\n");
+      await $`git -C ${path.join(repo.path, "nested")} init -q`.quiet();
+      await writeFile(repo.path, "new.txt", "x\n");
+
+      const diff = await getWorkingTreeDiff(repo.path, repo.path);
+
+      expect(diff.files.map((file) => file.newPath)).toEqual(["new.txt"]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("write nothing under the git dir", async () => {
+    // A fresh commit rather than template.copy(): copying leaves stat-dirty index entries, and
+    // porcelain `git diff` rewrites the index for those even under GIT_OPTIONAL_LOCKS=0 — a
+    // one-off refresh of the tracked half, not what this test is about.
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "init", { "hello.txt": "hello\n" });
+      // The empty blob already existing is the case where `git add -N` would freshen it.
+      await $`git -C ${repo.path} hash-object -w -t blob /dev/null`.quiet();
+      await writeFile(repo.path, "new.txt", "x\n");
+      const marker = path.join(repo.path, "marker");
+      await Bun.write(marker, "");
+      await Bun.sleep(1100); // mtime granularity on coarse filesystems
+
+      await getWorkingTreeDiff(repo.path, repo.path);
+
+      const touched = await $`find ${path.join(repo.path, ".git")} -newer ${marker}`.text();
+      expect(touched.trim()).toBe("");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("report tracked renames and non-ASCII names git quotes in diff headers", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "init", { "plain.txt": "a\n", "ünï.txt": "b\n" });
+      await $`git -C ${repo.path} mv plain.txt ${'q"ü.txt'}`.quiet();
+      await writeFile(repo.path, "ünï.txt", "b\nc\n");
+
+      const diff = await getWorkingTreeDiff(repo.path, repo.path);
+
+      expect(
+        diff.files.map(({ oldPath, newPath, status }) => ({ oldPath, newPath, status })),
+      ).toEqual([
+        { oldPath: "plain.txt", newPath: 'q"ü.txt', status: "renamed" },
+        { oldPath: "ünï.txt", newPath: "ünï.txt", status: "modified" },
+      ]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("fall back to per-file diffs when the combined diff cannot read a file", async () => {
+    const repo = await template.copy();
+    try {
+      await writeFile(repo.path, "hello.txt", "changed\n");
+      await writeFile(repo.path, "readable.txt", "r\n");
+      // A textconv driver that is not installed: `add -N` succeeds, the combined diff dies.
+      await writeFile(repo.path, ".gitattributes", "*.pdf diff=pdf\n");
+      await $`git -C ${repo.path} config diff.pdf.textconv loxel-missing-textconv-helper`.quiet();
+      await writeFile(repo.path, "doc.pdf", "not really a pdf\n");
+
+      const diff = await getWorkingTreeDiff(repo.path, repo.path);
+
+      const paths = diff.files.map((file) => file.newPath);
+      expect(paths).toContain("hello.txt");
+      expect(paths).toContain("readable.txt");
+      expect(paths).toContain(".gitattributes");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("fall back to per-file diffs when git refuses to add the paths", async () => {
+    const repo = await template.copy();
+    try {
+      await commit(repo.path, "dirs", { "in/a.txt": "a\n", "out/b.txt": "b\n" });
+      await $`git -C ${repo.path} sparse-checkout set --cone in`.quiet();
+      // Untracked, but outside the sparse cone: `git add` rejects it.
+      await mkdir(path.join(repo.path, "out"), { recursive: true });
+      await writeFile(repo.path, "out/new.txt", "outside\n");
+      await writeFile(repo.path, "in/new.txt", "inside\n");
+
+      const diff = await getWorkingTreeDiff(repo.path, repo.path);
+
+      expect(diff.files.map((file) => file.newPath).sort()).toEqual(["in/new.txt", "out/new.txt"]);
     } finally {
       await repo.cleanup();
     }

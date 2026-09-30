@@ -13,7 +13,7 @@ constraints that matter when changing them.
 | `ProjectFilesService`      | worktree resources  | working tree, recursive             | file tree and status overlays                          |
 | `DetachedFilesService`     | worktree resources  | detached draft directory            | detached-file panels                                   |
 | `ExternalFilesService`     | worktree resources  | individually opened external files  | external-file panels                                   |
-| Git fsmonitor              | Git                 | one daemon per Git directory        | Git status acceleration                                |
+| Git fsmonitor              | Git (user config)   | one daemon per Git directory        | Git status acceleration, only if the user enables it   |
 | Language servers           | LSP managers        | implementation-specific             | diagnostics and language features                      |
 
 For a bare project, the project Git directory is also the repository root and therefore contains
@@ -26,6 +26,8 @@ reported path; a catch-all would treat source edits and dependency writes as Git
 Trailing `.lock` is stripped rather than ignored because macOS FSEvents may report only Git's
 temporary lock filename. Read-only Git commands run by Loxel must set `GIT_OPTIONAL_LOCKS=0`, or a
 status refresh can write `index.lock`, trigger another status refresh, and feed itself.
+
+Nothing Loxel runs to read state may write under the Git directory, `objects/` included: loose objects map to a status/refs/log refresh. The untracked half of the working-tree diff therefore records intent-to-add entries in a throwaway index _and_ object directory — against the real object store, `git add -N` stores or freshens the empty blob, which would refetch the diff forever. The one known exception is porcelain `git diff`, which rewrites the index for stat-dirty entries (same content, new mtime) even under `GIT_OPTIONAL_LOCKS=0`; that write makes the entries fresh, so it costs one extra refresh and converges.
 
 Important classifications:
 
@@ -46,6 +48,16 @@ already handles.
 Worktree add/remove also has a non-recursive watch on `<commonDir>/worktrees`. Removal of a watched
 directory does not reliably emit an event from that directory's own watcher, while its parent does
 observe the directory entry disappearing.
+
+## Status refresh pipeline
+
+A subscribed worktree's `ProjectFilesService` is the single reader of its Git status. Each refresh pass runs one `git status --porcelain=v2 --branch -z` plus one ignored-files listing, and the result feeds everything: the `status_changed` broadcast, the file-tree colors, and that worktree's entry in the cross-worktree dirty list. Working-tree edits (via `FilesSyncService`) and Git-directory events (via the `FileWatcher`s) both request passes; neither runs `git status` itself.
+
+Passes are coalesced per worktree: one runs at a time, and everything requested meanwhile — flush batches with their nonces, file operations, Git-directory refreshes — merges into a single follow-up pass. A burst costs at most two passes, and no request is dropped, so the last event always produces a status that reflects it. There is no suppression window: the old 700ms one only existed to break a loop caused by forced fsmonitor index writes, and it silently dropped real updates that arrived inside it.
+
+`WorktreeStatusTracker` owns each project's cross-worktree dirty list (`worktree_status_changed` and `/api/worktree-statuses`). Subscribed worktrees update their entry from their live snapshot at no Git cost. Unwatched worktrees can only be refreshed by a sweep that runs `git status` in each of them (at most six concurrently): soon after a `log` or `worktrees` event, and, when triggered only by activity in a subscribed worktree, no sooner than five seconds after the previous sweep finished. Sweeps are single-flight, reuse live snapshots, and keep a worktree's last known state when its status cannot be read rather than reporting it clean. An explicit request (a client loading the list) re-reads unless a sweep finished within the last two seconds, since unwatched worktrees change without any event. Clients rely on the pushed list and do not refetch it on `log_changed`.
+
+The client refetches only working-tree diffs (staged, unstaged, uncommitted) on `status_changed` and ref/log events; commit and range diffs are keyed by full SHAs and never change.
 
 ## Working-tree file events
 
@@ -103,10 +115,9 @@ more specific ref/index names during a commit. Per-event debouncing bounds the e
 
 ## External processes
 
-Git fsmonitor daemon count scales with Git directories, not just top-level worktrees. Submodules
-are separate repositories and can account for most daemon processes. Git reuses one daemon via
-`<gitdir>/fsmonitor--daemon.ipc`; a high count alone is not evidence of a leak. Measurements that
-motivated this document found matching live Git directories and no orphaned daemon roots.
+Loxel never passes `-c core.fsmonitor=true`; whether Git's fsmonitor daemon runs is the user's Git configuration to decide. Loxel used to force it on, which left a persistent daemon behind for every Git directory a status touched — every worktree and, because `-c` settings travel to child Git processes, every submodule — and bought nothing: with `GIT_OPTIONAL_LOCKS=0` Git can never save the fsmonitor token in the index, so every query got a "trivial" answer followed by a full scan. Daemons started by those versions stay until their worktree is removed; stopping them is safe (`pkill -f 'git fsmonitor--daemon'`), since Git restarts one on demand where config enables it.
+
+When the user does enable fsmonitor, daemon count scales with Git directories, not just top-level worktrees. Git reuses one daemon via `<gitdir>/fsmonitor--daemon.ipc`; a high count alone is not evidence of a leak.
 
 Language servers may run their own watchers. They are not currently torn down when a worktree is
 removed, so they can remain rooted at a deleted path. That lifecycle gap is outside this change
@@ -116,7 +127,10 @@ and should be considered when consolidating watcher ownership.
 
 When changing watcher behavior, verify:
 
-- read-only Git calls use `readOnlyGitEnv()`;
+- read-only Git calls use `readOnlyGitEnv()` and never pass `-c core.fsmonitor`;
+- nothing a read path runs writes under the Git directory, `objects/` included;
+- watcher-driven status consumers use the files-service snapshot instead of running another `git status` (an explicit `/api/status` request still reads fresh, so it reflects a just-finished mutation);
+- a burst of events is coalesced, never dropped: the last event is always reflected;
 - bare-repo source paths cannot match Git metadata rules;
 - project-level events are not multiplied once per subscribed worktree;
 - worktree lifecycle broadcasts precede resource teardown;

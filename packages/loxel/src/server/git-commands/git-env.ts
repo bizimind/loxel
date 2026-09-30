@@ -5,8 +5,12 @@
  * of truth for how Loxel shells out to git, independent of argument validation.
  */
 
-/** Enables git's built-in fsmonitor daemon for commands that scan the working tree or index. */
-export const FSMONITOR = ["-c", "core.fsmonitor=true"];
+// Loxel deliberately does NOT pass `-c core.fsmonitor=true`. Forcing it bought nothing: read-only
+// commands run with GIT_OPTIONAL_LOCKS=0 (below), so git can never persist the fsmonitor token
+// in the index and every query gets a "trivial" response followed by a full lstat scan. It cost an
+// IPC round trip per command and left a persistent `fsmonitor--daemon` behind for every worktree
+// and — because `-c` travels to child git processes — every submodule a status touched. Whether
+// fsmonitor runs is the user's git configuration to decide.
 
 /**
  * Environment for read-only git commands.

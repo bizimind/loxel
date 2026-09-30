@@ -1,10 +1,15 @@
 import type { FileStatus, StatusInfo } from "@/api/git-models";
 
 /**
- * Parse git status --porcelain=v2 --branch output.
+ * Parse `git status --porcelain=v2 --branch -z` output.
+ *
+ * `-z` is required, not cosmetic: without it git C-quotes any path containing a double quote,
+ * a control character or a non-ASCII byte (`"\303\274.txt"`), and the quoted form matches
+ * nothing on disk. With `-z` every record is NUL-terminated and paths are verbatim; a rename
+ * or copy record is followed by one extra NUL-terminated field holding the original path.
  */
 export function parseStatusOutput(output: string): StatusInfo {
-  const lines = output.trim().split("\n");
+  const records = output.split("\0");
   const staged: FileStatus[] = [];
   const unstaged: FileStatus[] = [];
   const untracked: string[] = [];
@@ -16,34 +21,32 @@ export function parseStatusOutput(output: string): StatusInfo {
   let ahead = 0;
   let behind = 0;
 
-  for (const line of lines) {
-    if (line.startsWith("# branch.oid ")) {
-      commit = line.slice("# branch.oid ".length);
-    } else if (line.startsWith("# branch.head ")) {
-      const head = line.slice("# branch.head ".length);
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i]!;
+    if (record.startsWith("# branch.oid ")) {
+      commit = record.slice("# branch.oid ".length);
+    } else if (record.startsWith("# branch.head ")) {
+      const head = record.slice("# branch.head ".length);
       branch = head === "(detached)" ? null : head;
-    } else if (line.startsWith("# branch.upstream ")) {
-      upstream = line.slice("# branch.upstream ".length);
-    } else if (line.startsWith("# branch.ab ")) {
-      const match = line.match(/# branch\.ab \+(\d+) -(\d+)/);
+    } else if (record.startsWith("# branch.upstream ")) {
+      upstream = record.slice("# branch.upstream ".length);
+    } else if (record.startsWith("# branch.ab ")) {
+      const match = record.match(/# branch\.ab \+(\d+) -(\d+)/);
       if (match) {
         ahead = parseInt(match[1] ?? "0", 10);
         behind = parseInt(match[2] ?? "0", 10);
       }
-    } else if (line.startsWith("1 ") || line.startsWith("2 ")) {
-      // Ordinary or rename/copy entry
-      const entry = parseOrdinaryEntry(line);
-      if (entry) {
-        if (entry.staged) staged.push(entry.staged);
-        if (entry.unstaged) unstaged.push(entry.unstaged);
-      }
-    } else if (line.startsWith("u ")) {
-      // Unmerged entry
-      const entry = parseUnmergedEntry(line);
-      if (entry) conflicted.push(entry);
-    } else if (line.startsWith("? ")) {
-      // Untracked file
-      untracked.push(line.slice(2));
+    } else if (record.startsWith("1 ")) {
+      addOrdinaryEntry(record, 8, undefined, staged, unstaged);
+    } else if (record.startsWith("2 ")) {
+      // The original path is the next NUL-terminated field; consume it.
+      i++;
+      addOrdinaryEntry(record, 9, records[i], staged, unstaged);
+    } else if (record.startsWith("u ")) {
+      const path = fieldsFrom(record, 10);
+      if (path) conflicted.push({ path, status: "U" });
+    } else if (record.startsWith("? ")) {
+      untracked.push(record.slice(2));
     }
   }
 
@@ -51,66 +54,40 @@ export function parseStatusOutput(output: string): StatusInfo {
 }
 
 /**
- * Parse an ordinary (1) or rename/copy (2) entry from porcelain v2.
- * Format:
- *   1 XY sub mH mI mW hH hI path
- *   2 XY sub mH mI mW hH hI Xscore path\torigPath
+ * The path of a record: everything after its first `fixedFields` space-separated fields.
+ * Paths may contain spaces, so the remainder is taken verbatim rather than split.
  */
-function parseOrdinaryEntry(
-  line: string,
-): { staged: FileStatus | null; unstaged: FileStatus | null } | null {
-  const parts = line.split(" ");
-  if (parts.length < 9) return null;
-
-  const xy = parts[1];
-  if (!xy || xy.length < 2) return null;
-
-  const x = xy.charAt(0); // staged status
-  const y = xy.charAt(1); // unstaged status
-
-  const isRename = line.startsWith("2 ");
-  let path: string;
-  let oldPath: string | undefined;
-
-  if (isRename) {
-    // Format: 2 XY sub mH mI mW hH hI Xscore path\torigPath
-    // parts[8] is Xscore (e.g., "R100"), path starts at parts[9]
-    const pathStr = parts.slice(9).join(" ");
-    const tabIndex = pathStr.indexOf("\t");
-    if (tabIndex !== -1) {
-      path = pathStr.slice(0, tabIndex);
-      oldPath = pathStr.slice(tabIndex + 1);
-    } else {
-      path = pathStr;
-    }
-  } else {
-    path = parts.slice(8).join(" ");
+function fieldsFrom(record: string, fixedFields: number): string | null {
+  let index = 0;
+  for (let n = 0; n < fixedFields; n++) {
+    index = record.indexOf(" ", index);
+    if (index === -1) return null;
+    index++;
   }
-
-  const result: { staged: FileStatus | null; unstaged: FileStatus | null } = {
-    staged: null,
-    unstaged: null,
-  };
-
-  if (x !== ".") {
-    result.staged = { path, oldPath, status: mapStatusChar(x) };
-  }
-  if (y !== ".") {
-    result.unstaged = { path, status: mapStatusChar(y) };
-  }
-
-  return result;
+  return record.slice(index) || null;
 }
 
 /**
- * Parse an unmerged (u) entry from porcelain v2.
+ * Add an ordinary (`1`) or rename/copy (`2`) record.
+ *
+ *   1 XY sub mH mI mW hH hI path
+ *   2 XY sub mH mI mW hH hI Xscore path   (followed by origPath as its own -z field)
  */
-function parseUnmergedEntry(line: string): FileStatus | null {
-  const parts = line.split(" ");
-  if (parts.length < 11) return null;
+function addOrdinaryEntry(
+  record: string,
+  fixedFields: number,
+  oldPath: string | undefined,
+  staged: FileStatus[],
+  unstaged: FileStatus[],
+): void {
+  const xy = record.slice(2, 4);
+  const path = fieldsFrom(record, fixedFields);
+  if (xy.length < 2 || !path) return;
 
-  const path = parts.slice(10).join(" ");
-  return { path, status: "U" };
+  const x = xy.charAt(0); // staged status
+  const y = xy.charAt(1); // unstaged status
+  if (x !== ".") staged.push({ path, oldPath: oldPath || undefined, status: mapStatusChar(x) });
+  if (y !== ".") unstaged.push({ path, status: mapStatusChar(y) });
 }
 
 /**

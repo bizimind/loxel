@@ -19,7 +19,7 @@ import { applyStoreUpdate } from "@/store/store-sync";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { queryKeys } from "./query-keys";
+import { isWorkingTreeDiffKey, queryKeys } from "./query-keys";
 
 const log = frontendLog.child("files");
 
@@ -57,10 +57,13 @@ export function useWsBridge(): void {
         case "status_changed": {
           const projectPath = deriveProjectPath(message.wtPath);
           queryClient.setQueryData(queryKeys.status(projectPath, message.wtPath), message.data);
-          // Refetch diffs (uncommitted changes may have changed).
+          // Refetch working-tree diffs (uncommitted changes may have changed). This fires on
+          // every edit, so commit/range diffs — immutable — are deliberately left alone.
           // File content is handled per-file by file_content_changed events —
           // no need to invalidate all fileContent queries on every status change.
-          queryClient.invalidateQueries({ queryKey: ["diff", projectPath] });
+          queryClient.invalidateQueries({
+            predicate: (query) => isWorkingTreeDiffKey(query.queryKey, projectPath),
+          });
           break;
         }
 
@@ -244,13 +247,13 @@ export function useWsBridge(): void {
         case "log_changed":
           queryClient.invalidateQueries({ queryKey: ["commits", message.projectPath] });
           queryClient.invalidateQueries({ queryKey: ["branchCommits", message.projectPath] });
-          // Refetch diffs — commit amends / rebases change diff content
-          queryClient.invalidateQueries({ queryKey: ["diff", message.projectPath] });
-          if (message.type === "log_changed") {
-            queryClient.invalidateQueries({
-              queryKey: queryKeys.worktreeStatuses(message.projectPath),
-            });
-          }
+          // A commit or reset moves what uncommitted/staged diffs compare against. Commit and
+          // range diffs are keyed by SHA; an amend or rebase yields new SHAs, hence new keys.
+          queryClient.invalidateQueries({
+            predicate: (query) => isWorkingTreeDiffKey(query.queryKey, message.projectPath),
+          });
+          // Worktree statuses need no refetch here: the server re-sweeps them on the same git
+          // event and pushes the result as worktree_status_changed.
           break;
 
         case "worktrees_changed": {

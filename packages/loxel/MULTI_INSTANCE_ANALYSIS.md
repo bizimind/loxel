@@ -20,24 +20,13 @@ The port is hardcoded: `7433` (prod) / `7434` (dev). `Bun.serve()` binds to `127
 
 All watcher debounce/suppression state is per-process. Each instance independently reacts to filesystem changes, including changes caused by the other instance. This section is relevant to Approach A (multiple servers); Approach B (shared server) eliminates these concerns entirely.
 
-#### 2a. FileWatcher & Status Suppress — NO CROSS-INSTANCE LOOP
+#### 2a. FileWatcher & Status Refresh — NO CROSS-INSTANCE LOOP
 
-**Files:** `src/server/file-watcher.ts`, `src/server/index.ts:101,142-165`
+**Files:** `src/server/file-watcher.ts`, `src/server/index.ts`, `src/server/project-files-service.ts`
 
-The concern: `git -c core.fsmonitor=true status` updates the index (to refresh fsmonitor extension data), which triggers the FileWatcher's `"status"` event. Within a single instance, the `statusSuppressUntil` guard (700ms window) prevents this from becoming an infinite loop. But does it work cross-instance?
+The concern: if one instance's status refresh wrote into the git dir, the other instance's watcher would see it, refresh, write, and so on. That cannot happen because Loxel's read paths write nothing there: every read-only git command runs with `GIT_OPTIONAL_LOCKS=0`, Loxel no longer forces `core.fsmonitor` (whose index-token refresh used to be the write in question), and the untracked half of the working-tree diff uses a throwaway index and object directory. The one exception is porcelain `git diff`, which rewrites the index for stat-dirty entries even with `GIT_OPTIONAL_LOCKS=0`; that write makes those entries fresh, so it converges after a single extra refresh in each instance.
 
-**Yes — the loop is broken cross-instance.** Trace:
-
-1. T=0: External index change detected by both watchers
-2. T=150ms: Both watchers' debounce fires, both call `handleStatusEvent()`
-3. T=150ms: Both pass suppress check (timer expired/0), both call `getStatus()`
-4. ~T=200ms: Both `getStatus()` complete (modifying index via fsmonitor), both set `statusSuppressUntil ≈ T+900ms`
-5. T=200ms: A's index write triggers B's watcher, B's write triggers A's
-6. T=350ms: Watcher debounce fires → `handleStatusEvent()` → suppress check: `350 < 900` → **SUPPRESSED**
-
-The 700ms suppress window comfortably covers the 150ms watcher debounce.
-
-**Index lock for `git status`:** `git status` with fsmonitor uses a try-lock approach for index updates — if it can't acquire `.git/index.lock`, it skips the fsmonitor update and proceeds with potentially stale data. No user-facing error.
+There is no suppression window any more (the old 700ms `statusSuppressUntil` existed only to break the fsmonitor loop, and it dropped real updates). Each instance coalesces its own refreshes: one pass per worktree at a time plus at most one follow-up.
 
 **Impact:** Both instances run `git status` independently on the same repo — correct behavior, each needs its own view. Doubles the git command load but no correctness issue.
 
@@ -61,13 +50,13 @@ Instance B's clients see this as an external file change — which it is, from t
 
 Same pattern as 2c for draft files. Instance B sees Instance A's draft writes as external changes. This is expected — in a same-user multi-window scenario, the user is aware they have the same draft open in two windows, and "external change" is the correct signal.
 
-#### 2e. Status Suppress Timer — SAFE
+#### 2e. Status Refresh Coalescing — SAFE
 
-Per-instance `statusSuppressUntil` timestamp prevents git-status retrigger loops. Each instance manages its own suppression independently. No cross-instance issue — covered in 2a above.
+Per-instance, per-worktree coalescing in `ProjectFilesService` bounds refresh work. Each instance coalesces independently. No cross-instance issue — covered in 2a above.
 
-#### 2f. Debounced Worktree Status Broadcast — DUPLICATIVE
+#### 2f. Worktree Status Sweeps — DUPLICATIVE
 
-`projectWtStatusTimers` is per-instance. Both instances may run `getDirtyWorktreeStatuses()` concurrently. Correct but wasteful — performance cost, not correctness.
+`WorktreeStatusTracker` is per-instance. Both instances may sweep `readWorktreeStatuses()` concurrently. Correct but wasteful — performance cost, not correctness.
 
 **Summary for FS Watchers:** No correctness bugs and no infinite loops. The nonce system causes "external change" signals in the other instance, which is the correct behavior. Main cost is doubled git command load.
 
@@ -114,11 +103,11 @@ The `enqueue()` Promise chain serializes operations within a single instance. No
 
 Write operations (`git add`, `git commit`, `git checkout`, `git mv`, `git rm`, etc.) all acquire `.git/index.lock`. If Instance A holds the lock, Instance B's git command fails with: `fatal: Unable to create '.git/index.lock': File exists`.
 
-Read operations (`git status`, `git diff`, `git log`, `git show`) do not require exclusive index.lock. `git status` with fsmonitor uses a try-lock — if the lock is held, it skips the fsmonitor update gracefully.
+Read operations (`git status`, `git diff`, `git log`, `git show`) do not require exclusive index.lock; with `GIT_OPTIONAL_LOCKS=0` they do not try to take it at all.
 
-The FileWatcher deliberately does **not** filter `.lock` files — on macOS FSEvents coalesces git's write bursts and often reports only the `X.lock` name, so ignoring locks meant ignoring the operation entirely. Spurious self-triggering is prevented at the source instead: every read-only git command runs with `GIT_OPTIONAL_LOCKS=0` (`src/server/git-commands/git-env.ts`) and writes nothing inside the git dir. This covers the per-worktree status fan-out too: `getDirtyWorktreeStatuses` runs `getWorktreeStatus` once per worktree behind `/api/worktree-statuses`, which is refetched on every `refs_changed`/`log_changed`.
+The FileWatcher deliberately does **not** filter `.lock` files — on macOS FSEvents coalesces git's write bursts and often reports only the `X.lock` name, so ignoring locks meant ignoring the operation entirely. Spurious self-triggering is prevented at the source instead: every read-only git command runs with `GIT_OPTIONAL_LOCKS=0` (`src/server/git-commands/git-env.ts`) and writes nothing inside the git dir. This covers the per-worktree status fan-out too: `WorktreeStatusTracker` sweeps run `git status` in each worktree after git metadata changes and, rate-limited, after activity.
 
-**Recommendation:** Background operations like `git status` (triggered by watchers, not user action) should retry with backoff — they're read operations where index.lock contention from fsmonitor is transient. User-initiated git write operations should catch index.lock errors and surface a clear message.
+**Recommendation:** User-initiated git write operations should catch index.lock errors and surface a clear message.
 
 #### 5c. Undo/Redo Stacks
 

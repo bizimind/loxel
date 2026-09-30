@@ -5,7 +5,7 @@ import { openDatabase } from "@bizimind/localdb-sdk";
 import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
 import type { ServerWebSocket } from "bun";
 
-import type { WorktreeEntry } from "@/api/git-models";
+import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import type { AgentEventPayload, WsClientMessage, WsMessage } from "@/api/ws-protocol";
 import {
   BIN_HEADER_SIZE,
@@ -20,19 +20,11 @@ import { AstroLspManager } from "./astro-lsp-manager";
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { DockerLspManager } from "./docker-lsp-manager";
-import { describeError } from "./error-message";
 import { ExternalFilesService } from "./external-files-service";
 import { FileOperationsService } from "./file-operations-service";
 import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
-import {
-  getDirtyWorktreeStatuses,
-  getGitRoot,
-  getRefs,
-  getStatus,
-  getWorktrees,
-  isBareRepo,
-} from "./git-commands";
+import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
 import { logger } from "./logger";
 import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
@@ -58,6 +50,7 @@ import { recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
 import { TerraformLspManager } from "./terraform-lsp-manager";
 import { TsLspManager } from "./ts-lsp-manager";
+import { WorktreeStatusTracker } from "./worktree-status-tracker";
 import { INTERNAL_WORKTREE_PREFIX } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
 import { XmlLspManager } from "./xml-lsp-manager";
@@ -135,8 +128,6 @@ async function pruneOrphanedTempWorktrees(cwd: string): Promise<void> {
 
 // --- Scoped broadcasting ---
 
-const STATUS_SUPPRESS_MS = 700;
-
 /** Send a message to all subscribers of a specific worktree (with dedup). */
 function broadcastToSubscribers(wtPath: string, message: WsMessage) {
   stress.track("broadcast", { type: message.type });
@@ -179,72 +170,41 @@ function sendTo(ws: ServerWebSocket<WsData>, message: WsMessage) {
 
 // --- Per-worktree status handling ---
 
-async function handleStatusEvent(wtPath: string) {
-  stress.track("status-event", { wtPath });
+/**
+ * Ask a subscribed worktree to re-read its git status (the git dir changed). The files service
+ * coalesces requests — one pass at a time plus at most one follow-up — and delivers the result
+ * to {@link publishWorktreeStatus}; nothing here runs git itself.
+ */
+function requestStatusRefresh(wtPath: string): void {
   const resources = wtResources.get(wtPath);
   if (!resources || suspendedWorktrees.has(wtPath)) return;
-  if (Date.now() < resources.statusSuppressUntil) return;
-
-  try {
-    const status = await getStatus(wtPath);
-    if (suspendedWorktrees.has(wtPath) || wtResources.get(wtPath) !== resources) return;
-    resources.statusSuppressUntil = Date.now() + STATUS_SUPPRESS_MS;
-    broadcastToSubscribers(wtPath, { type: "status_changed", wtPath, data: status });
-    debouncedWorktreeStatusBroadcast(resources.projectPath);
-    resources.filesService
-      .refreshGitStatus()
-      .then(() => {
-        // Re-read resources in case it was torn down during the async refresh
-        const r = wtResources.get(wtPath);
-        if (r) r.statusSuppressUntil = Date.now() + STATUS_SUPPRESS_MS;
-      })
-      .catch((err: unknown) => {
-        if (suspendedWorktrees.has(wtPath) || !existsSync(wtPath)) return;
-        log.error("Failed to refresh file tree git status", {
-          error: describeError(err, "file tree status refresh failed"),
-        });
-      });
-  } catch (err) {
-    if (suspendedWorktrees.has(wtPath) || !existsSync(wtPath)) {
-      log.debug(`Skipping status refresh for removed worktree: ${wtPath}`);
-      return;
-    }
-    log.error("Failed to handle git status change", {
-      error: describeError(err, "git status failed"),
-    });
-  }
+  stress.track("status-event", { wtPath });
+  void resources.filesService.refreshGitStatus();
 }
 
-/** Per-project debounced worktree status sweep. */
-const projectWtStatusTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** Broadcast a fresh status snapshot read by a subscribed worktree's files service. */
+function publishWorktreeStatus(wtPath: string, service: ProjectFilesService, status: StatusInfo) {
+  const resources = wtResources.get(wtPath);
+  // Resources replaced or torn down while the pass ran, or removal in progress.
+  if (resources?.filesService !== service || suspendedWorktrees.has(wtPath)) return;
+  broadcastToSubscribers(wtPath, { type: "status_changed", wtPath, data: status });
+  projects.get(resources.projectPath)?.worktreeStatuses.update(wtPath, status);
+}
 
-function debouncedWorktreeStatusBroadcast(projectPath: string) {
-  const existing = projectWtStatusTimers.get(projectPath);
-  if (existing) clearTimeout(existing);
-  projectWtStatusTimers.set(
-    projectPath,
-    setTimeout(async () => {
-      projectWtStatusTimers.delete(projectPath);
-      const project = projects.get(projectPath);
-      if (!project) return;
-      try {
-        const statuses = await getDirtyWorktreeStatuses(project.cwd);
-        // Update suppress timers for all subscribed worktrees in this project
-        for (const resources of wtResources.values()) {
-          if (resources.projectPath === projectPath) {
-            resources.statusSuppressUntil = Date.now() + STATUS_SUPPRESS_MS;
-          }
-        }
-        broadcastToProject(projectPath, {
-          type: "worktree_status_changed",
-          projectPath,
-          data: statuses,
-        });
-      } catch (err) {
-        log.error("Failed to refresh dirty worktree statuses", { error: err });
-      }
-    }, 500),
-  );
+/** A worktree's status as its watchers keep it, when it is subscribed and not being removed. */
+function liveWorktreeStatus(projectPath: string, wtPath: string): StatusInfo | undefined {
+  const resources = wtResources.get(wtPath);
+  if (!resources || resources.projectPath !== projectPath || suspendedWorktrees.has(wtPath)) {
+    return undefined;
+  }
+  return resources.filesService.getStatusSnapshot() ?? undefined;
+}
+
+function projectHasSubscribers(projectPath: string): boolean {
+  for (const resources of wtResources.values()) {
+    if (resources.projectPath === projectPath && resources.subscribers.size > 0) return true;
+  }
+  return false;
 }
 
 // --- Worktree resource factories ---
@@ -253,8 +213,8 @@ function createWorktreeWatcher(wtPath: string): FileWatcher {
   return new FileWatcher({
     gitRoot: wtPath,
     allowedEvents: new Set(["status"]),
-    onEvent: async (event) => {
-      if (event === "status") await handleStatusEvent(wtPath);
+    onEvent: (event) => {
+      if (event === "status") requestStatusRefresh(wtPath);
     },
     debounceMs: 150,
   });
@@ -280,7 +240,7 @@ function createDetachedFilesService(cwd: string, wtPath: string): DetachedFilesS
 }
 
 function createFilesService(wtPath: string): ProjectFilesService {
-  return new ProjectFilesService(
+  const service: ProjectFilesService = new ProjectFilesService(
     wtPath,
     (dir, entries) => {
       broadcastToSubscribers(wtPath, { type: "files_dir_changed", wtPath, data: { dir, entries } });
@@ -292,9 +252,9 @@ function createFilesService(wtPath: string): ProjectFilesService {
         data: { path: filePath, nonces },
       });
     },
-    // A working-tree edit is the one status change the git-dir watcher cannot see.
-    () => void handleStatusEvent(wtPath),
+    (status) => publishWorktreeStatus(wtPath, service, status),
   );
+  return service;
 }
 
 // --- Subscription management ---
@@ -361,13 +321,14 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     detachedFilesService,
     externalFilesService,
     subscribers: new Set([ws]),
-    statusSuppressUntil: 0,
   };
 
   wtResources.set(wtPath, resources);
   const clientState = clients.get(ws);
   if (clientState) clientState.subscribedWorktrees.add(wtPath);
   log.info(`Worktree resources created: ${wtPath} (1 subscriber)`);
+  // Nothing sweeps a project nobody watches, so its cached dirty list may be old by now.
+  project.worktreeStatuses.invalidate();
 
   // Push initial root directory listing so the file tree isn't empty.
   // The client may have already requested GET /api/files before resources existed
@@ -470,6 +431,8 @@ async function suspendWorktreeWatchers(wtPath: string): Promise<() => Promise<vo
       .filter((result): result is PromiseRejectedResult => result.status === "rejected")
       .map((result) => result.reason);
     if (failures.length > 0) throw new AggregateError(failures, `Failed to resume ${wtPath}`);
+    // The resync pass ran while still suspended, so its status never reached the tracker.
+    projects.get(resources.projectPath)?.worktreeStatuses.invalidate();
     broadcastToSubscribers(wtPath, {
       type: "worktree_files_resynced",
       wtPath,
@@ -517,22 +480,23 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
       if (event === "worktrees") {
         broadcastToProject(cwd, worktreesChangedMessage(cwd));
         reconcileRemovedWorktrees(cwd);
+        project.worktreeStatuses.invalidate();
         return;
       }
 
       // Status/refs/log — broadcast to subscribers of worktrees under this project
       if (event === "status") {
-        // Fire status event for each subscribed worktree under this project
         for (const [wtPath, resources] of wtResources) {
-          if (resources.projectPath === cwd) {
-            await handleStatusEvent(wtPath);
-          }
+          if (resources.projectPath === cwd) requestStatusRefresh(wtPath);
         }
       } else if (event === "refs") {
         const refs = await getRefs(cwd);
         broadcastToProject(cwd, { type: "refs_changed", projectPath: cwd, data: refs });
       } else if (event === "log") {
         broadcastToProject(cwd, { type: "log_changed", projectPath: cwd });
+        // A commit, checkout or branch move anywhere in the project; the tracker pushes the
+        // refreshed list, so clients need not refetch it on `log_changed`.
+        project.worktreeStatuses.invalidate();
       }
     },
     debounceMs: 150,
@@ -568,6 +532,17 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
     localDb,
     authorName,
     worktreesDir,
+    worktreeStatuses: new WorktreeStatusTracker({
+      projectPath: cwd,
+      liveStatus: (wtPath) => liveWorktreeStatus(cwd, wtPath),
+      hasListeners: () => projectHasSubscribers(cwd),
+      onChange: (statuses) =>
+        broadcastToProject(cwd, {
+          type: "worktree_status_changed",
+          projectPath: cwd,
+          data: statuses,
+        }),
+    }),
   };
 
   projects.set(cwd, project);
@@ -589,6 +564,7 @@ function teardownProject(cwd: string): void {
   }
 
   project.watcher.stop();
+  project.worktreeStatuses.dispose();
   project.reviewDb.close();
   project.localDb.close();
   projects.delete(cwd);
@@ -1204,13 +1180,7 @@ function shutdown(exitCode = 0) {
     teardownWorktreeResources(wtPath, resources);
   }
 
-  // Cancel all per-project status timers
-  for (const timer of projectWtStatusTimers.values()) {
-    clearTimeout(timer);
-  }
-  projectWtStatusTimers.clear();
-
-  // Teardown all project resources
+  // Teardown all project resources (also cancels their pending worktree status sweeps)
   for (const cwd of Array.from(projects.keys())) {
     teardownProject(cwd);
   }

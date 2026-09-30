@@ -1,29 +1,54 @@
+import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, sep } from "node:path";
 
 import { $ } from "bun";
 
+import type { StatusInfo } from "@/api/git-models";
 import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 
 import type { FileChange } from "./file-sync-service";
 import { FilesSyncService } from "./file-sync-service";
-import { readOnlyGitEnv } from "./git-commands";
+import { getStatus, readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
 
 const log = logger.child("files");
 
+/** Work accumulated while a refresh pass is running, applied by the next pass as one unit. */
+interface PendingRefresh {
+  /** Changed paths (relative, `/`-separated) and every write nonce matched for each. */
+  changes: Map<string, string[]>;
+  /** Directories whose cached subtree must be dropped first (deleted by a file operation). */
+  purgeDirs: Set<string>;
+  /**
+   * Re-read every cached directory rather than only the parents of changed paths: the change
+   * could not be pinned to files (null-filename watcher event), or it came from the git dir
+   * (checkout, reset, stash) and may have rewritten files whose events FSEvents dropped.
+   */
+  rescanAll: boolean;
+  waiters: Array<() => void>;
+}
+
 /**
- * Manages cached directory contents with git status overlay for a worktree.
+ * Manages cached directory contents with git status overlay for a worktree, and owns that
+ * worktree's git status snapshot.
  *
  * Composes with {@link FilesSyncService} for fs.watch lifecycle, debouncing,
- * and nonce-tracked writes. On each flush, rebuilds git status and updates
+ * and nonce-tracked writes. Each refresh pass rebuilds git status and updates
  * cached directory entries.
  *
  * Two separate concerns, two separate triggers:
  * - Directory contents (what files exist): updated when the watcher detects
  *   changes in a cached (expanded) directory
- * - Git statuses (what color each entry gets): rebuilt on every fs event so
+ * - Git statuses (what color each entry gets): rebuilt on every pass so
  *   status changes propagate to parent folders even for collapsed directories
+ *
+ * Passes are coalesced: at most one runs at a time, and everything requested meanwhile — any
+ * number of watcher flushes, file operations and git-dir refreshes — is merged into a single
+ * follow-up pass, so a burst of events costs at most two passes instead of a queue that grows
+ * with the burst. Passes are serialized because they mutate shared state (dirCache, status
+ * maps): overlapping passes could make one caller's entriesEqual check see entries written by
+ * another instead of the true "old" entries, suppressing onDirChanged broadcasts.
  */
 export class ProjectFilesService {
   /** File path → git status (only non-normal files are stored). */
@@ -32,23 +57,23 @@ export class ProjectFilesService {
   private dirStatusMap = new Map<string, ProjectFileStatus>();
   /** Ignored directory paths (from git ls-files --ignored --directory). */
   private ignoredDirs = new Set<string>();
-  /** Untracked directory paths (from git status, entries like `?? dir/`). */
+  /** Ignored file paths (from git ls-files --ignored --directory). */
+  private ignoredFiles = new Set<string>();
+  /** Untracked directory paths (from git status, entries like `? dir/`). */
   private untrackedDirs = new Set<string>();
+  /** The status the maps were last built from; null until one has been read. */
+  private status: StatusInfo | null = null;
 
   /** Cached readdir results for directories the client has expanded. */
   private dirCache = new Map<string, DirEntry[]>();
   /** In-flight readdir promises to avoid duplicate concurrent reads. */
   private pendingReads = new Map<string, Promise<DirEntry[]>>();
 
-  /**
-   * Serialization queue for state mutations.
-   * Multiple callers (notifyChanges, fs watcher flush, git index watcher)
-   * can trigger concurrent handleFlush/refreshGitStatus/refreshCachedDirs calls
-   * that mutate shared state (dirCache, status maps). Serializing prevents races
-   * where one caller's entriesEqual check sees entries written by another caller
-   * instead of the true "old" entries, suppressing onDirChanged broadcasts.
-   */
-  private queue: Promise<unknown> = Promise.resolve();
+  /** Work for the next pass; null when nothing is queued. */
+  private pending: PendingRefresh | null = null;
+  /** The drain loop, while one is running. */
+  private draining: Promise<void> | null = null;
+  private stopped = false;
 
   private syncService: FilesSyncService;
 
@@ -57,11 +82,12 @@ export class ProjectFilesService {
     private onDirChanged: (dir: string, entries: DirEntry[]) => void,
     private onFileChanged?: (filePath: string, nonces: string[]) => void,
     /**
-     * Called after a working-tree change rebuilt the git status maps. Read-only git runs with
-     * GIT_OPTIONAL_LOCKS=0 and writes nothing under the git dir, so this is the only signal
-     * that an edit changed the status; the git-dir watcher only sees index/ref writes.
+     * Called with the fresh status after every pass that read it — working-tree edits and
+     * git-dir refreshes alike. Read-only git runs with GIT_OPTIONAL_LOCKS=0 and writes nothing
+     * under the git dir, so this is the only signal that an edit changed the status. It must
+     * not request another refresh: the snapshot it receives is already current.
      */
-    private onStatusChanged?: () => void,
+    private onStatusChanged?: (status: StatusInfo) => void,
   ) {
     this.syncService = new FilesSyncService({
       watchDir: worktreeCwd,
@@ -75,8 +101,11 @@ export class ProjectFilesService {
         return true;
       },
       normalizeKey: (filename) => filename.replaceAll(sep, "/"),
-      onFlush: (changes) => this.enqueue(() => this.handleFlush(changes)),
-      onUnknownChange: () => this.enqueue(() => this.refreshCachedDirs()),
+      onFlush: (changes) => this.request((work) => addChanges(work, changes)),
+      onUnknownChange: () =>
+        this.request((work) => {
+          work.rescanAll = true;
+        }),
     });
   }
 
@@ -86,22 +115,33 @@ export class ProjectFilesService {
   }
 
   stop(): void {
+    this.stopped = true;
     this.syncService.stop();
+    // Nothing will run the queued pass any more; release whoever is waiting on it.
+    for (const resolve of this.pending?.waiters ?? []) resolve();
+    this.pending = null;
     this.dirCache.clear();
     this.pendingReads.clear();
     this.fileStatusMap.clear();
     this.dirStatusMap.clear();
     this.ignoredDirs.clear();
+    this.ignoredFiles.clear();
     this.untrackedDirs.clear();
+    this.status = null;
   }
 
   async pauseWatching(): Promise<void> {
     await this.syncService.pause();
-    await this.queue;
+    await this.draining;
   }
 
   async resumeWatching(): Promise<void> {
     await this.syncService.resume();
+  }
+
+  /** The most recent status snapshot, or null before the first successful read. */
+  getStatusSnapshot(): StatusInfo | null {
+    return this.status;
   }
 
   /**
@@ -156,77 +196,114 @@ export class ProjectFilesService {
    * Used by file operation routes to bypass watcher debounce for self-initiated changes.
    * Triggers the same logic as a detected filesystem event: rebuilds git status,
    * re-reads affected cached directories, and broadcasts changes to clients.
+   * Resolves once a pass that includes these paths has completed.
    */
   async notifyChanges(keys: string[]): Promise<void> {
     if (keys.length === 0) return;
 
-    await this.enqueue(async () => {
+    await this.request((work) => {
       // For directory deletions, clean up cached subdirectories that no longer exist on disk
-      for (const key of keys) {
-        const prefix = key + "/";
-        for (const cachedDir of this.dirCache.keys()) {
-          if (cachedDir === key || cachedDir.startsWith(prefix)) {
-            this.dirCache.delete(cachedDir);
-          }
-        }
-      }
-
-      await this.handleFlush(keys.map((key) => ({ key, nonces: [] })));
+      for (const key of keys) work.purgeDirs.add(key);
+      addChanges(
+        work,
+        keys.map((key) => ({ key, nonces: [] })),
+      );
     });
   }
 
   /**
-   * Re-read all cached (expanded) directories from disk and broadcast changes.
-   * Called when fs.watch fires with a null filename — the platform detected a
-   * change but couldn't identify which file, so we re-scan everything visible.
-   * Cheaper than refreshGitStatus (no git commands, just readdir).
-   */
-  private async refreshCachedDirs(): Promise<void> {
-    await this.buildStatusMaps();
-    this.onStatusChanged?.();
-    for (const dir of Array.from(this.dirCache.keys())) {
-      const oldEntries = this.dirCache.get(dir);
-      this.dirCache.delete(dir);
-      const newEntries = await this.readAndClassifyDir(dir);
-      if (!oldEntries || !entriesEqual(oldEntries, newEntries)) {
-        this.onDirChanged(this.absDir(dir), newEntries);
-      }
-    }
-  }
-
-  /**
-   * Refresh git status maps and update all cached directories.
-   * Called from the existing FileWatcher when the git index changes.
+   * Re-read the git status and every cached directory. Called when the git dir changed (index,
+   * HEAD, refs, stash). Resolves once a pass started after this call has completed; the new
+   * status is delivered through `onStatusChanged`.
    */
   async refreshGitStatus(): Promise<void> {
-    await this.enqueue(async () => {
-      await this.buildStatusMaps();
-
-      // Snapshot keys — readAndClassifyDir may delete entries on error
-      for (const dir of Array.from(this.dirCache.keys())) {
-        const oldEntries = this.dirCache.get(dir);
-        const newEntries = await this.readAndClassifyDir(dir);
-
-        // Only broadcast if entries actually changed
-        if (!oldEntries || !entriesEqual(oldEntries, newEntries)) {
-          this.onDirChanged(this.absDir(dir), newEntries);
-        }
-      }
+    await this.request((work) => {
+      work.rescanAll = true;
     });
   }
 
   // --- Private implementation ---
 
-  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(fn, fn);
-    this.queue = next.catch(() => {});
-    return next;
+  /**
+   * Merge work into the next pass and make sure the drain loop runs. The returned promise
+   * settles when the pass carrying this work finishes, and never rejects: a failed git read is
+   * logged and the previous status kept.
+   */
+  private request(add: (work: PendingRefresh) => void): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    const work = (this.pending ??= emptyPendingRefresh());
+    add(work);
+    const done = new Promise<void>((resolve) => {
+      work.waiters.push(resolve);
+    });
+    this.drain();
+    return done;
   }
 
-  private async handleFlush(changes: FileChange[]): Promise<void> {
-    // Derive parent dirs for cached dir re-reads
+  private drain(): void {
+    if (this.draining) return;
+    this.draining = (async () => {
+      // Yield first so `this.draining` is assigned before the loop can possibly finish.
+      await Promise.resolve();
+      try {
+        while (this.pending && !this.stopped) {
+          const work = this.pending;
+          this.pending = null;
+          try {
+            await this.runPass(work);
+          } catch (err) {
+            log.error("File tree refresh failed", { error: err });
+          } finally {
+            for (const resolve of work.waiters) resolve();
+          }
+        }
+      } finally {
+        // Cleared synchronously after the last `pending` check, so a request arriving from
+        // here on starts a new loop instead of stranding its work.
+        this.draining = null;
+      }
+    })();
+  }
+
+  private async runPass(work: PendingRefresh): Promise<void> {
+    for (const key of work.purgeDirs) {
+      const prefix = key + "/";
+      for (const cachedDir of this.dirCache.keys()) {
+        if (cachedDir === key || cachedDir.startsWith(prefix)) {
+          this.dirCache.delete(cachedDir);
+        }
+      }
+    }
+
+    // Always rebuild git status so changes anywhere in the tree (including
+    // collapsed directories) propagate correct colors to visible parents.
+    const status = await this.buildStatusMaps();
+    if (this.stopped) return;
+    if (status) this.onStatusChanged?.(status);
+
+    if (work.rescanAll) {
+      // Snapshot keys — readAndClassifyDir may delete entries on error
+      for (const dir of Array.from(this.dirCache.keys())) {
+        if (this.stopped) return;
+        await this.rereadDir(dir);
+      }
+    } else {
+      await this.applyFileChanges(work.changes);
+    }
+    if (this.stopped) return;
+
+    // Emit per-file change events for editor live updates
+    if (this.onFileChanged) {
+      for (const [key, nonces] of work.changes) {
+        this.onFileChanged(join(this.worktreeCwd, key), nonces);
+      }
+    }
+  }
+
+  /** Re-read the cached parents of changed paths; reclassify every other cached directory. */
+  private async applyFileChanges(changes: Map<string, string[]>): Promise<void> {
     const parentDirs = new Set<string>();
-    for (const { key } of changes) {
+    for (const key of changes.keys()) {
       const slashIdx = key.lastIndexOf("/");
       const parentDir = slashIdx === -1 ? "" : key.substring(0, slashIdx);
       if (this.dirCache.has(parentDir)) {
@@ -234,21 +311,10 @@ export class ProjectFilesService {
       }
     }
 
-    // Always rebuild git status so changes anywhere in the tree (including
-    // collapsed directories) propagate correct colors to visible parents.
-    await this.buildStatusMaps();
-    this.onStatusChanged?.();
-
     // Re-read cached directories that had direct children change
     for (const dir of parentDirs) {
-      const oldEntries = this.dirCache.get(dir);
-      // Force re-read by deleting cache entry
-      this.dirCache.delete(dir);
-      const newEntries = await this.readAndClassifyDir(dir);
-
-      if (!oldEntries || !entriesEqual(oldEntries, newEntries)) {
-        this.onDirChanged(this.absDir(dir), newEntries);
-      }
+      if (this.stopped) return;
+      await this.rereadDir(dir);
     }
 
     // Reclassify cached directories that had NO direct children change but whose
@@ -262,106 +328,79 @@ export class ProjectFilesService {
         this.onDirChanged(this.absDir(dir), newEntries);
       }
     }
+  }
 
-    // Emit per-file change events for editor live updates
-    if (this.onFileChanged) {
-      for (const { key, nonces } of changes) {
-        this.onFileChanged(join(this.worktreeCwd, key), nonces);
-      }
+  /** Re-read one cached directory from disk and broadcast it if its entries changed. */
+  private async rereadDir(dir: string): Promise<void> {
+    const oldEntries = this.dirCache.get(dir);
+    // Force re-read by deleting cache entry
+    this.dirCache.delete(dir);
+    const newEntries = await this.readAndClassifyDir(dir);
+    if (!oldEntries || !entriesEqual(oldEntries, newEntries)) {
+      this.onDirChanged(this.absDir(dir), newEntries);
     }
   }
 
-  private async buildStatusMaps(): Promise<void> {
-    const [statusOutput, ignoredOutput] = await Promise.all([
-      $`git -C ${this.worktreeCwd} status --porcelain`
-        .env(readOnlyGitEnv())
-        .text()
-        .catch((err: unknown) => {
+  /**
+   * Read git status and the ignored set, and rebuild the status maps from them.
+   *
+   * Returns the status, or null when it could not be read. The previous maps (ignored set
+   * included, so they stay consistent) are then kept rather than wiped, so a transient failure
+   * does not repaint the whole tree as clean; a failed ignored-files listing likewise keeps the
+   * previous ignored set.
+   */
+  private async buildStatusMaps(): Promise<StatusInfo | null> {
+    const [status, ignoredOutput] = await Promise.all([
+      getStatus(this.worktreeCwd).catch((err: unknown) => {
+        // A removed worktree is an expected lifecycle race, not an error.
+        if (existsSync(this.worktreeCwd)) {
           log.error("Failed to run git status for file tree", { error: err });
-          return "";
-        }),
-      $`git -C ${this.worktreeCwd} ls-files --others --ignored --exclude-standard --directory`
+        }
+        return null;
+      }),
+      $`git -C ${this.worktreeCwd} ls-files --others --ignored --exclude-standard --directory -z`
         .env(readOnlyGitEnv())
         .text()
         .catch((err: unknown) => {
-          log.error("Failed to list ignored files for file tree", { error: err });
-          return "";
+          if (existsSync(this.worktreeCwd)) {
+            log.error("Failed to list ignored files for file tree", { error: err });
+          }
+          return null;
         }),
     ]);
+    if (this.stopped || !status) return null;
 
-    this.fileStatusMap.clear();
-    this.dirStatusMap.clear();
-    this.ignoredDirs.clear();
-    this.untrackedDirs.clear();
-
-    // Parse git status --porcelain output
-    for (const line of statusOutput.split("\n")) {
-      if (!line || line.length < 4) continue;
-      const xy = line.substring(0, 2);
-      let filePath = line.substring(3);
-
-      if (xy === "??") {
-        if (filePath.endsWith("/")) {
-          // Untracked directory — git reports the dir instead of individual files
-          const dirPath = filePath.slice(0, -1);
-          this.untrackedDirs.add(dirPath);
-          this.dirStatusMap.set(dirPath, "untracked");
-        } else {
-          this.fileStatusMap.set(filePath, "untracked");
-        }
-      } else if (xy === "!!") {
-        // Ignored (only appears with --ignored flag, but we use ls-files for that)
-        this.fileStatusMap.set(filePath, "ignored");
-      } else {
-        // Any other status (M, A, D, R, C, etc.) = modified
-        // Skip deleted files — they don't exist on disk
-        const indexStatus = xy[0];
-        const worktreeStatus = xy[1];
-        if (indexStatus === "D" && worktreeStatus === " ") continue;
-        if (worktreeStatus === "D" && indexStatus === " ") continue;
-
-        // Renames/copies: format is "old_path -> new_path" — use the new path
-        if (indexStatus === "R" || indexStatus === "C") {
-          const arrowIdx = filePath.indexOf(" -> ");
-          if (arrowIdx !== -1) {
-            filePath = filePath.substring(arrowIdx + 4);
-          }
-        }
-
-        this.fileStatusMap.set(filePath, "modified");
+    if (ignoredOutput !== null) {
+      this.ignoredDirs.clear();
+      this.ignoredFiles.clear();
+      for (const entry of ignoredOutput.split("\0")) {
+        if (!entry) continue;
+        // Ignored directory — stored without trailing slash
+        if (entry.endsWith("/")) this.ignoredDirs.add(entry.slice(0, -1));
+        else this.ignoredFiles.add(entry);
       }
     }
-
-    // Parse ignored files/dirs
-    for (const line of ignoredOutput.split("\n")) {
-      if (!line) continue;
-      if (line.endsWith("/")) {
-        // Ignored directory — store without trailing slash
-        this.ignoredDirs.add(line.slice(0, -1));
-      } else {
-        this.fileStatusMap.set(line, "ignored");
-      }
-    }
+    this.status = status;
+    this.fileStatusMap = deriveFileStatuses(status);
+    this.untrackedDirs = new Set(
+      status.untracked.filter((path) => path.endsWith("/")).map((path) => path.slice(0, -1)),
+    );
+    for (const file of this.ignoredFiles) this.fileStatusMap.set(file, "ignored");
 
     // Derive directory statuses by walking up parent paths.
     // Any dir containing modified or untracked content is "modified" (blue) —
     // having new content in an existing dir means the dir changed.
-    for (const [filePath, status] of this.fileStatusMap) {
-      if (status === "ignored") continue;
-      const parts = filePath.split("/");
-      for (let i = 1; i < parts.length; i++) {
-        this.dirStatusMap.set(parts.slice(0, i).join("/"), "modified");
-      }
+    this.dirStatusMap = new Map();
+    for (const [filePath, fileStatus] of this.fileStatusMap) {
+      if (fileStatus === "ignored") continue;
+      markParentsModified(this.dirStatusMap, filePath);
     }
     // Untracked dirs also propagate "modified" up to their parents
     for (const untrackedDir of this.untrackedDirs) {
-      const parts = untrackedDir.split("/");
-      for (let i = 1; i < parts.length; i++) {
-        this.dirStatusMap.set(parts.slice(0, i).join("/"), "modified");
-      }
+      markParentsModified(this.dirStatusMap, untrackedDir);
     }
 
-    // Fully new directories (git reports as `?? dir/`) are "untracked" (green),
+    // Fully new directories (git reports as `? dir/`) are "untracked" (green),
     // overriding the "modified" set above for the dir itself (parents stay blue).
     for (const dir of this.untrackedDirs) {
       this.dirStatusMap.set(dir, "untracked");
@@ -370,6 +409,7 @@ export class ProjectFilesService {
     for (const dir of this.ignoredDirs) {
       this.dirStatusMap.set(dir, "ignored");
     }
+    return status;
   }
 
   /** Check if a path is inside an ignored directory. */
@@ -395,15 +435,19 @@ export class ProjectFilesService {
   /** Check which paths are ignored by gitignore. Returns the set of ignored paths. */
   private async checkIgnored(paths: string[]): Promise<Set<string>> {
     if (paths.length === 0) return new Set();
-    try {
-      const input = paths.join("\n");
-      const result =
-        await $`echo ${input} | git -C ${this.worktreeCwd} check-ignore --stdin`.text();
-      return new Set(result.trim().split("\n").filter(Boolean));
-    } catch {
-      // git check-ignore exits with 1 when no paths are ignored
+    // NUL-separated both ways: otherwise names with quotes or non-ASCII bytes come back quoted.
+    // Non-empty by the guard above — Bun's shell never closes stdin for an empty Buffer.
+    const input = Buffer.from(paths.join("\0"));
+    const result = await $`git -C ${this.worktreeCwd} check-ignore --stdin -z < ${input}`
+      .env(readOnlyGitEnv())
+      .nothrow()
+      .quiet();
+    // Exit code 1 just means none of the paths are ignored.
+    if (result.exitCode !== 0 && result.exitCode !== 1) {
+      log.warn("git check-ignore failed", { stderr: result.stderr.toString().trim() });
       return new Set();
     }
+    return new Set(result.stdout.toString().split("\0").filter(Boolean));
   }
 
   private async readAndClassifyDir(dir: string): Promise<DirEntry[]> {
@@ -508,4 +552,53 @@ function entriesEqual(a: DirEntry[], b: DirEntry[]): boolean {
       return false;
   }
   return true;
+}
+
+/**
+ * File path → tree status for every path git reports.
+ *
+ * A deletion on one side with the other side untouched is skipped: the file is not on disk, so
+ * there is no entry to color. Everything else with a change — modifications, additions, the new
+ * side of renames and copies, conflicts — is "modified". Untracked directories (`dir/`) are not
+ * files and are handled separately.
+ */
+function deriveFileStatuses(status: StatusInfo): Map<string, ProjectFileStatus> {
+  const sides = new Map<string, { staged?: string; unstaged?: string }>();
+  for (const entry of status.staged) {
+    sides.set(entry.path, { ...sides.get(entry.path), staged: entry.status });
+  }
+  for (const entry of status.unstaged) {
+    sides.set(entry.path, { ...sides.get(entry.path), unstaged: entry.status });
+  }
+
+  const map = new Map<string, ProjectFileStatus>();
+  for (const [path, { staged, unstaged }] of sides) {
+    if ((staged === "D" && !unstaged) || (unstaged === "D" && !staged)) continue;
+    map.set(path, "modified");
+  }
+  for (const entry of status.conflicted) map.set(entry.path, "modified");
+  for (const path of status.untracked) {
+    if (!path.endsWith("/")) map.set(path, "untracked");
+  }
+  return map;
+}
+
+/** Mark every ancestor directory of `path` as modified. */
+function markParentsModified(dirStatusMap: Map<string, ProjectFileStatus>, path: string): void {
+  let slash = path.indexOf("/");
+  while (slash !== -1) {
+    dirStatusMap.set(path.slice(0, slash), "modified");
+    slash = path.indexOf("/", slash + 1);
+  }
+}
+
+function emptyPendingRefresh(): PendingRefresh {
+  return { changes: new Map(), purgeDirs: new Set(), rescanAll: false, waiters: [] };
+}
+
+/** Merge a flush batch into pending work, keeping every nonce matched for a key. */
+function addChanges(work: PendingRefresh, changes: FileChange[]): void {
+  for (const { key, nonces } of changes) {
+    work.changes.set(key, [...(work.changes.get(key) ?? []), ...nonces]);
+  }
 }

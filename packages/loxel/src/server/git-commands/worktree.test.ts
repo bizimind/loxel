@@ -1,14 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { rm } from "node:fs/promises";
 
 import { $ } from "bun";
 
+import type { StatusInfo } from "@/api/git-models";
+
 import { commit, createRepo, writeFile } from "./test-utils";
-import {
-  getDirtyWorktreeStatuses,
-  getWorktrees,
-  getWorktreeStatus,
-  parseWorktreeListOutput,
-} from "./worktree";
+import { getWorktrees, parseWorktreeListOutput, readWorktreeStatuses } from "./worktree";
 
 describe("parseWorktreeListOutput", () => {
   test.each([
@@ -65,42 +63,91 @@ describe("getWorktrees", () => {
   });
 });
 
-describe("getWorktreeStatus", () => {
-  test("returns status for worktree", async () => {
+describe("readWorktreeStatuses", () => {
+  test("reports a clean worktree as null", async () => {
     const repo = await createRepo();
     try {
       await commit(repo.path, "init", { "a.txt": "a" });
-      const status = await getWorktreeStatus(repo.path);
-      expect(status.branch).toBe("main");
-      expect(status.staged).toHaveLength(0);
-    } finally {
-      await repo.cleanup();
-    }
-  });
-});
-
-describe("getDirtyWorktreeStatuses", () => {
-  test("returns empty for clean worktrees", async () => {
-    const repo = await createRepo();
-    try {
-      await commit(repo.path, "init", { "a.txt": "a" });
-      const statuses = await getDirtyWorktreeStatuses(repo.path);
-      expect(statuses).toHaveLength(0);
+      const probes = await readWorktreeStatuses(repo.path);
+      expect(probes).toHaveLength(1);
+      expect(probes[0]!.worktree.path).toBe(repo.path);
+      expect(probes[0]!.status).toBeNull();
     } finally {
       await repo.cleanup();
     }
   });
 
-  test("returns entry for dirty worktree", async () => {
+  test("reports a dirty worktree with its changes and current branch", async () => {
     const repo = await createRepo();
     try {
       await commit(repo.path, "init", { "a.txt": "a" });
       await writeFile(repo.path, "a.txt", "dirty");
-      const statuses = await getDirtyWorktreeStatuses(repo.path);
-      expect(statuses).toHaveLength(1);
-      expect(statuses[0]!.path).toBe(repo.path);
-      expect(statuses[0]!.unstaged.length).toBeGreaterThan(0);
+      const probes = await readWorktreeStatuses(repo.path);
+      expect(probes[0]!.status).toMatchObject({ path: repo.path, branch: "main", isMain: true });
+      expect(probes[0]!.status!.unstaged.length).toBeGreaterThan(0);
     } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("uses a live status instead of running git for that worktree", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "init", { "a.txt": "a" });
+      const live: StatusInfo = {
+        branch: "main",
+        commit: "abc",
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        staged: [],
+        unstaged: [],
+        untracked: ["only-in-the-snapshot.txt"],
+        conflicted: [],
+      };
+      const probes = await readWorktreeStatuses(repo.path, {
+        liveStatus: (wtPath) => (wtPath === repo.path ? live : undefined),
+      });
+      expect(probes[0]!.status?.untracked).toEqual(["only-in-the-snapshot.txt"]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("reports a deleted but unpruned worktree as clean", async () => {
+    const repo = await createRepo();
+    const wtPath = `${repo.path}-gone`;
+    try {
+      await commit(repo.path, "init", { "a.txt": "a" });
+      await $`git -C ${repo.path} worktree add -q ${wtPath} -b gone`.quiet();
+      await writeFile(wtPath, "dirty.txt", "x");
+      // Deleted behind git's back and not pruned: still listed, nothing left to show.
+      await rm(wtPath, { recursive: true, force: true });
+      const probes = await readWorktreeStatuses(repo.path);
+      expect(probes.map((probe) => [probe.worktree.path, probe.status])).toEqual([
+        [repo.path, null],
+        [wtPath, null],
+      ]);
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("reports an existing but unreadable worktree as undefined rather than clean", async () => {
+    const repo = await createRepo();
+    const wtPath = `${repo.path}-broken`;
+    try {
+      await commit(repo.path, "init", { "a.txt": "a" });
+      await $`git -C ${repo.path} worktree add -q ${wtPath} -b broken`.quiet();
+      // The directory is still there but is no longer a checkout git can read.
+      await rm(`${wtPath}/.git`, { force: true });
+      const probes = await readWorktreeStatuses(repo.path);
+      expect(probes.map((probe) => [probe.worktree.path, probe.status])).toEqual([
+        [repo.path, null],
+        [wtPath, undefined],
+      ]);
+    } finally {
+      await rm(wtPath, { recursive: true, force: true });
       await repo.cleanup();
     }
   });

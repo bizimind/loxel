@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { WatchEvent } from "./file-watcher";
 import { classifyGitChange, FileWatcher } from "./file-watcher";
-import { getDirtyWorktreeStatuses, getStatus } from "./git-commands";
+import { getStatus, getWorkingTreeDiff, readWorktreeStatuses } from "./git-commands";
 import { ProjectFilesService } from "./project-files-service";
 
 describe("classifyGitChange", () => {
@@ -390,10 +390,6 @@ describe("FileWatcher live git updates", () => {
     await Bun.write(path.join(repo, "a.txt"), "one\n");
     await Bun.$`git -C ${repo} add -A`.quiet();
     await Bun.$`git -C ${repo} commit -q -m init`.quiet();
-    // The fsmonitor daemon getStatus starts writes into the git dir; leave none running.
-    cleanups.push(async () => {
-      await Bun.$`git -C ${repo} fsmonitor--daemon stop`.nothrow().quiet();
-    });
     return repo;
   }
 
@@ -511,7 +507,7 @@ describe("FileWatcher live git updates", () => {
     expect(seen).toEqual([]);
   }, 120000);
 
-  test("getDirtyWorktreeStatuses over several worktrees produces no events", async () => {
+  test("readWorktreeStatuses over several worktrees produces no events", async () => {
     const base = scratchDir("dirty-");
     const repo = await seedRepo(path.join(base, "repo"));
 
@@ -525,9 +521,6 @@ describe("FileWatcher live git updates", () => {
     const worktrees = ["w1", "w2", "w3"].map((name) => path.join(base, name));
     for (const [i, wt] of worktrees.entries()) {
       await Bun.$`git -C ${repo} worktree add -q -b ${`br${i}`} ${wt}`.quiet();
-      cleanups.push(async () => {
-        await Bun.$`git -C ${wt} fsmonitor--daemon stop`.nothrow().quiet();
-      });
       // Dirty each one: a clean tree gives git less reason to rewrite the index.
       await Bun.write(path.join(wt, "dirty.txt"), `${i}\n`);
     }
@@ -544,9 +537,9 @@ describe("FileWatcher live git updates", () => {
       for (const [i, wt] of [repo, ...worktrees].entries()) {
         await Bun.write(path.join(wt, "dirty.txt"), `round ${round} wt ${i}\n`);
       }
-      const statuses = await getDirtyWorktreeStatuses(repo);
+      const probes = await readWorktreeStatuses(repo);
       // main + w1..w3, all dirty.
-      expect(statuses.length).toBe(worktrees.length + 1);
+      expect(probes.filter((probe) => probe.status).length).toBe(worktrees.length + 1);
       await Bun.sleep(400);
     }
     await Bun.sleep(SETTLE_MS);
@@ -557,6 +550,37 @@ describe("FileWatcher live git updates", () => {
     await Bun.$`git -C ${repo} branch proof`.quiet();
     expect(await sawAny(seen)).toBe(true);
   }, 180000);
+
+  test("working-tree diffs with untracked files produce no git-directory events", async () => {
+    const base = scratchDir("untracked-diff-");
+    // Real path: the diff validates the worktree against `git worktree list`, which resolves
+    // macOS's /var → /private/var symlink.
+    const repo = realpathSync(await seedRepo(path.join(base, "repo")));
+    // The untracked half of the diff goes through `git add --intent-to-add`, which stores the
+    // empty blob — or, when it already exists, freshens its mtime. Against the real object
+    // store that is an `objects/` event, i.e. a status/refs/log refresh that refetches this
+    // very diff. Seed the empty blob so the freshen path is the one exercised.
+    await Bun.$`git -C ${repo} hash-object -w -t blob /dev/null`.quiet();
+    await Bun.write(path.join(repo, "new-a.txt"), "a\n");
+    await Bun.write(path.join(repo, "new-b.txt"), "b\n");
+
+    const { seen } = await startWatcher(repo);
+    seen.length = 0;
+
+    for (let round = 0; round < 4; round++) {
+      await Bun.write(path.join(repo, "new-a.txt"), `round ${round}\n`);
+      const diff = await getWorkingTreeDiff(repo, repo);
+      expect(diff.files.map((file) => file.newPath).sort()).toEqual(["new-a.txt", "new-b.txt"]);
+      await Bun.sleep(1100); // mtime granularity: a freshen needs a later second to show
+    }
+    await Bun.sleep(SETTLE_MS);
+
+    expect(seen).toEqual([]);
+
+    // Guard against a false negative from a dead watcher.
+    await Bun.$`git -C ${repo} branch proof`.quiet();
+    expect(await sawAny(seen)).toBe(true);
+  }, 120000);
 
   test("bare repo: edits inside .worktrees/ produce no events", async () => {
     const base = scratchDir("bare-");
