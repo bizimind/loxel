@@ -63,7 +63,6 @@ beforeEach(() => {
     worktreePath: WT_PATH,
     branch: "feat-x",
     dirty: true,
-    localOnlySubmodules: [],
     isMain: false,
     locked: false,
   };

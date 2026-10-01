@@ -27,7 +27,6 @@ describe("planRemove", () => {
       worktreePath: added.path,
       branch: "feat/foo",
       dirty: false,
-      localOnlySubmodules: [],
       isMain: false,
       locked: false,
     });
@@ -451,7 +450,7 @@ describe("executeRemove with submodules", () => {
     expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
   });
 
-  test("refuses to escalate when a submodule holds commits no remote has", async () => {
+  test("does not guard commits inside a submodule that no remote has", async () => {
     const { subUrl } = await repoWithSubmodule();
     const added = await executeAdd({ name: "unpushed-sub", repoPath: repo.root });
     await addSubmoduleTo(added.path, subUrl);
@@ -466,28 +465,13 @@ describe("executeRemove with submodules", () => {
       added.path,
     );
 
-    await writeHook(repo.root, "clean.wt.sh", 'touch "$WT_ROOT/clean-ran"');
-
-    const plan = await planRemove({ name: "unpushed-sub", repoPath: repo.root });
-    expect(plan.dirty).toBe(false);
-    expect(plan.localOnlySubmodules).toEqual(["mysub"]);
-    await expect(
-      executeRemove({
-        name: "unpushed-sub",
-        repoPath: repo.root,
-        deleteBranch: false,
-        force: false,
-      }),
-    ).rejects.toThrow(/mysub .* has commits no remote has/);
-    expect(await Bun.file(join(sub, "tracked.txt")).text()).toBe("v2\n");
-    // Refused before the clean hook, so the environment is still up.
-    expect(await pathExists(join(repo.root, "clean-ran"))).toBe(false);
-
+    // A design decision: dirtiness is the only removal guard.
+    expect((await planRemove({ name: "unpushed-sub", repoPath: repo.root })).dirty).toBe(false);
     await executeRemove({
       name: "unpushed-sub",
       repoPath: repo.root,
       deleteBranch: false,
-      force: true,
+      force: false,
     });
     expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
   });
@@ -557,56 +541,6 @@ describe("executeRemove with submodules", () => {
     await Bun.write(join(added.path, "my sub dir", "untracked.txt"), "x\n");
 
     expect(await worktreeStatus(added.path)).toEqual({ ok: true, value: [" M my sub dir"] });
-  });
-
-  test("fails closed when a submodule's refs cannot be walked", async () => {
-    const { subUrl } = await repoWithSubmodule();
-    const added = await executeAdd({ name: "broken-sub", repoPath: repo.root });
-    await addSubmoduleTo(added.path, subUrl);
-    const sub = join(added.path, "mysub");
-    const subGitDir = (await git(["rev-parse", "--path-format=absolute", "--git-dir"], sub)).trim();
-    await Bun.write(join(subGitDir, "refs", "heads", "broken"), "0".repeat(40) + "\n");
-
-    // Unverifiable counts as dirty: refused without force, but force stays reachable.
-    expect((await planRemove({ name: "broken-sub", repoPath: repo.root })).dirty).toBe(true);
-    await expect(
-      executeRemove({ name: "broken-sub", repoPath: repo.root, deleteBranch: false, force: false }),
-    ).rejects.toThrow(/uncommitted or untracked/i);
-    expect(await Bun.file(join(sub, "tracked.txt")).exists()).toBe(true);
-
-    await executeRemove({
-      name: "broken-sub",
-      repoPath: repo.root,
-      deleteBranch: false,
-      force: true,
-    });
-    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
-  });
-
-  test("still sees local-only commits of a deinitialized submodule", async () => {
-    const { subUrl } = await repoWithSubmodule();
-    const added = await executeAdd({ name: "deinit-sub", repoPath: repo.root });
-    await addSubmoduleTo(added.path, subUrl);
-    const sub = join(added.path, "mysub");
-    await Bun.write(join(sub, "tracked.txt"), "v2\n");
-    await git(
-      ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-am", "local only"],
-      sub,
-    );
-    await git(
-      ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-am", "bump"],
-      added.path,
-    );
-    await git(["submodule", "deinit", "-f", "mysub"], added.path);
-
-    expect(await git(["status", "--porcelain", "--ignore-submodules=none"], added.path)).toBe("");
-    const plan = await planRemove({ name: "deinit-sub", repoPath: repo.root });
-    expect(plan.dirty).toBe(false);
-    expect(plan.localOnlySubmodules).toEqual(["mysub"]);
-    await expect(
-      executeRemove({ name: "deinit-sub", repoPath: repo.root, deleteBranch: false, force: false }),
-    ).rejects.toThrow(/mysub .* has commits no remote has/);
-    expect(await git(["worktree", "list", "--porcelain"], repo.root)).toContain(added.path);
   });
 
   test("removes a worktree whose modules directory holds no object store", async () => {

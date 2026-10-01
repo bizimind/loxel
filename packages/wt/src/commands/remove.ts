@@ -80,7 +80,7 @@ async function decideBranchDeletion(
 /** A removal git would refuse needs --force, or a confirmation when interactive. */
 async function decideForce(plan: RemovePlan, options: RemoveOptions): Promise<boolean | "cancel"> {
   if (options.force) return true;
-  const reason = forceReason(plan.name, plan);
+  const reason = forceReason(plan.name, plan.dirty);
   if (!reason) return false;
 
   if (!isTTY()) {

@@ -7,7 +7,6 @@ import {
   pruneEmptyParents,
   removeWorktree,
   resolveRemoteDefault,
-  submodulesWithLocalOnlyCommits,
 } from "../git/index.ts";
 import { HOOK_CLEAN, runHook, type HookContext } from "../hooks/run.ts";
 import { silentProgress, type ProgressHandler } from "../progress.ts";
@@ -21,17 +20,10 @@ export interface RemovePlan {
   /** Branch name, or null when detached */
   branch: string | null;
   /**
-   * Uncommitted or untracked files present, or the checkout could not be
-   * inspected (unreadable status, submodule refs that cannot be walked).
-   * Removal refuses without force in every case.
+   * Top-level `git status` reports changes, or could not be read. Removal
+   * refuses without force in both cases.
    */
   dirty: boolean;
-  /**
-   * Initialized submodules holding commits no remote has. A linked worktree's
-   * submodule objects live under its own git directory, so removing it
-   * deletes them; removal refuses without force.
-   */
-  localOnlySubmodules: string[];
   /** The main worktree, which cannot be removed */
   isMain: boolean;
   /** Locked with `git worktree lock`; removal refuses until it is unlocked */
@@ -78,42 +70,24 @@ export async function planRemove(params: { name: string; repoPath: string }): Pr
     name: params.name,
     worktreePath: worktree.path,
     branch: worktree.branch,
-    ...(await inspectForceBlockers(worktree.path)),
+    dirty: await isWorktreeDirty(worktree.path),
     isMain: worktree.path === root,
     locked: worktree.locked,
   };
-}
-
-type ForceBlockers = Pick<RemovePlan, "dirty" | "localOnlySubmodules">;
-
-/** The conditions under which git, or wt on its behalf, refuses a removal without force. */
-async function inspectForceBlockers(worktreePath: string): Promise<ForceBlockers> {
-  // Nothing here throws: a checkout that cannot be inspected needs force, and
-  // planning must still succeed so that force stays reachable.
-  if (await isWorktreeDirty(worktreePath)) return { dirty: true, localOnlySubmodules: [] };
-  const probe = await submodulesWithLocalOnlyCommits(worktreePath);
-  if (!probe.ok) return { dirty: true, localOnlySubmodules: [] };
-  return { dirty: false, localOnlySubmodules: probe.value };
 }
 
 /**
  * Why removing `name` needs force, phrased for an error or a prompt, or null
  * when git would accept the removal as is.
  */
-export function forceReason(name: string, blockers: ForceBlockers): string | null {
-  if (blockers.dirty) return `Worktree '${name}' has uncommitted or untracked changes`;
-  if (blockers.localOnlySubmodules.length > 0) {
-    const list = blockers.localOnlySubmodules.join(", ");
-    return `Submodule ${list} in worktree '${name}' has commits no remote has, which removal would delete`;
-  }
-  return null;
+export function forceReason(name: string, dirty: boolean): string | null {
+  return dirty ? `Worktree '${name}' has uncommitted or untracked changes` : null;
 }
 
 /**
  * Run the clean hook, then remove the worktree and optionally its branch.
  *
- * Throws when the worktree is dirty or a submodule holds local-only commits
- * and `force` is not set, when it is the main worktree, or when it is locked.
+ * Throws when the worktree is dirty and `force` is not set, when it is the main worktree, or when it is locked.
  * Every refusal happens before the clean hook runs, so a removal git would
  * reject never tears down the environment; only a change made while the hook
  * runs can fail afterwards.
@@ -136,7 +110,7 @@ export async function executeRemove(
     throw new Error(lockedMessage(name, worktree.path));
   }
   if (!force) {
-    const reason = forceReason(name, await inspectForceBlockers(worktree.path));
+    const reason = forceReason(name, await isWorktreeDirty(worktree.path));
     if (reason) throw new Error(`${reason}. Use force to remove it anyway.`);
   }
 

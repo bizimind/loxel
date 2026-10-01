@@ -39,7 +39,6 @@ export {
   pruneEmptyParents,
   removeWorktree,
   resolveRepoRoot,
-  submodulesWithLocalOnlyCommits,
   upstreamDivergence,
   worktreeStatus,
   type GitProbe,
