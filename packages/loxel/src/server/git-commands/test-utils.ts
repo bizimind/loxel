@@ -41,13 +41,17 @@ function makeTempRepo(repoPath: string): TempRepo {
   };
 }
 
+/** Author identity for test commits, so no test depends on the machine's global git config. */
+const TEST_EMAIL = "test@loxel.dev";
+const TEST_NAME = "Test";
+
 export async function createRepo(): Promise<TempRepo> {
   const prefix = await getTmpPrefix();
   const dir = `${prefix}${randomUUID()}`;
   await mkdir(dir, { recursive: true });
   await $`git init -b main ${dir}`.quiet();
-  await $`git -C ${dir} config user.email "test@loxel.dev"`.quiet();
-  await $`git -C ${dir} config user.name "Test"`.quiet();
+  await $`git -C ${dir} config user.email ${TEST_EMAIL}`.quiet();
+  await $`git -C ${dir} config user.name ${TEST_NAME}`.quiet();
   return makeTempRepo(dir);
 }
 
@@ -74,7 +78,8 @@ export async function commit(
     }
     await $`git -C ${repoPath} add -A`.quiet();
   }
-  await $`git -C ${repoPath} commit --allow-empty -m ${message}`.quiet();
+  // Explicit identity: `repoPath` may be a submodule, whose config has none.
+  await $`git -C ${repoPath} -c user.email=${TEST_EMAIL} -c user.name=${TEST_NAME} commit --allow-empty -m ${message}`.quiet();
   return (await $`git -C ${repoPath} rev-parse HEAD`.text()).trim();
 }
 
