@@ -62,3 +62,19 @@ export function isWorkingTreeDiffKey(
     WORKING_TREE_DIFF_TYPES.has(source.type)
   );
 }
+
+/**
+ * The key under which the diff view caches the working-tree side of an uncommitted diff: the
+ * worktree-relative path with no ref. File change events carry absolute paths, so they never
+ * match this key on their own. Null when the path is not inside the worktree (detached or
+ * external files), which the diff view never reads.
+ */
+export function workingTreeFileContentKey(
+  projectPath: string | null,
+  wtPath: string,
+  absPath: string,
+): ReturnType<typeof queryKeys.fileContent> | null {
+  const root = wtPath.endsWith("/") ? wtPath : `${wtPath}/`;
+  if (!absPath.startsWith(root) || absPath.length === root.length) return null;
+  return queryKeys.fileContent(projectPath, absPath.slice(root.length), undefined, wtPath);
+}
