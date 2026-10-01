@@ -9,7 +9,7 @@ import type { DiffInfo, FileDiff } from "@/api/diff-model";
 import { logger } from "../logger";
 import { parseDiffOutput } from "../parsers/diff";
 import { mapWithConcurrency } from "./concurrency";
-import { readOnlyGitEnv } from "./git-env";
+import { SUBMODULE_GITLINK_ONLY, readOnlyGitEnv } from "./git-env";
 import { validateCommitHash } from "./validation";
 import { validateWorktreePath } from "./worktree";
 
@@ -54,7 +54,7 @@ export async function getStagedDiff(cwd: string): Promise<DiffInfo> {
 }
 
 export async function getUnstagedDiff(cwd: string): Promise<DiffInfo> {
-  const result = await $`git -C ${cwd} diff`.env(readOnlyGitEnv()).text();
+  const result = await $`git -C ${cwd} ${SUBMODULE_GITLINK_ONLY} diff`.env(readOnlyGitEnv()).text();
   // The old side here is the index, which is not a commit and has no SHA to name.
   return { files: parseDiffOutput(result), baseRef: null };
 }
@@ -117,9 +117,10 @@ export async function getWorkingTreeDiff(
       // Resolved against the worktree, not `cwd`: an unqualified HEAD here means
       // the commit this worktree has checked out, which is rarely the project's.
       const baseRef = await resolveCommit(worktreePath, ref);
-      const result = await $`git -C ${worktreePath} diff ${baseRef ?? ref}`
-        .env(readOnlyGitEnv())
-        .text();
+      const result =
+        await $`git -C ${worktreePath} ${SUBMODULE_GITLINK_ONLY} diff ${baseRef ?? ref}`
+          .env(readOnlyGitEnv())
+          .text();
       return { baseRef, files: parseDiffOutput(result) };
     })(),
     getUntrackedDiff(worktreePath),
@@ -198,7 +199,10 @@ async function getUntrackedDiff(worktreePath: string): Promise<FileDiff[]> {
       }
       // `add -N` never reads contents, so an unreadable file or a missing textconv helper only
       // fails here; the per-file fallback below then loses just that file, not the whole diff.
-      const diff = await $`git -C ${worktreePath} diff`.env(env).nothrow().quiet();
+      const diff = await $`git -C ${worktreePath} ${SUBMODULE_GITLINK_ONLY} diff`
+        .env(env)
+        .nothrow()
+        .quiet();
       if (diff.exitCode === 0) return parseDiffOutput(diff.stdout.toString());
       log.debug("Diff of intent-to-add untracked files failed", {
         path: worktreePath,

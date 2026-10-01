@@ -117,6 +117,8 @@ more specific ref/index names during a commit. Per-event debouncing bounds the e
 
 Loxel never passes `-c core.fsmonitor=true`; whether Git's fsmonitor daemon runs is the user's Git configuration to decide. Loxel used to force it on, which left a persistent daemon behind for every Git directory a status touched — every worktree and, because `-c` settings travel to child Git processes, every submodule — and bought nothing: with `GIT_OPTIONAL_LOCKS=0` Git can never save the fsmonitor token in the index, so every query got a "trivial" answer followed by a full scan. Daemons started by those versions stay until their worktree is removed; stopping them is safe (`pkill -f 'git fsmonitor--daemon'`), since Git restarts one on demand where config enables it.
 
+Status and working-tree diffs run with `-c diff.ignoreSubmodules=dirty` (`SUBMODULE_GITLINK_ONLY` in `git-env.ts`): a submodule is reported only when its checked-out commit differs from the recorded one, never for edits or untracked files inside it. Otherwise Git runs a status inside every submodule, recursively, on every refresh — 4s instead of 0.3s in a repository with 76 submodules. This is a deliberate design decision. It is a default, so a repository's own `submodule.<name>.ignore` still wins: an `ignore=all` submodule stays hidden, and one set to `none` is still inspected in full.
+
 When the user does enable fsmonitor, daemon count scales with Git directories, not just top-level worktrees. Git reuses one daemon via `<gitdir>/fsmonitor--daemon.ipc`; a high count alone is not evidence of a leak.
 
 Language servers may run their own watchers. They are not currently torn down when a worktree is
