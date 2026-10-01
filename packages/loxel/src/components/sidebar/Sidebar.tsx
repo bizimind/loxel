@@ -26,9 +26,12 @@ import {
   ChevronsRightIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  CopyIcon,
   EyeIcon,
   EyeOffIcon,
+  FolderIcon,
   FolderPlusIcon,
+  GitBranchIcon,
   GitBranchPlusIcon,
   PencilIcon,
   PlusIcon,
@@ -93,9 +96,9 @@ const COLLAPSED_WIDTH = 48;
 const EMPTY_STRINGS: string[] = [];
 const EMPTY_WORKTREES: WorktreeEntry[] = [];
 
-// ── Shared worktree removal hook ────────────────────────────────────────
+// ── Shared worktree context menu hook ───────────────────────────────────
 
-function useWorktreeRemoval(projectPath: string) {
+function useWorktreeContextMenu(projectPath: string) {
   const requestRemoveWorktree = useWorktreeStore((s) => s.requestRemoveWorktree);
   const confirmRemoveWorktree = useWorktreeStore((s) => s.confirmRemoveWorktree);
   const dismissPendingPlan = useWorktreeStore((s) => s.dismissPendingPlan);
@@ -141,6 +144,7 @@ function useWorktreeRemoval(projectPath: string) {
   );
 
   return {
+    projectPath,
     contextMenu,
     setContextMenu,
     removeError,
@@ -153,21 +157,56 @@ function useWorktreeRemoval(projectPath: string) {
   };
 }
 
-/** Renders context menu + confirmation dialogs for worktree removal. */
-function WorktreeRemoveDialogs({ removal }: { removal: ReturnType<typeof useWorktreeRemoval> }) {
+function copyToClipboard(text: string, what: string) {
+  navigator.clipboard.writeText(text).catch((err: unknown) => {
+    frontendLog
+      .child("ui")
+      .error(`Failed to copy ${what} to clipboard`, {
+        error: err instanceof Error ? err : undefined,
+      });
+  });
+}
+
+/** Renders the worktree context menu (copy, hide/show, remove) + removal dialogs. */
+function WorktreeContextMenu({ menu }: { menu: ReturnType<typeof useWorktreeContextMenu> }) {
+  const toggleVisibility = useWorktreeStore((s) => s.toggleVisibility);
+  const wt = menu.contextMenu?.worktree;
+  const isHidden = useWorktreeStore(
+    (s) =>
+      wt !== undefined && (s.byProject[menu.projectPath]?.hiddenPaths?.includes(wt.path) ?? false),
+  );
+
   return (
     <>
       {/* Worktree context menu */}
-      {removal.contextMenu && (
+      {menu.contextMenu && wt && (
         <ContextMenu
-          open={removal.contextMenu.open}
-          onOpenChange={(open) => !open && removal.setContextMenu(null)}
-          position={removal.contextMenu.position}
+          open={menu.contextMenu.open}
+          onOpenChange={(open) => !open && menu.setContextMenu(null)}
+          position={menu.contextMenu.position}
         >
+          <ContextMenuItem onClick={() => copyToClipboard(worktreeName(wt), "worktree name")}>
+            <CopyIcon className="size-3.5" />
+            Copy worktree name
+          </ContextMenuItem>
           <ContextMenuItem
-            variant="destructive"
-            onClick={() => removal.handleRemoveRequest(removal.contextMenu!.worktree)}
+            disabled={!wt.branch}
+            onClick={() => wt.branch && copyToClipboard(wt.branch, "branch name")}
           >
+            <GitBranchIcon className="size-3.5" />
+            Copy branch name
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => copyToClipboard(wt.path, "worktree path")}>
+            <FolderIcon className="size-3.5" />
+            Copy absolute path
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => toggleVisibility(menu.projectPath, wt.path)}>
+            {isHidden ? <EyeIcon className="size-3.5" /> : <EyeOffIcon className="size-3.5" />}
+            {isHidden ? "Show worktree" : "Hide worktree"}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onClick={() => menu.handleRemoveRequest(wt)}>
             <TrashIcon className="size-3.5" />
             Remove worktree
           </ContextMenuItem>
@@ -175,22 +214,22 @@ function WorktreeRemoveDialogs({ removal }: { removal: ReturnType<typeof useWork
       )}
 
       {/* Remove dialog (wt library plan) */}
-      {removal.pendingRemovePlan && (
+      {menu.pendingRemovePlan && (
         <RemoveWorktreeDialog
-          plan={removal.pendingRemovePlan}
-          error={removal.removeError}
-          onConfirm={removal.handlePlanRemoveConfirm}
+          plan={menu.pendingRemovePlan}
+          error={menu.removeError}
+          onConfirm={menu.handlePlanRemoveConfirm}
           onCancel={() => {
-            removal.dismissPendingPlan();
-            removal.setRemoveError(null);
+            menu.dismissPendingPlan();
+            menu.setRemoveError(null);
           }}
         />
       )}
 
       {/* Global remove error toast */}
-      {removal.removeError && !removal.pendingRemovePlan && (
+      {menu.removeError && !menu.pendingRemovePlan && (
         <div className="text-destructive absolute right-2 bottom-2 left-2 text-[10px]">
-          {removal.removeError}
+          {menu.removeError}
         </div>
       )}
     </>
@@ -586,7 +625,7 @@ function CollapsedWorktreeList({
   const setCustomOrder = useWorktreeStore((s) => s.setCustomOrder);
   const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
 
-  const removal = useWorktreeRemoval(project.path);
+  const menu = useWorktreeContextMenu(project.path);
 
   const orderedWorktrees = useMemo(
     () => getOrderedWorktrees(worktrees, customOrder),
@@ -642,7 +681,7 @@ function CollapsedWorktreeList({
                   isActive={wtIsActive}
                   isPending={wt.pending ?? false}
                   onClick={() => !wt.pending && switchWorktree(wt.path)}
-                  onContextMenu={(e) => !wt.pending && removal.handleContextMenu(e, wt)}
+                  onContextMenu={(e) => !wt.pending && menu.handleContextMenu(e, wt)}
                 />
               );
             })}
@@ -674,7 +713,7 @@ function CollapsedWorktreeList({
         </DragOverlay>
       </DndContext>
 
-      <WorktreeRemoveDialogs removal={removal} />
+      <WorktreeContextMenu menu={menu} />
     </>
   );
 }
@@ -794,7 +833,7 @@ function WorktreeList({ project }: { project: Project }) {
   const createWorktreeRequested = useWorktreeStore((s) => s.createWorktreeRequested);
   const clearCreateWorktreeRequest = useWorktreeStore((s) => s.clearCreateWorktreeRequest);
 
-  const removal = useWorktreeRemoval(project.path);
+  const menu = useWorktreeContextMenu(project.path);
 
   const orderedWorktrees = useMemo(
     () => getOrderedWorktrees(worktrees, customOrder),
@@ -914,7 +953,7 @@ function WorktreeList({ project }: { project: Project }) {
                 isHidden={hiddenSet.has(wt.path)}
                 isDragOverlay={false}
                 onSelect={() => !wt.pending && switchWorktree(wt.path)}
-                onContextMenu={(e) => !wt.pending && removal.handleContextMenu(e, wt)}
+                onContextMenu={(e) => !wt.pending && menu.handleContextMenu(e, wt)}
                 onToggleVisibility={() => toggleVisibility(project.path, wt.path)}
               />
             ))}
@@ -993,7 +1032,7 @@ function WorktreeList({ project }: { project: Project }) {
         </DragOverlay>
       </DndContext>
 
-      <WorktreeRemoveDialogs removal={removal} />
+      <WorktreeContextMenu menu={menu} />
 
       {/* Branch conflict resolution dialog */}
       {pendingAddPlan?.branchConflict?.kind === "exists" && (

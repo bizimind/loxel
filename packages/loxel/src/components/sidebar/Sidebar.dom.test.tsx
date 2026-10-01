@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+import type { WorktreeEntry } from "@/api/git-models";
 import type { EnrichedProject } from "@/api/project-model";
 import {
   SIDEBAR_DEFAULT_WIDTH,
@@ -98,6 +99,80 @@ describe("Sidebar regular-repository worktrees", () => {
     await waitFor(() => {
       expect(useWorktreeStore.getState().activeWorktreePath).toBe(project.path);
     });
+  });
+});
+
+describe("Sidebar worktree context menu", () => {
+  // A branch distinct from the wt name, so the copy tests can tell them apart.
+  const worktree = { ...project.worktrees[0]!, branch: "feature/topic" };
+  const writeText = mock((_text: string) => Promise.resolve());
+  const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+
+  beforeEach(() => {
+    writeText.mockClear();
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    setWorktrees([worktree]);
+  });
+
+  afterEach(() => {
+    if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard);
+    else Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  function setWorktrees(worktrees: WorktreeEntry[]) {
+    useWorktreeStore.setState({
+      byProject: { [project.path]: { worktrees, worktreesDir: project.worktreesDir } },
+    });
+  }
+
+  function openMenu() {
+    render(<Sidebar />);
+    fireEvent.contextMenu(screen.getByText("topic"));
+  }
+
+  test.each([
+    ["Copy worktree name", "topic"],
+    ["Copy branch name", "feature/topic"],
+    ["Copy absolute path", worktree.path],
+  ])("%s copies %s", async (label, expected) => {
+    openMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+
+    expect(writeText).toHaveBeenCalledWith(expected);
+  });
+
+  test("copy branch name is disabled for a detached worktree", async () => {
+    setWorktrees([{ ...worktree, branch: null }]);
+    openMenu();
+
+    const item = await screen.findByRole("menuitem", { name: "Copy branch name" });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  test("hide and show toggle the worktree's visibility", async () => {
+    openMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Hide worktree" }));
+    expect(useWorktreeStore.getState().byProject[project.path]?.hiddenPaths).toEqual([
+      worktree.path,
+    ]);
+
+    fireEvent.contextMenu(screen.getByText("topic"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Show worktree" }));
+    expect(useWorktreeStore.getState().byProject[project.path]?.hiddenPaths).toEqual([]);
+  });
+
+  test("hiding from the collapsed rail removes the worktree icon", async () => {
+    useProjectStore.setState({ sidebarExpanded: false });
+    const { container } = render(<Sidebar />);
+    const icon = () => container.querySelector(`[aria-roledescription="sortable"] button`);
+    expect(icon()).not.toBeNull();
+
+    fireEvent.contextMenu(icon()!);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Hide worktree" }));
+
+    await waitFor(() => expect(icon()).toBeNull());
   });
 });
 
