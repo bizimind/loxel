@@ -259,7 +259,7 @@ wt add feature-auth -b existing-branch # check out an existing branch instead
 
 ### `wt view [name]`
 
-Show one worktree's branch, head, path, lock state, dirty file count and upstream divergence. Picks from a list when the name is omitted. The dirty count includes changes inside initialized submodules and is `null` when the status cannot be read.
+Show one worktree's branch, head, path, lock state, dirty file count and upstream divergence. Picks from a list when the name is omitted. The dirty count is the number of entries `git status` reports, so a changed submodule counts once, and it is `null` when the status cannot be read.
 
 ### `wt mv [old] <new>` (aliases: `rename`, `move`)
 
@@ -269,7 +269,7 @@ Rename a worktree and its branch, then run `rename.wt.sh`. See [Renaming](#renam
 
 Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with commits merged into neither `HEAD` nor the remote default branch (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Judging against the remote default matters for a bare setup, where `HEAD` is the local `main` mirror and may lag the `origin/main` a branch started from. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused.
 
-Clean worktrees with initialized submodules can be removed without `--force`. Dirty means a non-empty top-level `git status`: a submodule with changes, untracked files or a moved commit counts as one entry, and whatever the repository marks as ignored (`submodule.<name>.ignore`, `.gitmodules`, nested levels included) is ignored. A submodule holding commits that no remote has, even one since deinitialized or removed from the tree, still requires `--force`, since a linked worktree's submodule objects live under its own git directory and are deleted with it.
+Clean worktrees with initialized submodules can be removed without `--force`. Dirty means `git status` reports something: a submodule with changes, untracked files or a moved commit is one entry, and whatever your git configuration tells `git status` to ignore is not counted. A submodule holding commits that no remote has, even one since deinitialized or removed from the tree, still requires `--force`, since a linked worktree's submodule objects live under its own git directory and are deleted with it.
 
 ```bash
 wt remove feature-auth                 # prompts about the branch when interactive

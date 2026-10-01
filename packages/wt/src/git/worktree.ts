@@ -326,9 +326,9 @@ export type WorktreeStatus = GitProbe<string[]>;
  * when the status cannot be determined. A checkout that has disappeared
  * reports no changes.
  *
- * One top-level `git status`: a submodule that differs is a single gitlink
- * line, and `submodule.<name>.ignore` is honoured as configured — whatever a
- * repository marks as ignored does not make its worktree dirty.
+ * Exactly what one top-level `git status` reports: a submodule that differs
+ * is a single gitlink line, and git's submodule ignore settings apply as
+ * configured, whether set by the repository or by the user.
  */
 export async function worktreeStatus(worktreePath: string): Promise<WorktreeStatus> {
   if (!(await pathExists(worktreePath))) return { ok: true, value: [] };
