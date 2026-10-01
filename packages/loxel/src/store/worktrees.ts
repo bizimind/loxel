@@ -317,7 +317,7 @@ export const useWorktreeStore = create<WorktreeState>()(
 
           if (deleteBranch && !result.branchDeleted) {
             throw new Error(
-              "The worktree was removed, but Git refused to delete its unmerged branch. The branch was kept.",
+              "The worktree was removed, but its branch could not be deleted. The branch was kept.",
             );
           }
         },

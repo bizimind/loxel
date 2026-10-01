@@ -320,7 +320,7 @@ describe("confirmRemoveWorktree", () => {
     expect(removeCalls).toEqual([]);
   });
 
-  test("surfaces partial success when Git keeps an unmerged branch", async () => {
+  test("surfaces partial success when the branch could not be deleted", async () => {
     branchDeleteSucceeds = false;
     await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
 
