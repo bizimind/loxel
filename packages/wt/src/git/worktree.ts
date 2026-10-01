@@ -218,7 +218,7 @@ export async function removeWorktree(root: string, path: string, force: boolean)
 
   // Git refuses a non-force removal whenever the worktree's git dir has a
   // `modules` directory, clean or not, populated or not. Escalate to --force
-  // only when nothing would be lost; --force itself skips that check, so it
+  // only when the worktree is clean; --force itself skips that check, so it
   // never refuses for this reason.
   const reason = gitFailure(result);
   if (force || !SUBMODULE_REFUSAL.test(reason)) {
@@ -326,76 +326,48 @@ export type WorktreeStatus = GitProbe<string[]>;
  * when the status cannot be determined. A checkout that has disappeared
  * reports no changes.
  *
- * Initialized submodules are walked explicitly and recursively; `git status`
- * alone honours `submodule.<name>.ignore` for nested levels, which would hide
- * their changes.
+ * Exactly what one top-level `git status` reports: a submodule that differs
+ * is a single gitlink line.
+ *
+ * Design decision: dirty means what `git status` shows, nothing more. Git's
+ * submodule ignore settings therefore apply wherever they come from: the
+ * user's own config (`diff.ignoreSubmodules`, `submodule.<name>.ignore`), a
+ * `.gitmodules` committed by the repository, and nested submodules' own
+ * settings. Content hidden that way does not make the worktree dirty, so a
+ * removal without force deletes it, including through the `--force`
+ * escalation in `removeWorktree`. This is intended, not an oversight.
+ *
+ * `--ignore-submodules=none` would make git look inside every submodule
+ * despite those settings. It is deliberately not passed: in repositories with
+ * many, nested submodules it costs seconds on every check, and it would make
+ * wt's answer differ from the `git status` the user sees.
  */
 export async function worktreeStatus(worktreePath: string): Promise<WorktreeStatus> {
   if (!(await pathExists(worktreePath))) return { ok: true, value: [] };
-  const top = await runGit(["status", ...STATUS_ARGS], worktreePath);
-  if (top.exitCode !== 0) return { ok: false, reason: gitFailure(top) };
-  const nested = await runGit(
-    [
-      "submodule",
-      "foreach",
-      "--recursive",
-      "--quiet",
-      `printf '%s\\0' "${SUBMODULE_MARKER}$displaypath"; git status ${STATUS_ARGS.join(" ")}`,
-    ],
-    worktreePath,
-  );
-  if (nested.exitCode !== 0) return { ok: false, reason: gitFailure(nested) };
-
-  const inner = parseStatus(nested.stdout);
-  // A gitlink line for a submodule whose own changes are listed would count
-  // the same work twice; keep it only when nothing inside explains it.
-  const changes = parseStatus(top.stdout)
-    .concat(inner)
-    .filter((entry) => !inner.some((change) => change.path.startsWith(`${entry.path}/`)))
-    .map((entry) =>
-      entry.from === undefined
-        ? `${entry.code} ${entry.path}`
-        : `${entry.code} ${entry.from} -> ${entry.path}`,
-    );
-  return { ok: true, value: changes };
+  // NUL-separated output keeps paths raw instead of C-quoting them.
+  const result = await runGit(["status", "--porcelain", "-z"], worktreePath);
+  if (result.exitCode !== 0) return { ok: false, reason: gitFailure(result) };
+  return { ok: true, value: parseStatus(result.stdout) };
 }
 
-// NUL-separated output keeps paths raw: the porcelain v1 text format C-quotes
-// paths with spaces or non-ASCII characters, which would never match the raw
-// `$displaypath` of `git submodule foreach`.
-const STATUS_ARGS = ["--porcelain", "-z", "--ignore-submodules=none"];
-
-interface StatusEntry {
-  /** The two-character XY status code. */
-  code: string;
-  /** Path relative to the worktree root, through any enclosing submodules. */
-  path: string;
-  /** The original path of a rename or copy. */
-  from?: string;
-}
-
-/** Parse `git status --porcelain -z` output, with submodule markers setting the path prefix. */
-function parseStatus(output: string): StatusEntry[] {
+/** Format `git status --porcelain -z` records as `XY path` / `XY from -> path` lines. */
+function parseStatus(output: string): string[] {
   const fields = output.split("\0");
-  const entries: StatusEntry[] = [];
-  let prefix = "";
+  const lines: string[] = [];
   for (let i = 0; i < fields.length; i += 1) {
     const field = fields[i]!;
-    if (field.startsWith(SUBMODULE_MARKER)) {
-      prefix = `${field.slice(SUBMODULE_MARKER.length)}/`;
-      continue;
-    }
     if (field.length < 4) continue;
     const code = field.slice(0, 2);
-    const entry: StatusEntry = { code, path: `${prefix}${field.slice(3)}` };
+    const path = field.slice(3);
     // A rename or copy is followed by its original path as a separate field.
     if (code.includes("R") || code.includes("C")) {
       i += 1;
-      entry.from = `${prefix}${fields[i] ?? ""}`;
+      lines.push(`${code} ${fields[i] ?? ""} -> ${path}`);
+    } else {
+      lines.push(`${code} ${path}`);
     }
-    entries.push(entry);
   }
-  return entries;
+  return lines;
 }
 
 /**
@@ -459,8 +431,6 @@ async function submoduleStores(
   }
   return stores;
 }
-
-const SUBMODULE_MARKER = "@@";
 
 /** Commits ahead of / behind the upstream branch, or null when there is none. */
 export async function upstreamDivergence(
