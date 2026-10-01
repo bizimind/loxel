@@ -57,7 +57,7 @@ Passes are coalesced per worktree: one runs at a time, and everything requested 
 
 `WorktreeStatusTracker` owns each project's cross-worktree dirty list (`worktree_status_changed` and `/api/worktree-statuses`). Subscribed worktrees update their entry from their live snapshot at no Git cost. Unwatched worktrees can only be refreshed by a sweep that runs `git status` in each of them (at most six concurrently): soon after a `log` or `worktrees` event, and, when triggered only by activity in a subscribed worktree, no sooner than five seconds after the previous sweep finished. Sweeps are single-flight, reuse live snapshots, and keep a worktree's last known state when its status cannot be read rather than reporting it clean. An explicit request (a client loading the list) re-reads unless a sweep finished within the last two seconds, since unwatched worktrees change without any event. Clients rely on the pushed list and do not refetch it on `log_changed`.
 
-The client refetches only working-tree diffs (staged, unstaged, uncommitted) on `status_changed` and ref/log events; commit and range diffs are keyed by full SHAs and never change.
+The client refetches only working-tree diffs (staged, unstaged, uncommitted) on `status_changed` and ref/log events; commit and range diffs are keyed by full SHAs and never change. Full file contents are not refetched on `status_changed`: each `file_content_changed` invalidates that file's content queries, both an open editor's (keyed by absolute path) and the working-tree side of the side-by-side diff (keyed by worktree-relative path), whether or not the file is open in an editor.
 
 ## Working-tree file events
 

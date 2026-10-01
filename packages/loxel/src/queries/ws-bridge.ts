@@ -19,7 +19,7 @@ import { applyStoreUpdate } from "@/store/store-sync";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { isWorkingTreeDiffKey, queryKeys } from "./query-keys";
+import { isWorkingTreeDiffKey, queryKeys, workingTreeFileContentKey } from "./query-keys";
 
 const log = frontendLog.child("files");
 
@@ -59,8 +59,9 @@ export function useWsBridge(): void {
           queryClient.setQueryData(queryKeys.status(projectPath, message.wtPath), message.data);
           // Refetch working-tree diffs (uncommitted changes may have changed). This fires on
           // every edit, so commit/range diffs — immutable — are deliberately left alone.
-          // File content is handled per-file by file_content_changed events —
-          // no need to invalidate all fileContent queries on every status change.
+          // File content (editors and the diff view's working-tree side) is handled per-file
+          // by file_content_changed events — no need to invalidate all fileContent queries on
+          // every status change.
           queryClient.invalidateQueries({
             predicate: (query) => isWorkingTreeDiffKey(query.queryKey, projectPath),
           });
@@ -79,11 +80,23 @@ export function useWsBridge(): void {
 
         case "file_content_changed": {
           const { path: changedPath, nonces } = message.data;
+          const projectPath = deriveProjectPath(message.wtPath);
+
+          // The diff view reads the new side of an uncommitted diff from disk, keyed by the
+          // worktree-relative path, whether or not the file is open in an editor.
+          const diffContentKey = workingTreeFileContentKey(
+            projectPath,
+            message.wtPath,
+            changedPath,
+          );
+          if (diffContentKey) {
+            queryClient.invalidateQueries({ queryKey: diffContentKey, exact: true });
+          }
+
           const editorStore = useEditorStateStore.getState();
           const entry = editorStore.files.get(changedPath);
           if (!entry) break;
 
-          const projectPath = deriveProjectPath(message.wtPath);
           const prefixKey = queryKeys.fileContentPrefix(projectPath, changedPath);
           if (entry.state === "clean") {
             for (const n of nonces) {
