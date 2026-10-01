@@ -13,6 +13,23 @@
 // fsmonitor runs is the user's git configuration to decide.
 
 /**
+ * Global options for every command that compares the working tree (status, working-tree diffs).
+ * Placed before the subcommand: `git -C <dir> ${SUBMODULE_GITLINK_ONLY} status ...`.
+ *
+ * Git otherwise decides whether each submodule is dirty by running a status inside it,
+ * recursively, which dominates the cost in repositories with many submodules (4s against 0.3s
+ * for one with 76). With it a submodule shows as changed only when its checked-out commit
+ * differs from the recorded one; edits and untracked files inside it are not reported. A
+ * design decision: Loxel reports submodules at the gitlink level only.
+ *
+ * Set as the `diff.ignoreSubmodules` default rather than passed as `--ignore-submodules=dirty`:
+ * the flag would override a repository's own `submodule.<name>.ignore` (an `all` submodule would
+ * reappear when its commit moves), whereas per-submodule configuration takes precedence over
+ * this default.
+ */
+export const SUBMODULE_GITLINK_ONLY = ["-c", "diff.ignoreSubmodules=dirty"];
+
+/**
  * Environment for read-only git commands.
  *
  * `GIT_OPTIONAL_LOCKS=0` breaks a feedback loop with the git-directory FileWatcher. A read-only

@@ -144,7 +144,8 @@ describe("getStatus and fsmonitor", () => {
         await commit(repo.path, "init", { "a.txt": "a\n" });
         await $`git -C ${repo.path} -c protocol.file.allow=always submodule add -q ${sub.path} sub`.quiet();
         await commit(repo.path, "add submodule");
-        await writeFile(repo.path, "sub/s.txt", "dirty\n");
+        // A moved submodule commit is what status reports for a submodule (see below).
+        await commit(`${repo.path}/sub`, "move", { "s.txt": "moved\n" });
         // A developer's global config may legitimately enable fsmonitor; nothing to assert then.
         const configured = await $`git -C ${repo.path} config --get core.fsmonitor`
           .nothrow()
@@ -182,6 +183,69 @@ describe("getStatus and fsmonitor", () => {
       expect(await Bun.file(marker).exists()).toBe(true);
     } finally {
       await repo.cleanup();
+    }
+  });
+});
+
+describe("getStatus and submodules", () => {
+  // Reported at the gitlink level only: looking inside every submodule dominates status time in
+  // repositories with many of them.
+  let repo: TempRepo;
+  let sub: TempRepo;
+
+  beforeAll(async () => {
+    sub = await createRepo();
+    repo = await createRepo();
+    await commit(sub.path, "sub init", { "s.txt": "s\n" });
+    await commit(repo.path, "init", { "a.txt": "a\n" });
+    await $`git -C ${repo.path} -c protocol.file.allow=always submodule add -q ${sub.path} sub`.quiet();
+    await commit(repo.path, "add submodule");
+  });
+
+  afterAll(async () => {
+    await repo.cleanup();
+    await sub.cleanup();
+  });
+
+  test("does not report edits or untracked files inside a submodule", async () => {
+    const copy = await repo.copy();
+    try {
+      await writeFile(copy.path, "sub/s.txt", "dirty\n");
+      await writeFile(copy.path, "sub/untracked.txt", "x\n");
+
+      const status = await getStatus(copy.path);
+
+      expect(status.unstaged).toEqual([]);
+      expect(status.untracked).toEqual([]);
+    } finally {
+      await copy.cleanup();
+    }
+  });
+
+  test("respects a repository's own ignore=all for a submodule", async () => {
+    const copy = await repo.copy();
+    try {
+      await commit(`${copy.path}/sub`, "move", { "s.txt": "moved\n" });
+      await $`git -C ${copy.path} config submodule.sub.ignore all`.quiet();
+
+      const status = await getStatus(copy.path);
+
+      expect(status.unstaged).toEqual([]);
+    } finally {
+      await copy.cleanup();
+    }
+  });
+
+  test("reports a submodule whose checked-out commit moved", async () => {
+    const copy = await repo.copy();
+    try {
+      await commit(`${copy.path}/sub`, "move", { "s.txt": "moved\n" });
+
+      const status = await getStatus(copy.path);
+
+      expect(status.unstaged.map((entry) => entry.path)).toEqual(["sub"]);
+    } finally {
+      await copy.cleanup();
     }
   });
 });
