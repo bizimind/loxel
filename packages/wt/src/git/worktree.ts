@@ -218,7 +218,7 @@ export async function removeWorktree(root: string, path: string, force: boolean)
 
   // Git refuses a non-force removal whenever the worktree's git dir has a
   // `modules` directory, clean or not, populated or not. Escalate to --force
-  // only when nothing would be lost; --force itself skips that check, so it
+  // only when the worktree is clean; --force itself skips that check, so it
   // never refuses for this reason.
   const reason = gitFailure(result);
   if (force || !SUBMODULE_REFUSAL.test(reason)) {
@@ -327,8 +327,20 @@ export type WorktreeStatus = GitProbe<string[]>;
  * reports no changes.
  *
  * Exactly what one top-level `git status` reports: a submodule that differs
- * is a single gitlink line, and git's submodule ignore settings apply as
- * configured, whether set by the repository or by the user.
+ * is a single gitlink line.
+ *
+ * Design decision: dirty means what `git status` shows, nothing more. Git's
+ * submodule ignore settings therefore apply wherever they come from: the
+ * user's own config (`diff.ignoreSubmodules`, `submodule.<name>.ignore`), a
+ * `.gitmodules` committed by the repository, and nested submodules' own
+ * settings. Content hidden that way does not make the worktree dirty, so a
+ * removal without force deletes it, including through the `--force`
+ * escalation in `removeWorktree`. This is intended, not an oversight.
+ *
+ * `--ignore-submodules=none` would make git look inside every submodule
+ * despite those settings. It is deliberately not passed: in repositories with
+ * many, nested submodules it costs seconds on every check, and it would make
+ * wt's answer differ from the `git status` the user sees.
  */
 export async function worktreeStatus(worktreePath: string): Promise<WorktreeStatus> {
   if (!(await pathExists(worktreePath))) return { ok: true, value: [] };

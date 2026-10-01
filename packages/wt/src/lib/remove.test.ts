@@ -430,6 +430,8 @@ describe("executeRemove with submodules", () => {
     ).rejects.toThrow(/uncommitted or untracked/i);
   });
 
+  // Deliberate: dirty is what `git status` reports, so content hidden by an
+  // ignore setting is deleted by a non-forced removal (see worktreeStatus).
   test("respects ignore=all configured for a submodule", async () => {
     const { subUrl } = await repoWithSubmodule();
     const added = await executeAdd({ name: "ignored-dirty-sub", repoPath: repo.root });
