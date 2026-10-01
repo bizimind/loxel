@@ -2167,9 +2167,11 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
       {
         name,
         deleteBranch,
-        // Checking "Also delete branch" is the confirmation, so skip git's merged check: it
-        // compares commit IDs and refuses squash-merged branches whose content is on main. The
-        // branch is only deleted after the worktree is, and a dirty worktree needs `force`.
+        // Design decision: checking "Also delete branch" is the confirmation, so skip git's
+        // merged check. It compares commit IDs and refuses squash-merged branches whose content
+        // is on main. This also deletes a branch whose commits were never pushed or merged; that
+        // is intended, not an oversight. The branch is only deleted after the worktree is, and a
+        // dirty worktree needs `force`.
         forceBranch: deleteBranch,
         force,
         repoPath: project.cwd,
