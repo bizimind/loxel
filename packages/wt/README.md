@@ -269,7 +269,7 @@ Rename a worktree and its branch, then run `rename.wt.sh`. See [Renaming](#renam
 
 Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with commits merged into neither `HEAD` nor the remote default branch (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Judging against the remote default matters for a bare setup, where `HEAD` is the local `main` mirror and may lag the `origin/main` a branch started from. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused.
 
-Clean worktrees with initialized submodules can be removed without `--force`. A worktree is dirty when `git status` reports something; a submodule with changes, untracked files or a moved commit counts as one entry. Anything `git status` hides is not counted, whether the submodule is ignored by your git config, by the repository's `.gitmodules` or by a nested submodule's own settings, and removing the worktree deletes that hidden content without asking for `--force`. A submodule holding commits that no remote has, even one since deinitialized or removed from the tree, still requires `--force`, since a linked worktree's submodule objects live under its own git directory and are deleted with it.
+Clean worktrees with initialized submodules can be removed without `--force`. A worktree is dirty when `git status` reports something; a submodule with changes, untracked files or a moved commit counts as one entry. Anything `git status` hides is not counted, whether the submodule is ignored by your git config, by the repository's `.gitmodules` or by a nested submodule's own settings, and removing the worktree deletes that hidden content without asking for `--force`. Dirtiness is the only check: commits inside a submodule that exist on no remote are not detected, and removing the worktree deletes them.
 
 ```bash
 wt remove feature-auth                 # prompts about the branch when interactive
@@ -468,9 +468,9 @@ const move = await planMove({ oldName: "feat/foo", name: "feat/bar", repoPath })
 const moved = await executeMove({ oldName: "feat/foo", name: "feat/bar", repoPath });
 
 const removal = await planRemove({ name: "feat/bar", repoPath });
-// removal.dirty, or removal.localOnlySubmodules non-empty, means git (or wt on
-// its behalf) refuses without force; forceReason() phrases that for a prompt.
-if (!forceReason("feat/bar", removal)) {
+// removal.dirty means git (or wt on its behalf) refuses without force;
+// forceReason() phrases that for a prompt.
+if (!forceReason("feat/bar", removal.dirty)) {
   await executeRemove({ name: "feat/bar", repoPath, deleteBranch: true, force: false });
 }
 ```

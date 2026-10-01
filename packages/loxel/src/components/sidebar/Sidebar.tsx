@@ -1108,8 +1108,7 @@ function RemoveWorktreeDialog({
   const [force, setForce] = useState(false);
 
   const branch = plan.branch;
-  const localOnly = plan.localOnlySubmodules.length > 0;
-  const needsForce = plan.dirty || localOnly;
+  const needsForce = plan.dirty;
   const blocked = needsForce && !force;
 
   return (
@@ -1139,15 +1138,6 @@ function RemoveWorktreeDialog({
           <div className="border-warning/20 bg-warning/5 mt-3 rounded-md border p-2.5">
             <p className="text-warning text-[11px] font-medium">
               This worktree has uncommitted or untracked files. They will be lost.
-            </p>
-          </div>
-        )}
-
-        {localOnly && (
-          <div className="border-warning/20 bg-warning/5 mt-3 rounded-md border p-2.5">
-            <p className="text-warning text-[11px] font-medium">
-              Submodule {plan.localOnlySubmodules.join(", ")} has commits no remote has. They will
-              be lost.
             </p>
           </div>
         )}
