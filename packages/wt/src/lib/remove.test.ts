@@ -430,24 +430,23 @@ describe("executeRemove with submodules", () => {
     ).rejects.toThrow(/uncommitted or untracked/i);
   });
 
-  test("detects untracked submodule files even when ignore=all is configured", async () => {
+  test("respects ignore=all configured for a submodule", async () => {
     const { subUrl } = await repoWithSubmodule();
     const added = await executeAdd({ name: "ignored-dirty-sub", repoPath: repo.root });
     await addSubmoduleTo(added.path, subUrl);
     await git(["config", "submodule.mysub.ignore", "all"], added.path);
-    await Bun.write(join(added.path, "mysub", "untracked-secret"), "keep me\n");
+    await Bun.write(join(added.path, "mysub", "untracked-ignored"), "x\n");
 
-    expect(await git(["status", "--porcelain"], added.path)).toBe("");
-    expect((await planRemove({ name: "ignored-dirty-sub", repoPath: repo.root })).dirty).toBe(true);
-    await expect(
-      executeRemove({
-        name: "ignored-dirty-sub",
-        repoPath: repo.root,
-        deleteBranch: false,
-        force: false,
-      }),
-    ).rejects.toThrow(/uncommitted or untracked/i);
-    expect(await Bun.file(join(added.path, "mysub", "untracked-secret")).text()).toBe("keep me\n");
+    expect((await planRemove({ name: "ignored-dirty-sub", repoPath: repo.root })).dirty).toBe(
+      false,
+    );
+    await executeRemove({
+      name: "ignored-dirty-sub",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: false,
+    });
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
   });
 
   test("refuses to escalate when a submodule holds commits no remote has", async () => {
@@ -491,7 +490,7 @@ describe("executeRemove with submodules", () => {
     expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
   });
 
-  test("detects changes in a nested submodule hidden by a committed ignore=all", async () => {
+  test("respects a committed ignore=all in a nested submodule", async () => {
     const { subUrl: deepUrl } = await repoWithSubmodule();
     const midUrl = join(dirname(repo.root), "mid-origin");
     await git(["init", "--initial-branch=main", midUrl], dirname(repo.root));
@@ -512,50 +511,50 @@ describe("executeRemove with submodules", () => {
       ["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-am", "add mid"],
       added.path,
     );
-    await Bun.write(join(added.path, "mid", "deep", "precious.txt"), "keep me\n");
+    await Bun.write(join(added.path, "mid", "deep", "ignored.txt"), "x\n");
 
-    expect(await git(["status", "--porcelain", "--ignore-submodules=none"], added.path)).toBe("");
-    expect((await planRemove({ name: "nested-sub", repoPath: repo.root })).dirty).toBe(true);
-    await expect(
-      executeRemove({ name: "nested-sub", repoPath: repo.root, deleteBranch: false, force: false }),
-    ).rejects.toThrow(/uncommitted or untracked/i);
-    expect(await Bun.file(join(added.path, "mid", "deep", "precious.txt")).exists()).toBe(true);
+    expect((await planRemove({ name: "nested-sub", repoPath: repo.root })).dirty).toBe(false);
+    await executeRemove({
+      name: "nested-sub",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: false,
+    });
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
   });
 
-  test("counts a change inside a submodule once", async () => {
+  test("reports a changed submodule as one gitlink line", async () => {
     const { subUrl } = await repoWithSubmodule();
     const added = await executeAdd({ name: "counted-sub", repoPath: repo.root });
     await addSubmoduleTo(added.path, subUrl);
     await Bun.write(join(added.path, "mysub", "untracked.txt"), "x\n");
+    await git(["mv", "tracked.txt", "renamed.txt"], join(added.path, "mysub"));
+
+    expect(await worktreeStatus(added.path)).toEqual({ ok: true, value: [" M mysub"] });
+  });
+
+  test("formats a rename with both of its paths", async () => {
+    const { subUrl } = await repoWithSubmodule();
+    const added = await executeAdd({ name: "renamed-top", repoPath: repo.root });
+    await addSubmoduleTo(added.path, subUrl);
+    await Bun.write(join(added.path, "old name.txt"), "x\n");
+    await git(["add", "old name.txt"], added.path);
+    await git(["-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "add"], added.path);
+    await git(["mv", "old name.txt", "new name.txt"], added.path);
 
     expect(await worktreeStatus(added.path)).toEqual({
       ok: true,
-      value: ["?? mysub/untracked.txt"],
+      value: ["R  old name.txt -> new name.txt"],
     });
   });
 
-  test("counts changes once in a submodule whose path contains a space", async () => {
+  test("keeps a submodule path containing a space verbatim", async () => {
     const { subUrl } = await repoWithSubmodule();
     const added = await executeAdd({ name: "spaced-sub", repoPath: repo.root });
     await addSubmoduleTo(added.path, subUrl, "my sub dir");
     await Bun.write(join(added.path, "my sub dir", "untracked.txt"), "x\n");
 
-    expect(await worktreeStatus(added.path)).toEqual({
-      ok: true,
-      value: ["?? my sub dir/untracked.txt"],
-    });
-  });
-
-  test("prefixes both halves of a rename inside a submodule", async () => {
-    const { subUrl } = await repoWithSubmodule();
-    const added = await executeAdd({ name: "renamed-in-sub", repoPath: repo.root });
-    await addSubmoduleTo(added.path, subUrl);
-    await git(["mv", "tracked.txt", "renamed.txt"], join(added.path, "mysub"));
-
-    expect(await worktreeStatus(added.path)).toEqual({
-      ok: true,
-      value: ["R  mysub/tracked.txt -> mysub/renamed.txt"],
-    });
+    expect(await worktreeStatus(added.path)).toEqual({ ok: true, value: [" M my sub dir"] });
   });
 
   test("fails closed when a submodule's refs cannot be walked", async () => {

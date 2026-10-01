@@ -269,7 +269,7 @@ Rename a worktree and its branch, then run `rename.wt.sh`. See [Renaming](#renam
 
 Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with commits merged into neither `HEAD` nor the remote default branch (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Judging against the remote default matters for a bare setup, where `HEAD` is the local `main` mirror and may lag the `origin/main` a branch started from. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused.
 
-Clean worktrees with initialized submodules can be removed without `--force`. Changes inside submodules, nested ones included, are checked explicitly, even when `submodule.<name>.ignore=all` is configured; those removals still require `--force`, as does a submodule holding commits that no remote has, even one since deinitialized or removed from the tree, since a linked worktree's submodule objects live under its own git directory and are deleted with it.
+Clean worktrees with initialized submodules can be removed without `--force`. Dirty means a non-empty top-level `git status`: a submodule with changes, untracked files or a moved commit counts as one entry, and whatever the repository marks as ignored (`submodule.<name>.ignore`, `.gitmodules`, nested levels included) is ignored. A submodule holding commits that no remote has, even one since deinitialized or removed from the tree, still requires `--force`, since a linked worktree's submodule objects live under its own git directory and are deleted with it.
 
 ```bash
 wt remove feature-auth                 # prompts about the branch when interactive
