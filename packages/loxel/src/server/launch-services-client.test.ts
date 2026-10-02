@@ -17,7 +17,9 @@ for await (const line of console) {
   const req = JSON.parse(line);
   calls++;
   const target = req.path ?? req.appPath;
-  if (target.includes("crash")) process.kill(process.pid, "SIGSEGV");
+  // Die abruptly. SIGKILL rather than SIGSEGV: on Linux the JS engine handles SIGSEGV itself,
+  // so a SIGSEGV sent with kill() does not terminate the process there.
+  if (target.includes("crash")) process.kill(process.pid, "SIGKILL");
   if (target.includes("hang")) continue;
   const response = target.includes("fail")
     ? { id: req.id, ok: false, error: "boom" }
@@ -158,7 +160,9 @@ describe("LaunchServicesClient", () => {
     const client = createClient();
     const before = helperInfo((await client.appsForFile("/repo/a.txt")).apps);
 
-    await expect(client.appsForFile("/repo/crash.md")).rejects.toThrow("SIGSEGV");
+    await expect(client.appsForFile("/repo/crash.md")).rejects.toThrow(
+      "LaunchServices helper exited (SIGKILL)",
+    );
 
     const after = helperInfo((await client.appsForFile("/repo/b.json")).apps);
     expect(after.pid).not.toBe(before.pid);
