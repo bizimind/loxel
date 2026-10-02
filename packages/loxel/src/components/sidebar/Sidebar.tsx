@@ -43,6 +43,7 @@ import { createPortal } from "react-dom";
 
 import type { WorktreeEntry } from "@/api/git-models";
 import type { Project } from "@/api/project-model";
+import { OpenInMenuItems, isOpenInSupported } from "@/components/menus/OpenInMenuItems";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
@@ -200,6 +201,8 @@ function WorktreeContextMenu({ menu }: { menu: ReturnType<typeof useWorktreeCont
             <FolderIcon className="size-3.5" />
             Copy absolute path
           </ContextMenuItem>
+          {isOpenInSupported && <ContextMenuSeparator />}
+          <OpenInMenuItems path={wt.path} />
           <ContextMenuSeparator />
           <ContextMenuItem onClick={() => toggleVisibility(menu.projectPath, wt.path)}>
             {isHidden ? <EyeIcon className="size-3.5" /> : <EyeOffIcon className="size-3.5" />}

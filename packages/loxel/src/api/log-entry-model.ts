@@ -22,6 +22,7 @@ export const LOG_CATEGORIES = [
   "ui",
   "search",
   "format",
+  "launch-services",
   "keychain",
   "secret-store",
   "perf",

@@ -13,6 +13,7 @@ import type {
   WorktreeStatusInfo,
 } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
+import type { OpenInApps, OpenWithAppRequest, RevealInFinderRequest } from "./open-in-model";
 import type { DirEntry } from "./project-files-model";
 import type {
   BrowseEntry,
@@ -223,6 +224,25 @@ export async function writeFileContent(options: {
 export interface DetectedFormatter {
   command: string;
   extensions: string[];
+}
+
+// "Open In" (macOS): Finder reveal and open-with-app for files Loxel manages
+
+export async function getOpenInApps(path: string): Promise<OpenInApps> {
+  return fetchJson<OpenInApps>(`/open-in/apps?path=${encodeURIComponent(path)}`);
+}
+
+/** URL of an app's icon PNG, for use as an `<img>` source. */
+export function getOpenInAppIconUrl(appPath: string): string {
+  return `${API_BASE}/open-in/app-icon?app=${encodeURIComponent(appPath)}`;
+}
+
+export async function revealInFinder(request: RevealInFinderRequest): Promise<void> {
+  await fetchJson("/open-in/reveal", { method: "POST", body: JSON.stringify(request) });
+}
+
+export async function openWithApp(request: OpenWithAppRequest): Promise<void> {
+  await fetchJson("/open-in/open", { method: "POST", body: JSON.stringify(request) });
 }
 
 export async function getDetectedFormatters(worktreePath: string): Promise<DetectedFormatter[]> {
