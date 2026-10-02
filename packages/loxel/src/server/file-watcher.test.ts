@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -610,5 +610,28 @@ describe("FileWatcher live git updates", () => {
     // negative rather than a dead watch: a ref update in the bare repo must still fire.
     await Bun.$`git -C ${bare} branch proof`.quiet();
     expect(await sawAny(seen)).toBe(true);
+  }, 120000);
+
+  test("bare repo: deleting a large tree inside .worktrees/ emits no worktrees event", async () => {
+    const base = scratchDir("bare-mass-");
+    const seed = await seedRepo(path.join(base, "seed"));
+    const bare = path.join(base, "bare");
+    await Bun.$`git clone -q --bare ${seed} ${bare}`.quiet();
+    const wt = path.join(bare, ".worktrees", "foo");
+    await Bun.$`git -C ${bare} worktree add -q -b foo ${wt}`.quiet();
+
+    const deps = path.join(wt, "node_modules");
+    mkdirSync(deps);
+    for (let i = 0; i < 20000; i++) writeFileSync(path.join(deps, `f${i}.js`), "x");
+
+    const { seen } = await startWatcher(bare);
+    seen.length = 0;
+
+    // Bun cross-delivers a recursive watch's churn to the non-recursive `worktrees/` watch in
+    // the same process, as changes to `worktrees` itself; the entry set has not changed.
+    rmSync(deps, { recursive: true });
+    await Bun.sleep(SETTLE_MS);
+
+    expect(seen).not.toContain("worktrees");
   }, 120000);
 });

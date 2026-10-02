@@ -679,7 +679,7 @@ function CollapsedWorktreeList({
                   id={wt.path}
                   name={name}
                   isActive={wtIsActive}
-                  isPending={wt.pending ?? false}
+                  isPending={wt.pending !== undefined}
                   onClick={() => !wt.pending && switchWorktree(wt.path)}
                   onContextMenu={(e) => !wt.pending && menu.handleContextMenu(e, wt)}
                 />
@@ -1108,7 +1108,11 @@ function WorktreeItem({
       <div className="min-w-0 flex-1 overflow-hidden">
         <div className="text-foreground truncate text-xs font-medium">{name}</div>
         <div className="text-muted-foreground truncate text-[10px]">
-          {wt.pending ? "Creating..." : subtitle}
+          {wt.pending === "creating"
+            ? "Creating..."
+            : wt.pending === "removing"
+              ? "Removing..."
+              : subtitle}
         </div>
       </div>
       {!isDragOverlay && (

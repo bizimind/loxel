@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { branchExists, git, pathExists, worktreeStatus } from "../git/index.ts";
+import {
+  branchExists,
+  detachWorktree,
+  git,
+  pathExists,
+  TRASH_DIR,
+  worktreeStatus,
+} from "../git/index.ts";
 import {
   createTestRepo,
   enableOriginTracking,
@@ -358,6 +365,101 @@ describe("executeRemove", () => {
     expect(await pathExists(join(repo.root, ".worktrees", "feat", "two"))).toBe(true);
     const reused = await executeAdd({ name: "feat/one", repoPath: repo.root });
     expect(reused.created).toBe(true);
+  });
+});
+
+describe("executeRemove detaching the checkout", () => {
+  const trashOf = (root: string) => join(root, ".worktrees", TRASH_DIR);
+
+  /** The background deletion finishes on its own schedule; poll for its outcome. */
+  async function waitFor(condition: () => Promise<boolean>): Promise<boolean> {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (await condition()) return true;
+      await Bun.sleep(50);
+    }
+    return false;
+  }
+
+  test("unregisters at once and deletes the files in the background", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "feat/foo", repoPath: repo.root });
+    await Bun.write(join(added.path, "node_modules", "dep", "index.js"), "untracked\n");
+
+    await executeRemove({
+      name: "feat/foo",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: true,
+    });
+
+    expect(await pathExists(added.path)).toBe(false);
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
+    expect(await waitFor(async () => (await readdir(trashOf(repo.root))).length === 0)).toBe(true);
+  });
+
+  test("refuses when clean.wt.sh leaves the worktree dirty", async () => {
+    repo = await createTestRepo({ bare: true });
+    await writeHook(repo.root, "clean.wt.sh", "echo late > leftover.txt");
+    const added = await executeAdd({ name: "late", repoPath: repo.root });
+
+    await expect(
+      executeRemove({ name: "late", repoPath: repo.root, deleteBranch: false, force: false }),
+    ).rejects.toThrow("after clean.wt.sh ran");
+    expect(await Bun.file(join(added.path, "leftover.txt")).text()).toBe("late\n");
+  });
+
+  test("moves the checkout back when git refuses the removal", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "locked", repoPath: repo.root });
+    await git(["worktree", "lock", added.path], repo.root);
+
+    await expect(
+      detachWorktree(repo.root, added.path, join(repo.root, ".worktrees")),
+    ).rejects.toThrow(/locked/i);
+    expect(await Bun.file(join(added.path, "README.md")).exists()).toBe(true);
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).toContain(added.path);
+  });
+
+  test("deletes only its own checkout from the trash", async () => {
+    repo = await createTestRepo({ bare: true });
+    // Another removal's checkout, possibly still registered while it is parked here.
+    const other = join(trashOf(repo.root), "other-1234", "file.txt");
+    await Bun.write(other, "in flight\n");
+    await executeAdd({ name: "next", repoPath: repo.root });
+
+    await executeRemove({ name: "next", repoPath: repo.root, deleteBranch: false, force: false });
+
+    const onlyOtherLeft = async () => (await readdir(trashOf(repo.root))).join() === "other-1234";
+    expect(await waitFor(onlyOtherLeft)).toBe(true);
+    expect(await Bun.file(other).text()).toBe("in flight\n");
+  });
+
+  test("falls back to git's own removal when the checkout cannot be parked", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "fallback", repoPath: repo.root });
+    // A file where the trash directory belongs makes parking fail.
+    await Bun.write(trashOf(repo.root), "not a directory\n");
+
+    await executeRemove({
+      name: "fallback",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: false,
+    });
+
+    expect(await pathExists(added.path)).toBe(false);
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
+  });
+
+  test("detaches a worktree of a regular repository", async () => {
+    repo = await createTestRepo();
+    const added = await executeAdd({ name: "regular", repoPath: repo.root });
+
+    await executeRemove({ name: "regular", repoPath: repo.root, deleteBranch: true, force: false });
+
+    expect(await pathExists(added.path)).toBe(false);
+    expect(await git(["worktree", "list", "--porcelain"], repo.root)).not.toContain(added.path);
+    expect(await waitFor(async () => (await readdir(trashOf(repo.root))).length === 0)).toBe(true);
   });
 });
 
