@@ -1,9 +1,11 @@
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
   deleteBranch,
+  detachWorktree,
   isMergedInto,
   isWorktreeDirty,
+  pathExists,
   pruneEmptyParents,
   removeWorktree,
   resolveRemoteDefault,
@@ -91,6 +93,9 @@ export function forceReason(name: string, dirty: boolean): string | null {
  * Every refusal happens before the clean hook runs, so a removal git would
  * reject never tears down the environment; only a change made while the hook
  * runs can fail afterwards.
+ *
+ * Returns once the worktree is unregistered: its files are deleted in the
+ * background (see `detachWorktree`).
  */
 export async function executeRemove(
   params: RemoveParams,
@@ -114,14 +119,24 @@ export async function executeRemove(
     if (reason) throw new Error(`${reason}. Use force to remove it anyway.`);
   }
 
+  const hookExists = await pathExists(join(root, HOOK_CLEAN));
   const hookRan = await runHook(
     HOOK_CLEAN,
     { root, name, worktreePath: worktree.path, branch: worktree.branch, baseEnv: params.hookEnv },
     progress,
   );
+  // Detaching skips git's own clean check, so a change made while the hook ran
+  // must be caught here instead.
+  if (!force && hookExists) {
+    const reason = forceReason(name, await isWorktreeDirty(worktree.path));
+    if (reason)
+      throw new Error(`${reason} after ${HOOK_CLEAN} ran. Use force to remove it anyway.`);
+  }
 
   progress.log(`Removing worktree '${name}'...`);
-  await removeWorktree(root, worktree.path, force);
+  if (!(await detachWorktree(root, worktree.path, dir))) {
+    await removeWorktree(root, worktree.path, force);
+  }
   await pruneEmptyParents(dirname(worktree.path), dir);
 
   const branchDeleted = await tryDeleteBranch(

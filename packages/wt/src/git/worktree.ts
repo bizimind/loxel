@@ -1,4 +1,6 @@
-import { mkdir, realpath, rmdir, stat } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { mkdir, realpath, rename, rmdir, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { git, gitFailure, runGit } from "./run.ts";
@@ -242,6 +244,74 @@ export async function removeWorktree(root: string, path: string, force: boolean)
 }
 
 const SUBMODULE_REFUSAL = /working trees containing submodules cannot be moved or removed/i;
+
+/** Directory under the worktrees directory where detached checkouts wait to be deleted. */
+export const TRASH_DIR = ".wt-trash";
+
+/**
+ * Unregister a worktree without waiting for its files to be deleted.
+ *
+ * Deleting the checkout is nearly all of a removal's time (seconds for a tree
+ * with installed dependencies), and git keeps the worktree registered until it
+ * is done. Renaming the checkout into the trash is instant; `git worktree
+ * remove --force` then has only the metadata of a missing checkout to delete,
+ * and a detached `rm -rf` that outlives the caller deletes the files. The
+ * trash is inside the worktrees directory so the rename never crosses a
+ * filesystem.
+ *
+ * Only this removal's own parked checkout is ever deleted: another removal's
+ * checkout may still be registered while it sits in the trash, and so is one
+ * left there by a crash or by a failed move back.
+ *
+ * `--force` skips git's clean check, so the caller must have verified the
+ * worktree is clean (or that force is meant). It does not skip a lock: when
+ * git refuses, the checkout is moved back and the refusal is thrown.
+ *
+ * @returns false when the checkout could not be moved (missing, or on another
+ *   filesystem); the worktree is untouched, and the caller should use
+ *   `removeWorktree`.
+ */
+export async function detachWorktree(
+  root: string,
+  path: string,
+  worktreesDirPath: string,
+): Promise<boolean> {
+  const parked = join(worktreesDirPath, TRASH_DIR, `${basename(path)}-${randomUUID()}`);
+  try {
+    await mkdir(dirname(parked), { recursive: true });
+    await rename(path, parked);
+  } catch {
+    return false;
+  }
+
+  const result = await runGit(["worktree", "remove", "--force", path], root);
+  if (result.exitCode !== 0) {
+    const reason = gitFailure(result);
+    try {
+      await rename(parked, path);
+    } catch (error) {
+      throw new Error(
+        `Failed to remove worktree at ${path}: ${reason}. Its files could not be moved back from ${parked}`,
+        { cause: error },
+      );
+    }
+    throw new Error(`Failed to remove worktree at ${path}: ${reason}`);
+  }
+
+  deleteInBackground(parked);
+  return true;
+}
+
+/**
+ * Delete `path` in a detached process, so the caller can return (or exit) at
+ * once. Best effort: if `rm` cannot start, the files stay in the trash.
+ */
+function deleteInBackground(path: string): void {
+  const child = spawn("/bin/rm", ["-rf", "--", path], { detached: true, stdio: "ignore" });
+  // A spawn failure arrives as an `error` event; unhandled, it would kill the caller.
+  child.on("error", () => {});
+  child.unref();
+}
 
 /**
  * Remove empty directories left between `from` and `stopAt` after a nested

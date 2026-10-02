@@ -103,8 +103,8 @@ export interface WorktreeEntry {
   createdAt: string | null;
   /** wt directory-based name (only present for wt-managed worktrees). */
   wtName?: string;
-  /** True for optimistic entries that haven't been confirmed by the server yet. */
-  pending?: boolean;
+  /** Set while the entry is being created or removed and not yet confirmed by the server. */
+  pending?: "creating" | "removing";
 }
 
 /** Worktree status with dirty file details */

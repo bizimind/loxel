@@ -16,6 +16,8 @@ import { purgeWorktreeStores, setActiveWorktreeKey } from "./worktree-store";
 
 const ACTIVE_WT_SESSION_KEY = `${STORAGE_PREFIX}-activeWorktreePath`;
 const refreshRequestIds = new Map<string, number>();
+/** Worktrees with a removal request in flight; shown as pending across list refreshes. */
+const removingPaths = new Set<string>();
 let nextRefreshRequestId = 0;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -208,7 +210,9 @@ export const useWorktreeStore = create<WorktreeState>()(
             const existing = getProject(s, projectPath);
             return {
               byProject: patchProject(s, projectPath, {
-                worktrees: data.worktrees,
+                worktrees: data.worktrees.map((wt) =>
+                  removingPaths.has(wt.path) ? { ...wt, pending: "removing" as const } : wt,
+                ),
                 customOrder: existing.customOrder?.filter((x) => validPaths.has(x)),
                 hiddenPaths: existing.hiddenPaths?.filter((x) => validPaths.has(x)),
               }),
@@ -300,15 +304,19 @@ export const useWorktreeStore = create<WorktreeState>()(
           const { wtPath, worktreePath, projectPath } = pendingRemovePlan;
           set({ pendingRemovePlan: null });
 
-          optimisticRemove(set, projectPath, worktreePath);
-
+          // Not removed optimistically: the entry stays, marked pending, until the server has
+          // unregistered the worktree (its files are deleted afterwards, in the background).
+          removingPaths.add(worktreePath);
+          markRemoving(set, projectPath, worktreePath);
           let result: Awaited<ReturnType<typeof api.removeWorktreeByWtPath>>;
           try {
             result = await api.removeWorktreeByWtPath(projectPath, wtPath, { deleteBranch, force });
           } catch (err) {
+            removingPaths.delete(worktreePath);
             await get().refreshProjectWorktrees(projectPath);
             throw err;
           }
+          removingPaths.delete(worktreePath);
 
           purgeWorktreeStores(worktreePath);
           purgeWorktreeCache(worktreePath);
@@ -351,6 +359,7 @@ export const useWorktreeStore = create<WorktreeState>()(
 
         reset: () => {
           refreshRequestIds.clear();
+          removingPaths.clear();
           set({
             byProject: {},
             activeWorktreePath: null,
@@ -428,7 +437,7 @@ function addOptimisticEntry(
     isMain: false,
     createdAt: new Date().toISOString(),
     wtName: name,
-    pending: true,
+    pending: "creating",
   };
   set((s) => ({
     byProject: patchProject(s, projectPath, {
@@ -445,15 +454,12 @@ function removeOptimisticEntry(set: SetFn, projectPath: string, worktreePath: st
   }));
 }
 
-function optimisticRemove(set: SetFn, projectPath: string, wtPath: string): void {
-  set((s) => {
-    const ps = getProject(s, projectPath);
-    return {
-      byProject: patchProject(s, projectPath, {
-        worktrees: ps.worktrees.filter((wt) => wt.path !== wtPath),
-        customOrder: ps.customOrder?.filter((p) => p !== wtPath),
-        hiddenPaths: ps.hiddenPaths?.filter((p) => p !== wtPath),
-      }),
-    };
-  });
+function markRemoving(set: SetFn, projectPath: string, worktreePath: string): void {
+  set((s) => ({
+    byProject: patchProject(s, projectPath, {
+      worktrees: getProject(s, projectPath).worktrees.map((wt) =>
+        wt.path === worktreePath ? { ...wt, pending: "removing" } : wt,
+      ),
+    }),
+  }));
 }

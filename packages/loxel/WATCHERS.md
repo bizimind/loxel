@@ -45,9 +45,9 @@ The project watcher owns project-scoped events. A per-worktree watcher accepts o
 must not recursively watch the common directory once per worktree for events the project watcher
 already handles.
 
-Worktree add/remove also has a non-recursive watch on `<commonDir>/worktrees`. Removal of a watched
-directory does not reliably emit an event from that directory's own watcher, while its parent does
-observe the directory entry disappearing.
+Worktree add/remove also has a non-recursive watch on `<commonDir>/worktrees`. Removal of a watched directory does not reliably emit an event from that directory's own watcher, while its parent does observe the directory entry disappearing.
+
+That watch emits only when the directory's modification time moved (an entry was added, removed or renamed) or the directory is gone. Bun (1.4.2) delivers a same-process recursive watch's churn to it as changes to `worktrees` itself, and in a bare repo the recursive watch covers every working tree: deleting a checkout with installed dependencies produced dozens of spurious lifecycle events, each broadcasting `worktrees_changed` and starting a cross-worktree status sweep. Comparing the mtime filters them without depending on how Bun routes events (see #311 for the other watchers it affects).
 
 ## Status refresh pipeline
 
@@ -89,8 +89,7 @@ Reconciliation then:
 2. removes the path from each subscriber's subscription set;
 3. tears down its Git/file/detached/external watchers and related caches.
 
-Before an in-app removal, filesystem delivery for that worktree is paused. This avoids expensive
-cache refreshes while thousands of files disappear. If Git refuses removal, every service is
+Before an in-app removal, filesystem delivery for that worktree is paused. `wt` renames the checkout into `<worktreesDir>/.wt-trash/` and returns once git has unregistered it; the files are deleted afterwards by a detached `rm -rf`, so the route answers in well under a second rather than after the many seconds the deletion takes. Those deletions happen outside any subscribed working tree: in a bare repo the project watcher sees them under `.worktrees/` and classifies them as nothing, and a regular repository's root checkout ignores `.worktrees/` through `info/exclude`. If Git refuses removal, every service is
 given a chance to resume without losing state, and a failure in one does not prevent the others.
 If removal succeeds, the route sends the final project broadcast and immediately performs
 permanent teardown; a later lifecycle event is harmless and keeps external removals covered.

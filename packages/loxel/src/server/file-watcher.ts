@@ -155,6 +155,15 @@ export function classifyGitChange(filename: string): WatchEvent[] {
   return events;
 }
 
+/** A directory's modification time, or null when it cannot be read. */
+function currentMtime(dir: string): number | null {
+  try {
+    return statSync(dir).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Watch the git directory (and common dir for worktrees) for changes and emit events.
  *
@@ -172,6 +181,8 @@ export class FileWatcher {
   private worktreesDirWatcher: FSWatcher | null = null;
   /** Inode of the directory `worktreesDirWatcher` is bound to, to notice a recreated one. */
   private worktreesDirIno: number | null = null;
+  /** Modification time of the watched `worktrees/`, to tell real changes from spurious events. */
+  private worktreesDirMtime: number | null = null;
   private commonDir: string | null = null;
   private gitRoot: string;
   private onEvent: (event: WatchEvent) => void;
@@ -224,6 +235,7 @@ export class FileWatcher {
     this.worktreesDirWatcher?.close();
     this.worktreesDirWatcher = null;
     this.worktreesDirIno = null;
+    this.worktreesDirMtime = null;
     this.commonDir = null;
     for (const timer of this.debounceTimers.values()) {
       clearTimeout(timer);
@@ -266,8 +278,9 @@ export class FileWatcher {
 
     const dir = path.join(this.commonDir, "worktrees");
     let ino: number;
+    let mtime: number;
     try {
-      ino = statSync(dir).ino;
+      ({ ino, mtimeMs: mtime } = statSync(dir));
     } catch {
       // The directory is gone (last worktree removed). Forget the dead watcher now: git may
       // hand the recreated directory the very same inode, which the check below would then
@@ -283,9 +296,18 @@ export class FileWatcher {
       const watcher = watch(dir, { recursive: false }, () => {
         // Self-deletion is delivered as a rename of the directory itself; that watcher is
         // dead from here on, so let it go rather than shadow the next attach.
-        if (!existsSync(dir) && this.worktreesDirWatcher === watcher) {
-          this.dropWorktreesDirWatcher();
+        if (!existsSync(dir)) {
+          if (this.worktreesDirWatcher === watcher) this.dropWorktreesDirWatcher();
+          this.emitDebounced("worktrees");
+          return;
         }
+        // Bun also delivers a same-process recursive watch's churn here, reported as a change
+        // to `worktrees` itself: in a bare repo, every file written or deleted in any working
+        // tree. Only an entry added, removed or renamed is a lifecycle change, and exactly
+        // those move the directory's mtime (a remove and re-add of one name included).
+        const current = currentMtime(dir);
+        if (current !== null && current === this.worktreesDirMtime) return;
+        this.worktreesDirMtime = current;
         this.emitDebounced("worktrees");
       });
       watcher.on("error", (error) => {
@@ -300,6 +322,8 @@ export class FileWatcher {
       });
       this.worktreesDirWatcher = watcher;
       this.worktreesDirIno = ino;
+      // Taken before watch() started, so a change made meanwhile still compares unequal.
+      this.worktreesDirMtime = mtime;
       return true;
     } catch (error) {
       log.debug("Worktrees directory not watchable yet, relying on git-dir watch", {
@@ -314,6 +338,7 @@ export class FileWatcher {
     this.worktreesDirWatcher?.close();
     this.worktreesDirWatcher = null;
     this.worktreesDirIno = null;
+    this.worktreesDirMtime = null;
   }
 
   private emitDebounced(event: WatchEvent) {

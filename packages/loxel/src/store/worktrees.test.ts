@@ -12,6 +12,8 @@ let planRemoveCalls: string[] = [];
 let branchDeleteSucceeds = true;
 let listResult: { worktrees: WorktreeEntry[] } = { worktrees: [] };
 let listResponses: Array<Promise<{ worktrees: WorktreeEntry[] }>> = [];
+/** When set, the removal request does not resolve until this does. */
+let removeGate: Promise<void> | null = null;
 
 const actualClient = await import("@/api/client");
 
@@ -29,13 +31,13 @@ mock.module("@/api/client", () => ({
     options: { deleteBranch: boolean; force: boolean },
   ) => {
     removeCalls.push({ wtPath, options });
-    return Promise.resolve({
+    return (removeGate ?? Promise.resolve()).then(() => ({
       name: "feat-x",
       path: wtPath,
       removed: true,
       branchDeleted: options.deleteBranch && branchDeleteSucceeds,
       hookRan: false,
-    });
+    }));
   },
   getProjectWorktrees: () => listResponses.shift() ?? Promise.resolve(listResult),
 }));
@@ -58,6 +60,7 @@ beforeEach(() => {
   branchDeleteSucceeds = true;
   listResult = { worktrees: [] };
   listResponses = [];
+  removeGate = null;
   plan = {
     name: "feat-x",
     worktreePath: WT_PATH,
@@ -297,6 +300,50 @@ describe("requestRemoveWorktree", () => {
 });
 
 describe("confirmRemoveWorktree", () => {
+  // Removal refreshes the list, which only runs for a project the project store knows.
+  beforeEach(() => {
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "p1",
+          path: PROJECT,
+          name: "repo",
+          addedAt: "",
+          isBare: true,
+          worktreesDir: "/repo/.worktrees",
+          worktrees: [worktree],
+        },
+      ],
+    });
+  });
+
+  test("keeps the entry, marked removing, until the server confirms the removal", async () => {
+    let finishRemoval: () => void = () => {};
+    removeGate = new Promise((resolve) => {
+      finishRemoval = resolve;
+    });
+    await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
+
+    const removal = useWorktreeStore
+      .getState()
+      .confirmRemoveWorktree({ deleteBranch: false, force: false });
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([
+      { ...worktree, pending: "removing" },
+    ]);
+
+    // A list refresh while the request is in flight keeps the marker.
+    listResult = { worktrees: [worktree] };
+    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees?.[0]?.pending).toBe(
+      "removing",
+    );
+
+    listResult = { worktrees: [] };
+    finishRemoval();
+    await removal;
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([]);
+  });
+
   test("forwards the user's force and deleteBranch choices", async () => {
     await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
     await useWorktreeStore.getState().confirmRemoveWorktree({ deleteBranch: true, force: true });
@@ -306,6 +353,17 @@ describe("confirmRemoveWorktree", () => {
     ]);
     expect(useWorktreeStore.getState().pendingRemovePlan).toBeNull();
     expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([]);
+  });
+
+  test("restores the entry when the removal fails", async () => {
+    removeGate = Promise.reject(new Error("locked"));
+    listResult = { worktrees: [worktree] };
+    await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
+
+    await expect(
+      useWorktreeStore.getState().confirmRemoveWorktree({ deleteBranch: false, force: false }),
+    ).rejects.toThrow("locked");
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([worktree]);
   });
 
   test("forwards a keep-branch, no-force removal unchanged", async () => {
