@@ -11,12 +11,18 @@ import { getStore, putStore } from "./store-db";
 
 const log = logger.child("files");
 
-/** A folder outside every project, shown in a worktree's Others section. */
-export interface ExternalFolder {
+/**
+ * A tree the files panel browses — a worktree's own, or a folder in its Others section: the root
+ * every relative path resolves against, and the services that list and modify it.
+ */
+export interface FileTree {
   root: string;
   filesService: ProjectFilesService;
   fileOpsService: FileOperationsService;
 }
+
+/** A folder outside every project, shown in a worktree's Others section. */
+export type ExternalFolder = FileTree;
 
 /** Where a worktree's list of open folders is persisted. */
 export interface ExternalFolderStorage {

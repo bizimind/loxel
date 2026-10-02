@@ -43,15 +43,15 @@ import { isHttpUrl } from "@/url-utils";
 import { config } from "./config";
 import { getDiagnostics } from "./diagnostics";
 import { describeError } from "./error-message";
+import type { FileTree } from "./external-folders-service";
 import { externalFoldersStoreKey } from "./external-folders-service";
-import type { FileOperationsService, HistoryStep } from "./file-operations-service";
+import type { HistoryStep } from "./file-operations-service";
 import { listFolderApps } from "./folder-apps";
 import * as git from "./git-commands";
 import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
 import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
-import type { ProjectFilesService } from "./project-files-service";
 import * as projectStore from "./project-store";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
@@ -958,13 +958,6 @@ function handleDetectedFormatters(req: Request, ctx: RouteContext): Response {
 // ---------------------------------------------------------------------------
 // Service-dependent routes: files panel
 // ---------------------------------------------------------------------------
-
-/** A tree the files panel browses: a worktree's own, or a folder in its Others section. */
-interface FileTree {
-  root: string;
-  filesService: ProjectFilesService;
-  fileOpsService: FileOperationsService;
-}
 
 function worktreeTree(wt: string, resources: WorktreeResources): FileTree {
   return {
