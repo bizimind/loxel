@@ -1,6 +1,7 @@
 import type { DockviewPanelApi } from "dockview-react";
 import { useCallback, useState } from "react";
 
+import { OpenInMenuItems, isOpenInSupported } from "@/components/menus/OpenInMenuItems";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 
 import { TabCloseButton } from "./tab-close-button";
@@ -34,6 +35,8 @@ export function FileContextMenuItems({
       <ContextMenuItem onClick={() => navigator.clipboard.writeText(filePath)}>
         Copy File Path
       </ContextMenuItem>
+      {isOpenInSupported && <ContextMenuSeparator />}
+      <OpenInMenuItems path={filePath} />
     </>
   );
 }

@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/context-menu";
 import { FileTypeIcon } from "@/lib/file-icons";
 
+import { OpenInMenuItems, isOpenInSupported } from "./OpenInMenuItems";
+
 interface ProjectFileMenuProps {
   open: boolean;
   position: { x: number; y: number };
@@ -151,7 +153,13 @@ export function ProjectFileMenu({
         </ContextMenuItem>
       )}
 
-      {(hasRename || hasNewSection || hasClipboard) && onRemoveFromOthers && (
+      {isOpenInSupported && (hasNewSection || hasRename || hasClipboard) && (
+        <ContextMenuSeparator />
+      )}
+
+      <OpenInMenuItems path={filePath} />
+
+      {(hasRename || hasNewSection || hasClipboard || isOpenInSupported) && onRemoveFromOthers && (
         <ContextMenuSeparator />
       )}
 
@@ -167,7 +175,9 @@ export function ProjectFileMenu({
         </ContextMenuItem>
       )}
 
-      {(hasClipboard || onRemoveFromOthers) && hasDestructive && <ContextMenuSeparator />}
+      {(hasClipboard || isOpenInSupported || onRemoveFromOthers) && hasDestructive && (
+        <ContextMenuSeparator />
+      )}
 
       {onGitRestore && (
         <ContextMenuItem

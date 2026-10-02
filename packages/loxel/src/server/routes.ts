@@ -45,9 +45,12 @@ import { getDiagnostics } from "./diagnostics";
 import { describeError } from "./error-message";
 import { externalFoldersStoreKey } from "./external-folders-service";
 import type { FileOperationsService, HistoryStep } from "./file-operations-service";
+import { listFolderApps } from "./folder-apps";
 import * as git from "./git-commands";
+import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
+import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
 import type { ProjectFilesService } from "./project-files-service";
 import * as projectStore from "./project-store";
 import { error, json } from "./response-helpers";
@@ -65,6 +68,7 @@ import { worktreesChangedMessage } from "./ws-messages";
 
 const wtLog = logger.child("worktrees");
 const searchLog = logger.child("search");
+const openInLog = logger.child("launch-services");
 
 const wtProgress: ProgressHandler = {
   log: (msg) => wtLog.info(msg),
@@ -908,6 +912,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
       return json({ success: true });
     }
     if (resolved.type === "external-folder") {
+      if (!resolved.relativePath) return error("Cannot write to a folder", 400);
       // Formatters are detected per worktree, so they do not apply to folders outside it.
       const { root, filesService } = resolved.folder;
       await filesService.writeFile(resolved.relativePath, nonce, async () => {
@@ -2932,6 +2937,9 @@ async function handleFileIndex(req: Request, ctx: RouteContext): Promise<Respons
   return json(await collectFileList(resolved.wtPath));
 }
 
+/** Created on the first "Open In" request; owns the LaunchServices helper process. */
+let launchServices: LaunchServicesClient | undefined;
+
 // ---------------------------------------------------------------------------
 // Unified route table
 // ---------------------------------------------------------------------------
@@ -3173,6 +3181,28 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
       if (reviewResponse) return reviewResponse;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
+      return error(message, 500);
+    }
+  }
+
+  // "Open In" routes (macOS only) — Finder reveal and open-with-app
+  if (pathname.startsWith("/api/open-in/")) {
+    if (process.platform !== "darwin") return error("Open In is only supported on macOS", 501);
+    launchServices ??= new LaunchServicesClient();
+    try {
+      const openInResponse = await handleOpenInRequest(req, {
+        // Files of open worktrees, drafts and external files, or anything inside a known
+        // project's repo or worktrees directory (e.g. worktrees listed in the sidebar)
+        isManagedPath: (path) =>
+          ctx.resolveFilePath(path) !== null || ctx.findProjectForPath(path) !== undefined,
+        launchServices,
+        folderApps: () => listFolderApps(),
+        runOpen: runOpenCommand,
+      });
+      if (openInResponse) return openInResponse;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      openInLog.warn(`Open In request failed: ${req.method} ${pathname}`, { err });
       return error(message, 500);
     }
   }

@@ -108,6 +108,7 @@ export type ResolvedFilePath =
       wtPath: string;
       resources: WorktreeResources;
       folder: ExternalFolder;
+      /** Relative to the folder root; empty for the root itself. */
       relativePath: string;
     };
 

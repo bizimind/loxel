@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import type { WsMessage } from "@/api/ws-protocol";
 
@@ -91,8 +91,8 @@ describe("Others folders routes", () => {
           };
         }
         const owner = externalFoldersService.find(path);
-        if (owner && path !== owner.root) {
-          const relativePath = path.slice(owner.root.length + 1);
+        if (owner) {
+          const relativePath = relative(owner.root, path);
           return { type: "external-folder", wtPath: wt, resources, folder: owner, relativePath };
         }
         return null;
