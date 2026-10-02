@@ -36,6 +36,7 @@ export const queryKeys = {
     ["externalFiles", projectPath, wtPath] as const,
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
+  openInApps: (path: string) => ["openInApps", path] as const,
 };
 
 const WORKING_TREE_DIFF_TYPES: ReadonlySet<unknown> = new Set<DiffSource["type"]>([

@@ -1,8 +1,12 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+
+/** Shared by the root menu and submenus so they look identical. */
+const POPUP_CLASS_NAME =
+  "data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 ring-foreground/10 bg-popover text-popover-foreground z-50 min-w-36 overflow-hidden rounded-md p-1 shadow-md ring-1 duration-100 outline-none";
 
 interface ContextMenuProps {
   children: React.ReactNode;
@@ -12,8 +16,25 @@ interface ContextMenuProps {
 }
 
 function ContextMenu({ children, open, onOpenChange, position }: ContextMenuProps) {
+  const triggerId = React.useId();
+
   return (
-    <MenuPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    <MenuPrimitive.Root open={open} onOpenChange={onOpenChange} triggerId={triggerId}>
+      {/*
+        The menu opens at the pointer (see `anchor`), so this trigger is never interacted with.
+        It exists because Base UI registers a top-level menu in its floating tree through its
+        trigger; without one, opening a submenu is treated as a sibling menu opening and closes
+        the whole context menu. Because the menu is opened programmatically, Base UI still
+        returns focus to the element focused before it opened, not to this trigger.
+      */}
+      <MenuPrimitive.Trigger
+        id={triggerId}
+        nativeButton={false}
+        render={<span />}
+        aria-hidden
+        tabIndex={-1}
+        className="pointer-events-none fixed size-0 opacity-0"
+      />
       <MenuPrimitive.Portal>
         <MenuPrimitive.Positioner
           className="isolate z-50 outline-none"
@@ -33,12 +54,7 @@ function ContextMenu({ children, open, onOpenChange, position }: ContextMenuProp
             }),
           }}
         >
-          <MenuPrimitive.Popup
-            data-slot="context-menu-content"
-            className={cn(
-              "data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 ring-foreground/10 bg-popover text-popover-foreground z-50 min-w-36 overflow-hidden rounded-md p-1 shadow-md ring-1 duration-100 outline-none",
-            )}
-          >
+          <MenuPrimitive.Popup data-slot="context-menu-content" className={POPUP_CLASS_NAME}>
             {children}
           </MenuPrimitive.Popup>
         </MenuPrimitive.Positioner>
@@ -124,6 +140,47 @@ function ContextMenuCheckboxItem({
   );
 }
 
+function ContextMenuSub(props: MenuPrimitive.SubmenuRoot.Props) {
+  return <MenuPrimitive.SubmenuRoot data-slot="context-menu-sub" {...props} />;
+}
+
+function ContextMenuSubTrigger({
+  className,
+  children,
+  ...props
+}: MenuPrimitive.SubmenuTrigger.Props) {
+  return (
+    <MenuPrimitive.SubmenuTrigger
+      data-slot="context-menu-sub-trigger"
+      className={cn(
+        "focus:bg-primary data-open:bg-primary flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-hidden select-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <ChevronRightIcon className="ml-auto" />
+    </MenuPrimitive.SubmenuTrigger>
+  );
+}
+
+function ContextMenuSubContent({ children }: { children: React.ReactNode }) {
+  return (
+    <MenuPrimitive.Portal>
+      <MenuPrimitive.Positioner
+        className="isolate z-50 outline-none"
+        side="right"
+        align="start"
+        alignOffset={-4}
+      >
+        <MenuPrimitive.Popup data-slot="context-menu-sub-content" className={POPUP_CLASS_NAME}>
+          {children}
+        </MenuPrimitive.Popup>
+      </MenuPrimitive.Positioner>
+    </MenuPrimitive.Portal>
+  );
+}
+
 function ContextMenuShortcut({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
@@ -141,4 +198,7 @@ export {
   ContextMenuLabel,
   ContextMenuCheckboxItem,
   ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubTrigger,
+  ContextMenuSubContent,
 };
