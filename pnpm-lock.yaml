@@ -29,8 +29,8 @@ importers:
   .:
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -61,8 +61,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
 
   packages/channel-worker:
     dependencies:
@@ -80,8 +80,8 @@ importers:
         specifier: ^5.20260823.1
         version: 5.20260823.1
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
       wrangler:
         specifier: ^4.125.0
         version: 4.125.0(@cloudflare/workers-types@5.20260823.1)(@types/node@24.12.4)
@@ -99,8 +99,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -121,8 +121,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -146,8 +146,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -183,8 +183,8 @@ importers:
         version: 2.1.0
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -196,8 +196,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -212,8 +212,8 @@ importers:
         version: 0.4.0(@axiomhq/js@1.8.0)
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
 
   packages/loxel:
     dependencies:
@@ -399,8 +399,8 @@ importers:
         specifier: ^14.6.6
         version: 14.6.6(@testing-library/dom@10.4.1)
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -476,8 +476,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
 
   packages/site:
     dependencies:
@@ -560,8 +560,8 @@ importers:
         version: 15.0.0
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.2
+        version: 1.4.2
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -2931,8 +2931,8 @@ packages:
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
 
-  '@types/bun@1.4.0':
-    resolution: {integrity: sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ==}
+  '@types/bun@1.4.2':
+    resolution: {integrity: sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ==}
 
   '@types/cacheable-request@6.0.3':
     resolution: {integrity: sha512-IQ3EbTzGxIigb1I3qPZc1rWJnH0BmSKv5QYTalEwweFvyBDLSAe24zP0le/hyi7ecGfZVlIVAg4BZqb8WBwKqw==}
@@ -3578,8 +3578,8 @@ packages:
     resolution: {integrity: sha512-q2hn7Mbo2nFNkVekPiHFx6Nfo3hURmES3tfBn+k5Pqxl2RkmP3QGqZUhH/q9Pch/4G05NRhPjDlVj1O8q4Txvw==}
     engines: {node: '>=14.0.0'}
 
-  bun-types@1.4.0:
-    resolution: {integrity: sha512-iIKw23BspnQQYd3prITOBxeUsxBHnwzX6YJfGMuNOZzeNcMmVqzIIVGRm1l69ogaPQmb4wB6BN8mA5bE9YuC5Q==}
+  bun-types@1.4.2:
+    resolution: {integrity: sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w==}
 
   bytestreamjs@2.0.1:
     resolution: {integrity: sha512-U1Z/ob71V/bXfVABvNr/Kumf5VyeQRBEm6Txb0PQ6S7V5GpBM3w4Cbqz/xPDicR5tN0uvDifng8C+5qECeGwyQ==}
@@ -9317,9 +9317,9 @@ snapshots:
     dependencies:
       '@babel/types': 7.29.8
 
-  '@types/bun@1.4.0':
+  '@types/bun@1.4.2':
     dependencies:
-      bun-types: 1.4.0
+      bun-types: 1.4.2
 
   '@types/cacheable-request@6.0.3':
     dependencies:
@@ -10068,7 +10068,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  bun-types@1.4.0:
+  bun-types@1.4.2:
     dependencies:
       '@types/node': 24.13.3
 
