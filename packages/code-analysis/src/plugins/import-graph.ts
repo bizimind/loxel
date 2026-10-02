@@ -27,7 +27,6 @@ const plugin: AnalysisPlugin = {
     const result = await cruise(roots, {
       doNotFollow: { path: "node_modules" },
       exclude: { path: ["node_modules", "\\.git", "dist"] },
-      tsConfig: { fileName: join(workDir, "tsconfig.json") },
     });
 
     const cruiseResult = result.output as ICruiseResult;
@@ -37,6 +36,7 @@ const plugin: AnalysisPlugin = {
       if (mod.coreModule) continue;
       for (const dep of mod.dependencies) {
         if (dep.coreModule) continue;
+        if (dep.couldNotResolve) continue;
         if (!dep.resolved) continue;
         records.push({ path: mod.source, source: mod.source, target: dep.resolved });
       }
