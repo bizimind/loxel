@@ -50,6 +50,11 @@ export function putStore(key: string, value: string): void {
     .run(key, value, new Date().toISOString());
 }
 
+/** Delete a store by key (no-op when missing). */
+export function deleteStore(key: string): void {
+  getDb().prepare("DELETE FROM stores WHERE key = ?").run(key);
+}
+
 /**
  * Promote all `layout:session:<windowId>:*` rows to `layout:canonical:*`, atomically.
  * Called when a window closes (orderly) — its session-scoped layout becomes the

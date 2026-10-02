@@ -7,6 +7,7 @@ import cssWorker from "monaco-editor/language/css/css.worker.js?worker";
 import htmlWorker from "monaco-editor/language/html/html.worker.js?worker";
 import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
 
+import { deriveProject, useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { connectAstroLsp, disconnectAstroLsp } from "./astro-lsp-client";
@@ -155,17 +156,26 @@ function createLazyLspConnector(opts: {
 }): void {
   let activeWt: string | null = useWorktreeStore.getState().activeWorktreePath ?? null;
   let modelCount = 0;
+  // Models counted at creation; `isMatch` can change meanwhile (projects load, worktree switch).
+  let counted = new WeakSet<monaco.editor.ITextModel>();
 
   const isMatch = (model: monaco.editor.ITextModel): boolean => {
     if (!opts.languageIds.includes(model.getLanguageId())) return false;
     if (!activeWt) return false;
-    return model.uri.path.startsWith(activeWt);
+    const path = model.uri.path;
+    if (path.startsWith(activeWt)) return true;
+    // Files outside every project (the Others section) are served by the active worktree's LSP.
+    if (model.uri.scheme !== "file") return false;
+    return !deriveProject(path, useProjectStore.getState().projects);
   };
 
   const countExistingModels = (): number => {
+    counted = new WeakSet();
     let n = 0;
     for (const model of monaco.editor.getModels()) {
-      if (isMatch(model)) n += 1;
+      if (!isMatch(model)) continue;
+      counted.add(model);
+      n += 1;
     }
     return n;
   };
@@ -183,12 +193,13 @@ function createLazyLspConnector(opts: {
 
   monaco.editor.onDidCreateModel((model) => {
     if (!isMatch(model)) return;
+    counted.add(model);
     modelCount += 1;
     if (modelCount === 1) syncConnection();
   });
 
   monaco.editor.onWillDisposeModel((model) => {
-    if (!isMatch(model)) return;
+    if (!counted.delete(model)) return;
     modelCount = Math.max(0, modelCount - 1);
     if (modelCount === 0) syncConnection();
   });

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 import { isHttpUrl } from "./url-utils";
@@ -50,12 +51,21 @@ function launchLoxel(): void {
   Bun.spawn(["open", "-a", "Loxel"], { stdout: "ignore", stderr: "ignore" });
 }
 
+/** How long to retry while no window can receive the request yet (e.g. Loxel is launching). */
+const OPEN_RETRY_MS = 10_000;
+
 async function sendOpen(port: number, body: Record<string, string>): Promise<void> {
-  const res = await fetch(`http://127.0.0.1:${port}/api/open`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const start = Date.now();
+  let res: Response;
+  while (true) {
+    res = await fetch(`http://127.0.0.1:${port}/api/open`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.status !== 503 || Date.now() - start >= OPEN_RETRY_MS) break;
+    await Bun.sleep(300);
+  }
 
   if (!res.ok) {
     const data: Record<string, unknown> = await res.json().catch(() => ({}));
@@ -81,19 +91,27 @@ async function main(): Promise<void> {
   const envPort = process.env.LOXEL_PORT ? parseInt(process.env.LOXEL_PORT, 10) : null;
   const envWorktree = process.env.LOXEL_WORKTREE;
 
-  // Detect worktree: from file path for files, from CWD for URLs.
-  // Inside loxel terminal, fall back to LOXEL_WORKTREE env for files outside any git repo.
   const filePath = isUrl ? null : resolve(rawArg);
-  let wtPath: string;
-  try {
-    wtPath = await detectWorktree(filePath ?? process.cwd());
-  } catch (err) {
-    if (isInsideLoxel && envWorktree) {
-      wtPath = envWorktree;
-    } else {
-      throw new Error(`File is not inside a git repository: ${filePath ?? process.cwd()}`, {
-        cause: err,
-      });
+  const isFolder = filePath !== null && isDirectory(filePath);
+
+  // Folders need no worktree: the window in use reveals one inside a worktree, or opens it in its
+  // Others section. Inside a loxel terminal, target that terminal's window.
+  let wtPath: string | undefined;
+  if (isFolder) {
+    wtPath = isInsideLoxel ? envWorktree : undefined;
+  } else {
+    // Detect worktree: from file path for files, from CWD for URLs.
+    // Inside loxel terminal, fall back to LOXEL_WORKTREE env for files outside any git repo.
+    try {
+      wtPath = await detectWorktree(filePath ?? process.cwd());
+    } catch (err) {
+      if (isInsideLoxel && envWorktree) {
+        wtPath = envWorktree;
+      } else {
+        throw new Error(`File is not inside a git repository: ${filePath ?? process.cwd()}`, {
+          cause: err,
+        });
+      }
     }
   }
 
@@ -108,7 +126,17 @@ async function main(): Promise<void> {
     if (!detectedPort) await waitForServer(port);
   }
 
-  await sendOpen(port, isUrl ? { url: rawArg, wtPath } : { filePath: filePath!, wtPath });
+  const body: Record<string, string> = isUrl ? { url: rawArg } : { filePath: filePath! };
+  if (wtPath) body.wtPath = wtPath;
+  await sendOpen(port, body);
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 main().catch((err: unknown) => {

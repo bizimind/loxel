@@ -43,7 +43,7 @@ import {
   preserveSource,
   topLevelBlockRanges,
 } from "@/lib/markdown-source-preservation";
-import { dispatchOpenFile } from "@/lib/open-file";
+import { openPath } from "@/lib/open-folder";
 import { rawLineToProsePosition } from "@/lib/prosemirror-position";
 import { createMinimalReplaceTransaction } from "@/lib/prosemirror-replace";
 import { threeWayMerge } from "@/lib/three-way-merge";
@@ -800,7 +800,8 @@ export function MarkdownEditor({
 
       const dir = filePath.substring(0, filePath.lastIndexOf("/"));
       const resolved = new URL(href, `file://${dir}/`).pathname;
-      dispatchOpenFile(resolved);
+      // Folder links open in the files panel; file links in their editor.
+      void openPath(resolved);
     }
 
     container.addEventListener("click", handleClick, true);

@@ -71,6 +71,12 @@ interface WorktreeUIState {
   setExpandedProjectFolders: (folders: Set<string>) => void;
   /** Update selected file when a path is renamed or moved. */
   renameProjectPaths: (oldPrefix: string, newPrefix: string) => void;
+  /**
+   * A folder the project files panel should reveal and expand as soon as its tree can show it —
+   * set across a worktree switch, or before a newly opened Others folder is listed.
+   */
+  pendingRevealFolder: string | null;
+  setPendingRevealFolder: (path: string | null) => void;
 }
 
 export const {
@@ -113,6 +119,8 @@ export const {
       return { expandedProjectFolders: next };
     }),
   setExpandedProjectFolders: (folders) => set({ expandedProjectFolders: new Set(folders) }),
+  pendingRevealFolder: null,
+  setPendingRevealFolder: (path) => set({ pendingRevealFolder: path }),
   renameProjectPaths: (oldPrefix, newPrefix) =>
     set((s) => {
       let sel = s.selectedProjectFile;

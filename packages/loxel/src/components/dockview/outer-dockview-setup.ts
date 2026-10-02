@@ -10,7 +10,12 @@ import { withDrawingCachePreserved } from "@/components/excalidraw-editor/Excali
 import { getGroupZone } from "@/store/layout-actions";
 import type { PanelId } from "@/store/panel-config";
 import { ALLOWED_ZONES } from "@/store/panel-config";
-import { movePanelToZone, movePanel, setDockviewApi } from "@/store/tools-bar";
+import {
+  movePanelToZone,
+  movePanel,
+  setDockviewApi,
+  showPanelsQueuedForRestore,
+} from "@/store/tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 
 import {
@@ -134,6 +139,7 @@ export function onOuterLayoutRestored(api: DockviewApi): void {
   syncActiveFromStore(api);
   applyZoneConstraints(api);
   setOuterSwapping(false);
+  showPanelsQueuedForRestore();
 }
 
 /** Track sidebar sizes on layout changes. */

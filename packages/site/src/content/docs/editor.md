@@ -94,6 +94,20 @@ The file tree supports keyboard-only navigation:
 
 **Drag and drop:** files and folders can be dragged within the project tree to reorganize them. See [Drafts](/docs/drafts) for dragging draft files into the project.
 
+### Other folders
+
+Folders outside every project can be opened in the **Others** section at the bottom of the file tree, next to files opened from outside the worktree. Open one with `loxel <folder>` (see [the `loxel` CLI](/docs/reference-env-files-cli-settings#loxel-cli)), or by Cmd-clicking a folder path in a terminal or a folder link in a markdown file. If the folder is inside a project's worktree instead, loxel switches to that worktree and reveals the folder in its tree.
+
+A folder that contains one of your projects can't be opened this way, nor can the filesystem root or your home folder (they are too large to watch); open a folder inside them instead. Other folders belong to the worktree they were opened in and are remembered across restarts, until the worktree is removed. They work like the project tree — open, edit and save files with conflict detection, create, rename, delete, cut/copy/paste and drag within the folder, undo with `Cmd+Z` — with these differences:
+
+- No git status coloring, and file operations never use git, even if the folder sits inside a repo
+- Files and folders can't be moved or copied between the project and an other folder
+- Format on save does not apply, since formatters are detected per worktree
+- Quick Open, full-text search and project diagnostics cover the worktree only
+- Language features come from the active worktree's language servers, so results depend on how each server handles files outside its workspace
+
+Right-click a folder's root row and choose **Remove from Others** to close it; nothing is deleted from disk.
+
 ---
 
 ## TypeScript diagnostics

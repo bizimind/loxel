@@ -2,9 +2,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { DockviewPanelApi } from "dockview-react";
 import { CheckIcon, CopyIcon, CrosshairIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
+import { wsClient } from "@/api/client";
 import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 import { ProjectFileMenu } from "@/components/menus/ProjectFileMenu";
 import { DetachedFileNode } from "@/components/panels/DetachedFileNode";
@@ -23,7 +24,13 @@ import { getTreeActionForEvent, useTreeKeyboardNav } from "@/hooks/useTreeKeyboa
 import { getDisplayFilename, toAbsoluteDir } from "@/lib/detached-path";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { dispatchOpenFile } from "@/lib/open-file";
-import { fileParentDir, parentDir, pathName, statusColorClass } from "@/lib/project-file-helpers";
+import {
+  fileParentDir,
+  findTreeRoot,
+  parentDir,
+  pathName,
+  statusColorClass,
+} from "@/lib/project-file-helpers";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { cn } from "@/lib/utils";
 import { removeDirQueries } from "@/queries/query-helpers";
@@ -31,6 +38,7 @@ import { queryKeys } from "@/queries/query-keys";
 import { useDiscardChangesMutation } from "@/queries/use-git-mutations";
 import { useDetachedFilesQuery, useExternalFilesQuery } from "@/queries/use-repo-queries";
 import { getQueryScope } from "@/queries/use-scope";
+import { useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 import { getCenterApi, subscribeCenterApi } from "@/store/tools-bar";
 import { getCurrentWorktreeUI, useWorktreeUI } from "@/store/worktree-ui";
@@ -42,7 +50,10 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   const isPanelActive = usePanelActive(panelApi);
   const [copied, setCopied] = useState(false);
   const queryClient = useQueryClient();
+  /** Routes to the tree that shows a path: the worktree's own, or the Others folders' tree. */
   const treeRef = useRef<FilesTreeHandle>(null);
+  const projectTreeRef = useRef<FilesTreeHandle>(null);
+  const othersTreeRef = useRef<FilesTreeHandle>(null);
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const displayPath = activeWorktreePath;
@@ -68,8 +79,79 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   );
   const isDetachedPath = useCallback((p: string) => detachedPathSet.has(p), [detachedPathSet]);
 
-  const { data: externalFiles } = useExternalFilesQuery();
-  const hasExternalFiles = externalFiles && externalFiles.length > 0;
+  // --- Others section: open folders (each a tree root) and individually opened files ---
+  const { data: otherEntries } = useExternalFilesQuery();
+  const externalFolders = useMemo(() => otherEntries?.filter((e) => e.isDir) ?? [], [otherEntries]);
+  const externalFiles = useMemo(() => otherEntries?.filter((e) => !e.isDir) ?? [], [otherEntries]);
+  const hasOthers = externalFolders.length > 0 || externalFiles.length > 0;
+  const othersNodes = useMemo<TreeNode[]>(
+    () => externalFolders.map((e) => ({ path: e.path, name: e.name, isDir: true })),
+    [externalFolders],
+  );
+  const folderRoots = useMemo(() => externalFolders.map((e) => e.path), [externalFolders]);
+  const treeRoots = useMemo(
+    () => (activeWorktreePath ? [activeWorktreePath, ...folderRoots] : folderRoots),
+    [activeWorktreePath, folderRoots],
+  );
+  const getTreeRoot = useCallback((path: string) => findTreeRoot(path, treeRoots), [treeRoots]);
+  const isTreeRoot = useCallback((path: string) => treeRoots.includes(path), [treeRoots]);
+  const isOthersRoot = useCallback((path: string) => folderRoots.includes(path), [folderRoots]);
+
+  useLayoutEffect(() => {
+    const treeFor = (path: string) =>
+      getTreeRoot(path) === activeWorktreePath ? projectTreeRef.current : othersTreeRef.current;
+    treeRef.current = {
+      getSelectedPath: () =>
+        projectTreeRef.current?.getSelectedPath() ??
+        othersTreeRef.current?.getSelectedPath() ??
+        null,
+      togglePath: (path) => treeFor(path)?.togglePath(path),
+      expandPath: (path) => treeFor(path)?.expandPath(path),
+      revealPath: async (path) => treeFor(path)?.revealPath(path),
+      reloadSubtree: (path) => treeFor(path)?.reloadSubtree(path),
+      clearSubtree: (path) => treeFor(path)?.clearSubtree(path),
+      handlePathsRenamed: (oldPrefix, newPrefix) =>
+        treeFor(oldPrefix)?.handlePathsRenamed(oldPrefix, newPrefix),
+      focusPath: (path) => treeFor(path)?.focusPath(path),
+      focusTree: () => projectTreeRef.current?.focusTree(),
+    };
+  }, [getTreeRoot, activeWorktreePath]);
+
+  // One expanded set for both trees, split so each tree only loads its own directories.
+  const [expandedInProject, expandedInOthers] = useMemo(() => {
+    const inProject = new Set<string>();
+    const inOthers = new Set<string>();
+    for (const path of expandedProjectFolders) {
+      (getTreeRoot(path) === activeWorktreePath ? inProject : inOthers).add(path);
+    }
+    return [inProject, inOthers];
+  }, [expandedProjectFolders, getTreeRoot, activeWorktreePath]);
+  const setExpandedInProject = useCallback(
+    (paths: Set<string>) => setExpandedProjectFolders(new Set([...paths, ...expandedInOthers])),
+    [setExpandedProjectFolders, expandedInOthers],
+  );
+  const setExpandedInOthers = useCallback(
+    (paths: Set<string>) => setExpandedProjectFolders(new Set([...expandedInProject, ...paths])),
+    [setExpandedProjectFolders, expandedInProject],
+  );
+
+  const handleRemoveFromOthers = useCallback(async (path: string) => {
+    const wt = useWorktreeStore.getState().activeWorktreePath;
+    if (!wt) return;
+    try {
+      await api.removeExternalFolder(wt, path);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to remove folder");
+      return;
+    }
+    // Editors still open on its files keep receiving disk changes as individual Others files.
+    const openPaths = [...useEditorStateStore.getState().files.keys()].filter((p) =>
+      p.startsWith(path + "/"),
+    );
+    if (openPaths.length > 0) {
+      wsClient.send({ type: "register_external_files", worktreePath: wt, filePaths: openPaths });
+    }
+  }, []);
 
   // --- Context menu ---
   const [contextMenu, setContextMenu] = useState<{
@@ -109,13 +191,13 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
     async (filePath: string) => {
       const wt = useWorktreeStore.getState().activeWorktreePath;
       if (!wt) return;
-      const isProjectFile = filePath.startsWith(wt + "/");
-      if (isProjectFile) {
-        const relativePath = filePath.slice(wt.length + 1);
-        const segments = relativePath.split("/");
-        const ancestors: string[] = [wt];
+      // Load every ancestor below the root of the tree that shows the path.
+      const root = getTreeRoot(filePath);
+      if (root && filePath !== root) {
+        const segments = filePath.slice(root.length + 1).split("/");
+        const ancestors: string[] = [root];
         for (let i = 0; i < segments.length - 1; i++) {
-          ancestors.push(`${wt}/${segments.slice(0, i + 1).join("/")}`);
+          ancestors.push(`${root}/${segments.slice(0, i + 1).join("/")}`);
         }
         const { activeProjectPath } = getQueryScope();
         for (const dir of ancestors) {
@@ -129,8 +211,33 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       getCurrentWorktreeUI().getState().setSelectedProjectFile(filePath);
       await treeRef.current?.revealPath(filePath);
     },
-    [queryClient],
+    [queryClient, getTreeRoot],
   );
+
+  // Reveal a folder opened via `loxel <folder>`, a terminal link, etc. once its tree lists it.
+  // Right after a worktree switch the server is still creating the worktree's resources and its
+  // listing fails, so keep the request until a reveal succeeds and retry as listings arrive.
+  const pendingRevealFolder = useWorktreeUI((s) => s.pendingRevealFolder);
+  useEffect(() => {
+    if (!pendingRevealFolder || !getTreeRoot(pendingRevealFolder)) return;
+    let done = false;
+    const attempt = () => {
+      revealFileInTree(pendingRevealFolder)
+        .then(() => {
+          if (done) return;
+          done = true;
+          treeRef.current?.expandPath(pendingRevealFolder);
+          getCurrentWorktreeUI().getState().setPendingRevealFolder(null);
+        })
+        .catch(() => {});
+    };
+    attempt();
+    const unsubscribe = onLoxelEvent("loxel-dir-changed", attempt);
+    return () => {
+      done = true;
+      unsubscribe();
+    };
+  }, [pendingRevealFolder, getTreeRoot, revealFileInTree]);
 
   useEffect(() => {
     return onLoxelEvent("loxel-reveal-in-explorer", ({ filePath }) => {
@@ -170,7 +277,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
   // --- Clipboard ---
   const { clipboard, cutPath, handleCut, handleCopyFile, handlePaste, resolveTargetDir } =
-    useFileClipboard(isDetachedPath, queryClient, activeWorktreePath);
+    useFileClipboard(isDetachedPath, queryClient, activeWorktreePath, getTreeRoot);
 
   // --- Git restore (discard changes) ---
   const discardMutation = useDiscardChangesMutation();
@@ -198,7 +305,14 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
     onContainerDragLeave,
     onContainerDrop,
     onContainerDragOver,
-  } = useProjectFileDrag(renamingPath, cutPath, scrollRef, startAutoScroll, stopAutoScroll);
+  } = useProjectFileDrag(
+    renamingPath,
+    cutPath,
+    scrollRef,
+    startAutoScroll,
+    stopAutoScroll,
+    getTreeRoot,
+  );
 
   // --- FilesTree: loadSubtree ---
   const rootNodes = useMemo<TreeNode[]>(
@@ -246,7 +360,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
   const getEntryStatus = useCallback(
     (path: string): ProjectFileStatus | undefined => {
-      if (path === activeWorktreePath) return undefined;
+      if (isTreeRoot(path)) return undefined;
       const dir = fileParentDir(path, activeWorktreePath);
       const { activeProjectPath } = getQueryScope();
       const absDir = toAbsoluteDir(dir, activeWorktreePath);
@@ -256,7 +370,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       const name = pathName(path);
       return entries?.find((e) => e.name === name)?.status;
     },
-    [queryClient, activeWorktreePath],
+    [queryClient, activeWorktreePath, isTreeRoot],
   );
 
   const renderLabel = useCallback(
@@ -306,8 +420,8 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         );
       }
 
-      // Root node: bold
-      if (node.path === activeWorktreePath && node.isDir) {
+      // Root node (the worktree or an Others folder): bold
+      if (node.isDir && isTreeRoot(node.path)) {
         return (
           <span className="text-tree-folder min-w-0 flex-1 truncate text-left font-semibold">
             {node.name}
@@ -326,7 +440,14 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
       return undefined;
     },
-    [renamingPath, handleFinishRename, handleCancelRename, getEntryStatus],
+    [renamingPath, handleFinishRename, handleCancelRename, getEntryStatus, isTreeRoot],
+  );
+
+  // Others folders show their full path on hover, since their names alone can be ambiguous.
+  const getOthersRowProps = useCallback(
+    (node: TreeNode) =>
+      isOthersRoot(node.path) ? { ...getRowProps(node), title: node.path } : getRowProps(node),
+    [getRowProps, isOthersRoot],
   );
 
   // --- FilesTree event handlers ---
@@ -394,7 +515,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
           (document.activeElement as HTMLElement | null);
         const focusedPath = focused?.getAttribute(TREE_PATH_ATTR);
         if (!focused || !focusedPath) return;
-        const isFocusedRoot = focusedPath === activeWorktreePath;
+        const isFocusedRoot = isTreeRoot(focusedPath);
         if (treeActionId === "tree.open") {
           e.preventDefault();
           if (focused.hasAttribute("data-tree-dir")) {
@@ -414,7 +535,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       if (!selected) return;
 
       const isDetached = isDetachedPath(selected);
-      const isRoot = selected === activeWorktreePath;
+      const isRoot = isTreeRoot(selected);
 
       if (isMeta && e.key === "x") {
         if (isRoot) return;
@@ -467,12 +588,14 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       handleCopyFile,
       handlePaste,
       resolveTargetDir,
+      isTreeRoot,
     ],
   );
 
   // --- Derived values for context menu and delete dialog ---
   const ctxIsDraft = contextMenu ? isDetachedPath(contextMenu.path) : false;
-  const ctxIsRoot = contextMenu?.path === activeWorktreePath;
+  const ctxIsRoot = contextMenu ? isTreeRoot(contextMenu.path) : false;
+  const ctxIsOthersRoot = contextMenu ? isOthersRoot(contextMenu.path) : false;
   const ctxIsModified = contextMenu?.status === "modified" && !ctxIsDraft && !ctxIsRoot;
 
   const deleteDescription = (() => {
@@ -564,11 +687,11 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         )}
 
         <FilesTree
-          ref={treeRef}
+          ref={projectTreeRef}
           nodes={rootNodes}
           loadSubtree={loadSubtree}
-          expandedPaths={expandedProjectFolders}
-          onExpandedPathsChange={setExpandedProjectFolders}
+          expandedPaths={expandedInProject}
+          onExpandedPathsChange={setExpandedInProject}
           onOpen={dispatchOpenFile}
           onSelect={handleTreeSelect}
           onToggle={handleTreeToggle}
@@ -583,7 +706,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
           disableBuiltinKeyNav
         />
 
-        {hasExternalFiles && (
+        {hasOthers && (
           <>
             <div className="border-border mx-2 my-1.5 border-t" />
             <div className="px-3 py-1">
@@ -591,6 +714,27 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
                 Others
               </span>
             </div>
+            {othersNodes.length > 0 && (
+              <FilesTree
+                ref={othersTreeRef}
+                nodes={othersNodes}
+                loadSubtree={loadSubtree}
+                expandedPaths={expandedInOthers}
+                onExpandedPathsChange={setExpandedInOthers}
+                onOpen={dispatchOpenFile}
+                onSelect={handleTreeSelect}
+                onToggle={handleTreeToggle}
+                onContextMenu={handleTreeContextMenu}
+                focusedPath={selectedProjectFile}
+                activePath={activeEditorFilePath}
+                renderLabel={renderLabel}
+                getRowProps={getOthersRowProps}
+                getRowClassName={getRowClassName}
+                isPanelActive={isPanelActive}
+                compactRoot={false}
+                disableBuiltinKeyNav
+              />
+            )}
             {externalFiles.map((entry) => (
               <ExternalFileNode key={entry.path} entry={entry} isPanelActive={isPanelActive} />
             ))}
@@ -626,9 +770,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
             !ctxIsDraft
               ? () =>
                   handlePaste(
-                    ctxIsRoot && activeWorktreePath
-                      ? activeWorktreePath
-                      : parentDir(contextMenu.path, contextMenu.isDir),
+                    ctxIsRoot ? contextMenu.path : parentDir(contextMenu.path, contextMenu.isDir),
                   )
               : undefined
           }
@@ -636,6 +778,9 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
             ctxIsModified
               ? () => handleRequestRestore(contextMenu.path, contextMenu.isDir)
               : undefined
+          }
+          onRemoveFromOthers={
+            ctxIsOthersRoot ? () => handleRemoveFromOthers(contextMenu.path) : undefined
           }
         />
       )}

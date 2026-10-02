@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 import { openDatabase } from "@bizimind/localdb-sdk";
@@ -21,7 +22,8 @@ import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { DockerLspManager } from "./docker-lsp-manager";
 import { ExternalFilesService } from "./external-files-service";
-import { FileOperationsService } from "./file-operations-service";
+import { ExternalFoldersService, createExternalFolderStorage } from "./external-folders-service";
+import { FileOperationsHistory, FileOperationsService } from "./file-operations-service";
 import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
@@ -36,7 +38,7 @@ import { handleRequest } from "./routes";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
 import { createServerPerfMonitor } from "./server-perf-monitor";
-import { findOwningProject } from "./server-state";
+import { externalFolderConflict, findOwningProject, listOthers } from "./server-state";
 import type {
   ClientState,
   ProjectState,
@@ -72,7 +74,8 @@ export function findProjectForPath(targetPath: string): ProjectState | undefined
 
 /**
  * Resolve an absolute file path to its owning worktree and service type.
- * Checks both project worktree directories and detached file storage.
+ * Worktree files and drafts win over a worktree's Others section, since an open folder may
+ * contain other worktrees.
  */
 function resolveFilePath(absolutePath: string): ResolvedFilePath | null {
   const normalized = resolve(absolutePath);
@@ -87,6 +90,14 @@ function resolveFilePath(absolutePath: string): ResolvedFilePath | null {
     if (normalized.startsWith(wtPath + "/")) {
       const relativePath = normalized.slice(wtPath.length + 1);
       return { type: "project", wtPath, resources, relativePath };
+    }
+  }
+  for (const [wtPath, resources] of wtResources) {
+    // Check folders opened in the Others section
+    const folder = resources.externalFoldersService.find(normalized);
+    if (folder && normalized !== folder.root) {
+      const relativePath = normalized.slice(folder.root.length + 1);
+      return { type: "external-folder", wtPath, resources, folder, relativePath };
     }
     // Check external files (individually watched files outside the worktree)
     if (resources.externalFilesService.hasFile(normalized)) {
@@ -166,6 +177,41 @@ function broadcastAll(message: WsMessage) {
 
 function sendTo(ws: ServerWebSocket<WsData>, message: WsMessage) {
   ws.send(JSON.stringify(message));
+}
+
+/** The app client whose window was focused most recently (reported by the client). */
+let lastFocusedClient: ServerWebSocket<WsData> | null = null;
+
+/**
+ * Deliver a request to the window the user is working in: the subscribers of `wtPath` when it
+ * has any (e.g. the CLI ran in that worktree's terminal), otherwise the most recently focused
+ * window. Returns false when no window can receive it.
+ */
+function sendToActiveWindow(wtPath: string | null, message: WsMessage): boolean {
+  if (wtPath && (wtResources.get(wtPath)?.subscribers.size ?? 0) > 0) {
+    broadcastToSubscribers(wtPath, message);
+    return true;
+  }
+  const target = lastFocusedClient ?? clients.keys().next().value;
+  if (!target) return false;
+  sendTo(target, message);
+  return true;
+}
+
+/** Why a folder cannot be opened in an Others section, given the registered projects. */
+function externalFolderConflictFor(folder: string): string | null {
+  return externalFolderConflict([...projects.values()], folder, homedir());
+}
+
+/** Broadcast a worktree's Others section: its open folders, then its open external files. */
+function broadcastOthers(wtPath: string): void {
+  const resources = wtResources.get(wtPath);
+  if (!resources) return;
+  broadcastToSubscribers(wtPath, {
+    type: "external_files_changed",
+    wtPath,
+    data: { entries: listOthers(resources) },
+  });
 }
 
 // --- Per-worktree status handling ---
@@ -297,29 +343,44 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   const detachedFilesService = createDetachedFilesService(project.cwd, wtPath);
   await detachedFilesService.start();
 
-  const fileOpsService = new FileOperationsService(wtPath);
+  const fileOpsHistory = new FileOperationsHistory();
+  const fileOpsService = new FileOperationsService(wtPath, { history: fileOpsHistory });
+
+  const broadcastFileChanged = (filePath: string, nonces: string[]) => {
+    broadcastToSubscribers(wtPath, {
+      type: "file_content_changed",
+      wtPath,
+      data: { path: filePath, nonces },
+    });
+  };
 
   const externalFilesService = new ExternalFilesService(
-    (entries) => {
-      broadcastToSubscribers(wtPath, { type: "external_files_changed", wtPath, data: { entries } });
-    },
-    (filePath, nonces) => {
-      broadcastToSubscribers(wtPath, {
-        type: "file_content_changed",
-        wtPath,
-        data: { path: filePath, nonces },
-      });
-    },
+    () => broadcastOthers(wtPath),
+    broadcastFileChanged,
   );
   externalFilesService.start();
+
+  const externalFoldersService = new ExternalFoldersService({
+    storage: createExternalFolderStorage(wtPath),
+    conflict: externalFolderConflictFor,
+    history: fileOpsHistory,
+    onListChanged: () => broadcastOthers(wtPath),
+    onDirChanged: (dir, entries) => {
+      broadcastToSubscribers(wtPath, { type: "files_dir_changed", wtPath, data: { dir, entries } });
+    },
+    onFileChanged: broadcastFileChanged,
+  });
+  await externalFoldersService.start();
 
   const resources: WorktreeResources = {
     projectPath: project.cwd,
     worktreeWatcher,
     filesService,
     fileOpsService,
+    fileOpsHistory,
     detachedFilesService,
     externalFilesService,
+    externalFoldersService,
     subscribers: new Set([ws]),
   };
 
@@ -350,6 +411,8 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     wtPath,
     data: { entries: detachedFilesService.listFiles() },
   });
+  // Same for the Others section, which starts with the folders restored from the last session.
+  broadcastOthers(wtPath);
 }
 
 function unsubscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): void {
@@ -374,6 +437,7 @@ function teardownWorktreeResources(wtPath: string, resources: WorktreeResources)
   resources.fileOpsService.dispose();
   resources.detachedFilesService.stop();
   resources.externalFilesService.stop();
+  resources.externalFoldersService.stop();
   formatService.invalidateCache(wtPath);
   wtResources.delete(wtPath);
   log.info(`Worktree resources torn down: ${wtPath}`);
@@ -409,6 +473,7 @@ async function suspendWorktreeWatchers(wtPath: string): Promise<() => Promise<vo
     resources.filesService.pauseWatching(),
     resources.detachedFilesService.pauseWatching(),
     resources.externalFilesService.pauseWatching(),
+    resources.externalFoldersService.pauseWatching(),
   ]);
   log.debug(`Suspended watchers for ${wtPath}`);
 
@@ -421,6 +486,7 @@ async function suspendWorktreeWatchers(wtPath: string): Promise<() => Promise<vo
       resources.filesService.resumeWatching(),
       resources.detachedFilesService.resumeWatching(),
       resources.externalFilesService.resumeWatching(),
+      resources.externalFoldersService.resumeWatching(),
     ]);
     suspendedWorktrees.delete(wtPath);
     const watcherResults = await Promise.allSettled([
@@ -638,11 +704,17 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       const resources = wtResources.get(msg.worktreePath);
       if (resources) {
         for (const filePath of msg.filePaths) {
+          // Files inside an open Others folder are already watched by that folder.
+          if (resources.externalFoldersService.find(resolve(filePath))) continue;
           resources.externalFilesService.addFile(filePath);
         }
       }
       break;
     }
+
+    case "window_focused":
+      lastFocusedClient = ws;
+      break;
 
     case "terminal_create": {
       const clientState = clients.get(ws);
@@ -945,6 +1017,8 @@ const server = Bun.serve<WsData>({
         broadcastToSubscribers,
         broadcastToProject,
         broadcastAll,
+        sendToActiveWindow,
+        externalFolderConflict: externalFolderConflictFor,
         getProject: (cwd: string) => projects.get(cwd),
         findProjectForPath,
         getWorktreeResources: (wtPath: string) => wtResources.get(wtPath),
@@ -977,6 +1051,8 @@ const server = Bun.serve<WsData>({
       broadcastToSubscribers,
       broadcastToProject,
       broadcastAll,
+      sendToActiveWindow,
+      externalFolderConflict: externalFolderConflictFor,
       getProject: (cwd: string) => projects.get(cwd),
       findProjectForPath,
       getWorktreeResources: (wtPath: string) => wtResources.get(wtPath),
@@ -1072,6 +1148,7 @@ const server = Bun.serve<WsData>({
       detachClientAgents(ws);
       logSubscribers.delete(ws);
       clients.delete(ws);
+      if (lastFocusedClient === ws) lastFocusedClient = null;
       log.debug(`Client disconnected (${clients.size} remaining)`);
 
       if (clients.size === 0 && !idleShutdownTimer && !shuttingDown) {

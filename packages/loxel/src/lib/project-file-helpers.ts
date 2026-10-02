@@ -12,6 +12,16 @@ export function fileParentDir(path: string, rootPath: string | null): string {
   return parent || rootPath || "";
 }
 
+/** The deepest of `roots` that is `path` or contains it; null when none does. */
+export function findTreeRoot(path: string, roots: readonly string[]): string | null {
+  let best: string | null = null;
+  for (const root of roots) {
+    if (path !== root && !path.startsWith(root + "/")) continue;
+    if (!best || root.length > best.length) best = root;
+  }
+  return best;
+}
+
 export function pathName(path: string): string {
   return path.split("/").pop() ?? path;
 }

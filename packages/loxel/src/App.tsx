@@ -25,6 +25,7 @@ import { RightToolsBar } from "./components/tools-bar/RightToolsBar";
 import { useDiffSource } from "./hooks/useDiffSource";
 import { useKeybindings } from "./hooks/useKeybindings";
 import { useLoxelEventListeners } from "./hooks/useLoxelEventListeners";
+import { useReportWindowFocus } from "./hooks/useReportWindowFocus";
 import { useThemeSync } from "./hooks/useThemeSync";
 import { useWsSubscription } from "./hooks/useWsSubscription";
 import { useWsBridge } from "./queries/ws-bridge";
@@ -63,6 +64,7 @@ export default function App() {
 
   // WS subscription lifecycle
   useWsSubscription(activeWorktreePath);
+  useReportWindowFocus();
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">

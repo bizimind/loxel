@@ -72,22 +72,40 @@ async function moveProjectFile(srcPath: string, destDir: string) {
   }
 }
 
+/**
+ * @param getTreeRoot The root of the tree that shows a path: the worktree or an Others folder.
+ *   Roots are not draggable, and drops stay within the dragged item's tree (drafts drop into the
+ *   worktree only).
+ */
 export function useProjectFileDrag(
   renamingPath: string | null,
   cutPath: string | null,
   scrollRef: RefObject<HTMLDivElement | null>,
   startAutoScroll: (speed: number) => void,
   stopAutoScroll: () => void,
+  getTreeRoot: (path: string) => string | null,
 ) {
   const [dropTargetDir, setDropTargetDir] = useState<string | null>(null);
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+
+  /** Whether the item being dragged may be dropped into `destDir`. */
+  const canDropInto = useCallback(
+    (e: React.DragEvent, destDir: string): boolean => {
+      const destRoot = getTreeRoot(destDir);
+      if (e.dataTransfer.types.includes(DETACHED_FILE_DRAG_TYPE)) {
+        return destRoot === activeWorktreePath;
+      }
+      return draggedProjectFilePath === null || getTreeRoot(draggedProjectFilePath) === destRoot;
+    },
+    [getTreeRoot, activeWorktreePath],
+  );
 
   const getRowProps = useCallback(
     (node: TreeNode) => {
       const isRenaming = renamingPath === node.path;
       const props: React.HTMLAttributes<HTMLButtonElement> = {};
 
-      if (!isRenaming && node.path !== activeWorktreePath) {
+      if (!isRenaming && getTreeRoot(node.path) !== node.path) {
         props.draggable = true;
         props.onDragStart = (e: React.DragEvent<HTMLButtonElement>) => {
           e.dataTransfer.setData(PROJECT_FILE_DRAG_TYPE, node.path);
@@ -104,6 +122,10 @@ export function useProjectFileDrag(
         const fileParent = fileParentDir(node.path, activeWorktreePath);
         props.onDragOver = (e: React.DragEvent<HTMLButtonElement>) => {
           if (!hasDragType(e)) return;
+          if (!canDropInto(e, fileParent)) {
+            e.dataTransfer.dropEffect = "none";
+            return;
+          }
           if (draggedProjectFilePath !== null) {
             const srcParent = fileParentDir(draggedProjectFilePath, activeWorktreePath);
             if (srcParent === fileParent) {
@@ -133,6 +155,10 @@ export function useProjectFileDrag(
         const dirPath = node.path;
         props.onDragOver = (e: React.DragEvent<HTMLButtonElement>) => {
           if (!hasDragType(e)) return;
+          if (!canDropInto(e, dirPath)) {
+            e.dataTransfer.dropEffect = "none";
+            return;
+          }
           if (draggedProjectFilePath !== null) {
             if (
               dirPath.startsWith(draggedProjectFilePath + "/") ||
@@ -167,7 +193,7 @@ export function useProjectFileDrag(
 
       return props;
     },
-    [renamingPath, activeWorktreePath, stopAutoScroll],
+    [renamingPath, activeWorktreePath, stopAutoScroll, getTreeRoot, canDropInto],
   );
 
   const getRowClassName = useCallback(
@@ -199,7 +225,9 @@ export function useProjectFileDrag(
         moveDetachedFile(detachedPath, activeWorktreePath ?? "");
       } else if (projectPath && dropTargetDir === null) {
         const srcParent = fileParentDir(projectPath, activeWorktreePath);
-        if (activeWorktreePath && srcParent === activeWorktreePath) {
+        // The empty area belongs to the worktree root; Others items stay in their folder.
+        const outsideWorktree = getTreeRoot(projectPath) !== activeWorktreePath;
+        if (activeWorktreePath && (srcParent === activeWorktreePath || outsideWorktree)) {
           e.preventDefault();
           e.dataTransfer.dropEffect = "none";
           setDropTargetDir(null);
@@ -214,7 +242,7 @@ export function useProjectFileDrag(
       stopAutoScroll();
       draggedProjectFilePath = null;
     },
-    [dropTargetDir, activeWorktreePath, stopAutoScroll],
+    [dropTargetDir, activeWorktreePath, stopAutoScroll, getTreeRoot],
   );
 
   const onContainerDragOver = useCallback(

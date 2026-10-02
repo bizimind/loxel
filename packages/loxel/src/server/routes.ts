@@ -43,14 +43,18 @@ import { isHttpUrl } from "@/url-utils";
 import { config } from "./config";
 import { getDiagnostics } from "./diagnostics";
 import { describeError } from "./error-message";
+import { externalFoldersStoreKey } from "./external-folders-service";
+import type { FileOperationsService, HistoryStep } from "./file-operations-service";
 import * as git from "./git-commands";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
+import type { ProjectFilesService } from "./project-files-service";
 import * as projectStore from "./project-store";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import { decrypt, encrypt, isEncrypted } from "./secret-store";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
+import { listOthers } from "./server-state";
 import { buildSpawnEnv } from "./shell-env";
 import * as storeDb from "./store-db";
 import { stress } from "./stress-detector";
@@ -71,6 +75,13 @@ export interface RouteContext {
   broadcastToSubscribers: (wtPath: string, msg: WsMessage) => void;
   broadcastToProject: (projectPath: string, msg: WsMessage) => void;
   broadcastAll: (msg: WsMessage) => void;
+  /**
+   * Send to the window the user is working in: `wtPath`'s subscribers when it has any, else the
+   * most recently focused window. Returns false when no window is connected.
+   */
+  sendToActiveWindow: (wtPath: string | null, msg: WsMessage) => boolean;
+  /** Why a folder cannot be opened in an Others section, or null when it can. */
+  externalFolderConflict: (folder: string) => string | null;
   getProject: (cwd: string) => ProjectState | undefined;
   findProjectForPath: (path: string) => ProjectState | undefined;
   getWorktreeResources: (wtPath: string) => WorktreeResources | undefined;
@@ -448,8 +459,9 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
         return error("File not found", 404);
       }
     }
+    const root = resolved.type === "external-folder" ? resolved.folder.root : resolved.wtPath;
     try {
-      const content = await Bun.file(join(resolved.wtPath, resolved.relativePath)).text();
+      const content = await Bun.file(join(root, resolved.relativePath)).text();
       return json({ content });
     } catch {
       return error("File not found", 404);
@@ -895,6 +907,14 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
       );
       return json({ success: true });
     }
+    if (resolved.type === "external-folder") {
+      // Formatters are detected per worktree, so they do not apply to folders outside it.
+      const { root, filesService } = resolved.folder;
+      await filesService.writeFile(resolved.relativePath, nonce, async () => {
+        await Bun.write(join(root, resolved.relativePath), content);
+      });
+      return json({ success: true });
+    }
     // Format project files before writing (detached/external files skip formatting)
     content = await maybeFormat(content, filePath, resolved.wtPath);
     await resolved.resources.filesService.writeFile(resolved.relativePath, nonce, async () => {
@@ -934,54 +954,90 @@ function handleDetectedFormatters(req: Request, ctx: RouteContext): Response {
 // Service-dependent routes: files panel
 // ---------------------------------------------------------------------------
 
+/** A tree the files panel browses: a worktree's own, or a folder in its Others section. */
+interface FileTree {
+  root: string;
+  filesService: ProjectFilesService;
+  fileOpsService: FileOperationsService;
+}
+
+function worktreeTree(wt: string, resources: WorktreeResources): FileTree {
+  return {
+    root: wt,
+    filesService: resources.filesService,
+    fileOpsService: resources.fileOpsService,
+  };
+}
+
+/**
+ * The tree that owns `absolutePath` within worktree `wt`: an Others folder when the path is
+ * outside the worktree and inside one of its open folders, the worktree's own tree otherwise
+ * (callers then reject paths that escape it).
+ */
+function treeForPath(wt: string, resources: WorktreeResources, absolutePath: string): FileTree {
+  if (absolutePath === wt || absolutePath.startsWith(wt + "/")) {
+    return worktreeTree(wt, resources);
+  }
+  const folder = resources.externalFoldersService.find(absolutePath);
+  return folder ? folder : worktreeTree(wt, resources);
+}
+
+/**
+ * Resolve a files-panel directory (absolute, or relative to `wt`) to its tree and its path
+ * relative to that tree's root. Null when no active worktree owns it.
+ */
+function resolveTreeDir(
+  rawDir: string,
+  wtParam: string | null | undefined,
+  ctx: RouteContext,
+): { tree: FileTree; relDir: string } | null {
+  if (!rawDir.startsWith("/")) {
+    const resources = wtParam ? ctx.getWorktreeResources(wtParam) : undefined;
+    if (!wtParam || !resources) return null;
+    return { tree: worktreeTree(wtParam, resources), relDir: rawDir };
+  }
+
+  // A worktree root
+  const rootResources = ctx.getWorktreeResources(rawDir);
+  if (rootResources) return { tree: worktreeTree(rawDir, rootResources), relDir: "" };
+
+  // A directory inside a worktree
+  const resolved = ctx.resolveFilePath(rawDir);
+  if (resolved?.type === "project") {
+    return {
+      tree: worktreeTree(resolved.wtPath, resolved.resources),
+      relDir: resolved.relativePath,
+    };
+  }
+
+  // A folder in the requesting worktree's Others section, or a directory inside one
+  const folder = wtParam
+    ? ctx.getWorktreeResources(wtParam)?.externalFoldersService.find(rawDir)
+    : undefined;
+  if (!folder) return null;
+  return { tree: folder, relDir: relative(folder.root, rawDir) };
+}
+
 // GET /api/files?wt=&dir= — list directory contents for the project files panel
 async function handleFiles(req: Request, ctx: RouteContext): Promise<Response> {
   const url = new URL(req.url);
   const rawDir = url.searchParams.get("dir") ?? "";
+  const wtParam = url.searchParams.get("wt");
+  if (!rawDir.startsWith("/") && !wtParam) return error("Missing wt parameter", 400);
 
-  // Resolve worktree and relative dir from absolute or relative input
-  let wt: string;
-  let relDir: string;
-  if (rawDir.startsWith("/")) {
-    // Absolute dir: check if it's a worktree root or a subdir of one
-    const resources = ctx.getWorktreeResources(rawDir);
-    if (resources) {
-      wt = rawDir;
-      relDir = "";
-    } else {
-      const resolved = ctx.resolveFilePath(rawDir);
-      if (!resolved || resolved.type !== "project") {
-        return error("Directory not in any active worktree", 404);
-      }
-      wt = resolved.wtPath;
-      relDir = resolved.relativePath;
-    }
-  } else {
-    const wtParam = url.searchParams.get("wt");
-    if (!wtParam) return error("Missing wt parameter", 400);
-    wt = wtParam;
-    relDir = rawDir;
+  const target = resolveTreeDir(rawDir, wtParam, ctx);
+  if (!target) {
+    // A relative dir of an inactive worktree: resources are created on subscribe.
+    return rawDir.startsWith("/") ? error("Directory not in any active worktree", 404) : json([]);
   }
-
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return json([]);
+  const { tree, relDir } = target;
 
   // Validate relative dir to prevent path traversal
-  if (relDir) {
-    try {
-      git.validatePath(relDir);
-    } catch {
-      return error("Invalid directory path", 400);
-    }
-    const realWorktree = await realpath(wt).catch(() => wt);
-    const real = await realpath(resolve(wt, relDir)).catch(() => null);
-    if (!real || (!real.startsWith(realWorktree + "/") && real !== realWorktree)) {
-      return error("Directory outside worktree", 400);
-    }
-  }
+  const denied = await assertContained(tree.root, relDir);
+  if (denied) return denied;
 
   try {
-    const entries = await resources.filesService.getDirContents(relDir);
+    const entries = await tree.filesService.getDirContents(relDir);
     return json(entries);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to read directory";
@@ -993,39 +1049,21 @@ async function handleFiles(req: Request, ctx: RouteContext): Promise<Response> {
 async function handleFilesUnwatch(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
   const rawDir = typeof body.dir === "string" ? body.dir : "";
+  const wtParam = typeof body.wt === "string" ? body.wt : undefined;
+  if (!rawDir.startsWith("/") && !wtParam) return error("Missing wt in body", 400);
 
-  let wt: string;
-  let relDir: string;
-  if (rawDir.startsWith("/")) {
-    const resources = ctx.getWorktreeResources(rawDir);
-    if (resources) {
-      wt = rawDir;
-      relDir = "";
-    } else {
-      const resolved = ctx.resolveFilePath(rawDir);
-      if (!resolved || resolved.type !== "project") return json({ ok: true });
-      wt = resolved.wtPath;
-      relDir = resolved.relativePath;
-    }
-  } else {
-    const wtParam = typeof body.wt === "string" ? body.wt : undefined;
-    if (!wtParam) return error("Missing wt in body", 400);
-    wt = wtParam;
-    relDir = rawDir;
-  }
+  const target = resolveTreeDir(rawDir, wtParam, ctx);
+  if (!target) return json({ ok: true });
 
-  const resources = ctx.getWorktreeResources(wt);
-  if (!resources) return json({ ok: true });
-
-  if (relDir) {
+  if (target.relDir) {
     try {
-      git.validatePath(relDir);
+      git.validatePath(target.relDir);
     } catch {
       return error("Invalid directory path", 400);
     }
   }
 
-  resources.filesService.unwatchDir(relDir);
+  target.tree.filesService.unwatchDir(target.relDir);
   return json({ ok: true });
 }
 
@@ -1049,15 +1087,23 @@ async function assertContained(worktreeCwd: string, relPath: string): Promise<Re
   return null;
 }
 
+/**
+ * Resolve a file operation's worktree and the tree it acts on, chosen by the operation's main
+ * path: an absolute path inside one of the worktree's Others folders acts on that folder.
+ */
 function resolveFileOps(
   body: Record<string, unknown>,
   ctx: RouteContext,
-): { resources: WorktreeResources; wt: string } | Response {
+  rawPath = "",
+): { resources: WorktreeResources; tree: FileTree } | Response {
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
   const resources = ctx.getWorktreeResources(wt);
   if (!resources) return error("Worktree not active", 503);
-  return { resources, wt };
+  const tree = rawPath.startsWith("/")
+    ? treeForPath(wt, resources, rawPath)
+    : worktreeTree(wt, resources);
+  return { resources, tree };
 }
 
 /** Convert an absolute path to relative if it starts with the worktree prefix. */
@@ -1094,6 +1140,42 @@ function toAbsoluteResult<T extends { newPath?: string; path?: string }>(
   return result;
 }
 
+/**
+ * Refresh the tree an undo/redo acted on and return its result for the client. Results from an
+ * Others folder are made absolute: the client resolves relative paths against the worktree.
+ */
+async function applyHistoryStep(
+  resources: WorktreeResources,
+  step: HistoryStep,
+): Promise<FileOperationResult> {
+  const folder = resources.externalFoldersService
+    .all()
+    .find((f) => f.fileOpsService === step.service);
+  const filesService = folder?.filesService ?? resources.filesService;
+  await filesService.notifyChanges(getAffectedPaths(step.result));
+  return folder ? absoluteOperationResult(step.result, folder.root) : step.result;
+}
+
+function absoluteOperationResult(result: FileOperationResult, root: string): FileOperationResult {
+  switch (result.type) {
+    case "rename":
+    case "move":
+      return {
+        ...result,
+        oldPath: join(root, result.oldPath),
+        newPath: join(root, result.newPath),
+      };
+    case "delete":
+    case "restore":
+    case "create":
+      return { ...result, path: join(root, result.path) };
+    default: {
+      const _exhaustive: never = result;
+      throw new Error(`Unknown file operation result type: ${String(_exhaustive)}`);
+    }
+  }
+}
+
 /** Extract relative paths affected by an undo/redo result for tree notification. */
 function getAffectedPaths(result: FileOperationResult): string[] {
   switch (result.type) {
@@ -1114,18 +1196,18 @@ function getAffectedPaths(result: FileOperationResult): string[] {
 // POST /api/files/rename
 async function handleFileRename(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
-  const resolved = resolveFileOps(body, ctx);
-  if (resolved instanceof Response) return resolved;
   const rawPath = requireString(body, "path");
   const newName = requireString(body, "newName");
+  const resolved = resolveFileOps(body, ctx, rawPath);
+  if (resolved instanceof Response) return resolved;
   const isAbsolute = rawPath.startsWith("/");
-  const path = toRelativePath(rawPath, resolved.wt);
-  const denied = await assertContained(resolved.wt, path);
+  const path = toRelativePath(rawPath, resolved.tree.root);
+  const denied = await assertContained(resolved.tree.root, path);
   if (denied) return denied;
   try {
-    const result = await resolved.resources.fileOpsService.rename(path, newName);
-    await resolved.resources.filesService.notifyChanges([path, result.newPath]);
-    return json(toAbsoluteResult(result, isAbsolute, resolved.wt));
+    const result = await resolved.tree.fileOpsService.rename(path, newName);
+    await resolved.tree.filesService.notifyChanges([path, result.newPath]);
+    return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
     return error(err instanceof Error ? err.message : "Rename failed", 400);
   }
@@ -1134,15 +1216,15 @@ async function handleFileRename(req: Request, ctx: RouteContext): Promise<Respon
 // POST /api/files/delete
 async function handleFileDelete(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
-  const resolved = resolveFileOps(body, ctx);
-  if (resolved instanceof Response) return resolved;
   const rawPath = requireString(body, "path");
-  const path = toRelativePath(rawPath, resolved.wt);
-  const denied = await assertContained(resolved.wt, path);
+  const resolved = resolveFileOps(body, ctx, rawPath);
+  if (resolved instanceof Response) return resolved;
+  const path = toRelativePath(rawPath, resolved.tree.root);
+  const denied = await assertContained(resolved.tree.root, path);
   if (denied) return denied;
   try {
-    await resolved.resources.fileOpsService.delete(path);
-    await resolved.resources.filesService.notifyChanges([path]);
+    await resolved.tree.fileOpsService.delete(path);
+    await resolved.tree.filesService.notifyChanges([path]);
     return json({ success: true });
   } catch (err) {
     return error(err instanceof Error ? err.message : "Delete failed", 400);
@@ -1152,23 +1234,25 @@ async function handleFileDelete(req: Request, ctx: RouteContext): Promise<Respon
 // POST /api/files/move
 async function handleFileMove(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
-  const resolved = resolveFileOps(body, ctx);
-  if (resolved instanceof Response) return resolved;
   const rawSrcPath = requireString(body, "srcPath");
+  const resolved = resolveFileOps(body, ctx, rawSrcPath);
+  if (resolved instanceof Response) return resolved;
   const rawDestDir = typeof body.destDir === "string" ? body.destDir : "";
   const isAbsolute = rawSrcPath.startsWith("/");
-  const srcPath = toRelativePath(rawSrcPath, resolved.wt);
-  const destDir = rawDestDir.startsWith("/") ? toRelativePath(rawDestDir, resolved.wt) : rawDestDir;
-  const denied = await assertContained(resolved.wt, srcPath);
+  const srcPath = toRelativePath(rawSrcPath, resolved.tree.root);
+  const destDir = rawDestDir.startsWith("/")
+    ? toRelativePath(rawDestDir, resolved.tree.root)
+    : rawDestDir;
+  const denied = await assertContained(resolved.tree.root, srcPath);
   if (denied) return denied;
   if (destDir) {
-    const destDenied = await assertContained(resolved.wt, destDir);
+    const destDenied = await assertContained(resolved.tree.root, destDir);
     if (destDenied) return destDenied;
   }
   try {
-    const result = await resolved.resources.fileOpsService.move(srcPath, destDir);
-    await resolved.resources.filesService.notifyChanges([srcPath, result.newPath]);
-    return json(toAbsoluteResult(result, isAbsolute, resolved.wt));
+    const result = await resolved.tree.fileOpsService.move(srcPath, destDir);
+    await resolved.tree.filesService.notifyChanges([srcPath, result.newPath]);
+    return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
     return error(err instanceof Error ? err.message : "Move failed", 400);
   }
@@ -1180,9 +1264,8 @@ async function handleFileUndo(req: Request, ctx: RouteContext): Promise<Response
   const resolved = resolveFileOps(body, ctx);
   if (resolved instanceof Response) return resolved;
   try {
-    const result = await resolved.resources.fileOpsService.undo();
-    if (result) await resolved.resources.filesService.notifyChanges(getAffectedPaths(result));
-    return json({ result });
+    const step = await resolved.resources.fileOpsHistory.undo();
+    return json({ result: step ? await applyHistoryStep(resolved.resources, step) : null });
   } catch (err) {
     return error(err instanceof Error ? err.message : "Undo failed", 500);
   }
@@ -1194,9 +1277,8 @@ async function handleFileRedo(req: Request, ctx: RouteContext): Promise<Response
   const resolved = resolveFileOps(body, ctx);
   if (resolved instanceof Response) return resolved;
   try {
-    const result = await resolved.resources.fileOpsService.redo();
-    if (result) await resolved.resources.filesService.notifyChanges(getAffectedPaths(result));
-    return json({ result });
+    const step = await resolved.resources.fileOpsHistory.redo();
+    return json({ result: step ? await applyHistoryStep(resolved.resources, step) : null });
   } catch (err) {
     return error(err instanceof Error ? err.message : "Redo failed", 500);
   }
@@ -1205,20 +1287,20 @@ async function handleFileRedo(req: Request, ctx: RouteContext): Promise<Response
 // POST /api/files/create-file
 async function handleFileCreateFile(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
-  const resolved = resolveFileOps(body, ctx);
-  if (resolved instanceof Response) return resolved;
   const rawDir = typeof body.dir === "string" ? body.dir : "";
+  const resolved = resolveFileOps(body, ctx, rawDir);
+  if (resolved instanceof Response) return resolved;
   const isAbsolute = rawDir.startsWith("/");
-  const dir = toRelativePath(rawDir, resolved.wt);
+  const dir = toRelativePath(rawDir, resolved.tree.root);
   const name = typeof body.name === "string" ? body.name : "Untitled.md";
   if (dir) {
-    const denied = await assertContained(resolved.wt, dir);
+    const denied = await assertContained(resolved.tree.root, dir);
     if (denied) return denied;
   }
   try {
-    const result = await resolved.resources.fileOpsService.createFile(dir, name);
-    await resolved.resources.filesService.notifyChanges([result.path]);
-    return json(toAbsoluteResult(result, isAbsolute, resolved.wt));
+    const result = await resolved.tree.fileOpsService.createFile(dir, name);
+    await resolved.tree.filesService.notifyChanges([result.path]);
+    return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
     return error(err instanceof Error ? err.message : "Create file failed", 400);
   }
@@ -1227,20 +1309,20 @@ async function handleFileCreateFile(req: Request, ctx: RouteContext): Promise<Re
 // POST /api/files/create-dir
 async function handleFileCreateDir(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
-  const resolved = resolveFileOps(body, ctx);
-  if (resolved instanceof Response) return resolved;
   const rawDir = typeof body.dir === "string" ? body.dir : "";
+  const resolved = resolveFileOps(body, ctx, rawDir);
+  if (resolved instanceof Response) return resolved;
   const isAbsolute = rawDir.startsWith("/");
-  const dir = toRelativePath(rawDir, resolved.wt);
+  const dir = toRelativePath(rawDir, resolved.tree.root);
   const name = typeof body.name === "string" ? body.name : "Untitled";
   if (dir) {
-    const denied = await assertContained(resolved.wt, dir);
+    const denied = await assertContained(resolved.tree.root, dir);
     if (denied) return denied;
   }
   try {
-    const result = await resolved.resources.fileOpsService.createDir(dir, name);
-    await resolved.resources.filesService.notifyChanges([result.path]);
-    return json(toAbsoluteResult(result, isAbsolute, resolved.wt));
+    const result = await resolved.tree.fileOpsService.createDir(dir, name);
+    await resolved.tree.filesService.notifyChanges([result.path]);
+    return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
     return error(err instanceof Error ? err.message : "Create directory failed", 400);
   }
@@ -1249,23 +1331,25 @@ async function handleFileCreateDir(req: Request, ctx: RouteContext): Promise<Res
 // POST /api/files/copy
 async function handleFileCopy(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
-  const resolved = resolveFileOps(body, ctx);
-  if (resolved instanceof Response) return resolved;
   const rawSrcPath = requireString(body, "srcPath");
+  const resolved = resolveFileOps(body, ctx, rawSrcPath);
+  if (resolved instanceof Response) return resolved;
   const rawDestDir = typeof body.destDir === "string" ? body.destDir : "";
   const isAbsolute = rawSrcPath.startsWith("/");
-  const srcPath = toRelativePath(rawSrcPath, resolved.wt);
-  const destDir = rawDestDir.startsWith("/") ? toRelativePath(rawDestDir, resolved.wt) : rawDestDir;
-  const denied = await assertContained(resolved.wt, srcPath);
+  const srcPath = toRelativePath(rawSrcPath, resolved.tree.root);
+  const destDir = rawDestDir.startsWith("/")
+    ? toRelativePath(rawDestDir, resolved.tree.root)
+    : rawDestDir;
+  const denied = await assertContained(resolved.tree.root, srcPath);
   if (denied) return denied;
   if (destDir) {
-    const destDenied = await assertContained(resolved.wt, destDir);
+    const destDenied = await assertContained(resolved.tree.root, destDir);
     if (destDenied) return destDenied;
   }
   try {
-    const result = await resolved.resources.fileOpsService.copy(srcPath, destDir);
-    await resolved.resources.filesService.notifyChanges([result.newPath]);
-    return json(toAbsoluteResult(result, isAbsolute, resolved.wt));
+    const result = await resolved.tree.fileOpsService.copy(srcPath, destDir);
+    await resolved.tree.filesService.notifyChanges([result.newPath]);
+    return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
     return error(err instanceof Error ? err.message : "Copy failed", 400);
   }
@@ -1285,14 +1369,14 @@ function handleDetachedFiles(req: Request, ctx: RouteContext): Response {
   return json(resources.detachedFilesService.listFiles());
 }
 
-// GET /api/external-files?wt= — list externally opened files for the project explorer
+// GET /api/external-files?wt= — list the Others section (open folders, then open files)
 function handleExternalFiles(req: Request, ctx: RouteContext): Response {
   const url = new URL(req.url);
   const wt = url.searchParams.get("wt");
   if (!wt) return error("Missing wt parameter", 400);
   const resources = ctx.getWorktreeResources(wt);
   if (!resources) return json([]);
-  return json(resources.externalFilesService.listFiles());
+  return json(listOthers(resources));
 }
 
 // GET /api/detached-file-content?wt=&name=
@@ -2183,6 +2267,8 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
     wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
     ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
     ctx.completeWorktreeRemoval(wtPath);
+    // A worktree later created at the same path starts with an empty Others section.
+    storeDb.deleteStore(externalFoldersStoreKey(wtPath));
     return json(result);
   } catch (err) {
     try {
@@ -2366,10 +2452,67 @@ function handleUpdateInstall(_req: Request, ctx: RouteContext): Response {
 }
 
 // ---------------------------------------------------------------------------
+// Others section: folders outside every project
+// ---------------------------------------------------------------------------
+
+/**
+ * Expand a leading `~/` (terminal output and shells use it) and resolve symlinks, so the same
+ * folder reached through `/tmp` and `/private/tmp` (or a symlink) gets one path. Null if missing.
+ */
+async function canonicalPath(rawPath: string): Promise<string | null> {
+  const expanded = rawPath.startsWith("~/") ? join(homedir(), rawPath.slice(2)) : rawPath;
+  return realpath(resolve(expanded)).catch(() => null);
+}
+
+// GET /api/path-info?path= — whether a path exists and is a directory (e.g. for terminal links)
+async function handlePathInfo(req: Request): Promise<Response> {
+  const rawPath = new URL(req.url).searchParams.get("path");
+  if (!rawPath) return error("Missing path parameter", 400);
+  const path = await canonicalPath(rawPath);
+  const stats = path ? await stat(path).catch(() => null) : null;
+  if (!path || !stats) return error("Path not found", 404);
+  return json({ path, isDir: stats.isDirectory() });
+}
+
+// POST /api/external-folders/add { wt, path } — open a folder in the worktree's Others section
+async function handleExternalFolderAdd(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const wt = requireString(body, "wt");
+  const rawPath = requireString(body, "path");
+  if (!isAbsolute(rawPath) && !rawPath.startsWith("~/")) return error("Path must be absolute", 400);
+  const resources = ctx.getWorktreeResources(wt);
+  if (!resources) return error("Worktree not active", 503);
+
+  const path = await canonicalPath(rawPath);
+  const stats = path ? await stat(path).catch(() => null) : null;
+  if (!path || !stats) return error(`Folder not found: ${rawPath}`, 404);
+  if (!stats.isDirectory()) return error(`Not a folder: ${path}`, 400);
+  const conflict = ctx.externalFolderConflict(path);
+  if (conflict) return error(conflict, 409);
+
+  const root = await resources.externalFoldersService.add(path);
+  // Files opened individually from inside the folder are now listed and watched by it.
+  for (const entry of resources.externalFilesService.listFiles()) {
+    if (entry.path.startsWith(root + "/")) resources.externalFilesService.removeFile(entry.path);
+  }
+  return json({ root });
+}
+
+// POST /api/external-folders/remove { wt, path } — close a folder in the Others section
+async function handleExternalFolderRemove(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const wt = requireString(body, "wt");
+  const path = requireString(body, "path");
+  const resources = ctx.getWorktreeResources(wt);
+  if (!resources) return error("Worktree not active", 503);
+  return json({ removed: resources.externalFoldersService.remove(path) });
+}
+
+// ---------------------------------------------------------------------------
 // Open file (CLI integration)
 // ---------------------------------------------------------------------------
 
-// POST /api/open — open a file or URL in the appropriate panel (triggered by `loxel` CLI)
+// POST /api/open — open a file, folder or URL in the appropriate panel (triggered by `loxel` CLI)
 async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
 
@@ -2388,10 +2531,23 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     return json({ ok: true });
   }
 
-  // File mode: open in the appropriate editor panel
   const filePath = body.filePath;
   if (typeof filePath !== "string") return error("Missing filePath or url in body", 400);
+  const absolutePath = resolve(filePath);
+  const stats = await stat(absolutePath).catch(() => null);
+  if (!stats) return error("File not found", 404);
 
+  // Folder mode: the window in use reveals it in its worktree or opens it in its Others section
+  if (stats.isDirectory()) {
+    const wtHint = typeof body.wtPath === "string" ? body.wtPath : null;
+    const sent = ctx.sendToActiveWindow(wtHint, {
+      type: "open_folder",
+      data: { path: (await canonicalPath(absolutePath)) ?? absolutePath },
+    });
+    return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
+  }
+
+  // File mode: open in the appropriate editor panel
   // Determine worktree path: explicit or derived from file path
   let wtPath: string;
   if (typeof body.wtPath === "string") {
@@ -2403,9 +2559,6 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     wtPath = project.cwd;
   }
 
-  const absolutePath = resolve(filePath);
-  if (!existsSync(absolutePath)) return error("File not found", 404);
-
   // If file is outside the worktree, register it as an external file for watching
   const relPath = relative(wtPath, absolutePath);
   if (relPath.startsWith("../") || relPath === "..") {
@@ -2413,7 +2566,10 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     if (!resources) {
       return error("Worktree not active — no subscribers to receive the file", 503);
     }
-    resources.externalFilesService.addFile(absolutePath);
+    // Files inside an open Others folder are already watched by that folder.
+    if (!resources.externalFoldersService.find(absolutePath)) {
+      resources.externalFilesService.addFile(absolutePath);
+    }
   }
 
   ctx.broadcastToSubscribers(wtPath, {
@@ -2804,6 +2960,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detached-files": handleDetachedFiles,
     "/api/detached-file-content": handleDetachedFileContent,
     "/api/external-files": handleExternalFiles,
+    "/api/path-info": handlePathInfo,
     "/api/search": handleSearch,
     "/api/search-scopes": handleSearchScopes,
     "/api/file-index": handleFileIndex,
@@ -2857,6 +3014,8 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/update/download": handleUpdateDownload,
     "/api/update/install": handleUpdateInstall,
     "/api/open": handleOpen,
+    "/api/external-folders/add": handleExternalFolderAdd,
+    "/api/external-folders/remove": handleExternalFolderRemove,
   },
 };
 

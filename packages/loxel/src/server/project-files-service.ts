@@ -14,6 +14,15 @@ import { logger } from "./logger";
 
 const log = logger.child("files");
 
+export interface ProjectFilesServiceOptions {
+  /**
+   * Overlay git status (colors, ignored dirs) on the tree. Defaults to true. Disable for folders
+   * that are not a worktree: git would resolve the enclosing repo, if any, whose paths are not
+   * relative to this root.
+   */
+  gitStatus?: boolean;
+}
+
 /** Work accumulated while a refresh pass is running, applied by the next pass as one unit. */
 interface PendingRefresh {
   /** Changed paths (relative, `/`-separated) and every write nonce matched for each. */
@@ -88,6 +97,7 @@ export class ProjectFilesService {
      * not request another refresh: the snapshot it receives is already current.
      */
     private onStatusChanged?: (status: StatusInfo) => void,
+    private options: ProjectFilesServiceOptions = {},
   ) {
     this.syncService = new FilesSyncService({
       watchDir: worktreeCwd,
@@ -95,6 +105,8 @@ export class ProjectFilesService {
       filter: (filename) => {
         if (filename === ".git" || filename.startsWith(`.git${sep}`)) return false;
         const normalized = filename.replaceAll(sep, "/");
+        // Without git there is no ignored set; still skip the churn of repos nested in the tree.
+        if (options.gitStatus === false && /(^|\/)\.git(\/|$)/.test(normalized)) return false;
         for (const ignoredDir of this.ignoredDirs) {
           if (normalized === ignoredDir || normalized.startsWith(ignoredDir + "/")) return false;
         }
@@ -350,6 +362,7 @@ export class ProjectFilesService {
    * previous ignored set.
    */
   private async buildStatusMaps(): Promise<StatusInfo | null> {
+    if (this.options.gitStatus === false) return null;
     const [status, ignoredOutput] = await Promise.all([
       getStatus(this.worktreeCwd).catch((err: unknown) => {
         // A removed worktree is an expected lifecycle race, not an error.

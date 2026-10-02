@@ -2,6 +2,7 @@ import {
   ClipboardPasteIcon,
   CopyIcon,
   FilePlusIcon,
+  FolderMinusIcon,
   FolderPlusIcon,
   PencilIcon,
   ScissorsIcon,
@@ -33,6 +34,8 @@ interface ProjectFileMenuProps {
   onCopy?: () => void;
   onPaste?: () => void;
   onGitRestore?: () => void;
+  /** Close a folder in the Others section (the folder stays on disk). */
+  onRemoveFromOthers?: () => void;
 }
 
 export function ProjectFileMenu({
@@ -50,6 +53,7 @@ export function ProjectFileMenu({
   onCopy,
   onPaste,
   onGitRestore,
+  onRemoveFromOthers,
 }: ProjectFileMenuProps) {
   const fileName = filePath.split("/").pop() ?? filePath;
 
@@ -147,7 +151,23 @@ export function ProjectFileMenu({
         </ContextMenuItem>
       )}
 
-      {hasClipboard && hasDestructive && <ContextMenuSeparator />}
+      {(hasRename || hasNewSection || hasClipboard) && onRemoveFromOthers && (
+        <ContextMenuSeparator />
+      )}
+
+      {onRemoveFromOthers && (
+        <ContextMenuItem
+          onClick={() => {
+            onClose();
+            onRemoveFromOthers();
+          }}
+        >
+          <FolderMinusIcon />
+          Remove from Others
+        </ContextMenuItem>
+      )}
+
+      {(hasClipboard || onRemoveFromOthers) && hasDestructive && <ContextMenuSeparator />}
 
       {onGitRestore && (
         <ContextMenuItem

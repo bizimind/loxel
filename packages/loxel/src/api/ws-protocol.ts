@@ -61,6 +61,8 @@ export type WsMessage =
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
   | { type: "open_file"; wtPath: string; data: { filePath: string } }
   | { type: "open_url"; wtPath: string; data: { url: string } }
+  // Window-scoped (sent to the window the user is working in)
+  | { type: "open_folder"; data: { path: string } }
   // Project-scoped (sent to all subscribers under project)
   | { type: "refs_changed"; projectPath: string; data: RefInfo[] }
   | { type: "log_changed"; projectPath: string }
@@ -133,6 +135,8 @@ export type WsClientMessage =
   // External files
   | { type: "close_external_file"; worktreePath: string; filePath: string }
   | { type: "register_external_files"; worktreePath: string; filePaths: string[] }
+  // Window focus (targets requests such as `loxel <folder>` at the window in use)
+  | { type: "window_focused" }
   // Notifications
   | {
       type: "notification_add";

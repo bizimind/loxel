@@ -10,7 +10,8 @@
  */
 import type { IBufferLine, ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 
-import { dispatchOpenFile, type FileLocation } from "@/lib/open-file";
+import type { FileLocation } from "@/lib/open-file";
+import { openPath } from "@/lib/open-folder";
 
 /** Paths starting with `/`, `./`, `../`, or `~/` — always treated as file links. */
 const PREFIXED_PATH_RE = /(?<=^|[\s"'`({[;,|<>])(?:\/|\.\/|\.\.\/|~\/)[^\s"'`(){}[\];,|<>]+/g;
@@ -142,7 +143,8 @@ function createLink(
       const resolved = resolvedRelative
         ? resolvePath(resolvedRelative, cwd)
         : resolvePath(filePath, cwd);
-      dispatchOpenFile(resolved, location);
+      // Folders open in the files panel; everything else in its editor.
+      void openPath(resolved, location);
     },
   };
 }
