@@ -12,10 +12,15 @@ import { getQueryScope } from "@/queries/use-scope";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
+/**
+ * @param getTreeRoot The root of the tree that shows a path: the worktree or an Others folder.
+ *   Moves and copies stay within one tree.
+ */
 export function useFileClipboard(
   isDetachedPath: (path: string) => boolean,
   queryClient: QueryClient,
   activeWorktreePath: string | null,
+  getTreeRoot: (path: string) => string | null,
 ) {
   const [clipboard, setClipboard] = useState<{ path: string; mode: "cut" | "copy" } | null>(null);
 
@@ -33,6 +38,13 @@ export function useFileClipboard(
       try {
         const wt = useWorktreeStore.getState().activeWorktreePath;
         if (!wt) return;
+
+        // Drafts move into the worktree only; everything else stays within its own tree.
+        const sourceRoot = isDetachedPath(clipboard.path) ? wt : getTreeRoot(clipboard.path);
+        if (sourceRoot !== getTreeRoot(targetDir || wt)) {
+          showToast("Can't move or copy between the project and other folders");
+          return;
+        }
 
         if (isDetachedPath(clipboard.path)) {
           if (clipboard.mode === "cut") {
@@ -76,12 +88,12 @@ export function useFileClipboard(
       }
       setClipboard(null);
     },
-    [clipboard, isDetachedPath],
+    [clipboard, isDetachedPath, getTreeRoot],
   );
 
   const resolveTargetDir = useCallback(
     (selected: string) => {
-      if (activeWorktreePath && selected === activeWorktreePath) return activeWorktreePath;
+      if (getTreeRoot(selected) === selected) return selected;
       const parentDirPath = fileParentDir(selected, activeWorktreePath);
       const entryName = pathName(selected);
       const { activeProjectPath: projectPath } = getQueryScope();
@@ -92,7 +104,7 @@ export function useFileClipboard(
       const isDir = parentEntries?.find((entry) => entry.name === entryName)?.isDir ?? false;
       return isDir ? selected : parentDirPath;
     },
-    [queryClient, activeWorktreePath],
+    [queryClient, activeWorktreePath, getTreeRoot],
   );
 
   const cutPath = clipboard?.mode === "cut" ? clipboard.path : null;

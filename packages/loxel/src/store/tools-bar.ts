@@ -96,6 +96,32 @@ export function togglePanel(panelId: PanelId): void {
   }
 }
 
+/** Panels to open once the outer layout being swapped in (worktree switch) is restored. */
+let panelsToShowAfterRestore: PanelId[] = [];
+
+/**
+ * Open a sidebar panel once the next outer layout restore completes. Use right after switching
+ * worktrees: until then the outer API still holds the previous worktree's layout.
+ */
+export function showPanelAfterLayoutRestore(panelId: PanelId): void {
+  panelsToShowAfterRestore.push(panelId);
+}
+
+/** Open the panels queued by {@link showPanelAfterLayoutRestore}. Called on outer restore. */
+export function showPanelsQueuedForRestore(): void {
+  const panelIds = panelsToShowAfterRestore;
+  panelsToShowAfterRestore = [];
+  for (const panelId of panelIds) showPanel(panelId);
+}
+
+/** Open a sidebar panel if it is not already the active panel of its zone. */
+export function showPanel(panelId: PanelId): void {
+  const state = getCurrentWorktreeToolsBar().getState();
+  const zone = findPanelZone(panelId, state.leftEntries, state.bottomEntries, state.rightEntries);
+  if (!zone || state[ACTIVE_PANEL_KEY[zone]] === panelId) return;
+  togglePanel(panelId);
+}
+
 /**
  * Move a panel between toolbar zones (entries only, no dockview move).
  * Used when dockview has already moved the panel (e.g. onDidDrop in App.tsx).

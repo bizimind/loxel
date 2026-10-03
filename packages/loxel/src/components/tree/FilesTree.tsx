@@ -1,5 +1,6 @@
 import type { HTMLAttributes, ReactNode } from "react";
 import {
+  Fragment,
   forwardRef,
   useCallback,
   useEffect,
@@ -40,6 +41,8 @@ export interface FilesTreeProps {
   labelClassName?: (node: TreeNode) => string | undefined;
   renderLabel?: (node: TreeNode, compactedWith?: TreeNode) => ReactNode;
   renderTrailing?: (node: TreeNode) => ReactNode;
+  /** Content rendered above a root node (e.g. a section heading between groups of roots). */
+  renderRootHeader?: (node: TreeNode, index: number) => ReactNode;
   getRowProps?: (node: TreeNode) => HTMLAttributes<HTMLButtonElement>;
   getRowClassName?: (node: TreeNode) => string | undefined;
 
@@ -86,6 +89,7 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
     labelClassName,
     renderLabel,
     renderTrailing,
+    renderRootHeader,
     getRowProps,
     getRowClassName,
     isPanelActive,
@@ -496,27 +500,29 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
       onKeyDown={disableBuiltinKeyNav ? undefined : handleKeyDown}
       onFocusCapture={handleFocusIn}
     >
-      {nodes.map((node) => (
-        <TreeNodeRenderer
-          key={node.path}
-          node={node}
-          depth={0}
-          expandedPaths={expandedPaths}
-          loadingPaths={loadingSnapshot}
-          isPanelActive={isPanelActive}
-          compactRoot={compactRoot}
-          resolveChildren={resolveChildren}
-          toggleExpanded={toggleExpanded}
-          onOpen={onOpen}
-          onContextMenu={onContextMenu}
-          labelClassName={labelClassName}
-          renderLabel={renderLabel}
-          renderTrailing={renderTrailing}
-          getRowProps={getRowProps}
-          getRowClassName={getRowClassName}
-          focusedPath={focusedPath}
-          activePath={activePath}
-        />
+      {nodes.map((node, index) => (
+        <Fragment key={node.path}>
+          {renderRootHeader?.(node, index)}
+          <TreeNodeRenderer
+            node={node}
+            depth={0}
+            expandedPaths={expandedPaths}
+            loadingPaths={loadingSnapshot}
+            isPanelActive={isPanelActive}
+            compactRoot={compactRoot}
+            resolveChildren={resolveChildren}
+            toggleExpanded={toggleExpanded}
+            onOpen={onOpen}
+            onContextMenu={onContextMenu}
+            labelClassName={labelClassName}
+            renderLabel={renderLabel}
+            renderTrailing={renderTrailing}
+            getRowProps={getRowProps}
+            getRowClassName={getRowClassName}
+            focusedPath={focusedPath}
+            activePath={activePath}
+          />
+        </Fragment>
       ))}
     </div>
   );

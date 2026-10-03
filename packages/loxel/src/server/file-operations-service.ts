@@ -108,6 +108,16 @@ function entryBytes(entry: UndoEntry): number {
   }
 }
 
+export interface FileOperationsServiceOptions {
+  /**
+   * Use `git mv` / `git rm` for tracked files. Defaults to true. Disable for folders that are
+   * not a worktree, so an operation never stages changes in an enclosing repo.
+   */
+  git?: boolean;
+  /** The owning worktree's history, which orders undo/redo across all its services. */
+  history?: FileOperationsHistory;
+}
+
 /**
  * Manages file rename/delete/move operations with git integration and undo/redo.
  *
@@ -120,7 +130,10 @@ export class FileOperationsService {
   private totalBytes = 0;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private worktreeCwd: string) {}
+  constructor(
+    private worktreeCwd: string,
+    private options: FileOperationsServiceOptions = {},
+  ) {}
 
   // --- Public API ---
 
@@ -525,6 +538,7 @@ export class FileOperationsService {
 
     this.undoStack.push(entry);
     this.totalBytes += bytes;
+    this.options.history?.recordOperation(this);
   }
 
   private findOldestContentEntry(): number {
@@ -580,6 +594,11 @@ export class FileOperationsService {
 
   /** Try `git mv`. Returns true if git handled it, false if untracked (fell back to raw rename). */
   private async tryGitMv(from: string, to: string): Promise<boolean> {
+    if (this.options.git === false) {
+      await this.rawRename(from, to);
+      return false;
+    }
+
     // Ensure destination parent exists
     const destParent = dirname(to);
     if (destParent !== ".") {
@@ -598,6 +617,7 @@ export class FileOperationsService {
 
   /** Check if a path is tracked by git (in HEAD or index). */
   private async isGitTracked(relPath: string): Promise<boolean> {
+    if (this.options.git === false) return false;
     try {
       const out = await $`git -C ${this.worktreeCwd} ls-files -- ${relPath}`.text();
       return out.trim().length > 0;
@@ -736,6 +756,67 @@ export class FileOperationsService {
     return join(this.worktreeCwd, relPath);
   }
 }
+
+/**
+ * Orders undo/redo across the file-operation services of one worktree: its own tree plus every
+ * folder in its Others section. Each service keeps its own stacks; this records which service
+ * performed each operation, so Cmd+Z undoes the most recent operation wherever it happened.
+ */
+export class FileOperationsHistory {
+  private undoOrder: FileOperationsService[] = [];
+  private redoOrder: FileOperationsService[] = [];
+
+  /**
+   * Called by a service when it records a new (non-redo) undo entry — never for no-ops such as a
+   * move into the item's own folder. Every service of one worktree (its tree's and each Others
+   * folder's) belongs to that worktree alone, so its stack holds only this worktree's operations.
+   */
+  recordOperation(service: FileOperationsService): void {
+    this.undoOrder.push(service);
+    if (this.undoOrder.length > MAX_HISTORY_ENTRIES) this.undoOrder.shift();
+    this.redoOrder = [];
+  }
+
+  /** Undo the most recent operation. Services with nothing left to undo are skipped. */
+  async undo(): Promise<HistoryStep | null> {
+    return this.step(this.undoOrder, this.redoOrder, (service) => service.undo());
+  }
+
+  /** Redo the most recently undone operation. */
+  async redo(): Promise<HistoryStep | null> {
+    return this.step(this.redoOrder, this.undoOrder, (service) => service.redo());
+  }
+
+  private async step(
+    from: FileOperationsService[],
+    to: FileOperationsService[],
+    run: (service: FileOperationsService) => Promise<FileOperationResult | null>,
+  ): Promise<HistoryStep | null> {
+    for (let service = from.pop(); service; service = from.pop()) {
+      let result: FileOperationResult | null;
+      try {
+        result = await run(service);
+      } catch (err) {
+        // The service kept its entry; keep ours so a retry targets the same operation.
+        from.push(service);
+        throw err;
+      }
+      // A disposed service (folder removed from Others) or an evicted entry has nothing to do.
+      if (!result) continue;
+      to.push(service);
+      return { service, result };
+    }
+    return null;
+  }
+}
+
+export interface HistoryStep {
+  service: FileOperationsService;
+  result: FileOperationResult;
+}
+
+/** Undo/redo tokens kept per worktree; each service caps its own stack at MAX_UNDO_ENTRIES. */
+const MAX_HISTORY_ENTRIES = MAX_UNDO_ENTRIES * 4;
 
 // --- Validation ---
 

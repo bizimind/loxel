@@ -52,6 +52,8 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       broadcastToSubscribers: () => {},
       broadcastToProject: () => {},
       broadcastAll: () => {},
+      sendToActiveWindow: () => false,
+      externalFolderConflict: () => null,
       getProject: (cwd) => (cwd === repo ? project : undefined),
       findProjectForPath: () => undefined,
       getWorktreeResources: () => undefined,

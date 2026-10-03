@@ -26,6 +26,7 @@ import { useDiffSource } from "./hooks/useDiffSource";
 import { useKeybindings } from "./hooks/useKeybindings";
 import { useLoxelEventListeners } from "./hooks/useLoxelEventListeners";
 import { useThemeSync } from "./hooks/useThemeSync";
+import { useWindowPresence } from "./hooks/useWindowPresence";
 import { useWsSubscription } from "./hooks/useWsSubscription";
 import { useWsBridge } from "./queries/ws-bridge";
 import { useProjectStore } from "./store/projects";
@@ -63,6 +64,7 @@ export default function App() {
 
   // WS subscription lifecycle
   useWsSubscription(activeWorktreePath);
+  useWindowPresence();
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">

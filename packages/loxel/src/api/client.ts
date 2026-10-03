@@ -302,8 +302,31 @@ export async function getDetachedFiles(wt: string) {
   return fetchJson<DirEntry[]>(withScope("/detached-files", { wt }));
 }
 
+/** The worktree's Others section: open folders (`isDir`), then individually opened files. */
 export async function getExternalFiles(wt: string) {
   return fetchJson<DirEntry[]>(withScope("/external-files", { wt }));
+}
+
+/** Open a folder in the worktree's Others section. Returns the root it is shown under. */
+export async function addExternalFolder(wt: string, path: string) {
+  return fetchJson<{ root: string }>("/external-folders/add", {
+    method: "POST",
+    body: JSON.stringify({ wt, path }),
+  });
+}
+
+export async function removeExternalFolder(wt: string, path: string) {
+  return fetchJson<{ removed: boolean }>("/external-folders/remove", {
+    method: "POST",
+    body: JSON.stringify({ wt, path }),
+  });
+}
+
+/** Resolve a path (`~/` expanded) and report whether it is a directory. Throws when missing. */
+export async function getPathInfo(path: string) {
+  return fetchJson<{ path: string; isDir: boolean }>(
+    `/path-info?${new URLSearchParams({ path }).toString()}`,
+  );
 }
 
 export async function createDetachedFile(options: {

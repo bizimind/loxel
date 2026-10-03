@@ -42,7 +42,7 @@ mock.module("@/api/client", () => ({
   getProjectWorktrees: () => listResponses.shift() ?? Promise.resolve(listResult),
 }));
 
-const { useWorktreeStore } = await import("./worktrees");
+const { deriveOwningWorktree, useWorktreeStore } = await import("./worktrees");
 const { useProjectStore } = await import("./projects");
 
 const worktree: WorktreeEntry = {
@@ -387,5 +387,46 @@ describe("confirmRemoveWorktree", () => {
     ).rejects.toThrow("worktree was removed");
 
     expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([]);
+  });
+});
+
+describe("deriveOwningWorktree", () => {
+  function project(path: string, worktreePaths: string[], isBare = false) {
+    return { path, isBare, worktrees: worktreePaths.map((p) => worktree(p)) };
+  }
+  function worktree(path: string): WorktreeEntry {
+    return { path, branch: "topic", commit: "abc", isMain: false, createdAt: null };
+  }
+
+  test("picks the deepest worktree containing the path", () => {
+    const projects = [project("/repos/app", ["/repos/app/.worktrees/topic"])];
+
+    expect(deriveOwningWorktree("/repos/app/.worktrees/topic/src", projects, {})).toBe(
+      "/repos/app/.worktrees/topic",
+    );
+    expect(deriveOwningWorktree("/repos/app/src", projects, {})).toBe("/repos/app");
+  });
+
+  test("uses the live worktree list over the projects snapshot", () => {
+    const projects = [project("/repos/app", [])];
+    const byProject = { "/repos/app": { worktrees: [worktree("/repos/app/.worktrees/new")] } };
+
+    expect(deriveOwningWorktree("/repos/app/.worktrees/new/src", projects, byProject)).toBe(
+      "/repos/app/.worktrees/new",
+    );
+  });
+
+  test("ignores a bare repo's root, which is not a worktree", () => {
+    const projects = [project("/repos/bare", ["/repos/bare/main"], true)];
+
+    expect(deriveOwningWorktree("/repos/bare/main/docs", projects, {})).toBe("/repos/bare/main");
+    expect(deriveOwningWorktree("/repos/bare/hooks", projects, {})).toBeNull();
+  });
+
+  test("returns null outside every project", () => {
+    const projects = [project("/repos/app", [])];
+
+    expect(deriveOwningWorktree("/notes", projects, {})).toBeNull();
+    expect(deriveOwningWorktree("/repos/app-other", projects, {})).toBeNull();
   });
 });

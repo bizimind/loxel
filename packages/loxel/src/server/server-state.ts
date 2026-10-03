@@ -1,9 +1,13 @@
 import type { LocalDb } from "@bizimind/localdb-sdk";
 import type { ServerWebSocket } from "bun";
 
+import type { DirEntry } from "@/api/project-files-model";
+import { isWithin } from "@/lib/project-file-helpers";
+
 import type { DetachedFilesService } from "./detached-files-service";
 import type { ExternalFilesService } from "./external-files-service";
-import type { FileOperationsService } from "./file-operations-service";
+import type { ExternalFoldersService, FileTree } from "./external-folders-service";
+import type { FileOperationsHistory, FileOperationsService } from "./file-operations-service";
 import type { FileWatcher } from "./file-watcher";
 import type { ProjectFilesService } from "./project-files-service";
 import type { ReviewDb } from "./review-db";
@@ -35,11 +39,34 @@ export function findOwningProject<T extends Pick<ProjectState, "cwd" | "worktree
   let best: { project: T; prefix: string } | undefined;
   for (const project of projects) {
     for (const prefix of [project.cwd, project.worktreesDir]) {
-      if (targetPath !== prefix && !targetPath.startsWith(prefix + "/")) continue;
+      if (!isWithin(targetPath, prefix)) continue;
       if (!best || prefix.length > best.prefix.length) best = { project, prefix };
     }
   }
   return best?.project;
+}
+
+/**
+ * Why `folder` cannot be opened in an Others section, or null when it can. Folders inside a
+ * project belong to its worktrees; folders containing one would watch and list it twice; the
+ * filesystem root and the home folder are too large to watch recursively.
+ */
+export function externalFolderConflict(
+  projects: readonly Pick<ProjectState, "cwd" | "worktreesDir">[],
+  folder: string,
+  homeDir: string,
+): string | null {
+  if (folder === "/" || folder === homeDir) {
+    return `${folder} is too large to open; open a folder inside it`;
+  }
+  const owner = findOwningProject(projects, folder);
+  if (owner) return `${folder} belongs to the project at ${owner.cwd}`;
+  for (const project of projects) {
+    if ([project.cwd, project.worktreesDir].some((p) => isWithin(p, folder))) {
+      return `${folder} contains the project at ${project.cwd}`;
+    }
+  }
+  return null;
 }
 
 /**
@@ -56,13 +83,42 @@ export interface WorktreeResources {
   fileOpsService: FileOperationsService;
   detachedFilesService: DetachedFilesService;
   externalFilesService: ExternalFilesService;
+  /** Folders outside every project, opened in this worktree's Others section. */
+  externalFoldersService: ExternalFoldersService;
+  /** Orders file-operation undo/redo across the worktree and its Others folders. */
+  fileOpsHistory: FileOperationsHistory;
   /** Connected clients subscribing to this worktree's events. */
   subscribers: Set<ServerWebSocket<WsData>>;
 }
 
+/** A worktree's Others section: its open folders, then its open external files. */
+export function listOthers(resources: WorktreeResources): DirEntry[] {
+  return [
+    ...resources.externalFoldersService.list(),
+    ...resources.externalFilesService.listFiles(),
+  ];
+}
+
+/** The worktree's own file tree (its Others folders are trees too, see `ExternalFoldersService`). */
+export function worktreeTree(wtPath: string, resources: WorktreeResources): FileTree {
+  return {
+    root: wtPath,
+    filesService: resources.filesService,
+    fileOpsService: resources.fileOpsService,
+  };
+}
+
 /** Result of resolving an absolute file path to its owning worktree + service. */
 export type ResolvedFilePath =
-  | { type: "project"; wtPath: string; resources: WorktreeResources; relativePath: string }
+  | {
+      /** A file in a tree: the worktree's own, or a folder in its Others section. */
+      type: "tree";
+      wtPath: string;
+      resources: WorktreeResources;
+      tree: FileTree;
+      /** Relative to the tree root; empty only for an Others folder's root. */
+      relativePath: string;
+    }
   | { type: "detached"; wtPath: string; resources: WorktreeResources; name: string }
   | { type: "external"; wtPath: string; resources: WorktreeResources; absolutePath: string };
 
@@ -70,6 +126,8 @@ export type ResolvedFilePath =
 export interface ClientState {
   terminals: Set<string>;
   subscribedWorktrees: Set<string>;
+  /** The window this socket belongs to (its terminals carry it as `LOXEL_WINDOW_ID`). */
+  windowId?: string;
 }
 
 /** WS data tag for routing app vs language-server connections. */

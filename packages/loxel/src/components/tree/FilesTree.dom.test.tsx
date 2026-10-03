@@ -45,6 +45,27 @@ describe("FilesTree", () => {
     expect(screen.getByText("a.ts")).toBeDefined();
   });
 
+  test("renders a root header above the root it is returned for", () => {
+    const { container } = render(
+      <FilesTree
+        nodes={[
+          { path: "/repo", name: "repo", isDir: true },
+          { path: "/notes", name: "notes", isDir: true },
+        ]}
+        renderRootHeader={(_node, index) => index === 1 && <div>Others</div>}
+        onOpen={() => {}}
+      />,
+    );
+
+    const header = screen.getByText("Others");
+    const row = (path: string) => container.querySelector(`button[${TREE_PATH_ATTR}="${path}"]`)!;
+    const follows = (a: Element, b: Element) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(row("/repo"), header)).toBe(true);
+    expect(follows(header, row("/notes"))).toBe(true);
+    expect(screen.getAllByText("Others")).toHaveLength(1);
+  });
+
   test("styles focus selection separately from the active opened entry", () => {
     render(
       <FilesTree

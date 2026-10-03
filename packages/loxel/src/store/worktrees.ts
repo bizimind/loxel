@@ -7,6 +7,7 @@ import { wsClient } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
 import type { EnrichedProject } from "@/api/project-model";
 import { STORAGE_PREFIX } from "@/lib/env";
+import { findTreeRoot } from "@/lib/project-file-helpers";
 import { toggleSet } from "@/lib/set-utils";
 
 import { deriveProject, useProjectStore } from "./projects";
@@ -66,6 +67,25 @@ export interface ProjectState extends Partial<ProjectConfig> {
 }
 
 const EMPTY_PROJECT: ProjectState = { worktrees: [] };
+
+/**
+ * The worktree that contains `path` (the worktree root included): the deepest match among every
+ * project's worktrees and non-bare roots. Worktree lists come from `byProject`, which
+ * `worktrees_changed` keeps current — unlike the snapshot loaded with the projects. Null when no
+ * worktree contains it.
+ */
+export function deriveOwningWorktree(
+  path: string,
+  projects: readonly Pick<EnrichedProject, "path" | "isBare" | "worktrees">[],
+  byProject: Readonly<Record<string, Pick<ProjectState, "worktrees">>>,
+): string | null {
+  const roots = projects.flatMap((project) => {
+    const worktrees = byProject[project.path]?.worktrees ?? project.worktrees;
+    const worktreeRoots = worktrees.map((worktree) => worktree.path);
+    return project.isBare ? worktreeRoots : [...worktreeRoots, project.path];
+  });
+  return findTreeRoot(path, roots);
+}
 
 // ── Worktree store ──────────────────────────────────────────────────────
 

@@ -55,6 +55,12 @@ loxel src/app.ts:42        # jump to line 42
 loxel src/app.ts:42:8      # jump to line 42, column 8
 ```
 
+Pass a folder to reveal it in the file tree. A folder outside every project opens in the [Others section](/docs/editor#other-folders):
+
+```bash
+loxel ~/notes
+```
+
 It also accepts URLs:
 
 ```bash
