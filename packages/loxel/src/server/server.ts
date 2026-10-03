@@ -27,6 +27,7 @@ import {
   ExternalFolderRegistry,
   ExternalFoldersService,
   createExternalFolderStorage,
+  externalFoldersStoreKey,
 } from "./external-folders-service";
 import { FileOperationsHistory, FileOperationsService } from "./file-operations-service";
 import { FileWatcher } from "./file-watcher";
@@ -58,7 +59,7 @@ import type {
   WorktreeLspType,
 } from "./server-state";
 import { resolveLoginShellEnv } from "./shell-env";
-import { recoverOrphanLayoutSessions } from "./store-db";
+import { deleteStore, recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
 import { TerraformLspManager } from "./terraform-lsp-manager";
 import { TsLspManager } from "./ts-lsp-manager";
@@ -472,6 +473,8 @@ function reconcileRemovedWorktrees(projectPath: string): void {
 
 /** Permanently release a removed worktree after its final project broadcast. */
 function completeWorktreeRemoval(wtPath: string): void {
+  // A worktree later created at the same path starts with an empty Others section.
+  deleteStore(externalFoldersStoreKey(wtPath));
   const resources = wtResources.get(wtPath);
   if (!resources) return;
   for (const ws of resources.subscribers) {

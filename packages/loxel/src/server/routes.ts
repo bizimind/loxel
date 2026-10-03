@@ -45,7 +45,6 @@ import { config } from "./config";
 import { getDiagnostics } from "./diagnostics";
 import { describeError } from "./error-message";
 import type { FileTree } from "./external-folders-service";
-import { externalFoldersStoreKey } from "./external-folders-service";
 import type { HistoryStep } from "./file-operations-service";
 import { listFolderApps } from "./folder-apps";
 import * as git from "./git-commands";
@@ -92,7 +91,10 @@ export interface RouteContext {
   getWorktreeResources: (wtPath: string) => WorktreeResources | undefined;
   /** Pause filesystem delivery while a worktree directory is being removed. */
   suspendWorktreeWatchers: (wtPath: string) => Promise<() => Promise<void>>;
-  /** Permanently tear down resources after the final removal broadcast. */
+  /**
+   * Permanently tear down resources after the final removal broadcast, and forget the worktree's
+   * persisted state (its Others folders).
+   */
   completeWorktreeRemoval: (wtPath: string) => void;
   /**
    * Resolve an absolute file path to its owning worktree and service type. A folder can be open in
@@ -2251,8 +2253,6 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
     wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
     ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
     ctx.completeWorktreeRemoval(wtPath);
-    // A worktree later created at the same path starts with an empty Others section.
-    storeDb.deleteStore(externalFoldersStoreKey(wtPath));
     return json(result);
   } catch (err) {
     try {
