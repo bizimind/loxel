@@ -2,9 +2,13 @@ name: Release site
 
 on:
   push:
+    # Branches only: path filters are not evaluated for tag pushes, so release tags would deploy previews
+    branches: ["**"]
     paths:
       - "packages/site/**"
       - ".github/workflows/release-site.yml"
+  # Dispatched by release-loxel.yml after a release so the download page picks up the new manifest
+  workflow_dispatch:
 
 permissions:
   contents: read
