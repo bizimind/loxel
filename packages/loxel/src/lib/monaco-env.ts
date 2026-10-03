@@ -16,6 +16,7 @@ import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { getHighlighter } from "./highlighter";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { dispatchOpenFile } from "./open-file";
+import { isWithin } from "./project-file-helpers";
 import { connectPythonLsp, disconnectPythonLsp } from "./python-lsp-client";
 import { connectTerraformLsp, disconnectTerraformLsp } from "./terraform-lsp-client";
 import { connectTsLsp } from "./ts-lsp-client";
@@ -163,7 +164,7 @@ function createLazyLspConnector(opts: {
     if (!opts.languageIds.includes(model.getLanguageId())) return false;
     if (!activeWt) return false;
     const path = model.uri.path;
-    if (path.startsWith(activeWt)) return true;
+    if (isWithin(path, activeWt)) return true;
     // Files outside every project (the Others section) are served by the active worktree's LSP.
     // Live editors use file:// or loxel://HEAD (see CodeEditorPanel); diff and history models
     // use other loxel authorities and are not counted.

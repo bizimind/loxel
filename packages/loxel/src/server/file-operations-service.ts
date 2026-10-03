@@ -135,11 +135,6 @@ export class FileOperationsService {
     private options: FileOperationsServiceOptions = {},
   ) {}
 
-  /** The directory every relative path of this service resolves against. */
-  get root(): string {
-    return this.worktreeCwd;
-  }
-
   // --- Public API ---
 
   async rename(relPath: string, newName: string): Promise<{ newPath: string }> {

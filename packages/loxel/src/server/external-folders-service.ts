@@ -1,7 +1,7 @@
-import { statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 import type { DirEntry } from "@/api/project-files-model";
+import { isDirectory } from "@/fs-utils";
 import { findTreeRoot, isWithin } from "@/lib/project-file-helpers";
 
 import type { FileOperationsHistory } from "./file-operations-service";
@@ -233,13 +233,5 @@ export class ExternalFoldersService {
 
   private persist(): void {
     this.options.storage.save([...this.folders.keys()].sort());
-  }
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
   }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import { statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
+import { isDirectory } from "./fs-utils";
 import { isHttpUrl } from "./url-utils";
 
 const PROD_PORT = 7433;
@@ -143,14 +143,6 @@ async function main(): Promise<void> {
   const envWindowId = process.env.LOXEL_WINDOW_ID;
   if (isFolder && isInsideLoxel && envWindowId) body.windowId = envWindowId;
   await sendOpen(port, body, { waitForWindow: isFolder });
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
 }
 
 main().catch((err: unknown) => {
