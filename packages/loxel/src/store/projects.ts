@@ -53,6 +53,17 @@ async function removeAndSwitchProject(
   }
 }
 
+const projectsLoaded = Promise.withResolvers<void>();
+
+/**
+ * Resolves once the project list and its worktrees have first been fetched (or that fetch failed) —
+ * before that, path lookups find no project and no worktree is active (e.g. a file opened while
+ * Loxel launches).
+ */
+export function whenProjectsLoaded(): Promise<void> {
+  return projectsLoaded.promise;
+}
+
 // --- Project store ---
 
 export const SIDEBAR_MIN_WIDTH = 200;
@@ -101,11 +112,16 @@ export const useProjectStore = create<ProjectState>()(
       autoExpandedProjectIds: [],
 
       fetchProjects: async () => {
-        const data = await api.getProjects();
-        set({ projects: data.projects });
-        // Update the worktree store with enriched data
-        const { useWorktreeStore } = await import("./worktrees");
-        useWorktreeStore.getState().applyEnrichedProjects(data.projects);
+        try {
+          const data = await api.getProjects();
+          set({ projects: data.projects });
+          // Update the worktree store with enriched data
+          const { useWorktreeStore } = await import("./worktrees");
+          useWorktreeStore.getState().applyEnrichedProjects(data.projects);
+        } finally {
+          // Settle even on failure, so waiting opens report "no project" instead of hanging
+          projectsLoaded.resolve();
+        }
       },
 
       addProject: async (path, name) => {

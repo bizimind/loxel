@@ -261,6 +261,71 @@ describe("Others folders routes", () => {
     });
   });
 
+  describe("POST /api/open with a file", () => {
+    test("sends a file outside every project to the window in use", async () => {
+      const file = join(folder, "a.md");
+
+      const res = await post("/api/open", { filePath: file });
+
+      expect(res.status).toBe(200);
+      expect(sent).toEqual([
+        { windowId: null, msg: { type: "open_file", data: { filePath: file } } },
+      ]);
+    });
+
+    test("sends a project file to the window whose terminal asked", async () => {
+      const file = join(wt, "src", "index.ts");
+      await writeFile(file, "");
+      const windowId = "4a1b2c3d-0000-4000-8000-000000000002";
+
+      await post("/api/open", { filePath: file, windowId });
+
+      expect(sent).toEqual([{ windowId, msg: { type: "open_file", data: { filePath: file } } }]);
+    });
+
+    test("resolves symlinks to the real file", async () => {
+      const link = join(root, "link.md");
+      await symlink(join(folder, "a.md"), link);
+
+      await post("/api/open", { filePath: link });
+
+      expect(sent).toEqual([
+        { windowId: null, msg: { type: "open_file", data: { filePath: join(folder, "a.md") } } },
+      ]);
+    });
+
+    test("ignores the worktree older CLIs send with a file", async () => {
+      const file = join(folder, "a.md");
+
+      const res = await post("/api/open", { filePath: file, wtPath: wt });
+
+      expect(res.status).toBe(200);
+      expect(sent).toEqual([
+        { windowId: null, msg: { type: "open_file", data: { filePath: file } } },
+      ]);
+    });
+
+    test("refuses pipes and devices", async () => {
+      const fifo = join(root, "pipe");
+      await Bun.spawn(["mkfifo", fifo]).exited;
+
+      const res = await post("/api/open", { filePath: fifo });
+
+      expect(res.status).toBe(400);
+      expect(sent).toEqual([]);
+    });
+
+    test("reports missing files and when no window is open", async () => {
+      const missing = await post("/api/open", { filePath: join(root, "nope.md") });
+      windowConnected = false;
+      const noWindow = await post("/api/open", { filePath: join(folder, "a.md") });
+
+      expect(missing.status).toBe(404);
+      expect(noWindow.status).toBe(503);
+      expect(sent).toHaveLength(1);
+    });
+  });
+
   test("GET /api/path-info reports directories", async () => {
     const dir = await (await get(`/api/path-info?path=${encodeURIComponent(folder)}`)).json();
     const file = await (

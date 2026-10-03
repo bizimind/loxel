@@ -49,7 +49,7 @@ loxel src/app.ts          # open a file in the active window
 loxel https://example.com # open a URL in the browser panel
 ```
 
-> **Note:** The `loxel` CLI is not yet added to your system PATH by the installer, so it only works from inside a loxel terminal for now. To follow progress on bundling the CLI and PATH setup, see [issue #885](https://github.com/bizimind/loxel/issues/885).
+> **Note:** The `loxel` CLI is not yet added to your system PATH by the installer, so it only works from inside a loxel terminal for now. To follow progress on bundling the CLI and PATH setup, see [issue #322](https://github.com/bizimind/loxel/issues/322).
 
 > **Note:** macOS (Apple Silicon and Intel) and Linux (x64) are currently supported. For Windows support, see [issue #886](https://github.com/bizimind/loxel/issues/886).
 

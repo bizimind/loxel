@@ -77,13 +77,21 @@ interface WorktreeUIState {
    */
   pendingRevealFolder: string | null;
   setPendingRevealFolder: (path: string | null) => void;
+  /**
+   * Files to open once this worktree's editor area is mounted — queued across a worktree switch,
+   * or while the window is still launching. Taken by the center layout when it mounts.
+   */
+  pendingOpenFiles: string[];
+  queueOpenFile: (path: string) => void;
+  takePendingOpenFiles: () => string[];
 }
 
 export const {
   useStore: useWorktreeUI,
+  getStore: getWorktreeUI,
   getCurrent: getCurrentWorktreeUI,
   purge: purgeUIWorktree,
-} = createWorktreeStore<WorktreeUIState>((set) => ({
+} = createWorktreeStore<WorktreeUIState>((set, get) => ({
   branchesPanelCollapsed: false,
   toggleBranchesPanel: () => set((s) => ({ branchesPanelCollapsed: !s.branchesPanelCollapsed })),
   branchesPanelSide: "left",
@@ -121,6 +129,13 @@ export const {
   setExpandedProjectFolders: (folders) => set({ expandedProjectFolders: new Set(folders) }),
   pendingRevealFolder: null,
   setPendingRevealFolder: (path) => set({ pendingRevealFolder: path }),
+  pendingOpenFiles: [],
+  queueOpenFile: (path) => set((s) => ({ pendingOpenFiles: [...s.pendingOpenFiles, path] })),
+  takePendingOpenFiles: () => {
+    const paths = get().pendingOpenFiles;
+    if (paths.length > 0) set({ pendingOpenFiles: [] });
+    return paths;
+  },
   renameProjectPaths: (oldPrefix, newPrefix) =>
     set((s) => {
       let sel = s.selectedProjectFile;

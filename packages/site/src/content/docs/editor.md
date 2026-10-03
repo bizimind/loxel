@@ -108,6 +108,12 @@ A folder that contains one of your projects can't be opened this way, nor can th
 
 Right-click a folder's root row and choose **Remove from Others** to close it; nothing is deleted from disk.
 
+### Opening files from Finder
+
+On macOS, loxel appears in Finder's **Open With** menu for text and source files and `.excalidraw` drawings. You can also drop files and folders on loxel's Dock icon, or open them with `open -a Loxel <path>`. loxel never takes over a file type another app already opens: to open, say, markdown files with loxel on double-click, select one, choose **File → Get Info**, pick loxel under **Open with**, and click **Change All…**. File types no other installed app handles, such as `.excalidraw`, open in loxel on double-click.
+
+An opened file or folder goes to the most recently focused loxel window, launching loxel or opening a window first if needed. If it is inside one of your projects' worktrees, loxel switches to that worktree and opens it there; anything else opens in the active worktree's [Others section](#other-folders), which needs a project to be open. Files open in the editor for their type — markdown, Excalidraw or code.
+
 ---
 
 ## TypeScript diagnostics

@@ -11,12 +11,14 @@ import { useCallback, useEffect, useRef } from "react";
 import { wsClient } from "@/api/client";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { frontendLog } from "@/lib/frontend-logger";
+import { dispatchOpenFile } from "@/lib/open-file";
 import { useAgentDevToolsStore } from "@/store/agent-devtools";
 import { reattachActiveContent } from "@/store/layout-actions";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
-import { setCenterApi } from "@/store/tools-bar";
+import { getCenterApi, setCenterApi } from "@/store/tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
+import { getWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { syncTerminalsFromLayout } from "./default-layout";
@@ -28,6 +30,9 @@ const uiLog = frontendLog.child("ui");
 
 export function CenterHostComponent(_props: IDockviewPanelProps) {
   const layoutKey = useWorktreeStore((s) => s.activeWorktreePath ?? "default");
+  // The worktree this instance shows: a worktree switch remounts CenterHost (the outer swap removes
+  // its panel), so the worktree active at mount is the one it belongs to.
+  const worktreePathRef = useRef(useWorktreeStore.getState().activeWorktreePath);
   const centerApiRef = useRef<DockviewApi | null>(null);
   const swappingRef = useRef(false);
 
@@ -37,7 +42,7 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
   }, []);
 
   const handleApiReady = useCallback((api: DockviewApi) => {
-    setCenterApi(api);
+    setCenterApi(api, worktreePathRef.current);
 
     // Populate terminal instances from restored layout
     syncTerminalsFromLayout(api);
@@ -105,6 +110,19 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
       const worktreePath = useWorktreeStore.getState().activeWorktreePath;
       if (filePath && worktreePath && !filePath.startsWith(worktreePath + "/")) {
         wsClient.send({ type: "close_external_file", worktreePath, filePath });
+      }
+    });
+
+    // Open files queued for this worktree while its editor area was being swapped in or had not
+    // mounted yet (see openFile). Deferred so only the instance that stays mounted takes them —
+    // React StrictMode mounts the layout twice in dev — and left queued if the worktree was
+    // switched away again meanwhile, for the next center mounted for it.
+    queueMicrotask(() => {
+      const worktreePath = worktreePathRef.current;
+      if (getCenterApi() !== api || !worktreePath) return;
+      if (useWorktreeStore.getState().activeWorktreePath !== worktreePath) return;
+      for (const filePath of getWorktreeUI(worktreePath).getState().takePendingOpenFiles()) {
+        dispatchOpenFile(filePath);
       }
     });
   }, []);

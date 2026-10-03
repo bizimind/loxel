@@ -44,6 +44,62 @@ mac:
   # named here because it carries restricted entitlements (passkeys) that release
   # builds must back with --config.mac.provisioningProfile (see release-loxel.yml).
   entitlements: assets/entitlements.mac.plist
+  # Offer Loxel in Finder's "Open With" for text and source files and Excalidraw drawings, and let
+  # them and folders be dropped on the Dock icon or opened with `open -a Loxel`. Alternate rank:
+  # Loxel never becomes a type's default app unless the user picks it with "Change All…".
+  # src/electron/main.ts handles the opens.
+  extendInfo:
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: Text Document
+        CFBundleTypeRole: Editor
+        LSHandlerRank: Alternate
+        # Plain text, Markdown, JSON, YAML, XML, HTML, CSS, scripts and the source code macOS knows
+        LSItemContentTypes: [public.text]
+      - CFBundleTypeName: Source Code
+        CFBundleTypeRole: Editor
+        LSHandlerRank: Alternate
+        # Extensions macOS may have no text type for: Markdown and YAML have one only when an
+        # installed app declares it, and .ts is MPEG transport stream to macOS
+        CFBundleTypeExtensions:
+          - md
+          - markdown
+          - yml
+          - yaml
+          - mjs
+          - cjs
+          - ts
+          - tsx
+          - mts
+          - cts
+          - jsx
+          - mdx
+          - vue
+          - svelte
+          - astro
+          - toml
+          - tf
+          - tfvars
+          - hcl
+          - graphql
+          - gql
+          - prisma
+          - proto
+          - go
+          - rs
+          - kt
+          - kts
+          - dart
+          - zig
+          - lua
+          - lock
+      - CFBundleTypeName: Excalidraw Drawing
+        CFBundleTypeRole: Editor
+        LSHandlerRank: Alternate
+        CFBundleTypeExtensions: [excalidraw]
+      - CFBundleTypeName: Folder
+        CFBundleTypeRole: Viewer
+        LSHandlerRank: Alternate
+        LSItemContentTypes: [public.folder]
   target:
     - target: dmg
       arch:

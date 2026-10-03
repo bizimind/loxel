@@ -33,6 +33,7 @@ let isServerOwner = false;
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
 
+import { requestOpen } from "../open-request";
 import { BROWSER_PARTITION } from "./browser-partition";
 import {
   OPEN_FOLDER_DIALOG,
@@ -679,6 +680,55 @@ app.on("new-window-for-tab", () => {
   void createWindow();
 });
 
+let windowStarting: Promise<void> | null = null;
+
+/**
+ * Open a window if none is (macOS keeps running with all windows closed), starting the server
+ * first — it shuts down when idle. Concurrent callers share the one window.
+ */
+function ensureWindow(): Promise<void> {
+  if (BrowserWindow.getAllWindows().length > 0) return Promise.resolve();
+  windowStarting ??= (async () => {
+    await ensureServer();
+    await createWindow();
+  })().finally(() => {
+    windowStarting = null;
+  });
+  return windowStarting;
+}
+
+// --- Files and folders opened with Loxel ---
+// macOS hands the app files and folders opened with it (Finder "Open With", drops on the Dock
+// icon, `open -a Loxel <path>`) as open-file events. Those that launch the app arrive before it is
+// ready, so they wait for the startup window. The server sends each to the window in use.
+
+/** Paths received before the startup window exists; null once it does. */
+let launchPaths: string[] | null = [];
+/** Opens run one at a time so several files open in the order macOS sent them. */
+let openQueue = Promise.resolve();
+
+function openPathFromOS(filePath: string): void {
+  openQueue = openQueue.then(async () => {
+    try {
+      await ensureWindow();
+      await requestOpen(SERVER_URL, { filePath });
+    } catch (err) {
+      console.error(`[electron] Failed to open ${filePath}:`, err);
+      void dialog.showMessageBox({
+        type: "error",
+        message: `Cannot open ${path.basename(filePath)}`,
+        detail: `${filePath}\n\n${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  });
+}
+
+app.on("open-file", (event, filePath) => {
+  event.preventDefault();
+  if (launchPaths) launchPaths.push(filePath);
+  else openPathFromOS(filePath);
+});
+
 /** When we didn't spawn the server, poll for liveness so we can recover if it dies. */
 function startServerHealthCheck(): void {
   setInterval(async () => {
@@ -747,22 +797,19 @@ app.whenReady().then(async () => {
 
     buildAppMenu();
     await createWindow();
+    const pathsOpenedAtLaunch = launchPaths;
+    launchPaths = null;
+    for (const filePath of pathsOpenedAtLaunch ?? []) openPathFromOS(filePath);
     startMainProcessMonitor(SERVER_URL);
 
     // If we didn't spawn the server, monitor it so we can recover from unexpected death
     if (!isServerOwner) startServerHealthCheck();
 
     // On macOS, clicking the dock icon after all windows are closed re-activates.
-    // The server may have shut down via idle timer, so ensure it's running first.
-    app.on("activate", async () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        try {
-          await ensureServer();
-          await createWindow();
-        } catch (err) {
-          dialog.showErrorBox("Startup Error", String(err));
-        }
-      }
+    app.on("activate", () => {
+      ensureWindow().catch((err: unknown) => {
+        dialog.showErrorBox("Startup Error", String(err));
+      });
     });
   } catch (err) {
     dialog.showErrorBox("Startup Error", String(err));

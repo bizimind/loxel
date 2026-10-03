@@ -11,7 +11,7 @@
 import type { IBufferLine, ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 
 import type { FileLocation } from "@/lib/open-file";
-import { openPath } from "@/lib/open-folder";
+import { openPath } from "@/lib/open-path";
 
 /** Paths starting with `/`, `./`, `../`, or `~/` — always treated as file links. */
 const PREFIXED_PATH_RE = /(?<=^|[\s"'`({[;,|<>])(?:\/|\.\/|\.\.\/|~\/)[^\s"'`(){}[\];,|<>]+/g;

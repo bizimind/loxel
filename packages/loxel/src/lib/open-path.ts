@@ -2,9 +2,9 @@ import * as api from "@/api/client";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
-import { deriveProject, useProjectStore } from "@/store/projects";
-import { showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
-import { getCurrentWorktreeUI } from "@/store/worktree-ui";
+import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
+import { getCenterApiWorktree, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
+import { getCurrentWorktreeUI, getWorktreeUI } from "@/store/worktree-ui";
 import { deriveOwningWorktree, useWorktreeStore } from "@/store/worktrees";
 
 import { frontendLog } from "./frontend-logger";
@@ -19,6 +19,7 @@ const log = frontendLog.child("files");
  * section.
  */
 export async function openFolder(rawPath: string): Promise<void> {
+  await whenProjectsLoaded();
   const path = rawPath.replace(/(.)\/+$/, "$1");
   const { projects } = useProjectStore.getState();
   const { activeWorktreePath, switchWorktree, byProject } = useWorktreeStore.getState();
@@ -59,6 +60,34 @@ export async function openFolder(rawPath: string): Promise<void> {
   });
   showPanel("projectFiles");
   getCurrentWorktreeUI().getState().setPendingRevealFolder(path);
+}
+
+/**
+ * Open a file sent from outside the window (`loxel <file>`, Finder). A file inside a worktree opens
+ * in that worktree, switching to it if needed; any other file opens in the active worktree's
+ * Others section.
+ */
+export async function openFile(path: string): Promise<void> {
+  await whenProjectsLoaded();
+  const { projects } = useProjectStore.getState();
+  const { activeWorktreePath, switchWorktree, byProject } = useWorktreeStore.getState();
+
+  const target = deriveOwningWorktree(path, projects, byProject) ?? activeWorktreePath;
+  if (!target) {
+    showToast("Open a project before opening other files");
+    return;
+  }
+
+  // Open now if the target's editor area is mounted; otherwise — while a worktree switch swaps it
+  // in, or before it first mounts — queue the file for it, behind any file already waiting there.
+  const ui = getWorktreeUI(target).getState();
+  const centerReady = target === activeWorktreePath && getCenterApiWorktree() === target;
+  if (centerReady && ui.pendingOpenFiles.length === 0) {
+    dispatchOpenFile(path);
+    return;
+  }
+  ui.queueOpenFile(path);
+  if (target !== activeWorktreePath) await switchWorktree(target);
 }
 
 /**
