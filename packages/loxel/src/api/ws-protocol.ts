@@ -135,7 +135,8 @@ export type WsClientMessage =
   // External files
   | { type: "close_external_file"; worktreePath: string; filePath: string }
   | { type: "register_external_files"; worktreePath: string; filePaths: string[] }
-  // Window focus (targets requests such as `loxel <folder>` at the window in use)
+  // Window identity and focus (target requests such as `loxel <folder>` at the window in use)
+  | { type: "window_hello"; windowId: string }
   | { type: "window_focused" }
   // Notifications
   | {

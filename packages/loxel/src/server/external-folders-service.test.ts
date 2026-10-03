@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { ExternalFolderStorage } from "./external-folders-service";
 import { ExternalFolderRegistry, ExternalFoldersService } from "./external-folders-service";
+import { FileOperationsHistory } from "./file-operations-service";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -30,11 +31,12 @@ function memoryStorage(initial: string[] = []): ExternalFolderStorage & { saved:
 
 function createRegistry() {
   const fileEvents: Array<{ worktrees: readonly string[]; path: string }> = [];
+  const dirEvents: Array<{ worktrees: readonly string[]; dir: string }> = [];
   const registry = new ExternalFolderRegistry({
-    onDirChanged: () => {},
+    onDirChanged: (worktrees, dir) => dirEvents.push({ worktrees, dir }),
     onFileChanged: (worktrees, path) => fileEvents.push({ worktrees, path }),
   });
-  return { registry, fileEvents };
+  return { registry, fileEvents, dirEvents };
 }
 
 function createService(
@@ -47,6 +49,7 @@ function createService(
   const service = new ExternalFoldersService({
     wtPath,
     registry,
+    history: new FileOperationsHistory(),
     storage,
     conflict,
     onListChanged: () => {
@@ -177,7 +180,7 @@ describe("ExternalFoldersService", () => {
 });
 
 describe("ExternalFolderRegistry", () => {
-  test("worktrees opening the same folder share one instance", async () => {
+  test("worktrees opening the same folder share its listing but own their file operations", async () => {
     const base = tempDir();
     const { registry } = createRegistry();
     const { service: first } = createService(memoryStorage(), undefined, registry, "/wt/a");
@@ -186,7 +189,68 @@ describe("ExternalFolderRegistry", () => {
     await first.add(base);
     await second.add(base);
 
-    expect(second.find(base)).toBe(first.find(base)!);
+    expect(second.find(base)!.filesService).toBe(first.find(base)!.filesService);
+    expect(second.find(base)!.fileOpsService).not.toBe(first.find(base)!.fileOpsService);
+  });
+
+  test("undo in one worktree never undoes another worktree's operation", async () => {
+    const base = tempDir();
+    const { registry } = createRegistry();
+    const historyA = new FileOperationsHistory();
+    const historyB = new FileOperationsHistory();
+    const a = new ExternalFoldersService({
+      wtPath: "/wt/a",
+      registry,
+      history: historyA,
+      storage: memoryStorage(),
+      conflict: () => null,
+      onListChanged: () => {},
+    });
+    const b = new ExternalFoldersService({
+      wtPath: "/wt/b",
+      registry,
+      history: historyB,
+      storage: memoryStorage(),
+      conflict: () => null,
+      onListChanged: () => {},
+    });
+    cleanups.push(
+      () => a.stop(),
+      () => b.stop(),
+    );
+    await a.add(base);
+    await b.add(base);
+    await a.find(base)!.fileOpsService.createFile("", "a.txt");
+    await b.find(base)!.fileOpsService.createFile("", "b.txt");
+
+    await historyA.undo();
+
+    expect(existsSync(path.join(base, "a.txt"))).toBe(false);
+    expect(existsSync(path.join(base, "b.txt"))).toBe(true);
+  });
+
+  test("removing a folder drops its operations from the worktree's undo history", async () => {
+    const base = tempDir();
+    const { registry } = createRegistry();
+    const history = new FileOperationsHistory();
+    const service = new ExternalFoldersService({
+      wtPath: "/wt/a",
+      registry,
+      history,
+      storage: memoryStorage(),
+      conflict: () => null,
+      onListChanged: () => {},
+    });
+    const { service: other } = createService(memoryStorage(), undefined, registry, "/wt/b");
+    cleanups.push(() => service.stop());
+    await service.add(base);
+    await other.add(base);
+    await service.find(base)!.fileOpsService.createFile("", "c.txt");
+
+    service.remove(base);
+
+    expect(await history.undo()).toBeNull();
+    expect(existsSync(path.join(base, "c.txt"))).toBe(true);
   });
 
   test("a folder's changes reach every worktree that has it open", async () => {
@@ -206,18 +270,42 @@ describe("ExternalFolderRegistry", () => {
     });
   });
 
-  test("keeps a folder live until the last worktree releases it", async () => {
+  test("keeps a folder's watcher live until the last worktree releases it", async () => {
     const base = tempDir();
     const { registry } = createRegistry();
     const { service: first } = createService(memoryStorage(), undefined, registry, "/wt/a");
     const { service: second } = createService(memoryStorage(), undefined, registry, "/wt/b");
     await first.add(base);
     await second.add(base);
+    const shared = first.find(base)!.filesService;
 
     first.stop();
-    expect(registry.get(base)).toBeDefined();
+    const whileHeld = registry.acquire(base, "/wt/c");
+    expect(whileHeld.filesService).toBe(shared);
+    registry.release(base, "/wt/c");
 
     second.remove(base);
-    expect(registry.get(base)).toBeUndefined();
+    const afterRelease = registry.acquire(base, "/wt/c");
+    expect(afterRelease.filesService).not.toBe(shared);
+    registry.release(base, "/wt/c");
+  });
+
+  test("a directory stays watched until every worktree has collapsed it", async () => {
+    const base = tempDir();
+    mkdirSync(path.join(base, "sub"));
+    const { registry, dirEvents } = createRegistry();
+    const { service: first } = createService(memoryStorage(), undefined, registry, "/wt/a");
+    const { service: second } = createService(memoryStorage(), undefined, registry, "/wt/b");
+    await first.add(base);
+    await second.add(base);
+    const shared = first.find(base)!.filesService;
+    await shared.getDirContents("sub", "/wt/a");
+    await shared.getDirContents("sub", "/wt/b");
+
+    shared.unwatchDir("sub", "/wt/a");
+    await Bun.write(path.join(base, "sub", "new.md"), "x");
+    await shared.notifyChanges(["sub/new.md"]);
+
+    expect(dirEvents.some((e) => e.dir === path.join(base, "sub"))).toBe(true);
   });
 });

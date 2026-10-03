@@ -7,7 +7,6 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   clampSidebarWidth,
-  deriveOwningWorktree,
   deriveProject,
 } from "./projects";
 
@@ -56,31 +55,5 @@ describe("clampSidebarWidth", () => {
   test("falls back to the default for non-finite values", () => {
     expect(clampSidebarWidth(Number.NaN)).toBe(SIDEBAR_DEFAULT_WIDTH);
     expect(clampSidebarWidth(Number.POSITIVE_INFINITY)).toBe(SIDEBAR_DEFAULT_WIDTH);
-  });
-});
-
-describe("deriveOwningWorktree", () => {
-  test("picks the deepest worktree containing the path", () => {
-    const owner = project("/repos/project", ["/repos/project/.worktrees/topic"]);
-
-    expect(deriveOwningWorktree("/repos/project/.worktrees/topic/src", [owner])).toBe(
-      "/repos/project/.worktrees/topic",
-    );
-    expect(deriveOwningWorktree("/repos/project/src", [owner])).toBe("/repos/project");
-    expect(deriveOwningWorktree("/repos/project", [owner])).toBe("/repos/project");
-  });
-
-  test("ignores a bare repo's root, which is not a worktree", () => {
-    const bare = { ...project("/repos/bare", ["/repos/bare/main"]), isBare: true };
-
-    expect(deriveOwningWorktree("/repos/bare/main/docs", [bare])).toBe("/repos/bare/main");
-    expect(deriveOwningWorktree("/repos/bare/hooks", [bare])).toBeNull();
-  });
-
-  test("returns null outside every project", () => {
-    expect(deriveOwningWorktree("/notes", [project("/repos/project", [])])).toBeNull();
-    expect(
-      deriveOwningWorktree("/repos/project-other", [project("/repos/project", [])]),
-    ).toBeNull();
   });
 });

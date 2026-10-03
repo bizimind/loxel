@@ -68,7 +68,7 @@ loxel [file-path | folder-path | url]
 
 **Worktree resolution:** when opening a file, `loxel` runs `git rev-parse --show-toplevel` on the file's directory to identify the worktree. Inside a loxel terminal, it falls back to `LOXEL_WORKTREE` if the file path doesn't resolve to a git repo. If no worktree can be determined and no fallback is available, the command errors.
 
-**Folders:** `loxel <folder>` goes to the window you are working in: the window of the terminal it runs in, or else the most recently focused loxel window. A folder inside one of your projects' worktrees is revealed in that worktree, switching to it if needed. Any other folder opens in the [Others section](/docs/editor#other-folders) of that window's active worktree. If loxel is still starting, the CLI waits up to 10 seconds for a window to connect.
+**Folders:** `loxel <folder>` goes to the window you are working in: the window of the loxel terminal it runs in, or else the most recently focused loxel window. Other windows are left alone. A folder inside one of your projects' worktrees is revealed in that worktree, switching to it if needed. Any other folder opens in the [Others section](/docs/editor#other-folders) of that window's active worktree. If loxel is still starting, the CLI prints `waiting for a Loxel window...` and waits up to 10 seconds for a window to connect.
 
 ---
 

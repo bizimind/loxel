@@ -91,9 +91,10 @@ function resolveFilePath(absolutePath: string, preferredWtPath?: string): Resolv
   const normalized = resolve(absolutePath);
   // A folder can be open in the Others section of several worktrees; the requester's wins.
   const preferred = preferredWtPath ? wtResources.get(preferredWtPath) : undefined;
-  const candidates: Array<[string, WorktreeResources]> = preferred
-    ? [[preferredWtPath!, preferred], ...[...wtResources].filter(([wt]) => wt !== preferredWtPath)]
-    : [...wtResources];
+  const candidates: Array<[string, WorktreeResources]> =
+    preferredWtPath && preferred
+      ? [[preferredWtPath, preferred], ...[...wtResources].filter(([wt]) => wt !== preferredWtPath)]
+      : [...wtResources];
   for (const [wtPath, resources] of candidates) {
     // Check detached files first (more specific path prefix)
     const detachedDir = resources.detachedFilesService.dir;
@@ -204,19 +205,18 @@ function sendTo(ws: ServerWebSocket<WsData>, message: WsMessage) {
 let lastFocusedClient: ServerWebSocket<WsData> | null = null;
 
 /**
- * Deliver a request to the window the user is working in: the subscribers of `wtPath` when it
- * has any (e.g. the CLI ran in that worktree's terminal), otherwise the most recently focused
- * window. Returns false when no window can receive it.
+ * Deliver a request to the window the user is working in: the window `windowId` names (the CLI
+ * ran in one of its terminals), otherwise the most recently focused window. Returns false when no
+ * window can receive it.
  */
-function sendToActiveWindow(wtPath: string | null, message: WsMessage): boolean {
-  if (wtPath && (wtResources.get(wtPath)?.subscribers.size ?? 0) > 0) {
-    broadcastToSubscribers(wtPath, message);
-    return true;
-  }
-  const target = lastFocusedClient ?? clients.keys().next().value;
-  if (!target) return false;
-  sendTo(target, message);
-  return true;
+function sendToActiveWindow(windowId: string | null, message: WsMessage): boolean {
+  const named = windowId
+    ? [...clients].filter(([, state]) => state.windowId === windowId).map(([ws]) => ws)
+    : [];
+  const fallback = lastFocusedClient ?? clients.keys().next().value;
+  const targets = named.length > 0 ? named : fallback ? [fallback] : [];
+  for (const ws of targets) sendTo(ws, message);
+  return targets.length > 0;
 }
 
 /** Why a folder cannot be opened in an Others section, given the registered projects. */
@@ -371,7 +371,8 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   const detachedFilesService = createDetachedFilesService(project.cwd, wtPath);
   await detachedFilesService.start();
 
-  const fileOpsService = new FileOperationsService(wtPath);
+  const fileOpsHistory = new FileOperationsHistory();
+  const fileOpsService = new FileOperationsService(wtPath, { history: fileOpsHistory });
 
   const externalFilesService = new ExternalFilesService(
     () => broadcastOthers(wtPath),
@@ -382,6 +383,7 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   const externalFoldersService = new ExternalFoldersService({
     wtPath,
     registry: externalFolderRegistry,
+    history: fileOpsHistory,
     storage: createExternalFolderStorage(wtPath),
     conflict: externalFolderConflictFor,
     onListChanged: () => broadcastOthers(wtPath),
@@ -393,7 +395,7 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     worktreeWatcher,
     filesService,
     fileOpsService,
-    fileOpsHistory: new FileOperationsHistory(),
+    fileOpsHistory,
     detachedFilesService,
     externalFilesService,
     externalFoldersService,
@@ -411,7 +413,7 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   // The client may have already requested GET /api/files before resources existed
   // and cached an empty result (staleTime: Infinity). This WS push overwrites it.
   filesService
-    .getDirContents("")
+    .getDirContents("", wtPath)
     .then((entries) => {
       broadcastToSubscribers(wtPath, {
         type: "files_dir_changed",
@@ -723,6 +725,12 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
           resources.externalFilesService.addFile(filePath);
         }
       }
+      break;
+    }
+
+    case "window_hello": {
+      const clientState = clients.get(ws);
+      if (clientState) clientState.windowId = msg.windowId;
       break;
     }
 

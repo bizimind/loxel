@@ -4,7 +4,6 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import * as api from "@/api/client";
 import type { EnrichedProject, Project } from "@/api/project-model";
 import { STORAGE_PREFIX } from "@/lib/env";
-import { findTreeRoot } from "@/lib/project-file-helpers";
 import { toggleSet } from "@/lib/set-utils";
 
 import { serverProjectsStorage } from "./server-storage";
@@ -26,18 +25,6 @@ export function deriveProject(wtPath: string | null, projects: EnrichedProject[]
       )
       .sort((a, b) => b.path.length - a.path.length)[0] ?? null
   );
-}
-
-/**
- * The worktree that contains `path` (the worktree root included): the deepest match among every
- * project's worktrees and non-bare roots. Null when no worktree contains it.
- */
-export function deriveOwningWorktree(path: string, projects: EnrichedProject[]): string | null {
-  const roots = projects.flatMap((project) => {
-    const worktreeRoots = project.worktrees.map((worktree) => worktree.path);
-    return project.isBare ? worktreeRoots : [...worktreeRoots, project.path];
-  });
-  return findTreeRoot(path, roots);
 }
 
 async function removeAndSwitchProject(

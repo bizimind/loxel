@@ -75,6 +75,12 @@ export class ProjectFilesService {
 
   /** Cached readdir results for directories the client has expanded. */
   private dirCache = new Map<string, DirEntry[]>();
+  /**
+   * Consumers (worktrees) that have each cached directory expanded. An Others folder's service is
+   * shared by every worktree listing it, so a directory stays cached — and keeps sending updates —
+   * until the last consumer collapses it.
+   */
+  private dirConsumers = new Map<string, Set<string>>();
   /** In-flight readdir promises to avoid duplicate concurrent reads. */
   private pendingReads = new Map<string, Promise<DirEntry[]>>();
 
@@ -133,6 +139,7 @@ export class ProjectFilesService {
     for (const resolve of this.pending?.waiters ?? []) resolve();
     this.pending = null;
     this.dirCache.clear();
+    this.dirConsumers.clear();
     this.pendingReads.clear();
     this.fileStatusMap.clear();
     this.dirStatusMap.clear();
@@ -169,7 +176,11 @@ export class ProjectFilesService {
    * Results are cached — subsequent calls return from cache until
    * invalidated by a fs event or `unwatchDir`.
    */
-  async getDirContents(dir: string): Promise<DirEntry[]> {
+  async getDirContents(dir: string, consumer = DEFAULT_CONSUMER): Promise<DirEntry[]> {
+    let consumers = this.dirConsumers.get(dir);
+    if (!consumers) this.dirConsumers.set(dir, (consumers = new Set()));
+    consumers.add(consumer);
+
     const cached = this.dirCache.get(dir);
     if (cached) return cached;
 
@@ -187,20 +198,29 @@ export class ProjectFilesService {
   }
 
   /**
-   * Clear the cache for a directory and all its descendants.
-   * Called when the client collapses a directory so that re-expanding
-   * fetches fresh data from disk.
+   * `consumer` collapsed a directory: stop tracking it and its descendants for that consumer, and
+   * clear the cache of those no other consumer still has expanded, so re-expanding fetches fresh
+   * data from disk.
    */
-  unwatchDir(dir: string): void {
-    this.dirCache.delete(dir);
-
-    // Clear caches for all descendants
+  unwatchDir(dir: string, consumer = DEFAULT_CONSUMER): void {
     const prefix = dir ? dir + "/" : "";
-    for (const watchedDir of this.dirCache.keys()) {
-      if (dir === "" || watchedDir.startsWith(prefix)) {
-        this.dirCache.delete(watchedDir);
-      }
+    for (const [watchedDir, consumers] of [...this.dirConsumers]) {
+      if (dir !== "" && watchedDir !== dir && !watchedDir.startsWith(prefix)) continue;
+      consumers.delete(consumer);
+      if (consumers.size > 0) continue;
+      this.dirConsumers.delete(watchedDir);
+      this.dirCache.delete(watchedDir);
     }
+    // Directories cached without a recorded consumer (e.g. re-read after a purge) go too.
+    for (const cachedDir of [...this.dirCache.keys()]) {
+      if (dir !== "" && cachedDir !== dir && !cachedDir.startsWith(prefix)) continue;
+      if (!this.dirConsumers.has(cachedDir)) this.dirCache.delete(cachedDir);
+    }
+  }
+
+  /** A consumer stopped using this service altogether (its worktree closed the folder). */
+  releaseConsumer(consumer: string): void {
+    this.unwatchDir("", consumer);
   }
 
   /**
@@ -549,6 +569,9 @@ export class ProjectFilesService {
     });
   }
 }
+
+/** The consumer of a service that has only one (a worktree's own tree). */
+const DEFAULT_CONSUMER = "";
 
 /** Compare two DirEntry arrays for equality (same entries in same order). */
 function entriesEqual(a: DirEntry[], b: DirEntry[]): boolean {

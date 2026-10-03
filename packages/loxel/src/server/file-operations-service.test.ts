@@ -50,20 +50,15 @@ describe("FileOperationsHistory", () => {
     const history = new FileOperationsHistory();
     const firstDir = tempDir();
     const secondDir = tempDir();
-    const first = new FileOperationsService(firstDir, { git: false });
-    const second = new FileOperationsService(secondDir, { git: false });
-    /** Run a forward operation and record it, as the file-operation routes do. */
-    const run = async (service: FileOperationsService, op: () => Promise<unknown>) => {
-      await op();
-      history.recordOperation(service);
-    };
-    return { history, first, second, firstDir, secondDir, run };
+    const first = new FileOperationsService(firstDir, { git: false, history });
+    const second = new FileOperationsService(secondDir, { git: false, history });
+    return { history, first, second, firstDir, secondDir };
   }
 
   test("undoes and redoes the most recent operation across services", async () => {
-    const { history, first, second, firstDir, secondDir, run } = setup();
-    await run(first, () => first.createFile("", "one.md"));
-    await run(second, () => second.createFile("", "two.md"));
+    const { history, first, second, firstDir, secondDir } = setup();
+    await first.createFile("", "one.md");
+    await second.createFile("", "two.md");
 
     const undone = await history.undo();
     expect(undone?.service).toBe(second);
@@ -80,19 +75,31 @@ describe("FileOperationsHistory", () => {
   });
 
   test("a new operation clears redo everywhere", async () => {
-    const { history, first, second, run } = setup();
-    await run(first, () => first.createFile("", "one.md"));
+    const { history, first, second } = setup();
+    await first.createFile("", "one.md");
     await history.undo();
 
-    await run(second, () => second.createDir("", "dir"));
+    await second.createDir("", "dir");
 
     expect(await history.redo()).toBeNull();
   });
 
+  test("a move into the item's own folder adds no undo step", async () => {
+    const { history, first, second, firstDir } = setup();
+    await first.createFile("", "a.txt");
+    await second.createFile("", "p.txt");
+
+    await first.move("a.txt", "");
+    const step = await history.undo();
+
+    expect(step?.service).toBe(second);
+    expect(existsSync(path.join(firstDir, "a.txt"))).toBe(true);
+  });
+
   test("skips services that were disposed", async () => {
-    const { history, first, second, firstDir, run } = setup();
-    await run(first, () => first.createFile("", "one.md"));
-    await run(second, () => second.createFile("", "two.md"));
+    const { history, first, second, firstDir } = setup();
+    await first.createFile("", "one.md");
+    await second.createFile("", "two.md");
     second.dispose();
 
     const step = await history.undo();

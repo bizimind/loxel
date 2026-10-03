@@ -103,23 +103,33 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
     [isTreeRoot, isOtherFile],
   );
 
-  const handleRemoveFromOthers = useCallback(async (path: string) => {
-    const wt = useWorktreeStore.getState().activeWorktreePath;
-    if (!wt) return;
-    try {
-      await api.removeExternalFolder(wt, path);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to remove folder");
-      return;
-    }
-    // Editors still open on its files keep receiving disk changes as individual Others files.
-    const openPaths = [...useEditorStateStore.getState().files.keys()].filter((p) =>
-      isWithin(p, path),
-    );
-    if (openPaths.length > 0) {
-      wsClient.send({ type: "register_external_files", worktreePath: wt, filePaths: openPaths });
-    }
-  }, []);
+  const handleRemoveFromOthers = useCallback(
+    async (path: string) => {
+      const wt = useWorktreeStore.getState().activeWorktreePath;
+      if (!wt) return;
+      try {
+        await api.removeExternalFolder(wt, path);
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : "Failed to remove folder");
+        return;
+      }
+      // Forget its tree like a collapse does, so reopening it later lists its current contents.
+      treeRef.current?.clearSubtree(path);
+      removeDirQueries(queryClient, path);
+      const ui = getCurrentWorktreeUI().getState();
+      ui.setExpandedProjectFolders(
+        new Set([...ui.expandedProjectFolders].filter((p) => !isWithin(p, path))),
+      );
+      // Editors still open on its files keep receiving disk changes as individual Others files.
+      const openPaths = [...useEditorStateStore.getState().files.keys()].filter((p) =>
+        isWithin(p, path),
+      );
+      if (openPaths.length > 0) {
+        wsClient.send({ type: "register_external_files", worktreePath: wt, filePaths: openPaths });
+      }
+    },
+    [queryClient],
+  );
 
   // --- Context menu ---
   const [contextMenu, setContextMenu] = useState<{

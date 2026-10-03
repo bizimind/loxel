@@ -2,10 +2,10 @@ import * as api from "@/api/client";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
-import { deriveOwningWorktree, deriveProject, useProjectStore } from "@/store/projects";
+import { deriveProject, useProjectStore } from "@/store/projects";
 import { showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
-import { useWorktreeStore } from "@/store/worktrees";
+import { deriveOwningWorktree, useWorktreeStore } from "@/store/worktrees";
 
 import { frontendLog } from "./frontend-logger";
 import type { FileLocation } from "./open-file";
@@ -21,9 +21,9 @@ const log = frontendLog.child("files");
 export async function openFolder(rawPath: string): Promise<void> {
   const path = rawPath.replace(/(.)\/+$/, "$1");
   const { projects } = useProjectStore.getState();
-  const { activeWorktreePath, switchWorktree } = useWorktreeStore.getState();
+  const { activeWorktreePath, switchWorktree, byProject } = useWorktreeStore.getState();
 
-  const owner = deriveOwningWorktree(path, projects);
+  const owner = deriveOwningWorktree(path, projects, byProject);
   if (owner) {
     if (owner === activeWorktreePath) {
       showPanel("projectFiles");

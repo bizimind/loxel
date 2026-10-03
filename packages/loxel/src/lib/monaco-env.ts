@@ -165,7 +165,11 @@ function createLazyLspConnector(opts: {
     const path = model.uri.path;
     if (path.startsWith(activeWt)) return true;
     // Files outside every project (the Others section) are served by the active worktree's LSP.
-    if (model.uri.scheme !== "file") return false;
+    // Live editors use file:// or loxel://HEAD (see CodeEditorPanel); diff and history models
+    // use other loxel authorities and are not counted.
+    const { scheme, authority } = model.uri;
+    const isLiveEditor = scheme === "file" || (scheme === "loxel" && authority === "HEAD");
+    if (!isLiveEditor) return false;
     return !deriveProject(path, useProjectStore.getState().projects);
   };
 

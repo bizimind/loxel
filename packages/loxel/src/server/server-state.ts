@@ -126,6 +126,8 @@ export type ResolvedFilePath =
 export interface ClientState {
   terminals: Set<string>;
   subscribedWorktrees: Set<string>;
+  /** The window this socket belongs to (its terminals carry it as `LOXEL_WINDOW_ID`). */
+  windowId?: string;
 }
 
 /** WS data tag for routing app vs language-server connections. */

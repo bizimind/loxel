@@ -81,10 +81,10 @@ export interface RouteContext {
   broadcastToProject: (projectPath: string, msg: WsMessage) => void;
   broadcastAll: (msg: WsMessage) => void;
   /**
-   * Send to the window the user is working in: `wtPath`'s subscribers when it has any, else the
-   * most recently focused window. Returns false when no window is connected.
+   * Send to the window the user is working in: the window `windowId` names when it is connected,
+   * else the most recently focused window. Returns false when no window is connected.
    */
-  sendToActiveWindow: (wtPath: string | null, msg: WsMessage) => boolean;
+  sendToActiveWindow: (windowId: string | null, msg: WsMessage) => boolean;
   /** Why a folder cannot be opened in an Others section, or null when it can. */
   externalFolderConflict: (folder: string) => string | null;
   getProject: (cwd: string) => ProjectState | undefined;
@@ -94,8 +94,12 @@ export interface RouteContext {
   suspendWorktreeWatchers: (wtPath: string) => Promise<() => Promise<void>>;
   /** Permanently tear down resources after the final removal broadcast. */
   completeWorktreeRemoval: (wtPath: string) => void;
-  /** Resolve an absolute file path to its owning worktree and service type. */
-  resolveFilePath: (absolutePath: string) => ResolvedFilePath | null;
+  /**
+   * Resolve an absolute file path to its owning worktree and service type. A folder can be open in
+   * the Others section of several worktrees; `preferredWtPath` (the requester) wins then, so its
+   * own file services — and the subscribers that see its write acknowledgements — are used.
+   */
+  resolveFilePath: (absolutePath: string, preferredWtPath?: string) => ResolvedFilePath | null;
   initializeProject: (repoPath: string) => Promise<{ project: ProjectState; worktrees: unknown[] }>;
   teardownProject: (cwd: string) => void;
   shutdown: (exitCode?: number) => void;
@@ -131,14 +135,14 @@ function resolveFilePathWithHint(
   worktreeHint: string | null | undefined,
   requireExists = true,
 ): ResolvedFilePath | null {
-  const resolved = ctx.resolveFilePath(filePath);
+  const resolved = ctx.resolveFilePath(filePath, worktreeHint ?? undefined);
   if (resolved) return resolved;
   if (!worktreeHint) return null;
   const resources = ctx.getWorktreeResources(worktreeHint);
   if (!resources) return null;
   if (requireExists && !existsSync(filePath)) return null;
   resources.externalFilesService.addFile(filePath);
-  return ctx.resolveFilePath(filePath);
+  return ctx.resolveFilePath(filePath, worktreeHint);
 }
 
 function resolveProjectFromReq(
@@ -974,21 +978,23 @@ function resolveTreeDir(
   rawDir: string,
   wtParam: string | null | undefined,
   ctx: RouteContext,
-): { tree: FileTree; relDir: string } | null {
+): { tree: FileTree; relDir: string; consumer: string } | null {
   if (!rawDir.startsWith("/")) {
     const resources = wtParam ? ctx.getWorktreeResources(wtParam) : undefined;
     if (!wtParam || !resources) return null;
-    return { tree: worktreeTree(wtParam, resources), relDir: rawDir };
+    return { tree: worktreeTree(wtParam, resources), relDir: rawDir, consumer: wtParam };
   }
 
   // A worktree root
   const rootResources = ctx.getWorktreeResources(rawDir);
-  if (rootResources) return { tree: worktreeTree(rawDir, rootResources), relDir: "" };
+  if (rootResources) {
+    return { tree: worktreeTree(rawDir, rootResources), relDir: "", consumer: rawDir };
+  }
 
   // A directory inside a worktree, or an Others folder or a directory inside one
-  const resolved = ctx.resolveFilePath(rawDir);
+  const resolved = ctx.resolveFilePath(rawDir, wtParam ?? undefined);
   if (resolved?.type !== "tree") return null;
-  return { tree: resolved.tree, relDir: resolved.relativePath };
+  return { tree: resolved.tree, relDir: resolved.relativePath, consumer: resolved.wtPath };
 }
 
 // GET /api/files?wt=&dir= — list directory contents for the project files panel
@@ -1010,7 +1016,7 @@ async function handleFiles(req: Request, ctx: RouteContext): Promise<Response> {
   if (denied) return denied;
 
   try {
-    const entries = await tree.filesService.getDirContents(relDir);
+    const entries = await tree.filesService.getDirContents(relDir, target.consumer);
     return json(entries);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to read directory";
@@ -1036,7 +1042,7 @@ async function handleFilesUnwatch(req: Request, ctx: RouteContext): Promise<Resp
     }
   }
 
-  target.tree.filesService.unwatchDir(target.relDir);
+  target.tree.filesService.unwatchDir(target.relDir, target.consumer);
   return json({ ok: true });
 }
 
@@ -1063,13 +1069,12 @@ async function assertContained(worktreeCwd: string, relPath: string): Promise<Re
 /**
  * Resolve a file operation's worktree and the tree it acts on, chosen by the operation's main
  * path: an absolute path inside one of the worktree's Others folders acts on that folder.
- * `recordOperation` adds a successful operation to the worktree's undo history.
  */
 function resolveFileOps(
   body: Record<string, unknown>,
   ctx: RouteContext,
   rawPath = "",
-): { resources: WorktreeResources; tree: FileTree; recordOperation: () => void } | Response {
+): { resources: WorktreeResources; tree: FileTree } | Response {
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
   const resources = ctx.getWorktreeResources(wt);
@@ -1077,8 +1082,7 @@ function resolveFileOps(
   const tree = rawPath.startsWith("/")
     ? treeForPath(wt, resources, rawPath)
     : worktreeTree(wt, resources);
-  const recordOperation = () => resources.fileOpsHistory.recordOperation(tree.fileOpsService);
-  return { resources, tree, recordOperation };
+  return { resources, tree };
 }
 
 /** Convert an absolute path to relative if it starts with the worktree prefix. */
@@ -1123,12 +1127,17 @@ async function applyHistoryStep(
   resources: WorktreeResources,
   step: HistoryStep,
 ): Promise<FileOperationResult> {
+  if (step.service === resources.fileOpsService) {
+    await resources.filesService.notifyChanges(getAffectedPaths(step.result));
+    return step.result;
+  }
   const folder = resources.externalFoldersService
     .all()
     .find((f) => f.fileOpsService === step.service);
-  const filesService = folder?.filesService ?? resources.filesService;
-  await filesService.notifyChanges(getAffectedPaths(step.result));
-  return folder ? absoluteOperationResult(step.result, folder.root) : step.result;
+  // Closing a folder disposes its service, whose emptied stacks make the history skip it.
+  if (!folder) throw new Error("Undo history refers to a folder that is no longer open");
+  await folder.filesService.notifyChanges(getAffectedPaths(step.result));
+  return absoluteOperationResult(step.result, folder.root);
 }
 
 function absoluteOperationResult(result: FileOperationResult, root: string): FileOperationResult {
@@ -1181,7 +1190,6 @@ async function handleFileRename(req: Request, ctx: RouteContext): Promise<Respon
   if (denied) return denied;
   try {
     const result = await resolved.tree.fileOpsService.rename(path, newName);
-    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([path, result.newPath]);
     return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
@@ -1200,7 +1208,6 @@ async function handleFileDelete(req: Request, ctx: RouteContext): Promise<Respon
   if (denied) return denied;
   try {
     await resolved.tree.fileOpsService.delete(path);
-    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([path]);
     return json({ success: true });
   } catch (err) {
@@ -1228,7 +1235,6 @@ async function handleFileMove(req: Request, ctx: RouteContext): Promise<Response
   }
   try {
     const result = await resolved.tree.fileOpsService.move(srcPath, destDir);
-    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([srcPath, result.newPath]);
     return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
@@ -1277,7 +1283,6 @@ async function handleFileCreateFile(req: Request, ctx: RouteContext): Promise<Re
   }
   try {
     const result = await resolved.tree.fileOpsService.createFile(dir, name);
-    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([result.path]);
     return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
@@ -1300,7 +1305,6 @@ async function handleFileCreateDir(req: Request, ctx: RouteContext): Promise<Res
   }
   try {
     const result = await resolved.tree.fileOpsService.createDir(dir, name);
-    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([result.path]);
     return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
@@ -1328,7 +1332,6 @@ async function handleFileCopy(req: Request, ctx: RouteContext): Promise<Response
   }
   try {
     const result = await resolved.tree.fileOpsService.copy(srcPath, destDir);
-    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([result.newPath]);
     return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
@@ -2520,8 +2523,8 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
 
   // Folder mode: the window in use reveals it in its worktree or opens it in its Others section
   if (stats.isDirectory()) {
-    const wtHint = typeof body.wtPath === "string" ? body.wtPath : null;
-    const sent = ctx.sendToActiveWindow(wtHint, {
+    const windowId = typeof body.windowId === "string" ? body.windowId : null;
+    const sent = ctx.sendToActiveWindow(windowId, {
       type: "open_folder",
       data: { path: (await canonicalPath(absolutePath)) ?? absolutePath },
     });

@@ -21,7 +21,7 @@ describe("Others folders routes", () => {
   let folder: string;
   let resources: WorktreeResources;
   let ctx: RouteContext;
-  let sent: Array<{ wtPath: string | null; msg: WsMessage }>;
+  let sent: Array<{ windowId: string | null; msg: WsMessage }>;
   let windowConnected: boolean;
 
   beforeEach(async () => {
@@ -33,8 +33,10 @@ describe("Others folders routes", () => {
     await writeFile(join(folder, "a.md"), "a");
     await writeFile(join(folder, "sub", "b.md"), "b");
 
+    const fileOpsHistory = new FileOperationsHistory();
     const externalFoldersService = new ExternalFoldersService({
       wtPath: wt,
+      history: fileOpsHistory,
       registry: new ExternalFolderRegistry({ onDirChanged: () => {}, onFileChanged: () => {} }),
       storage: { load: () => [], save: () => {} },
       conflict: () => null,
@@ -53,8 +55,8 @@ describe("Others folders routes", () => {
       projectPath: wt,
       worktreeWatcher: null,
       filesService,
-      fileOpsService: new FileOperationsService(wt, { git: false }),
-      fileOpsHistory: new FileOperationsHistory(),
+      fileOpsService: new FileOperationsService(wt, { git: false, history: fileOpsHistory }),
+      fileOpsHistory,
       detachedFilesService: {} as WorktreeResources["detachedFilesService"],
       externalFilesService,
       externalFoldersService,
@@ -68,8 +70,8 @@ describe("Others folders routes", () => {
       broadcastToSubscribers: () => {},
       broadcastToProject: () => {},
       broadcastAll: () => {},
-      sendToActiveWindow: (wtPath, msg) => {
-        sent.push({ wtPath, msg });
+      sendToActiveWindow: (windowId, msg) => {
+        sent.push({ windowId, msg });
         return windowConnected;
       },
       externalFolderConflict: (path) => externalFolderConflict([project], path, "/home/me"),
@@ -234,18 +236,19 @@ describe("Others folders routes", () => {
   });
 
   describe("POST /api/open with a folder", () => {
-    test("sends the folder to the window in use", async () => {
-      const res = await post("/api/open", { filePath: folder, wtPath: wt });
+    test("sends the folder to the window whose terminal asked", async () => {
+      const windowId = "4a1b2c3d-0000-4000-8000-000000000001";
+      const res = await post("/api/open", { filePath: folder, windowId });
 
       expect(res.status).toBe(200);
-      expect(sent).toEqual([{ wtPath: wt, msg: { type: "open_folder", data: { path: folder } } }]);
+      expect(sent).toEqual([{ windowId, msg: { type: "open_folder", data: { path: folder } } }]);
     });
 
-    test("needs no worktree", async () => {
+    test("falls back to the focused window without a window id", async () => {
       await post("/api/open", { filePath: folder });
 
       expect(sent).toEqual([
-        { wtPath: null, msg: { type: "open_folder", data: { path: folder } } },
+        { windowId: null, msg: { type: "open_folder", data: { path: folder } } },
       ]);
     });
 
