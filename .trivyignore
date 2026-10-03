@@ -1,0 +1,6 @@
+# Trivy ignore list. Every entry needs a justification and an expiry (exp:) so it is re-evaluated.
+
+# http-cache-semantics <=4.2.0 (no patched release): cross-user disclosure via max-stale in shared caches.
+# Not affected: only used at build time (astro remote-image cache for the static site, and got ->
+# cacheable-request in electron-builder for Electron downloads). No shared multi-user HTTP cache.
+CVE-2026-93748 exp:2027-01-03

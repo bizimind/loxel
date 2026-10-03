@@ -4,17 +4,17 @@ packages:
 # Delay newly published versions to reduce supply-chain risk.
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
-  - "immutable@4.3.9"
   - "nanoid@3.3.18"
   - "nanoid@5.1.16"
   - "postcss@8.5.26"
   - "undici@7.29.0"
 
 overrides:
+  # sass is a build-time tool mislisted as a runtime dep; drops chokidar@3 -> braces (CVE-2026-93687)
+  "@excalidraw/excalidraw>sass": "-"
   "@ai-sdk/provider-utils@>=4.0.0 <4.0.33": "4.0.33"
   devalue: "^5.9.4"
   "dompurify@<3.4.14": "3.4.14"
-  immutable: "4.3.9"
   js-yaml: "4.3.2"
   lodash-es: ">=4.18.0"
   "mermaid@<11.16.1": "11.16.1"
