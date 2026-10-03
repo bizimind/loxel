@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 
-import { isDirectory } from "./fs-utils";
+import { requestOpen } from "./open-request";
 import { isHttpUrl } from "./url-utils";
 
 const PROD_PORT = 7433;
@@ -24,15 +24,14 @@ async function detectPort(): Promise<number | null> {
   return null;
 }
 
-async function detectWorktree(filePath: string): Promise<string> {
-  const dir = dirname(filePath);
+async function detectWorktree(dir: string): Promise<string> {
   const proc = Bun.spawn(["git", "-C", dir, "rev-parse", "--show-toplevel"], {
     stdout: "pipe",
     stderr: "pipe",
   });
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
-    throw new Error(`File is not inside a git repository: ${filePath}`);
+    throw new Error(`Not inside a git repository: ${dir}`);
   }
   const stdout = await new Response(proc.stdout).text();
   return stdout.trim();
@@ -49,43 +48,6 @@ async function waitForServer(port: number, timeoutMs = 15_000): Promise<void> {
 
 function launchLoxel(): void {
   Bun.spawn(["open", "-a", "Loxel"], { stdout: "ignore", stderr: "ignore" });
-}
-
-/** How long a folder request waits for a window to connect (e.g. while Loxel is launching). */
-const WINDOW_WAIT_MS = 10_000;
-
-async function postOpen(port: number, body: Record<string, string>): Promise<Response> {
-  return fetch(`http://127.0.0.1:${port}/api/open`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-/**
- * Send an open request. With `waitForWindow`, a 503 means no window has connected yet — the only
- * 503 the folder request returns — so it is retried for a while instead of failing.
- */
-async function sendOpen(
-  port: number,
-  body: Record<string, string>,
-  { waitForWindow = false } = {},
-): Promise<void> {
-  let res = await postOpen(port, body);
-  if (waitForWindow && res.status === 503) {
-    process.stderr.write("loxel: waiting for a Loxel window...\n");
-    const start = Date.now();
-    while (res.status === 503 && Date.now() - start < WINDOW_WAIT_MS) {
-      await Bun.sleep(300);
-      res = await postOpen(port, body);
-    }
-  }
-
-  if (!res.ok) {
-    const data: Record<string, unknown> = await res.json().catch(() => ({}));
-    const message = typeof data.error === "string" ? data.error : `Server returned ${res.status}`;
-    throw new Error(message);
-  }
 }
 
 async function main(): Promise<void> {
@@ -105,25 +67,15 @@ async function main(): Promise<void> {
   const envPort = process.env.LOXEL_PORT ? parseInt(process.env.LOXEL_PORT, 10) : null;
   const envWorktree = process.env.LOXEL_WORKTREE;
 
-  const filePath = isUrl ? null : resolve(rawArg);
-  const isFolder = filePath !== null && isDirectory(filePath);
-
-  // Folders need no worktree: the window in use reveals one inside a worktree, or opens it in its
-  // Others section — from a loxel terminal, that terminal's window; otherwise the focused one.
-  let wtPath: string | undefined;
-  if (!isFolder) {
-    // Detect worktree: from file path for files, from CWD for URLs.
-    // Inside loxel terminal, fall back to LOXEL_WORKTREE env for files outside any git repo.
+  // URLs open in the windows showing the CWD's worktree. Inside a loxel terminal, fall back to
+  // LOXEL_WORKTREE when the CWD is outside any git repo.
+  let urlWtPath: string | null = null;
+  if (isUrl) {
     try {
-      wtPath = await detectWorktree(filePath ?? process.cwd());
+      urlWtPath = await detectWorktree(process.cwd());
     } catch (err) {
-      if (isInsideLoxel && envWorktree) {
-        wtPath = envWorktree;
-      } else {
-        throw new Error(`File is not inside a git repository: ${filePath ?? process.cwd()}`, {
-          cause: err,
-        });
-      }
+      if (!isInsideLoxel || !envWorktree) throw err;
+      urlWtPath = envWorktree;
     }
   }
 
@@ -137,12 +89,24 @@ async function main(): Promise<void> {
     port = detectedPort ?? PROD_PORT;
     if (!detectedPort) await waitForServer(port);
   }
+  const serverUrl = `http://127.0.0.1:${port}`;
 
-  const body: Record<string, string> = isUrl ? { url: rawArg } : { filePath: filePath! };
-  if (wtPath) body.wtPath = wtPath;
+  if (urlWtPath) {
+    await requestOpen(serverUrl, { url: rawArg, wtPath: urlWtPath });
+    return;
+  }
+
+  // Files and folders need no worktree: the window in use opens them in their worktree, or in its
+  // Others section — from a loxel terminal, that terminal's window; otherwise the focused one.
   const envWindowId = process.env.LOXEL_WINDOW_ID;
-  if (isFolder && isInsideLoxel && envWindowId) body.windowId = envWindowId;
-  await sendOpen(port, body, { waitForWindow: isFolder });
+  await requestOpen(
+    serverUrl,
+    {
+      filePath: resolve(rawArg),
+      ...(isInsideLoxel && envWindowId ? { windowId: envWindowId } : {}),
+    },
+    { onWaiting: () => process.stderr.write("loxel: waiting for a Loxel window...\n") },
+  );
 }
 
 main().catch((err: unknown) => {

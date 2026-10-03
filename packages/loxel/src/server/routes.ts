@@ -2493,10 +2493,11 @@ async function handleExternalFolderRemove(req: Request, ctx: RouteContext): Prom
 }
 
 // ---------------------------------------------------------------------------
-// Open file (CLI integration)
+// Open file, folder or URL (CLI and Finder integration)
 // ---------------------------------------------------------------------------
 
-// POST /api/open — open a file, folder or URL in the appropriate panel (triggered by `loxel` CLI)
+// POST /api/open — open a file, folder or URL in the appropriate panel (triggered by the `loxel`
+// CLI and by files and folders macOS hands to the app)
 async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
 
@@ -2520,49 +2521,20 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   const absolutePath = resolve(filePath);
   const stats = await stat(absolutePath).catch(() => null);
   if (!stats) return error("File not found", 404);
+  // Pipes and devices would hang or flood the editor's read
+  if (!stats.isFile() && !stats.isDirectory()) return error("Not a file or folder", 400);
 
-  // Folder mode: the window in use reveals it in its worktree or opens it in its Others section
-  if (stats.isDirectory()) {
-    const windowId = typeof body.windowId === "string" ? body.windowId : null;
-    const sent = ctx.sendToActiveWindow(windowId, {
-      type: "open_folder",
-      data: { path: (await canonicalPath(absolutePath)) ?? absolutePath },
-    });
-    return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
-  }
-
-  // File mode: open in the appropriate editor panel
-  // Determine worktree path: explicit or derived from file path
-  let wtPath: string;
-  if (typeof body.wtPath === "string") {
-    if (!ctx.findProjectForPath(body.wtPath)) return error("No project found for worktree", 404);
-    wtPath = body.wtPath;
-  } else {
-    const project = ctx.findProjectForPath(filePath);
-    if (!project) return error("No project found for file path", 404);
-    wtPath = project.cwd;
-  }
-
-  // If file is outside the worktree, register it as an external file for watching
-  const relPath = relative(wtPath, absolutePath);
-  if (relPath.startsWith("../") || relPath === "..") {
-    const resources = ctx.getWorktreeResources(wtPath);
-    if (!resources) {
-      return error("Worktree not active — no subscribers to receive the file", 503);
-    }
-    // Files inside an open Others folder are already watched by that folder.
-    if (!resources.externalFoldersService.find(absolutePath)) {
-      resources.externalFilesService.addFile(absolutePath);
-    }
-  }
-
-  ctx.broadcastToSubscribers(wtPath, {
-    type: "open_file",
-    wtPath,
-    data: { filePath: absolutePath },
-  });
-
-  return json({ ok: true });
+  // Files and folders go to the window in use — from a loxel terminal, that terminal's window;
+  // otherwise the focused one — which opens them in their worktree or its Others section.
+  const path = (await canonicalPath(absolutePath)) ?? absolutePath;
+  const windowId = typeof body.windowId === "string" ? body.windowId : null;
+  const sent = ctx.sendToActiveWindow(
+    windowId,
+    stats.isDirectory()
+      ? { type: "open_folder", data: { path } }
+      : { type: "open_file", data: { filePath: path } },
+  );
+  return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
 }
 
 // ---------------------------------------------------------------------------

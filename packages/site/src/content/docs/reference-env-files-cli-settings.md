@@ -60,15 +60,15 @@ loxel [file-path | folder-path | url]
 | Invocation          | Behavior                                                  |
 | ------------------- | --------------------------------------------------------- |
 | `loxel`             | Launch loxel if not running, or focus the existing window |
-| `loxel src/app.ts`  | Open a file in the running loxel instance                 |
+| `loxel src/app.ts`  | Open a file in an editor (see below)                      |
 | `loxel ~/notes`     | Reveal a folder in the file tree (see below)              |
 | `loxel https://...` | Open a URL in loxel's browser panel                       |
 
 **Server detection:** `loxel` tries port 7433 (prod) then 7434 (dev), with a 1-second timeout on each. Inside a loxel terminal, `LOXEL_PORT` is already set and used directly — no detection needed. If no server is found, loxel launches and the CLI waits up to 15 seconds for it to become ready.
 
-**Worktree resolution:** when opening a file, `loxel` runs `git rev-parse --show-toplevel` on the file's directory to identify the worktree. Inside a loxel terminal, it falls back to `LOXEL_WORKTREE` if the file path doesn't resolve to a git repo. If no worktree can be determined and no fallback is available, the command errors.
+**Files and folders:** `loxel <path>` goes to the window you are working in: the window of the loxel terminal it runs in, or else the most recently focused loxel window. Other windows are left alone. A file or folder inside one of your projects' worktrees opens in that worktree, switching to it if needed (a folder is revealed in the file tree). Anything else opens in the [Others section](/docs/editor#other-folders) of that window's active worktree, so files don't need to be inside a git repository. If loxel is still starting, the CLI prints `waiting for a Loxel window...` and waits up to 30 seconds for a window to connect. Files and folders opened from Finder take the same path (see [Opening files from Finder](/docs/editor#opening-files-from-finder)).
 
-**Folders:** `loxel <folder>` goes to the window you are working in: the window of the loxel terminal it runs in, or else the most recently focused loxel window. Other windows are left alone. A folder inside one of your projects' worktrees is revealed in that worktree, switching to it if needed. Any other folder opens in the [Others section](/docs/editor#other-folders) of that window's active worktree. If loxel is still starting, the CLI prints `waiting for a Loxel window...` and waits up to 10 seconds for a window to connect.
+**URLs:** `loxel <url>` opens in the windows showing the worktree of the current directory, found with `git rev-parse --show-toplevel`. Inside a loxel terminal, it falls back to `LOXEL_WORKTREE` when the current directory isn't in a git repository; otherwise the command errors.
 
 ---
 

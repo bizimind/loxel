@@ -43,7 +43,7 @@ import {
   preserveSource,
   topLevelBlockRanges,
 } from "@/lib/markdown-source-preservation";
-import { openPath } from "@/lib/open-folder";
+import { openPath } from "@/lib/open-path";
 import { rawLineToProsePosition } from "@/lib/prosemirror-position";
 import { createMinimalReplaceTransaction } from "@/lib/prosemirror-replace";
 import { threeWayMerge } from "@/lib/three-way-merge";
