@@ -7,6 +7,7 @@ import { listManagedWorktrees, resolveWorktreesDir } from "@bizimind/wt/lib";
 import type { ServerWebSocket } from "bun";
 
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
+import type { DirEntry } from "@/api/project-files-model";
 import type { AgentEventPayload, WsClientMessage, WsMessage } from "@/api/ws-protocol";
 import {
   BIN_HEADER_SIZE,
@@ -22,7 +23,11 @@ import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { DockerLspManager } from "./docker-lsp-manager";
 import { ExternalFilesService } from "./external-files-service";
-import { ExternalFoldersService, createExternalFolderStorage } from "./external-folders-service";
+import {
+  ExternalFolderRegistry,
+  ExternalFoldersService,
+  createExternalFolderStorage,
+} from "./external-folders-service";
 import { FileOperationsHistory, FileOperationsService } from "./file-operations-service";
 import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
@@ -38,7 +43,12 @@ import { handleRequest } from "./routes";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
 import { createServerPerfMonitor } from "./server-perf-monitor";
-import { externalFolderConflict, findOwningProject, listOthers } from "./server-state";
+import {
+  externalFolderConflict,
+  findOwningProject,
+  listOthers,
+  worktreeTree,
+} from "./server-state";
 import type {
   ClientState,
   ProjectState,
@@ -77,9 +87,14 @@ export function findProjectForPath(targetPath: string): ProjectState | undefined
  * Worktree files and drafts win over a worktree's Others section, since an open folder may
  * contain other worktrees.
  */
-function resolveFilePath(absolutePath: string): ResolvedFilePath | null {
+function resolveFilePath(absolutePath: string, preferredWtPath?: string): ResolvedFilePath | null {
   const normalized = resolve(absolutePath);
-  for (const [wtPath, resources] of wtResources) {
+  // A folder can be open in the Others section of several worktrees; the requester's wins.
+  const preferred = preferredWtPath ? wtResources.get(preferredWtPath) : undefined;
+  const candidates: Array<[string, WorktreeResources]> = preferred
+    ? [[preferredWtPath!, preferred], ...[...wtResources].filter(([wt]) => wt !== preferredWtPath)]
+    : [...wtResources];
+  for (const [wtPath, resources] of candidates) {
     // Check detached files first (more specific path prefix)
     const detachedDir = resources.detachedFilesService.dir;
     if (normalized.startsWith(detachedDir + "/")) {
@@ -89,15 +104,21 @@ function resolveFilePath(absolutePath: string): ResolvedFilePath | null {
     // Check project files
     if (normalized.startsWith(wtPath + "/")) {
       const relativePath = normalized.slice(wtPath.length + 1);
-      return { type: "project", wtPath, resources, relativePath };
+      return {
+        type: "tree",
+        wtPath,
+        resources,
+        tree: worktreeTree(wtPath, resources),
+        relativePath,
+      };
     }
   }
-  for (const [wtPath, resources] of wtResources) {
+  for (const [wtPath, resources] of candidates) {
     // Check folders opened in the Others section (the root too, e.g. for Reveal in Finder)
     const folder = resources.externalFoldersService.find(normalized);
     if (folder) {
       const relativePath = relative(folder.root, normalized);
-      return { type: "external-folder", wtPath, resources, folder, relativePath };
+      return { type: "tree", wtPath, resources, tree: folder, relativePath };
     }
     // Check external files (individually watched files outside the worktree)
     if (resources.externalFilesService.hasFile(normalized)) {
@@ -266,6 +287,29 @@ function createWorktreeWatcher(wtPath: string): FileWatcher {
   });
 }
 
+/** Tell a worktree's subscribers that a directory of one of its trees changed. */
+function broadcastDirChanged(wtPath: string, dir: string, entries: DirEntry[]): void {
+  broadcastToSubscribers(wtPath, { type: "files_dir_changed", wtPath, data: { dir, entries } });
+}
+
+/**
+ * Tell a worktree's subscribers that a file changed on disk — in its tree, an Others folder, its
+ * drafts or its external files. The absolute path is self-identifying, so all share one message.
+ */
+function broadcastFileChanged(wtPath: string, path: string, nonces: string[]): void {
+  broadcastToSubscribers(wtPath, { type: "file_content_changed", wtPath, data: { path, nonces } });
+}
+
+/** Folders open in Others sections, shared by every worktree listing them. */
+const externalFolderRegistry = new ExternalFolderRegistry({
+  onDirChanged: (worktrees, dir, entries) => {
+    for (const wtPath of worktrees) broadcastDirChanged(wtPath, dir, entries);
+  },
+  onFileChanged: (worktrees, path, nonces) => {
+    for (const wtPath of worktrees) broadcastFileChanged(wtPath, path, nonces);
+  },
+});
+
 function createDetachedFilesService(cwd: string, wtPath: string): DetachedFilesService {
   const dir = getDetachedDir(cwd, wtPath);
   return new DetachedFilesService(
@@ -273,31 +317,15 @@ function createDetachedFilesService(cwd: string, wtPath: string): DetachedFilesS
     (entries) => {
       broadcastToSubscribers(wtPath, { type: "detached_files_changed", wtPath, data: { entries } });
     },
-    (path, nonces) => {
-      // Detached file changes emit the same message type as project file changes.
-      // The absolute path is self-identifying — no need for a separate message type.
-      broadcastToSubscribers(wtPath, {
-        type: "file_content_changed",
-        wtPath,
-        data: { path, nonces },
-      });
-    },
+    (path, nonces) => broadcastFileChanged(wtPath, path, nonces),
   );
 }
 
 function createFilesService(wtPath: string): ProjectFilesService {
   const service: ProjectFilesService = new ProjectFilesService(
     wtPath,
-    (dir, entries) => {
-      broadcastToSubscribers(wtPath, { type: "files_dir_changed", wtPath, data: { dir, entries } });
-    },
-    (filePath, nonces) => {
-      broadcastToSubscribers(wtPath, {
-        type: "file_content_changed",
-        wtPath,
-        data: { path: filePath, nonces },
-      });
-    },
+    (dir, entries) => broadcastDirChanged(wtPath, dir, entries),
+    (filePath, nonces) => broadcastFileChanged(wtPath, filePath, nonces),
     (status) => publishWorktreeStatus(wtPath, service, status),
   );
   return service;
@@ -343,32 +371,20 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   const detachedFilesService = createDetachedFilesService(project.cwd, wtPath);
   await detachedFilesService.start();
 
-  const fileOpsHistory = new FileOperationsHistory();
-  const fileOpsService = new FileOperationsService(wtPath, { history: fileOpsHistory });
-
-  const broadcastFileChanged = (filePath: string, nonces: string[]) => {
-    broadcastToSubscribers(wtPath, {
-      type: "file_content_changed",
-      wtPath,
-      data: { path: filePath, nonces },
-    });
-  };
+  const fileOpsService = new FileOperationsService(wtPath);
 
   const externalFilesService = new ExternalFilesService(
     () => broadcastOthers(wtPath),
-    broadcastFileChanged,
+    (path, nonces) => broadcastFileChanged(wtPath, path, nonces),
   );
   externalFilesService.start();
 
   const externalFoldersService = new ExternalFoldersService({
+    wtPath,
+    registry: externalFolderRegistry,
     storage: createExternalFolderStorage(wtPath),
     conflict: externalFolderConflictFor,
-    history: fileOpsHistory,
     onListChanged: () => broadcastOthers(wtPath),
-    onDirChanged: (dir, entries) => {
-      broadcastToSubscribers(wtPath, { type: "files_dir_changed", wtPath, data: { dir, entries } });
-    },
-    onFileChanged: broadcastFileChanged,
   });
   await externalFoldersService.start();
 
@@ -377,7 +393,7 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     worktreeWatcher,
     filesService,
     fileOpsService,
-    fileOpsHistory,
+    fileOpsHistory: new FileOperationsHistory(),
     detachedFilesService,
     externalFilesService,
     externalFoldersService,
@@ -473,7 +489,6 @@ async function suspendWorktreeWatchers(wtPath: string): Promise<() => Promise<vo
     resources.filesService.pauseWatching(),
     resources.detachedFilesService.pauseWatching(),
     resources.externalFilesService.pauseWatching(),
-    resources.externalFoldersService.pauseWatching(),
   ]);
   log.debug(`Suspended watchers for ${wtPath}`);
 
@@ -486,7 +501,6 @@ async function suspendWorktreeWatchers(wtPath: string): Promise<() => Promise<vo
       resources.filesService.resumeWatching(),
       resources.detachedFilesService.resumeWatching(),
       resources.externalFilesService.resumeWatching(),
-      resources.externalFoldersService.resumeWatching(),
     ]);
     suspendedWorktrees.delete(wtPath);
     const watcherResults = await Promise.allSettled([

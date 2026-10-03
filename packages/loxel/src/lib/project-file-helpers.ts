@@ -12,11 +12,16 @@ export function fileParentDir(path: string, rootPath: string | null): string {
   return parent || rootPath || "";
 }
 
+/** Whether `path` is `root` or inside it (a sibling sharing the string prefix is not). */
+export function isWithin(path: string, root: string): boolean {
+  return path === root || path.startsWith(root + "/");
+}
+
 /** The deepest of `roots` that is `path` or contains it; null when none does. */
-export function findTreeRoot(path: string, roots: readonly string[]): string | null {
+export function findTreeRoot(path: string, roots: Iterable<string>): string | null {
   let best: string | null = null;
   for (const root of roots) {
-    if (path !== root && !path.startsWith(root + "/")) continue;
+    if (!isWithin(path, root)) continue;
     if (!best || root.length > best.length) best = root;
   }
   return best;

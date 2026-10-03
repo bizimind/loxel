@@ -2,10 +2,11 @@ import type { LocalDb } from "@bizimind/localdb-sdk";
 import type { ServerWebSocket } from "bun";
 
 import type { DirEntry } from "@/api/project-files-model";
+import { isWithin } from "@/lib/project-file-helpers";
 
 import type { DetachedFilesService } from "./detached-files-service";
 import type { ExternalFilesService } from "./external-files-service";
-import type { ExternalFolder, ExternalFoldersService } from "./external-folders-service";
+import type { ExternalFoldersService, FileTree } from "./external-folders-service";
 import type { FileOperationsHistory, FileOperationsService } from "./file-operations-service";
 import type { FileWatcher } from "./file-watcher";
 import type { ProjectFilesService } from "./project-files-service";
@@ -38,7 +39,7 @@ export function findOwningProject<T extends Pick<ProjectState, "cwd" | "worktree
   let best: { project: T; prefix: string } | undefined;
   for (const project of projects) {
     for (const prefix of [project.cwd, project.worktreesDir]) {
-      if (targetPath !== prefix && !targetPath.startsWith(prefix + "/")) continue;
+      if (!isWithin(targetPath, prefix)) continue;
       if (!best || prefix.length > best.prefix.length) best = { project, prefix };
     }
   }
@@ -61,7 +62,7 @@ export function externalFolderConflict(
   const owner = findOwningProject(projects, folder);
   if (owner) return `${folder} belongs to the project at ${owner.cwd}`;
   for (const project of projects) {
-    if ([project.cwd, project.worktreesDir].some((p) => p.startsWith(folder + "/"))) {
+    if ([project.cwd, project.worktreesDir].some((p) => isWithin(p, folder))) {
       return `${folder} contains the project at ${project.cwd}`;
     }
   }
@@ -98,19 +99,28 @@ export function listOthers(resources: WorktreeResources): DirEntry[] {
   ];
 }
 
+/** The worktree's own file tree (its Others folders are trees too, see `ExternalFoldersService`). */
+export function worktreeTree(wtPath: string, resources: WorktreeResources): FileTree {
+  return {
+    root: wtPath,
+    filesService: resources.filesService,
+    fileOpsService: resources.fileOpsService,
+  };
+}
+
 /** Result of resolving an absolute file path to its owning worktree + service. */
 export type ResolvedFilePath =
-  | { type: "project"; wtPath: string; resources: WorktreeResources; relativePath: string }
-  | { type: "detached"; wtPath: string; resources: WorktreeResources; name: string }
-  | { type: "external"; wtPath: string; resources: WorktreeResources; absolutePath: string }
   | {
-      type: "external-folder";
+      /** A file in a tree: the worktree's own, or a folder in its Others section. */
+      type: "tree";
       wtPath: string;
       resources: WorktreeResources;
-      folder: ExternalFolder;
-      /** Relative to the folder root; empty for the root itself. */
+      tree: FileTree;
+      /** Relative to the tree root; empty only for an Others folder's root. */
       relativePath: string;
-    };
+    }
+  | { type: "detached"; wtPath: string; resources: WorktreeResources; name: string }
+  | { type: "external"; wtPath: string; resources: WorktreeResources; absolutePath: string };
 
 /** Per-client tracking for cleanup on disconnect. */
 export interface ClientState {

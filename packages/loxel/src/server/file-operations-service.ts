@@ -114,8 +114,6 @@ export interface FileOperationsServiceOptions {
    * not a worktree, so an operation never stages changes in an enclosing repo.
    */
   git?: boolean;
-  /** Shared history that orders undo/redo across every service of one worktree. */
-  history?: FileOperationsHistory;
 }
 
 /**
@@ -543,7 +541,6 @@ export class FileOperationsService {
 
     this.undoStack.push(entry);
     this.totalBytes += bytes;
-    this.options.history?.recordOperation(this);
   }
 
   private findOldestContentEntry(): number {
@@ -771,7 +768,11 @@ export class FileOperationsHistory {
   private undoOrder: FileOperationsService[] = [];
   private redoOrder: FileOperationsService[] = [];
 
-  /** Called by a service when it records a new (non-redo) operation. */
+  /**
+   * Record a new (non-redo) operation performed through `service` for this worktree. Recorded by
+   * the caller rather than the service: an Others folder's service is shared by every worktree
+   * that has the folder open.
+   */
   recordOperation(service: FileOperationsService): void {
     this.undoOrder.push(service);
     if (this.undoOrder.length > MAX_HISTORY_ENTRIES) this.undoOrder.shift();

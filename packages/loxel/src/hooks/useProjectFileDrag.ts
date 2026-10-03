@@ -73,9 +73,9 @@ async function moveProjectFile(srcPath: string, destDir: string) {
 }
 
 /**
- * @param getTreeRoot The root of the tree that shows a path: the worktree or an Others folder.
- *   Roots are not draggable, and drops stay within the dragged item's tree (drafts drop into the
- *   worktree only).
+ * @param getTreeRoot The root of the tree that shows a path: the worktree or an Others folder
+ *   (null for an individually opened Others file). Only entries inside a tree are draggable, and
+ *   drops stay within the dragged item's tree (drafts drop into the worktree only).
  */
 export function useProjectFileDrag(
   renamingPath: string | null,
@@ -105,7 +105,9 @@ export function useProjectFileDrag(
       const isRenaming = renamingPath === node.path;
       const props: React.HTMLAttributes<HTMLButtonElement> = {};
 
-      if (!isRenaming && getTreeRoot(node.path) !== node.path) {
+      // Only entries inside a tree move; roots and Others files (in no tree) stay put.
+      const root = getTreeRoot(node.path);
+      if (!isRenaming && root !== null && root !== node.path) {
         props.draggable = true;
         props.onDragStart = (e: React.DragEvent<HTMLButtonElement>) => {
           e.dataTransfer.setData(PROJECT_FILE_DRAG_TYPE, node.path);

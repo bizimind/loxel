@@ -7,13 +7,13 @@ import { join, relative } from "node:path";
 import type { WsMessage } from "@/api/ws-protocol";
 
 import { ExternalFilesService } from "./external-files-service";
-import { ExternalFoldersService } from "./external-folders-service";
+import { ExternalFolderRegistry, ExternalFoldersService } from "./external-folders-service";
 import { FileOperationsHistory, FileOperationsService } from "./file-operations-service";
 import { ProjectFilesService } from "./project-files-service";
 import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
-import { externalFolderConflict } from "./server-state";
+import { externalFolderConflict, worktreeTree } from "./server-state";
 
 describe("Others folders routes", () => {
   let root: string;
@@ -33,14 +33,12 @@ describe("Others folders routes", () => {
     await writeFile(join(folder, "a.md"), "a");
     await writeFile(join(folder, "sub", "b.md"), "b");
 
-    const fileOpsHistory = new FileOperationsHistory();
     const externalFoldersService = new ExternalFoldersService({
+      wtPath: wt,
+      registry: new ExternalFolderRegistry({ onDirChanged: () => {}, onFileChanged: () => {} }),
       storage: { load: () => [], save: () => {} },
       conflict: () => null,
-      history: fileOpsHistory,
       onListChanged: () => {},
-      onDirChanged: () => {},
-      onFileChanged: () => {},
     });
     const externalFilesService = new ExternalFilesService(
       () => {},
@@ -55,8 +53,8 @@ describe("Others folders routes", () => {
       projectPath: wt,
       worktreeWatcher: null,
       filesService,
-      fileOpsService: new FileOperationsService(wt, { git: false, history: fileOpsHistory }),
-      fileOpsHistory,
+      fileOpsService: new FileOperationsService(wt, { git: false }),
+      fileOpsHistory: new FileOperationsHistory(),
       detachedFilesService: {} as WorktreeResources["detachedFilesService"],
       externalFilesService,
       externalFoldersService,
@@ -83,19 +81,13 @@ describe("Others folders routes", () => {
       completeWorktreeRemoval: () => {},
       resolveFilePath: (path): ResolvedFilePath | null => {
         if (path.startsWith(wt + "/")) {
-          return {
-            type: "project",
-            wtPath: wt,
-            resources,
-            relativePath: path.slice(wt.length + 1),
-          };
+          const tree = worktreeTree(wt, resources);
+          return { type: "tree", wtPath: wt, resources, tree, relativePath: relative(wt, path) };
         }
         const owner = externalFoldersService.find(path);
-        if (owner) {
-          const relativePath = relative(owner.root, path);
-          return { type: "external-folder", wtPath: wt, resources, folder: owner, relativePath };
-        }
-        return null;
+        if (!owner) return null;
+        const relativePath = relative(owner.root, path);
+        return { type: "tree", wtPath: wt, resources, tree: owner, relativePath };
       },
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},

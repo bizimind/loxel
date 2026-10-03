@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { DockviewPanelApi } from "dockview-react";
 import { CheckIcon, CopyIcon, CrosshairIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
@@ -10,7 +10,6 @@ import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 import { ProjectFileMenu } from "@/components/menus/ProjectFileMenu";
 import { DetachedFileNode } from "@/components/panels/DetachedFileNode";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
-import { ExternalFileNode } from "@/components/panels/ExternalFileNode";
 import type { FilesTreeHandle, TreeNode } from "@/components/tree";
 import { FilesTree, InlineRenameInput, TREE_PATH_ATTR } from "@/components/tree";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -27,6 +26,7 @@ import { dispatchOpenFile } from "@/lib/open-file";
 import {
   fileParentDir,
   findTreeRoot,
+  isWithin,
   parentDir,
   pathName,
   statusColorClass,
@@ -50,10 +50,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   const isPanelActive = usePanelActive(panelApi);
   const [copied, setCopied] = useState(false);
   const queryClient = useQueryClient();
-  /** Routes to the tree that shows a path: the worktree's own, or the Others folders' tree. */
   const treeRef = useRef<FilesTreeHandle>(null);
-  const projectTreeRef = useRef<FilesTreeHandle>(null);
-  const othersTreeRef = useRef<FilesTreeHandle>(null);
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const displayPath = activeWorktreePath;
@@ -79,16 +76,19 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   );
   const isDetachedPath = useCallback((p: string) => detachedPathSet.has(p), [detachedPathSet]);
 
-  // --- Others section: open folders (each a tree root) and individually opened files ---
+  // --- Others section: open folders and individually opened files ---
+  // The tree's roots are the worktree, then each Others folder (browsed and edited like the
+  // worktree), then each Others file. `getTreeRoot` tells which folder tree a path belongs to;
+  // Others files belong to none and are read-only in the tree.
   const { data: otherEntries } = useExternalFilesQuery();
-  const externalFolders = useMemo(() => otherEntries?.filter((e) => e.isDir) ?? [], [otherEntries]);
-  const externalFiles = useMemo(() => otherEntries?.filter((e) => !e.isDir) ?? [], [otherEntries]);
-  const hasOthers = externalFolders.length > 0 || externalFiles.length > 0;
-  const othersNodes = useMemo<TreeNode[]>(
-    () => externalFolders.map((e) => ({ path: e.path, name: e.name, isDir: true })),
-    [externalFolders],
+  const folderRoots = useMemo(
+    () => otherEntries?.filter((e) => e.isDir).map((e) => e.path) ?? [],
+    [otherEntries],
   );
-  const folderRoots = useMemo(() => externalFolders.map((e) => e.path), [externalFolders]);
+  const otherFilePaths = useMemo(
+    () => new Set(otherEntries?.filter((e) => !e.isDir).map((e) => e.path)),
+    [otherEntries],
+  );
   const treeRoots = useMemo(
     () => (activeWorktreePath ? [activeWorktreePath, ...folderRoots] : folderRoots),
     [activeWorktreePath, folderRoots],
@@ -96,43 +96,11 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   const getTreeRoot = useCallback((path: string) => findTreeRoot(path, treeRoots), [treeRoots]);
   const isTreeRoot = useCallback((path: string) => treeRoots.includes(path), [treeRoots]);
   const isOthersRoot = useCallback((path: string) => folderRoots.includes(path), [folderRoots]);
-
-  useLayoutEffect(() => {
-    const treeFor = (path: string) =>
-      getTreeRoot(path) === activeWorktreePath ? projectTreeRef.current : othersTreeRef.current;
-    treeRef.current = {
-      getSelectedPath: () =>
-        projectTreeRef.current?.getSelectedPath() ??
-        othersTreeRef.current?.getSelectedPath() ??
-        null,
-      togglePath: (path) => treeFor(path)?.togglePath(path),
-      expandPath: (path) => treeFor(path)?.expandPath(path),
-      revealPath: async (path) => treeFor(path)?.revealPath(path),
-      reloadSubtree: (path) => treeFor(path)?.reloadSubtree(path),
-      clearSubtree: (path) => treeFor(path)?.clearSubtree(path),
-      handlePathsRenamed: (oldPrefix, newPrefix) =>
-        treeFor(oldPrefix)?.handlePathsRenamed(oldPrefix, newPrefix),
-      focusPath: (path) => treeFor(path)?.focusPath(path),
-      focusTree: () => projectTreeRef.current?.focusTree(),
-    };
-  }, [getTreeRoot, activeWorktreePath]);
-
-  // One expanded set for both trees, split so each tree only loads its own directories.
-  const [expandedInProject, expandedInOthers] = useMemo(() => {
-    const inProject = new Set<string>();
-    const inOthers = new Set<string>();
-    for (const path of expandedProjectFolders) {
-      (getTreeRoot(path) === activeWorktreePath ? inProject : inOthers).add(path);
-    }
-    return [inProject, inOthers];
-  }, [expandedProjectFolders, getTreeRoot, activeWorktreePath]);
-  const setExpandedInProject = useCallback(
-    (paths: Set<string>) => setExpandedProjectFolders(new Set([...paths, ...expandedInOthers])),
-    [setExpandedProjectFolders, expandedInOthers],
-  );
-  const setExpandedInOthers = useCallback(
-    (paths: Set<string>) => setExpandedProjectFolders(new Set([...expandedInProject, ...paths])),
-    [setExpandedProjectFolders, expandedInProject],
+  const isOtherFile = useCallback((path: string) => otherFilePaths.has(path), [otherFilePaths]);
+  /** Roots and Others files can't be renamed, moved, cut, copied or deleted from the tree. */
+  const isFixedRow = useCallback(
+    (path: string) => isTreeRoot(path) || isOtherFile(path),
+    [isTreeRoot, isOtherFile],
   );
 
   const handleRemoveFromOthers = useCallback(async (path: string) => {
@@ -146,7 +114,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
     }
     // Editors still open on its files keep receiving disk changes as individual Others files.
     const openPaths = [...useEditorStateStore.getState().files.keys()].filter((p) =>
-      p.startsWith(path + "/"),
+      isWithin(p, path),
     );
     if (openPaths.length > 0) {
       wsClient.send({ type: "register_external_files", worktreePath: wt, filePaths: openPaths });
@@ -316,8 +284,11 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
   // --- FilesTree: loadSubtree ---
   const rootNodes = useMemo<TreeNode[]>(
-    () => (activeWorktreePath ? [{ path: activeWorktreePath, name: rootName, isDir: true }] : []),
-    [activeWorktreePath, rootName],
+    () => [
+      ...(activeWorktreePath ? [{ path: activeWorktreePath, name: rootName, isDir: true }] : []),
+      ...(otherEntries ?? []).map((e) => ({ path: e.path, name: e.name, isDir: e.isDir })),
+    ],
+    [activeWorktreePath, rootName, otherEntries],
   );
 
   useEffect(() => {
@@ -349,11 +320,13 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       const entries = await queryClient.fetchQuery({
         queryKey: queryKeys.dirContents(activeProjectPath, absDir),
         queryFn: () => api.getDirContents(wt, path),
-        staleTime: Infinity,
+        // An Others folder may have changed while no worktree listing it was active, so its
+        // directories are re-read instead of served from a cache last pushed to another worktree.
+        staleTime: getTreeRoot(absDir) === wt ? Infinity : 0,
       });
       return entries.map((e) => ({ path: e.path, name: e.name, isDir: e.isDir }));
     },
-    [queryClient],
+    [queryClient, getTreeRoot],
   );
 
   // --- FilesTree: rendering callbacks ---
@@ -420,6 +393,13 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         );
       }
 
+      // An individually opened Others file
+      if (isOtherFile(node.path)) {
+        return (
+          <span className="text-muted-foreground min-w-0 flex-1 truncate italic">{node.name}</span>
+        );
+      }
+
       // Root node (the worktree or an Others folder): bold
       if (node.isDir && isTreeRoot(node.path)) {
         return (
@@ -440,14 +420,32 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
       return undefined;
     },
-    [renamingPath, handleFinishRename, handleCancelRename, getEntryStatus, isTreeRoot],
+    [renamingPath, handleFinishRename, handleCancelRename, getEntryStatus, isTreeRoot, isOtherFile],
   );
 
-  // Others folders show their full path on hover, since their names alone can be ambiguous.
-  const getOthersRowProps = useCallback(
+  // Others rows show their full path on hover, since their names alone can be ambiguous.
+  const getTreeRowProps = useCallback(
     (node: TreeNode) =>
-      isOthersRoot(node.path) ? { ...getRowProps(node), title: node.path } : getRowProps(node),
-    [getRowProps, isOthersRoot],
+      isOthersRoot(node.path) || isOtherFile(node.path)
+        ? { ...getRowProps(node), title: node.path }
+        : getRowProps(node),
+    [getRowProps, isOthersRoot, isOtherFile],
+  );
+
+  // The Others section starts at the first root after the worktree's own.
+  const renderRootHeader = useCallback(
+    (_node: TreeNode, index: number) =>
+      index === 1 && (
+        <>
+          <div className="border-border mx-2 my-1.5 border-t" />
+          <div className="px-3 py-1">
+            <span className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
+              Others
+            </span>
+          </div>
+        </>
+      ),
+    [],
   );
 
   // --- FilesTree event handlers ---
@@ -515,7 +513,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
           (document.activeElement as HTMLElement | null);
         const focusedPath = focused?.getAttribute(TREE_PATH_ATTR);
         if (!focused || !focusedPath) return;
-        const isFocusedRoot = isTreeRoot(focusedPath);
+        const isFocusedFixed = isFixedRow(focusedPath);
         if (treeActionId === "tree.open") {
           e.preventDefault();
           if (focused.hasAttribute("data-tree-dir")) {
@@ -525,7 +523,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
           }
           return;
         }
-        if (isFocusedRoot) return;
+        if (isFocusedFixed) return;
         e.preventDefault();
         handleStartRename(focusedPath);
         return;
@@ -535,29 +533,29 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       if (!selected) return;
 
       const isDetached = isDetachedPath(selected);
-      const isRoot = isTreeRoot(selected);
+      const isFixed = isFixedRow(selected);
 
       if (isMeta && e.key === "x") {
-        if (isRoot) return;
+        if (isFixed) return;
         e.preventDefault();
         handleCut(selected);
         return;
       }
       if (isMeta && e.key === "c") {
-        if (isRoot) return;
+        if (isFixed) return;
         e.preventDefault();
         handleCopyFile(selected);
         return;
       }
       if (isMeta && e.key === "v" && clipboard) {
-        if (isDetached) return;
+        if (isDetached || isOtherFile(selected)) return;
         e.preventDefault();
         handlePaste(resolveTargetDir(selected));
         return;
       }
 
       if (e.key === "Delete" || e.key === "Backspace") {
-        if (isRoot) return;
+        if (isFixed) return;
         e.preventDefault();
         if (isDetached) {
           handleRequestDelete(selected, false);
@@ -588,14 +586,18 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       handleCopyFile,
       handlePaste,
       resolveTargetDir,
-      isTreeRoot,
+      isFixedRow,
+      isOtherFile,
     ],
   );
 
   // --- Derived values for context menu and delete dialog ---
   const ctxIsDraft = contextMenu ? isDetachedPath(contextMenu.path) : false;
   const ctxIsRoot = contextMenu ? isTreeRoot(contextMenu.path) : false;
+  const ctxIsFixed = contextMenu ? isFixedRow(contextMenu.path) : false;
   const ctxIsOthersRoot = contextMenu ? isOthersRoot(contextMenu.path) : false;
+  // An individually opened Others file is outside every tree: its menu only offers Open In.
+  const ctxIsOtherFile = contextMenu ? isOtherFile(contextMenu.path) : false;
   const ctxIsModified = contextMenu?.status === "modified" && !ctxIsDraft && !ctxIsRoot;
 
   const deleteDescription = (() => {
@@ -687,11 +689,11 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         )}
 
         <FilesTree
-          ref={projectTreeRef}
+          ref={treeRef}
           nodes={rootNodes}
           loadSubtree={loadSubtree}
-          expandedPaths={expandedInProject}
-          onExpandedPathsChange={setExpandedInProject}
+          expandedPaths={expandedProjectFolders}
+          onExpandedPathsChange={setExpandedProjectFolders}
           onOpen={dispatchOpenFile}
           onSelect={handleTreeSelect}
           onToggle={handleTreeToggle}
@@ -699,47 +701,13 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
           focusedPath={selectedProjectFile}
           activePath={activeEditorFilePath}
           renderLabel={renderLabel}
-          getRowProps={getRowProps}
+          renderRootHeader={renderRootHeader}
+          getRowProps={getTreeRowProps}
           getRowClassName={getRowClassName}
           isPanelActive={isPanelActive}
           compactRoot={false}
           disableBuiltinKeyNav
         />
-
-        {hasOthers && (
-          <>
-            <div className="border-border mx-2 my-1.5 border-t" />
-            <div className="px-3 py-1">
-              <span className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-                Others
-              </span>
-            </div>
-            {othersNodes.length > 0 && (
-              <FilesTree
-                ref={othersTreeRef}
-                nodes={othersNodes}
-                loadSubtree={loadSubtree}
-                expandedPaths={expandedInOthers}
-                onExpandedPathsChange={setExpandedInOthers}
-                onOpen={dispatchOpenFile}
-                onSelect={handleTreeSelect}
-                onToggle={handleTreeToggle}
-                onContextMenu={handleTreeContextMenu}
-                focusedPath={selectedProjectFile}
-                activePath={activeEditorFilePath}
-                renderLabel={renderLabel}
-                getRowProps={getOthersRowProps}
-                getRowClassName={getRowClassName}
-                isPanelActive={isPanelActive}
-                compactRoot={false}
-                disableBuiltinKeyNav
-              />
-            )}
-            {externalFiles.map((entry) => (
-              <ExternalFileNode key={entry.path} entry={entry} isPanelActive={isPanelActive} />
-            ))}
-          </>
-        )}
       </div>
 
       {contextMenu && (
@@ -751,23 +719,23 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
           canPaste={clipboard !== null}
           onClose={() => setContextMenu(null)}
           onNewFile={
-            !ctxIsDraft
+            !ctxIsDraft && !ctxIsOtherFile
               ? () => handleNewFile(parentDir(contextMenu.path, contextMenu.isDir))
               : undefined
           }
           onNewDir={
-            !ctxIsDraft
+            !ctxIsDraft && !ctxIsOtherFile
               ? () => handleNewDir(parentDir(contextMenu.path, contextMenu.isDir))
               : undefined
           }
-          onRename={!ctxIsRoot ? () => handleStartRename(contextMenu.path) : undefined}
+          onRename={!ctxIsFixed ? () => handleStartRename(contextMenu.path) : undefined}
           onDelete={
-            !ctxIsRoot ? () => handleRequestDelete(contextMenu.path, contextMenu.isDir) : undefined
+            !ctxIsFixed ? () => handleRequestDelete(contextMenu.path, contextMenu.isDir) : undefined
           }
-          onCut={!ctxIsRoot ? () => handleCut(contextMenu.path) : undefined}
-          onCopy={!ctxIsRoot ? () => handleCopyFile(contextMenu.path) : undefined}
+          onCut={!ctxIsFixed ? () => handleCut(contextMenu.path) : undefined}
+          onCopy={!ctxIsFixed ? () => handleCopyFile(contextMenu.path) : undefined}
           onPaste={
-            !ctxIsDraft
+            !ctxIsDraft && !ctxIsOtherFile
               ? () =>
                   handlePaste(
                     ctxIsRoot ? contextMenu.path : parentDir(contextMenu.path, contextMenu.isDir),

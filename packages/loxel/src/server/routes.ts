@@ -38,6 +38,7 @@ import type { WsMessage } from "@/api/ws-protocol";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 import { getMediaType } from "@/lib/media-extensions";
+import { isWithin } from "@/lib/project-file-helpers";
 import { isHttpUrl } from "@/url-utils";
 
 import { config } from "./config";
@@ -57,7 +58,7 @@ import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import { decrypt, encrypt, isEncrypted } from "./secret-store";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
-import { listOthers } from "./server-state";
+import { listOthers, worktreeTree } from "./server-state";
 import { buildSpawnEnv } from "./shell-env";
 import * as storeDb from "./store-db";
 import { stress } from "./stress-detector";
@@ -463,9 +464,8 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
         return error("File not found", 404);
       }
     }
-    const root = resolved.type === "external-folder" ? resolved.folder.root : resolved.wtPath;
     try {
-      const content = await Bun.file(join(root, resolved.relativePath)).text();
+      const content = await Bun.file(join(resolved.tree.root, resolved.relativePath)).text();
       return json({ content });
     } catch {
       return error("File not found", 404);
@@ -911,19 +911,13 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
       );
       return json({ success: true });
     }
-    if (resolved.type === "external-folder") {
-      if (!resolved.relativePath) return error("Cannot write to a folder", 400);
-      // Formatters are detected per worktree, so they do not apply to folders outside it.
-      const { root, filesService } = resolved.folder;
-      await filesService.writeFile(resolved.relativePath, nonce, async () => {
-        await Bun.write(join(root, resolved.relativePath), content);
-      });
-      return json({ success: true });
-    }
-    // Format project files before writing (detached/external files skip formatting)
-    content = await maybeFormat(content, filePath, resolved.wtPath);
-    await resolved.resources.filesService.writeFile(resolved.relativePath, nonce, async () => {
-      await Bun.write(join(resolved.wtPath, resolved.relativePath), content);
+    const { tree, relativePath } = resolved;
+    if (!relativePath) return error("Cannot write to a folder", 400);
+    // Formatters are detected per worktree, so only the worktree's own files are formatted
+    // (Others folders, drafts and external files are written as-is).
+    if (tree.root === resolved.wtPath) content = await maybeFormat(content, filePath, tree.root);
+    await tree.filesService.writeFile(relativePath, nonce, async () => {
+      await Bun.write(join(tree.root, relativePath), content);
     });
     return json({ success: true, content });
   }
@@ -959,25 +953,17 @@ function handleDetectedFormatters(req: Request, ctx: RouteContext): Response {
 // Service-dependent routes: files panel
 // ---------------------------------------------------------------------------
 
-function worktreeTree(wt: string, resources: WorktreeResources): FileTree {
-  return {
-    root: wt,
-    filesService: resources.filesService,
-    fileOpsService: resources.fileOpsService,
-  };
-}
-
 /**
  * The tree that owns `absolutePath` within worktree `wt`: an Others folder when the path is
  * outside the worktree and inside one of its open folders, the worktree's own tree otherwise
  * (callers then reject paths that escape it).
  */
 function treeForPath(wt: string, resources: WorktreeResources, absolutePath: string): FileTree {
-  if (absolutePath === wt || absolutePath.startsWith(wt + "/")) {
+  if (isWithin(absolutePath, wt)) {
     return worktreeTree(wt, resources);
   }
   const folder = resources.externalFoldersService.find(absolutePath);
-  return folder ? folder : worktreeTree(wt, resources);
+  return folder ?? worktreeTree(wt, resources);
 }
 
 /**
@@ -999,21 +985,10 @@ function resolveTreeDir(
   const rootResources = ctx.getWorktreeResources(rawDir);
   if (rootResources) return { tree: worktreeTree(rawDir, rootResources), relDir: "" };
 
-  // A directory inside a worktree
+  // A directory inside a worktree, or an Others folder or a directory inside one
   const resolved = ctx.resolveFilePath(rawDir);
-  if (resolved?.type === "project") {
-    return {
-      tree: worktreeTree(resolved.wtPath, resolved.resources),
-      relDir: resolved.relativePath,
-    };
-  }
-
-  // A folder in the requesting worktree's Others section, or a directory inside one
-  const folder = wtParam
-    ? ctx.getWorktreeResources(wtParam)?.externalFoldersService.find(rawDir)
-    : undefined;
-  if (!folder) return null;
-  return { tree: folder, relDir: relative(folder.root, rawDir) };
+  if (resolved?.type !== "tree") return null;
+  return { tree: resolved.tree, relDir: resolved.relativePath };
 }
 
 // GET /api/files?wt=&dir= — list directory contents for the project files panel
@@ -1088,12 +1063,13 @@ async function assertContained(worktreeCwd: string, relPath: string): Promise<Re
 /**
  * Resolve a file operation's worktree and the tree it acts on, chosen by the operation's main
  * path: an absolute path inside one of the worktree's Others folders acts on that folder.
+ * `recordOperation` adds a successful operation to the worktree's undo history.
  */
 function resolveFileOps(
   body: Record<string, unknown>,
   ctx: RouteContext,
   rawPath = "",
-): { resources: WorktreeResources; tree: FileTree } | Response {
+): { resources: WorktreeResources; tree: FileTree; recordOperation: () => void } | Response {
   const wt = typeof body.wt === "string" ? body.wt : undefined;
   if (!wt) return error("Missing wt in body", 400);
   const resources = ctx.getWorktreeResources(wt);
@@ -1101,7 +1077,8 @@ function resolveFileOps(
   const tree = rawPath.startsWith("/")
     ? treeForPath(wt, resources, rawPath)
     : worktreeTree(wt, resources);
-  return { resources, tree };
+  const recordOperation = () => resources.fileOpsHistory.recordOperation(tree.fileOpsService);
+  return { resources, tree, recordOperation };
 }
 
 /** Convert an absolute path to relative if it starts with the worktree prefix. */
@@ -1204,6 +1181,7 @@ async function handleFileRename(req: Request, ctx: RouteContext): Promise<Respon
   if (denied) return denied;
   try {
     const result = await resolved.tree.fileOpsService.rename(path, newName);
+    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([path, result.newPath]);
     return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
@@ -1222,6 +1200,7 @@ async function handleFileDelete(req: Request, ctx: RouteContext): Promise<Respon
   if (denied) return denied;
   try {
     await resolved.tree.fileOpsService.delete(path);
+    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([path]);
     return json({ success: true });
   } catch (err) {
@@ -1249,6 +1228,7 @@ async function handleFileMove(req: Request, ctx: RouteContext): Promise<Response
   }
   try {
     const result = await resolved.tree.fileOpsService.move(srcPath, destDir);
+    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([srcPath, result.newPath]);
     return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
@@ -1297,6 +1277,7 @@ async function handleFileCreateFile(req: Request, ctx: RouteContext): Promise<Re
   }
   try {
     const result = await resolved.tree.fileOpsService.createFile(dir, name);
+    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([result.path]);
     return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
@@ -1319,6 +1300,7 @@ async function handleFileCreateDir(req: Request, ctx: RouteContext): Promise<Res
   }
   try {
     const result = await resolved.tree.fileOpsService.createDir(dir, name);
+    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([result.path]);
     return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
@@ -1346,6 +1328,7 @@ async function handleFileCopy(req: Request, ctx: RouteContext): Promise<Response
   }
   try {
     const result = await resolved.tree.fileOpsService.copy(srcPath, destDir);
+    resolved.recordOperation();
     await resolved.tree.filesService.notifyChanges([result.newPath]);
     return json(toAbsoluteResult(result, isAbsolute, resolved.tree.root));
   } catch (err) {
@@ -2491,7 +2474,7 @@ async function handleExternalFolderAdd(req: Request, ctx: RouteContext): Promise
   const root = await resources.externalFoldersService.add(path);
   // Files opened individually from inside the folder are now listed and watched by it.
   for (const entry of resources.externalFilesService.listFiles()) {
-    if (entry.path.startsWith(root + "/")) resources.externalFilesService.removeFile(entry.path);
+    if (isWithin(entry.path, root)) resources.externalFilesService.removeFile(entry.path);
   }
   return json({ root });
 }

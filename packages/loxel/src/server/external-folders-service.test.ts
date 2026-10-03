@@ -4,8 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { ExternalFolderStorage } from "./external-folders-service";
-import { ExternalFoldersService } from "./external-folders-service";
-import { FileOperationsHistory } from "./file-operations-service";
+import { ExternalFolderRegistry, ExternalFoldersService } from "./external-folders-service";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -29,20 +28,30 @@ function memoryStorage(initial: string[] = []): ExternalFolderStorage & { saved:
   return storage;
 }
 
+function createRegistry() {
+  const fileEvents: Array<{ worktrees: readonly string[]; path: string }> = [];
+  const registry = new ExternalFolderRegistry({
+    onDirChanged: () => {},
+    onFileChanged: (worktrees, path) => fileEvents.push({ worktrees, path }),
+  });
+  return { registry, fileEvents };
+}
+
 function createService(
   storage: ExternalFolderStorage,
   conflict: (root: string) => string | null = () => null,
+  registry = createRegistry().registry,
+  wtPath = "/wt",
 ) {
   let listChanges = 0;
   const service = new ExternalFoldersService({
+    wtPath,
+    registry,
     storage,
     conflict,
-    history: new FileOperationsHistory(),
     onListChanged: () => {
       listChanges++;
     },
-    onDirChanged: () => {},
-    onFileChanged: () => {},
   });
   cleanups.push(() => service.stop());
   return { service, listChanges: () => listChanges };
@@ -164,5 +173,51 @@ describe("ExternalFoldersService", () => {
     expect(entries).toEqual([
       { name: "a.md", path: path.join(base, "a.md"), isDir: false, status: "normal" },
     ]);
+  });
+});
+
+describe("ExternalFolderRegistry", () => {
+  test("worktrees opening the same folder share one instance", async () => {
+    const base = tempDir();
+    const { registry } = createRegistry();
+    const { service: first } = createService(memoryStorage(), undefined, registry, "/wt/a");
+    const { service: second } = createService(memoryStorage(), undefined, registry, "/wt/b");
+
+    await first.add(base);
+    await second.add(base);
+
+    expect(second.find(base)).toBe(first.find(base)!);
+  });
+
+  test("a folder's changes reach every worktree that has it open", async () => {
+    const base = tempDir();
+    const { registry, fileEvents } = createRegistry();
+    const { service: first } = createService(memoryStorage(), undefined, registry, "/wt/a");
+    const { service: second } = createService(memoryStorage(), undefined, registry, "/wt/b");
+    await first.add(base);
+    await second.add(base);
+    await first.find(base)!.filesService.getDirContents("");
+
+    await first.find(base)!.filesService.notifyChanges(["a.md"]);
+
+    expect(fileEvents).toContainEqual({
+      worktrees: ["/wt/a", "/wt/b"],
+      path: path.join(base, "a.md"),
+    });
+  });
+
+  test("keeps a folder live until the last worktree releases it", async () => {
+    const base = tempDir();
+    const { registry } = createRegistry();
+    const { service: first } = createService(memoryStorage(), undefined, registry, "/wt/a");
+    const { service: second } = createService(memoryStorage(), undefined, registry, "/wt/b");
+    await first.add(base);
+    await second.add(base);
+
+    first.stop();
+    expect(registry.get(base)).toBeDefined();
+
+    second.remove(base);
+    expect(registry.get(base)).toBeUndefined();
   });
 });

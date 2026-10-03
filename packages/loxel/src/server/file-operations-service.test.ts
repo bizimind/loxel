@@ -48,21 +48,22 @@ describe("FileOperationsService with git disabled", () => {
 describe("FileOperationsHistory", () => {
   function setup() {
     const history = new FileOperationsHistory();
-    const first = tempDir();
-    const second = tempDir();
-    return {
-      history,
-      first: new FileOperationsService(first, { git: false, history }),
-      second: new FileOperationsService(second, { git: false, history }),
-      firstDir: first,
-      secondDir: second,
+    const firstDir = tempDir();
+    const secondDir = tempDir();
+    const first = new FileOperationsService(firstDir, { git: false });
+    const second = new FileOperationsService(secondDir, { git: false });
+    /** Run a forward operation and record it, as the file-operation routes do. */
+    const run = async (service: FileOperationsService, op: () => Promise<unknown>) => {
+      await op();
+      history.recordOperation(service);
     };
+    return { history, first, second, firstDir, secondDir, run };
   }
 
   test("undoes and redoes the most recent operation across services", async () => {
-    const { history, first, second, firstDir, secondDir } = setup();
-    await first.createFile("", "one.md");
-    await second.createFile("", "two.md");
+    const { history, first, second, firstDir, secondDir, run } = setup();
+    await run(first, () => first.createFile("", "one.md"));
+    await run(second, () => second.createFile("", "two.md"));
 
     const undone = await history.undo();
     expect(undone?.service).toBe(second);
@@ -79,19 +80,19 @@ describe("FileOperationsHistory", () => {
   });
 
   test("a new operation clears redo everywhere", async () => {
-    const { history, first, second } = setup();
-    await first.createFile("", "one.md");
+    const { history, first, second, run } = setup();
+    await run(first, () => first.createFile("", "one.md"));
     await history.undo();
 
-    await second.createDir("", "dir");
+    await run(second, () => second.createDir("", "dir"));
 
     expect(await history.redo()).toBeNull();
   });
 
   test("skips services that were disposed", async () => {
-    const { history, first, second, firstDir } = setup();
-    await first.createFile("", "one.md");
-    await second.createFile("", "two.md");
+    const { history, first, second, firstDir, run } = setup();
+    await run(first, () => first.createFile("", "one.md"));
+    await run(second, () => second.createFile("", "two.md"));
     second.dispose();
 
     const step = await history.undo();

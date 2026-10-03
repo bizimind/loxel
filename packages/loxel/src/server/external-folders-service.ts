@@ -2,8 +2,8 @@ import { statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 import type { DirEntry } from "@/api/project-files-model";
+import { findTreeRoot, isWithin } from "@/lib/project-file-helpers";
 
-import type { FileOperationsHistory } from "./file-operations-service";
 import { FileOperationsService } from "./file-operations-service";
 import { logger } from "./logger";
 import { ProjectFilesService } from "./project-files-service";
@@ -30,14 +30,81 @@ export interface ExternalFolderStorage {
   save: (roots: string[]) => void;
 }
 
+/** Where a folder's change events go: the worktrees that currently have it open. */
+interface ExternalFolderEvents {
+  onDirChanged: (worktrees: readonly string[], dir: string, entries: DirEntry[]) => void;
+  onFileChanged: (worktrees: readonly string[], filePath: string, nonces: string[]) => void;
+}
+
+interface SharedFolder {
+  folder: ExternalFolder;
+  /** Worktrees (with live resources) whose Others section lists the folder. */
+  worktrees: Set<string>;
+  started: Promise<void>;
+}
+
+/**
+ * The folders open in any worktree's Others section, shared server-wide: each folder has one
+ * watcher, directory cache and set of services however many worktrees list it, and its changes
+ * reach every one of them. A folder is live while a subscribed worktree lists it.
+ *
+ * Its services are the worktree tree's, with git disabled: the folder is not part of any project,
+ * and git would otherwise act on whatever repo encloses it.
+ */
+export class ExternalFolderRegistry {
+  private folders = new Map<string, SharedFolder>();
+
+  constructor(private events: ExternalFolderEvents) {}
+
+  /** Start using `root` from `wtPath`, starting its services if no worktree uses it yet. */
+  async acquire(root: string, wtPath: string): Promise<ExternalFolder> {
+    let shared = this.folders.get(root);
+    if (!shared) {
+      const users = new Set<string>();
+      const filesService = new ProjectFilesService(
+        root,
+        (dir, entries) => this.events.onDirChanged([...users], dir, entries),
+        (filePath, nonces) => this.events.onFileChanged([...users], filePath, nonces),
+        undefined,
+        { gitStatus: false },
+      );
+      const fileOpsService = new FileOperationsService(root, { git: false });
+      shared = {
+        folder: { root, filesService, fileOpsService },
+        worktrees: users,
+        started: filesService.start(),
+      };
+      // Registered before starting so a concurrent acquire of the same root shares it.
+      this.folders.set(root, shared);
+    }
+    shared.worktrees.add(wtPath);
+    await shared.started;
+    return shared.folder;
+  }
+
+  /** Stop using `root` from `wtPath`; its services stop when no worktree uses it any more. */
+  release(root: string, wtPath: string): void {
+    const shared = this.folders.get(root);
+    if (!shared) return;
+    shared.worktrees.delete(wtPath);
+    if (shared.worktrees.size > 0) return;
+    shared.folder.filesService.stop();
+    shared.folder.fileOpsService.dispose();
+    this.folders.delete(root);
+  }
+
+  get(root: string): ExternalFolder | undefined {
+    return this.folders.get(root)?.folder;
+  }
+}
+
 interface ExternalFoldersServiceOptions {
+  wtPath: string;
+  registry: ExternalFolderRegistry;
   storage: ExternalFolderStorage;
   /** Why a folder cannot be opened (see `externalFolderConflict`), or null. Checked on restore. */
   conflict: (root: string) => string | null;
-  history: FileOperationsHistory;
   onListChanged: () => void;
-  onDirChanged: (dir: string, entries: DirEntry[]) => void;
-  onFileChanged: (filePath: string, nonces: string[]) => void;
 }
 
 /** Store-database key holding a worktree's open folders. */
@@ -65,15 +132,14 @@ export function createExternalFolderStorage(wtPath: string): ExternalFolderStora
 }
 
 /**
- * Manages the folders opened in a worktree's Others section. Each folder gets the same tree and
- * file-operation services as the worktree itself, with git disabled: the folder is not part of
- * any project, and git would otherwise act on whatever repo encloses it.
+ * The folders listed in one worktree's Others section, persisted per worktree. The folders
+ * themselves are shared through {@link ExternalFolderRegistry}.
  *
  * Open folders never nest: adding a folder inside an open one is a no-op, and adding a parent of
  * open folders replaces them.
  */
 export class ExternalFoldersService {
-  private folders = new Map<string, ExternalFolder>();
+  private roots = new Set<string>();
   private stopped = false;
 
   constructor(private options: ExternalFoldersServiceOptions) {}
@@ -86,11 +152,11 @@ export class ExternalFoldersService {
     const stored = this.options.storage.load();
     const roots: string[] = [];
     for (const root of [...stored].sort()) {
-      if (roots.some((kept) => root.startsWith(kept + "/"))) continue;
+      if (findTreeRoot(root, roots)) continue;
       if (!isDirectory(root) || this.options.conflict(root)) continue;
       roots.push(root);
     }
-    await Promise.all(roots.map((root) => this.startFolder(root)));
+    await Promise.all(roots.map((root) => this.open(root)));
     if (roots.length !== stored.length) this.persist();
   }
 
@@ -102,13 +168,13 @@ export class ExternalFoldersService {
     // The worktree may have been torn down while the caller awaited.
     if (this.stopped) throw new Error("Worktree is no longer active");
     const normalized = resolve(path);
-    const owner = this.find(normalized);
-    if (owner) return owner.root;
+    const owner = findTreeRoot(normalized, this.roots);
+    if (owner) return owner;
 
-    for (const root of [...this.folders.keys()]) {
-      if (root.startsWith(normalized + "/")) this.stopFolder(root);
+    for (const root of [...this.roots]) {
+      if (isWithin(root, normalized)) this.close(root);
     }
-    await this.startFolder(normalized);
+    await this.open(normalized);
     this.persist();
     this.options.onListChanged();
     return normalized;
@@ -117,8 +183,8 @@ export class ExternalFoldersService {
   /** Close an open folder. Returns false when it was not open. */
   remove(path: string): boolean {
     const normalized = resolve(path);
-    if (!this.folders.has(normalized)) return false;
-    this.stopFolder(normalized);
+    if (!this.roots.has(normalized)) return false;
+    this.close(normalized);
     this.persist();
     this.options.onListChanged();
     return true;
@@ -126,66 +192,40 @@ export class ExternalFoldersService {
 
   /** The open folder containing `absolutePath`, the folder root itself included. */
   find(absolutePath: string): ExternalFolder | undefined {
-    for (const folder of this.folders.values()) {
-      if (absolutePath === folder.root || absolutePath.startsWith(folder.root + "/")) {
-        return folder;
-      }
-    }
-    return undefined;
+    const root = findTreeRoot(absolutePath, this.roots);
+    return root ? this.options.registry.get(root) : undefined;
   }
 
   /** Every open folder (for undo/redo bookkeeping). */
   all(): ExternalFolder[] {
-    return [...this.folders.values()];
+    return [...this.roots].flatMap((root) => this.options.registry.get(root) ?? []);
   }
 
   /** Open folders as tree roots, sorted by path. */
   list(): DirEntry[] {
-    return [...this.folders.keys()]
+    return [...this.roots]
       .sort()
       .map((root) => ({ name: basename(root) || root, path: root, isDir: true, status: "normal" }));
   }
 
-  async pauseWatching(): Promise<void> {
-    await Promise.all(this.all().map((folder) => folder.filesService.pauseWatching()));
-  }
-
-  async resumeWatching(): Promise<void> {
-    await Promise.all(this.all().map((folder) => folder.filesService.resumeWatching()));
-  }
-
+  /** Release every folder (worktree teardown); the persisted list is kept. */
   stop(): void {
     this.stopped = true;
-    for (const root of [...this.folders.keys()]) this.stopFolder(root);
+    for (const root of [...this.roots]) this.close(root);
   }
 
-  private async startFolder(root: string): Promise<void> {
-    const filesService = new ProjectFilesService(
-      root,
-      this.options.onDirChanged,
-      this.options.onFileChanged,
-      undefined,
-      { gitStatus: false },
-    );
-    const fileOpsService = new FileOperationsService(root, {
-      git: false,
-      history: this.options.history,
-    });
-    // Registered before starting so a concurrent add of the same path finds it.
-    this.folders.set(root, { root, filesService, fileOpsService });
-    await filesService.start();
+  private async open(root: string): Promise<void> {
+    this.roots.add(root);
+    await this.options.registry.acquire(root, this.options.wtPath);
   }
 
-  private stopFolder(root: string): void {
-    const folder = this.folders.get(root);
-    if (!folder) return;
-    folder.filesService.stop();
-    folder.fileOpsService.dispose();
-    this.folders.delete(root);
+  private close(root: string): void {
+    this.roots.delete(root);
+    this.options.registry.release(root, this.options.wtPath);
   }
 
   private persist(): void {
-    this.options.storage.save([...this.folders.keys()].sort());
+    this.options.storage.save([...this.roots].sort());
   }
 }
 
