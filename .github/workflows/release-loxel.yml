@@ -6,6 +6,8 @@ on:
     paths:
       - "packages/loxel/**"
       - ".github/workflows/release-loxel.yml"
+  # Manual release for changes outside packages/loxel (e.g. root lockfile/override bumps)
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,8 +18,8 @@ concurrency:
 
 jobs:
   build-matrix:
-    # Skip if this is a release commit
-    if: "!startsWith(github.event.head_commit.message, 'chore(loxel): release')"
+    # Skip release commits; manual runs only from main (the bump commit is pushed to main)
+    if: "github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'chore(loxel): release')"
     uses: ./.github/workflows/build-matrix.yml
 
   check-and-bump:

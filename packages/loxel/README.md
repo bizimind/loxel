@@ -245,6 +245,8 @@ bun run build:app         # Build standalone server + renderer + package DMG/zip
 
 `build:app` runs two steps: compiles the server to a standalone binary (`bun build --compile`), builds the renderer with Vite, and packages everything with electron-builder. Output goes to `release/`.
 
+**Releases**: `release-loxel.yml` bumps the patch version, builds, and publishes on every merge to main that touches `packages/loxel/**`. For changes outside the package that still affect the app (e.g. root lockfile or dependency overrides), trigger it manually with `gh workflow run release-loxel.yml --ref main`.
+
 ### Type check
 
 ```bash
