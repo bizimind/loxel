@@ -205,7 +205,10 @@ export function syncTerminalsFromLayout(api: DockviewApi): void {
   }
 }
 
-export type SplitPosition = { referencePanel: string; direction: "right" | "below" };
+export type SplitPosition = {
+  referencePanel: string;
+  direction: "right" | "left" | "above" | "below";
+};
 
 /**
  * Gap-filling panel title: scans existing panel titles and returns the first

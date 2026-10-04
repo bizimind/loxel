@@ -23,6 +23,7 @@ import { getTreeActionForEvent, useTreeKeyboardNav } from "@/hooks/useTreeKeyboa
 import { getDisplayFilename, toAbsoluteDir } from "@/lib/detached-path";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { dispatchOpenFile } from "@/lib/open-file";
+import { registerPanelFocus } from "@/lib/panel-focus";
 import {
   fileParentDir,
   findTreeRoot,
@@ -314,6 +315,13 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
     next.add(activeWorktreePath);
     setExpandedProjectFolders(next);
   }, [activeWorktreePath, expandedProjectFolders, setExpandedProjectFolders]);
+
+  // Keyboard panel navigation lands on the selected row (the tree's own key handling is the
+  // panel's, so FilesTree's autofocus target is disabled here).
+  useEffect(
+    () => registerPanelFocus("projectFiles", () => treeRef.current?.focusTree() ?? false),
+    [],
+  );
 
   useEffect(() => {
     if (!activeWorktreePath || focusedRootPathsRef.current.has(activeWorktreePath)) return;

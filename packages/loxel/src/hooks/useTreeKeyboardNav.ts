@@ -3,7 +3,7 @@ import { useCallback } from "react";
 
 import { TREE_PATH_ATTR } from "@/components/tree";
 import type { ActionId } from "@/store/keybindings/action-registry";
-import { eventToKeyCombo } from "@/store/keybindings/keybinding-schema";
+import { eventToKeyCombo } from "@/store/keybindings/key-combo";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
 
 type TreeActionId = Extract<ActionId, `tree.${string}`>;

@@ -51,6 +51,8 @@ import { DialogShell } from "@/components/ui/dialog-shell";
 import { NotificationDot } from "@/components/ui/notification-dot";
 import { dayjs } from "@/lib/dayjs";
 import { FileTypeIcon } from "@/lib/file-icons";
+import { handleSidebarEntryKeyDown } from "@/lib/focus-navigation";
+import { focusAreaProps, sidebarEntryProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { cn } from "@/lib/utils";
 import { hasWorktreeNotification, usePanelNotificationStore } from "@/store/panel-notifications";
@@ -94,6 +96,9 @@ function ProjectIconWithBadge({
 }
 
 const COLLAPSED_WIDTH = 48;
+/** Keyboard cursor ring for the collapsed rail's icon buttons. */
+const ENTRY_FOCUS_RING =
+  "focus-visible:ring-ring focus-visible:ring-offset-card outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
 const EMPTY_STRINGS: string[] = [];
 const EMPTY_WORKTREES: WorktreeEntry[] = [];
 
@@ -409,6 +414,7 @@ export function Sidebar() {
         dragWidth === null && "transition-[width] duration-150 ease-out",
       )}
       style={{ width: sidebarExpanded ? expandedWidth : COLLAPSED_WIDTH }}
+      {...focusAreaProps("worktrees")}
     >
       {sidebarExpanded && (
         <SidebarResizeHandle
@@ -432,7 +438,10 @@ export function Sidebar() {
       </button>
 
       {/* Project + worktree list */}
-      <div className="flex-1 overflow-x-hidden overflow-y-auto">
+      <div
+        className="flex-1 overflow-x-hidden overflow-y-auto"
+        onKeyDown={handleSidebarEntryKeyDown}
+      >
         {projects.map((project) => {
           const isRootActive = activeWorktreePath === project.path;
           const isExpanded = expandedSet.has(project.id);
@@ -444,10 +453,12 @@ export function Sidebar() {
                 {/* Project header row */}
                 <div
                   className={cn(
-                    "hover:bg-primary/50 group relative flex cursor-pointer items-center gap-2 px-2.5 py-1.5 transition-colors",
+                    "hover:bg-primary/50 group focus-visible:ring-ring relative flex cursor-pointer items-center gap-2 px-2.5 py-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
                     isRootActive && "bg-primary",
                   )}
                   style={{ paddingLeft: "8px" }}
+                  tabIndex={-1}
+                  {...sidebarEntryProps(project.path)}
                   onClick={() => !isRenaming && handleProjectClick(project)}
                   onContextMenu={(e) => handleProjectContextMenu(e, project)}
                 >
@@ -505,8 +516,9 @@ export function Sidebar() {
             <div key={project.id}>
               <div className="flex justify-center py-1.5" style={{ paddingLeft: "3px" }}>
                 <button
-                  className="cursor-pointer"
+                  className={cn("cursor-pointer rounded-md", ENTRY_FOCUS_RING)}
                   onClick={() => handleProjectClick(project)}
+                  {...sidebarEntryProps(project.path)}
                   onContextMenu={(e) => handleProjectContextMenu(e, project)}
                   title={`${project.name}\n${project.path}`}
                 >
@@ -790,8 +802,13 @@ function CollapsedWorktreeIcon({
     <>
       <div className="flex justify-center py-1">
         <button
-          className={cn("relative cursor-pointer", isPending && "opacity-50")}
+          className={cn(
+            "relative cursor-pointer rounded-md",
+            ENTRY_FOCUS_RING,
+            isPending && "opacity-50",
+          )}
           onClick={onClick}
+          {...(isPending ? undefined : sidebarEntryProps(id))}
           onContextMenu={onContextMenu}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={() => setHovered(false)}
@@ -1091,7 +1108,7 @@ function WorktreeItem({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "hover:bg-primary/50 group relative flex cursor-pointer items-center gap-2 px-2 py-1 transition-colors",
+        "hover:bg-primary/50 group focus-visible:ring-ring relative flex cursor-pointer items-center gap-2 px-2 py-1 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
         isActive && "bg-primary",
         isHidden && "opacity-40",
         isDragging && "z-10 opacity-30",
@@ -1103,6 +1120,7 @@ function WorktreeItem({
       onContextMenu={onContextMenu}
       {...attributes}
       {...listeners}
+      {...(wt.pending || isDragOverlay ? undefined : sidebarEntryProps(wt.path))}
     >
       <div className="relative shrink-0">
         <WorktreeIcon name={name} size="sm" />

@@ -1,3 +1,4 @@
+import { focusAreaProps } from "@/lib/focus-targets";
 import { useWorktreeToolsBar } from "@/store/worktree-tools-bar";
 
 import { ToolbarZone } from "./ToolbarZone";
@@ -8,7 +9,10 @@ export function LeftToolsBar() {
   const bottomEntries = useWorktreeToolsBar((s) => s.bottomEntries);
 
   return (
-    <div className="bg-card border-border flex w-10 shrink-0 flex-col border-r">
+    <div
+      className="bg-card border-border flex w-10 shrink-0 flex-col border-r"
+      {...focusAreaProps("left-bar")}
+    >
       <ToolbarZone zone="left" className="flex flex-1 flex-col items-center gap-1 pt-2">
         {leftEntries.map((e) => (
           <ToolsBarIcon key={e.panelId} panelId={e.panelId} />

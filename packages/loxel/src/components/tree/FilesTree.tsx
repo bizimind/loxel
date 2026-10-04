@@ -11,6 +11,7 @@ import {
 } from "react";
 
 import { getTreeActionForEvent, useTreeKeyboardNav } from "@/hooks/useTreeKeyboardNav";
+import { panelAutofocusProps } from "@/lib/focus-targets";
 
 import { TreeNodeRenderer } from "./TreeNodeRenderer";
 import { TREE_PATH_ATTR } from "./TreeRow";
@@ -66,7 +67,8 @@ export interface FilesTreeHandle {
   clearSubtree: (path: string) => void;
   handlePathsRenamed: (oldPrefix: string, newPrefix: string) => void;
   focusPath: (path: string) => void;
-  focusTree: () => void;
+  /** Focus the selected row, else the first. Returns false when the tree has no rows. */
+  focusTree: () => boolean;
 }
 
 export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function FilesTree(
@@ -291,14 +293,33 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
 
   // --- Focus tracking → onSelect ---
 
+  const focusTree = useCallback(() => {
+    const container = containerRef.current;
+    const row =
+      container?.querySelector<HTMLButtonElement>(
+        `button[${TREE_PATH_ATTR}][data-tree-selected]`,
+      ) ?? container?.querySelector<HTMLButtonElement>(`button[${TREE_PATH_ATTR}]`);
+    if (!row) return false;
+    row.focus({ preventScroll: true });
+    row.scrollIntoView({ block: "nearest" });
+    return true;
+  }, []);
+
   const handleFocusIn = useCallback(
     (e: React.FocusEvent) => {
+      // Focus entering the container itself from outside (Tab, keyboard panel navigation) goes
+      // to a row. Shift+Tab from a row also lands here and must be able to leave the tree.
+      const container = containerRef.current;
+      if (e.target === container) {
+        if (!(e.relatedTarget instanceof Node && container.contains(e.relatedTarget))) focusTree();
+        return;
+      }
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(`button[${TREE_PATH_ATTR}]`);
       if (!btn) return;
       const path = btn.getAttribute(TREE_PATH_ATTR);
       if (path !== null) onSelect?.(path);
     },
-    [onSelect],
+    [focusTree, onSelect],
   );
 
   // --- focusedPath prop → DOM focus ---
@@ -460,17 +481,13 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
         setPendingFocusPath(path);
       },
 
-      focusTree: () => {
-        const container = containerRef.current;
-        if (!container) return;
-        const first = container.querySelector<HTMLButtonElement>(`button[${TREE_PATH_ATTR}]`);
-        first?.focus();
-      },
+      focusTree,
     }),
     [
       expandPath,
       focusAndScrollPath,
       focusPath,
+      focusTree,
       toggleExpanded,
       loadAndCache,
       loadSubtree,
@@ -497,6 +514,7 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
       className={className}
       tabIndex={disableBuiltinKeyNav ? undefined : 0}
       data-panel-active={isPanelActive ? "" : undefined}
+      {...(disableBuiltinKeyNav ? undefined : panelAutofocusProps())}
       onKeyDown={disableBuiltinKeyNav ? undefined : handleKeyDown}
       onFocusCapture={handleFocusIn}
     >
