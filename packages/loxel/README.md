@@ -58,6 +58,7 @@ An opinionated agent harness designed for a better interaction model:
 Terminals are first-class panels, used for running CLI-based agents (Claude Code, Codex, Opencode, Gemini, etc.) and normal development tasks (tests, builds, dev servers, git).
 
 - **xterm.js terminals** with web link detection
+- **Pixel-perfect block art** — the WebGL renderer (`@xterm/addon-webgl`) draws block elements and box-drawing characters as custom glyphs, so ASCII art like the Claude Code mascot renders seamlessly at every zoom level. A Vite transform (`xtermWebglPixelGrid` in `vite.config.ts`) snaps the addon to the device pixel grid like Ghostty: cell width is rounded (not floored) from the font's advance, and block element edges land on whole pixels. Chromium allows ~16 live WebGL contexts per window, so a terminal holds one only while its panel is visible (`src/components/terminal/webgl-renderer.ts`): hidden tabs release it and use the DOM renderer, and re-acquire it when shown. More than ~16 visible terminals, a lost context or missing WebGL fall back to the DOM renderer. The terminal opens only after its font faces load, since the cell grid and glyph atlas are built from the font at open
 - **Multiple tabs** in the same panel group (`Ctrl+Shift+T` to create)
 - **Low-overhead PTY I/O** — binary WebSocket protocol (37-byte header) for responsive interaction
 - **Scrollback persistence** — configurable scrollback (default 50K lines), server-side circular buffer replayed on reattach
