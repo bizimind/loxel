@@ -3,6 +3,8 @@ import { useCallback, useState } from "react";
 
 import { OpenInMenuItems, isOpenInSupported } from "@/components/menus/OpenInMenuItems";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
+import { copyToClipboard } from "@/lib/clipboard";
+import { relativeTo } from "@/lib/project-file-helpers";
 
 import { TabCloseButton } from "./tab-close-button";
 
@@ -17,23 +19,20 @@ export function FileContextMenuItems({
   /** When set and filePath is inside the worktree, a "Copy Relative Path" item is shown. */
   worktreePath?: string;
 }) {
-  const relativePath =
-    worktreePath && filePath.startsWith(worktreePath + "/")
-      ? filePath.slice(worktreePath.length + 1)
-      : undefined;
+  const relativePath = worktreePath ? relativeTo(filePath, worktreePath) : undefined;
 
   return (
     <>
-      <ContextMenuItem onClick={() => navigator.clipboard.writeText(filename)}>
+      <ContextMenuItem onClick={() => copyToClipboard(filename, "file name")}>
         Copy File Name
       </ContextMenuItem>
       {relativePath && (
-        <ContextMenuItem onClick={() => navigator.clipboard.writeText(relativePath)}>
+        <ContextMenuItem onClick={() => copyToClipboard(relativePath, "relative path")}>
           Copy Relative Path
         </ContextMenuItem>
       )}
-      <ContextMenuItem onClick={() => navigator.clipboard.writeText(filePath)}>
-        Copy File Path
+      <ContextMenuItem onClick={() => copyToClipboard(filePath, "absolute path")}>
+        Copy Absolute Path
       </ContextMenuItem>
       {isOpenInSupported && <ContextMenuSeparator />}
       <OpenInMenuItems path={filePath} />

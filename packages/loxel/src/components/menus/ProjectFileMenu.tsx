@@ -4,9 +4,12 @@ import {
   FilePlusIcon,
   FolderMinusIcon,
   FolderPlusIcon,
+  FolderRootIcon,
+  FolderTreeIcon,
   PencilIcon,
   ScissorsIcon,
   TrashIcon,
+  TypeIcon,
   Undo2Icon,
 } from "lucide-react";
 
@@ -17,14 +20,19 @@ import {
   ContextMenuSeparator,
   ContextMenuShortcut,
 } from "@/components/ui/context-menu";
+import { copyToClipboard } from "@/lib/clipboard";
 import { FileTypeIcon } from "@/lib/file-icons";
+import { pathName } from "@/lib/project-file-helpers";
 
 import { OpenInMenuItems, isOpenInSupported } from "./OpenInMenuItems";
 
 interface ProjectFileMenuProps {
   open: boolean;
   position: { x: number; y: number };
+  /** Absolute path of the file or folder. */
   filePath: string;
+  /** Path relative to its tree root; "Copy Relative Path" is shown only when set. */
+  relativePath?: string;
   isDir: boolean;
   canPaste?: boolean;
   onClose: () => void;
@@ -44,6 +52,7 @@ export function ProjectFileMenu({
   open,
   position,
   filePath,
+  relativePath,
   isDir,
   canPaste,
   onClose,
@@ -57,7 +66,7 @@ export function ProjectFileMenu({
   onGitRestore,
   onRemoveFromOthers,
 }: ProjectFileMenuProps) {
-  const fileName = filePath.split("/").pop() ?? filePath;
+  const fileName = pathName(filePath);
 
   const hasNewSection = onNewFile || onNewDir;
   const hasRename = !!onRename;
@@ -153,15 +162,45 @@ export function ProjectFileMenu({
         </ContextMenuItem>
       )}
 
-      {isOpenInSupported && (hasNewSection || hasRename || hasClipboard) && (
-        <ContextMenuSeparator />
+      {(hasNewSection || hasRename || hasClipboard) && <ContextMenuSeparator />}
+
+      <ContextMenuItem
+        onClick={() => {
+          onClose();
+          copyToClipboard(fileName, "name");
+        }}
+      >
+        <TypeIcon />
+        Copy Name
+      </ContextMenuItem>
+
+      {relativePath && (
+        <ContextMenuItem
+          onClick={() => {
+            onClose();
+            copyToClipboard(relativePath, "relative path");
+          }}
+        >
+          <FolderTreeIcon />
+          Copy Relative Path
+        </ContextMenuItem>
       )}
+
+      <ContextMenuItem
+        onClick={() => {
+          onClose();
+          copyToClipboard(filePath, "absolute path");
+        }}
+      >
+        <FolderRootIcon />
+        Copy Absolute Path
+      </ContextMenuItem>
+
+      {isOpenInSupported && <ContextMenuSeparator />}
 
       <OpenInMenuItems path={filePath} />
 
-      {(hasRename || hasNewSection || hasClipboard || isOpenInSupported) && onRemoveFromOthers && (
-        <ContextMenuSeparator />
-      )}
+      {onRemoveFromOthers && <ContextMenuSeparator />}
 
       {onRemoveFromOthers && (
         <ContextMenuItem
@@ -175,9 +214,7 @@ export function ProjectFileMenu({
         </ContextMenuItem>
       )}
 
-      {(hasClipboard || isOpenInSupported || onRemoveFromOthers) && hasDestructive && (
-        <ContextMenuSeparator />
-      )}
+      {hasDestructive && <ContextMenuSeparator />}
 
       {onGitRestore && (
         <ContextMenuItem

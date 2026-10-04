@@ -27,6 +27,12 @@ export function findTreeRoot(path: string, roots: Iterable<string>): string | nu
   return best;
 }
 
+/** `path` relative to `root`; undefined when `path` is `root` itself or outside it. */
+export function relativeTo(path: string, root: string): string | undefined {
+  if (!path.startsWith(root + "/")) return undefined;
+  return path.slice(root.length + 1);
+}
+
 export function pathName(path: string): string {
   return path.split("/").pop() ?? path;
 }
