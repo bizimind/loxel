@@ -378,7 +378,6 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
                 {renamingPath === seg.path ? (
                   <InlineRenameInput
                     currentName={seg.name}
-                    isDir
                     onFinish={(newName) => handleFinishRename(seg.path, newName)}
                     onCancel={handleCancelRename}
                   />
@@ -396,7 +395,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         return (
           <InlineRenameInput
             currentName={node.name}
-            isDir={node.isDir}
+            selectBaseName={!node.isDir}
             onFinish={(newName) => handleFinishRename(node.path, newName)}
             onCancel={handleCancelRename}
           />

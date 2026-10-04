@@ -22,6 +22,7 @@ import { SettingsModal } from "./components/settings/SettingsModal";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { LeftToolsBar } from "./components/tools-bar/LeftToolsBar";
 import { RightToolsBar } from "./components/tools-bar/RightToolsBar";
+import { ToastContainer } from "./components/ui/toast";
 import { useDiffSource } from "./hooks/useDiffSource";
 import { useKeybindings } from "./hooks/useKeybindings";
 import { useLoxelEventListeners } from "./hooks/useLoxelEventListeners";
@@ -106,6 +107,7 @@ export default function App() {
       <SearchModal />
       <FileSearchModal />
       <CommandPaletteModal />
+      <ToastContainer />
     </div>
   );
 }
