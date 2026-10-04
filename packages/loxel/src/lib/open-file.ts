@@ -20,23 +20,43 @@ export function parseQueryLocation(raw: string): { search: string; location?: Fi
   return { search: match[1]!, location: { line, column: column ?? 1 } };
 }
 
+/** The kind of center panel that opens a file, by its extension. */
+export type FilePanelType = "editor" | "codeEditor" | "excalidraw" | "media";
+
+export function filePanelType(filePath: string): FilePanelType {
+  if (filePath.endsWith(".md")) return "editor";
+  if (filePath.endsWith(".excalidraw")) return "excalidraw";
+  if (isMediaFile(filePath)) return "media";
+  return "codeEditor";
+}
+
 /** Dispatch the appropriate panel-open event based on file type. */
 export function dispatchOpenFile(filePath: string, location?: FileLocation): void {
-  if (filePath.endsWith(".md")) {
-    dispatchLoxelEvent("loxel-open-markdown-editor", {
-      filePath,
-      line: location?.line,
-      column: location?.column,
-    });
-  } else if (filePath.endsWith(".excalidraw")) {
-    dispatchLoxelEvent("loxel-open-drawing-editor", { filePath });
-  } else if (isMediaFile(filePath)) {
-    dispatchLoxelEvent("loxel-open-media-viewer", { filePath });
-  } else {
-    dispatchLoxelEvent("loxel-open-code-editor", {
-      filePath,
-      line: location?.line,
-      column: location?.column,
-    });
+  const type = filePanelType(filePath);
+  switch (type) {
+    case "editor":
+      dispatchLoxelEvent("loxel-open-markdown-editor", {
+        filePath,
+        line: location?.line,
+        column: location?.column,
+      });
+      break;
+    case "excalidraw":
+      dispatchLoxelEvent("loxel-open-drawing-editor", { filePath });
+      break;
+    case "media":
+      dispatchLoxelEvent("loxel-open-media-viewer", { filePath });
+      break;
+    case "codeEditor":
+      dispatchLoxelEvent("loxel-open-code-editor", {
+        filePath,
+        line: location?.line,
+        column: location?.column,
+      });
+      break;
+    default: {
+      const _exhaustive: never = type;
+      throw new Error(`Unknown file panel type: ${String(_exhaustive)}`);
+    }
   }
 }

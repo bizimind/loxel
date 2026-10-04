@@ -151,6 +151,7 @@ Dockview-powered layout with drag-and-drop arrangement:
 - **Bottom panels**: git graph, terminal container, server logs
 - **Collapsible** with saved dimensions, responsive sidebar collapse via container queries
 - **Per-context persistence** — layout saved and restored per project + worktree combination
+- **Rename from the tab** — right-click a terminal or file tab (code, markdown, Excalidraw, media) → **Rename**, or double-click its title, to edit the name inline (Enter commits, Escape or an unchanged name cancels). A terminal rename changes its tab title, which is saved with the layout. A file rename renames the file on disk like the file tree does, so it is offered for files in the worktree, its Drafts and its Others folders but not for individually opened Others files; the reopened tab keeps its place and active state, and a refused rename (e.g. the name already exists) shows an error toast
 - **Per-panel error boundaries** — every panel is wrapped with a `react-error-boundary` at the registration level (`wrapPanelComponents`), so a render error in one panel shows an inline fallback (panel icon, error message, retry button) without crashing the rest of the app. Errors are logged to the frontend structured logger
 
 ### Status Bar

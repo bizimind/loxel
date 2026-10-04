@@ -5,7 +5,7 @@
  * Zustand stores directly. They are module-level (not React hooks) because
  * they must run outside the React render cycle (event handlers, store actions).
  */
-import type { DockviewApi } from "dockview-react";
+import type { AddPanelOptions, DockviewApi, IDockviewPanel } from "dockview-react";
 
 import * as api from "@/api/client";
 import type { SplitPosition } from "@/components/dockview/default-layout";
@@ -14,7 +14,8 @@ import { renameEditorCacheKey, setEditorContent } from "@/components/editor/Mark
 import { renameDrawingCacheKey } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { frontendLog } from "@/lib/frontend-logger";
-import { isMediaFile } from "@/lib/media-extensions";
+import { filePanelType } from "@/lib/open-file";
+import type { FilePanelType } from "@/lib/open-file";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
@@ -300,16 +301,23 @@ export async function createCodeEditor(options?: {
 
 // -- File-backed panel opener --
 
-/** Open or focus a file-backed center panel, deduplicating by path. */
+/** Where to add a new file-backed panel; defaults to an active tab after the active panel. */
+type FileBackedPlacement = Required<Pick<AddPanelOptions, "position" | "inactive">>;
+
+/**
+ * Open or focus a file-backed center panel, deduplicating by path. Returns the panel, or
+ * undefined when there is no center layout.
+ */
 export function openFileBacked(
-  type: "editor" | "codeEditor" | "excalidraw" | "media",
+  type: FilePanelType,
   filePath: string,
   extra?: { line?: number; column?: number },
-): void {
+  placement?: FileBackedPlacement,
+): IDockviewPanel | undefined {
   const cApi = getCenterApi();
-  if (!cApi) return;
+  if (!cApi) return undefined;
   const def = getCenterPanelDefByType(type);
-  if (!def) return;
+  if (!def) return undefined;
   const panelId = `${def.idPrefix}${filePath}`;
   const existing = cApi.getPanel(panelId);
   if (existing) {
@@ -317,18 +325,19 @@ export function openFileBacked(
     if (extra?.line) {
       existing.api.updateParameters({ line: extra.line, column: extra.column });
     }
-    return;
+    return existing;
   }
   const filename = getDisplayFilename(filePath);
   const worktreePath = useWorktreeStore.getState().activeWorktreePath;
   const ref = cApi.activePanel ?? cApi.panels[0];
-  cApi.addPanel({
+  return cApi.addPanel({
     id: panelId,
     component: def.component,
     tabComponent: def.tabComponent,
     title: filename,
     params: { filePath, worktreePath, ...extra },
     position: ref ? { referencePanel: ref.id, direction: "within" } : undefined,
+    ...placement,
   });
 }
 
@@ -340,30 +349,45 @@ function getPanelFilePath(params: unknown): string | undefined {
   return typeof filePath === "string" ? filePath : undefined;
 }
 
-/** Handle file-moved events: close old panel, migrate caches, reopen at new path. */
+/**
+ * Handle file-moved events: migrate caches and replace the old panel with one for the new path
+ * in the old tab's place. The new tab is visible only if the old one was, and the move never
+ * changes which group is active.
+ */
 export function handleFileMoved(oldPath: string, newPath: string): void {
   const dv = getCenterApi();
   if (!dv) return;
 
   const oldPanel = dv.panels.find((p) => getPanelFilePath(p.params) === oldPath);
+  if (!oldPanel) return;
 
-  if (oldPanel) {
-    renameEditorCacheKey(oldPath, newPath);
-    renameDrawingCacheKey(oldPath, newPath);
-
-    useEditorStateStore.getState().closeFile(oldPath);
+  useEditorStateStore.getState().closeFile(oldPath);
+  // A tab already open on the new path (e.g. for a file deleted outside the app) keeps its own
+  // state; just drop the old tab.
+  if (dv.panels.some((p) => getPanelFilePath(p.params) === newPath)) {
     oldPanel.api.close();
+    return;
+  }
 
-    if (newPath.endsWith(".md")) {
-      openFileBacked("editor", newPath);
-    } else if (newPath.endsWith(".excalidraw")) {
-      openFileBacked("excalidraw", newPath);
-    } else if (isMediaFile(newPath)) {
-      openFileBacked("media", newPath);
+  renameEditorCacheKey(oldPath, newPath);
+  renameDrawingCacheKey(oldPath, newPath);
+
+  // Add the new panel before closing the old one, so a group holding only the old panel
+  // isn't removed from the layout in between.
+  const { group } = oldPanel;
+  const wasVisible = group.activePanel === oldPanel;
+  const newPanel = openFileBacked(filePanelType(newPath), newPath, undefined, {
+    position: { referenceGroup: group, index: group.panels.indexOf(oldPanel) + 1 },
+    inactive: true,
+  });
+  if (newPanel && wasVisible) {
+    if (dv.activeGroup === group) {
+      activatePanel(dv, newPanel);
     } else {
-      openFileBacked("codeEditor", newPath);
+      group.model.openPanel(newPanel, { skipSetGroupActive: true });
     }
   }
+  oldPanel.api.close();
 }
 
 /** Handle file-deleted events: close any open panel for the deleted file/directory. */

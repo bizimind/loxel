@@ -4,10 +4,11 @@ import { BotIcon, BugPlayIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCodingAgentStore } from "@/store/coding-agent";
 
-import { Tab } from "./tab";
+import { Tab, usePanelTitle } from "./tab";
 
 export function CodingAgentTab(props: IDockviewPanelHeaderProps<{ sessionId: string }>) {
   const sessionId = props.params.sessionId;
+  const title = usePanelTitle(props.api);
   const status = useCodingAgentStore((s) => s.sessions[sessionId]?.status ?? "starting");
 
   const dotColor =
@@ -23,7 +24,7 @@ export function CodingAgentTab(props: IDockviewPanelHeaderProps<{ sessionId: str
     <Tab
       api={props.api}
       icon={<BotIcon className="size-3.5 shrink-0" />}
-      title={props.api.title ?? "Agent"}
+      title={title ?? "Agent"}
       leading={<span className={cn("inline-block size-2 shrink-0 rounded-full", dotColor)} />}
       trailing={
         <button
