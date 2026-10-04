@@ -20,6 +20,7 @@ import type { DockviewApi, IDockviewPanel } from "dockview-react";
 import { activatePanel, findAdjacentCenterGroup } from "@/store/layout-actions";
 import type { MoveDirection } from "@/store/layout-actions";
 import type { PanelId } from "@/store/panel-config";
+import { useProjectStore } from "@/store/projects";
 import type { SidebarZone } from "@/store/settings-store";
 import {
   getActiveSidebarPanel,
@@ -264,15 +265,24 @@ function focusSidebarEntry(entry: HTMLElement): void {
   entry.scrollIntoView({ block: "nearest" });
 }
 
-/** Enter the worktree sidebar on the active worktree's entry. */
-function enterWorktrees(): boolean {
+/**
+ * Focus the worktree sidebar entry for `path` if it is shown, else the active worktree's entry,
+ * else the first entry.
+ */
+function focusWorktreeEntry(path: string | null): boolean {
   const entries = sidebarEntries();
   const activePath = useWorktreeStore.getState().activeWorktreePath;
-  const entry =
-    entries.find((e) => e.getAttribute(SIDEBAR_ENTRY_ATTR) === activePath) ?? entries[0];
+  const byPath = (p: string | null) =>
+    entries.find((e) => e.getAttribute(SIDEBAR_ENTRY_ATTR) === p);
+  const entry = byPath(path) ?? byPath(activePath) ?? entries[0];
   if (!entry) return false;
   focusSidebarEntry(entry);
   return true;
+}
+
+/** Enter the worktree sidebar on the active worktree's entry. */
+function enterWorktrees(): boolean {
+  return focusWorktreeEntry(null);
 }
 
 /** Move the worktree sidebar cursor one entry up or down. */
@@ -368,4 +378,35 @@ export function moveFocus(direction: MoveDirection): void {
   ) {
     if (enterArea(AREA_ORDER[i]!, from)) return;
   }
+}
+
+/**
+ * Collapse or expand the area holding focus (`sidebar.toggleFocused`): the worktree sidebar, or
+ * the side zone of the focused panel / tool bar icon. Focus stays put — on the same sidebar entry
+ * (the active worktree's if the collapsed rail hides it), on the icon of a collapsed zone, or in
+ * the content of an expanded one. The center has nothing to collapse.
+ */
+export function toggleFocusedArea(): void {
+  const area = currentArea();
+  if (area.kind === "worktrees") {
+    const entryPath =
+      document.activeElement
+        ?.closest(`[${SIDEBAR_ENTRY_ATTR}]`)
+        ?.getAttribute(SIDEBAR_ENTRY_ATTR) ?? null;
+    useProjectStore.getState().toggleSidebar();
+    afterLayout(() => focusWorktreeEntry(entryPath));
+    return;
+  }
+  if (area.kind !== "bar" || !area.panelId) return;
+
+  const zone = getSidebarPanelZone(area.panelId);
+  if (!zone) return;
+  const visible = getActiveSidebarPanel(zone);
+  if (visible === null) {
+    togglePanel(area.panelId);
+    focusSidebarPanel(area.panelId);
+    return;
+  }
+  togglePanel(visible);
+  focusToolbarIcon(area.panelId);
 }

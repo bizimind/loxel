@@ -6,7 +6,7 @@ import type { IDockviewPanel } from "dockview-react";
 import { useCallback } from "react";
 
 import type { SplitPosition } from "@/components/dockview/default-layout";
-import { moveFocus, toggleSidebarPanel } from "@/lib/focus-navigation";
+import { moveFocus, toggleFocusedArea, toggleSidebarPanel } from "@/lib/focus-navigation";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
@@ -253,6 +253,9 @@ export function useActionHandler(): (actionId: ActionId) => void {
       // -- Worktree sidebar expand/collapse --
       case "sidebar.worktree.toggle":
         useProjectStore.getState().toggleSidebar();
+        break;
+      case "sidebar.toggleFocused":
+        toggleFocusedArea();
         break;
 
       // -- Navigation --

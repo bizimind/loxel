@@ -53,6 +53,7 @@ export type ActionId =
   | "nav.openFile"
   | "nav.recentNotification"
   | "sidebar.worktree.toggle"
+  | "sidebar.toggleFocused"
   | "worktree.back"
   | "worktree.forward"
   | "worktree.new"
@@ -188,6 +189,11 @@ export const ACTIONS: readonly ActionDef[] = [
 
   // Sidebar collapse
   { id: "sidebar.worktree.toggle", label: "Toggle Worktree Sidebar", category: "sidebar" },
+  {
+    id: "sidebar.toggleFocused",
+    label: "Collapse/Expand Focused Sidebar or Panel",
+    category: "sidebar",
+  },
 
   // Worktree management
   { id: "worktree.back", label: "Go Back to Previous Worktree", category: "worktree" },

@@ -113,6 +113,8 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "toggle.logs": ["Ctrl+Shift+L"],
   "toggle.forkTree": ["Ctrl+Shift+K"],
   "sidebar.worktree.toggle": ["Ctrl+Alt+B"],
+  // Context-aware: collapses/expands the worktree sidebar or side zone that holds focus
+  "sidebar.toggleFocused": ["Ctrl+Shift+Space"],
   "nav.project": ["Cmd+Alt+P"],
   "nav.worktree": ["Cmd+Alt+W"],
   "nav.commandPalette": ["Cmd+Shift+P"],
