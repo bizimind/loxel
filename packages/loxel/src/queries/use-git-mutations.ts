@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import * as api from "@/api/client";
-import { queryKeys } from "@/queries/query-keys";
+import { isWorkingTreeDiffKey, queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
 import { getActiveWt } from "@/store/active-worktree";
 
@@ -46,6 +46,24 @@ export function useDiscardChangesMutation() {
         queryKey: queryKeys.status(activeProjectPath, activeWorktreePath),
       });
       queryClient.invalidateQueries({ queryKey: ["diff"] });
+    },
+  });
+}
+
+/** Discard all local changes to files of a worktree (not necessarily the active one). */
+export function useRevertToHeadMutation() {
+  const queryClient = useQueryClient();
+  const { activeProjectPath } = useQueryScope();
+
+  return useMutation({
+    mutationFn: ({ worktree, files }: { worktree: string; files: string[] }) =>
+      api.revertToHead(worktree, files),
+    onSuccess: (_data, { worktree }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.status(activeProjectPath, worktree) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.worktreeStatuses(activeProjectPath) });
+      queryClient.invalidateQueries({
+        predicate: (query) => isWorkingTreeDiffKey(query.queryKey, activeProjectPath),
+      });
     },
   });
 }

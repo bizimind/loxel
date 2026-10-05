@@ -854,7 +854,19 @@ async function handleDiscard(req: Request, ctx: RouteContext): Promise<Response>
   const resolved = resolveProjectFromBody(body, ctx);
   if (resolved instanceof Response) return resolved;
   const files = requireStringArray(body, "files");
+  await git.validateWorktreePath(resolved.wtPath, resolved.cwd);
   await git.discardChanges(resolved.wtPath, files);
+  return json({ success: true });
+}
+
+// POST /api/revert-to-head — discard all local changes (staged, unstaged, untracked) to files
+async function handleRevertToHead(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const resolved = resolveProjectFromBody(body, ctx);
+  if (resolved instanceof Response) return resolved;
+  const files = requireStringArray(body, "files");
+  await git.validateWorktreePath(resolved.wtPath, resolved.cwd);
+  await git.revertToHead(resolved.wtPath, files);
   return json({ success: true });
 }
 
@@ -2947,6 +2959,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/branch/delete": handleBranchDelete,
     "/api/branch/rename": handleBranchRename,
     "/api/discard": handleDiscard,
+    "/api/revert-to-head": handleRevertToHead,
     "/api/stage-hunk": handleStageHunk,
     "/api/unstage-hunk": handleUnstageHunk,
     "/api/file-write": handleFileWrite,

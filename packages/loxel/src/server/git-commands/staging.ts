@@ -1,6 +1,7 @@
 import { $ } from "bun";
 
 import { logger } from "../logger";
+import { SUBMODULE_GITLINK_ONLY, readOnlyGitEnv } from "./git-env";
 import { validatePath } from "./validation";
 
 const log = logger.child("git");
@@ -58,4 +59,58 @@ export async function discardChanges(cwd: string, files: string[]): Promise<void
     validatePath(file);
   }
   await $`git -C ${cwd} checkout -- ${files}`.quiet();
+}
+
+/**
+ * Make files match HEAD again, discarding their staged and unstaged changes alike: tracked files
+ * (including both sides of a staged rename, and staged deletions) are restored from HEAD, files
+ * HEAD doesn't have are removed from the index and deleted, and untracked files are deleted.
+ *
+ * `files` are relative to the worktree root. Each is classified by git's own status, so a path
+ * that already matches HEAD (e.g. a diff that went stale) is skipped instead of failing the batch.
+ * Paths are literal (no glob matching), so a name like `*.ts` never touches other files.
+ */
+export async function revertToHead(cwd: string, files: string[]): Promise<void> {
+  if (files.length === 0) return;
+  log.debug(`Reverting ${files.length} file(s) to HEAD`);
+  for (const file of files) {
+    validatePath(file);
+  }
+
+  const requested = new Set(files);
+  const tracked: string[] = [];
+  const untracked: string[] = [];
+  const status = await runGit(
+    $`git -C ${cwd} ${SUBMODULE_GITLINK_ONLY} status --porcelain -z --untracked-files=all --no-renames`.env(
+      readOnlyGitEnv(),
+    ),
+    "git status",
+  );
+  for (const entry of status.split("\0")) {
+    const file = entry.slice(3);
+    if (!requested.has(file)) continue;
+    (entry.startsWith("??") ? untracked : tracked).push(file);
+  }
+
+  if (tracked.length > 0) {
+    await runGit(
+      $`git --literal-pathspecs -C ${cwd} restore --source=HEAD --staged --worktree --pathspec-from-file=- --pathspec-file-nul < ${Buffer.from(tracked.join("\0"))}`,
+      "git restore",
+    );
+  }
+  if (untracked.length > 0) {
+    await runGit(
+      $`git --literal-pathspecs -C ${cwd} clean --force --quiet -- ${untracked}`,
+      "git clean",
+    );
+  }
+}
+
+/** Run a git command, failing with its stderr (rather than just the exit code) and returning stdout. */
+async function runGit(command: $.ShellPromise, name: string): Promise<string> {
+  const result = await command.nothrow().quiet();
+  if (result.exitCode !== 0) {
+    throw new Error(`${name} failed: ${result.stderr.toString().trim()}`);
+  }
+  return result.stdout.toString();
 }

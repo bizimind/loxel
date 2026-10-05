@@ -33,6 +33,12 @@ const DEFAULT_SEARCH_FILTERS: SearchFilters = {
   paths: "",
 };
 
+/** A project files panel reveal request; `expand` also expands the revealed folder. */
+export interface PendingReveal {
+  path: string;
+  expand: boolean;
+}
+
 interface WorktreeUIState {
   // Branches panel collapse & side (used by GraphPanel's inner dockview)
   branchesPanelCollapsed: boolean;
@@ -72,11 +78,12 @@ interface WorktreeUIState {
   /** Update selected file when a path is renamed or moved. */
   renameProjectPaths: (oldPrefix: string, newPrefix: string) => void;
   /**
-   * A folder the project files panel should reveal and expand as soon as its tree can show it —
-   * set across a worktree switch, or before a newly opened Others folder is listed.
+   * A path the project files panel should reveal (and, for `expand`, expand) as soon as its tree
+   * can show it and the panel is mounted — set across a worktree switch, before a newly opened
+   * Others folder is listed, or while the panel is being shown.
    */
-  pendingRevealFolder: string | null;
-  setPendingRevealFolder: (path: string | null) => void;
+  pendingReveal: PendingReveal | null;
+  setPendingReveal: (reveal: PendingReveal | null) => void;
   /**
    * Files to open once this worktree's editor area is mounted — queued across a worktree switch,
    * or while the window is still launching. Taken by the center layout when it mounts.
@@ -127,8 +134,8 @@ export const {
       return { expandedProjectFolders: next };
     }),
   setExpandedProjectFolders: (folders) => set({ expandedProjectFolders: new Set(folders) }),
-  pendingRevealFolder: null,
-  setPendingRevealFolder: (path) => set({ pendingRevealFolder: path }),
+  pendingReveal: null,
+  setPendingReveal: (reveal) => set({ pendingReveal: reveal }),
   pendingOpenFiles: [],
   queueOpenFile: (path) => set((s) => ({ pendingOpenFiles: [...s.pendingOpenFiles, path] })),
   takePendingOpenFiles: () => {
