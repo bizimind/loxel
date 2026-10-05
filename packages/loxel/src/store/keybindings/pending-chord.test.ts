@@ -143,13 +143,16 @@ describe("context-dependent actions", () => {
       next: noop,
       previous: noop,
     });
-    expect(resolveKeystroke(key("Cmd+F"))).toEqual({ kind: "action", actionId: "find.open" });
-    expect(resolveKeystroke(key("Cmd+G"))).toEqual({ kind: "action", actionId: "find.next" });
-    expect(resolveKeystroke(key("Cmd+Shift+G"))).toEqual({
-      kind: "action",
-      actionId: "find.previous",
-    });
-    unregister();
+    try {
+      expect(resolveKeystroke(key("Cmd+F"))).toEqual({ kind: "action", actionId: "find.open" });
+      expect(resolveKeystroke(key("Cmd+G"))).toEqual({ kind: "action", actionId: "find.next" });
+      expect(resolveKeystroke(key("Cmd+Shift+G"))).toEqual({
+        kind: "action",
+        actionId: "find.previous",
+      });
+    } finally {
+      unregister();
+    }
     expect(resolveKeystroke(key("Cmd+F"))).toEqual({ kind: "unbound" });
   });
 });

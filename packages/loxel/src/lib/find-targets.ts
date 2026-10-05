@@ -2,8 +2,7 @@
  * Registry of find-in-panel handlers, keyed by the panel's root element.
  *
  * The `find.*` actions (⌘F, ⌘G, ⇧⌘G) apply to whichever registered panel holds keyboard focus,
- * and are disabled everywhere else so the key reaches widgets with their own find (Monaco, the
- * markdown editor, …).
+ * and are disabled everywhere else so the key reaches the focused widget (e.g. Monaco's own find).
  */
 
 export interface FindHandlers {

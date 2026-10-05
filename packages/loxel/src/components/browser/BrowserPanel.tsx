@@ -116,14 +116,18 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
   const findRequestRef = useRef(0);
+  // Set when the page changed (or wasn't ready) since the last search: the next step must start a
+  // new find session, since Chromium's session belongs to the previous document.
+  const findSessionStaleRef = useRef(true);
   const { barProps: findBarProps, setMatches: setFindMatches } = usePanelFind(rootRef, {
     find: (query, direction, newQuery) => {
       const webview = webviewRef.current;
       if (!webview || !readyRef.current) return;
       findRequestRef.current = webview.findInPage(query, {
         forward: direction === "next",
-        findNext: newQuery,
+        findNext: newQuery || findSessionStaleRef.current,
       });
+      findSessionStaleRef.current = false;
     },
     clear: () => {
       if (readyRef.current) webviewRef.current?.stopFindInPage("clearSelection");
@@ -151,7 +155,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     panelApi,
     useCallback(() => {
       const webview = webviewRef.current;
-      if (!webview || webview.parentElement?.contains(document.activeElement)) return;
+      if (!webview || rootRef.current?.contains(document.activeElement)) return;
       webview.focus();
     }, []),
   );
@@ -188,7 +192,11 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     };
 
     const onDidNavigate = (event: WebviewNavigateEvent) => {
-      if (event.type === "did-navigate") setFindMatches(null); // a new page drops the matches
+      if (event.type === "did-navigate") {
+        // A new page drops the matches and the find session.
+        setFindMatches(null);
+        findSessionStaleRef.current = true;
+      }
       setCurrentUrl(event.url);
       setInputUrl(event.url);
       panelApi.updateParameters({ url: event.url, faviconUrl: undefined });

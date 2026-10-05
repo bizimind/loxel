@@ -102,16 +102,23 @@ export function useKeybindings(): void {
       if (state.steps.length > 0 !== prev.steps.length > 0) syncWebviewInterception();
     });
     syncWebviewInterception();
+    // Focus moving into a <webview> fires no focusin here, only a focusout (from a focused
+    // element) or a window blur (from <body>), and activeElement updates after those events.
+    const syncAfterFocusLeaves = () => setTimeout(syncWebviewInterception, 0);
 
     // Capture phase ensures this fires before component-level handlers
     document.addEventListener("keydown", handleKeyDown, true);
     // Context-dependent actions change which keys a focused webview should give up.
     document.addEventListener("focusin", syncWebviewInterception);
+    document.addEventListener("focusout", syncAfterFocusLeaves);
     window.addEventListener("blur", cancelPendingChord);
+    window.addEventListener("blur", syncAfterFocusLeaves);
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
       document.removeEventListener("focusin", syncWebviewInterception);
+      document.removeEventListener("focusout", syncAfterFocusLeaves);
       window.removeEventListener("blur", cancelPendingChord);
+      window.removeEventListener("blur", syncAfterFocusLeaves);
       offWebviewKeystroke?.();
       offLookup();
       offChord();

@@ -32,6 +32,7 @@ export function FindBar({
   onClose,
 }: FindBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const matchLabel = query ? formatMatches(matches) : "";
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -64,10 +65,8 @@ export function FindBar({
         spellCheck={false}
         className="border-border text-foreground placeholder:text-muted-foreground h-6 w-48 rounded border bg-transparent px-2 text-xs focus:outline-none"
       />
-      {query && (
-        <span className="text-muted-foreground px-1 text-xs tabular-nums">
-          {formatMatches(matches)}
-        </span>
+      {matchLabel && (
+        <span className="text-muted-foreground px-1 text-xs tabular-nums">{matchLabel}</span>
       )}
       <FindBarButton onClick={onPrevious} title="Previous match (⇧⏎)">
         <ChevronUpIcon className="size-3.5" />
@@ -101,6 +100,8 @@ function FindBarButton({
     <button
       type="button"
       onClick={onClick}
+      // Keep focus in the input so Enter and Escape keep working after a click.
+      onMouseDown={(e) => e.preventDefault()}
       title={title}
       aria-label={title}
       className="text-muted-foreground hover:text-foreground hover:bg-muted flex size-6 cursor-pointer items-center justify-center rounded"
