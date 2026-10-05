@@ -10,7 +10,9 @@ Loxel's integrated terminals are full PTY sessions. Open as many as you need, ru
 
 ## Opening a terminal
 
-Press `Cmd+T` to open a new terminal tab. There is no limit on the number of terminals. Like any panel, terminals can be docked, split, or moved anywhere in your layout.
+Press `Cmd+T` (or `` Ctrl+Shift+` ``) to open a new terminal tab. There is no limit on the number of terminals. Like any panel, terminals can be docked, split, or moved anywhere in your layout.
+
+To rename a terminal, double-click its tab title, or right-click the tab and choose **Rename**. The name is saved with the layout.
 
 ---
 
@@ -27,6 +29,18 @@ The scrollback buffer is held server-side. Default: **3,000 lines**. Adjust it i
 ## Find
 
 Press `Cmd+F` in a terminal to search its output and scrollback. Matches are highlighted as you type; `Enter` / `Shift+Enter` (or `Cmd+G` / `Cmd+Shift+G`) jump to the next / previous match, and `Esc` closes the find bar. Reopening it keeps your last search.
+
+---
+
+## Links
+
+`Cmd`-click a file path in terminal output to open it in the editor. Paths starting with `/`, `./`, `../` or `~/` are always clickable; bare names like `src/index.ts` are clickable when they match a file in the project. A `:line` or `:line:col` suffix jumps to that position. `Cmd`-click a URL to open it in a loxel browser panel; a plain click opens it in your default browser.
+
+---
+
+## Notifications
+
+Terminal programs can raise loxel notifications with the OSC 9 (iTerm2), OSC 777 (rxvt-unicode) and OSC 99 (Kitty) escape sequences; choose which ones loxel listens to in **Settings > Terminal**. Notifications appear under the bell in the top bar and as a dot on the worktree in the sidebar. Press `` Ctrl+` `` to jump to the panel that raised the most recent one.
 
 ---
 
@@ -53,12 +67,10 @@ Every loxel terminal starts with four environment variables already set:
 
 ## The `loxel` CLI inside a terminal
 
-From any loxel terminal, run `loxel` with a file path to open that file in the active loxel window:
+From any loxel terminal, run `loxel` with a file path to open that file in the window that terminal belongs to:
 
 ```bash
 loxel src/app.ts
-loxel src/app.ts:42        # jump to line 42
-loxel src/app.ts:42:8      # jump to line 42, column 8
 ```
 
 Pass a folder to reveal it in the file tree. A folder outside every project opens in the [Others section](/docs/editor#other-folders):
@@ -81,7 +93,7 @@ Because the terminal already has `LOXEL_PORT` set, the CLI locates the running s
 
 ## TUI agents
 
-Any terminal-based coding agent runs normally in loxel terminals. Claude Code, Codex, OpenCode, and Gemini CLI all work without special configuration. They inherit `LOXEL_WORKTREE`, which gives them the current worktree path as immediate context — no need to `cd` or pass a path manually.
+Any terminal-based coding agent runs normally in loxel terminals. Claude Code, Codex, OpenCode, and Gemini CLI all work without special configuration. They inherit `LOXEL_WORKTREE`, which gives them the current worktree path as immediate context — no need to `cd` or pass a path manually. `Shift+Enter` and `Ctrl+Enter` send the modified-Enter sequences these agents use to insert a newline instead of submitting.
 
 These are distinct from loxel's built-in coding agent, which has a dedicated timeline UI and runs outside the terminal. If you want the timeline, human interaction overlays, and structured tool calls integrated into your layout, see [Coding Agent](/docs/coding-agent). If you have an existing TUI agent workflow or want full CLI control, run it in a terminal here.
 

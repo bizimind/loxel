@@ -1,40 +1,75 @@
 # coding-agent
 
-`coding-agent` is a programmatic, event-sourced coding agent runtime for newline-delimited JSON protocols over stdio.
+`@bizimind/coding-agent` is a programmatic, event-sourced coding agent runtime. It runs tool-calling agent loops against OpenRouter models, with plan mode, human questions, approval gates, and persistent sessions that can be resumed, rewound, forked, and compacted. There is no TUI: hosts drive it either in-process through the SDK or as a subprocess speaking newline-delimited JSON over stdio. The loxel app's Coding Agent panel uses the in-process `Session` API.
 
-- No TUI assumptions.
-- CLI and SDK use the same runtime core.
-- Session reconstruction is strict and event-driven (`events.jsonl` is canonical).
+- CLI and SDK share the same runtime core.
+- Each session's `events.jsonl` is the source of truth; session state is rebuilt by strict replay of that log.
 
-Source of truth: [`./src/index.ts`](./src/index.ts)
+Further docs:
+
+- [Design spec](./docs/SPEC.md): protocol, tool contracts, plan mode, approvals, prompt layering, agent loop, and session semantics, with rationale.
 
 ## Install and run
 
-From repo root:
+From the repo root:
 
 ```bash
-bun install
-bun run --cwd packages/coding-agent dev
+pnpm install
+bun packages/coding-agent/src/cli.ts agent run      # start the stdio JSON protocol server
+pnpm -C packages/coding-agent run build             # standalone binary at dist/coding-agent
 ```
 
-The server reads one JSON request per line from stdin and emits one JSON event per line to stdout.
-
-Source of truth: [`./src/cli.ts`](./src/cli.ts)
+The protocol server reads one JSON request per line from stdin and writes one JSON event per line to stdout.
 
 ## CLI commands
 
-- `coding-agent agent run`: start JSON-stream protocol server.
+- `coding-agent agent run [--no-log]`: start the stdio JSON protocol server. Logs go to Axiom when `AXIOM_TOKEN` and `AXIOM_DATASET` are set (never to stdout); `--no-log` disables logging.
 - `coding-agent session list`: list known sessions.
 - `coding-agent session get --session-id <id>`: inspect one session.
-- `coding-agent session resume --session-id <id> [--message-id <id>]`: resume, optionally rewind to a message id.
-- `coding-agent session fork --session-id <id> [--message-id <id>]`: fork into a new session id.
-- `coding-agent session compact --session-id <id>`: compact active context.
+- `coding-agent session resume --session-id <id> [--message-id <id>]`: load a session, optionally rewinding to a message.
+- `coding-agent session fork --session-id <id> [--message-id <id>]`: fork into a new session, optionally at a message.
+- `coding-agent session compact --session-id <id>`: compact the active context.
+
+The `session` commands accept `-j, --json` for JSON output.
 
 Source of truth: [`./src/cli.ts`](./src/cli.ts)
 
-## Quickstart (CLI protocol)
+## SDK
 
-### 1) Start a session
+The package root exports the runtime. [`./src/index.ts`](./src/index.ts) lists the full public surface.
+
+- `Session`: the recommended in-process API. `Session.create(config)` and `Session.resume(id, config)` return a session with `send()` (resolves with the final text when the run completes, accepts an `AbortSignal`), `rewind()`, `fork()`, `compact()`, and `destroy()`. `config.handlers` must name a handler (or `null`) for every event type. `withAutoApprove()` fills in the rest and auto-allows approvals.
+- `CodingAgentSession` / `CodingAgentRuntime`: lower-level wrappers that take raw protocol requests and emit raw protocol events. Use them for protocol bridges.
+- `SessionStore`, `PermissionStore`, tool schemas and registry, and loop-control helpers are exported for direct use.
+
+```ts
+import { Session, withAutoApprove } from "@bizimind/coding-agent";
+
+const session = await Session.create({
+  workspaceRoot: process.cwd(),
+  profile: "execute",
+  handlers: withAutoApprove({ "run.delta": (event) => process.stdout.write(event.text) }),
+});
+
+const result = await session.send("Read package.json and summarize scripts");
+session.destroy();
+```
+
+`@bizimind/coding-agent/schemas` ([`./src/schemas.ts`](./src/schemas.ts)) exports only Zod schemas and types with no Node.js dependencies, so browser builds can import it.
+
+Source of truth: [`./src/session/session-types.ts`](./src/session/session-types.ts), [`./src/sdk.ts`](./src/sdk.ts)
+
+## Protocol (stdio JSON stream)
+
+Requests: `session.start`, `session.input`, `session.cancel`, `session.close`, `session.resume`, `session.compact`, `session.fork`, `session.list`, `session.get`, `human.input.response`, `approval.response`.
+
+Every event shares one envelope: `type`, `session_id`, `timestamp`, `payload`, plus optional `request_id` and `run_id`. The main event families are `session.*`, `run.*` (including `run.delta` and per-step `run.step.*`), `tool.call.*`, `human.input.*`, `approval.*`, `plan.*`, `todo.updated`, `context.compaction.*`, and `runtime.warning` / `runtime.error`. If an input line fails to parse or validate, the CLI emits a `run.failed` event with `session_id: "unknown"`.
+
+Source of truth: [`./src/protocol/schemas.ts`](./src/protocol/schemas.ts), [`./src/orchestrator/runtime.ts`](./src/orchestrator/runtime.ts)
+
+### Example exchange
+
+Start a session:
 
 ```json protocol-request
 {
@@ -62,7 +97,7 @@ Source of truth: [`./src/cli.ts`](./src/cli.ts)
 }
 ```
 
-### 2) Send user input
+Send user input:
 
 ```json protocol-request
 {
@@ -85,7 +120,7 @@ Source of truth: [`./src/cli.ts`](./src/cli.ts)
 }
 ```
 
-### 3) Answer a human question (if requested)
+Answer a human question (`human.input.requested`):
 
 ```json protocol-request
 {
@@ -99,7 +134,7 @@ Source of truth: [`./src/cli.ts`](./src/cli.ts)
 }
 ```
 
-### 4) Answer an approval request (if requested)
+Answer an approval request (`approval.requested`):
 
 ```json protocol-request
 {
@@ -113,244 +148,47 @@ Source of truth: [`./src/cli.ts`](./src/cli.ts)
 }
 ```
 
-Note: invalid/unknown inbound lines are surfaced by the CLI host as `run.failed` events with `session_id: "unknown"`.
-
-Source of truth:
-
-- [`./src/protocol/schemas.ts`](./src/protocol/schemas.ts)
-- [`./src/cli.ts`](./src/cli.ts)
-
-## Protocol reference (concise)
-
-Supported request types:
-
-- `session.start`
-- `session.input`
-- `session.cancel`
-- `session.close`
-- `session.resume`
-- `session.compact`
-- `session.fork`
-- `session.list`
-- `session.get`
-- `human.input.response`
-- `approval.response`
-
-Important event families:
-
-- Session lifecycle: `session.started`, `session.resumed`, `session.rewound`, `session.forked`, `session.listed`, `session.got`
-- Run lifecycle: `run.started`, `run.completed`, `run.failed`, `run.cancelled`
-- Tooling/human approval: `tool.call.requested`, `tool.call.result`, `human.input.requested`, `human.input.response`, `approval.requested`, `approval.granted`, `approval.denied`
-- Planning/context: `plan.*`, `context.compaction.*`
-- Diagnostics: `runtime.warning`, `runtime.error`
-
-Source of truth:
-
-- [`./src/protocol/schemas.ts`](./src/protocol/schemas.ts)
-- [`./src/orchestrator/runtime.ts`](./src/orchestrator/runtime.ts)
-
-## SDK usage
-
-```ts
-import {
-  CodingAgentRuntime,
-  SessionStore,
-  type ProtocolEvent,
-  type ProtocolRequest,
-} from "coding-agent";
-
-const events: ProtocolEvent[] = [];
-const runtime = new CodingAgentRuntime({
-  emit: async (event) => {
-    events.push(event);
-  },
-});
-
-runtime.on("error", (diagnostic) => {
-  console.error("runtime diagnostic", diagnostic.code, diagnostic.message);
-});
-
-const startReq: ProtocolRequest = {
-  type: "session.start",
-  request_id: "req_sdk_start",
-  workspace_root: process.cwd(),
-  profile: "execute",
-};
-await runtime.handleRequest(startReq);
-
-const started = events.find((event) => event.type === "session.started");
-const sessionId = String(started?.payload.session_id ?? "");
-
-await runtime.handleRequest({
-  type: "session.input",
-  request_id: "req_sdk_input",
-  session_id: sessionId,
-  messages: [{ role: "user", content: "Run ToolSearch for read tools" }],
-});
-
-// Direct session operations (without protocol server)
-const store = new SessionStore();
-const summary = await store.listSessions();
-const active = await store.loadSession(sessionId);
-const forked = await store.fork(sessionId);
-const compacted = await store.compact(sessionId);
-```
-
-Source of truth: [`./src/index.ts`](./src/index.ts)
-
 ## Tools and profiles
 
-Canonical tools:
+Tools use Claude Code's names and input shapes: `Read`, `Edit`, `Write`, `MultiEdit`, `Glob`, `Grep`, `Bash`, `WebFetch`, `WebSearch`, `AskUserQuestion`, `EnterPlanMode`, `ExitPlanMode`, `Task`, `TaskOutput`, `TaskStop`, `TodoWrite`, `TodoRead`, `ToolSearch`, `Skill`. Legacy names (`WriteTodo`, `ReadTodo`, `ShellOutput`, `BashOutput`, `KillShell`) are accepted as input aliases.
 
-- File operations: `Read`, `Edit`, `Write`, `MultiEdit`
-- Search/discovery: `Glob`, `Grep`, `ToolSearch`
-- Command/task: `Bash`, `Task`, `TaskOutput`, `TaskStop`
-- Web: `WebFetch`, `WebSearch`
-- Human/plan/todo: `AskUserQuestion`, `EnterPlanMode`, `ExitPlanMode`, `TodoWrite`, `TodoRead`
-- Extensions: `Skill`
+| Profile   | Tools                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------- |
+| `execute` | Full catalog, subject to approvals                                                           |
+| `plan`    | No `Bash`, `TodoWrite`, or `Skill`; `Edit`/`Write`/`MultiEdit` only on the session plan file |
+| `minimal` | `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `AskUserQuestion`, `ToolSearch`, `TodoRead` |
 
-Profiles:
+If `session.start` includes `declared_tools`, the session only exposes tools that are both in the profile and in that list.
 
-- `execute`: full tool set (subject to permissions and declared tools).
-- `plan`: no execution shell; read/search everywhere; write/edit limited to plan file path policy.
-- `minimal`: restricted read/search + ask-user oriented set.
+Source of truth: [`./src/tools/schemas.ts`](./src/tools/schemas.ts), [`./src/tools/profile.ts`](./src/tools/profile.ts), [`./src/tools/tool-names.ts`](./src/tools/tool-names.ts)
 
-Aliases accepted on input:
+## Sessions, state, and permissions
 
-- `WriteTodo` -> `TodoWrite`
-- `ReadTodo` -> `TodoRead`
-- `ShellOutput` -> `TaskOutput`
-- `BashOutput` -> `TaskOutput`
-- `KillShell` -> `TaskStop`
+State lives under `~/.local/state/loxel/coding-agent/` (override with `CODING_AGENT_STATE_ROOT`): `sessions/<id>/events.jsonl` plus artifacts, project and session permission files under `permissions/`, and plan files under `plans/` (kept outside the workspace). Replay is strict: a malformed `events.jsonl` makes `session.get`, `session.list`, and `session.resume` fail instead of skipping the bad entries.
 
-Declared tools:
+- Rewind branches the history at a message and restores agent state (context, plan, todos, reminders) at that point. It does not undo filesystem side effects or permissions.
+- Fork copies the full event timeline into a new session ID.
+- Compact replaces the active context with a summary and keeps the full history available for rewind.
 
-- If `declared_tools` is provided at `session.start`, runtime intersects profile tools with declared capabilities.
+Approval decisions: `allow` and `deny` apply once, `allow_this_session` is saved to the session's permission file, and `allow_always` is saved to the project's permission file.
 
-Source of truth:
+Source of truth: [`./src/session/store.ts`](./src/session/store.ts), [`./src/state/layout.ts`](./src/state/layout.ts), [`./src/permissions/store.ts`](./src/permissions/store.ts)
 
-- [`./src/tools/schemas.ts`](./src/tools/schemas.ts)
-- [`./src/tools/profile.ts`](./src/tools/profile.ts)
-- [`./src/tools/capabilities.ts`](./src/tools/capabilities.ts)
-- [`./src/tools/tool-names.ts`](./src/tools/tool-names.ts)
+## Configuration
 
-## Session and state behavior
+SDK hosts can pass models and API keys in `SessionConfig.models` / `CodingAgentSessionOptions.models`. Without them, the runtime reads these environment variables:
 
-Guarantees:
+| Variable                              | Default                             | Effect                                                         |
+| ------------------------------------- | ----------------------------------- | -------------------------------------------------------------- |
+| `OPENROUTER_API_KEY`                  | none (required)                     | OpenRouter auth for model calls and `WebSearch`.               |
+| `OPENROUTER_MODEL_PLANNER`            | `z-ai/glm-5`                        | Planner profile model.                                         |
+| `OPENROUTER_MODEL_EXECUTOR`           | `moonshotai/kimi-k2.5`              | Executor profile model.                                        |
+| `OPENROUTER_MODEL_FALLBACK`           | `openrouter/auto`                   | Fallback profile model.                                        |
+| `OPENROUTER_MODEL_JUDGE`              | `anthropic/claude-3-haiku`          | Model that checks whether a long run is still making progress. |
+| `OPENROUTER_WEBSEARCH_MODEL`          | none (required for `WebSearch`)     | Model used for `WebSearch` (OpenRouter web plugin).            |
+| `OPENROUTER_WEBSEARCH_FALLBACK_MODEL` | none                                | Model to retry `WebSearch` with if the primary model fails.    |
+| `CODING_AGENT_STATE_ROOT`             | `~/.local/state/loxel/coding-agent` | Override the state root.                                       |
+| `CODING_AGENT_COST_INPUT_USD_PER_M`   | none                                | Input token price used for cost estimates in `run.completed`.  |
+| `CODING_AGENT_COST_OUTPUT_USD_PER_M`  | none                                | Output token price used for cost estimates in `run.completed`. |
 
-- `events.jsonl` is the strict source of truth for session reconstruction.
-- Replay is strict; malformed JSONL/event payloads fail reconstruction.
-- `rewind` creates a branch and restores agent-controlled state at target message.
-- `fork` clones full source event timeline into a new `sessionId`.
-- `compact` does summarize+replace for active context while preserving full rewindable history.
-- Plan files are global under state root `/plans` (outside workspace).
-
-Default state root:
-
-- `~/.local/state/loxel/coding-agent/`
-
-Layout (high-level):
-
-- `settings.json`
-- `permissions/project/*.json`
-- `permissions/session/*.json`
-- `plans/*.md`
-- `sessions/<sessionId>/events.jsonl`
-- `sessions/<sessionId>/artifacts/*`
-
-Source of truth:
-
-- [`./src/session/store.ts`](./src/session/store.ts)
-- [`./src/state/layout.ts`](./src/state/layout.ts)
-
-## Permissions and approval semantics
-
-Approval decisions:
-
-- `allow`
-- `allow_this_session`
-- `allow_always`
-- `deny`
-
-Persistence behavior:
-
-- `allow` and `deny`: not persisted.
-- `allow_this_session`: persisted in session permission file.
-- `allow_always`: persisted in project permission file.
-
-Source of truth:
-
-- [`./src/permissions/model.ts`](./src/permissions/model.ts)
-- [`./src/permissions/store.ts`](./src/permissions/store.ts)
-
-## Configuration (environment variables)
-
-| Variable                              | Required              | Default                             | Effect                                                      |
-| ------------------------------------- | --------------------- | ----------------------------------- | ----------------------------------------------------------- |
-| `OPENROUTER_API_KEY`                  | Yes (model/web calls) | none                                | OpenRouter auth for model routing and WebSearch.            |
-| `OPENROUTER_MODEL_PLANNER`            | No                    | `z-ai/glm-5`                        | Planner profile model id.                                   |
-| `OPENROUTER_MODEL_EXECUTOR`           | No                    | `moonshotai/kimi-k2.5`              | Executor profile model id.                                  |
-| `OPENROUTER_MODEL_FALLBACK`           | No                    | `openrouter/auto`                   | Fallback profile model id.                                  |
-| `OPENROUTER_WEBSEARCH_MODEL`          | Yes (WebSearch)       | none                                | Primary model for web plugin search calls.                  |
-| `OPENROUTER_WEBSEARCH_FALLBACK_MODEL` | No                    | none                                | Secondary WebSearch model if primary fails.                 |
-| `CODING_AGENT_STATE_ROOT`             | No                    | `~/.local/state/loxel/coding-agent` | Override persisted state root.                              |
-| `CODING_AGENT_COST_INPUT_USD_PER_M`   | No                    | none                                | Optional per-million input token cost for usage estimates.  |
-| `CODING_AGENT_COST_OUTPUT_USD_PER_M`  | No                    | none                                | Optional per-million output token cost for usage estimates. |
-
-Source of truth:
-
-- [`./src/orchestrator/model-router.ts`](./src/orchestrator/model-router.ts)
-- [`./src/tools/handlers.ts`](./src/tools/handlers.ts)
-- [`./src/state/layout.ts`](./src/state/layout.ts)
-- [`./src/orchestrator/loop.ts`](./src/orchestrator/loop.ts)
-
-## Operational limits and safety notes
-
-| Area       | Limit summary                                                          |
-| ---------- | ---------------------------------------------------------------------- |
-| Read       | max window 2000 lines, max line length 2000 chars, max 50 KiB payload  |
-| Grep       | default 100 matches, hard max 2000                                     |
-| Bash       | default timeout 120s, max 600s, preview truncation 2000 lines / 50 KiB |
-| TaskOutput | default blocking with 30s timeout, max 600s                            |
-| Web        | fetch timeout 30s, search default top 8, max top 20                    |
-
-Notes:
-
-- Outputs may be truncated with artifact references for full content retrieval.
-- Approval policy can block tool execution even when tool is in profile.
-
-Source of truth: [`./src/core/constants.ts`](./src/core/constants.ts)
-
-## Troubleshooting
-
-Missing OpenRouter config:
-
-- Symptom: provider/model errors or `WEBSEARCH_UNAVAILABLE`.
-- Check required env vars in configuration section.
-
-Malformed protocol request:
-
-- Symptom: `run.failed` event from CLI host with parse/validation error.
-- Validate request against `protocolRequestSchema`.
-
-Strict replay failure:
-
-- Symptom: `session.get`, `session.list`, or `session.resume` fails due to malformed/corrupt `events.jsonl`.
-- Inspect state root `sessions/<id>/events.jsonl`.
-
-Approval/tool availability issues:
-
-- Symptom: tool denied or unavailable errors.
-- Check profile gating, `declared_tools`, and persisted permissions.
-
-Runtime diagnostics:
-
-- Subscribe via `runtime.on("error", ...)` in SDK mode.
-- Monitor emitted `runtime.error`/`runtime.warning` events.
-
-Source of truth:
-
-- [`./src/protocol/schemas.ts`](./src/protocol/schemas.ts)
-- [`./src/orchestrator/runtime.ts`](./src/orchestrator/runtime.ts)
-- [`./src/session/store.ts`](./src/session/store.ts)
-- [`./src/permissions/store.ts`](./src/permissions/store.ts)
+Source of truth: [`./src/orchestrator/model-router.ts`](./src/orchestrator/model-router.ts)

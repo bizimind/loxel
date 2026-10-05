@@ -10,21 +10,25 @@ Reference material for configuring and understanding loxel's runtime behavior.
 
 ## Environment Variables
 
-Most of these you set once in your shell profile. The `LOXEL_*` injection variables are set automatically by loxel in every terminal it opens — you don't configure them. See [Terminals](/docs/terminals) for how these are used in practice.
+The variables you set are read from the environment loxel starts in; a loxel launched from Finder or the Dock doesn't see your shell profile's variables. The `LOXEL_*` injection variables are set automatically by loxel in every terminal it opens — you don't configure them. See [Terminals](/docs/terminals) for how these are used in practice.
 
-| Variable                     | What it does                                                  | Default                |
-| ---------------------------- | ------------------------------------------------------------- | ---------------------- |
-| `LOXEL_DEV`                  | Dev mode: separate state directory, port 7434 instead of 7433 | (unset = prod)         |
-| `LOXEL_STATIC_DIR`           | Override the frontend assets directory                        | Auto-detect            |
-| `LOXEL_PORT`                 | Auto-injected in terminals: port of the running loxel server  | (injected)             |
-| `LOXEL_WORKTREE`             | Auto-injected in terminals: worktree path for that terminal   | (injected)             |
-| `LOXEL_WINDOW_ID`            | Auto-injected in terminals: Electron window ID                | (injected)             |
-| `LOXEL`                      | Auto-injected in terminals: always `1`                        | (injected)             |
-| `OPENROUTER_API_KEY`         | Required for the built-in coding agent                        | (none)                 |
-| `OPENROUTER_MODEL_PLANNER`   | Model used for planning steps                                 | `z-ai/glm-5`           |
-| `OPENROUTER_MODEL_EXECUTOR`  | Model used for execution steps                                | `moonshotai/kimi-k2.5` |
-| `OPENROUTER_MODEL_FALLBACK`  | Fallback model                                                | `openrouter/auto`      |
-| `OPENROUTER_WEBSEARCH_MODEL` | Model for the WebSearch tool (required to enable WebSearch)   | (none)                 |
+| Variable                              | What it does                                                                                                                 | Default                               |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `LOXEL_DEV`                           | Set to `1` for dev mode: separate state directory, port 7434 instead of 7433                                                 | (unset = prod)                        |
+| `LOXEL_SERVE_PORT`                    | Server port when running the server on its own, such as in tests; the desktop app and the `loxel` CLI always use 7433 / 7434 | `7433` (dev: `7434`)                  |
+| `LOXEL_STATE_DIR`                     | Override the state directory                                                                                                 | See [File Locations](#file-locations) |
+| `LOXEL_STATIC_DIR`                    | Override the frontend assets directory                                                                                       | Auto-detect                           |
+| `LOXEL_PORT`                          | Auto-injected in terminals: port of the running loxel server                                                                 | (injected)                            |
+| `LOXEL_WORKTREE`                      | Auto-injected in terminals: worktree path for that terminal                                                                  | (injected)                            |
+| `LOXEL_WINDOW_ID`                     | Auto-injected in terminals: Electron window ID                                                                               | (injected)                            |
+| `LOXEL`                               | Auto-injected in terminals: always `1`                                                                                       | (injected)                            |
+| `OPENROUTER_API_KEY`                  | Coding agent API key, used when Settings > Models has none                                                                   | (none)                                |
+| `OPENROUTER_MODEL_PLANNER`            | Coding agent fallback: model used for planning steps                                                                         | `z-ai/glm-5`                          |
+| `OPENROUTER_MODEL_EXECUTOR`           | Coding agent fallback: model used for execution steps                                                                        | `moonshotai/kimi-k2.5`                |
+| `OPENROUTER_MODEL_FALLBACK`           | Coding agent fallback: fallback model                                                                                        | `openrouter/auto`                     |
+| `OPENROUTER_MODEL_JUDGE`              | Coding agent fallback: judge model                                                                                           | `anthropic/claude-3-haiku`            |
+| `OPENROUTER_WEBSEARCH_MODEL`          | Coding agent fallback: model for the WebSearch tool                                                                          | (none)                                |
+| `OPENROUTER_WEBSEARCH_FALLBACK_MODEL` | Coding agent fallback: WebSearch fallback model                                                                              | (none)                                |
 
 > **Note:** Inside a loxel terminal, `LOXEL=1` is always set. You can use this in scripts and shell prompts to detect when you're running inside loxel.
 
@@ -32,12 +36,12 @@ Most of these you set once in your shell profile. The `LOXEL_*` injection variab
 
 ## File Locations
 
-All loxel state lives under `~/.local/state/loxel/`. Dev mode (`LOXEL_DEV` set) uses `loxel-dev/` instead.
+All loxel state lives under `~/.local/state/loxel/loxel/`. Dev mode (`LOXEL_DEV=1`) uses `~/.local/state/loxel/loxel-dev/` instead, and `LOXEL_STATE_DIR` overrides both.
 
 | Path                               | Contents                                                                                                |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `projects.db`                      | SQLite — registered projects                                                                            |
-| `stores.db`                        | SQLite — panel layouts and internal store                                                               |
+| `stores.db`                        | SQLite — panel layouts, settings, keybindings and other UI state                                        |
 | `comments/{repoHash}.db`           | SQLite — code review sessions and comments; one file per repo, shared across all worktrees of that repo |
 | `detached/{projectHash}/{wtHash}/` | Draft markdown and excalidraw files                                                                     |
 | `logs/server-{instanceId}.log`     | Server logs in NDJSON format; rotated at 5 MB                                                           |
@@ -74,15 +78,16 @@ loxel [file-path | folder-path | url]
 
 ## Settings
 
-Open settings with `Cmd+,`. Panel layout is persisted server-side in `stores.db`; other settings persist in browser localStorage.
+Open settings with `Cmd+,`. Settings, keybindings and panel layouts are persisted server-side in `stores.db`, so every window shares them.
 
-| Section           | What you configure                                                                                                                       |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| General           | Auto-reveal active file in the file explorer when switching tabs                                                                         |
-| Coding Agent      | Model profiles, default session mode (execute or plan), tool profile (execute / plan / minimal) — see [Coding Agent](/docs/coding-agent) |
-| Models            | Model library — add or remove OpenRouter model entries with their API keys                                                               |
-| Keybindings       | Per-action shortcut overrides — see [Keyboard Shortcuts](/docs/reference-keybindings)                                                    |
-| Terminal          | Scrollback buffer size (1,000–100,000 lines; default 3,000), notification sequences — see [Terminals](/docs/terminals)                   |
-| Editor            | Indentation, formatting per language or file extension, format-on-autosave — see [Editor](/docs/editor)                                  |
-| File Associations | Glob-to-language mappings for custom file types                                                                                          |
-| Schemas           | JSON and YAML schema mappings; `tsconfig.json`, `package.json`, and GitHub workflow files are built in                                   |
+| Section           | What you configure                                                                                                                                                      |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| General           | Version and updates (check, download, install and restart); auto-reveal the active file in the file explorer when switching tabs                                        |
+| Coding Agent      | Base model and per-function overrides, default session mode (execute or plan), default tool profile (execute / plan / minimal) — see [Coding Agent](/docs/coding-agent) |
+| Models            | Model library — add or remove OpenRouter model entries with their API keys                                                                                              |
+| Keybindings       | Per-action shortcut overrides — see [Keyboard Shortcuts](/docs/reference-keybindings)                                                                                   |
+| Layout            | Which panels each side zone (left, bottom, right) holds and opens by default, and the zone sizes; applies to new worktree layouts                                       |
+| Terminal          | Scrollback buffer size (1,000–100,000 lines; default 3,000), notification sequences — see [Terminals](/docs/terminals)                                                  |
+| Editor            | Indentation and per-extension overrides, format on save and on autosave, formatter auto-detection and manual formatter overrides — see [Editor](/docs/editor)           |
+| File Associations | Glob-to-language mappings for custom file types                                                                                                                         |
+| Schemas           | JSON and YAML schema mappings; `tsconfig.json`, `package.json`, and GitHub workflow files are built in                                                                  |

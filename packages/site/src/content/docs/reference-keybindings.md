@@ -4,7 +4,7 @@ description: Complete keyboard shortcut reference for all panels, navigation, an
 order: 14
 ---
 
-All shortcuts use the "Loxel Default" template and are fully customizable in Settings > Keybindings (`Cmd+,`). On Windows and Linux, `Cmd` = `Ctrl`.
+All shortcuts use the "Loxel Default" template and are fully customizable in Settings > Keybindings (`Cmd+,`). Shortcuts use macOS key names; `Cmd` is the Command key.
 
 For context on what each feature does, see [Terminals](/docs/terminals), [Drafts](/docs/drafts), [Coding Agent](/docs/coding-agent), [Editor](/docs/editor), [Worktrees & Projects](/docs/worktrees-and-projects), [Panel Layout](/docs/panel-layout), [Git](/docs/git), and [Diff Viewer](/docs/diff-viewer).
 
@@ -14,7 +14,7 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 
 | Action                             | Shortcut                                                     |
 | ---------------------------------- | ------------------------------------------------------------ |
-| New terminal                       | `Cmd+T`                                                      |
+| New terminal                       | `Cmd+T` or `` Ctrl+Shift+` ``                                |
 | New markdown draft                 | `Cmd+Shift+M` or `Cmd+N`                                     |
 | New drawing                        | `Cmd+Shift+D`                                                |
 | New agent                          | `Cmd+Shift+A`                                                |
@@ -51,15 +51,15 @@ Splits are chords: press `Cmd+\`, release, then press the next key. The status b
 
 ## Navigation & global
 
-| Action            | Shortcut      |
-| ----------------- | ------------- |
-| Quick Open (file) | `Cmd+P`       |
-| Find in files     | `Cmd+Shift+F` |
-| Command palette   | `Cmd+Shift+P` |
-| Open settings     | `Cmd+,`       |
-| Switch project    | `Cmd+Alt+P`   |
-| Switch worktree   | `Cmd+Alt+W`   |
-| Save              | `Cmd+S`       |
+| Action                                  | Shortcut      |
+| --------------------------------------- | ------------- |
+| Quick Open (file)                       | `Cmd+P`       |
+| Find in files                           | `Cmd+Shift+F` |
+| Command palette                         | `Cmd+Shift+P` |
+| Open settings                           | `Cmd+,`       |
+| Reveal the active file in Project Files | `Cmd+Alt+E`   |
+| Go to the most recent notification      | `` Ctrl+` ``  |
+| Save                                    | `Cmd+S`       |
 
 In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G` / `Cmd+Shift+G` (or `Enter` / `Shift+Enter` in the bar) step through the matches and `Esc` closes it. In a code editor, `Cmd+F` opens the editor's own find widget.
 
@@ -73,6 +73,8 @@ In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G`
 | Changes          | `Cmd+Shift+C`  |
 | Git graph        | `Ctrl+Shift+G` |
 | Comments         | `Ctrl+Shift+R` |
+| Logs             | `Ctrl+Shift+L` |
+| Fork tree        | `Ctrl+Shift+K` |
 | Worktree sidebar | `Ctrl+Alt+B`   |
 
 ---
@@ -86,7 +88,7 @@ In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G`
 | Focus worktree 1–8, last, 10             | `Ctrl+Alt+1` – `Ctrl+Alt+8`, `Ctrl+Alt+9`, `Ctrl+Alt+0` |
 | Delete worktree                          | unbound — command palette or right-click menu           |
 
-Back/forward work like a browser's history, across all projects. Worktree numbers follow the sidebar order and skip hidden worktrees.
+Back/forward work like a browser's history, across all projects. Worktree numbers count the active project's worktrees in sidebar order and skip hidden worktrees.
 
 ---
 

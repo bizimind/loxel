@@ -4,5 +4,5 @@
 # WorkOS Client ID - find it in WorkOS Dashboard → Configuration → API Keys
 WORKOS_CLIENT_ID=client_XXXXXXXXXXXXXXXX
 
-# Note: Axiom logging is configured via Cloudflare Dashboard (Workers Observability → Destinations)
-# not through environment variables. See wrangler.toml [observability.logs] section.
+# Axiom API token used for worker logs (AXIOM_DATASET and LOG_LEVEL are set in wrangler.toml [vars])
+AXIOM_TOKEN=

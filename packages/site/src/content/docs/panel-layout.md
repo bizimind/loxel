@@ -12,24 +12,26 @@ Loxel's workspace is divided into five fixed zones. Within those zones, panels a
 
 ### Left sidebar
 
-The left sidebar holds dockable panels for navigating your project:
+The left sidebar holds dockable tool panels. By default it has:
 
 - **Project files** — the file tree for the active worktree
-- **Changes** — staged, unstaged, and untracked files; becomes a commit diff viewer when a commit is selected in the git graph
-- **Branches** — branch list with upstream tracking, create/rename/delete/checkout
-- **Comments** — code review sessions and comment threads
-- **Projects** — all projects registered with loxel
-- **Worktrees** — worktrees for the active project with dirty status indicators
+- **Changes** — your uncommitted changes; shows a commit's or range's files when commits are selected in the git graph
 
-Toggle any of these panels without touching the mouse:
+Every tool panel has an icon in the tool bars at the window's left and right edges; click an icon to show or hide its panel, or drag it to another zone's tool bar. Toggle panels without touching the mouse:
 
-| Panel         | Shortcut       |
-| ------------- | -------------- |
-| Project files | `Cmd+Shift+E`  |
-| Changes       | `Cmd+Shift+C`  |
-| Git graph     | `Ctrl+Shift+G` |
-| Comments      | `Ctrl+Shift+R` |
-| Worktrees     | `Ctrl+Alt+B`   |
+| Panel            | Shortcut       |
+| ---------------- | -------------- |
+| Project files    | `Cmd+Shift+E`  |
+| Changes          | `Cmd+Shift+C`  |
+| Git              | `Ctrl+Shift+G` |
+| Comments         | `Ctrl+Shift+R` |
+| Logs             | `Ctrl+Shift+L` |
+| Fork tree        | `Ctrl+Shift+K` |
+| Worktree sidebar | `Ctrl+Alt+B`   |
+
+The **worktree sidebar** to the far left lists your projects and their worktrees. Collapsed, it is a narrow rail of worktree icons; expanded, drag its right edge to resize it (double-click the edge to reset the width).
+
+**Settings > Layout** sets which panels each zone holds and opens by default, and the zones' sizes, for new worktree layouts.
 
 ### Center
 
@@ -40,28 +42,38 @@ The center area is the main content area. Every editor and interactive view open
 - **Markdown editor** — live preview markdown editing for repo files and drafts
 - **Excalidraw** — whiteboard and diagram editor
 - **Coding agent** — the built-in agent's timeline UI
-- **Standalone terminals** — full-featured terminal tabs
+- **Terminals** — full-featured terminal tabs
+- **Browser** — web pages, see [Browser panels](#browser-panels)
+- **Media viewer** — images, SVGs, and videos
+
+Double-click a terminal or file tab's title, or right-click the tab and choose **Rename**, to rename it; renaming a file tab renames the file. The tab menu also copies a file's name or path, closes other tabs, and on macOS offers **Reveal in Finder** and **Open In**.
 
 ### Right sidebar
 
-The right sidebar accepts any dockable panel. Use it to keep a secondary view alongside your main editor — for example, a terminal or the changes panel while reviewing code.
+The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads) and the **Fork tree** of coding agent sessions.
 
 ### Bottom
 
-The bottom zone holds views that benefit from a full-width horizontal strip:
+The bottom zone holds views that benefit from a full-width horizontal strip. By default it has:
 
-- **Git graph** — the interactive commit DAG with branch and tag labels
-- **Terminal container** — tabbed terminal sessions (`Cmd+T` for a new tab)
-- **Server logs** — the loxel server's NDJSON log stream
+- **Git** — the interactive commit graph with branch and tag labels, and the branch list
+- **Logs** — the loxel server's log stream
 
 ### Status bar
 
 The status bar runs across the bottom edge of the window and is always visible. It shows:
 
 - **Active branch** — the current branch name for the active worktree
-- **Upstream tracking** — `↑ X ↓ Y` (commits ahead / behind the upstream)
-- **Working tree counts** — staged, modified, and untracked file counts
-- **Terminal launcher** — click to open a new terminal tab
+- **Upstream tracking** — `↑ X ↓ Y` (commits ahead / behind) and the upstream branch name
+- **Working tree counts** — staged, modified, untracked, and conflicted file counts
+- **Chord progress** — the keys typed so far while a chord shortcut such as `Cmd+\` is waiting for its next key
+- **New panel buttons** — open a new agent, markdown editor, drawing, browser, or terminal
+
+---
+
+## Browser panels
+
+A browser panel (`Cmd+Shift+B`) is a full web view with back, forward, reload, an address bar, and DevTools. `Cmd+F` finds text in the page. All browser panels share one persistent session, so cookies and logins carry across panels and restarts. In the signed macOS app, sites can create and use passkeys with Touch ID. Open a URL in a browser panel with `loxel <url>` from a terminal, or by `Cmd`-clicking a link in terminal output.
 
 ---
 
@@ -89,12 +101,12 @@ Move focus between panels without the mouse.
 
 **Focus a specific panel by position:**
 
-`Cmd+1` through `Cmd+9` focus the panels in the order they appear across the layout. The numbering follows left-to-right, top-to-bottom group order.
+`Cmd+1` through `Cmd+9` focus the first through ninth panel in the center area, counting each group's tabs in turn.
 
 **Cycle through open panels:**
 
-- `Ctrl+Tab` — next panel
-- `Ctrl+Shift+Tab` — previous panel
+- `Ctrl+Tab` or `Cmd+Shift+]` — next panel
+- `Ctrl+Shift+Tab` or `Cmd+Shift+[` — previous panel
 
 **Move a panel to an adjacent group:**
 

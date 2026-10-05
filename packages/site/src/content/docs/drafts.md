@@ -10,7 +10,7 @@ Drafts let you sketch a design doc or architecture diagram before deciding where
 
 ## What drafts are
 
-A draft is a markdown (`.md`) or excalidraw (`.excalidraw`) file stored in loxel's own state directory, outside your project. Drafts appear in a **Detached** section at the top of the project files panel, visually separate from repo files.
+A draft is a file — usually markdown (`.md`) or excalidraw (`.excalidraw`) — stored in loxel's own state directory, outside your project. Drafts appear in a **Drafts** section at the top of the project files panel, shown once you have at least one, with their names in muted italics to set them apart from repo files.
 
 They behave identically to their repo-file counterparts:
 
@@ -23,22 +23,22 @@ Both autosave on the same schedule as the code editor.
 
 ## Creating a draft
 
-| Action                 | Shortcut      |
-| ---------------------- | ------------- |
-| New markdown draft     | `Cmd+N`       |
-| New excalidraw drawing | `Cmd+Shift+D` |
+| Action                 | Shortcut                 |
+| ---------------------- | ------------------------ |
+| New markdown draft     | `Cmd+N` or `Cmd+Shift+M` |
+| New excalidraw drawing | `Cmd+Shift+D`            |
 
-Drafts are named sequentially: "Note 1.md", "Note 2.md", and so on. Rename them via `F2` or `Shift+F6` in the file tree.
+New drafts get the first free name: "Note 1.md", "Note 2.md", and so on for markdown, "Drawing 1.excalidraw" for drawings. Rename them via `F2` or `Shift+F6` in the file tree, or by double-clicking the editor tab.
 
 ---
 
 ## Where drafts are stored
 
 ```
-~/.local/state/loxel/detached/<projectHash>/<worktreeHash>/
+~/.local/state/loxel/loxel/detached/<projectHash>/<worktreeHash>/
 ```
 
-Drafts are scoped per project + worktree. Switching to a different worktree shows that worktree's own Detached section — drafts are not shared across worktrees.
+Drafts are scoped per project + worktree. Switching to a different worktree shows that worktree's own Drafts section — drafts are not shared across worktrees.
 
 > **Note:** Hashes are the first 12 hex characters of the SHA-256 of the respective path.
 
@@ -52,11 +52,11 @@ Drafts autosave on the same schedule as the code editor (250ms debounce, 5s maxi
 
 ## Moving a draft into the repo
 
-When a draft is ready to become part of the project, drag it from the Detached section into any folder in the project file tree.
+When a draft is ready to become part of the project, drag it from the Drafts section into any folder in the active worktree's file tree (drop it on empty space for the worktree root). You can also cut it (`Cmd+X`) and paste it (`Cmd+V`) into a folder, or copy and paste to keep the draft as well. The move fails if a file with the same name already exists there.
 
 Loxel moves the file, updates the editor's internal path, and the editor keeps working — no need to reopen it. After the move, the file is a regular repo file, tracked by git like any other.
 
-> **Note:** Drag-to-project is a one-way operation. There is no drag-back to Detached — once a file is in the repo, treat it as a repo file.
+> **Note:** Moving a draft into the project is one-way. There is no drag-back to Drafts — once a file is in the repo, treat it as a repo file. Deleting a draft can't be undone.
 
 ---
 
@@ -65,7 +65,7 @@ Loxel moves the file, updates the editor's internal path, and the editor keeps w
 A common pattern when working with the coding agent:
 
 1. `Cmd+N` — open a markdown draft and outline the approach
-2. Hand the draft to the agent as context for the task
+2. Point the agent at the draft — paste its contents or its path into the prompt
 3. When the design is settled, drag the doc into `docs/` in the project tree
 4. Commit it alongside the implementation
 

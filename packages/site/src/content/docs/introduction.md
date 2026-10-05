@@ -20,13 +20,13 @@ The **Excalidraw canvas** (`Cmd+Shift+D`) gives you a drawing surface for archit
 
 The **markdown editor** (`Cmd+N`) supports embedded data widgets via the `:::localdb` directive. Insert a Table, Kanban, Calendar, Gantt, Graph, or Form view directly in any document — task tracking, decision logs, sprint boards. These widgets are backed by a per-project SQLite database and update in real time across open editors. Add one via the block menu: Data > Database Widget.
 
-Drafts live outside the repo until you're ready to commit them. Drag a file from the Detached section into any project folder and loxel moves it into the repo, no editor disruption.
+Drafts live outside the repo until you're ready to commit them. Drag a file from the Drafts section into any project folder and loxel moves it into the repo, no editor disruption.
 
 ## Flexible layout
 
 Loxel's panel system lets you place any panel wherever it fits your workflow — side by side, stacked, in its own group. That goes for agents too.
 
-The **built-in coding agent** has a dedicated timeline UI: user messages, assistant responses, reasoning blocks, tool calls, and plan steps all visible at once. It connects to OpenRouter; configure it with `OPENROUTER_API_KEY`.
+The **built-in coding agent** has a dedicated timeline UI: user messages, assistant responses, reasoning blocks, tool calls, and plan steps all visible at once. It connects to OpenRouter; add your models and API keys in Settings > Models.
 
 If you prefer a TUI agent — Claude Code, Codex, OpenCode, Gemini CLI, or anything else that runs in a terminal — open one in a loxel terminal with `Cmd+T` and run it there. Both workflows coexist. Put a coding agent panel next to your editor, or run two TUI agents in split terminals. Layout is yours to configure.
 
@@ -34,7 +34,7 @@ If you prefer a TUI agent — Claude Code, Codex, OpenCode, Gemini CLI, or anyth
 
 ## Git and code review
 
-The git panel shows an interactive commit graph with multi-select, branch filtering, author filtering, and date presets. Stage individual hunks, cherry-pick, reset with confirmation, and manage branches — all without leaving the IDE.
+The git panel shows an interactive commit graph with multi-select, branch filtering, author filtering, and date presets. Cherry-pick, revert, reset with confirmation, discard changes, and manage branches — all without leaving the IDE.
 
 Code review is built in. Start a named review session, add comments anchored to specific lines of a diff, and loxel tracks those comments as the code changes — relocating them when code moves, marking them outdated when the lines change. Comments survive repeated agent iterations, which is exactly when you need them to.
 

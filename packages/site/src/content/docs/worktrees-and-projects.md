@@ -10,15 +10,17 @@ Loxel tracks your repositories as **projects** and surfaces each worktree as a d
 
 ## Adding a project
 
-There are five ways to bring a repository into loxel.
+Click **Add project** in the worktree sidebar. The dialog has two tabs: **New Project** creates a new repository in a folder you choose, and **Import Existing** brings in a folder or a remote URL in one of the ways below.
+
+When you choose multi-workspace (see [Clone](#clone)) for a new or imported repository, an extra step lets you list files to copy into each new worktree (such as `.env`) and setup commands to run in it. Loxel writes them to the repo-root `init.wt.sh` hook.
 
 ### Detect
 
-Browse to a folder on disk and loxel will inspect it. The result is one of four classifications: bare repo, regular repo, worktree (linked to a bare repo elsewhere), or a non-repo folder. No changes are made at this step — it's read-only.
+Enter a path or browse to a folder on disk and loxel will inspect it. The result is one of four classifications: bare repo, regular repo, worktree (linked to a bare repo elsewhere), or a non-repo folder. No changes are made at this step — it's read-only.
 
 ### Add
 
-After detection, confirm to register the repo with loxel. The project is added to loxel's project list and becomes available in `Cmd+Alt+P` (Switch project). This is the path for repos you've already set up locally.
+After detection, confirm to register the repo with loxel. The project is added to loxel's project list in the worktree sidebar. This is the path for repos you've already set up locally.
 
 ### Clone
 
@@ -58,9 +60,15 @@ Loxel's configless `wt` integration handles branch planning and hook execution f
 
 ## Dirty status across worktrees
 
-The sidebar shows a live summary of uncommitted changes for every worktree in the active project. Loxel queries all worktrees and displays per-worktree counts of staged files, modified files, and untracked files.
+Loxel tracks uncommitted changes in every worktree of the active project. In the [git graph](/docs/git#uncommitted-changes-row), each worktree with staged, modified, or untracked files gets its own uncommitted-changes row above its branch tip, with the counts.
 
 This lets you see at a glance which worktrees have pending work — without switching to them.
+
+---
+
+## The worktree sidebar
+
+The worktree sidebar lists your projects and their worktrees. Drag worktrees to reorder them. Right-click a worktree to copy its name, branch name, or absolute path, hide or show it, or remove it; on macOS the menu also has **Reveal in Finder** and **Open In** (installed terminals and editors). Hidden worktrees are left out of the collapsed rail and of the `Ctrl+Alt+1`–`0` numbering, and are dimmed in the expanded list. Removing a worktree asks for confirmation, offers to delete its branch, and warns when uncommitted or untracked files would be lost.
 
 ---
 
@@ -78,7 +86,7 @@ Every worktree has its own saved layout. When you switch worktrees, loxel saves 
 
 **How it's stored:**
 
-Layout state is persisted server-side in SQLite (`~/.local/state/loxel/stores.db`), keyed by worktree path. Loxel maintains two key namespaces per worktree:
+Layout state is persisted server-side in SQLite (`stores.db` in the [state directory](/docs/reference-env-files-cli-settings#file-locations)), keyed by worktree path. Loxel maintains two key namespaces per worktree:
 
 - **Session key** — the live state for the current window. Updated continuously as you work.
 - **Canonical key** — a snapshot taken when a window is closed. Represents the last confirmed layout.
@@ -91,7 +99,7 @@ This means your layout survives app restarts, and multiple windows don't clobber
 
 ## Switching worktrees
 
-Use `Ctrl+Alt+[` and `Ctrl+Alt+]` to go back and forward through the worktrees you visited (across all projects), or `Ctrl+Alt+1`–`9` to jump to a specific one by position (hidden worktrees are skipped). `Cmd+Alt+W` opens the worktree switcher. `Ctrl+Alt+N` creates a new worktree.
+Click a worktree in the sidebar to switch to it. Use `Ctrl+Alt+[` and `Ctrl+Alt+]` to go back and forward through the worktrees you visited (across all projects), or `Ctrl+Alt+1`–`8` to jump to one of the active project's worktrees by position (`Ctrl+Alt+9` is the last one, `Ctrl+Alt+0` the tenth; hidden worktrees are skipped). `Ctrl+Alt+N` starts a new worktree: type its name in the sidebar and press `Enter`.
 
 The switch is immediate: loxel saves the outgoing layout, restores the incoming one, and resubscribes the WebSocket to the new worktree's data. No server round-trip is needed for the switch itself.
 

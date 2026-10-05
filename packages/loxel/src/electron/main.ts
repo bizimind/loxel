@@ -224,6 +224,8 @@ async function createWindow(): Promise<BrowserWindow> {
     titleBarStyle: "hiddenInset",
     tabbingIdentifier: "loxel",
     trafficLightPosition: { x: 12, y: 9 },
+    // A click on a backgrounded window also reaches the renderer, so the clicked panel takes
+    // focus on the same click that activates the window.
     acceptFirstMouse: true,
     webPreferences: {
       contextIsolation: true,

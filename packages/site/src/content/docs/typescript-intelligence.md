@@ -1,6 +1,6 @@
 ---
 title: TypeScript Intelligence
-description: Per-worktree language servers, supported features, backend selection, and other language servers.
+description: Per-worktree language servers, supported features, and other language servers.
 order: 13
 ---
 
@@ -10,7 +10,7 @@ Loxel runs a dedicated language server per worktree and wires it directly into M
 
 ## Per-worktree language server
 
-Each worktree gets its own language server subprocess. Switching worktrees switches language servers. There is no shared server state between worktrees — if one worktree is using an older TypeScript config or a different version of your packages, it does not affect any other worktree's language server.
+The active worktree gets its own TypeScript language server process. Switching worktrees stops it and starts a fresh one for the worktree you switch to, so expect a short warm-up after a switch. There is no shared server state between worktrees — if one worktree is using an older TypeScript config or a different version of your packages, it does not affect any other worktree's language server.
 
 ---
 
@@ -20,26 +20,27 @@ Each worktree gets its own language server subprocess. Switching worktrees switc
 | ---------------- | -------------------------------------------- |
 | Hover            | Type information and JSDoc for any symbol    |
 | Go-to-definition | Jump to the declaration of any symbol        |
-| Find references  | List all usages across the project           |
+| Find references  | Jump to the usages of a symbol               |
 | Completions      | Context-aware autocompletion as you type     |
 | Rename           | Rename a symbol and update all references    |
 | Code actions     | Quick fixes, imports, and refactors          |
-| Inlay hints      | Inline type annotations and parameter names  |
 | Signature help   | Function parameter hints while typing a call |
 | Document symbols | Symbol outline for the current file          |
 | Folding ranges   | Collapse functions, blocks, and regions      |
+
+These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quick fixes); the code editor has no right-click menu.
 
 ---
 
 ## Navigation
 
-`Cmd+Click` on any symbol — or press `F12` — to jump to its definition. The target opens in a new editor tab. There is no inline peek; definitions always open as a full tab.
+`Cmd+Click` on any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. There is no inline peek; definitions always open as a full tab.
 
 ---
 
 ## Unused symbols
 
-Symbols flagged as unused by the language server are dimmed in the editor. This uses Monaco's `MarkerTag.Unnecessary` — the same visual treatment as VS Code. TypeScript emits these diagnostics automatically; no extra configuration required.
+Symbols flagged as unused by the language server are dimmed in the editor, and deprecated ones are struck through. This uses Monaco's `MarkerTag.Unnecessary` and `MarkerTag.Deprecated` — the same visual treatment as VS Code. TypeScript emits these diagnostics automatically; no extra configuration required.
 
 ---
 
@@ -52,16 +53,18 @@ The same runtime provides diagnostics, completions, navigation, refactors, and o
 
 ## Other language servers
 
-Loxel runs language servers for four other languages. Each one is independent of the TypeScript backend.
+Loxel runs language servers for six other languages. Each one is independent of the TypeScript server.
 
-| Language  | When it starts                                | File types                 |
-| --------- | --------------------------------------------- | -------------------------- |
-| YAML      | Always active (global singleton)              | `.yml`, `.yaml`            |
-| Terraform | First `.tf`, `.tfvars`, or `.hcl` file opened | `.tf`, `.tfvars`, `.hcl`   |
-| Docker    | First dockerfile opened                       | `dockerfile`, `dockerbake` |
-| Python    | First `.py` or `.pyi` file opened             | `.py`, `.pyi`              |
+| Language  | When it starts             | File types                                                       |
+| --------- | -------------------------- | ---------------------------------------------------------------- |
+| YAML      | Always active              | `.yml`, `.yaml`                                                  |
+| Terraform | First matching file opened | `.tf`, `.tfvars`, `.hcl`                                         |
+| Docker    | First matching file opened | `Dockerfile`, `Containerfile`, `*.dockerfile`, `docker-bake.hcl` |
+| Python    | First matching file opened | `.py`                                                            |
+| Astro     | First matching file opened | `.astro`                                                         |
+| XML       | First matching file opened | `.xml`, `.xsd`, `.xsl`, `.xslt`, `.plist`, and other XML formats |
 
-YAML is a singleton that starts with loxel and stays running. The Terraform, Docker, and Python servers are lazy — they spawn the first time you open a matching file and disconnect automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
+YAML starts with loxel and stays running. The other servers are lazy — they spawn the first time you open a matching file and disconnect automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
 
 ---
 

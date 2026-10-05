@@ -14,7 +14,7 @@ Name your review session after the task — not the implementation. "Add OAuth l
 
 See [Code Review](/docs/code-review) for how to create a session. Once it's active, any comment you leave in the diff is tracked there.
 
-The session is shared across all worktrees of the repo, so you can start a comment in one worktree and continue it in another.
+The session is shared across all worktrees of the repo: select it in the Reviews dropdown of another worktree to continue there.
 
 ---
 
@@ -28,7 +28,7 @@ Collapsed unchanged regions show as squiggly connectors in the gutter. Click one
 
 ## Leave intent-based comments
 
-When something catches your attention, anchor a comment to it. Select the relevant lines, click **Add comment** in the gutter, and write what you'd want the agent to understand — not what you'd want it to do.
+When something catches your attention, anchor a comment to it. Select the relevant lines in split view, click **Add comment** in the gutter, and write what you'd want the agent to understand — not what you'd want it to do.
 
 Good comments ask about intent or raise a concern: "Why was X chosen over Y here?", "Does this handle the empty case?", "Is this logic in the right layer?"
 
@@ -40,13 +40,13 @@ Avoid "fix this" or "wrong" — those don't survive a rewrite. Intent-based comm
 
 Feed your comments back to the agent as input. When it rewrites the code, loxel re-places every comment using its anchor system — comments end up `exact`, `relocated`, `outdated`, or `lost`. See [Code Review](/docs/code-review) for the full anchor state reference.
 
-`outdated` comments are where the most useful signal lives. The mini-diff under the comment shows the original context in amber — you can see exactly what the agent changed and decide if your concern was addressed or just worked around.
+`outdated` comments are where the most useful signal lives. Expand the thread in the Comments panel to see the original code under **"Original code at time of comment"** — compare it with the new code to see what the agent changed and decide if your concern was addressed or just worked around.
 
 ---
 
 ## Export when you're done
 
-Click the file icon in the Comments panel header (**Open as markdown**) to export all threads in the active session to a formatted document — grouped by file, with open/resolved status and anchor state. Use it for async discussion, PR descriptions, or just a record of what happened.
+Click the file icon in the Comments panel header (**Open as markdown**) to export all threads in the selected sessions to a formatted document — grouped by file, with open/resolved status and the originally commented code. Use it for async discussion, PR descriptions, or just a record of what happened.
 
 ---
 

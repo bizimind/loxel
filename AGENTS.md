@@ -1,10 +1,10 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents working in this repository (`CLAUDE.md` is a symlink to it). It is an index: it covers repo-wide setup, commands, and standards, and points to package READMEs for everything package-specific.
 
 ## Project Overview
 
-loxel is a monorepo (pnpm for package management, Bun for runtime) containing packages that extend Claude Code's capabilities for agent-friendly development workflows. The packages intercept and adapt standard tools (like Git) for non-blocking agent execution while preserving normal UX for humans.
+loxel is a monorepo (pnpm for package management, Bun for runtime) built around **Loxel**, an IDE for agentic coding (`packages/loxel`, Electron app plus Bun server), its docs site (`packages/site`), and a set of CLI tools, libraries, and services that support agent-driven development workflows: a configless worktree manager (`wt`), Claude Code hooks and wrappers that make standard tools non-blocking for agents while preserving normal UX for humans, and shared libraries for logging, CLI output, and WebSocket channels.
 
 ## Environment Setup
 
@@ -23,11 +23,9 @@ The `.env` file is copied to the worktree root by the repo-root `init.wt.sh` hoo
 ```bash
 pnpm install                                   # Install all dependencies
 
-# Build individual packages (all packages with build scripts)
-pnpm -C packages/cc-git-editor run build
-pnpm -C packages/cc-tool-guard run build
-pnpm -C packages/whisper-cpp run build
-pnpm -C packages/wt run build
+# Build a package (root `build` is intentionally disabled; packages with a build script:
+# cc-git-editor, cc-tool-guard, code-analysis, coding-agent, excalidraw, loxel, site, whisper-cpp, wt)
+pnpm -C packages/<package> run build
 
 # Lint and format (root-level, or from any package via aliases)
 pnpm run lint                                  # Run oxlint
@@ -56,33 +54,47 @@ bun test --cwd packages/wt --test-name-pattern "validates"
 
 ### Packages
 
+Each package README is the authoritative doc for that package; this list only orients. Package READMEs link down to their nested docs and specs where they exist.
+
+#### Apps
+
+- **loxel**: The IDE itself (Electron app plus Bun server). User-facing feature docs are the site pages under `packages/site/src/content/docs/`; update those, not the loxel README, when user-visible behavior changes. See `packages/loxel/README.md`.
+
+- **site**: Astro site for bizimind.io (landing page, downloads, user docs), deployed to Cloudflare Pages. See `packages/site/README.md`.
+
 #### CLI Tools & Binaries
-
-- **cc-git-editor**: Intercepts `git rebase -i` and `git add -p` to provide non-blocking execution for agents. Entry point: `src/git-wrapper.ts`. Detects agent mode via `CLAUDECODE=1` env var.
-
-- **cc-tool-guard**: Permission request hook that evaluates Bash/Read operations for safety. Uses pattern matching (`src/evaluator/patterns.ts`) with Haiku fallback for uncertain cases.
-
-- **excalidraw**: CLI for agents to create, edit, and view Excalidraw diagrams. Provides batch operations via JSON-over-stdin for atomic multi-element mutations (draw, move, resize, edit, group). Uses jsdom DOM shim for headless element creation via `@excalidraw/element`. Entry point: `src/cli.ts`.
 
 - **wt**: Configless git worktree manager CLI (`add`/`list`/`view`/`mv`/`remove`, repo-root `init.wt.sh`/`clean.wt.sh`/`rename.wt.sh` hooks). Read `packages/wt/README.md` or the `wt` skill before working on it.
 
-- **loxel**: The IDE itself (Electron app plus Bun server). See `packages/loxel/README.md`.
+- **cc-git-editor**: Intercepts `git rebase -i` and `git add -p` to provide non-blocking execution for agents. Detects agent mode via `CLAUDECODE=1`. See `packages/cc-git-editor/README.md`.
 
-- Also in the monorepo, each with its own README where present: **code-analysis**, **coding-agent**, **sandbox**, **site**, **localdb-sdk**, **monaco-lsp-client**.
+- **cc-tool-guard**: PermissionRequest hook that auto-approves safe Bash/Read operations and defers everything else to the user (never denies), using pattern matching with a Haiku fallback. See `packages/cc-tool-guard/README.md`.
+
+- **excalidraw**: CLI for agents to create, edit, query, and render Excalidraw diagrams, with JSON-over-stdin batch operations. See `packages/excalidraw/README.md` and the `excalidraw` skill.
+
+- **code-analysis**: Code analysis CLI with built-in plugins (loc, languages, git-churn, lint/type issues, import graph) that prints results or serves a live treemap or graph visualization. See `packages/code-analysis/README.md`.
+
+- **coding-agent**: Programmatic coding agent runtime used by loxel's agent panel (in-process `Session` SDK, or a stdio JSON protocol CLI). See `packages/coding-agent/README.md`.
 
 #### Libraries
 
-- **channel**: WebSocket channel client library for peer-to-peer communication via relay. Supports JSON and binary messages, auto-reconnection with exponential backoff, ACK-based reliability with retries, and backpressure handling. Entry point: `src/index.ts`.
+- **channel**: WebSocket client library for peer-to-peer messaging through the channel-worker relay; owns the shared wire protocol. See `packages/channel/README.md`.
 
-- **cli-common**: Shared CLI utilities for consistent command-line interfaces. Provides `CommandResult<T>` pattern with `runAction()` for type-safe output handling (json/human/quiet modes), formatters (`formatTable`, `formatKeyValue`, `formatStatus`), centralized `OutputContext` for progress logging, and the update system for self-updating binaries. Used by wt, excalidraw, coding-agent.
+- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, logging, self-update) used by wt, excalidraw, coding-agent, and code-analysis. See `packages/cli-common/README.md`.
 
-- **logger**: Shared structured logging library with Axiom integration. Provides error serialization with cause chain traversal, sensitive data filtering, and string truncation. Entry point: `src/index.ts`. Used by channel-worker, cli-common, coding-agent, loxel.
+- **logger**: Axiom-backed structured logger with error-cause serialization and sensitive-data redaction. See `packages/logger/README.md` and the `logs` skill.
 
-- **whisper-cpp**: Node addon wrapping whisper.cpp for speech-to-text. Native C++ bindings built with cmake-js.
+- **localdb-sdk**: SQLite-backed (`bun:sqlite`) structured database SDK with typed columns, views, and formulas; powers loxel's local databases. See `packages/localdb-sdk/README.md`.
+
+- **monaco-lsp-client**: Monaco LSP client forked from `@vscode/monaco-lsp-client`, used by loxel's editor. See `packages/monaco-lsp-client/README.md`.
+
+- **sandbox**: Provider-agnostic container SDK (Apple Containers, Podman, Docker) plus a reference agent sandbox image. See `packages/sandbox/README.md`.
+
+- **whisper-cpp**: Node addon wrapping whisper.cpp for local speech-to-text, built with cmake-js. See `packages/whisper-cpp/README.md`.
 
 #### Backend Services
 
-- **channel-worker**: Cloudflare Worker for WebSocket channel relay using Durable Objects. JWT auth via WorkOS JWKS with RS256 verification. Enforces same-user channels (all clients must share the same JWT `sub` claim). Entry point: `src/index.ts`. Config via `WORKOS_CLIENT_ID` env var. Deployed via `release-channel-worker.yml` workflow.
+- **channel-worker**: Cloudflare Worker (Durable Objects) that relays channel WebSocket traffic, with WorkOS JWT auth and same-user channels. See `packages/channel-worker/README.md`.
 
 ### Key Patterns
 
@@ -233,15 +245,15 @@ The root `pnpm run typecheck` invokes each workspace's script in parallel via
 
 **CI**: Every push runs change detection to find affected packages (direct changes + transitive dependents via workspace dependency graph). Only affected packages run `test`, `build`, and `typecheck` in parallel matrix jobs. Root config changes trigger targeted checks: `tsconfig*.json` → typecheck all, `.oxlintrc.jsonc`/`.oxfmtrc.jsonc` → lint all, root `package.json` → everything. Lint/format runs only when code or lint config changed. Automated code review via Claude runs on PRs (`claude-code-review.yml`).
 
-**Auto-releases**: `wt` has automatic releases triggered when changes to its package directory are merged to main:
+**Auto-releases**: `wt`, `code-analysis`, and `loxel` release automatically when changes under their package directory are merged to main (`release-<pkg>.yml`; `loxel` also supports `workflow_dispatch` for releases driven by root-level changes):
 
 1. Bumps patch version in package.json
 2. Creates a release commit (`chore(<pkg>): release vX.Y.Z`) and tag
 3. Builds binaries
-4. Uploads binaries directly to R2 (`https://loxel.bizimind.io/<pkg>/`)
-5. Creates GitHub release with R2 download links (no binary attachments)
+4. Uploads binaries and a `manifest.json` to R2 (`https://loxel.bizimind.io/<pkg>/`)
+5. Creates a GitHub release with R2 download links (no binary attachments)
 
-**Deployments**: `channel-worker` has a dedicated deploy workflow (`release-channel-worker.yml`).
+**Deployments**: `channel-worker` deploys via `release-channel-worker.yml`. The docs site deploys via `release-site.yml` on pushes touching `packages/site` (preview per branch, production from main) and is re-dispatched after each `loxel` release so the download page picks up the new manifest.
 
 **Version checking**: When debugging CLI issues, verify the user has the latest version. Check the manifest at `https://loxel.bizimind.io/<pkg>/manifest.json` for current version and compare with local binary. Don't manually bump versions - releases are automated.
 

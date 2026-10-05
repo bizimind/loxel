@@ -36,7 +36,7 @@ Use the scope filter to narrow results by package, directory, or file extension.
 
 Loxel autosaves 250ms after you stop typing, with a maximum 5s wait. You never have to remember to save during normal work.
 
-Press `Cmd+S` to save immediately. Explicit save is the trigger for format on save — by default, the formatter runs only on `Cmd+S`, not on autosave. If you want the formatter to also run on autosave, enable **Format on autosave** in Settings > Editor.
+Press `Cmd+S` to save immediately. Explicit save is the trigger for format on save — by default, the formatter runs only on `Cmd+S`, not on autosave. If you want the formatter to also run on autosave, enable **Also format on auto-save** in Settings > Editor.
 
 > **Note:** Format on save is per-language. If no formatter is detected for the current file type, `Cmd+S` saves without formatting.
 
@@ -48,15 +48,22 @@ Loxel detects which formatters are available in the active worktree by inspectin
 
 Supported formatters:
 
-| Formatter  | How it runs                                     |
-| ---------- | ----------------------------------------------- |
-| `prettier` | Loaded as a library — no per-file process spawn |
-| `oxfmt`    | Persistent LSP subprocess — no spawn overhead   |
-| `rustfmt`  | Detected and invoked on `.rs` files             |
-| `ruff`     | Detected and invoked on `.py` files             |
-| `yamlfmt`  | Detected and invoked on `.yaml`/`.yml` files    |
+| Formatter      | Detected from                                              | How it runs                                     |
+| -------------- | ---------------------------------------------------------- | ----------------------------------------------- |
+| `prettier`     | A Prettier config file or `prettier` key in `package.json` | Loaded as a library — no per-file process spawn |
+| `oxfmt`        | An `.oxfmtrc.*` file or an `oxfmt` dependency              | Persistent LSP subprocess — no spawn overhead   |
+| `rustfmt`      | `rustfmt.toml`                                             | Invoked on `.rs` files                          |
+| `ruff`         | `pyproject.toml`                                           | Invoked on `.py` files                          |
+| `clang-format` | `.clang-format`                                            | Invoked on C and C++ files                      |
+| `deno`         | `deno.json`                                                | Invoked on JS and TS files                      |
 
-Loxel also detects other formatters from common config files. The full list of formatters found in the current worktree is visible in **Settings > Editor**.
+Prettier and oxfmt both cover JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, and GraphQL (oxfmt also formats TOML). When a project has both, Prettier wins for the languages it supports. The formatters found in the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+
+---
+
+## Markdown files
+
+Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original bytes, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide.
 
 ---
 
@@ -93,6 +100,10 @@ The file tree supports keyboard-only navigation:
 - **Ignored** — muted/gray
 
 **Drag and drop:** files and folders can be dragged within the project tree to reorganize them. See [Drafts](/docs/drafts) for dragging draft files into the project.
+
+**Context menu:** right-click a file or folder for New File, New Directory, Rename, Cut, Copy, Paste, Delete, Copy Name, Copy Relative Path, and Copy Absolute Path; on macOS also **Reveal in Finder** and **Open In** (the apps macOS offers for a file; installed terminals and editors for a folder). A modified file or folder also gets **Git Restore**.
+
+**Reveal the active file:** press `Cmd+Alt+E` to show the active editor's file in the tree. To do this automatically whenever you switch tabs, turn on auto-reveal in **Settings > General**.
 
 ### Other folders
 

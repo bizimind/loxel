@@ -10,33 +10,26 @@ The built-in coding agent gives you a dedicated timeline for every run — user 
 
 ## Setup
 
-The coding agent connects to [OpenRouter](https://openrouter.ai/). Set your API key before using it:
+The coding agent uses models from [OpenRouter](https://openrouter.ai/). Set it up in two steps:
 
-```bash
-OPENROUTER_API_KEY=sk-or-...
-```
+1. **Settings > Models** — add the models you want to use. Each entry has a display name, an OpenRouter model ID, and its own API key; keys are encrypted at rest.
+2. **Settings > Coding Agent** — pick a **Base Model**, used for every agent function. Turn on **Function Overrides** to use different models for specific functions: Planner, Executor, Fallback, Judge, WebSearch, and WS Fallback. WebSearch only works once it has an override. Plan mode runs on the planner model and execute mode on the executor.
 
-That is the only required variable. The agent ships with default models for each role:
+Settings apply to newly created sessions. The same section sets the default session mode (execute or plan) and the default tool profile.
 
-| Variable                     | Role                                       | Default                |
-| ---------------------------- | ------------------------------------------ | ---------------------- |
-| `OPENROUTER_API_KEY`         | Authentication (required)                  | —                      |
-| `OPENROUTER_MODEL_PLANNER`   | Planning steps                             | `z-ai/glm-5`           |
-| `OPENROUTER_MODEL_EXECUTOR`  | Execution steps                            | `moonshotai/kimi-k2.5` |
-| `OPENROUTER_MODEL_FALLBACK`  | Fallback                                   | `openrouter/auto`      |
-| `OPENROUTER_WEBSEARCH_MODEL` | WebSearch tool (required to use WebSearch) | —                      |
-
-Models are organized by **profile** — planner, executor, fallback. You configure which model each profile uses, not arbitrary per-turn model IDs. You can add or swap models in Settings > Models, and configure which model maps to each profile in Settings > Coding Agent.
+Without settings, the agent falls back to environment variables in the loxel server's environment: `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL_PLANNER`, `OPENROUTER_MODEL_EXECUTOR`, `OPENROUTER_MODEL_FALLBACK`, `OPENROUTER_MODEL_JUDGE`, `OPENROUTER_WEBSEARCH_MODEL`, and `OPENROUTER_WEBSEARCH_FALLBACK_MODEL` for each function's model. Loxel launched from Finder or the Dock doesn't read your shell profile's variables, so prefer Settings.
 
 ---
 
 ## Sessions
 
-A session is created automatically when you send your first message. It is scoped to the active project + worktree.
+A session starts when you open an agent panel. It is scoped to the active project + worktree.
 
-Sessions survive context switches. If you switch worktrees — or navigate away to another panel — the agent subprocess keeps running. When you come back, the full event history replays from the buffer (up to 5,000 events per session). You pick up exactly where you left off.
+Sessions survive context switches. If you switch worktrees — or navigate away to another panel — the agent session keeps running in the loxel server. When you come back, the full event history replays from the buffer (up to 5,000 events per session). You pick up exactly where you left off.
 
-Sessions do not end on their own. Use the exit action in the agent panel to close a session explicitly.
+Closing an agent tab detaches from the session; it keeps running in the background until loxel quits.
+
+While a run is active, `Enter` stops it and sends your new message right away (steer), and `Cmd+Enter` queues the message until the run finishes. The agent tab's dot shows the session's state: green while running, amber while waiting for you, gray once it has exited.
 
 ---
 
@@ -47,12 +40,16 @@ Every run produces a linear sequence of events:
 - **User messages** — what you sent
 - **Assistant responses** — the agent's reply text
 - **Reasoning blocks** — the agent's internal chain of thought, when the model exposes it
-- **Tool calls** — each tool invocation with its inputs
-- **Tool results** — the output returned to the agent
+- **Tool calls** — each tool invocation with its inputs, and the output it returned
 - **Plan steps** — discrete steps when running in plan mode
-- **System events** — run errors, completion signals, mode changes
+- **Tasks** — the agent's todo list
+- **System events** — errors, cancelled runs, and plan mode changes
 
-The timeline is a read-only record of what happened. You can scroll back through any prior run within the session buffer.
+Scroll back through any prior run within the session buffer.
+
+### Rewind and fork
+
+Hover a message or tool call to rewind or fork from that point. **Rewind to here** rolls the session back; rewinding to one of your messages puts its text back in the input so you can edit and resend it. **Fork from here** opens a copy of the session up to that point in a new agent tab, leaving the original untouched. The **Fork tree** panel (`Ctrl+Shift+K`) shows a session's branches; double-click one to resume it.
 
 ---
 
@@ -65,9 +62,11 @@ The agent can pause and ask for input. Two overlay types appear inline in the ti
 **Approvals** — when the agent wants to run a tool that requires your sign-off. Options:
 
 - **Allow** — permit this one invocation
-- **Allow this session** — permit the same tool for the rest of the session
-- **Allow always** — add a permanent permission
+- **Allow this session** — permit the same invocation (for Bash, the same command; for edits inside the workspace, any file write) for the rest of the session
+- **Allow always** — save the permission for this workspace
 - **Deny** — block the invocation; the agent receives a denial and can decide how to proceed
+
+Edit, Write, MultiEdit, Bash, and TaskStop ask for approval; leaving plan mode asks you to approve the plan.
 
 ---
 
@@ -75,21 +74,19 @@ The agent can pause and ask for input. Two overlay types appear inline in the ti
 
 The tools available to the agent depend on the active **tool profile**, configured in Settings > Coding Agent:
 
-| Profile   | Tools                                                                                                                                                                |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `execute` | Full catalog: Read, Write, Edit, MultiEdit, Glob, Grep, Bash, Task, WebFetch, WebSearch, AskUserQuestion, EnterPlanMode, ExitPlanMode, TodoWrite, TodoRead, and more |
-| `plan`    | No Bash; mutations only to the plan file                                                                                                                             |
-| `minimal` | Read, search, and AskUserQuestion only                                                                                                                               |
+| Profile   | Tools                                                                                                                                                                                               |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `execute` | Full catalog: Read, Write, Edit, MultiEdit, Glob, Grep, Bash, Task, TaskOutput, TaskStop, WebFetch, WebSearch, AskUserQuestion, EnterPlanMode, ExitPlanMode, TodoWrite, TodoRead, ToolSearch, Skill |
+| `plan`    | Everything in `execute` except Bash, TodoWrite, and Skill                                                                                                                                           |
+| `minimal` | Read, Glob, Grep, WebFetch, WebSearch, AskUserQuestion, ToolSearch, and TodoRead                                                                                                                    |
 
-The default session mode (execute or plan) is also configurable in Settings > Coding Agent.
-
-`plan` mode is useful when you want the agent to draft a step-by-step plan before taking any action. `minimal` is a read-only research mode — the agent can look at your code and ask clarifying questions but cannot modify anything.
+The tool profile and the session **mode** are separate: plan mode is what blocks Bash and limits writes to the plan file, while the `plan` profile only removes tools. Plan mode is useful when you want the agent to draft a step-by-step plan before taking any action. `minimal` is a read-only research profile — the agent can look at your code and the web and ask clarifying questions, but cannot modify anything.
 
 ---
 
 ## New agent panel
 
-Open a new agent panel with `Cmd+Shift+A`. Like any panel, it can be docked, moved, or split alongside your editor and terminal.
+Open a new agent panel with `Cmd+Shift+A`, or in a split with `Cmd+\` then `A` then an arrow. Like any panel, it can be docked, moved, or split alongside your editor and terminal. The bug icon on an agent tab opens its DevTools panel, with the session's events, metrics, and state.
 
 ---
 

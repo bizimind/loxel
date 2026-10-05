@@ -14,7 +14,7 @@ Your unit of focus in loxel is a **context**: one project plus one worktree. Whe
 
 Context state is persisted server-side in SQLite, not just in the browser. This means it survives reloads and multi-window usage. The key is the worktree path, so each worktree has its own completely independent workspace.
 
-Use `Cmd+Alt+W` to switch worktrees. Use `Ctrl+Alt+[` / `Ctrl+Alt+]` to go back and forward through the ones you visited.
+Click a worktree in the sidebar to switch to it. Use `Ctrl+Alt+[` / `Ctrl+Alt+]` to go back and forward through the ones you visited.
 
 ---
 
@@ -30,11 +30,11 @@ If you're working on a single branch and don't need parallelism, a regular repo 
 
 ## Drafts vs. repo files
 
-Not everything belongs in the repo immediately. Loxel has a **Detached** area in the file panel where you can create markdown notes and excalidraw drawings that don't live inside any repo. These are called **drafts**.
+Not everything belongs in the repo immediately. Loxel has a **Drafts** section in the project files panel where you can create markdown notes and excalidraw drawings that don't live inside any repo. These are called **drafts**.
 
-Drafts are scoped per project + worktree — they're stored in `~/.local/state/loxel/detached/<projectHash>/<wtHash>/` and are not shared across worktrees. A draft you create while working on a feature branch stays with that worktree context.
+Drafts are scoped per project + worktree — they're stored in `~/.local/state/loxel/loxel/detached/<projectHash>/<wtHash>/` and are not shared across worktrees. A draft you create while working on a feature branch stays with that worktree context.
 
-When a draft is ready to become part of the repo, drag it from the Detached section into any folder in the project file tree. Loxel moves the file and updates any open editors. The typical flow: sketch a design doc or architecture diagram as a draft, hand it to the coding agent, then move it into the repo once it's worth keeping.
+When a draft is ready to become part of the repo, drag it from the Drafts section into any folder in the project file tree. Loxel moves the file and updates any open editors. The typical flow: sketch a design doc or architecture diagram as a draft, hand it to the coding agent, then move it into the repo once it's worth keeping.
 
 ---
 
@@ -42,7 +42,7 @@ When a draft is ready to become part of the repo, drag it from the Detached sect
 
 Code review isn't an afterthought in loxel — it's built into the editor. You can start a named **review session**, leave comments anchored to specific lines in a diff, and those comments track through code changes.
 
-The anchor system uses a content fingerprint of the commented lines plus surrounding context. When code changes, loxel re-locates the anchor: exact match, then nearby lines, then full-file search. If the code has been edited but context lines still match, the comment is marked `outdated` and shows a mini-diff of the original. Only if the code is gone entirely does a comment become `lost`.
+The anchor system uses a content fingerprint of the commented lines plus surrounding context. When code changes, loxel re-locates the anchor: exact match, then nearby lines, then full-file search. If the code has been edited but context lines still match, the comment is marked `outdated` and keeps the original lines so you can compare. Only if the code is gone entirely does a comment become `lost`.
 
 This is particularly useful when reviewing AI-generated code across multiple agent iterations. Leave comments that capture intent — questions, concerns, design rationale — and they'll follow the code through rewrites rather than becoming stale line-number artifacts.
 
