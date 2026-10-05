@@ -179,6 +179,27 @@ describe("FileTreePanel", () => {
     );
   });
 
+  test.each([
+    ["Copy Name", "b.ts"],
+    ["Copy Relative Path", "src/b.ts"],
+    ["Copy Absolute Path", "/repo/src/b.ts"],
+  ])("%s copies %s", async (item, expected) => {
+    const writeText = mock((_text: string) => Promise.resolve());
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      renderPanel();
+
+      await openMenu(/b\.ts/);
+      fireEvent.click(await screen.findByRole("menuitem", { name: item }));
+
+      expect(writeText).toHaveBeenCalledWith(expected);
+    } finally {
+      if (original) Object.defineProperty(navigator, "clipboard", original);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
   test("offers no discard for a commit's changes", async () => {
     getCurrentRepositoryStore().getState().setDiffSource({ type: "commit", commit: "abc1234" });
     renderPanel();

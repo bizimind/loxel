@@ -1,5 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { CopyIcon, CrosshairIcon, FileDiffIcon, FileIcon, Undo2Icon } from "lucide-react";
+import {
+  CrosshairIcon,
+  FileDiffIcon,
+  FileIcon,
+  FolderRootIcon,
+  FolderTreeIcon,
+  TypeIcon,
+  Undo2Icon,
+} from "lucide-react";
 
 import { getPathInfo } from "@/api/client";
 import {
@@ -8,6 +16,7 @@ import {
   ContextMenuLabel,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
+import { copyToClipboard } from "@/lib/clipboard";
 import { FileTypeIcon } from "@/lib/file-icons";
 import { pathName } from "@/lib/project-file-helpers";
 import { queryKeys } from "@/queries/query-keys";
@@ -96,13 +105,17 @@ export function ChangesFileMenu({
 
       {hasOpenSection && <ContextMenuSeparator />}
 
-      <ContextMenuItem onClick={run(() => navigator.clipboard.writeText(path))}>
-        <CopyIcon />
+      <ContextMenuItem onClick={run(() => copyToClipboard(name, "name"))}>
+        <TypeIcon />
+        Copy Name
+      </ContextMenuItem>
+      <ContextMenuItem onClick={run(() => copyToClipboard(path, "relative path"))}>
+        <FolderTreeIcon />
         Copy Relative Path
       </ContextMenuItem>
-      <ContextMenuItem onClick={run(() => navigator.clipboard.writeText(absolutePath))}>
-        <CopyIcon />
-        Copy Path
+      <ContextMenuItem onClick={run(() => copyToClipboard(absolutePath, "absolute path"))}>
+        <FolderRootIcon />
+        Copy Absolute Path
       </ContextMenuItem>
 
       {isOpenInSupported && <ContextMenuSeparator />}
