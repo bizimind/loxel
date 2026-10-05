@@ -6,8 +6,9 @@ import type { IDockviewPanel } from "dockview-react";
 import { useCallback } from "react";
 
 import type { SplitPosition } from "@/components/dockview/default-layout";
+import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
-import { getActiveEditorFilePath, revealInProjectExplorer } from "@/lib/reveal-in-explorer";
+import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
 import type { ActionId } from "@/store/keybindings/action-registry";
@@ -17,7 +18,7 @@ import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { deriveProject, useProjectStore } from "@/store/projects";
 import { useSearchStore } from "@/store/search";
 import { useSettingsStore } from "@/store/settings-store";
-import { getCenterApi, togglePanel } from "@/store/tools-bar";
+import { getCenterApi, showPanel, togglePanel } from "@/store/tools-bar";
 import { getOrderedWorktrees, useWorktreeStore } from "@/store/worktrees";
 
 /**
@@ -253,7 +254,12 @@ export function useActionHandler(): (actionId: ActionId) => void {
 
       case "file.revealInExplorer": {
         const filePath = getActiveEditorFilePath();
-        if (filePath) revealInProjectExplorer(filePath);
+        if (filePath) {
+          // The event (not `revealInProjectExplorer`) also reveals Others files and drafts, which
+          // the pending reveal can't, as they are outside every folder tree.
+          showPanel("projectFiles");
+          dispatchLoxelEvent("loxel-reveal-in-explorer", { filePath });
+        }
         break;
       }
 
