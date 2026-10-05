@@ -6,11 +6,12 @@ import type { BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { ContextMenuItem } from "@/components/ui/context-menu";
 import { createBrowser } from "@/lib/panel-creators";
 
-import { Tab } from "./tab";
+import { Tab, usePanelTitle } from "./tab";
 
 export function BrowserTab(props: IDockviewPanelHeaderProps<BrowserPanelParams>) {
   const [faviconUrl, setFaviconUrl] = useState(props.params.faviconUrl);
   const [faviconError, setFaviconError] = useState(false);
+  const title = usePanelTitle(props.api);
 
   useEffect(() => {
     const disposable = props.api.onDidParametersChange((params) => {
@@ -41,7 +42,7 @@ export function BrowserTab(props: IDockviewPanelHeaderProps<BrowserPanelParams>)
     <Tab
       api={props.api}
       icon={icon}
-      title={props.api.title || "Browser"}
+      title={title || "Browser"}
       contextMenuItems={contextMenuItems}
     />
   );

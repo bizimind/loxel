@@ -49,6 +49,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { NotificationDot } from "@/components/ui/notification-dot";
+import { copyToClipboard } from "@/lib/clipboard";
 import { dayjs } from "@/lib/dayjs";
 import { FileTypeIcon } from "@/lib/file-icons";
 import { handleSidebarEntryKeyDown } from "@/lib/focus-navigation";
@@ -161,16 +162,6 @@ function useWorktreeContextMenu(projectPath: string) {
     handleRemoveRequest,
     handlePlanRemoveConfirm,
   };
-}
-
-function copyToClipboard(text: string, what: string) {
-  navigator.clipboard.writeText(text).catch((err: unknown) => {
-    frontendLog
-      .child("ui")
-      .error(`Failed to copy ${what} to clipboard`, {
-        error: err instanceof Error ? err : undefined,
-      });
-  });
 }
 
 /** Renders the worktree context menu (copy, hide/show, remove) + removal dialogs. */

@@ -3,7 +3,6 @@ import { useState } from "react";
 
 import { AddProjectWizard } from "./projects/AddProjectWizard";
 import { Button } from "./ui/button";
-import { ToastContainer } from "./ui/toast";
 
 export function EmptyState() {
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -25,7 +24,6 @@ export function EmptyState() {
         </Button>
 
         <AddProjectWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
-        <ToastContainer />
       </div>
     </div>
   );

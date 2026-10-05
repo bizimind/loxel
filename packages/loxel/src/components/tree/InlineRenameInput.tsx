@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useRef } from "react";
 
+import { cn } from "@/lib/utils";
+
 export function InlineRenameInput({
   currentName,
-  isDir,
+  selectBaseName = false,
+  className,
   onFinish,
   onCancel,
 }: {
   currentName: string;
-  isDir: boolean;
+  /** Initially select only the name before its extension (file names), instead of all of it. */
+  selectBaseName?: boolean;
+  className?: string;
   onFinish: (newName: string) => void;
   onCancel: () => void;
 }) {
@@ -19,13 +24,9 @@ export function InlineRenameInput({
     const input = inputRef.current;
     if (!input) return;
     input.focus();
-    if (!isDir) {
-      const dotIdx = currentName.lastIndexOf(".");
-      if (dotIdx > 0) {
-        input.setSelectionRange(0, dotIdx);
-      } else {
-        input.select();
-      }
+    const dotIdx = selectBaseName ? currentName.lastIndexOf(".") : -1;
+    if (dotIdx > 0) {
+      input.setSelectionRange(0, dotIdx);
     } else {
       input.select();
     }
@@ -34,7 +35,7 @@ export function InlineRenameInput({
       blurReadyRef.current = true;
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, [currentName, isDir]);
+  }, [currentName, selectBaseName]);
 
   const handleSubmit = useCallback(() => {
     if (cancelledRef.current) return;
@@ -49,7 +50,7 @@ export function InlineRenameInput({
   return (
     <input
       ref={inputRef}
-      className="bg-input min-w-0 flex-1 rounded px-1 text-xs outline-none"
+      className={cn("bg-input min-w-0 flex-1 rounded px-1 text-xs outline-none", className)}
       defaultValue={currentName}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}

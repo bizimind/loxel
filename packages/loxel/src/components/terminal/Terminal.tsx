@@ -26,6 +26,7 @@ import { useUIStore } from "@/store/ui";
 import { type FileIndex, buildFileIndex, createFilePathLinkProvider } from "./file-link-provider";
 import { SEARCH_DECORATIONS } from "./search-decorations";
 import { TerminalSearchBar } from "./TerminalSearchBar";
+import { createWebglRenderer } from "./webgl-renderer";
 
 import "@xterm/xterm/css/xterm.css";
 
@@ -64,6 +65,34 @@ function getTerminalTheme() {
 
 const RESIZE_DEBOUNCE_MS = 100;
 
+const TERMINAL_FONT = {
+  family: "JetBrains Mono NL",
+  size: 13,
+  weight: "400",
+  weightBold: "500",
+} as const;
+
+const TERMINAL_FONT_TIMEOUT_MS = 2000;
+
+/**
+ * Resolve once the terminal's font faces are loaded, failed, or timed out. xterm measures the cell
+ * grid and the WebGL renderer rasterizes glyphs on open, and neither re-checks when a web font
+ * swaps in, so opening earlier would bake the fallback font into the grid and the glyph atlas.
+ */
+function loadTerminalFont(): Promise<unknown> {
+  // Load the family's FontFace objects directly: Chromium's document.fonts.load() matches no faces
+  // for this family (its local() fallback face for U+23FA in index.css breaks matching) and
+  // resolves without loading anything.
+  const faces = [...document.fonts].filter(
+    (face) => face.family.replaceAll('"', "") === TERMINAL_FONT.family,
+  );
+  const loaded = Promise.allSettled(faces.map((face) => face.load()));
+  const timeout = new Promise((resolve) => {
+    setTimeout(resolve, TERMINAL_FONT_TIMEOUT_MS);
+  });
+  return Promise.race([loaded, timeout]);
+}
+
 /** Open a URL: Cmd+click opens in browser panel, plain click opens in system browser. */
 function openUrl(event: MouseEvent, url: string) {
   try {
@@ -80,6 +109,19 @@ function openUrl(event: MouseEvent, url: string) {
 }
 
 const termLog = frontendLog.child("terminal");
+
+/** Fit the terminal to its container and sync changed dimensions to the PTY. */
+function fitAndSendResize(terminalId: string, terminal: XTerm, fitAddon: FitAddon) {
+  const { cols, rows } = terminal;
+  fitAddon.fit();
+  if (terminal.cols === cols && terminal.rows === rows) return;
+  wsClient.send({
+    type: "terminal_resize",
+    id: terminalId,
+    cols: terminal.cols,
+    rows: terminal.rows,
+  });
+}
 
 /** Send terminal_create with current dimensions and the panel's working directory. */
 function sendCreate(terminalId: string, terminal: XTerm, cwd: string) {
@@ -135,10 +177,10 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
 
     const terminal = new XTerm({
       cursorBlink: true,
-      fontFamily: "'JetBrains Mono NL', monospace",
-      fontSize: 13,
-      fontWeight: "400",
-      fontWeightBold: "500",
+      fontFamily: `"${TERMINAL_FONT.family}", monospace`,
+      fontSize: TERMINAL_FONT.size,
+      fontWeight: TERMINAL_FONT.weight,
+      fontWeightBold: TERMINAL_FONT.weightBold,
       letterSpacing: 0,
       lineHeight: 1.1,
       linkHandler: { activate: (event, text) => openUrl(event, text) },
@@ -155,7 +197,6 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(searchAddon);
     terminal.loadAddon(webLinksAddon);
-    terminal.open(containerRef.current);
 
     // File path link detection: prefixed paths (/, ./, ../, ~/) and bare filenames
     // matched against the project file index.
@@ -293,12 +334,32 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       return true;
     });
 
-    // Fit after opening and send create to server
-    const rafId = requestAnimationFrame(() => {
-      fitAddon.fit();
-      if (cwdRef.current) sendCreate(terminalId, terminal, cwdRef.current);
-      createdRef.current = true;
-      exitedRef.current = false;
+    // WebGL only while visible: hidden tabs don't count against Chromium's context cap. Switching
+    // renderers changes the cell size; the ResizeObserver refits when the panel is shown again.
+    const webglRenderer = createWebglRenderer(terminal, terminalId, () => {
+      if (createdRef.current) fitAndSendResize(terminalId, terminal, fitAddon);
+    });
+    const visibility = panelApi.onDidVisibilityChange(({ isVisible }) => {
+      if (isVisible) webglRenderer.attach();
+      else webglRenderer.detach();
+    });
+
+    // Open once the font is ready, then fit and send create to server
+    const container = containerRef.current;
+    let disposed = false;
+    let rafId = 0;
+    void loadTerminalFont().then(() => {
+      if (disposed) return;
+      terminal.open(container);
+      if (panelApi.isVisible) webglRenderer.attach();
+      // Activation focus before open() is a no-op (xterm has no textarea yet), so re-apply it.
+      if (panelApi.isActive && panelApi.isGroupActive) terminal.focus();
+      rafId = requestAnimationFrame(() => {
+        fitAddon.fit();
+        if (cwdRef.current) sendCreate(terminalId, terminal, cwdRef.current);
+        createdRef.current = true;
+        exitedRef.current = false;
+      });
     });
 
     xtermRef.current = terminal;
@@ -330,13 +391,15 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
 
     // On WebSocket reconnect, re-create the PTY
     const unsubReconnect = wsClient.onReconnect(() => {
-      if (exitedRef.current) return;
+      // Before the initial create, the pending open sends terminal_create itself.
+      if (exitedRef.current || !createdRef.current) return;
       terminal.reset();
       if (cwdRef.current) sendCreate(terminalId, terminal, cwdRef.current);
       termLog.info("Terminal reconnected", { terminalId });
     });
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(rafId);
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       inputDisposable.dispose();
@@ -345,6 +408,8 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       unsubOutput();
       unsubscribe();
       unsubReconnect();
+      visibility.dispose();
+      webglRenderer.detach();
       terminal.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
@@ -374,29 +439,42 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
     };
   }, [panelWorktreePath]);
 
-  // Handle container resize with debounce
+  // Handle container resize with debounce. Device pixel ratio changes (e.g. moving the window to
+  // another display) also refit: the WebGL renderer's cell size is rounded in device pixels, so
+  // the cols/rows that fit change even when the container's CSS size doesn't.
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const observer = new ResizeObserver(() => {
+    const scheduleFit = () => {
       if (!fitAddonRef.current || !xtermRef.current || !createdRef.current) return;
 
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       resizeTimerRef.current = setTimeout(() => {
         if (!fitAddonRef.current || !xtermRef.current) return;
-        fitAddonRef.current.fit();
-        wsClient.send({
-          type: "terminal_resize",
-          id: terminalId,
-          cols: xtermRef.current.cols,
-          rows: xtermRef.current.rows,
-        });
+        fitAndSendResize(terminalId, xtermRef.current, fitAddonRef.current);
         xtermRef.current.scrollToBottom();
       }, RESIZE_DEBOUNCE_MS);
-    });
+    };
 
+    const observer = new ResizeObserver(scheduleFit);
     observer.observe(containerRef.current);
-    return () => observer.disconnect();
+
+    // A resolution query only matches the current ratio, so re-arm it after each change.
+    let dprQuery: MediaQueryList | null = null;
+    const watchDevicePixelRatio = () => {
+      dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      dprQuery.addEventListener("change", onDevicePixelRatioChange, { once: true });
+    };
+    const onDevicePixelRatioChange = () => {
+      scheduleFit();
+      watchDevicePixelRatio();
+    };
+    watchDevicePixelRatio();
+
+    return () => {
+      observer.disconnect();
+      dprQuery?.removeEventListener("change", onDevicePixelRatioChange);
+    };
   }, [terminalId]);
 
   // Update terminal theme when dark mode changes
