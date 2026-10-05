@@ -80,10 +80,13 @@ const TERMINAL_FONT_TIMEOUT_MS = 2000;
  * swaps in, so opening earlier would bake the fallback font into the grid and the glyph atlas.
  */
 function loadTerminalFont(): Promise<unknown> {
-  const { family, size, weight, weightBold } = TERMINAL_FONT;
-  const loaded = Promise.allSettled(
-    [weight, weightBold].map((w) => document.fonts.load(`${w} ${size}px "${family}"`)),
+  // Load the family's FontFace objects directly: Chromium's document.fonts.load() matches no faces
+  // for this family (its local() fallback face for U+23FA in index.css breaks matching) and
+  // resolves without loading anything.
+  const faces = [...document.fonts].filter(
+    (face) => face.family.replaceAll('"', "") === TERMINAL_FONT.family,
   );
+  const loaded = Promise.allSettled(faces.map((face) => face.load()));
   const timeout = new Promise((resolve) => {
     setTimeout(resolve, TERMINAL_FONT_TIMEOUT_MS);
   });
@@ -349,6 +352,8 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       if (disposed) return;
       terminal.open(container);
       if (panelApi.isVisible) webglRenderer.attach();
+      // Activation focus before open() is a no-op (xterm has no textarea yet), so re-apply it.
+      if (panelApi.isActive && panelApi.isGroupActive) terminal.focus();
       rafId = requestAnimationFrame(() => {
         fitAddon.fit();
         if (cwdRef.current) sendCreate(terminalId, terminal, cwdRef.current);
