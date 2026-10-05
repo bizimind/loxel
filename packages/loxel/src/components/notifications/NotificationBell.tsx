@@ -23,7 +23,7 @@ export function NotificationBell() {
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         className="text-muted-foreground hover:text-foreground relative rounded p-1"
-        style={isElectron ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined}
+        style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
       >
         <BellIcon className="size-3.5" />
         {hasNotifications && (
