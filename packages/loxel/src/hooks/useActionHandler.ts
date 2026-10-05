@@ -30,7 +30,7 @@ import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { deriveProject, useProjectStore } from "@/store/projects";
 import { useSearchStore } from "@/store/search";
 import { useSettingsStore } from "@/store/settings-store";
-import { getCenterApi } from "@/store/tools-bar";
+import { getCenterApi, showPanel } from "@/store/tools-bar";
 import { goBackWorktree, goForwardWorktree } from "@/store/worktree-history";
 import { getOrderedWorktrees, useWorktreeStore } from "@/store/worktrees";
 
@@ -296,6 +296,9 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "file.revealInExplorer": {
         const filePath = getActiveEditorFilePath();
         if (filePath) {
+          // The event (not `revealInProjectExplorer`) also reveals Others files and drafts, which
+          // the pending reveal can't, as they are outside every folder tree.
+          showPanel("projectFiles");
           dispatchLoxelEvent("loxel-reveal-in-explorer", { filePath });
         }
         break;

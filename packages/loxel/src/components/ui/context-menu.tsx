@@ -153,7 +153,7 @@ function ContextMenuSubTrigger({
     <MenuPrimitive.SubmenuTrigger
       data-slot="context-menu-sub-trigger"
       className={cn(
-        "focus:bg-primary data-open:bg-primary flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-hidden select-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "focus:bg-primary data-open:bg-primary flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-hidden select-none data-disabled:pointer-events-none data-disabled:cursor-default data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       {...props}

@@ -89,7 +89,6 @@ JetBrains-style split diff with synchronized scrolling:
 - **Split and unified** view modes
 - **Server-resolved bases** — both panes use the exact commit that produced the diff, including
   worktree-specific `HEAD` values and merge bases for three-dot ranges
-- **Hunk-level staging** — stage or unstage individual hunks directly from the diff view
 
 ### TypeScript Language Intelligence
 
@@ -109,8 +108,8 @@ All per-file TS/JS language features are delivered by the official TypeScript 7 
 Full git client via context menus and inline forms:
 
 - **Commit graph** — interactive DAG with branch/tag labels, multi-select, search with filters (branch, author, date range, file paths), and an "uncommitted changes" virtual row
-- **Changes panel** — defaults to showing local changes (staged + unstaged + untracked) when no commits are selected. Includes a branch commit dropdown for selecting the commits this branch adds on top of the repository's default branch (`merge-base(default, HEAD)..HEAD` — the same range a pull request shows, so a branch stacked on another reports its whole range), with multi-select, "All branch changes" shortcut, and bidirectional sync with the Git graph
-- **Staging** — file-level and hunk-level staging, unstaging, discard
+- **Changes panel** — defaults to showing local changes (staged + unstaged + untracked) when no commits are selected. Includes a branch commit dropdown for selecting the commits this branch adds on top of the repository's default branch (`merge-base(default, HEAD)..HEAD` — the same range a pull request shows, so a branch stacked on another reports its whole range), with multi-select, "All branch changes" shortcut, and bidirectional sync with the Git graph. Right-click an entry for **Open Diff**, **Open File** (in its associated editor), **Reveal in Project Explorer**, **Copy Name** / **Copy Relative Path** / **Copy Absolute Path**, and on macOS **Reveal in Finder** / **Open In**. The items that act on the file on disk are disabled when the path is not there (a deleted file, or a file of a past commit that has since been removed); Open File and Reveal are only offered for the active worktree. While the panel shows a worktree's local changes (no commits selected besides its uncommitted row), **Discard Changes** reverts the file — or every changed file under a folder — to `HEAD` after confirmation: staged and unstaged changes alike, both sides of a staged rename, and new (staged or untracked) files are deleted
+- **Discard** — revert changed files or folders to `HEAD` from the Changes panel context menu (staging and unstaging have server endpoints but no UI yet)
 - **Commits** — create, cherry-pick, revert (single and multi-select)
 - **Branches** — create, delete, rename, checkout, favorites, upstream tracking (ahead/behind)
 - **Reset** — soft, mixed, hard to any commit
@@ -258,7 +257,7 @@ Individual build targets: `bun run build:ui` (Vite client only), `bun run build:
 
 Loxel can run as a desktop app via Electron. The Electron shell spawns the Bun server as a child process and opens a window pointing to `http://127.0.0.1:<port>`. Server/renderer traffic runs over WS + REST; Electron IPC is used only for a small set of native integrations.
 
-**IPC channels** (main → renderer unless noted, exposed via `contextBridge` as `window.electronAPI`, constants in `src/electron/ipc-channels.ts`):
+**IPC channels** (main → renderer unless noted, exposed via `contextBridge` as `window.electronAPI`, constants in `src/electron/ipc-channels.ts`). The preload ships in the `.app` bundle while in-app updates replace only the renderer and server, so a renderer can run against an older preload: `window.electronAPI` members added after the first release are optional in `src/electron-api.d.ts` and must be called with `?.()`:
 
 - `open-in-browser-tab` — Cmd+click on an external link in the renderer opens it in a Loxel browser panel tab instead of the system browser.
 - `set-dock-badge` — renderer pushes the unread-notification count to the macOS dock badge.

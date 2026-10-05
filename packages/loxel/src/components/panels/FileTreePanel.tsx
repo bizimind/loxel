@@ -1,16 +1,24 @@
 import type { DockviewPanelApi } from "dockview-react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
+import { ChangesFileMenu } from "@/components/menus/ChangesFileMenu";
 import { BranchCommitDropdown } from "@/components/panels/BranchCommitDropdown";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
 import { type TreeNode, FilesTree } from "@/components/tree";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { showToast } from "@/components/ui/toast";
 import { usePanelActive } from "@/hooks/usePanelActive";
+import { dispatchOpenFile } from "@/lib/open-file";
+import { isWithin, pathName } from "@/lib/project-file-helpers";
+import { revealInProjectExplorer } from "@/lib/reveal-in-explorer";
 import { cn } from "@/lib/utils";
+import { useRevertToHeadMutation } from "@/queries/use-git-mutations";
 import { useDiffQuery } from "@/queries/use-repo-queries";
 import { useRepositoryStore } from "@/store/worktree-repository";
 import { useWorktreeUI } from "@/store/worktree-ui";
+import { useWorktreeStore } from "@/store/worktrees";
 
 // --- Tree building ---
 
@@ -71,6 +79,41 @@ function compactTree(nodes: TreeNode[]): TreeNode[] {
   });
 }
 
+interface DiscardTarget {
+  worktree: string;
+  path: string;
+  isDir: boolean;
+  files: FileDiff[];
+}
+
+/** Every path a discard of `files` must revert: both sides of a rename (a copy's source stays). */
+function discardPaths(files: FileDiff[]): string[] {
+  return [
+    ...new Set(
+      files.flatMap((f) => (f.status === "renamed" ? [f.oldPath, f.newPath] : [fileDiffPath(f)])),
+    ),
+  ];
+}
+
+function discardDescription(target: DiscardTarget, activeWorktreePath: string | null): string {
+  const where =
+    target.worktree === activeWorktreePath ? "" : ` in worktree "${pathName(target.worktree)}"`;
+  const file = target.files[0];
+  let question: string;
+  if (target.isDir) {
+    const count = target.files.length;
+    const deletes = target.files.some((f) => f.status === "added" || f.status === "copied");
+    question = `Discard local changes to ${count} ${count === 1 ? "file" : "files"} in "${target.path}"${where}?${deletes ? " New files will be deleted." : ""}`;
+  } else if (file?.status === "added" || file?.status === "copied") {
+    question = `Discard "${target.path}"${where}? It is a new file and will be deleted.`;
+  } else if (file?.status === "renamed") {
+    question = `Discard the rename of "${file.oldPath}" to "${target.path}"${where}? "${file.oldPath}" will be restored and "${target.path}" deleted.`;
+  } else {
+    question = `Discard local changes to "${target.path}"${where}?`;
+  }
+  return `${question} This cannot be undone.`;
+}
+
 // --- Component ---
 
 export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
@@ -106,6 +149,52 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
   const handleOpen = useCallback(() => {
     window.dispatchEvent(new CustomEvent("loxel-open-diff"));
   }, []);
+
+  // --- Context menu ---
+  // Entry paths are relative to the repository root. They are on disk in the worktree whose local
+  // changes are shown, and otherwise (commits) in the active worktree's checkout.
+  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
+  const filesRoot = diffSource?.worktree ?? activeWorktreePath;
+  const showsLocalChanges = diffSource?.type === "uncommitted" && !diffSource.base;
+  const [contextMenu, setContextMenu] = useState<{
+    position: { x: number; y: number };
+    path: string;
+    isDir: boolean;
+  } | null>(null);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, path: string, isDir: boolean) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ position: { x: e.clientX, y: e.clientY }, path, isDir });
+  }, []);
+
+  // --- Discard (local changes only) ---
+  const revertMutation = useRevertToHeadMutation();
+  const [discardTarget, setDiscardTarget] = useState<DiscardTarget | null>(null);
+
+  const handleRequestDiscard = useCallback(
+    (worktree: string, path: string, isDir: boolean) => {
+      const targetFiles = isDir
+        ? files.filter((f) => isWithin(fileDiffPath(f), path))
+        : files.filter((f) => fileDiffPath(f) === path);
+      if (targetFiles.length === 0) return;
+      setDiscardTarget({ worktree, path, isDir, files: targetFiles });
+    },
+    [files],
+  );
+
+  const handleConfirmDiscard = useCallback(async () => {
+    if (!discardTarget) return;
+    setDiscardTarget(null);
+    try {
+      await revertMutation.mutateAsync({
+        worktree: discardTarget.worktree,
+        files: discardPaths(discardTarget.files),
+      });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to discard changes");
+    }
+  }, [discardTarget, revertMutation]);
 
   const handleSelect = useCallback(
     (path: string) => {
@@ -165,11 +254,56 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
           isPanelActive={isPanelActive}
           onOpen={handleOpen}
           onSelect={handleSelect}
+          onContextMenu={handleContextMenu}
           renderTrailing={renderTrailing}
           labelClassName={getLabelClassName}
           className="flex-1 scrollbar-thin overflow-y-auto py-1"
         />
       )}
+
+      {contextMenu && filesRoot && (
+        <ChangesFileMenu
+          position={contextMenu.position}
+          path={contextMenu.path}
+          absolutePath={`${filesRoot}/${contextMenu.path}`}
+          isDir={contextMenu.isDir}
+          onClose={() => setContextMenu(null)}
+          onOpenDiff={
+            contextMenu.isDir
+              ? undefined
+              : () => {
+                  setSelectedFile(contextMenu.path);
+                  handleOpen();
+                }
+          }
+          // The editor and the project explorer show the active worktree only.
+          onOpenFile={
+            !contextMenu.isDir && filesRoot === activeWorktreePath
+              ? () => dispatchOpenFile(`${filesRoot}/${contextMenu.path}`)
+              : undefined
+          }
+          onRevealInExplorer={
+            filesRoot === activeWorktreePath
+              ? () => revealInProjectExplorer(`${filesRoot}/${contextMenu.path}`)
+              : undefined
+          }
+          onDiscard={
+            showsLocalChanges
+              ? () => handleRequestDiscard(filesRoot, contextMenu.path, contextMenu.isDir)
+              : undefined
+          }
+        />
+      )}
+
+      <ConfirmDialog
+        open={discardTarget !== null}
+        title="Discard Changes"
+        description={discardTarget ? discardDescription(discardTarget, activeWorktreePath) : ""}
+        confirmLabel="Discard"
+        destructive
+        onConfirm={handleConfirmDiscard}
+        onCancel={() => setDiscardTarget(null)}
+      />
     </div>
   );
 }

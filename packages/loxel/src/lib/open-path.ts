@@ -33,7 +33,7 @@ export async function openFolder(rawPath: string): Promise<void> {
       showPanelAfterLayoutRestore("projectFiles");
     }
     // The switch sets the active worktree synchronously, so this targets the owner's store.
-    getCurrentWorktreeUI().getState().setPendingRevealFolder(path);
+    getCurrentWorktreeUI().getState().setPendingReveal({ path, expand: true });
     return;
   }
 
@@ -59,7 +59,7 @@ export async function openFolder(rawPath: string): Promise<void> {
     queryKey: queryKeys.externalFiles(projectPath, activeWorktreePath),
   });
   showPanel("projectFiles");
-  getCurrentWorktreeUI().getState().setPendingRevealFolder(path);
+  getCurrentWorktreeUI().getState().setPendingReveal({ path, expand: true });
 }
 
 /**

@@ -195,20 +195,21 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
     [queryClient, getTreeRoot],
   );
 
-  // Reveal a folder opened via `loxel <folder>`, a terminal link, etc. once its tree lists it.
-  // Right after a worktree switch the server is still creating the worktree's resources and its
-  // listing fails, so keep the request until a reveal succeeds and retry as listings arrive.
-  const pendingRevealFolder = useWorktreeUI((s) => s.pendingRevealFolder);
+  // Reveal a folder opened via `loxel <folder>`, a terminal link, etc., or a path revealed from
+  // another panel, once its tree lists it. Right after a worktree switch the server is still
+  // creating the worktree's resources and its listing fails, so keep the request until a reveal
+  // succeeds and retry as listings arrive.
+  const pendingReveal = useWorktreeUI((s) => s.pendingReveal);
   useEffect(() => {
-    if (!pendingRevealFolder || !getTreeRoot(pendingRevealFolder)) return;
+    if (!pendingReveal || !getTreeRoot(pendingReveal.path)) return;
     let done = false;
     const attempt = () => {
-      revealFileInTree(pendingRevealFolder)
+      revealFileInTree(pendingReveal.path)
         .then(() => {
           if (done) return;
           done = true;
-          treeRef.current?.expandPath(pendingRevealFolder);
-          getCurrentWorktreeUI().getState().setPendingRevealFolder(null);
+          if (pendingReveal.expand) treeRef.current?.expandPath(pendingReveal.path);
+          getCurrentWorktreeUI().getState().setPendingReveal(null);
         })
         .catch(() => {});
     };
@@ -218,7 +219,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
       done = true;
       unsubscribe();
     };
-  }, [pendingRevealFolder, getTreeRoot, revealFileInTree]);
+  }, [pendingReveal, getTreeRoot, revealFileInTree]);
 
   useEffect(() => {
     return onLoxelEvent("loxel-reveal-in-explorer", ({ filePath }) => {

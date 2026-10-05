@@ -37,6 +37,7 @@ export const queryKeys = {
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
   openInApps: (path: string) => ["openInApps", path] as const,
+  pathExists: (path: string) => ["pathExists", path] as const,
 };
 
 const WORKING_TREE_DIFF_TYPES: ReadonlySet<unknown> = new Set<DiffSource["type"]>([
