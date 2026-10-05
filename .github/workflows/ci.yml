@@ -197,7 +197,8 @@ jobs:
     needs: discover
     if: needs.discover.outputs.test != '[]'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    timeout-minutes: 4
+    # Healthy loxel runs take up to ~4 min including ~1 min of setup; leave room for slow runners.
+    timeout-minutes: 7
     strategy:
       fail-fast: false
       matrix:
