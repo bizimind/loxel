@@ -38,8 +38,12 @@ mock.module("@/api/client", () => ({
 }));
 
 mock.module("@/components/menus/ProjectFileMenu", () => ({
-  ProjectFileMenu: ({ filePath }: { filePath: string }) => (
-    <div data-testid="project-file-menu" data-file-path={filePath} />
+  ProjectFileMenu: ({ filePath, relativePath }: { filePath: string; relativePath?: string }) => (
+    <div
+      data-testid="project-file-menu"
+      data-file-path={filePath}
+      data-relative-path={relativePath}
+    />
   ),
 }));
 
@@ -241,6 +245,17 @@ describe("ProjectFilesPanel", () => {
     fireEvent.contextMenu(root);
 
     expect(screen.getByTestId("project-file-menu")).toHaveAttribute("data-file-path", "/repo");
+    expect(screen.getByTestId("project-file-menu")).not.toHaveAttribute("data-relative-path");
+  });
+
+  test("context menu offers a child's path relative to the worktree", async () => {
+    renderPanel(queryClient);
+
+    fireEvent.contextMenu(await screen.findByRole("button", { name: /src/ }));
+
+    const menu = screen.getByTestId("project-file-menu");
+    expect(menu).toHaveAttribute("data-file-path", "/repo/src");
+    expect(menu).toHaveAttribute("data-relative-path", "src");
   });
 
   test("root dir-changed events reload rendered root children", async () => {

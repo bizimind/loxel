@@ -37,7 +37,7 @@ export function DetachedFileNode({
         isRenaming ? (
           <InlineRenameInput
             currentName={entry.name}
-            isDir={false}
+            selectBaseName
             onFinish={(newName) => onFinishRename(filePath, newName)}
             onCancel={onCancelRename}
           />

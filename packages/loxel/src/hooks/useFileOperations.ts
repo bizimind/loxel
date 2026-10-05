@@ -7,6 +7,7 @@ import type { FilesTreeHandle } from "@/components/tree";
 import { showToast } from "@/components/ui/toast";
 import { frontendLog } from "@/lib/frontend-logger";
 import { fileParentDir } from "@/lib/project-file-helpers";
+import { renameFile } from "@/lib/rename-file";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -74,19 +75,8 @@ export function useFileOperations(
           return;
         }
 
-        let newPath: string;
-        if (isDetachedPath(path)) {
-          await api.renameDetachedFile(wt, path, newName);
-          newPath = path.slice(0, path.lastIndexOf("/") + 1) + newName;
-        } else {
-          ({ newPath } = await api.renameProjectFile(wt, { path, newName }));
-        }
-        getCurrentWorktreeUI().getState().renameProjectPaths(path, newPath);
+        const newPath = await renameFile({ wt, path, newName, isDetached: isDetachedPath(path) });
         treeRef.current?.handlePathsRenamed(path, newPath);
-        window.dispatchEvent(
-          new CustomEvent("loxel-file-moved", { detail: { oldPath: path, newPath } }),
-        );
-        invalidateDirQueries(fileParentDir(path, wt));
         treeRef.current?.focusPath(newPath);
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Rename failed");

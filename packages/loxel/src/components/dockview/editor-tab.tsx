@@ -1,5 +1,6 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 
+import { useFileTabRename } from "@/hooks/useFileTabRename";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { useEditorStateStore } from "@/store/editor-state";
 
@@ -17,6 +18,7 @@ interface EditorTabProps {
 export function EditorTab({ props, icon }: EditorTabProps) {
   const filePath = props.params.filePath;
   const filename = getDisplayFilename(filePath);
+  const handleRename = useFileTabRename(filePath);
   const isDiverged = useEditorStateStore((s) => s.files.get(filePath)?.state === "diverged");
 
   const leading = isDiverged ? (
@@ -31,6 +33,8 @@ export function EditorTab({ props, icon }: EditorTabProps) {
       api={props.api}
       icon={icon}
       title={filename}
+      onRename={handleRename}
+      selectBaseName
       leading={leading}
       contextMenuItems={
         <FileContextMenuItems

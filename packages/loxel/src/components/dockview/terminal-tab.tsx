@@ -5,12 +5,13 @@ import { useEffect, useState } from "react";
 import { NotificationDot } from "@/components/ui/notification-dot";
 import { hasPanelNotification, usePanelNotificationStore } from "@/store/panel-notifications";
 
-import { Tab } from "./tab";
+import { Tab, usePanelTitle } from "./tab";
 
 export function TerminalTab(props: IDockviewPanelHeaderProps<{ terminalId: string }>) {
   const terminalId = props.params.terminalId;
   const hasNotification = usePanelNotificationStore((s) => hasPanelNotification(s, terminalId));
   const [isActive, setIsActive] = useState(props.api.isActive);
+  const title = usePanelTitle(props.api);
 
   useEffect(() => {
     if (props.api.isActive) {
@@ -34,7 +35,8 @@ export function TerminalTab(props: IDockviewPanelHeaderProps<{ terminalId: strin
           {hasNotification && !isActive && <NotificationDot />}
         </span>
       }
-      title={props.api.title || "Terminal"}
+      title={title || "Terminal"}
+      onRename={(newName) => props.api.setTitle(newName)}
     />
   );
 }

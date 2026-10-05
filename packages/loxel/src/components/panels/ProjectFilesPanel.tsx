@@ -20,6 +20,7 @@ import { useFileOperations } from "@/hooks/useFileOperations";
 import { usePanelActive } from "@/hooks/usePanelActive";
 import { useProjectFileDrag } from "@/hooks/useProjectFileDrag";
 import { getTreeActionForEvent, useTreeKeyboardNav } from "@/hooks/useTreeKeyboardNav";
+import { copyToClipboard } from "@/lib/clipboard";
 import { getDisplayFilename, toAbsoluteDir } from "@/lib/detached-path";
 import { onLoxelEvent } from "@/lib/loxel-events";
 import { dispatchOpenFile } from "@/lib/open-file";
@@ -29,6 +30,7 @@ import {
   isWithin,
   parentDir,
   pathName,
+  relativeTo,
   statusColorClass,
 } from "@/lib/project-file-helpers";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
@@ -62,7 +64,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
   const handleCopy = useCallback(() => {
     if (!displayPath) return;
-    navigator.clipboard.writeText(displayPath);
+    copyToClipboard(displayPath, "worktree path");
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [displayPath]);
@@ -379,7 +381,6 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
                 {renamingPath === seg.path ? (
                   <InlineRenameInput
                     currentName={seg.name}
-                    isDir
                     onFinish={(newName) => handleFinishRename(seg.path, newName)}
                     onCancel={handleCancelRename}
                   />
@@ -397,7 +398,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         return (
           <InlineRenameInput
             currentName={node.name}
-            isDir={node.isDir}
+            selectBaseName={!node.isDir}
             onFinish={(newName) => handleFinishRename(node.path, newName)}
             onCancel={handleCancelRename}
           />
@@ -607,9 +608,13 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   const ctxIsRoot = contextMenu ? isTreeRoot(contextMenu.path) : false;
   const ctxIsFixed = contextMenu ? isFixedRow(contextMenu.path) : false;
   const ctxIsOthersRoot = contextMenu ? isOthersRoot(contextMenu.path) : false;
-  // An individually opened Others file is outside every tree: its menu only offers Open In.
+  // An individually opened Others file is outside every tree: only copy and Open In apply to it.
   const ctxIsOtherFile = contextMenu ? isOtherFile(contextMenu.path) : false;
   const ctxIsModified = contextMenu?.status === "modified" && !ctxIsDraft && !ctxIsRoot;
+  // Relative to the worktree or Others folder holding it; drafts and Others files have none.
+  const ctxTreeRoot = contextMenu ? getTreeRoot(contextMenu.path) : null;
+  const ctxRelativePath =
+    contextMenu && ctxTreeRoot ? relativeTo(contextMenu.path, ctxTreeRoot) : undefined;
 
   const deleteDescription = (() => {
     if (!deleteTarget) return "";
@@ -726,6 +731,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
           open
           position={contextMenu.position}
           filePath={contextMenu.path}
+          relativePath={ctxRelativePath}
           isDir={contextMenu.isDir}
           canPaste={clipboard !== null}
           onClose={() => setContextMenu(null)}

@@ -418,3 +418,17 @@ jobs:
           ${LINKS}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The site reads the manifest at build time, so rebuild it to show the new version.
+  # Separate job so a failed dispatch can be re-run without re-running the release.
+  redeploy-site:
+    needs: release
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 1
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch site deploy
+        run: gh workflow run release-site.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
