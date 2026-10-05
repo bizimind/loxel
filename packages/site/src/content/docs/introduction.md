@@ -8,7 +8,7 @@ Loxel is an IDE for directing AI agents across parallel workstreams. It combines
 
 ## Parallel workstreams
 
-The core workflow: create a worktree per task, hand it to an agent, switch to something else while it runs. Loxel treats the worktree as the unit of focus — each one has its own panel layout, open files, and agent sessions. Switch worktrees with `Ctrl+Alt+→` and your previous context is waiting exactly as you left it.
+The core workflow: create a worktree per task, hand it to an agent, switch to something else while it runs. Loxel treats the worktree as the unit of focus — each one has its own panel layout, open files, and agent sessions. Switch worktrees from the sidebar, then `Ctrl+Alt+[` takes you back — your previous context is waiting exactly as you left it.
 
 Running three or four agents in parallel requires visibility into what each one is doing, review tooling that survives repeated rewrites, and context switching that doesn't cost you 30 seconds of layout reconstruction. That's the problem loxel is built to solve.
 
@@ -30,7 +30,7 @@ The **built-in coding agent** has a dedicated timeline UI: user messages, assist
 
 If you prefer a TUI agent — Claude Code, Codex, OpenCode, Gemini CLI, or anything else that runs in a terminal — open one in a loxel terminal with `Cmd+T` and run it there. Both workflows coexist. Put a coding agent panel next to your editor, or run two TUI agents in split terminals. Layout is yours to configure.
 
-**Press** **`Cmd+Shift+O`** to open a full browser panel. It's a Chromium webview running inside loxel — use it to view your local dev server, browse GitHub, or read a tutorial. Works like any other panel: drag it next to a coding agent, split it below your editor, or pop it into its own group. From a loxel terminal, `loxel https://example.com` opens any URL directly in this panel.
+**Press** **`Cmd+Shift+B`** to open a full browser panel. It's a Chromium webview running inside loxel — use it to view your local dev server, browse GitHub, or read a tutorial. Works like any other panel: drag it next to a coding agent, split it below your editor, or pop it into its own group. From a loxel terminal, `loxel https://example.com` opens any URL directly in this panel.
 
 ## Git and code review
 

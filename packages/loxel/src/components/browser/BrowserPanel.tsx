@@ -12,13 +12,9 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
-import { useActionHandler } from "@/hooks/useActionHandler";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { cn } from "@/lib/utils";
-import { inputToKeyCombo } from "@/store/keybindings/keybinding-schema";
-import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import { reattachActiveContent } from "@/store/layout-actions";
-import { useSettingsStore } from "@/store/settings-store";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
@@ -37,25 +33,6 @@ interface WebviewFailLoadEvent extends Event {
 interface WebviewFaviconEvent extends Event {
   favicons: string[];
 }
-/**
- * Electron's before-input-event on the webview tag.
- * Event.type is read-only (always "before-input-event"), so the input direction
- * and key data live under a separate `input` property.
- */
-interface WebviewBeforeInputEvent extends Event {
-  input: {
-    type: string;
-    key: string;
-    code: string;
-    meta: boolean;
-    control: boolean;
-    alt: boolean;
-    shift: boolean;
-    isAutoRepeat: boolean;
-    isComposing: boolean;
-  };
-}
-
 /** Typed subset of Electron's webview API (not in React/DOM typings). */
 interface ElectronWebView extends HTMLElement {
   loadURL(url: string): void;
@@ -70,10 +47,6 @@ interface ElectronWebView extends HTMLElement {
   isDevToolsOpened(): boolean;
 
   addEventListener(
-    type: "before-input-event",
-    listener: (event: WebviewBeforeInputEvent) => void,
-  ): void;
-  addEventListener(
     type: "did-navigate" | "did-navigate-in-page",
     listener: (event: WebviewNavigateEvent) => void,
   ): void;
@@ -85,10 +58,6 @@ interface ElectronWebView extends HTMLElement {
   ): void;
   addEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
 
-  removeEventListener(
-    type: "before-input-event",
-    listener: (event: WebviewBeforeInputEvent) => void,
-  ): void;
   removeEventListener(
     type: "did-navigate" | "did-navigate-in-page",
     listener: (event: WebviewNavigateEvent) => void,
@@ -116,7 +85,6 @@ interface BrowserPanelProps {
 }
 
 export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
-  const dispatch = useActionHandler();
   const webviewRef = useRef<ElectronWebView | null>(null);
   const readyRef = useRef(false);
   const [currentUrl, setCurrentUrl] = useState(initialUrl);
@@ -207,30 +175,6 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     const onDevToolsOpened = () => setDevToolsOpen(true);
     const onDevToolsClosed = () => setDevToolsOpen(false);
 
-    // Intercept keyboard input before it reaches the webview guest page.
-    // Without this, loxel keybindings (Cmd+W, Cmd+T, etc.) are swallowed by the webview.
-    const onBeforeInput = (event: WebviewBeforeInputEvent) => {
-      const { input } = event;
-      if (input.type !== "keyDown") return;
-      if (useSettingsStore.getState().isOpen) return;
-      if (
-        input.key === "Meta" ||
-        input.key === "Control" ||
-        input.key === "Alt" ||
-        input.key === "Shift"
-      )
-        return;
-      if (input.isComposing) return;
-
-      const combo = inputToKeyCombo(input);
-      const actionId = useKeybindingStore.getState().lookup.get(combo);
-      if (actionId) {
-        event.preventDefault();
-        dispatch(actionId);
-      }
-    };
-
-    webview.addEventListener("before-input-event", onBeforeInput);
     webview.addEventListener("did-start-loading", onStartLoading);
     webview.addEventListener("did-stop-loading", onStopLoading);
     webview.addEventListener("did-navigate", onDidNavigate);
@@ -243,7 +187,6 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
 
     return () => {
       readyRef.current = false;
-      webview.removeEventListener("before-input-event", onBeforeInput);
       webview.removeEventListener("dom-ready", onDomReady);
       webview.removeEventListener("did-start-loading", onStartLoading);
       webview.removeEventListener("did-stop-loading", onStopLoading);
@@ -255,7 +198,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       webview.removeEventListener("devtools-opened", onDevToolsOpened);
       webview.removeEventListener("devtools-closed", onDevToolsClosed);
     };
-  }, [panelApi, dispatch]);
+  }, [panelApi]);
 
   const navigate = useCallback((url: string) => {
     const webview = webviewRef.current;

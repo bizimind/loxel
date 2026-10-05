@@ -43,6 +43,7 @@ import {
 } from "./ipc-channels";
 import { startMainProcessMonitor } from "./main-perf-monitor";
 import { configurePasskeys, installAccountChooser } from "./webauthn";
+import { forwardWebviewKeystrokes, installWebviewKeystrokeForwarding } from "./webview-keystrokes";
 
 /** Send a URL to the focused window's renderer to open in a browser panel tab. */
 function openInBrowserTab(url: string): void {
@@ -585,6 +586,7 @@ app.on("web-contents-created", (_, contents) => {
       metaKeyHeld = input.type === "keyDown";
     }
   });
+  forwardWebviewKeystrokes(contents);
 
   // Redirect window.open() from webview contents to the system browser
   // (or browser panel tab when Cmd is held).
@@ -668,6 +670,8 @@ ipcMain.handle(OPEN_FOLDER_DIALOG, async (event) => {
   });
   return result.canceled ? null : (result.filePaths[0] ?? null);
 });
+
+installWebviewKeystrokeForwarding();
 
 // macOS: show notification count on dock icon
 ipcMain.on(SET_DOCK_BADGE, (_event, count: unknown) => {

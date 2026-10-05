@@ -29,8 +29,7 @@ Toggle any of these panels without touching the mouse:
 | Changes       | `Cmd+Shift+C`  |
 | Git graph     | `Ctrl+Shift+G` |
 | Comments      | `Ctrl+Shift+R` |
-| Projects      | `Cmd+Shift+B`  |
-| Worktrees     | `Cmd+Alt+B`    |
+| Worktrees     | `Ctrl+Alt+B`   |
 
 ### Center
 
@@ -76,10 +75,11 @@ Grab any panel tab and drag it to:
 
 You can also split the current panel from the keyboard:
 
-| Action      | Shortcut      |
-| ----------- | ------------- |
-| Split right | `Cmd+\`       |
-| Split down  | `Cmd+Shift+\` |
+| Action                    | Shortcut                                                          |
+| ------------------------- | ----------------------------------------------------------------- |
+| Split (same panel type)   | `Cmd+\` then an arrow                                             |
+| Split as a new panel type | `Cmd+\` then `T` / `A` / `M` / `D` / `B`, then an arrow           |
+| New tab in the group      | `Cmd+\` then `Enter` (same type), or the type letter then `Enter` |
 
 ---
 
@@ -102,11 +102,11 @@ Move focus between panels without the mouse.
 
 **Move a panel into a new split:**
 
-`Ctrl+Cmd+Shift+Arrow` splits the current group in the arrow direction and moves the active panel into the new split.
+`Cmd+\` then `Shift+Arrow` splits the current group in the arrow direction and moves the active panel into the new split.
 
 **Move focus without moving the panel:**
 
-`Ctrl+Shift+Arrow` moves keyboard focus to the panel group in the arrow direction, leaving the panel itself in place.
+`Ctrl+Shift+Arrow` moves keyboard focus to the panel group in the arrow direction, leaving the panel itself in place. Past the center's edge it continues into the side tool bars and the worktree sidebar, and down into an open bottom panel. `Ctrl+Shift+Space` collapses or expands the sidebar or panel that holds focus.
 
 ---
 

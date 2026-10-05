@@ -1,6 +1,8 @@
 import type { DockviewPanelApi } from "dockview-react";
 import { useEffect } from "react";
 
+import { registerPanelFocus } from "@/lib/panel-focus";
+
 /**
  * Delegate panel activation to an underlying widget.
  *
@@ -15,6 +17,9 @@ import { useEffect } from "react";
  * Safe from feedback loops: calling `widget.focus()` inside the handler sets
  * native DOM focus on a descendant, which doesn't re-fire active-change events
  * (those are driven by dockview's explicit setActive calls, not DOM focus).
+ *
+ * The focus function is also registered for keyboard focus navigation, which re-focuses an
+ * already-active panel without any activation event (see `lib/panel-focus.ts`).
  *
  * @param api    The dockview panel API from `IDockviewPanelProps`.
  * @param focus  Called when the panel becomes the active-and-focused panel.
@@ -46,7 +51,12 @@ export function usePanelActivationFocus(api: DockviewPanelApi, focus: () => void
     // Fire once on mount in case the panel is already the active-and-focused
     // one (e.g. on initial layout restore).
     tryFocus();
+    const unregister = registerPanelFocus(api.id, () => {
+      focus();
+      return true;
+    });
     return () => {
+      unregister();
       a.dispose();
       g.dispose();
       m.dispose();

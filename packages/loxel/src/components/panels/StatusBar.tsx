@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
 import {
   createAgent,
   createBrowser,
@@ -19,6 +20,20 @@ import {
   createTerminal,
 } from "@/lib/panel-creators";
 import { useStatusQuery } from "@/queries/use-repo-queries";
+import { toKeyBinding } from "@/store/keybindings/key-combo";
+import { usePendingChordStore } from "@/store/keybindings/pending-chord";
+
+/** Shows the keystrokes of a chord in progress, like "⌘\ … waiting for the next key". */
+function PendingChordIndicator() {
+  const steps = usePendingChordStore((s) => s.steps);
+  if (steps.length === 0) return null;
+  return (
+    <div className="text-foreground flex items-center gap-1.5">
+      <KeyBindingDisplay binding={toKeyBinding(steps)} />
+      <span className="text-muted-foreground">… waiting for the next key (Esc to cancel)</span>
+    </div>
+  );
+}
 
 export function StatusBar() {
   const { data: status, isLoading, error } = useStatusQuery();
@@ -28,6 +43,7 @@ export function StatusBar() {
       <div className="border-border bg-destructive/10 text-destructive flex h-6 items-center gap-2 border-t px-3 text-xs">
         <AlertCircleIcon className="size-3.5" />
         {error.message}
+        <PendingChordIndicator />
       </div>
     );
   }
@@ -88,6 +104,8 @@ export function StatusBar() {
           </div>
         </>
       )}
+
+      <PendingChordIndicator />
 
       {/* Loading indicator */}
       {isLoading && (
