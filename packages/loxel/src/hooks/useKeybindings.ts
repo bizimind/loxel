@@ -51,13 +51,13 @@ let lastInterception = "";
  * Re-sent when bindings, chord state or focus change; unchanged payloads are skipped.
  */
 function syncWebviewInterception(): void {
-  const electronAPI = window.electronAPI;
-  if (!electronAPI) return;
+  const setInterception = window.electronAPI?.setKeystrokeInterception;
+  if (!setInterception) return;
   const interception = { combos: firstKeystrokes(), captureAll: hasPendingChord() };
   const serialized = JSON.stringify(interception);
   if (serialized === lastInterception) return;
   lastInterception = serialized;
-  electronAPI.setKeystrokeInterception(interception);
+  setInterception(interception);
 }
 
 export function useKeybindings(): void {
@@ -95,7 +95,7 @@ export function useKeybindings(): void {
       handleKeystroke(combo as KeyCombo, isRepeat === true);
     }
 
-    const offWebviewKeystroke = window.electronAPI?.onWebviewKeystroke(handleWebviewKeystroke);
+    const offWebviewKeystroke = window.electronAPI?.onWebviewKeystroke?.(handleWebviewKeystroke);
     const offLookup = useKeybindingStore.subscribe((state, prev) => {
       if (state.lookup !== prev.lookup) syncWebviewInterception();
     });
@@ -105,7 +105,7 @@ export function useKeybindings(): void {
     // Focus moving into a <webview> fires no focusin here. The main process reports it (the
     // guest's webContents focus event); as a fallback, re-sync one tick after a focusout or window
     // blur, by when activeElement is the webview.
-    const offWebviewFocused = window.electronAPI?.onWebviewFocused(syncWebviewInterception);
+    const offWebviewFocused = window.electronAPI?.onWebviewFocused?.(syncWebviewInterception);
     const syncAfterFocusLeaves = () => setTimeout(syncWebviewInterception, 0);
     const offFindTargets = onFindTargetsChange(syncWebviewInterception);
     syncWebviewInterception();
