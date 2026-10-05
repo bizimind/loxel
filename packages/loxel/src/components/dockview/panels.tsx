@@ -30,7 +30,7 @@ import { FileTreePanel } from "@/components/panels/FileTreePanel";
 import { LogsPanel } from "@/components/panels/LogsPanel";
 import { ProjectFilesPanel } from "@/components/panels/ProjectFilesPanel";
 import { Terminal } from "@/components/terminal/Terminal";
-import { KeyComboDisplay } from "@/components/ui/key-combo-display";
+import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
 import type { ActionId } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import { CENTER_PANELS, QUICKSTART_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
@@ -159,7 +159,7 @@ function QuickAction({
   actionId?: ActionId;
 }) {
   const store = useKeybindingStore();
-  const combo = actionId ? getBindingsForAction(store, actionId)[0] : undefined;
+  const binding = actionId ? getBindingsForAction(store, actionId)[0] : undefined;
 
   return (
     <button
@@ -168,7 +168,9 @@ function QuickAction({
     >
       {icon}
       <span className="flex-1 text-left">{label}</span>
-      {combo && <KeyComboDisplay combo={combo} className="text-muted-foreground/60 ml-4 text-xs" />}
+      {binding && (
+        <KeyBindingDisplay binding={binding} className="text-muted-foreground/60 ml-4 text-xs" />
+      )}
     </button>
   );
 }

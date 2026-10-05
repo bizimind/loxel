@@ -6,6 +6,9 @@ const OPEN_IN_BROWSER_TAB = "open-in-browser-tab";
 const SET_DOCK_BADGE = "set-dock-badge";
 const WINDOW_FOCUS_CHANGE = "window:focus-change";
 const OPEN_FOLDER_DIALOG = "dialog:open-folder";
+const SET_KEYSTROKE_INTERCEPTION = "keybindings:set-interception";
+const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
+const WEBVIEW_FOCUSED = "keybindings:webview-focused";
 
 // Per-window identity assigned by main when this BrowserWindow was created.
 // Stable across renderer reloads (Cmd+R) — different per BrowserWindow.
@@ -31,5 +34,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(WINDOW_FOCUS_CHANGE, handler);
   },
   openFolderDialog: () => ipcRenderer.invoke(OPEN_FOLDER_DIALOG),
+  setKeystrokeInterception: (interception) =>
+    ipcRenderer.send(SET_KEYSTROKE_INTERCEPTION, interception),
+  onWebviewKeystroke: (callback) => {
+    const handler = (_event, combo, isRepeat) => callback(combo, isRepeat);
+    ipcRenderer.on(WEBVIEW_KEYSTROKE, handler);
+    return () => ipcRenderer.removeListener(WEBVIEW_KEYSTROKE, handler);
+  },
+  onWebviewFocused: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on(WEBVIEW_FOCUSED, handler);
+    return () => ipcRenderer.removeListener(WEBVIEW_FOCUSED, handler);
+  },
   getZoomFactor: () => webFrame.getZoomFactor(),
 });

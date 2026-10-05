@@ -6,20 +6,87 @@ import type { IDockviewPanel } from "dockview-react";
 import { useCallback } from "react";
 
 import type { SplitPosition } from "@/components/dockview/default-layout";
+import { getFocusedFindTarget } from "@/lib/find-targets";
+import {
+  moveFocus,
+  toggleFocusedArea,
+  toggleSidebarPanel,
+  toggleWorktreeSidebar,
+} from "@/lib/focus-navigation";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
-import type { ActionId } from "@/store/keybindings/action-registry";
+import type { ActionId, SplitDirection, SplitPanelType } from "@/store/keybindings/action-registry";
+import type { MoveDirection } from "@/store/layout-actions";
 import { activatePanel, findAdjacentCenterGroup } from "@/store/layout-actions";
-import { getCenterPanelDef, getCreateEventForAction } from "@/store/panel-config";
+import {
+  getCenterPanelDef,
+  getCenterPanelDefByType,
+  getCreateEventForAction,
+} from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { deriveProject, useProjectStore } from "@/store/projects";
 import { useSearchStore } from "@/store/search";
 import { useSettingsStore } from "@/store/settings-store";
-import { getCenterApi, togglePanel } from "@/store/tools-bar";
+import { getCenterApi } from "@/store/tools-bar";
+import { goBackWorktree, goForwardWorktree } from "@/store/worktree-history";
 import { getOrderedWorktrees, useWorktreeStore } from "@/store/worktrees";
+
+type SplitActionId = Extract<ActionId, `panel.split.${string}`>;
+
+function isSplitAction(actionId: ActionId): actionId is SplitActionId {
+  return actionId.startsWith("panel.split.");
+}
+
+const SPLIT_POSITION_DIRECTION = {
+  right: "right",
+  left: "left",
+  up: "above",
+  down: "below",
+} as const satisfies Record<SplitDirection, SplitPosition["direction"]>;
+
+/**
+ * Open a new panel next to the active one, toward `direction` — or as a tab in its group when
+ * `direction` is null: of `type` when given, otherwise of the active panel's type (singletons
+ * can't be split). Without an active panel, a typed split just opens the panel.
+ */
+function splitActivePanel(direction: SplitDirection | null, type: SplitPanelType | null): void {
+  const api = getCenterApi();
+  if (!api) return;
+  const active = api.activePanel;
+  const def = type ? getCenterPanelDefByType(type) : active && getCenterPanelDef(active.id);
+  if (!def || (!type && def.singleton)) return;
+
+  const detail: Record<string, unknown> = {};
+  if (active && direction) {
+    const split: SplitPosition = {
+      referencePanel: active.id,
+      direction: SPLIT_POSITION_DIRECTION[direction],
+    };
+    detail.split = split;
+  }
+  // For code editors, extract extension from the active editor's file path
+  if (!type && active && def.type === "codeEditor") {
+    const filePath = active.id.slice(def.idPrefix.length);
+    const dot = filePath.lastIndexOf(".");
+    const slash = filePath.lastIndexOf("/");
+    if (dot > slash) detail.ext = filePath.slice(dot + 1);
+  }
+  window.dispatchEvent(new CustomEvent(def.createEvent, { detail }));
+}
+
+/** `panel.split.<dir>` or `panel.split.<type>.<dir>` → its parts. */
+function parseSplitAction(actionId: SplitActionId): {
+  direction: SplitDirection;
+  type: SplitPanelType | null;
+} {
+  const parts = actionId.split(".");
+  return parts.length === 4
+    ? { type: parts[2] as SplitPanelType, direction: parts[3] as SplitDirection }
+    : { type: null, direction: parts[2] as SplitDirection };
+}
 
 /**
  * Split the active panel off into a new local sub-group (when it has tab
@@ -62,36 +129,23 @@ export function useActionHandler(): (actionId: ActionId) => void {
       return;
     }
 
+    // -- Panel splitting (new panel of the active panel's type, or of a given type) --
+    if (isSplitAction(actionId)) {
+      const { direction, type } = parseSplitAction(actionId);
+      splitActivePanel(direction, type);
+      return;
+    }
+
     switch (actionId) {
+      // -- New tab of the active panel's type, in its group --
+      case "panel.newTab":
+        splitActivePanel(null, null);
+        break;
+
       // -- Panel close --
       case "panel.close": {
         const active = getCenterApi()?.activePanel;
         if (active) active.api.close();
-        break;
-      }
-
-      // -- Panel splitting (creates a new panel of the same type as the active one) --
-      case "panel.split.right":
-      case "panel.split.down": {
-        const api = getCenterApi();
-        if (!api) break;
-        const active = api.activePanel;
-        if (!active) break;
-        const def = getCenterPanelDef(active.id);
-        if (!def || def.singleton) break;
-        const split: SplitPosition = {
-          referencePanel: active.id,
-          direction: actionId === "panel.split.right" ? "right" : "below",
-        };
-        const detail: Record<string, unknown> = { split };
-        // For code editors, extract extension from the active editor's file path
-        if (def.type === "codeEditor") {
-          const filePath = active.id.slice(def.idPrefix.length);
-          const dot = filePath.lastIndexOf(".");
-          const slash = filePath.lastIndexOf("/");
-          if (dot > slash) detail.ext = filePath.slice(dot + 1);
-        }
-        window.dispatchEvent(new CustomEvent(def.createEvent, { detail }));
         break;
       }
 
@@ -158,39 +212,13 @@ export function useActionHandler(): (actionId: ActionId) => void {
         break;
       }
 
-      // -- Directional focus navigation --
+      // -- Directional focus navigation (center, side tool bars, worktree sidebar) --
       case "panel.focus.right":
       case "panel.focus.left":
       case "panel.focus.up":
-      case "panel.focus.down": {
-        const api = getCenterApi();
-        if (!api) break;
-        const active = api.activePanel;
-        if (!active) break;
-
-        const direction = actionId.slice("panel.focus.".length) as "right" | "left" | "up" | "down";
-
-        // Horizontal: try sibling tab first.
-        if (direction === "right" || direction === "left") {
-          const step = direction === "right" ? 1 : -1;
-          const panels = active.group.panels;
-          const idx = panels.indexOf(active);
-          const nextIdx = idx + step;
-          const sibling = idx >= 0 ? panels[nextIdx] : undefined;
-          if (sibling) {
-            activatePanel(api, sibling);
-            break;
-          }
-        }
-
-        // Otherwise (or for up/down): jump to adjacent group.
-        const adjacent = findAdjacentCenterGroup(api, active.group, direction);
-        if (adjacent) {
-          const target = adjacent.activePanel ?? adjacent.panels[0];
-          if (target) activatePanel(api, target);
-        }
+      case "panel.focus.down":
+        moveFocus(actionId.slice("panel.focus.".length) as MoveDirection);
         break;
-      }
 
       // -- Panel move to new split (always creates new group) --
       case "panel.move.newRight":
@@ -215,34 +243,47 @@ export function useActionHandler(): (actionId: ActionId) => void {
 
       // -- Sidebar panel toggles --
       case "toggle.projectFiles":
-        togglePanel("projectFiles");
+        toggleSidebarPanel("projectFiles");
         break;
       case "toggle.changes":
-        togglePanel("changes");
+        toggleSidebarPanel("changes");
         break;
       case "toggle.git":
-        togglePanel("git");
+        toggleSidebarPanel("git");
         break;
       case "toggle.comments":
-        togglePanel("comments");
+        toggleSidebarPanel("comments");
         break;
       case "toggle.logs":
-        togglePanel("logs");
+        toggleSidebarPanel("logs");
         break;
       case "toggle.forkTree":
-        togglePanel("forkTree");
+        toggleSidebarPanel("forkTree");
         break;
 
-      // -- Sidebar expand/collapse (unified sidebar) --
-      case "sidebar.project.toggle":
+      // -- Worktree sidebar expand/collapse --
       case "sidebar.worktree.toggle":
-        useProjectStore.getState().toggleSidebar();
+        toggleWorktreeSidebar();
+        break;
+      case "sidebar.toggleFocused":
+        toggleFocusedArea();
         break;
 
       // -- Navigation --
       case "nav.search":
         useSearchStore.getState().open();
         break;
+      // -- Find in the focused panel --
+      case "find.open":
+        getFocusedFindTarget()?.open();
+        break;
+      case "find.next":
+        getFocusedFindTarget()?.next();
+        break;
+      case "find.previous":
+        getFocusedFindTarget()?.previous();
+        break;
+
       case "nav.openFile":
         useFileSearchStore.getState().open();
         break;
@@ -269,26 +310,13 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "nav.worktree":
         break;
 
-      // -- Worktree navigation --
-      case "worktree.next":
-      case "worktree.prev": {
-        const ctx = getActiveProjectWorktrees();
-        if (!ctx?.ps) break;
-        const ordered = getOrderedWorktrees(ctx.ps.worktrees, ctx.ps.customOrder).filter(
-          (wt) => !wt.pending,
-        );
-        if (ordered.length === 0) break;
-
-        const currentIdx = ordered.findIndex((wt) => wt.path === ctx.wtState.activeWorktreePath);
-        const dir = actionId === "worktree.next" ? 1 : -1;
-        // When active worktree isn't in the list (e.g. pending), start from the boundary:
-        // next → before first (-1+1=0), prev → after last (0-1=last)
-        const safeIdx = currentIdx === -1 ? (dir === 1 ? -1 : 0) : currentIdx;
-        const nextIdx = (safeIdx + dir + ordered.length) % ordered.length;
-        const nextWt = ordered[nextIdx];
-        if (nextWt) ctx.wtState.switchWorktree(nextWt.path);
+      // -- Worktree history (global across projects) --
+      case "worktree.back":
+        goBackWorktree();
         break;
-      }
+      case "worktree.forward":
+        goForwardWorktree();
+        break;
 
       // -- Worktree focus by index --
       case "worktree.focus.0":
@@ -303,8 +331,11 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "worktree.focus.9": {
         const ctx = getActiveProjectWorktrees();
         if (!ctx?.ps) break;
+        // Numbering skips hidden worktrees whether or not the sidebar is expanded, so a digit
+        // always means the same worktree (the collapsed rail's order).
+        const hidden = new Set(ctx.ps.hiddenPaths);
         const ordered = getOrderedWorktrees(ctx.ps.worktrees, ctx.ps.customOrder).filter(
-          (wt) => !wt.pending,
+          (wt) => !wt.pending && !hidden.has(wt.path),
         );
         if (ordered.length === 0) break;
 

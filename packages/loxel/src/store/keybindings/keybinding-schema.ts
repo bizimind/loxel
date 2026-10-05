@@ -1,131 +1,99 @@
 /**
- * Keybinding schema: KeyCombo type, normalization, templates, and validation.
+ * Keybinding schema: binding templates, display labels, and validation.
  */
 
-import type { ActionId } from "./action-registry";
-import { ACTIONS, ACTION_IDS } from "./action-registry";
-
-// ---------------------------------------------------------------------------
-// KeyCombo type
-// ---------------------------------------------------------------------------
-
-/**
- * A normalized key combo string. Format: "Cmd+Ctrl+Alt+Shift+Key"
- * Modifiers appear in fixed order, then the key name.
- * Examples: "Cmd+N", "Cmd+Shift+Backtick", "Ctrl+Tab"
- */
-export type KeyCombo = string & { readonly __brand: unique symbol };
-
-/** Map browser key names to canonical names. */
-const KEY_NAME_MAP: Record<string, string> = {
-  "`": "Backtick",
-  "~": "Backtick",
-  "\\": "Backslash",
-  "|": "Backslash",
-  "[": "BracketLeft",
-  "{": "BracketLeft",
-  "]": "BracketRight",
-  "}": "BracketRight",
-  ",": "Comma",
-  "<": "Comma",
-  ".": "Period",
-  ">": "Period",
-  "/": "Slash",
-  "?": "Slash",
-  " ": "Space",
-  // Digit aliases
-  "!": "1",
-  "@": "2",
-  "#": "3",
-  $: "4",
-  "%": "5",
-  "+": "Plus",
-  "^": "6",
-  "&": "7",
-  "*": "8",
-  "(": "9",
-};
-
-/**
- * Normalize a raw key combo string to canonical form.
- * Accepts formats like "Cmd+Shift+`", "Meta+N", "Ctrl+Tab".
- */
-export function normalizeKeyCombo(raw: string): KeyCombo {
-  const parts = raw.split("+");
-  const key = parts.pop()!;
-  const mods = new Set(parts.map((m) => m.toLowerCase()));
-
-  const ordered: string[] = [];
-  if (mods.has("cmd") || mods.has("meta")) ordered.push("Cmd");
-  if (mods.has("ctrl") || mods.has("control")) ordered.push("Ctrl");
-  if (mods.has("alt") || mods.has("option")) ordered.push("Alt");
-  if (mods.has("shift")) ordered.push("Shift");
-
-  // Normalize key: special chars through KEY_NAME_MAP, single letters to uppercase
-  const normalized = KEY_NAME_MAP[key] ?? (key.length === 1 ? key.toUpperCase() : key);
-  ordered.push(normalized);
-
-  return ordered.join("+") as KeyCombo;
-}
-
-/** Build a KeyCombo from individual modifier flags and a key name. */
-function buildKeyCombo(
-  meta: boolean,
-  ctrl: boolean,
-  alt: boolean,
-  shift: boolean,
-  key: string,
-): KeyCombo {
-  const parts: string[] = [];
-  if (meta) parts.push("Cmd");
-  if (ctrl) parts.push("Ctrl");
-  if (alt) parts.push("Alt");
-  if (shift) parts.push("Shift");
-  const normalized = KEY_NAME_MAP[key] ?? (key.length === 1 ? key.toUpperCase() : key);
-  parts.push(normalized);
-  return parts.join("+") as KeyCombo;
-}
-
-/**
- * Convert a KeyboardEvent to a normalized KeyCombo string.
- * Called on every keydown — must be fast.
- */
-export function eventToKeyCombo(e: KeyboardEvent): KeyCombo {
-  return buildKeyCombo(e.metaKey, e.ctrlKey, e.altKey, e.shiftKey, e.key);
-}
+import type { ActionId, SplitDirection, SplitPanelType } from "./action-registry";
+import { ACTIONS, ACTION_IDS, SPLIT_DIRECTIONS, SPLIT_PANEL_TYPES } from "./action-registry";
+import type { KeyBinding } from "./key-combo";
+import { bindingsOverlap, normalizeKeyBinding } from "./key-combo";
 
 // ---------------------------------------------------------------------------
 // Templates
 // ---------------------------------------------------------------------------
 
-/** Maps every action to one or more key combos. */
-export type BindingTemplate = Readonly<Record<ActionId, readonly KeyCombo[]>>;
+/** Maps every action to one or more key bindings. */
+export type BindingTemplate = Readonly<Record<ActionId, readonly KeyBinding[]>>;
 
 // Additional templates (vscode, jetbrains) tracked in #493 — add here when real bindings exist.
 export type TemplateName = "loxel";
 
-/** Build a BindingTemplate from raw string definitions, normalizing all combos. */
+/** Build a BindingTemplate from raw string definitions, normalizing all bindings. */
 function buildTemplate(raw: Record<string, readonly string[]>): BindingTemplate {
-  const result = {} as Record<ActionId, KeyCombo[]>;
-  for (const [actionId, combos] of Object.entries(raw)) {
+  const result = {} as Record<ActionId, KeyBinding[]>;
+  for (const [actionId, bindings] of Object.entries(raw)) {
     if (!ACTION_IDS.has(actionId as ActionId)) {
       throw new Error(`buildTemplate: unknown action id "${actionId}"`);
     }
-    result[actionId as ActionId] = combos.map(normalizeKeyCombo);
+    result[actionId as ActionId] = bindings.map(normalizeKeyBinding);
   }
   return result as BindingTemplate;
 }
 
+/**
+ * Chord leader for split actions: ⌘\ then an arrow splits the active panel, ⌘\ then a panel-type
+ * key then an arrow splits as that type, ⌘\ then ⇧+arrow moves the active tab into a new split.
+ * Ending with Enter instead of an arrow opens a new tab in the active group.
+ */
+const SPLIT_LEADER = "Cmd+Backslash";
+
+const DIRECTION_KEYS: Record<SplitDirection, string> = {
+  right: "ArrowRight",
+  left: "ArrowLeft",
+  up: "ArrowUp",
+  down: "ArrowDown",
+};
+
+const SPLIT_TYPE_KEYS: Record<SplitPanelType, string> = {
+  terminal: "T",
+  agent: "A",
+  editor: "M",
+  excalidraw: "D",
+  browser: "B",
+};
+
+/** "⌘\ then <type letter> then Enter": open a panel of that type as a tab in the active group. */
+function newTabChord(type: SplitPanelType): string {
+  return `${SPLIT_LEADER} ${SPLIT_TYPE_KEYS[type]} Enter`;
+}
+
+const MOVE_TO_NEW_SPLIT_ACTIONS = {
+  right: "panel.move.newRight",
+  left: "panel.move.newLeft",
+  up: "panel.move.newUp",
+  down: "panel.move.newDown",
+} as const satisfies Record<SplitDirection, ActionId>;
+
+const SPLIT_CHORDS: Record<string, readonly string[]> = Object.fromEntries(
+  SPLIT_DIRECTIONS.flatMap((dir) => {
+    const arrow = DIRECTION_KEYS[dir];
+    return [
+      [`panel.split.${dir}`, [`${SPLIT_LEADER} ${arrow}`]],
+      [MOVE_TO_NEW_SPLIT_ACTIONS[dir], [`${SPLIT_LEADER} Shift+${arrow}`]],
+      ...SPLIT_PANEL_TYPES.map(({ type }) => [
+        `panel.split.${type}.${dir}`,
+        [`${SPLIT_LEADER} ${SPLIT_TYPE_KEYS[type]} ${arrow}`],
+      ]),
+    ];
+  }),
+);
+
+/**
+ * Default bindings. The arrow-key layers avoid macOS text editing, Monaco and Rectangle's ⌃⌥+arrow
+ * snapping: ⌃⇧+arrow moves focus, ⌃⌘+arrow moves the active tab, and splits live behind the ⌘\
+ * chord. ⌃⌥⌫ (Rectangle's Restore) is left unbound.
+ */
 export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
-  "panel.new.terminal": ["Cmd+T", "Ctrl+Shift+Backtick"],
-  "panel.new.markdown": ["Cmd+N"],
-  "panel.new.drawing": ["Cmd+Shift+D"],
-  "panel.new.agent": ["Cmd+Shift+A"],
-  "panel.new.browser": ["Cmd+Shift+O"],
+  // New panel as a tab in the active group: direct keys use the split chord's type letters, and
+  // the chord ends with Enter instead of an arrow.
+  "panel.new.terminal": ["Cmd+T", "Ctrl+Shift+Backtick", newTabChord("terminal")],
+  "panel.new.markdown": ["Cmd+Shift+M", "Cmd+N", newTabChord("editor")],
+  "panel.new.drawing": ["Cmd+Shift+D", newTabChord("excalidraw")],
+  "panel.new.agent": ["Cmd+Shift+A", newTabChord("agent")],
+  "panel.new.browser": ["Cmd+Shift+B", newTabChord("browser")],
+  "panel.newTab": [`${SPLIT_LEADER} Enter`],
   "panel.open.localdb": [],
   "panel.close": ["Cmd+W"],
-  "panel.split.right": ["Cmd+Backslash"],
-  "panel.split.down": ["Cmd+Shift+Backslash"],
+  ...SPLIT_CHORDS,
   "panel.next": ["Cmd+Shift+BracketRight", "Ctrl+Tab"],
   "panel.prev": ["Cmd+Shift+BracketLeft", "Ctrl+Shift+Tab"],
   "panel.focus.1": ["Cmd+1"],
@@ -142,12 +110,7 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "panel.move.groupLeft": ["Ctrl+Cmd+ArrowLeft"],
   "panel.move.groupUp": ["Ctrl+Cmd+ArrowUp"],
   "panel.move.groupDown": ["Ctrl+Cmd+ArrowDown"],
-  // Panel move to new split
-  "panel.move.newRight": ["Ctrl+Cmd+Shift+ArrowRight"],
-  "panel.move.newLeft": ["Ctrl+Cmd+Shift+ArrowLeft"],
-  "panel.move.newUp": ["Ctrl+Cmd+Shift+ArrowUp"],
-  "panel.move.newDown": ["Ctrl+Cmd+Shift+ArrowDown"],
-  // Directional focus navigation
+  // Directional focus navigation: center tabs/groups, side tool bars and the worktree sidebar
   "panel.focus.right": ["Ctrl+Shift+ArrowRight"],
   "panel.focus.left": ["Ctrl+Shift+ArrowLeft"],
   "panel.focus.up": ["Ctrl+Shift+ArrowUp"],
@@ -158,20 +121,26 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "toggle.comments": ["Ctrl+Shift+R"],
   "toggle.logs": ["Ctrl+Shift+L"],
   "toggle.forkTree": ["Ctrl+Shift+K"],
-  "sidebar.project.toggle": ["Cmd+Shift+B"],
-  "sidebar.worktree.toggle": ["Cmd+Alt+B"],
+  "sidebar.worktree.toggle": ["Ctrl+Alt+B"],
+  // Context-aware: collapses/expands the worktree sidebar or side zone that holds focus
+  "sidebar.toggleFocused": ["Ctrl+Shift+Space"],
   "nav.project": ["Cmd+Alt+P"],
   "nav.worktree": ["Cmd+Alt+W"],
   "nav.commandPalette": ["Cmd+Shift+P"],
   "nav.search": ["Cmd+Shift+F"],
   "nav.openFile": ["Cmd+P"],
   "nav.recentNotification": ["Ctrl+Backtick"],
+  // Context-aware: only while focus is in a panel with a find bar (browser, terminal)
+  "find.open": ["Cmd+F"],
+  "find.next": ["Cmd+G"],
+  "find.previous": ["Cmd+Shift+G"],
   "file.revealInExplorer": ["Cmd+Alt+E"],
   // Worktree management
-  "worktree.next": ["Ctrl+Alt+ArrowRight"],
-  "worktree.prev": ["Ctrl+Alt+ArrowLeft"],
+  "worktree.back": ["Ctrl+Alt+BracketLeft"],
+  "worktree.forward": ["Ctrl+Alt+BracketRight"],
   "worktree.new": ["Ctrl+Alt+N"],
-  "worktree.delete": ["Ctrl+Alt+Backspace"],
+  // Unbound by default: Rectangle's Restore takes ⌃⌥⌫ globally. Palette / context menu.
+  "worktree.delete": [],
   "worktree.focus.1": ["Ctrl+Alt+1"],
   "worktree.focus.2": ["Ctrl+Alt+2"],
   "worktree.focus.3": ["Ctrl+Alt+3"],
@@ -215,62 +184,35 @@ export const KEY_LABELS: Record<string, string> = {
   Space: "Space",
   Tab: "Tab",
   Escape: "Esc",
-  ArrowUp: "\u2191",
-  ArrowDown: "\u2193",
-  ArrowLeft: "\u2190",
-  ArrowRight: "\u2192",
-  Enter: "\u23CE",
-  Backspace: "\u232B",
-  Delete: "\u2326",
+  ArrowUp: "↑",
+  ArrowDown: "↓",
+  ArrowLeft: "←",
+  ArrowRight: "→",
+  Enter: "⏎",
+  Backspace: "⌫",
+  Delete: "⌦",
 };
-
-/** Modifier Unicode symbols + key labels for text-only display (e.g. logging). */
-const DISPLAY_MAP: Record<string, string> = {
-  Cmd: "\u2318",
-  Ctrl: "\u2303",
-  Alt: "\u2325",
-  Shift: "\u21E7",
-  ...KEY_LABELS,
-};
-
-/** Convert an Electron Input (from webview before-input-event) to a normalized KeyCombo. */
-export function inputToKeyCombo(input: {
-  key: string;
-  meta: boolean;
-  control: boolean;
-  alt: boolean;
-  shift: boolean;
-}): KeyCombo {
-  return buildKeyCombo(input.meta, input.control, input.alt, input.shift, input.key);
-}
-
-/** Format a KeyCombo for display (e.g. "Cmd+Shift+Backtick" -> "\u2318\u21E7`"). */
-export function formatKeyCombo(combo: KeyCombo): string {
-  return (combo as string)
-    .split("+")
-    .map((part) => DISPLAY_MAP[part] ?? part)
-    .join("");
-}
 
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 
 /**
- * Validate that a binding template has no duplicate key combos.
+ * Validate that a binding template has no ambiguous bindings: no binding is used twice and no
+ * binding is a chord prefix of another.
  * Called at module load time for built-in templates and from tests for CI coverage.
  */
 export function validateBindings(template: BindingTemplate): void {
-  const seen = new Map<KeyCombo, string>();
-  for (const [actionId, combos] of Object.entries(template)) {
-    for (const combo of combos) {
-      const existing = seen.get(combo);
+  const seen: { binding: KeyBinding; actionId: string }[] = [];
+  for (const [actionId, bindings] of Object.entries(template)) {
+    for (const binding of bindings) {
+      const existing = seen.find((s) => bindingsOverlap(s.binding, binding));
       if (existing) {
         throw new Error(
-          `Keybinding conflict: "${combo}" is bound to both "${existing}" and "${actionId}"`,
+          `Keybinding conflict: "${binding}" (${actionId}) overlaps "${existing.binding}" (${existing.actionId})`,
         );
       }
-      seen.set(combo, actionId);
+      seen.push({ binding, actionId });
     }
   }
 }

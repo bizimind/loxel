@@ -12,28 +12,40 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 
 ## Panel management
 
-| Action             | Shortcut          |
-| ------------------ | ----------------- |
-| New terminal       | `Cmd+T`           |
-| New markdown draft | `Cmd+N`           |
-| New drawing        | `Cmd+Shift+D`     |
-| New agent          | `Cmd+Shift+A`     |
-| Close panel        | `Cmd+W`           |
-| Split right        | `Cmd+\`           |
-| Split down         | `Cmd+Shift+\`     |
-| Next panel         | `Ctrl+Tab`        |
-| Previous panel     | `Ctrl+Shift+Tab`  |
-| Focus panel 1–9    | `Cmd+1` – `Cmd+9` |
+| Action                             | Shortcut                                                     |
+| ---------------------------------- | ------------------------------------------------------------ |
+| New terminal                       | `Cmd+T`                                                      |
+| New markdown draft                 | `Cmd+Shift+M` or `Cmd+N`                                     |
+| New drawing                        | `Cmd+Shift+D`                                                |
+| New agent                          | `Cmd+Shift+A`                                                |
+| New browser                        | `Cmd+Shift+B`                                                |
+| New tab of the active panel's type | `Cmd+\` then `Enter`                                         |
+| Close panel                        | `Cmd+W`                                                      |
+| Next / previous tab                | `Cmd+Shift+]` / `Cmd+Shift+[`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Focus panel 1–9                    | `Cmd+1` – `Cmd+9`                                            |
 
 ---
 
-## Panel movement
+## Splits
 
-| Action                       | Shortcut               |
-| ---------------------------- | ---------------------- |
-| Move panel to adjacent group | `Ctrl+Cmd+Arrow`       |
-| Move panel to new split      | `Ctrl+Cmd+Shift+Arrow` |
-| Focus panel in direction     | `Ctrl+Shift+Arrow`     |
+Splits are chords: press `Cmd+\`, release, then press the next key. The status bar shows the keys typed so far; `Esc` cancels.
+
+| Action                                  | Shortcut                                                                                        |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Split the active panel (same type)      | `Cmd+\` then an arrow                                                                           |
+| Split as a new panel type               | `Cmd+\` then `T` terminal / `A` agent / `M` markdown / `D` drawing / `B` browser, then an arrow |
+| Open a panel type as a tab in the group | `Cmd+\` then the type letter, then `Enter`                                                      |
+| Move the active tab into a new split    | `Cmd+\` then `Shift+Arrow`                                                                      |
+
+---
+
+## Focus and panel movement
+
+| Action                                                        | Shortcut           |
+| ------------------------------------------------------------- | ------------------ |
+| Move focus between groups, tool bars and the worktree sidebar | `Ctrl+Shift+Arrow` |
+| Move the active tab to the adjacent group                     | `Ctrl+Cmd+Arrow`   |
+| Collapse / expand the focused sidebar or panel                | `Ctrl+Shift+Space` |
 
 ---
 
@@ -49,6 +61,8 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 | Switch worktree   | `Cmd+Alt+W`   |
 | Save              | `Cmd+S`       |
 
+In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G` / `Cmd+Shift+G` (or `Enter` / `Shift+Enter` in the bar) step through the matches and `Esc` closes it. In a code editor, `Cmd+F` opens the editor's own find widget.
+
 ---
 
 ## Sidebar toggles
@@ -59,19 +73,20 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 | Changes          | `Cmd+Shift+C`  |
 | Git graph        | `Ctrl+Shift+G` |
 | Comments         | `Ctrl+Shift+R` |
-| Project sidebar  | `Cmd+Shift+B`  |
-| Worktree sidebar | `Cmd+Alt+B`    |
+| Worktree sidebar | `Ctrl+Alt+B`   |
 
 ---
 
 ## Worktree switching
 
-| Action             | Shortcut                    |
-| ------------------ | --------------------------- |
-| Next worktree      | `Ctrl+Alt+→`                |
-| Previous worktree  | `Ctrl+Alt+←`                |
-| New worktree       | `Ctrl+Alt+N`                |
-| Focus worktree 1–9 | `Ctrl+Alt+1` – `Ctrl+Alt+9` |
+| Action                                   | Shortcut                                                |
+| ---------------------------------------- | ------------------------------------------------------- |
+| Back / forward through visited worktrees | `Ctrl+Alt+[` / `Ctrl+Alt+]`                             |
+| New worktree                             | `Ctrl+Alt+N`                                            |
+| Focus worktree 1–8, last, 10             | `Ctrl+Alt+1` – `Ctrl+Alt+8`, `Ctrl+Alt+9`, `Ctrl+Alt+0` |
+| Delete worktree                          | unbound — command palette or right-click menu           |
+
+Back/forward work like a browser's history, across all projects. Worktree numbers follow the sidebar order and skip hidden worktrees.
 
 ---
 

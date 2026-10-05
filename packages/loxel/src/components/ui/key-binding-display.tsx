@@ -1,5 +1,6 @@
 /**
- * Reusable component that renders a KeyCombo as inline modifier icons + key label.
+ * Reusable component that renders a KeyBinding as inline modifier icons + key labels. Chord
+ * steps are separated by a small gap (e.g. "⌘\  →").
  *
  * Icons are used for modifiers (Cmd, Ctrl, Alt, Shift, Tab, Enter, Backspace, Delete)
  * instead of text. Size and color inherit from the parent font by default
@@ -18,7 +19,8 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import type { KeyCombo } from "@/store/keybindings/keybinding-schema";
+import type { KeyBinding, KeyCombo } from "@/store/keybindings/key-combo";
+import { getBindingSteps } from "@/store/keybindings/key-combo";
 import { KEY_LABELS } from "@/store/keybindings/keybinding-schema";
 
 /** Maps canonical key part names to lucide icons. */
@@ -35,16 +37,26 @@ const ICON_MAP: Record<string, LucideIcon> = {
 /** Keys whose icon should be horizontally flipped. */
 const FLIP_KEYS = new Set(["Backspace"]);
 
-interface KeyComboDisplayProps {
-  combo: KeyCombo;
+interface KeyBindingDisplayProps {
+  binding: KeyBinding;
   className?: string;
 }
 
-export function KeyComboDisplay({ combo, className }: KeyComboDisplayProps) {
+export function KeyBindingDisplay({ binding, className }: KeyBindingDisplayProps) {
+  return (
+    <span className={cn("inline-flex items-center gap-[0.4em]", className)}>
+      {getBindingSteps(binding).map((step, i) => (
+        <KeyComboParts key={i} combo={step} />
+      ))}
+    </span>
+  );
+}
+
+function KeyComboParts({ combo }: { combo: KeyCombo }) {
   const parts = (combo as string).split("+");
 
   return (
-    <span className={cn("inline-flex items-center gap-px", className)}>
+    <span className="inline-flex items-center gap-px">
       {parts.map((part, i) => {
         const Icon = ICON_MAP[part];
         if (Icon) {

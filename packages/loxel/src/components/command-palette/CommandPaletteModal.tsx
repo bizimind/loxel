@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
-import { KeyComboDisplay } from "@/components/ui/key-combo-display";
+import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
 import { useActionHandler } from "@/hooks/useActionHandler";
 import { fuzzyMatch } from "@/lib/fuzzy-match";
@@ -186,8 +186,8 @@ export function CommandPaletteModal() {
                     </span>
                     {bindings.length > 0 && (
                       <span className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs">
-                        {bindings.map((combo) => (
-                          <KeyComboDisplay key={combo} combo={combo} />
+                        {bindings.map((binding) => (
+                          <KeyBindingDisplay key={binding} binding={binding} />
                         ))}
                       </span>
                     )}
