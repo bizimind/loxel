@@ -11,8 +11,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { FindBar } from "@/components/ui/find-bar";
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { usePanelFind } from "@/hooks/usePanelFind";
 import { cn } from "@/lib/utils";
 import { reattachActiveContent } from "@/store/layout-actions";
 
@@ -33,6 +35,14 @@ interface WebviewFailLoadEvent extends Event {
 interface WebviewFaviconEvent extends Event {
   favicons: string[];
 }
+interface WebviewFoundInPageEvent extends Event {
+  result: {
+    requestId: number;
+    /** 1-based position of the active match. */
+    activeMatchOrdinal: number;
+    matches: number;
+  };
+}
 /** Typed subset of Electron's webview API (not in React/DOM typings). */
 interface ElectronWebView extends HTMLElement {
   loadURL(url: string): void;
@@ -45,6 +55,9 @@ interface ElectronWebView extends HTMLElement {
   openDevTools(): void;
   closeDevTools(): void;
   isDevToolsOpened(): boolean;
+  /** `findNext: true` starts a new find session (new query); false steps to the next match. */
+  findInPage(text: string, options?: { forward?: boolean; findNext?: boolean }): number;
+  stopFindInPage(action: "clearSelection" | "keepSelection" | "activateSelection"): void;
 
   addEventListener(
     type: "did-navigate" | "did-navigate-in-page",
@@ -56,6 +69,7 @@ interface ElectronWebView extends HTMLElement {
     type: "page-favicon-updated",
     listener: (event: WebviewFaviconEvent) => void,
   ): void;
+  addEventListener(type: "found-in-page", listener: (event: WebviewFoundInPageEvent) => void): void;
   addEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
 
   removeEventListener(
@@ -70,6 +84,10 @@ interface ElectronWebView extends HTMLElement {
   removeEventListener(
     type: "page-favicon-updated",
     listener: (event: WebviewFaviconEvent) => void,
+  ): void;
+  removeEventListener(
+    type: "found-in-page",
+    listener: (event: WebviewFoundInPageEvent) => void,
   ): void;
   removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
 }
@@ -94,6 +112,30 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   const [canGoForward, setCanGoForward] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+
+  // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const findRequestRef = useRef(0);
+  const { barProps: findBarProps, setMatches: setFindMatches } = usePanelFind(rootRef, {
+    find: (query, direction, newQuery) => {
+      const webview = webviewRef.current;
+      if (!webview || !readyRef.current) return;
+      findRequestRef.current = webview.findInPage(query, {
+        forward: direction === "next",
+        findNext: newQuery,
+      });
+    },
+    clear: () => {
+      if (readyRef.current) webviewRef.current?.stopFindInPage("clearSelection");
+    },
+    close: () => {
+      const webview = webviewRef.current;
+      if (!webview || !readyRef.current) return;
+      // Leave the active match selected, like Chrome's find bar.
+      webview.stopFindInPage("keepSelection");
+      webview.focus();
+    },
+  });
 
   // Layouts saved before browser panels used the "always" renderer restore with the default
   // renderer; upgrade them so hidden tabs stay attached (see createBrowser).
@@ -146,6 +188,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     };
 
     const onDidNavigate = (event: WebviewNavigateEvent) => {
+      if (event.type === "did-navigate") setFindMatches(null); // a new page drops the matches
       setCurrentUrl(event.url);
       setInputUrl(event.url);
       panelApi.updateParameters({ url: event.url, faviconUrl: undefined });
@@ -172,6 +215,12 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       setIsLoading(false);
     };
 
+    const onFoundInPage = ({ result }: WebviewFoundInPageEvent) => {
+      // Ignore results of a superseded search (the query changed since).
+      if (result.requestId !== findRequestRef.current) return;
+      setFindMatches({ active: result.activeMatchOrdinal, total: result.matches });
+    };
+
     const onDevToolsOpened = () => setDevToolsOpen(true);
     const onDevToolsClosed = () => setDevToolsOpen(false);
 
@@ -182,6 +231,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     webview.addEventListener("page-title-updated", onTitleUpdate);
     webview.addEventListener("page-favicon-updated", onFaviconUpdate);
     webview.addEventListener("did-fail-load", onFailLoad);
+    webview.addEventListener("found-in-page", onFoundInPage);
     webview.addEventListener("devtools-opened", onDevToolsOpened);
     webview.addEventListener("devtools-closed", onDevToolsClosed);
 
@@ -195,6 +245,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       webview.removeEventListener("page-title-updated", onTitleUpdate);
       webview.removeEventListener("page-favicon-updated", onFaviconUpdate);
       webview.removeEventListener("did-fail-load", onFailLoad);
+      webview.removeEventListener("found-in-page", onFoundInPage);
       webview.removeEventListener("devtools-opened", onDevToolsOpened);
       webview.removeEventListener("devtools-closed", onDevToolsClosed);
     };
@@ -284,7 +335,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   }
 
   return (
-    <div className="bg-editor-surface flex h-full flex-col overflow-hidden">
+    <div ref={rootRef} className="bg-editor-surface flex h-full flex-col overflow-hidden">
       {/* Navigation toolbar */}
       <div className="border-border flex h-8 shrink-0 items-center gap-1 border-b px-1.5">
         <NavButton onClick={goBack} disabled={!canGoBack} title="Back">
@@ -331,14 +382,17 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
         </div>
       )}
 
-      {/* Webview — Electron custom element, enabled via webviewTag in main.ts */}
-      <webview
-        ref={webviewRef as React.Ref<HTMLElement>}
-        src="about:blank"
-        partition={BROWSER_PARTITION}
-        className="flex-1"
-        style={{ display: "flex" }}
-      />
+      <div className="relative flex min-h-0 flex-1">
+        {/* Webview — Electron custom element, enabled via webviewTag in main.ts */}
+        <webview
+          ref={webviewRef as React.Ref<HTMLElement>}
+          src="about:blank"
+          partition={BROWSER_PARTITION}
+          className="flex-1"
+          style={{ display: "flex" }}
+        />
+        {findBarProps && <FindBar label="Find in page" {...findBarProps} />}
+      </div>
     </div>
   );
 }

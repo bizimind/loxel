@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import { getCenterPanelDefByType } from "../panel-config";
-import { SPLIT_PANEL_TYPES } from "./action-registry";
+import type { ActionId } from "./action-registry";
+import { SPLIT_PANEL_TYPES, getActionDef } from "./action-registry";
 import type { KeyBinding } from "./key-combo";
 import {
   bindingsOverlap,
@@ -302,11 +303,13 @@ describe("no overlap with critical system shortcuts", () => {
   ].map(normalizeKeyCombo);
 
   for (const [name, template] of Object.entries(TEMPLATES)) {
-    test(`${name} template does not bind system shortcuts`, () => {
-      // A chord's first keystroke is intercepted too, so check those as well.
-      const firstSteps = Object.values(template)
-        .flat()
-        .map((binding) => getBindingSteps(binding)[0]!);
+    test(`${name} template does not bind system shortcuts globally`, () => {
+      // A chord's first keystroke is intercepted too, so check those as well. Context-aware
+      // actions (`isEnabled`) are exempt: elsewhere the key reaches the focused widget, which is
+      // how ⌘F opens the browser and terminal find bars without taking Monaco's.
+      const firstSteps = (Object.entries(template) as [ActionId, readonly KeyBinding[]][])
+        .filter(([actionId]) => !getActionDef(actionId)?.isEnabled)
+        .flatMap(([, bindings]) => bindings.map((binding) => getBindingSteps(binding)[0]!));
       const conflicts = firstSteps.filter((combo) => SYSTEM_SHORTCUTS.includes(combo));
       expect(conflicts).toEqual([]);
     });

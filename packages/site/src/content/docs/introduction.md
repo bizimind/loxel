@@ -30,7 +30,7 @@ The **built-in coding agent** has a dedicated timeline UI: user messages, assist
 
 If you prefer a TUI agent — Claude Code, Codex, OpenCode, Gemini CLI, or anything else that runs in a terminal — open one in a loxel terminal with `Cmd+T` and run it there. Both workflows coexist. Put a coding agent panel next to your editor, or run two TUI agents in split terminals. Layout is yours to configure.
 
-**Press** **`Cmd+Shift+B`** to open a full browser panel. It's a Chromium webview running inside loxel — use it to view your local dev server, browse GitHub, or read a tutorial. Works like any other panel: drag it next to a coding agent, split it below your editor, or pop it into its own group. From a loxel terminal, `loxel https://example.com` opens any URL directly in this panel.
+**Press** **`Cmd+Shift+B`** to open a full browser panel. It's a Chromium webview running inside loxel — use it to view your local dev server, browse GitHub, or read a tutorial. Works like any other panel: drag it next to a coding agent, split it below your editor, or pop it into its own group. Press `Cmd+F` to find text in the page. From a loxel terminal, `loxel https://example.com` opens any URL directly in this panel.
 
 ## Git and code review
 

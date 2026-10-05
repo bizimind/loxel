@@ -24,6 +24,12 @@ The scrollback buffer is held server-side. Default: **3,000 lines**. Adjust it i
 
 ---
 
+## Find
+
+Press `Cmd+F` in a terminal to search its output and scrollback. Matches are highlighted as you type; `Enter` / `Shift+Enter` (or `Cmd+G` / `Cmd+Shift+G`) jump to the next / previous match, and `Esc` closes the find bar. Reopening it keeps your last search.
+
+---
+
 ## Theme
 
 Terminal colors follow your dark/light mode setting automatically. No manual configuration needed.

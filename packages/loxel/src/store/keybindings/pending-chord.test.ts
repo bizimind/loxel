@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
+import { registerFindTarget } from "@/lib/find-targets";
+
 import { applyStoreUpdate } from "../store-sync";
 import { normalizeKeyBinding, normalizeKeyCombo } from "./key-combo";
 import { useKeybindingStore } from "./keybinding-store";
@@ -125,6 +127,30 @@ describe("context-dependent actions", () => {
       kind: "action",
       actionId: "sidebar.toggleFocused",
     });
+  });
+
+  test("⌘F passes through outside panels with a find bar (Monaco keeps its own find)", () => {
+    focusIn("center");
+    expect(resolveKeystroke(key("Cmd+F"))).toEqual({ kind: "unbound" });
+    expect(resolveKeystroke(key("Cmd+G"))).toEqual({ kind: "unbound" });
+  });
+
+  test("⌘F, ⌘G and ⇧⌘G find while focus is in a registered find target", () => {
+    focusIn("center");
+    const noop = () => {};
+    const unregister = registerFindTarget(document.body.firstElementChild!, {
+      open: noop,
+      next: noop,
+      previous: noop,
+    });
+    expect(resolveKeystroke(key("Cmd+F"))).toEqual({ kind: "action", actionId: "find.open" });
+    expect(resolveKeystroke(key("Cmd+G"))).toEqual({ kind: "action", actionId: "find.next" });
+    expect(resolveKeystroke(key("Cmd+Shift+G"))).toEqual({
+      kind: "action",
+      actionId: "find.previous",
+    });
+    unregister();
+    expect(resolveKeystroke(key("Cmd+F"))).toEqual({ kind: "unbound" });
   });
 });
 

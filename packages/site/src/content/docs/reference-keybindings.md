@@ -61,6 +61,8 @@ Splits are chords: press `Cmd+\`, release, then press the next key. The status b
 | Switch worktree   | `Cmd+Alt+W`   |
 | Save              | `Cmd+S`       |
 
+In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G` / `Cmd+Shift+G` (or `Enter` / `Shift+Enter` in the bar) step through the matches and `Esc` closes it. Everywhere else `Cmd+F` stays with the focused editor's own find.
+
 ---
 
 ## Sidebar toggles

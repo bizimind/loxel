@@ -3,6 +3,7 @@
  * Used by the keybinding system, future command palette, and toolbar buttons.
  */
 
+import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
 
 /**
@@ -55,6 +56,9 @@ export type ActionId =
   | "nav.search"
   | "nav.openFile"
   | "nav.recentNotification"
+  | "find.open"
+  | "find.next"
+  | "find.previous"
   | "sidebar.worktree.toggle"
   | "sidebar.toggleFocused"
   | "worktree.back"
@@ -117,6 +121,10 @@ export interface ActionDef {
    * key resolves as unbound and reaches the focused widget (terminal, editor, …).
    */
   isEnabled?: () => boolean;
+}
+
+function isFindTargetFocused(): boolean {
+  return getFocusedFindTarget() !== undefined;
 }
 
 /**
@@ -197,6 +205,11 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "nav.search", label: "Find in Files", category: "nav" },
   { id: "nav.openFile", label: "Open File", category: "nav" },
   { id: "nav.recentNotification", label: "Go to Recent Notification", category: "nav" },
+
+  // Find in the focused panel (browser, terminal). Elsewhere the key reaches the widget's own find.
+  { id: "find.open", label: "Find", category: "nav", isEnabled: isFindTargetFocused },
+  { id: "find.next", label: "Find Next", category: "nav", isEnabled: isFindTargetFocused },
+  { id: "find.previous", label: "Find Previous", category: "nav", isEnabled: isFindTargetFocused },
 
   // Sidebar collapse
   { id: "sidebar.worktree.toggle", label: "Toggle Worktree Sidebar", category: "sidebar" },
