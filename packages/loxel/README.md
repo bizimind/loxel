@@ -258,7 +258,7 @@ Individual build targets: `bun run build:ui` (Vite client only), `bun run build:
 
 Loxel can run as a desktop app via Electron. The Electron shell spawns the Bun server as a child process and opens a window pointing to `http://127.0.0.1:<port>`. Server/renderer traffic runs over WS + REST; Electron IPC is used only for a small set of native integrations.
 
-**IPC channels** (main → renderer unless noted, exposed via `contextBridge` as `window.electronAPI`, constants in `src/electron/ipc-channels.ts`):
+**IPC channels** (main → renderer unless noted, exposed via `contextBridge` as `window.electronAPI`, constants in `src/electron/ipc-channels.ts`). The preload ships in the `.app` bundle while in-app updates replace only the renderer and server, so a renderer can run against an older preload: `window.electronAPI` members added after the first release are optional in `src/electron-api.d.ts` and must be called with `?.()`:
 
 - `open-in-browser-tab` — Cmd+click on an external link in the renderer opens it in a Loxel browser panel tab instead of the system browser.
 - `set-dock-badge` — renderer pushes the unread-notification count to the macOS dock badge.
