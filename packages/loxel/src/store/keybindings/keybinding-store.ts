@@ -21,7 +21,7 @@ import { TEMPLATES } from "./keybinding-schema";
 // Types
 // ---------------------------------------------------------------------------
 
-type BindingOverrides = Partial<Record<ActionId, readonly KeyBinding[]>>;
+export type BindingOverrides = Partial<Record<ActionId, readonly KeyBinding[]>>;
 
 export interface KeybindingState {
   /** Which template profile is active. */
@@ -47,7 +47,12 @@ export interface KeybindingState {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function rebuild(template: TemplateName, overrides: BindingOverrides) {
+/**
+ * The state derived from a template + overrides: the reverse lookup and its chord prefixes. Every
+ * writer of `activeTemplate`/`overrides` (including cross-window sync) spreads this, so derived
+ * fields can't go stale.
+ */
+export function deriveKeybindingState(template: TemplateName, overrides: BindingOverrides) {
   const lookup = buildReverseLookup(TEMPLATES[template], overrides);
   return { lookup, chordPrefixes: buildChordPrefixes(lookup) };
 }
@@ -120,26 +125,26 @@ export const useKeybindingStore = create<KeybindingState>()(
     (set, get) => ({
       activeTemplate: "loxel" as TemplateName,
       overrides: {},
-      ...rebuild("loxel", {}),
+      ...deriveKeybindingState("loxel", {}),
 
       setTemplate: (name) => {
-        set({ activeTemplate: name, ...rebuild(name, get().overrides) });
+        set({ activeTemplate: name, ...deriveKeybindingState(name, get().overrides) });
       },
 
       setOverride: (actionId, bindings) => {
         const template = get().activeTemplate;
         const overrides = applyOverride(TEMPLATES[template], get().overrides, actionId, bindings);
-        set({ overrides, ...rebuild(template, overrides) });
+        set({ overrides, ...deriveKeybindingState(template, overrides) });
       },
 
       removeOverride: (actionId) => {
         const overrides = { ...get().overrides };
         delete overrides[actionId];
-        set({ overrides, ...rebuild(get().activeTemplate, overrides) });
+        set({ overrides, ...deriveKeybindingState(get().activeTemplate, overrides) });
       },
 
       resetAllOverrides: () => {
-        set({ overrides: {}, ...rebuild(get().activeTemplate, {}) });
+        set({ overrides: {}, ...deriveKeybindingState(get().activeTemplate, {}) });
       },
     }),
     {
@@ -161,8 +166,12 @@ export const useKeybindingStore = create<KeybindingState>()(
             bindings.map((b) => normalizeKeyBinding(b)),
           );
         }
-        state.overrides = normalized;
-        Object.assign(state, rebuild(state.activeTemplate, state.overrides));
+        // Publish through setState (not by mutating `state`) so subscribers of the derived
+        // fields — e.g. the webview keystroke interception — see the loaded bindings.
+        useKeybindingStore.setState({
+          overrides: normalized,
+          ...deriveKeybindingState(state.activeTemplate, normalized),
+        });
       },
     },
   ),

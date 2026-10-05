@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
+import { applyStoreUpdate } from "../store-sync";
 import { normalizeKeyBinding, normalizeKeyCombo } from "./key-combo";
 import { useKeybindingStore } from "./keybinding-store";
 import {
@@ -133,5 +134,25 @@ describe("setOverride", () => {
     const { overrides } = useKeybindingStore.getState();
     expect(overrides["panel.split.right"]).toEqual([]);
     expect(overrides["panel.split.terminal.right"]).toEqual([]);
+  });
+});
+
+describe("cross-window sync", () => {
+  test("a synced override re-derives chord prefixes", () => {
+    // Another window binds the ⌘\ leader on its own, which strips every ⌘\ chord.
+    useKeybindingStore.getState().setOverride("app.settings", [key("Cmd+Backslash")]);
+    const remote = useKeybindingStore.getState().overrides;
+    useKeybindingStore.getState().resetAllOverrides();
+    expect(resolveKeystroke(key("Cmd+Backslash"))).toEqual({ kind: "pending" });
+    cancelPendingChord();
+
+    applyStoreUpdate("keybindings", { activeTemplate: "loxel", overrides: remote });
+    expect(resolveKeystroke(key("Cmd+Backslash"))).toEqual({
+      kind: "action",
+      actionId: "app.settings",
+    });
+    expect(
+      useKeybindingStore.getState().chordPrefixes.has(normalizeKeyBinding("Cmd+Backslash")),
+    ).toBe(false);
   });
 });

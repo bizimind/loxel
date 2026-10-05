@@ -274,7 +274,9 @@ describe("no default binding takes reserved keys", () => {
           .flat()
           .map((binding) => getBindingSteps(binding)[0]! as string),
       );
-      expect(Object.keys(RESERVED).filter((combo) => firstSteps.has(combo))).toEqual([]);
+      expect(
+        Object.keys(RESERVED).filter((combo) => firstSteps.has(normalizeKeyCombo(combo))),
+      ).toEqual([]);
     });
   }
 });

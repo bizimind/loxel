@@ -14,7 +14,7 @@ Your unit of focus in loxel is a **context**: one project plus one worktree. Whe
 
 Context state is persisted server-side in SQLite, not just in the browser. This means it survives reloads and multi-window usage. The key is the worktree path, so each worktree has its own completely independent workspace.
 
-Use `Cmd+Alt+W` to switch worktrees. Use `Ctrl+Alt+←` / `Ctrl+Alt+→` to cycle through them.
+Use `Cmd+Alt+W` to switch worktrees. Use `Ctrl+Alt+[` / `Ctrl+Alt+]` to go back and forward through the ones you visited.
 
 ---
 
