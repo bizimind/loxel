@@ -13,13 +13,30 @@ export interface FindHandlers {
 }
 
 const targets = new Map<Element, FindHandlers>();
+const changeListeners = new Set<() => void>();
 
 /** Register `handlers` for focus anywhere inside `root`. Returns an unregister function. */
 export function registerFindTarget(root: Element, handlers: FindHandlers): () => void {
   targets.set(root, handlers);
+  notifyChange();
   return () => {
-    if (targets.get(root) === handlers) targets.delete(root);
+    if (targets.get(root) !== handlers) return;
+    targets.delete(root);
+    notifyChange();
   };
+}
+
+/**
+ * Call `listener` whenever a find target is registered or removed — which can enable or disable
+ * the find actions without focus moving (a panel mounting around an already-focused webview).
+ */
+export function onFindTargetsChange(listener: () => void): () => void {
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+
+function notifyChange(): void {
+  for (const listener of changeListeners) listener();
 }
 
 /** Handlers of the registered panel that contains the focused element, if any. */

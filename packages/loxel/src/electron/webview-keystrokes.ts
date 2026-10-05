@@ -10,7 +10,7 @@
 import { type WebContents, ipcMain } from "electron";
 
 import { inputToKeyCombo, isModifierKey } from "../store/keybindings/key-combo";
-import { SET_KEYSTROKE_INTERCEPTION, WEBVIEW_KEYSTROKE } from "./ipc-channels";
+import { SET_KEYSTROKE_INTERCEPTION, WEBVIEW_FOCUSED, WEBVIEW_KEYSTROKE } from "./ipc-channels";
 
 interface Interception {
   combos: ReadonlySet<string>;
@@ -43,6 +43,12 @@ export function installWebviewKeystrokeForwarding(): void {
 /** Attach to every webview's webContents (from `web-contents-created`). */
 export function forwardWebviewKeystrokes(contents: WebContents): void {
   if (contents.getType() !== "webview") return;
+  // Focus entering a webview fires no focusin in the host document; tell the host so it can
+  // recompute the keystrokes to intercept for the new focus (e.g. ⌘F for find in page).
+  contents.on("focus", () => {
+    const host = contents.hostWebContents;
+    if (host && !host.isDestroyed()) host.send(WEBVIEW_FOCUSED);
+  });
   contents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown" || input.isComposing || isModifierKey(input.key)) return;
     const host = contents.hostWebContents;
