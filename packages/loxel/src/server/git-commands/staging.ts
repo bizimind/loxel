@@ -1,6 +1,7 @@
 import { $ } from "bun";
 
 import { logger } from "../logger";
+import { SUBMODULE_GITLINK_ONLY, readOnlyGitEnv } from "./git-env";
 import { validatePath } from "./validation";
 
 const log = logger.child("git");
@@ -80,7 +81,9 @@ export async function revertToHead(cwd: string, files: string[]): Promise<void> 
   const tracked: string[] = [];
   const untracked: string[] = [];
   const status = await runGit(
-    $`git -C ${cwd} status --porcelain -z --untracked-files=all --no-renames`,
+    $`git -C ${cwd} ${SUBMODULE_GITLINK_ONLY} status --porcelain -z --untracked-files=all --no-renames`.env(
+      readOnlyGitEnv(),
+    ),
     "git status",
   );
   for (const entry of status.split("\0")) {

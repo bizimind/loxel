@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { stat, utimes } from "node:fs/promises";
 
 import { $ } from "bun";
 
@@ -114,5 +115,17 @@ describe("revertToHead", () => {
     await revertToHead(repo.path, ["gone.txt", "untouched.txt", "modified.txt"]);
 
     expect(await status()).toBe("");
+  });
+
+  test("writes nothing in the git dir when no path needs reverting", async () => {
+    // Same content, new mtime: a plain `git status` would refresh the index for this file.
+    const later = new Date(Date.now() + 10_000);
+    await utimes(`${repo.path}/untouched.txt`, later, later);
+    const index = `${repo.path}/.git/index`;
+    const before = (await stat(index)).mtimeMs;
+
+    await revertToHead(repo.path, ["gone.txt"]);
+
+    expect((await stat(index)).mtimeMs).toBe(before);
   });
 });
