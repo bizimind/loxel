@@ -8,12 +8,14 @@ import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
 import type { DockviewPanelApi } from "dockview-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
+import { FindBar } from "@/components/ui/find-bar";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { usePanelFind } from "@/hooks/usePanelFind";
 import { frontendLog } from "@/lib/frontend-logger";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
@@ -25,7 +27,6 @@ import { useUIStore } from "@/store/ui";
 
 import { type FileIndex, buildFileIndex, createFilePathLinkProvider } from "./file-link-provider";
 import { SEARCH_DECORATIONS } from "./search-decorations";
-import { TerminalSearchBar } from "./TerminalSearchBar";
 import { createWebglRenderer } from "./webgl-renderer";
 
 import "@xterm/xterm/css/xterm.css";
@@ -160,8 +161,23 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
   const exitedRef = useRef(false);
   const createdRef = useRef(false);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [searchVisible, setSearchVisible] = useState(false);
-  const searchTermRef = useRef("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const { barProps: findBarProps, setMatches: setFindMatches } = usePanelFind(rootRef, {
+    find: (query, direction, newQuery) => {
+      const searchAddon = searchAddonRef.current;
+      if (!searchAddon) return;
+      if (direction === "next") {
+        searchAddon.findNext(query, { incremental: newQuery, decorations: SEARCH_DECORATIONS });
+      } else {
+        searchAddon.findPrevious(query, { decorations: SEARCH_DECORATIONS });
+      }
+    },
+    clear: () => searchAddonRef.current?.clearDecorations(),
+    close: () => {
+      searchAddonRef.current?.clearDecorations();
+      xtermRef.current?.focus();
+    },
+  });
 
   const cwdRef = useRef(panelWorktreePath);
   cwdRef.current = panelWorktreePath;
@@ -185,6 +201,8 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       lineHeight: 1.1,
       linkHandler: { activate: (event, text) => openUrl(event, text) },
       macOptionIsMeta: true,
+      // The search addon highlights matches with decorations, a proposed API.
+      allowProposedApi: true,
       scrollback: useSettingsStore.getState().terminal.scrollbackLines,
       scrollOnEraseInDisplay: true,
       theme: getTerminalTheme(),
@@ -196,6 +214,9 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(searchAddon);
+    const searchResults = searchAddon.onDidChangeResults(({ resultIndex, resultCount }) =>
+      setFindMatches({ active: resultIndex + 1, total: resultCount }),
+    );
     terminal.loadAddon(webLinksAddon);
 
     // File path link detection: prefixed paths (/, ./, ../, ~/) and bare filenames
@@ -268,7 +289,8 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       if (event.type !== "keydown") return true;
 
       // --- Cmd+key: app-level shortcuts (xterm passes these to browser) ---
-      // Cmd+N and Cmd+W are handled by the global keybinding system (useKeybindings).
+      // Cmd+N, Cmd+W and find (Cmd+F, Cmd+G) are handled by the global keybinding system
+      // (useKeybindings).
       // Returning true lets xterm pass them through to the DOM where the global handler picks them up.
 
       if (event.metaKey && event.key === "k") {
@@ -285,22 +307,6 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       }
       if (event.metaKey && event.key === "Delete") {
         wsClient.sendTerminalInput(terminalId, "\x0b");
-        return false;
-      }
-      if (event.metaKey && event.key === "f") {
-        setSearchVisible(true);
-        return false;
-      }
-      if (event.metaKey && !event.shiftKey && event.key === "g") {
-        if (searchTermRef.current) {
-          searchAddon.findNext(searchTermRef.current, { decorations: SEARCH_DECORATIONS });
-        }
-        return false;
-      }
-      if (event.metaKey && event.shiftKey && event.key === "G") {
-        if (searchTermRef.current) {
-          searchAddon.findPrevious(searchTermRef.current, { decorations: SEARCH_DECORATIONS });
-        }
         return false;
       }
       if (event.metaKey && event.key === "ArrowUp") {
@@ -403,6 +409,7 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       cancelAnimationFrame(rafId);
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       inputDisposable.dispose();
+      searchResults.dispose();
       fileLinks.dispose();
       for (const d of notifDisposables) d.dispose();
       unsubOutput();
@@ -504,31 +511,15 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
     xtermRef.current?.focus();
   }, []);
 
-  const handleSearchClose = useCallback(() => {
-    setSearchVisible(false);
-    searchTermRef.current = "";
-    xtermRef.current?.focus();
-  }, []);
-
-  const handleSearchTermChange = useCallback((term: string) => {
-    searchTermRef.current = term;
-  }, []);
-
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div ref={rootRef} className="relative h-full w-full overflow-hidden">
       <div
         ref={containerRef}
         className="h-full w-full overflow-hidden p-2"
         style={{ backgroundColor: "var(--editor-surface)" }}
         onMouseDown={handleClick}
       />
-      {searchVisible && searchAddonRef.current && (
-        <TerminalSearchBar
-          searchAddon={searchAddonRef.current}
-          onClose={handleSearchClose}
-          onSearchTermChange={handleSearchTermChange}
-        />
-      )}
+      {findBarProps && <FindBar label="Find in terminal" {...findBarProps} />}
     </div>
   );
 }

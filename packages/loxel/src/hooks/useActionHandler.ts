@@ -6,6 +6,7 @@ import type { IDockviewPanel } from "dockview-react";
 import { useCallback } from "react";
 
 import type { SplitPosition } from "@/components/dockview/default-layout";
+import { getFocusedFindTarget } from "@/lib/find-targets";
 import {
   moveFocus,
   toggleFocusedArea,
@@ -272,6 +273,17 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "nav.search":
         useSearchStore.getState().open();
         break;
+      // -- Find in the focused panel --
+      case "find.open":
+        getFocusedFindTarget()?.open();
+        break;
+      case "find.next":
+        getFocusedFindTarget()?.next();
+        break;
+      case "find.previous":
+        getFocusedFindTarget()?.previous();
+        break;
+
       case "nav.openFile":
         useFileSearchStore.getState().open();
         break;

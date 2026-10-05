@@ -7,6 +7,7 @@
 
 import { useEffect } from "react";
 
+import { onFindTargetsChange } from "@/lib/find-targets";
 import type { KeyCombo } from "@/store/keybindings/key-combo";
 import { eventToKeyCombo, getBindingSteps, isModifierKey } from "@/store/keybindings/key-combo";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
@@ -101,18 +102,30 @@ export function useKeybindings(): void {
     const offChord = usePendingChordStore.subscribe((state, prev) => {
       if (state.steps.length > 0 !== prev.steps.length > 0) syncWebviewInterception();
     });
+    // Focus moving into a <webview> fires no focusin here. The main process reports it (the
+    // guest's webContents focus event); as a fallback, re-sync one tick after a focusout or window
+    // blur, by when activeElement is the webview.
+    const offWebviewFocused = window.electronAPI?.onWebviewFocused(syncWebviewInterception);
+    const syncAfterFocusLeaves = () => setTimeout(syncWebviewInterception, 0);
+    const offFindTargets = onFindTargetsChange(syncWebviewInterception);
     syncWebviewInterception();
 
     // Capture phase ensures this fires before component-level handlers
     document.addEventListener("keydown", handleKeyDown, true);
     // Context-dependent actions change which keys a focused webview should give up.
     document.addEventListener("focusin", syncWebviewInterception);
+    document.addEventListener("focusout", syncAfterFocusLeaves);
     window.addEventListener("blur", cancelPendingChord);
+    window.addEventListener("blur", syncAfterFocusLeaves);
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
       document.removeEventListener("focusin", syncWebviewInterception);
+      document.removeEventListener("focusout", syncAfterFocusLeaves);
       window.removeEventListener("blur", cancelPendingChord);
+      window.removeEventListener("blur", syncAfterFocusLeaves);
       offWebviewKeystroke?.();
+      offWebviewFocused?.();
+      offFindTargets();
       offLookup();
       offChord();
     };

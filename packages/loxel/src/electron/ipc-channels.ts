@@ -10,3 +10,8 @@ export const OPEN_FOLDER_DIALOG = "dialog:open-folder";
 export const SET_KEYSTROKE_INTERCEPTION = "keybindings:set-interception";
 /** Main → renderer: a bound keystroke typed inside one of its webviews. */
 export const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
+/**
+ * Main → renderer: one of its webviews gained keyboard focus. The host document gets no focusin
+ * for that, so this is the renderer's cue to recompute which keystrokes to intercept.
+ */
+export const WEBVIEW_FOCUSED = "keybindings:webview-focused";

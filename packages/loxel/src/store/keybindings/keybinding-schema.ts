@@ -130,6 +130,10 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "nav.search": ["Cmd+Shift+F"],
   "nav.openFile": ["Cmd+P"],
   "nav.recentNotification": ["Ctrl+Backtick"],
+  // Context-aware: only while focus is in a panel with a find bar (browser, terminal)
+  "find.open": ["Cmd+F"],
+  "find.next": ["Cmd+G"],
+  "find.previous": ["Cmd+Shift+G"],
   "file.revealInExplorer": ["Cmd+Alt+E"],
   // Worktree management
   "worktree.back": ["Ctrl+Alt+BracketLeft"],
