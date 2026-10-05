@@ -470,6 +470,14 @@ export async function discardChanges(wt: string, files: string[]) {
   });
 }
 
+/** Discard every local change to `files` — staged, unstaged and untracked — making them match HEAD. */
+export async function revertToHead(wt: string, files: string[]) {
+  return fetchJson<{ success: boolean }>("/revert-to-head", {
+    method: "POST",
+    body: JSON.stringify({ worktreePath: wt, files }),
+  });
+}
+
 export async function stageHunk(wt: string, patch: string) {
   return fetchJson<{ success: boolean }>("/stage-hunk", {
     method: "POST",

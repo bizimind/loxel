@@ -30,14 +30,15 @@ function showActionError(action: string, err: unknown) {
 /**
  * Context menu items for a file or folder on disk: "Reveal in Finder", plus an "Open In"
  * submenu (the apps macOS offers for a file; installed terminals and editors for a folder).
- * Renders nothing outside macOS.
+ * Renders nothing outside macOS. `disabled` greys both out, e.g. for a path not on disk.
  */
-export function OpenInMenuItems({ path }: { path: string }) {
+export function OpenInMenuItems({ path, disabled = false }: { path: string; disabled?: boolean }) {
   if (!isOpenInSupported) return null;
 
   return (
     <>
       <ContextMenuItem
+        disabled={disabled}
         onClick={() => {
           revealInFinder({ path }).catch((err: unknown) =>
             showActionError("Couldn't reveal in Finder", err),
@@ -48,7 +49,7 @@ export function OpenInMenuItems({ path }: { path: string }) {
         Reveal in Finder
       </ContextMenuItem>
       <ContextMenuSub>
-        <ContextMenuSubTrigger>
+        <ContextMenuSubTrigger disabled={disabled}>
           <AppWindowIcon />
           Open In
         </ContextMenuSubTrigger>

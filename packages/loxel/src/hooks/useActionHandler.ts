@@ -6,9 +6,8 @@ import type { IDockviewPanel } from "dockview-react";
 import { useCallback } from "react";
 
 import type { SplitPosition } from "@/components/dockview/default-layout";
-import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
-import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
+import { getActiveEditorFilePath, revealInProjectExplorer } from "@/lib/reveal-in-explorer";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
 import type { ActionId } from "@/store/keybindings/action-registry";
@@ -254,9 +253,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
 
       case "file.revealInExplorer": {
         const filePath = getActiveEditorFilePath();
-        if (filePath) {
-          dispatchLoxelEvent("loxel-reveal-in-explorer", { filePath });
-        }
+        if (filePath) revealInProjectExplorer(filePath);
         break;
       }
 

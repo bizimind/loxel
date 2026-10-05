@@ -89,12 +89,13 @@ entry used by rendering.
 
 ## Reveal In Explorer
 
-There are two reveal entry points:
+There are three reveal entry points:
 
-- explicit command: dispatches `loxel-reveal-in-explorer`
+- reveal event: `loxel-reveal-in-explorer`, dispatched by Quick Open and search results to select the opened file if the panel is mounted
 - auto reveal: reacts to active editor tab changes when the `autoRevealInExplorer` setting is enabled
+- pending reveal: `pendingReveal` in the per-worktree UI store (`{ path, expand }`). `revealInProjectExplorer(path)` shows the panel and sets it — used by the `file.revealInExplorer` command and the changes panel's **Reveal in Project Explorer** — and `openFolder` sets it with `expand: true` (across a worktree switch, or before a new Others folder is listed). The panel retries it on directory changes until the tree can show the path, then clears it
 
-Both paths call the same `revealFileInTree(filePath)` helper.
+All paths call the same `revealFileInTree(filePath)` helper.
 
 For project files under the active worktree, reveal prefetches every ancestor directory using
 absolute paths:

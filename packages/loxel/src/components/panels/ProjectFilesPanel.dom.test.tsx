@@ -74,6 +74,7 @@ mock.module("@/lib/loxel-events", () => ({
 
 mock.module("@/store/tools-bar", () => ({
   getCenterApi: () => centerApiState.api,
+  showPanel: () => {},
   subscribeCenterApi: (
     listener: (
       api: {
@@ -276,6 +277,25 @@ describe("ProjectFilesPanel", () => {
       );
       expect(focus.mock.contexts).toContain(target);
       expect(scrollIntoView).toHaveBeenCalledWith({ block: "center", behavior: "smooth" });
+    });
+  });
+
+  test("a pending reveal selects the path, then clears without expanding a file", async () => {
+    renderPanel(queryClient);
+    expect(await screen.findByRole("button", { name: /src/ })).toBeInTheDocument();
+
+    act(() =>
+      getCurrentWorktreeUI()
+        .getState()
+        .setPendingReveal({ path: "/repo/src/components/Button.tsx", expand: false }),
+    );
+
+    expect(await screen.findByRole("button", { name: /Button\.tsx/ })).toBeInTheDocument();
+    await waitFor(() => {
+      const ui = getCurrentWorktreeUI().getState();
+      expect(ui.selectedProjectFile).toBe("/repo/src/components/Button.tsx");
+      expect(ui.pendingReveal).toBeNull();
+      expect(ui.expandedProjectFolders.has("/repo/src/components/Button.tsx")).toBe(false);
     });
   });
 
