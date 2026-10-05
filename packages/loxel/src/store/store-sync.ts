@@ -11,8 +11,11 @@ import type { LogLevel } from "@/api/log-entry-model";
 import { reconcile } from "@/lib/reconcile";
 
 import { TEMPLATES } from "./keybindings/keybinding-schema";
-import type { BindingOverrides } from "./keybindings/keybinding-store";
-import { deriveKeybindingState, useKeybindingStore } from "./keybindings/keybinding-store";
+import {
+  deriveKeybindingState,
+  parseBindingOverrides,
+  useKeybindingStore,
+} from "./keybindings/keybinding-store";
 import { useProjectStore } from "./projects";
 import { useSearchStore } from "./search";
 import { useSettingsStore } from "./settings-store";
@@ -62,7 +65,7 @@ const syncTargets: Record<string, SyncTarget> = {
       const { activeTemplate } = partial;
       if (typeof activeTemplate !== "string" || !Object.hasOwn(TEMPLATES, activeTemplate)) return;
       const template = activeTemplate as keyof typeof TEMPLATES;
-      const overrides = partial.overrides as BindingOverrides;
+      const overrides = parseBindingOverrides(template, partial.overrides);
       useKeybindingStore.setState({
         activeTemplate: template,
         overrides,

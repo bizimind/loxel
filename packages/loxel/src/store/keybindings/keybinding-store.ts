@@ -116,6 +116,27 @@ function applyOverride(
   return overrides;
 }
 
+/**
+ * Parse overrides from untrusted storage (persisted settings, other windows' sync frames): drop
+ * malformed entries and action IDs from old versions, re-normalize every binding, and re-apply
+ * each override so it can't overlap bindings the template gained since.
+ */
+export function parseBindingOverrides(template: TemplateName, raw: unknown): BindingOverrides {
+  let parsed: BindingOverrides = {};
+  if (typeof raw !== "object" || raw === null) return parsed;
+  for (const [id, bindings] of Object.entries(raw)) {
+    if (!ACTION_IDS.has(id as ActionId)) continue;
+    if (!Array.isArray(bindings) || !bindings.every((b) => typeof b === "string")) continue;
+    parsed = applyOverride(
+      TEMPLATES[template],
+      parsed,
+      id as ActionId,
+      bindings.map(normalizeKeyBinding),
+    );
+  }
+  return parsed;
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -154,18 +175,7 @@ export const useKeybindingStore = create<KeybindingState>()(
       partialize: (state) => ({ activeTemplate: state.activeTemplate, overrides: state.overrides }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
-        // Re-normalize persisted overrides, drop stale action IDs from old versions, and
-        // re-apply each override so it can't overlap bindings the template gained since.
-        let normalized: BindingOverrides = {};
-        for (const [actionId, bindings] of Object.entries(state.overrides)) {
-          if (!ACTION_IDS.has(actionId as ActionId) || !bindings) continue;
-          normalized = applyOverride(
-            TEMPLATES[state.activeTemplate],
-            normalized,
-            actionId as ActionId,
-            bindings.map((b) => normalizeKeyBinding(b)),
-          );
-        }
+        const normalized = parseBindingOverrides(state.activeTemplate, state.overrides);
         // Publish through setState (not by mutating `state`) so subscribers of the derived
         // fields — e.g. the webview keystroke interception — see the loaded bindings.
         useKeybindingStore.setState({

@@ -138,6 +138,31 @@ describe("setOverride", () => {
 });
 
 describe("cross-window sync", () => {
+  test("a malformed synced payload keeps valid overrides and drops the rest", () => {
+    expect(() =>
+      applyStoreUpdate("keybindings", {
+        activeTemplate: "loxel",
+        overrides: {
+          "app.settings": ["Cmd+Shift+Y"],
+          "panel.close": "Cmd+W",
+          "worktree.next": ["Ctrl+Alt+ArrowRight"],
+          "panel.new.terminal": [42],
+        },
+      }),
+    ).not.toThrow();
+    const { overrides } = useKeybindingStore.getState();
+    expect(Object.keys(overrides)).toEqual(["app.settings"]);
+    expect(resolveKeystroke(key("Cmd+Shift+Y"))).toEqual({
+      kind: "action",
+      actionId: "app.settings",
+    });
+  });
+
+  test("a sync frame with an unknown template is ignored", () => {
+    applyStoreUpdate("keybindings", { activeTemplate: "nope", overrides: {} });
+    expect(useKeybindingStore.getState().activeTemplate).toBe("loxel");
+  });
+
   test("a synced override re-derives chord prefixes", () => {
     // Another window binds the ⌘\ leader on its own, which strips every ⌘\ chord.
     useKeybindingStore.getState().setOverride("app.settings", [key("Cmd+Backslash")]);
