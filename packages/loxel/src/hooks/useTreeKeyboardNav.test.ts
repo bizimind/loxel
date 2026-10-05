@@ -21,9 +21,12 @@ describe("findTypeaheadMatch", () => {
     expect(findTypeaheadMatch(names, 2, "bu")).toBe(3);
   });
 
-  test("a repeated character matches a name starting with the run, else steps by the character", () => {
+  test("a repeated character steps through the names starting with it", () => {
     expect(findTypeaheadMatch(names, 1, "aa")).toBe(4);
     expect(findTypeaheadMatch(names, 2, "bb")).toBe(3);
+    // Even when the current row starts with the run itself.
+    expect(findTypeaheadMatch(names, 4, "aa")).toBe(1);
+    expect(findTypeaheadMatch(["ssh.ts", "ssr.ts"], 0, "ss")).toBe(1);
   });
 
   test("returns -1 when nothing matches", () => {

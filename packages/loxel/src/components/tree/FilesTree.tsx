@@ -526,8 +526,10 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
       onKeyDown={disableBuiltinKeyNav ? undefined : handleKeyDown}
       onFocusCapture={handleFocusIn}
     >
-      {sections.map(({ header, roots }) => (
-        <div key={roots[0]!.path} {...{ [TREE_SECTION_ATTR]: "" }}>
+      {/* Sections are positional: keying one by its first root would remount every row (and drop
+          focus) whenever a different root sorts first. */}
+      {sections.map(({ header, roots }, sectionIndex) => (
+        <div key={sectionIndex} {...{ [TREE_SECTION_ATTR]: "" }}>
           {header}
           {roots.map((node) => (
             <TreeNodeRenderer

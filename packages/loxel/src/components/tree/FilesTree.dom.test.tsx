@@ -270,6 +270,18 @@ describe("FilesTree", () => {
     await waitFor(() => expect(onToggle).toHaveBeenLastCalledWith("/repo/src/components", false));
   });
 
+  test("keeps the focused row when a root that sorts first is added", () => {
+    const b: TreeNode = { path: "/b.ts", name: "b.ts", isDir: false };
+    const { container, rerender } = render(<FilesTree nodes={[b]} onOpen={() => {}} />);
+    const row = container.querySelector<HTMLButtonElement>(`button[${TREE_PATH_ATTR}="/b.ts"]`)!;
+    row.focus();
+
+    rerender(
+      <FilesTree nodes={[{ path: "/a.ts", name: "a.ts", isDir: false }, b]} onOpen={() => {}} />,
+    );
+    expect(document.activeElement).toBe(row);
+  });
+
   test("focuses a row when it is clicked", () => {
     const onSelect = jest.fn();
     render(

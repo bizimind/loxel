@@ -201,10 +201,9 @@ function siblingRange(rows: HTMLElement[], idx: number): [number, number] {
 
 /**
  * Index of the row to focus for a type-ahead `query` (lowercase), or -1 when no name starts with
- * it. Searching wraps around. A single character searches from the row after `current`, so
- * repeating a key steps through the names starting with it; a longer prefix keeps the current row
- * while it still matches. A run of one repeated character ("aaa") that no name starts with also
- * steps through the names starting with that character.
+ * it. Searching wraps around. A run of one character ("a", "aaa") searches for that character from
+ * the row after `current`, so repeating a key steps through the names starting with it; any other
+ * prefix searches from `current`, keeping the current row while it still matches.
  */
 export function findTypeaheadMatch(names: string[], current: number, query: string): number {
   const search = (prefix: string, start: number) => {
@@ -214,9 +213,7 @@ export function findTypeaheadMatch(names: string[], current: number, query: stri
     }
     return -1;
   };
-  const from = Math.max(current, 0);
-  const match = search(query, query.length === 1 ? current + 1 : from);
-  if (match !== -1 || query.length === 1) return match;
   const char = query[0]!;
-  return query === char.repeat(query.length) ? search(char, current + 1) : -1;
+  if (query === char.repeat(query.length)) return search(char, current + 1);
+  return search(query, Math.max(current, 0));
 }
