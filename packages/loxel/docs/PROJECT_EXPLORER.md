@@ -154,9 +154,7 @@ context menu.
 
 When the Project Explorer opens for an active worktree, focus defaults to the worktree root row.
 
-Focus and selection are not the active/opened visual state. Keyboard focus, mouse hover, and rows
-focused by arrow navigation use the hover background. The stronger active background is only applied
-to the file path currently opened in the active center editor panel.
+Focus and selection are not the active/opened visual state. Clicking a row focuses it. The focused row (by click or keyboard) has a stronger tint and an outline than the light hover tint (see [FILES_TREE.md](FILES_TREE.md#focus-selection-and-active-rows)). The stronger active background is only applied to the file path currently opened in the active center editor panel.
 
 Project Explorer owns panel-level keyboard shortcuts and passes `disableBuiltinKeyNav` to
 `FilesTree`. It still resolves tree keyboard input through the shared keybinding store, so these
@@ -164,9 +162,8 @@ behaviors are configurable through settings and the command palette.
 
 Keyboard behavior:
 
-- `tree.focusNext`, `tree.focusPrevious`, `tree.expandOrFocusChild`,
-  `tree.collapseOrFocusParent`, and `tree.toggleExpanded` drive focus and expansion from the same
-  row attributes as `FilesTree`
+- `tree.focusNext`, `tree.focusPrevious`, `tree.focusFirstSibling`, `tree.focusLastSibling`, `tree.expandOrFocusChild`, `tree.collapseOrFocusParent`, and `tree.toggleExpanded` drive focus and expansion from the same row attributes as `FilesTree`; the Drafts rows form their own `data-tree-section`, so `Cmd+ArrowUp`/`Cmd+ArrowDown` on a root row stay within Drafts, the worktree root, or Others
+- typing a name prefix jumps to the next visible matching row, as in `FilesTree`
 - `tree.open` opens focused files and toggles focused directories; default `Enter`
 - `tree.rename` starts inline rename for non-root focused rows; defaults `F2` and `Shift+F6`
 - canceling inline rename restores focus to the renamed row

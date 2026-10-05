@@ -85,8 +85,9 @@ describe("FilesTree", () => {
 
     expect(focused).toHaveAttribute("data-tree-selected");
     expect(focused).not.toHaveClass("bg-primary");
-    expect(focused).toHaveClass("hover:bg-primary/50");
-    expect(focused).toHaveClass("focus-visible:bg-primary/50");
+    expect(focused).toHaveClass("dark:hover:bg-primary/20");
+    expect(focused).toHaveClass("dark:focus:bg-primary/50");
+    expect(focused).toHaveClass("focus:ring-1");
 
     expect(active).toHaveAttribute("data-tree-active");
     expect(active).toHaveClass("bg-primary");
@@ -267,5 +268,227 @@ describe("FilesTree", () => {
 
     fireEvent.keyDown(container.firstElementChild!, { key: " " });
     await waitFor(() => expect(onToggle).toHaveBeenLastCalledWith("/repo/src/components", false));
+  });
+
+  test("focuses a row when it is clicked", () => {
+    const onSelect = jest.fn();
+    render(
+      <FilesTree
+        nodes={[
+          { path: "/repo/dir", name: "dir", isDir: true, children: [] },
+          { path: "/repo/a.ts", name: "a.ts", isDir: false },
+        ]}
+        onOpen={() => {}}
+        onSelect={onSelect}
+      />,
+    );
+
+    const file = screen.getByRole("button", { name: /a\.ts/ });
+    fireEvent.click(file);
+    expect(document.activeElement).toBe(file);
+    expect(onSelect).toHaveBeenLastCalledWith("/repo/a.ts");
+
+    const dir = screen.getByRole("button", { name: /dir/ });
+    fireEvent.click(dir);
+    expect(document.activeElement).toBe(dir);
+    expect(onSelect).toHaveBeenLastCalledWith("/repo/dir");
+  });
+
+  describe("keyboard", () => {
+    const nodes: TreeNode[] = [
+      {
+        path: "/repo",
+        name: "repo",
+        isDir: true,
+        children: [
+          {
+            path: "/repo/src",
+            name: "src",
+            isDir: true,
+            children: [
+              { path: "/repo/src/app.ts", name: "app.ts", isDir: false },
+              { path: "/repo/src/main.ts", name: "main.ts", isDir: false },
+            ],
+          },
+          { path: "/repo/alpha.md", name: "alpha.md", isDir: false },
+          { path: "/repo/beta.md", name: "beta.md", isDir: false },
+          { path: "/repo/build.ts", name: "build.ts", isDir: false },
+        ],
+      },
+    ];
+
+    function renderTree() {
+      const { container } = render(
+        <FilesTree
+          nodes={nodes}
+          defaultExpandedPaths={["/repo", "/repo/src"]}
+          compactRoot={false}
+          onOpen={() => {}}
+        />,
+      );
+      const row = (path: string) =>
+        container.querySelector<HTMLButtonElement>(`button[${TREE_PATH_ATTR}="${path}"]`)!;
+      const focusedPath = () => document.activeElement?.getAttribute(TREE_PATH_ATTR);
+      return { row, focusedPath };
+    }
+
+    test("Cmd+ArrowUp / Cmd+ArrowDown focus the first / last entry of the focused row's folder", () => {
+      const { row, focusedPath } = renderTree();
+
+      row("/repo/alpha.md").focus();
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown", metaKey: true });
+      expect(focusedPath()).toBe("/repo/build.ts");
+      // The expanded src folder's children are skipped: src is the folder's first entry.
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp", metaKey: true });
+      expect(focusedPath()).toBe("/repo/src");
+
+      row("/repo/src/main.ts").focus();
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp", metaKey: true });
+      expect(focusedPath()).toBe("/repo/src/app.ts");
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown", metaKey: true });
+      expect(focusedPath()).toBe("/repo/src/main.ts");
+    });
+
+    test("typing a letter focuses the next visible entry starting with it, wrapping around", () => {
+      const { row, focusedPath } = renderTree();
+      const now = spyOn(Date, "now");
+      let time = 0;
+      now.mockImplementation(() => (time += 1000));
+
+      row("/repo").focus();
+      fireEvent.keyDown(document.activeElement!, { key: "b" });
+      expect(focusedPath()).toBe("/repo/beta.md");
+      fireEvent.keyDown(document.activeElement!, { key: "B" });
+      expect(focusedPath()).toBe("/repo/build.ts");
+      fireEvent.keyDown(document.activeElement!, { key: "b" });
+      expect(focusedPath()).toBe("/repo/beta.md");
+      fireEvent.keyDown(document.activeElement!, { key: "a" });
+      expect(focusedPath()).toBe("/repo/src/app.ts");
+      fireEvent.keyDown(document.activeElement!, { key: "a" });
+      expect(focusedPath()).toBe("/repo/alpha.md");
+      // No match leaves focus where it is.
+      fireEvent.keyDown(document.activeElement!, { key: "z" });
+      expect(focusedPath()).toBe("/repo/alpha.md");
+
+      now.mockRestore();
+    });
+
+    test("letters typed quickly build up a prefix", () => {
+      const { row, focusedPath } = renderTree();
+      const now = spyOn(Date, "now");
+      let time = 0;
+      now.mockImplementation(() => (time += 100));
+
+      row("/repo").focus();
+      fireEvent.keyDown(document.activeElement!, { key: "b" });
+      expect(focusedPath()).toBe("/repo/beta.md");
+      fireEvent.keyDown(document.activeElement!, { key: "u" });
+      expect(focusedPath()).toBe("/repo/build.ts");
+      // A repeated letter no name starts with steps through the names starting with it.
+      row("/repo").focus();
+      time += 1000;
+      fireEvent.keyDown(document.activeElement!, { key: "a" });
+      fireEvent.keyDown(document.activeElement!, { key: "a" });
+      expect(focusedPath()).toBe("/repo/alpha.md");
+
+      now.mockRestore();
+    });
+
+    test("Space continues a query in progress, and other navigation ends it", () => {
+      const { container } = render(
+        <FilesTree
+          nodes={[
+            { path: "/d/Note 1.md", name: "Note 1.md", isDir: false },
+            { path: "/d/Note 2.md", name: "Note 2.md", isDir: false },
+            { path: "/d/zeta.md", name: "zeta.md", isDir: false },
+          ]}
+          onOpen={() => {}}
+        />,
+      );
+      const row = (path: string) =>
+        container.querySelector<HTMLButtonElement>(`button[${TREE_PATH_ATTR}="${path}"]`)!;
+      const focusedPath = () => document.activeElement?.getAttribute(TREE_PATH_ATTR);
+      const now = spyOn(Date, "now");
+      let time = 0;
+      now.mockImplementation(() => (time += 100));
+
+      row("/d/zeta.md").focus();
+      for (const key of ["n", "o", "t", "e", " ", "2"]) {
+        fireEvent.keyDown(document.activeElement!, { key });
+      }
+      expect(focusedPath()).toBe("/d/Note 2.md");
+
+      // Within the reset delay, but after an arrow key: "z" starts a new query.
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+      fireEvent.keyDown(document.activeElement!, { key: "z" });
+      expect(focusedPath()).toBe("/d/zeta.md");
+
+      now.mockRestore();
+    });
+
+    test("Cmd+ArrowUp / Cmd+ArrowDown stay within a section and step over compacted rows", () => {
+      const { container } = render(
+        <FilesTree
+          nodes={[
+            {
+              path: "/repo",
+              name: "repo",
+              isDir: true,
+              children: [
+                {
+                  path: "/repo/src",
+                  name: "src",
+                  isDir: true,
+                  children: [
+                    {
+                      path: "/repo/src/lib",
+                      name: "lib",
+                      isDir: true,
+                      children: [
+                        { path: "/repo/src/lib/a.ts", name: "a.ts", isDir: false },
+                        { path: "/repo/src/lib/b.ts", name: "b.ts", isDir: false },
+                      ],
+                    },
+                  ],
+                },
+                { path: "/repo/z.md", name: "z.md", isDir: false },
+              ],
+            },
+            { path: "/notes", name: "notes", isDir: true },
+            { path: "/todo.md", name: "todo.md", isDir: false },
+          ]}
+          defaultExpandedPaths={["/repo", "/repo/src", "/repo/src/lib"]}
+          compactRoot={false}
+          renderRootHeader={(_node, index) => index === 1 && <div>Others</div>}
+          onOpen={() => {}}
+        />,
+      );
+      const row = (path: string) =>
+        container.querySelector<HTMLButtonElement>(`button[${TREE_PATH_ATTR}="${path}"]`)!;
+      const focusedPath = () => document.activeElement?.getAttribute(TREE_PATH_ATTR);
+      const press = (key: string) =>
+        fireEvent.keyDown(document.activeElement!, { key, metaKey: true });
+
+      // "src / lib" is one row; its children render two levels deeper.
+      row("/repo/src/lib/b.ts").focus();
+      press("ArrowUp");
+      expect(focusedPath()).toBe("/repo/src/lib/a.ts");
+      press("ArrowUp");
+      expect(focusedPath()).toBe("/repo/src/lib/a.ts");
+
+      row("/repo/z.md").focus();
+      press("ArrowUp");
+      expect(focusedPath()).toBe("/repo/src/lib");
+
+      // Roots: the worktree root is alone in its section, the Others roots share theirs.
+      row("/repo").focus();
+      press("ArrowDown");
+      expect(focusedPath()).toBe("/repo");
+      row("/notes").focus();
+      press("ArrowDown");
+      expect(focusedPath()).toBe("/todo.md");
+      press("ArrowUp");
+      expect(focusedPath()).toBe("/notes");
+    });
   });
 });
