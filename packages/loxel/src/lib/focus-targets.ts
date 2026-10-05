@@ -5,9 +5,9 @@
 
 import type { PanelId } from "@/store/panel-config";
 
-/** Marks a focus area container: the worktree sidebar or a side tool bar. */
+/** Marks a focus area container: the worktree sidebar, a side tool bar, or the center. */
 export const FOCUS_AREA_ATTR = "data-focus-area";
-export type FocusAreaName = "worktrees" | "left-bar" | "right-bar";
+export type FocusAreaName = "worktrees" | "left-bar" | "right-bar" | "center";
 
 /** Marks a tool bar icon button; the value is its PanelId. */
 export const TOOLBAR_PANEL_ATTR = "data-toolbar-panel";
@@ -40,4 +40,14 @@ export function panelAutofocusProps() {
 /** Props for a keyboard-navigable worktree sidebar entry (a worktree or project root). */
 export function sidebarEntryProps(path: string) {
   return { [SIDEBAR_ENTRY_ATTR]: path };
+}
+
+/**
+ * Whether keyboard focus is in the center panels (an editor, terminal, webview, …) or nowhere in
+ * particular. Context check for actions that only apply outside the center.
+ */
+export function isFocusInCenter(): boolean {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || active === document.body) return true;
+  return active.closest(`[${FOCUS_AREA_ATTR}="center"]`) !== null;
 }

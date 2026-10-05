@@ -13,6 +13,7 @@ import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import {
   cancelPendingChord,
   hasPendingChord,
+  isActionEnabledHere,
   resolveKeystroke,
   usePendingChordStore,
 } from "@/store/keybindings/pending-chord";
@@ -27,24 +28,35 @@ function isTextInput(target: EventTarget | null): boolean {
   return target.isContentEditable;
 }
 
-/** First keystroke of every non-tree binding — what the main process withholds from webviews. */
+/**
+ * First keystroke of every binding the app handles where focus is now — what the main process
+ * withholds from webviews. Tree actions and actions disabled in the current focus context (see
+ * `ActionDef.isEnabled`) are left to the page.
+ */
 function firstKeystrokes(): string[] {
   const firstSteps = new Set<string>();
   for (const [binding, actionId] of useKeybindingStore.getState().lookup) {
-    if (!actionId.startsWith("tree.")) firstSteps.add(getBindingSteps(binding)[0]!);
+    if (actionId.startsWith("tree.") || !isActionEnabledHere(actionId)) continue;
+    firstSteps.add(getBindingSteps(binding)[0]!);
   }
   return [...firstSteps];
 }
 
+let lastInterception = "";
+
 /**
  * Tell the main process which webview keystrokes to forward: the first keystroke of each
  * binding, or every keystroke while a chord is in progress (its next key may be any key).
+ * Re-sent when bindings, chord state or focus change; unchanged payloads are skipped.
  */
 function syncWebviewInterception(): void {
-  window.electronAPI?.setKeystrokeInterception({
-    combos: firstKeystrokes(),
-    captureAll: hasPendingChord(),
-  });
+  const electronAPI = window.electronAPI;
+  if (!electronAPI) return;
+  const interception = { combos: firstKeystrokes(), captureAll: hasPendingChord() };
+  const serialized = JSON.stringify(interception);
+  if (serialized === lastInterception) return;
+  lastInterception = serialized;
+  electronAPI.setKeystrokeInterception(interception);
 }
 
 export function useKeybindings(): void {
@@ -93,9 +105,12 @@ export function useKeybindings(): void {
 
     // Capture phase ensures this fires before component-level handlers
     document.addEventListener("keydown", handleKeyDown, true);
+    // Context-dependent actions change which keys a focused webview should give up.
+    document.addEventListener("focusin", syncWebviewInterception);
     window.addEventListener("blur", cancelPendingChord);
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
+      document.removeEventListener("focusin", syncWebviewInterception);
       window.removeEventListener("blur", cancelPendingChord);
       offWebviewKeystroke?.();
       offLookup();

@@ -3,6 +3,8 @@
  * Used by the keybinding system, future command palette, and toolbar buttons.
  */
 
+import { isFocusInCenter } from "@/lib/focus-targets";
+
 /**
  * All action IDs in the application. Adding an action here automatically
  * makes it available for keybinding and command palette lookup.
@@ -15,6 +17,7 @@ export type ActionId =
   | "panel.new.browser"
   | "panel.open.localdb"
   | "panel.close"
+  | "panel.newTab"
   | `panel.split.${SplitDirection}`
   | `panel.split.${SplitPanelType}.${SplitDirection}`
   | "panel.next"
@@ -109,6 +112,11 @@ export interface ActionDef {
   label: string;
   category: ActionCategory;
   hidden?: boolean;
+  /**
+   * Whether the action applies where keyboard focus is now. When it returns false the action's
+   * key resolves as unbound and reaches the focused widget (terminal, editor, …).
+   */
+  isEnabled?: () => boolean;
 }
 
 /**
@@ -126,6 +134,9 @@ export const ACTIONS: readonly ActionDef[] = [
 
   // Panel management
   { id: "panel.close", label: "Close Panel", category: "panel" },
+
+  // New tab of the active panel's type, in its group
+  { id: "panel.newTab", label: "New Tab (Same Type)", category: "panel" },
 
   // Split — new panel of the active panel's type, or of a specific type
   ...SPLIT_DIRECTIONS.map((dir): ActionDef => ({
@@ -193,6 +204,8 @@ export const ACTIONS: readonly ActionDef[] = [
     id: "sidebar.toggleFocused",
     label: "Collapse/Expand Focused Sidebar or Panel",
     category: "sidebar",
+    // Nothing to collapse in the center; let the key reach the terminal or editor there.
+    isEnabled: () => !isFocusInCenter(),
   },
 
   // Worktree management

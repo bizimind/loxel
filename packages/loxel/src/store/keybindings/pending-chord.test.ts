@@ -83,6 +83,50 @@ describe("resolveKeystroke", () => {
   });
 });
 
+describe("Enter-ended chords", () => {
+  test("⌘\\ then a type letter then Enter opens that panel type as a tab", () => {
+    resolveKeystroke(key("Cmd+Backslash"));
+    resolveKeystroke(key("B"));
+    expect(resolveKeystroke(key("Enter"))).toEqual({
+      kind: "action",
+      actionId: "panel.new.browser",
+    });
+  });
+
+  test("⌘\\ then Enter opens a tab of the active panel's type", () => {
+    resolveKeystroke(key("Cmd+Backslash"));
+    expect(resolveKeystroke(key("Enter"))).toEqual({ kind: "action", actionId: "panel.newTab" });
+  });
+});
+
+describe("context-dependent actions", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  function focusIn(area: string): void {
+    const container = document.createElement("div");
+    container.setAttribute("data-focus-area", area);
+    const button = document.createElement("button");
+    container.append(button);
+    document.body.append(container);
+    button.focus();
+  }
+
+  test("⌃⇧Space passes through while focus is in the center", () => {
+    focusIn("center");
+    expect(resolveKeystroke(key("Ctrl+Shift+Space"))).toEqual({ kind: "unbound" });
+  });
+
+  test("⌃⇧Space toggles while focus is in the worktree sidebar", () => {
+    focusIn("worktrees");
+    expect(resolveKeystroke(key("Ctrl+Shift+Space"))).toEqual({
+      kind: "action",
+      actionId: "sidebar.toggleFocused",
+    });
+  });
+});
+
 describe("setOverride", () => {
   test("binding a chord prefix removes the chords it shadows from other actions", () => {
     useKeybindingStore.getState().setOverride("app.settings", [key("Cmd+Backslash")]);

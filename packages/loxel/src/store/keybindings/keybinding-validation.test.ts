@@ -251,6 +251,35 @@ describe("buildChordPrefixes", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Cross-check: keys deliberately left to Monaco and window managers
+// ---------------------------------------------------------------------------
+
+describe("no default binding takes reserved keys", () => {
+  const RESERVED: Record<string, string> = {
+    "Cmd+Shift+O": "Monaco: Go to Symbol",
+    "Cmd+Shift+Backslash": "Monaco: Jump to Bracket",
+    "Ctrl+Cmd+Shift+ArrowLeft": "Monaco: Shrink Selection",
+    "Ctrl+Cmd+Shift+ArrowRight": "Monaco: Expand Selection",
+    "Ctrl+Alt+ArrowLeft": "Monaco: word-part left / Rectangle: left half",
+    "Ctrl+Alt+ArrowRight": "Monaco: word-part right / Rectangle: right half",
+    "Ctrl+Alt+ArrowUp": "Rectangle: top half",
+    "Ctrl+Alt+ArrowDown": "Rectangle: bottom half",
+    "Ctrl+Alt+Backspace": "Rectangle: Restore",
+  };
+
+  for (const [name, template] of Object.entries(TEMPLATES)) {
+    test(`${name} template leaves reserved keys alone`, () => {
+      const firstSteps = new Set(
+        Object.values(template)
+          .flat()
+          .map((binding) => getBindingSteps(binding)[0]! as string),
+      );
+      expect(Object.keys(RESERVED).filter((combo) => firstSteps.has(combo))).toEqual([]);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Cross-check: no overlap with macOS system shortcuts
 // ---------------------------------------------------------------------------
 

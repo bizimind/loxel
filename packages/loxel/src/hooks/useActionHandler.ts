@@ -6,7 +6,12 @@ import type { IDockviewPanel } from "dockview-react";
 import { useCallback } from "react";
 
 import type { SplitPosition } from "@/components/dockview/default-layout";
-import { moveFocus, toggleFocusedArea, toggleSidebarPanel } from "@/lib/focus-navigation";
+import {
+  moveFocus,
+  toggleFocusedArea,
+  toggleSidebarPanel,
+  toggleWorktreeSidebar,
+} from "@/lib/focus-navigation";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
@@ -42,11 +47,11 @@ const SPLIT_POSITION_DIRECTION = {
 } as const satisfies Record<SplitDirection, SplitPosition["direction"]>;
 
 /**
- * Open a new panel next to the active one, toward `direction`: of `type` when given, otherwise
- * of the active panel's type (singletons can't be split). Without an active panel, a typed split
- * just opens the panel.
+ * Open a new panel next to the active one, toward `direction` — or as a tab in its group when
+ * `direction` is null: of `type` when given, otherwise of the active panel's type (singletons
+ * can't be split). Without an active panel, a typed split just opens the panel.
  */
-function splitActivePanel(direction: SplitDirection, type: SplitPanelType | null): void {
+function splitActivePanel(direction: SplitDirection | null, type: SplitPanelType | null): void {
   const api = getCenterApi();
   if (!api) return;
   const active = api.activePanel;
@@ -54,7 +59,7 @@ function splitActivePanel(direction: SplitDirection, type: SplitPanelType | null
   if (!def || (!type && def.singleton)) return;
 
   const detail: Record<string, unknown> = {};
-  if (active) {
+  if (active && direction) {
     const split: SplitPosition = {
       referencePanel: active.id,
       direction: SPLIT_POSITION_DIRECTION[direction],
@@ -131,6 +136,11 @@ export function useActionHandler(): (actionId: ActionId) => void {
     }
 
     switch (actionId) {
+      // -- New tab of the active panel's type, in its group --
+      case "panel.newTab":
+        splitActivePanel(null, null);
+        break;
+
       // -- Panel close --
       case "panel.close": {
         const active = getCenterApi()?.activePanel;
@@ -252,7 +262,7 @@ export function useActionHandler(): (actionId: ActionId) => void {
 
       // -- Worktree sidebar expand/collapse --
       case "sidebar.worktree.toggle":
-        useProjectStore.getState().toggleSidebar();
+        toggleWorktreeSidebar();
         break;
       case "sidebar.toggleFocused":
         toggleFocusedArea();
@@ -309,10 +319,9 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "worktree.focus.9": {
         const ctx = getActiveProjectWorktrees();
         if (!ctx?.ps) break;
-        // Number the worktrees as the sidebar shows them: the collapsed rail leaves hidden ones out.
-        const hidden = useProjectStore.getState().sidebarExpanded
-          ? new Set<string>()
-          : new Set(ctx.ps.hiddenPaths);
+        // Numbering skips hidden worktrees whether or not the sidebar is expanded, so a digit
+        // always means the same worktree (the collapsed rail's order).
+        const hidden = new Set(ctx.ps.hiddenPaths);
         const ordered = getOrderedWorktrees(ctx.ps.worktrees, ctx.ps.customOrder).filter(
           (wt) => !wt.pending && !hidden.has(wt.path),
         );

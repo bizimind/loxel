@@ -4,11 +4,13 @@
  *
  *   worktree sidebar ⇄ left tool bar ⇄ center panels ⇄ right tool bar
  *
- * - Center: left/right walks the active group's tabs, then adjacent groups; up/down moves
- *   between groups. Leaving the center's left or right edge enters the tool bar on that side.
+ * - Center: arrows move between groups (tabs within a group are ⌘⇧[ ] / ⌃Tab). Leaving the
+ *   center's left or right edge enters the tool bar on that side; leaving its bottom edge enters
+ *   the bottom zone's panel when that zone is expanded.
  * - Tool bars: up/down walks the icons (the left bar lists the left zone, then the bottom zone).
  *   Landing on an icon of an expanded zone shows that panel and focuses its content; landing on
- *   an icon of a collapsed zone focuses only the icon, which Enter/Space expands.
+ *   an icon of a collapsed zone focuses only the icon, which Enter/Space expands. Up from inside
+ *   the bottom panel's content returns to the center.
  * - Worktree sidebar: up/down moves a cursor over the visible entries; Enter switches. Hidden
  *   worktrees are not rendered in the collapsed rail, so they are skipped there.
  *
@@ -41,10 +43,12 @@ import {
 import { focusRegisteredPanel } from "./panel-focus";
 
 type BarSide = "left" | "right";
+type CenterEdge = BarSide | "bottom";
 
 type FocusArea =
   | { kind: "worktrees" }
-  | { kind: "bar"; side: BarSide; panelId: PanelId | null }
+  /** A tool bar icon (`inContent: false`) or the content of its side panel (`inContent: true`). */
+  | { kind: "bar"; side: BarSide; panelId: PanelId | null; inContent: boolean }
   | { kind: "center" };
 
 interface BarItem {
@@ -106,13 +110,14 @@ function currentArea(): FocusArea {
       kind: "bar",
       side: area === "left-bar" ? "left" : "right",
       panelId: (panelId as PanelId | undefined) ?? null,
+      inContent: false,
     };
   }
 
   const panelId = sidebarPanelContaining(active);
   if (panelId) {
     const zone = getSidebarPanelZone(panelId);
-    return { kind: "bar", side: zone === "right" ? "right" : "left", panelId };
+    return { kind: "bar", side: zone === "right" ? "right" : "left", panelId, inContent: true };
   }
   return { kind: "center" };
 }
@@ -128,21 +133,11 @@ function focusCenterPanel(api: DockviewApi, panel: IDockviewPanel): void {
   afterLayout(() => focusPanelContent(panel.id, panel.view.content.element));
 }
 
-/** Move within the center layout. Returns false at the layout's edge in that direction. */
+/** Move to the adjacent center group. Returns false at the layout's edge in that direction. */
 function moveInCenter(direction: MoveDirection): boolean {
   const api = getCenterApi();
   const active = api?.activePanel;
   if (!api || !active) return false;
-
-  // Horizontal: try sibling tab first.
-  if (direction === "right" || direction === "left") {
-    const panels = active.group.panels;
-    const sibling = panels[panels.indexOf(active) + (direction === "right" ? 1 : -1)];
-    if (sibling) {
-      focusCenterPanel(api, sibling);
-      return true;
-    }
-  }
 
   const adjacent = findAdjacentCenterGroup(api, active.group, direction);
   const target = adjacent?.activePanel ?? adjacent?.panels[0];
@@ -152,27 +147,26 @@ function moveInCenter(direction: MoveDirection): boolean {
 }
 
 /**
- * Enter the center from its left or right side: the active group if it touches that edge,
- * otherwise the topmost group along it. Focuses that group's active tab.
+ * Enter the center from its left, right or bottom side: the active group if it touches that edge,
+ * otherwise the first group along it (topmost, or leftmost along the bottom). Focuses that
+ * group's active tab.
  */
-function enterCenter(from: BarSide): boolean {
+function enterCenter(from: CenterEdge): boolean {
   const api = getCenterApi();
   if (!api) return false;
   const groups = api.groups.filter((g) => g.panels.length > 0);
   if (groups.length === 0) return false;
 
   const rects = new Map(groups.map((g) => [g, g.element.getBoundingClientRect()]));
-  const edge =
-    from === "left"
-      ? Math.min(...groups.map((g) => rects.get(g)!.left))
-      : Math.max(...groups.map((g) => rects.get(g)!.right));
-  const atEdge = groups.filter((g) => {
-    const rect = rects.get(g)!;
-    return Math.abs((from === "left" ? rect.left : rect.right) - edge) <= 1;
-  });
+  const edgeOf = (rect: DOMRect) =>
+    from === "left" ? rect.left : from === "right" ? rect.right : rect.bottom;
+  const edges = groups.map((g) => edgeOf(rects.get(g)!));
+  const edge = from === "left" ? Math.min(...edges) : Math.max(...edges);
+  const atEdge = groups.filter((g) => Math.abs(edgeOf(rects.get(g)!) - edge) <= 1);
+  const along = (rect: DOMRect) => (from === "bottom" ? rect.left : rect.top);
   const group =
     atEdge.find((g) => g === api.activeGroup) ??
-    atEdge.toSorted((a, b) => rects.get(a)!.top - rects.get(b)!.top)[0];
+    atEdge.toSorted((a, b) => along(rects.get(a)!) - along(rects.get(b)!))[0];
   const panel = group?.activePanel ?? group?.panels[0];
   if (!panel) return false;
   focusCenterPanel(api, panel);
@@ -233,6 +227,14 @@ function enterBar(side: BarSide): boolean {
   return true;
 }
 
+/** Enter the bottom zone's panel from the center, if the zone is expanded. */
+function enterBottomPanel(): boolean {
+  const visible = getActiveSidebarPanel("bottom");
+  if (visible === null) return false;
+  focusSidebarPanel(visible);
+  return true;
+}
+
 function moveInBar(side: BarSide, from: PanelId | null, step: 1 | -1): void {
   const items = barItems(side);
   const index = items.findIndex((i) => i.panelId === from);
@@ -278,6 +280,19 @@ function focusWorktreeEntry(path: string | null): boolean {
   if (!entry) return false;
   focusSidebarEntry(entry);
   return true;
+}
+
+/**
+ * Collapse or expand the worktree sidebar. When it holds focus, the cursor stays on the same
+ * entry — or the active worktree's, if the collapsed rail hides it.
+ */
+export function toggleWorktreeSidebar(): void {
+  const entryPath = document.activeElement
+    ?.closest(`[${SIDEBAR_ENTRY_ATTR}]`)
+    ?.getAttribute(SIDEBAR_ENTRY_ATTR);
+  const hadFocus = currentArea().kind === "worktrees";
+  useProjectStore.getState().toggleSidebar();
+  if (hadFocus) afterLayout(() => focusWorktreeEntry(entryPath ?? null));
 }
 
 /** Enter the worktree sidebar on the active worktree's entry. */
@@ -360,9 +375,18 @@ export function moveFocus(direction: MoveDirection): void {
 
   if (direction === "up" || direction === "down") {
     const step = direction === "down" ? 1 : -1;
-    if (area.kind === "center") moveInCenter(direction);
-    else if (area.kind === "bar") moveInBar(area.side, area.panelId, step);
-    else moveWorktreeCursor(step);
+    if (area.kind === "center") {
+      if (!moveInCenter(direction) && direction === "down") enterBottomPanel();
+    } else if (area.kind === "worktrees") {
+      moveWorktreeCursor(step);
+    } else {
+      // Up from inside the bottom panel returns to the center; on its icon it walks the bar.
+      const inBottomPanel =
+        area.inContent && area.panelId !== null && getSidebarPanelZone(area.panelId) === "bottom";
+      if (!(direction === "up" && inBottomPanel && enterCenter("bottom"))) {
+        moveInBar(area.side, area.panelId, step);
+      }
+    }
     return;
   }
 
@@ -389,12 +413,7 @@ export function moveFocus(direction: MoveDirection): void {
 export function toggleFocusedArea(): void {
   const area = currentArea();
   if (area.kind === "worktrees") {
-    const entryPath =
-      document.activeElement
-        ?.closest(`[${SIDEBAR_ENTRY_ATTR}]`)
-        ?.getAttribute(SIDEBAR_ENTRY_ATTR) ?? null;
-    useProjectStore.getState().toggleSidebar();
-    afterLayout(() => focusWorktreeEntry(entryPath));
+    toggleWorktreeSidebar();
     return;
   }
   if (area.kind !== "bar" || !area.panelId) return;

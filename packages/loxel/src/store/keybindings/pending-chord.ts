@@ -9,6 +9,7 @@
 import { create } from "zustand";
 
 import type { ActionId } from "./action-registry";
+import { getActionDef } from "./action-registry";
 import type { KeyCombo } from "./key-combo";
 import { toKeyBinding } from "./key-combo";
 import { useKeybindingStore } from "./keybinding-store";
@@ -58,9 +59,16 @@ function withoutLeaderCmd(pending: readonly KeyCombo[], combo: KeyCombo): KeyCom
   return combo.slice("Cmd+".length) as KeyCombo;
 }
 
+/** Whether an action applies where focus is now (see `ActionDef.isEnabled`). */
+export function isActionEnabledHere(actionId: ActionId): boolean {
+  return getActionDef(actionId)?.isEnabled?.() ?? true;
+}
+
 /**
  * Resolve one keystroke against the active bindings, advancing chord state.
- * Tree actions are widget-local (handled by the focused tree), so they resolve as unbound.
+ * Tree actions are widget-local (handled by the focused tree), and actions disabled where focus
+ * is resolve as unbound, so the key reaches the focused widget. A completed chord whose action is
+ * disabled is cancelled instead (its first keys were already swallowed).
  * A single-key binding wins over a chord sharing the same first key (possible via overrides).
  */
 export function resolveKeystroke(combo: KeyCombo): KeystrokeResult {
@@ -70,7 +78,9 @@ export function resolveKeystroke(combo: KeyCombo): KeystrokeResult {
   if (pending.length === 0) {
     const actionId = lookup.get(combo);
     if (actionId?.startsWith("tree.")) return { kind: "unbound" };
-    if (actionId) return { kind: "action", actionId };
+    if (actionId) {
+      return isActionEnabledHere(actionId) ? { kind: "action", actionId } : { kind: "unbound" };
+    }
     if (chordPrefixes.has(combo)) {
       setSteps([combo]);
       return { kind: "pending" };
@@ -86,7 +96,7 @@ export function resolveKeystroke(combo: KeyCombo): KeystrokeResult {
     const actionId = lookup.get(sequence);
     if (actionId) {
       setSteps([]);
-      return { kind: "action", actionId };
+      return isActionEnabledHere(actionId) ? { kind: "action", actionId } : { kind: "cancelled" };
     }
     if (chordPrefixes.has(sequence)) {
       setSteps([...pending, step]);

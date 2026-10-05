@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
+import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchOpenFile } from "@/lib/open-file";
 import { useAgentDevToolsStore } from "@/store/agent-devtools";
@@ -137,21 +138,23 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
   }, []);
 
   return (
-    <PersistedLayoutComponent
-      className="dockview-theme-abyss h-full"
-      storagePrefix="center"
-      layoutKey={layoutKey}
-      layoutVersion={CENTER_LAYOUT_VERSION}
-      createDefaultLayout={() => {}}
-      onApiReady={handleApiReady}
-      onLayoutRestored={handleLayoutRestored}
-      performClear={handleClear}
-      components={centerComponents}
-      tabComponents={centerTabComponents}
-      watermarkComponent={CenterWatermark}
-      scrollbars="native"
-      apiRef={centerApiRef}
-      swappingRef={swappingRef}
-    />
+    <div className="h-full" {...focusAreaProps("center")}>
+      <PersistedLayoutComponent
+        className="dockview-theme-abyss h-full"
+        storagePrefix="center"
+        layoutKey={layoutKey}
+        layoutVersion={CENTER_LAYOUT_VERSION}
+        createDefaultLayout={() => {}}
+        onApiReady={handleApiReady}
+        onLayoutRestored={handleLayoutRestored}
+        performClear={handleClear}
+        components={centerComponents}
+        tabComponents={centerTabComponents}
+        watermarkComponent={CenterWatermark}
+        scrollbars="native"
+        apiRef={centerApiRef}
+        swappingRef={swappingRef}
+      />
+    </div>
   );
 }

@@ -32,6 +32,7 @@ function buildTemplate(raw: Record<string, readonly string[]>): BindingTemplate 
 /**
  * Chord leader for split actions: ⌘\ then an arrow splits the active panel, ⌘\ then a panel-type
  * key then an arrow splits as that type, ⌘\ then ⇧+arrow moves the active tab into a new split.
+ * Ending with Enter instead of an arrow opens a new tab in the active group.
  */
 const SPLIT_LEADER = "Cmd+Backslash";
 
@@ -49,6 +50,11 @@ const SPLIT_TYPE_KEYS: Record<SplitPanelType, string> = {
   excalidraw: "D",
   browser: "B",
 };
+
+/** "⌘\ then <type letter> then Enter": open a panel of that type as a tab in the active group. */
+function newTabChord(type: SplitPanelType): string {
+  return `${SPLIT_LEADER} ${SPLIT_TYPE_KEYS[type]} Enter`;
+}
 
 const MOVE_TO_NEW_SPLIT_ACTIONS = {
   right: "panel.move.newRight",
@@ -72,16 +78,19 @@ const SPLIT_CHORDS: Record<string, readonly string[]> = Object.fromEntries(
 );
 
 /**
- * Default bindings. Arrow-key layers were picked to avoid macOS text editing, Monaco and common
- * window managers (Rectangle): ⌃⇧+arrow moves focus, ⌃⌘+arrow moves the active tab, and splits
- * live behind the ⌘\ chord.
+ * Default bindings. The arrow-key layers avoid macOS text editing, Monaco and Rectangle's ⌃⌥+arrow
+ * snapping: ⌃⇧+arrow moves focus, ⌃⌘+arrow moves the active tab, and splits live behind the ⌘\
+ * chord. ⌃⌥⌫ (Rectangle's Restore) is left unbound.
  */
 export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
-  "panel.new.terminal": ["Cmd+T", "Ctrl+Shift+Backtick"],
-  "panel.new.markdown": ["Cmd+N"],
-  "panel.new.drawing": ["Cmd+Shift+D"],
-  "panel.new.agent": ["Cmd+Shift+A"],
-  "panel.new.browser": ["Cmd+Shift+O"],
+  // New panel as a tab in the active group: direct keys use the split chord's type letters, and
+  // the chord ends with Enter instead of an arrow.
+  "panel.new.terminal": ["Cmd+T", "Ctrl+Shift+Backtick", newTabChord("terminal")],
+  "panel.new.markdown": ["Cmd+Shift+M", "Cmd+N", newTabChord("editor")],
+  "panel.new.drawing": ["Cmd+Shift+D", newTabChord("excalidraw")],
+  "panel.new.agent": ["Cmd+Shift+A", newTabChord("agent")],
+  "panel.new.browser": ["Cmd+Shift+B", newTabChord("browser")],
+  "panel.newTab": [`${SPLIT_LEADER} Enter`],
   "panel.open.localdb": [],
   "panel.close": ["Cmd+W"],
   ...SPLIT_CHORDS,
@@ -126,7 +135,8 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "worktree.back": ["Ctrl+Alt+BracketLeft"],
   "worktree.forward": ["Ctrl+Alt+BracketRight"],
   "worktree.new": ["Ctrl+Alt+N"],
-  "worktree.delete": ["Ctrl+Alt+Backspace"],
+  // Unbound by default: Rectangle's Restore takes ⌃⌥⌫ globally. Palette / context menu.
+  "worktree.delete": [],
   "worktree.focus.1": ["Ctrl+Alt+1"],
   "worktree.focus.2": ["Ctrl+Alt+2"],
   "worktree.focus.3": ["Ctrl+Alt+3"],
