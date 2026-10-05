@@ -5,6 +5,7 @@ import * as api from "@/api/client";
 import type { UpdateState } from "@/api/update-model";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useWindowFocused } from "@/hooks/useWindowFocused";
+import { useZoomFactor } from "@/hooks/useZoomFactor";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/queries/query-keys";
 import { deriveProject, useProjectStore } from "@/store/projects";
@@ -14,9 +15,9 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { ProjectIcon } from "../projects/ProjectIcon";
 import { WorktreeIcon } from "../worktrees/WorktreeIcon";
 
-function LoxelLogo({ className }: { className?: string }) {
+function LoxelLogo({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <svg viewBox="0 0 100 100" fill="none" className={className}>
+    <svg viewBox="0 0 100 100" fill="none" className={className} style={style}>
       <rect width="100" height="100" rx="20" fill="currentColor" />
       <path
         d="M60.1213 30.5563C58.9498 31.7279 58.9498 33.6274 60.1213 34.799L73.5564 48.234C74.7279 49.4056 76.6274 49.4056 77.799 48.234L82.0416 43.9914C83.2132 42.8198 83.2132 40.9203 82.0416 39.7487L77.0919 34.799C75.9203 33.6274 75.9203 31.7279 77.0919 30.5563L82.0416 25.6066C83.2132 24.435 83.2132 22.5355 82.0416 21.3639L77.799 17.1213C76.6274 15.9497 74.7279 15.9497 73.5564 17.1213L60.1213 30.5563Z"
@@ -36,13 +37,18 @@ function LoxelLogo({ className }: { className?: string }) {
 
 const isDev = import.meta.env.DEV;
 const isElectron = navigator.userAgent.includes("Electron");
-const electronDragStyle: React.CSSProperties & { WebkitAppRegion: "drag" } = {
-  WebkitAppRegion: "drag",
-};
+
+// Native-chrome dimensions in screen points. The traffic lights (positioned via
+// `trafficLightPosition` in electron/main.ts) ignore page zoom, so the space reserved for
+// them, the minimum bar height, and the logo are divided by the zoom factor to stay fixed.
+const TRAFFIC_LIGHTS_INSET_PX = 80;
+const BAR_MIN_HEIGHT_PX = 32;
+const LOGO_SIZE_PX = 16;
 
 export function TopBar() {
   const isScreenshot = import.meta.env.VITE_SCREENSHOT === "1";
   const windowFocused = useWindowFocused();
+  const zoom = useZoomFactor();
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const activeProject = useProjectStore((s) => deriveProject(activeWorktreePath, s.projects));
   const activeWorktree = useWorktreeStore((s) => {
@@ -58,11 +64,15 @@ export function TopBar() {
   return (
     <div
       className={cn(
-        "border-border relative flex h-8 shrink-0 items-center gap-2 border-b px-3 text-sm",
+        "border-border relative flex shrink-0 items-center gap-2 border-b px-3 text-sm",
         windowFocused ? "bg-card" : "bg-surface-muted",
-        (isElectron || isScreenshot) && "pl-20",
       )}
-      style={isElectron ? electronDragStyle : undefined}
+      style={{
+        // Grows with zoom-in so the text fits, but never shrinks below the traffic lights.
+        height: `max(2rem, ${BAR_MIN_HEIGHT_PX / zoom}px)`,
+        ...((isElectron || isScreenshot) && { paddingLeft: TRAFFIC_LIGHTS_INSET_PX / zoom }),
+        ...(isElectron && { WebkitAppRegion: "drag" }),
+      }}
     >
       {isScreenshot && !isElectron && (
         <div className="absolute top-1/2 left-3 flex -translate-y-1/2 items-center gap-[6px]">
@@ -72,7 +82,10 @@ export function TopBar() {
         </div>
       )}
       {/* Logo + brand */}
-      <LoxelLogo className="text-foreground size-4" />
+      <LoxelLogo
+        className="text-foreground shrink-0"
+        style={{ width: LOGO_SIZE_PX / zoom, height: LOGO_SIZE_PX / zoom }}
+      />
       <span className="text-foreground font-semibold">Loxel</span>
       {isDev && !isScreenshot && (
         <span className="text-[10px] font-semibold text-red-300">DEV</span>
@@ -109,7 +122,7 @@ export function TopBar() {
         <button
           className="text-muted-foreground hover:text-foreground rounded p-1"
           onClick={() => useSettingsStore.getState().openSettings()}
-          style={isElectron ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined}
+          style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
         >
           <SettingsIcon className="size-3.5" />
         </button>
@@ -133,7 +146,7 @@ function UpdateIndicator() {
     <button
       className="text-primary hover:text-primary/80 mr-1 rounded p-1 text-[10px] font-medium"
       onClick={() => useSettingsStore.getState().openSettings("general")}
-      style={isElectron ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined}
+      style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
       title="Update available"
     >
       Update

@@ -19,6 +19,8 @@ interface Window {
      * Since v0.1.199.
      */
     onWebviewFocused?: (callback: () => void) => () => void;
+    /** Current page zoom factor (Cmd+/Cmd-), read synchronously from `webFrame`. */
+    getZoomFactor?: () => number;
   };
   loxelWindow?: {
     /** Stable per-BrowserWindow ID assigned by Electron main; null in non-Electron contexts. */

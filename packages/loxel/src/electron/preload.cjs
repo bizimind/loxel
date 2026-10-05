@@ -1,6 +1,6 @@
 // Preload script — must be CJS (sandboxed Electron renderers cannot use ESM imports).
 // Channel names must match constants in ipc-channels.ts.
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webFrame } = require("electron");
 
 const OPEN_IN_BROWSER_TAB = "open-in-browser-tab";
 const SET_DOCK_BADGE = "set-dock-badge";
@@ -46,4 +46,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(WEBVIEW_FOCUSED, handler);
     return () => ipcRenderer.removeListener(WEBVIEW_FOCUSED, handler);
   },
+  getZoomFactor: () => webFrame.getZoomFactor(),
 });
