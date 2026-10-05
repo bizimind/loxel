@@ -3,6 +3,8 @@
  * Used by the keybinding system, future command palette, and toolbar buttons.
  */
 
+import { isFocusInCenter } from "@/lib/focus-targets";
+
 /**
  * All action IDs in the application. Adding an action here automatically
  * makes it available for keybinding and command palette lookup.
@@ -15,8 +17,9 @@ export type ActionId =
   | "panel.new.browser"
   | "panel.open.localdb"
   | "panel.close"
-  | "panel.split.right"
-  | "panel.split.down"
+  | "panel.newTab"
+  | `panel.split.${SplitDirection}`
+  | `panel.split.${SplitPanelType}.${SplitDirection}`
   | "panel.next"
   | "panel.prev"
   | "panel.focus.1"
@@ -52,10 +55,10 @@ export type ActionId =
   | "nav.search"
   | "nav.openFile"
   | "nav.recentNotification"
-  | "sidebar.project.toggle"
   | "sidebar.worktree.toggle"
-  | "worktree.next"
-  | "worktree.prev"
+  | "sidebar.toggleFocused"
+  | "worktree.back"
+  | "worktree.forward"
   | "worktree.new"
   | "worktree.delete"
   | "worktree.focus.1"
@@ -78,6 +81,30 @@ export type ActionId =
   | "tree.rename"
   | "app.settings";
 
+/** Directions a panel can be split toward. */
+export const SPLIT_DIRECTIONS = ["right", "left", "up", "down"] as const;
+export type SplitDirection = (typeof SPLIT_DIRECTIONS)[number];
+
+/**
+ * Center panel types that have "split as <type>" actions. `type` matches `CenterPanelDef.type`
+ * in panel-config.ts (checked by keybinding-validation.test.ts).
+ */
+export const SPLIT_PANEL_TYPES = [
+  { type: "terminal", label: "Terminal" },
+  { type: "agent", label: "Agent" },
+  { type: "editor", label: "Markdown" },
+  { type: "excalidraw", label: "Drawing" },
+  { type: "browser", label: "Browser" },
+] as const;
+export type SplitPanelType = (typeof SPLIT_PANEL_TYPES)[number]["type"];
+
+const DIRECTION_LABELS: Record<SplitDirection, string> = {
+  right: "Right",
+  left: "Left",
+  up: "Up",
+  down: "Down",
+};
+
 export type ActionCategory = "panel" | "toggle" | "nav" | "sidebar" | "worktree" | "tree" | "app";
 
 export interface ActionDef {
@@ -85,6 +112,11 @@ export interface ActionDef {
   label: string;
   category: ActionCategory;
   hidden?: boolean;
+  /**
+   * Whether the action applies where keyboard focus is now. When it returns false the action's
+   * key resolves as unbound and reaches the focused widget (terminal, editor, …).
+   */
+  isEnabled?: () => boolean;
 }
 
 /**
@@ -102,8 +134,24 @@ export const ACTIONS: readonly ActionDef[] = [
 
   // Panel management
   { id: "panel.close", label: "Close Panel", category: "panel" },
-  { id: "panel.split.right", label: "Split Right", category: "panel" },
-  { id: "panel.split.down", label: "Split Down", category: "panel" },
+
+  // New tab of the active panel's type, in its group
+  { id: "panel.newTab", label: "New Tab (Same Type)", category: "panel" },
+
+  // Split — new panel of the active panel's type, or of a specific type
+  ...SPLIT_DIRECTIONS.map((dir): ActionDef => ({
+    id: `panel.split.${dir}`,
+    label: `Split ${DIRECTION_LABELS[dir]}`,
+    category: "panel",
+  })),
+  ...SPLIT_PANEL_TYPES.flatMap(({ type, label }) =>
+    SPLIT_DIRECTIONS.map((dir): ActionDef => ({
+      id: `panel.split.${type}.${dir}`,
+      label: `Split ${label} ${DIRECTION_LABELS[dir]}`,
+      category: "panel",
+    })),
+  ),
+
   { id: "panel.next", label: "Next Panel", category: "panel" },
   { id: "panel.prev", label: "Previous Panel", category: "panel" },
   { id: "panel.focus.1", label: "Focus Panel 1", category: "panel" },
@@ -129,10 +177,10 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "panel.move.newDown", label: "Move to New Split Below", category: "panel" },
 
   // Directional focus navigation
-  { id: "panel.focus.right", label: "Focus Right (Tab or Group)", category: "panel" },
-  { id: "panel.focus.left", label: "Focus Left (Tab or Group)", category: "panel" },
-  { id: "panel.focus.up", label: "Focus Group Above", category: "panel" },
-  { id: "panel.focus.down", label: "Focus Group Below", category: "panel" },
+  { id: "panel.focus.right", label: "Focus Right", category: "panel" },
+  { id: "panel.focus.left", label: "Focus Left", category: "panel" },
+  { id: "panel.focus.up", label: "Focus Up", category: "panel" },
+  { id: "panel.focus.down", label: "Focus Down", category: "panel" },
 
   // Sidebar panel toggles
   { id: "toggle.projectFiles", label: "Toggle Project Files", category: "toggle" },
@@ -151,12 +199,18 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "nav.recentNotification", label: "Go to Recent Notification", category: "nav" },
 
   // Sidebar collapse
-  { id: "sidebar.project.toggle", label: "Toggle Project Sidebar", category: "sidebar" },
   { id: "sidebar.worktree.toggle", label: "Toggle Worktree Sidebar", category: "sidebar" },
+  {
+    id: "sidebar.toggleFocused",
+    label: "Collapse/Expand Focused Sidebar or Panel",
+    category: "sidebar",
+    // Nothing to collapse in the center; let the key reach the terminal or editor there.
+    isEnabled: () => !isFocusInCenter(),
+  },
 
   // Worktree management
-  { id: "worktree.next", label: "Next Worktree", category: "worktree" },
-  { id: "worktree.prev", label: "Previous Worktree", category: "worktree" },
+  { id: "worktree.back", label: "Go Back to Previous Worktree", category: "worktree" },
+  { id: "worktree.forward", label: "Go Forward to Next Worktree", category: "worktree" },
   { id: "worktree.new", label: "New Worktree", category: "worktree" },
   { id: "worktree.delete", label: "Delete Worktree", category: "worktree" },
   { id: "worktree.focus.1", label: "Focus Worktree 1", category: "worktree" },

@@ -8,10 +8,10 @@ import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { KeyComboDisplay } from "@/components/ui/key-combo-display";
+import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
 import type { ActionCategory, ActionId } from "@/store/keybindings/action-registry";
 import { ACTIONS } from "@/store/keybindings/action-registry";
-import type { KeyCombo } from "@/store/keybindings/keybinding-schema";
+import type { KeyBinding } from "@/store/keybindings/key-combo";
 import { TEMPLATES } from "@/store/keybindings/keybinding-schema";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
 
@@ -49,8 +49,8 @@ export function KeybindingsSection() {
     return ACTIONS.filter((a) => a.label.toLowerCase().includes(q));
   }, [search]);
 
-  const handleConfirmRemap = useCallback((actionId: ActionId, combos: KeyCombo[]) => {
-    useKeybindingStore.getState().setOverride(actionId, combos);
+  const handleConfirmRemap = useCallback((actionId: ActionId, bindings: KeyBinding[]) => {
+    useKeybindingStore.getState().setOverride(actionId, bindings);
     setEditingAction(null);
   }, []);
 
@@ -108,7 +108,7 @@ export function KeybindingsSection() {
                     key={action.id}
                     actionId={action.id}
                     label={action.label}
-                    combos={
+                    bindings={
                       action.id in overrides
                         ? (overrides[action.id] ?? [])
                         : (TEMPLATES[activeTemplate][action.id] ?? [])
@@ -116,7 +116,7 @@ export function KeybindingsSection() {
                     isOverridden={action.id in overrides}
                     isEditing={editingAction === action.id}
                     onEdit={() => setEditingAction(action.id)}
-                    onConfirm={(combos) => handleConfirmRemap(action.id, combos)}
+                    onConfirm={(bindings) => handleConfirmRemap(action.id, bindings)}
                     onCancel={() => setEditingAction(null)}
                     onReset={() => handleResetOne(action.id)}
                   />
@@ -137,11 +137,11 @@ export function KeybindingsSection() {
 interface BindingRowProps {
   actionId: ActionId;
   label: string;
-  combos: readonly KeyCombo[];
+  bindings: readonly KeyBinding[];
   isOverridden: boolean;
   isEditing: boolean;
   onEdit: () => void;
-  onConfirm: (combos: KeyCombo[]) => void;
+  onConfirm: (bindings: KeyBinding[]) => void;
   onCancel: () => void;
   onReset: () => void;
 }
@@ -149,7 +149,7 @@ interface BindingRowProps {
 function BindingRow({
   actionId,
   label,
-  combos,
+  bindings,
   isOverridden,
   isEditing,
   onEdit,
@@ -171,15 +171,15 @@ function BindingRow({
       <span className="text-foreground w-[180px] shrink-0 text-xs">{label}</span>
 
       <div className="flex flex-1 flex-wrap gap-1">
-        {combos.map((combo) => (
+        {bindings.map((binding) => (
           <kbd
-            key={combo as string}
+            key={binding}
             className="bg-muted border-border text-muted-foreground flex items-center rounded border px-1.5 py-0.5 text-[10px]"
           >
-            <KeyComboDisplay combo={combo} />
+            <KeyBindingDisplay binding={binding} />
           </kbd>
         ))}
-        {combos.length === 0 && (
+        {bindings.length === 0 && (
           <span className="text-muted-foreground text-xs italic">unbound</span>
         )}
       </div>

@@ -10,10 +10,12 @@
 import type { LogLevel } from "@/api/log-entry-model";
 import { reconcile } from "@/lib/reconcile";
 
-import { buildReverseLookup } from "./keybindings/keybinding-resolver";
-import type { TemplateName } from "./keybindings/keybinding-schema";
 import { TEMPLATES } from "./keybindings/keybinding-schema";
-import { useKeybindingStore } from "./keybindings/keybinding-store";
+import {
+  deriveKeybindingState,
+  parseBindingOverrides,
+  useKeybindingStore,
+} from "./keybindings/keybinding-store";
 import { useProjectStore } from "./projects";
 import { useSearchStore } from "./search";
 import { useSettingsStore } from "./settings-store";
@@ -60,12 +62,14 @@ const syncTargets: Record<string, SyncTarget> = {
       return { activeTemplate: s.activeTemplate, overrides: s.overrides };
     },
     setState: (partial) => {
-      const activeTemplate = partial.activeTemplate as TemplateName;
-      const overrides = partial.overrides as Parameters<typeof buildReverseLookup>[1];
+      const { activeTemplate } = partial;
+      if (typeof activeTemplate !== "string" || !Object.hasOwn(TEMPLATES, activeTemplate)) return;
+      const template = activeTemplate as keyof typeof TEMPLATES;
+      const overrides = parseBindingOverrides(template, partial.overrides);
       useKeybindingStore.setState({
-        activeTemplate,
+        activeTemplate: template,
         overrides,
-        lookup: buildReverseLookup(TEMPLATES[activeTemplate], overrides),
+        ...deriveKeybindingState(template, overrides),
       });
     },
   },

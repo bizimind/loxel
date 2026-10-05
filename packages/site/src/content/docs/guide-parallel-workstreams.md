@@ -30,7 +30,7 @@ Either way, once the agent is running you don't need to stay here.
 
 ## Switch back to your previous context
 
-Press `Ctrl+Alt+←` to go back to your main worktree. The layout snaps back — same open files, same panel arrangement, same cursor positions. The agent keeps running in the background.
+Press `Ctrl+Alt+[` to go back to your main worktree. The layout snaps back — same open files, same panel arrangement, same cursor positions. The agent keeps running in the background.
 
 You are unblocked. Do your other work.
 
@@ -38,7 +38,7 @@ You are unblocked. Do your other work.
 
 ## Return when the agent is done
 
-The sidebar shows a live dirty-status count for every worktree in the project. When you see changes accumulating in the task worktree, or when you want to check in, press `Ctrl+Alt+→` to switch back.
+The sidebar shows a live dirty-status count for every worktree in the project. When you see changes accumulating in the task worktree, or when you want to check in, press `Ctrl+Alt+]` to switch back.
 
 If you used the built-in agent, the full event history is waiting for you — buffered and replayed from the start of the session. Scroll back through the timeline to see what the agent did and why.
 

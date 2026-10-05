@@ -68,6 +68,6 @@ When you're ready to start a parallel task without touching your current working
 
 Loxel prompts you for a branch name. After creation, the new worktree appears in the sidebar and becomes the active context — with a clean working tree, its own editor layout, and its own agent sessions.
 
-Switch back to your previous worktree by clicking it in the sidebar, or use `Ctrl+Alt+←` / `Ctrl+Alt+→` to cycle. Your layout and open files are restored exactly as you left them.
+Switch back to your previous worktree by clicking it in the sidebar, or use `Ctrl+Alt+[` / `Ctrl+Alt+]` to go back and forward through the worktrees you visited. Your layout and open files are restored exactly as you left them.
 
 See [Worktrees & Projects](/docs/worktrees-and-projects) for branch planning, dirty-status tracking, and the `wt` integration.

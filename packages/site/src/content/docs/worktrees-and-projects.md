@@ -91,7 +91,7 @@ This means your layout survives app restarts, and multiple windows don't clobber
 
 ## Switching worktrees
 
-Use `Ctrl+Alt+→` and `Ctrl+Alt+←` to move between worktrees, or `Ctrl+Alt+1`–`9` to jump to a specific one by position. `Cmd+Alt+W` opens the worktree switcher. `Ctrl+Alt+N` creates a new worktree.
+Use `Ctrl+Alt+[` and `Ctrl+Alt+]` to go back and forward through the worktrees you visited (across all projects), or `Ctrl+Alt+1`–`9` to jump to a specific one by position (hidden worktrees are skipped). `Cmd+Alt+W` opens the worktree switcher. `Ctrl+Alt+N` creates a new worktree.
 
 The switch is immediate: loxel saves the outgoing layout, restores the incoming one, and resubscribes the WebSocket to the new worktree's data. No server round-trip is needed for the switch itself.
 

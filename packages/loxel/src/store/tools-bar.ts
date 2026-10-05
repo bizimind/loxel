@@ -35,6 +35,17 @@ function findPanelZone(
   return null;
 }
 
+/** The zone a sidebar panel's tool bar icon is in, or null if it has none. */
+export function getSidebarPanelZone(panelId: PanelId): SidebarZone | null {
+  const { leftEntries, bottomEntries, rightEntries } = getCurrentWorktreeToolsBar().getState();
+  return findPanelZone(panelId, leftEntries, bottomEntries, rightEntries);
+}
+
+/** The visible panel of a sidebar zone, or null when the zone is collapsed. */
+export function getActiveSidebarPanel(zone: SidebarZone): PanelId | null {
+  return getCurrentWorktreeToolsBar().getState()[ACTIVE_PANEL_KEY[zone]];
+}
+
 /** Module-level reference to the outer (sidebar) dockview API. */
 let outerApi: DockviewApi | null = null;
 /** Module-level reference to the center (editor/terminal) dockview API. */
@@ -46,6 +57,11 @@ const centerApiListeners = new Set<(api: DockviewApi | null) => void>();
 /** Set the outer dockview API reference. Called from App.tsx onReady. */
 export function setDockviewApi(api: DockviewApi | null): void {
   outerApi = api;
+}
+
+/** The content element of a sidebar panel, or null if the outer layout doesn't hold it. */
+export function getSidebarPanelElement(panelId: PanelId): HTMLElement | null {
+  return outerApi?.getPanel(panelId)?.view.content.element ?? null;
 }
 
 /** Set the center dockview API reference and the worktree it shows. Called from CenterHost. */
