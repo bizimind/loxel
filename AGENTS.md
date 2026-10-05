@@ -188,9 +188,19 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 - Ensure failures are observable (structured logs/context) without leaking sensitive data.
 
-### Documentation Coupling
+### Documentation
 
-- Behavior changes must update the nearest README/spec/docs in the same PR.
+- Docs use progressive disclosure: this file is an index pointing to package READMEs, and a large package's README (e.g. `packages/loxel`) is in turn an index pointing to its nested docs and specs.
+
+- In every PR, check that the docs covering the code you changed are not stale, and fix them in the same PR if they are.
+
+- READMEs stay high-level and user-facing: what the package does, setup, commands, configuration, public APIs.
+
+- Internal docs (nested docs and specs linked from the README) cover architecture, patterns and conventions, and design choices with their rationale.
+
+- Add or expand docs only for significant changes. Write them at the most specific relevant level and link to them from the parent index instead of repeating the detail there.
+
+- Explain small fixes and local implementation details in code comments next to the code, not in docs.
 
 ### Solution Simplicity and Tradeoff Clarity
 
