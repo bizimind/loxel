@@ -71,7 +71,7 @@ The Changes panel shows different content depending on your selection in the com
 **One or more commits selected:** shows the diff for that commit or range. A dropdown in the panel header lets you switch between:
 
 - **Local changes** — your working tree diff
-- **All branch changes** — all changes from the branch tip back to the merge base with main
+- **All branch changes** — all changes from the branch tip back to the merge base with the repository's default branch (for example `origin/main`)
 - A specific commit or range from the current selection
 
 ---

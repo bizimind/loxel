@@ -4,7 +4,7 @@ How every Loxel window shares one Bun server process, how that server is started
 
 ## Model
 
-One server runs per mode, on a well-known port: `7433` in production and `7434` in dev (`LOXEL_SERVE_PORT` overrides it; `src/server/config.ts`). Dev and production also use separate state directories (`~/.local/state/loxel/loxel-dev` and `.../loxel`), so they never share a server or its state. Every window, whether opened from the same Electron process ("New Window" in the Dock menu) or from another Electron process, connects to that one server over WebSocket and REST.
+One server runs per mode, on a well-known port: `7433` in production and `7434` in dev (`src/server/config.ts`; `LOXEL_SERVE_PORT` overrides it for a standalone server, but Electron and the `loxel` CLI always use the well-known ports). Dev and production also use separate state directories (`~/.local/state/loxel/loxel-dev` and `.../loxel`), so they never share a server or its state. Every window, whether opened from the same Electron process ("New Window" in the Dock menu) or from another Electron process, connects to that one server over WebSocket and REST.
 
 Running one server instead of one per window removes a whole class of cross-process problems for every feature that touches the filesystem or persistent state:
 
@@ -23,7 +23,7 @@ Running one server instead of one per window removes a whole class of cross-proc
 
 The Electron process that spawned the server is its **owner**. When two Electron processes start at once and both spawn, the loser's server exits with `EADDRINUSE`; its Electron process notices the non-zero exit, drops ownership, and uses the winner's server.
 
-Only the owner holds the server's child-process handle, so only the owner reacts to its exit. Exit code `42` means an update is ready: the owner installs it and relaunches. If the owner has already quit, the update stays in `updates/pending.json` and is applied by whichever Electron process spawns the next server. Non-owners poll the server every 5 seconds; when it is gone they run `ensureServer()` again and reload their windows.
+Only the owner holds the server's child-process handle, so only the owner reacts to its exit. In production, exit code `42` means an update is ready: the owner installs it and relaunches. If the owner has already quit, the update stays in `updates/pending.json` and is applied by whichever Electron process spawns the next server. A process that starts as a non-owner polls the server every 5 seconds; when it is gone it runs `ensureServer()` again and reloads its windows. Polling starts only at launch, so a process that loses ownership later (its server crashed, or it lost the spawn race after startup) does not poll.
 
 ## Server lifecycle
 

@@ -50,7 +50,7 @@ Control where approved patterns are persisted using the `--update` flag, e.g. `"
 | `project`        | `.claude/settings.json`       | Project settings (committed)        |
 | `local`          | `.claude/settings.local.json` | Local project settings (gitignored) |
 
-Approved patterns are appended to `permissions.allow` as `Bash(<pattern>)`. Use `--update local` for typical workflows where you want patterns to persist but not be committed to version control. Only approvals that come with a suggested pattern are persisted (a known safe single command, or Haiku's suggestion); chained commands matched by known patterns, `git push`, and Read approvals are allowed per call only.
+Approved patterns are appended to `permissions.allow` as `Bash(<pattern>)`. Use `--update local` for typical workflows where you want patterns to persist but not be committed to version control. Only approvals that come with a suggested pattern are persisted (a known safe single command whose rule defines a pattern, or Haiku's suggestion); chained commands matched by known patterns, `git push`, and Read approvals are allowed per call only.
 
 ## How It Works
 
@@ -65,7 +65,7 @@ cc-tool-guard never denies; anything it is not sure about falls through to the u
 
 Commands are evaluated against patterns in `src/evaluator/patterns.ts`:
 
-- **Dangerous** patterns (e.g. `sudo`, global package installs, `curl | sh`) and pushes to `main`/`master` are deferred to the user
+- **Dangerous** patterns (e.g. `sudo`, global package installs) and pushes to `main`/`master` are deferred to the user
 - **Safe** patterns (read-only commands, common build/test tools, pushes to feature branches) are approved
 - Write commands targeting paths outside the project (home directory, absolute paths other than `/tmp`) are deferred
 - Chained commands are approved only if every part is safe

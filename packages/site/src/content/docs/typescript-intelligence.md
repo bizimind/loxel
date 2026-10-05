@@ -46,8 +46,7 @@ Symbols flagged as unused by the language server are dimmed in the editor, and d
 
 ## TypeScript server
 
-Loxel uses the official TypeScript 7 native compiler and language server (`tsc --lsp -stdio`).
-The same runtime provides diagnostics, completions, navigation, refactors, and other editor features.
+Loxel uses the official TypeScript 7 native compiler and language server (`tsc --lsp -stdio`). The same runtime provides diagnostics, completions, navigation, refactors, and other editor features.
 
 ---
 

@@ -63,7 +63,7 @@ Prettier and oxfmt both cover JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, and G
 
 ## Markdown files
 
-Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original bytes, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide.
+Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original bytes, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `:::localdb` blocks render as [database widgets](/docs/introduction#planning-and-visibility); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
 
 ---
 

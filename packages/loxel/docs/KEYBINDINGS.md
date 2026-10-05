@@ -18,7 +18,7 @@ Conventions:
 
 - **Every shortcut is an action.** Add an `ActionDef` and a default binding rather than a local `keydown` handler, so it shows in the command palette and can be remapped. `hidden: true` keeps internal actions (tree navigation, the palette itself) out of the palette.
 - **Context-dependent actions declare `isEnabled`.** A disabled action's key resolves as unbound, so it reaches the focused widget instead (for example `⌃⇧Space` in the center goes to the terminal or editor, and `⌘F` outside a find target goes to Monaco's own find widget).
-- **Reserved keys.** Defaults stay clear of macOS text editing, Monaco's defaults and Rectangle's `⌃⌥` window snapping (which is why Delete Worktree has no default key). The "no default binding takes reserved keys" test in `keybinding-validation.test.ts` enforces this; extend its list when reserving a new key.
+- **Reserved keys.** Defaults stay clear of macOS text editing, Monaco's defaults and Rectangle's global `⌃⌥` shortcuts (Restore on `⌃⌥⌫` is why Delete Worktree has no default key). The "no default binding takes reserved keys" test in `keybinding-validation.test.ts` enforces this; extend its list when reserving a new key.
 - **Chords** are up to three keystrokes. A single-key binding takes precedence over a chord with the same first key, and remapping removes overlapping bindings (equal, or a chord prefix) from other actions.
 
 ## Focus navigation

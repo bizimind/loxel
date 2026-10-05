@@ -28,7 +28,7 @@ db.close();
 `openDatabase(path)` returns a `LocalDb` with:
 
 - `schema` — create, drop, rename, list, and describe tables; add, drop, and rename columns; `planAlterColumn()` returns a `MigrationPlan` to review before `applyMigration()` runs it.
-- `data` — `list` (filter tree of `AND`/`OR` conditions, sort, select, pagination), `get`, `insert`, `update`, `delete`. Writes are validated against the column definitions and return `ValidationIssue`s rather than throwing.
+- `data` — `list` (filter tree of `AND`/`OR` conditions, sort, select, pagination), `get`, `insert`, `update`, `delete`. Writes are validated against the column definitions: invalid column values and uniqueness violations come back as `{ ok: false, issues }` (`ValidationIssue`s), while malformed requests (an invalid table name or payload, an unknown column, or an unknown option value) throw.
 - `views` — saved view configs (`table`, `kanban`, `form`, `calendar`, `graph`, `gantt`) per table.
 - `formula.evaluate(expression, row)` — evaluates a formula column expression against a row.
 

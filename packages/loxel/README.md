@@ -73,12 +73,12 @@ Dev mode (`LOXEL_DEV=1`, set by the dev scripts) uses its own state directory an
 
 ### Environment variables
 
-| Variable           | Purpose                                                                  |
-| ------------------ | ------------------------------------------------------------------------ |
-| `LOXEL_DEV`        | `1` for dev mode: dev state directory and port 7434                      |
-| `LOXEL_STATE_DIR`  | Override the state directory (see [Data storage](#data-storage))         |
-| `LOXEL_SERVE_PORT` | Override the server port                                                 |
-| `LOXEL_STATIC_DIR` | Directory of the built renderer the server serves (from source: `dist/`) |
+| Variable           | Purpose                                                                          |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `LOXEL_DEV`        | `1` for dev mode: dev state directory and port 7434                              |
+| `LOXEL_STATE_DIR`  | Override the state directory (see [Data storage](#data-storage))                 |
+| `LOXEL_SERVE_PORT` | Override the server port (standalone server only; the app and CLI use 7433/7434) |
+| `LOXEL_STATIC_DIR` | Directory of the built renderer the server serves (from source: `dist/`)         |
 
 Shells opened in a Loxel terminal inherit the app's `LOXEL_STATIC_DIR`, which points at the installed renderer. When testing a local build from such a shell, set `LOXEL_STATIC_DIR=$PWD/dist`, and use `LOXEL_STATE_DIR` and `LOXEL_SERVE_PORT` to keep a throwaway instance away from your real state. Variables Loxel injects into its terminals (`LOXEL_PORT`, `LOXEL_WORKTREE`, `LOXEL_WINDOW_ID`) are documented on the site's [Environment Variables & Settings](../site/src/content/docs/reference-env-files-cli-settings.md) page.
 

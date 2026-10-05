@@ -236,10 +236,7 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 ## Type Checking
 
-Type checking uses the official TypeScript 7 native compiler (`@typescript/native`) via `tsc`.
-Regular TypeScript package `typecheck` scripts run `tsc --noEmit`; the site runs `astro check`.
-The root `pnpm run typecheck` invokes each workspace's script in parallel via
-`pnpm -r --parallel run typecheck`.
+Type checking uses the official TypeScript 7 native compiler (`@typescript/native`) via `tsc`. Regular TypeScript package `typecheck` scripts run `tsc --noEmit`; the site runs `astro check`. The root `pnpm run typecheck` invokes each workspace's script in parallel via `pnpm -r --parallel run typecheck`.
 
 ## CI & Releases
 
