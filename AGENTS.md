@@ -194,9 +194,13 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 - In every PR, check that the docs covering the code you changed are not stale, and fix them in the same PR if they are.
 
-- Add or expand docs only for significant changes (new features, user-facing behavior, setup, commands, configuration, public APIs). Write them at the most specific relevant level and link to them from the parent index instead of repeating the detail there.
+- READMEs stay high-level and user-facing: what the package does, setup, commands, configuration, public APIs.
 
-- Do not document small fixes or internal mechanisms in READMEs; explain them in code comments next to the code.
+- Internal docs (nested docs and specs linked from the README) cover architecture, patterns and conventions, and design choices with their rationale.
+
+- Add or expand docs only for significant changes. Write them at the most specific relevant level and link to them from the parent index instead of repeating the detail there.
+
+- Explain small fixes and local implementation details in code comments next to the code, not in docs.
 
 ### Solution Simplicity and Tradeoff Clarity
 
