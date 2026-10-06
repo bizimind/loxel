@@ -17,7 +17,7 @@ export interface ExecOptions {
 }
 
 export interface SpawnOptions extends ExecOptions {
-  /** Allocate a TTY. Unsupported on Apple Containers. */
+  /** Allocate a TTY (passes `-t` to the provider's `exec`). Supported on all providers. */
   tty?: boolean;
 }
 

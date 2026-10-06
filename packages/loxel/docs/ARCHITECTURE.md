@@ -26,7 +26,7 @@ All code lives under one `src/` tree with one [tsconfig.json](../tsconfig.json) 
 
 Inconsistencies worth knowing (do not take them as rules):
 
-- The server imports a few renderer-side modules: `@/lib/formatting-model`, `@/lib/layout-key-schema`, `@/lib/content-anchor`, `@/lib/media-extensions`, `@/lib/project-file-helpers`, `@/lib/perf-lag-stats`, and `@/components/projects/wizard-detection` (from [routes.ts](../src/server/routes.ts)). Shared code is therefore not confined to `src/api/`.
+- The server imports a few renderer-side modules: `@/lib/formatting-model`, `@/lib/layout-key-schema`, `@/lib/content-anchor`, `@/lib/media-extensions`, `@/lib/project-file-helpers`, `@/lib/perf-lag-stats`, and `@/components/projects/wizard-detection` (in [routes.ts](../src/server/routes.ts), [store-db.ts](../src/server/store-db.ts), [placement.ts](../src/server/placement.ts) and [server-perf-monitor.ts](../src/server/server-perf-monitor.ts)). Shared code is therefore not confined to `src/api/`.
 - Hook file naming is mixed: mostly `useX.ts`, but [use-disk-synced-content.ts](../src/hooks/use-disk-synced-content.ts) is kebab-case and [diff-base.ts](../src/hooks/diff-base.ts) is not a hook. `src/queries/` uses kebab-case `use-*.ts`.
 - Feature components are PascalCase; most `components/ui/` primitives are kebab-case (`button.tsx`, `context-menu.tsx`), with exceptions such as `HighlightedLabel.tsx`.
 - Model module naming: `git-models.ts` is plural; everything else is `*-model.ts`.

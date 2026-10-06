@@ -78,7 +78,7 @@ loxel [file-path | folder-path | url]
 
 ## Settings
 
-Open settings with `Cmd+,`. Settings, keybindings and panel layouts are saved in `stores.db` in the state directory, so every window shares them.
+Open settings with `Cmd+,`. Settings and keybindings are saved in `stores.db` in the state directory and shared by every window. Panel layouts are saved there too, but [each window keeps its own](/docs/worktrees-and-projects).
 
 | Section           | What you configure                                                                                                                                                      |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

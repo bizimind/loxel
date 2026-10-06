@@ -16,7 +16,7 @@ When you choose multi-workspace (see [Clone](#clone)) for a new or imported repo
 
 ### Detect
 
-Enter a path or browse to a folder on disk and Loxel will inspect it. The result is one of four classifications: bare repo, regular repo, worktree (linked to a bare repo elsewhere), or a non-repo folder. No changes are made at this step — it's read-only.
+Enter a path or browse to a folder on disk and Loxel will inspect it. The result is one of three classifications: bare repo, regular repo, or a non-repo folder. No changes are made at this step — it's read-only.
 
 ### Add
 

@@ -63,7 +63,7 @@ Source of truth: [`./src/session/session-types.ts`](./src/session/session-types.
 
 Requests: `session.start`, `session.input`, `session.cancel`, `session.close`, `session.resume`, `session.compact`, `session.fork`, `session.list`, `session.get`, `human.input.response`, `approval.response`.
 
-Every event shares one envelope: `type`, `session_id`, `timestamp`, `payload`, plus optional `request_id` and `run_id`. The main event families are `session.*`, `run.*` (including `run.delta` and per-step `run.step.*`), `tool.call.*`, `human.input.*`, `approval.*`, `plan.*`, `todo.updated`, `context.compaction.*`, and `runtime.warning` / `runtime.error`. If an input line fails to parse or validate, the CLI emits a `run.failed` event with `session_id: "unknown"`.
+Every event shares one envelope: `type`, `session_id`, `timestamp`, `payload`, plus optional `request_id` and `run_id`. The main event families are `session.*`, `run.*` (including `run.delta` and per-step `run.step.*`), `tool.call.*`, `human.input.*`, `approval.*`, `plan.*`, `context.compaction.*`, and `runtime.warning` / `runtime.error`. If an input line fails to parse or validate, the CLI emits a `run.failed` event with `session_id: "unknown"`.
 
 Source of truth: [`./src/protocol/schemas.ts`](./src/protocol/schemas.ts), [`./src/orchestrator/runtime.ts`](./src/orchestrator/runtime.ts)
 

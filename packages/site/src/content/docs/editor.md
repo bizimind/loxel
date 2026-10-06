@@ -84,14 +84,14 @@ You have two choices:
 
 The file tree in the Project Files panel supports keyboard-only navigation:
 
-| Key | Action |
-| --- | --- | --- |
-| `↑` / `↓` | Move between rows |
-| `→` | Expand folder, or focus first child if already expanded |
-| `←` | Collapse folder, or jump to parent |
-| `Space` | Toggle expand/collapse |
-| `Enter` | Open file / toggle folder |
-| `F2` or `Shift+F6` | Rename |
+| Key                | Action                                                  |
+| ------------------ | ------------------------------------------------------- |
+| `↑` / `↓`          | Move between rows                                       |
+| `→`                | Expand folder, or focus first child if already expanded |
+| `←`                | Collapse folder, or jump to parent                      |
+| `Space`            | Toggle expand/collapse                                  |
+| `Enter`            | Open file / toggle folder                               |
+| `F2` or `Shift+F6` | Rename                                                  |
 
 **Git status coloring** is applied to every file and folder:
 

@@ -10,7 +10,7 @@ docker buildx bake sandbox --set '*.platform=linux/<arch>' --load
 
 ## Baked tools (version-pinned via `docker-bake.hcl`)
 
-Each tool is fetched with an SHA256 checksum and composed into the final image as `/usr/local/bin/<tool>`:
+Each tool is fetched with an SHA256 checksum and composed into the final image as `/usr/local/bin/<tool>`. The exception is `git`, which is apt-installed from the base image and so pinned only transitively via `BASE_IMAGE`:
 
 | Category            | Tools                                                                                  |
 | ------------------- | -------------------------------------------------------------------------------------- |
