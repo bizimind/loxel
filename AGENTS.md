@@ -217,6 +217,8 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 - Explain small fixes and local implementation details in code comments next to the code, not in docs.
 
+- Docs describe intended behavior. When the code diverges from a doc because of a defect in the code, fix the code or file a GitHub issue for it; do not document the defect, dead code, stale comments, or "known inconsistencies" in committed docs. Deliberate design limitations may be stated, phrased as scope rather than as bugs.
+
 ### Solution Simplicity and Tradeoff Clarity
 
 - Always evaluate the simplest, purest solution that can satisfy the requirements.

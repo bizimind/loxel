@@ -39,7 +39,7 @@ The project watcher owns project-scoped events. A per-worktree watcher accepts o
 
 Worktree add/remove also has a non-recursive watch on `<commonDir>/worktrees`. Removal of a watched directory does not reliably emit an event from that directory's own watcher, while its parent does observe the directory entry disappearing.
 
-That watch emits only when the directory's modification time moved (an entry was added, removed or renamed) or the directory is gone. Bun delivers a same-process recursive watch's churn to it as changes to `worktrees` itself, and in a bare repo the recursive watch covers every working tree, so without the mtime check deleting a checkout would fire dozens of spurious lifecycle events, each broadcasting `worktrees_changed` and starting a cross-worktree status sweep. The same Bun behavior still affects the other watchers (tracked in issue #311).
+That watch emits only when the directory's modification time moved (an entry was added, removed or renamed) or the directory is gone. Bun delivers a same-process recursive watch's churn to it as changes to `worktrees` itself, and in a bare repo the recursive watch covers every working tree, so without the mtime check deleting a checkout would fire dozens of spurious lifecycle events, each broadcasting `worktrees_changed` and starting a cross-worktree status sweep.
 
 ## Status refresh pipeline
 
@@ -92,7 +92,7 @@ Status and working-tree diffs run with `-c diff.ignoreSubmodules=dirty` (`SUBMOD
 
 When the user does enable fsmonitor, daemon count scales with Git directories, not just top-level worktrees. Git reuses one daemon via `<gitdir>/fsmonitor--daemon.ipc`; a high count alone is not evidence of a leak.
 
-Language servers may run their own watchers. Worktree teardown does not stop them, so they can remain rooted at a deleted path; keep this gap in mind when consolidating watcher ownership.
+Language servers may run their own watchers. Worktree teardown stops the language servers rooted at the removed worktree along with its other watchers.
 
 ## Review checklist
 

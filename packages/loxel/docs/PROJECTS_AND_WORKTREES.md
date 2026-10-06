@@ -64,7 +64,7 @@ All routes are in [routes.ts](../src/server/routes.ts) and are driven by [AddPro
 
 Convert preconditions, all checked before the live project is torn down: the path is a regular repo, has no uncommitted changes, HEAD is not detached, and `assertCanTransformToBare` passes (it rejects existing linked worktrees and an existing destination, per [routes.project-setup.test.ts](../src/server/routes.project-setup.test.ts)). Only then is `teardownProject` called; if `transformToBare` or the hook write fails, the project is re-initialized in its old form.
 
-Every flow ends the same way: `projectStore.addProject`, then `initializeProject`, removing the row again if initialization throws, then `broadcastAll(worktrees_changed)`. Project add and delete broadcast to all clients because a new project has no subscribers yet and a deleted one has none left.
+Every flow ends the same way: `projectStore.addProject`, then `initializeProject`, removing the row again if initialization throws, then a broadcast to all clients so every window refreshes its project list. Project add and delete broadcast to all clients because a new project has no subscribers yet and a deleted one has none left.
 
 What shells out where: plain `git` is spawned directly for `init`, `clone`, `add`/`commit` during init, and the initial empty commit. Repo-shape operations (`detectRepoType`, `initBareRepo`, `transformToBare`, `ensureWorktreesDir`, `executeAdd`) come from `@bizimind/wt/lib`, imported in-process, not by spawning the `wt` binary.
 
@@ -122,20 +122,12 @@ Entry points: `loxel <folder>` and Finder both reach `POST /api/open`, which sen
 
 ## Sidebar
 
-[Sidebar.tsx](../src/components/sidebar/Sidebar.tsx) reads `useProjectStore.projects` and `useWorktreeStore.byProject`. Clicking a bare project toggles expansion; clicking a regular project switches to its root. Projects auto-expand once (`autoExpandedProjectIds`). Worktree rows reorder with `@dnd-kit` and write `setCustomOrder`; hide/show writes `toggleVisibility`. The expanded sidebar shows all worktrees; the collapsed icon rail filters out `hiddenPaths`, so a reorder there saves only the visible paths. Context menus are local state in the sidebar (`useWorktreeContextMenu` for worktrees, a project menu for rename/remove/delete); removal goes through `requestRemoveWorktree` (plan) and `confirmRemoveWorktree`. Pending entries get no context menu. Icons: [ProjectIcon.tsx](../src/components/projects/ProjectIcon.tsx), [WorktreeIcon.tsx](../src/components/worktrees/WorktreeIcon.tsx). Layout and resizing: [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md).
+[Sidebar.tsx](../src/components/sidebar/Sidebar.tsx) reads `useProjectStore.projects` and `useWorktreeStore.byProject`. Clicking a bare project toggles expansion; clicking a regular project switches to its root. Projects auto-expand once (`autoExpandedProjectIds`). Worktree rows reorder with `@dnd-kit` and write `setCustomOrder`; hide/show writes `toggleVisibility`. The expanded sidebar shows all worktrees; the collapsed icon rail filters out `hiddenPaths`, and reordering there keeps hidden worktrees in their place. Context menus are local state in the sidebar (`useWorktreeContextMenu` for worktrees, a project menu for rename/remove/delete); removal goes through `requestRemoveWorktree` (plan) and `confirmRemoveWorktree`. Pending entries get no context menu. Icons: [ProjectIcon.tsx](../src/components/projects/ProjectIcon.tsx), [WorktreeIcon.tsx](../src/components/worktrees/WorktreeIcon.tsx). Layout and resizing: [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md).
 
 ## Invariants
 
 - **Absolute paths are identity.** Projects are keyed by git root, worktree resources and per-worktree client stores by absolute worktree path. Ownership checks must be boundary-aware (`isWithin`, `findTreeRoot` in [project-file-helpers.ts](../src/lib/project-file-helpers.ts)); a raw prefix `/repo` also matches `/repo-other`. `findOwningProject` also checks `worktreesDir`, because `WT_DIR` can place worktrees outside the repo.
-- **Validate client-supplied paths.** What routes check today:
-  - `?wt=`/`?project=` routes (`resolveWorktreeFromReq`, `resolveProjectFromReq`) and `subscribe_worktree` only require the path to be inside a registered project's cwd or `worktreesDir`; they do not check that it is a registered worktree. `subscribe_worktree` refuses a bare repo's root.
+- **Validate client-supplied paths.** What routes check:
+  - `?wt=`/`?project=` routes (`resolveWorktreeFromReq`, `resolveProjectFromReq`) and `subscribe_worktree` require the path to be inside a registered project's cwd or `worktreesDir`. `subscribe_worktree` refuses a bare repo's root.
   - Worktree CRUD requires `projectPath` to be an exact key of the initialized projects map. Remove and plan-remove additionally check the path against `git worktree list` (`validateWorktreePath`) and pass it as `expectedPath`, so a same-basename worktree elsewhere cannot be removed ([routes.worktrees.test.ts](../src/server/routes.worktrees.test.ts)).
   - Others routes require live `WorktreeResources` for `wt`.
-- **One server per repository.** Pruning temp worktrees on init and the in-memory removal bookkeeping assume a single server uses a repository at a time; see [SHARED_SERVER.md](SHARED_SERVER.md).
-
-## Known inconsistencies
-
-- `worktrees_changed` sent by project add/delete reaches every window, but `refreshProjectWorktrees` ignores projects missing from the local list and never refetches the project list. Other windows therefore do not show a newly added project until they call `fetchProjects` again. For a deleted project the refresh requests its worktrees by id, which the server no longer knows.
-- Comments in [worktrees.ts](../src/store/worktrees.ts) say `customOrder`/`hiddenPaths` persist to localStorage; they go to server storage (localStorage is only a migration fallback in [server-storage.ts](../src/store/server-storage.ts)). The rollback comment in `handleAddProject` still mentions `projects.json`.
-- `GET /api/projects/:id/worktrees` calls `loadProjects()`, which runs `isBareRepo` for every project, to resolve one id.
-- The `worktrees` list returned by `initializeProject` has `createdAt: null` and is not used by any route.

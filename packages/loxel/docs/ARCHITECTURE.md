@@ -24,12 +24,7 @@ All code lives under one `src/` tree with one [tsconfig.json](../tsconfig.json) 
 | [scripts/](../scripts/)               | Build-time scripts: app packaging (`build-app.ts`), bundling or downloading language-server binaries, copying the TypeScript 7 binary.                                                    |
 | [e2e/](../e2e/)                       | Playwright suite, currently screenshot specs for the site. See [Testing](#testing).                                                                                                       |
 
-Inconsistencies worth knowing (do not take them as rules):
-
-- The server imports a few renderer-side modules: `@/lib/formatting-model`, `@/lib/layout-key-schema`, `@/lib/content-anchor`, `@/lib/media-extensions`, `@/lib/project-file-helpers`, `@/lib/perf-lag-stats`, and `@/components/projects/wizard-detection` (in [routes.ts](../src/server/routes.ts), [store-db.ts](../src/server/store-db.ts), [placement.ts](../src/server/placement.ts) and [server-perf-monitor.ts](../src/server/server-perf-monitor.ts)). Shared code is therefore not confined to `src/api/`.
-- Hook file naming is mixed: mostly `useX.ts`, but [use-disk-synced-content.ts](../src/hooks/use-disk-synced-content.ts) is kebab-case and [diff-base.ts](../src/hooks/diff-base.ts) is not a hook. `src/queries/` uses kebab-case `use-*.ts`.
-- Feature components are PascalCase; most `components/ui/` primitives are kebab-case (`button.tsx`, `context-menu.tsx`), with exceptions such as `HighlightedLabel.tsx`.
-- Model module naming: `git-models.ts` is plural; everything else is `*-model.ts`.
+File naming conventions (hook file casing, kebab-case versus PascalCase in `components/ui/`, `*-model.ts` modules) are not uniformly applied, so follow the surrounding folder rather than inferring a rule from one file.
 
 ## Client-server contract
 
@@ -40,19 +35,19 @@ Inconsistencies worth knowing (do not take them as rules):
 - **Zod schemas with inferred types** in [project-model.ts](../src/api/project-model.ts), [review-model.ts](../src/api/review-model.ts), [comment-model.ts](../src/api/comment-model.ts), [open-in-model.ts](../src/api/open-in-model.ts) and [coding-agent-model.ts](../src/api/coding-agent-model.ts). The schema is canonical and the type is `z.infer`.
 - **Plain TypeScript types** everywhere else (`git-models.ts`, `diff-model.ts`, `log-entry-model.ts`, `search-model.ts`, ...).
 
-Runtime validation is one-sided and partial: [review-routes.ts](../src/server/review-routes.ts) and [open-in-routes.ts](../src/server/open-in-routes.ts) `safeParse` request bodies; [routes.ts](../src/server/routes.ts) checks fields by hand (`parseBody`, `requireString`, `requireStringArray`). The client never validates responses: `fetchJson<T>` returns the parsed JSON as `T`.
+Request bodies are validated on the server: [review-routes.ts](../src/server/review-routes.ts) and [open-in-routes.ts](../src/server/open-in-routes.ts) `safeParse` request bodies; [routes.ts](../src/server/routes.ts) checks fields by hand (`parseBody`, `requireString`, `requireStringArray`). The client does not validate responses: `fetchJson<T>` returns the parsed JSON as `T`.
 
 ### REST
 
 - **Dispatch.** [server.ts](../src/server/server.ts) forwards every `/api/*` request to `handleRequest(req, ctx)` in [routes.ts](../src/server/routes.ts). It first looks up a static `routes[method][pathname]` table, then falls through to hand-written matches: `/api/projects/:id...` regexes, `/api/layout/promote`, `/api/stores/:key`, and prefix-delegated sub-routers [localdb-routes.ts](../src/server/localdb-routes.ts), [review-routes.ts](../src/server/review-routes.ts) and [open-in-routes.ts](../src/server/open-in-routes.ts). Sub-routers take their own narrow context and return `null` when no route matches.
 - **Scope.** Worktree- or project-scoped endpoints take `?wt=<worktree path>` or `?project=<path>` (or a `worktreePath` body field); `resolveWorktreeFromReq` / `resolveProjectFromReq` / `resolveProjectFromBody` map that to a `ProjectState` via `findProjectForPath`.
 - **Responses.** Handlers return `json(data)` or `error(message, status)` from [response-helpers.ts](../src/server/response-helpers.ts); `error` keeps only the first line of the message, and the client throws `new Error(body.error)`. Exceptions thrown by a static-table handler become a 500 with the error message. [error-message.ts](../src/server/error-message.ts) `describeError` builds a message from an error's cause chain and `Bun.$` stderr, for failures from Git and `wt`.
-- **Dependency injection.** `RouteContext` (defined in `routes.ts`) carries the broadcast functions, project and worktree lookups, lifecycle hooks and formatter/schema services that server.ts owns, which lets route tests build a fake context (for example [routes.detached.test.ts](../src/server/routes.detached.test.ts)). It is partial: routes.ts also imports module singletons directly (`store-db`, `project-store`, `update`, `logger`). server.ts builds the same context literal twice in its `fetch` handler.
+- **Dependency injection.** `RouteContext` (defined in `routes.ts`) carries the broadcast functions, project and worktree lookups, lifecycle hooks and formatter/schema services that server.ts owns, which lets route tests build a fake context (for example [routes.detached.test.ts](../src/server/routes.detached.test.ts)).
 - **Naming trap.** `GET /api/log` is the Git log, `POST /api/log` ingests a log entry, and `GET /api/logs` returns server log history.
 
 ### WebSocket
 
-The app socket (`/ws`) carries JSON text frames typed in [ws-protocol.ts](../src/api/ws-protocol.ts): `WsMessage` (server to client) and `WsClientMessage` (client to server). Terminal I/O uses binary frames on the same socket: `[type byte][36-byte terminal UUID][payload]`, with `BIN_MSG_OUTPUT` and `BIN_MSG_INPUT`. [ws-messages.ts](../src/server/ws-messages.ts) holds only one shared builder (`worktreesChangedMessage`); every other message is built inline.
+The app socket (`/ws`) carries JSON text frames typed in [ws-protocol.ts](../src/api/ws-protocol.ts): `WsMessage` (server to client) and `WsClientMessage` (client to server). Terminal I/O uses binary frames on the same socket: `[type byte][36-byte terminal UUID][payload]`, with `BIN_MSG_OUTPUT` and `BIN_MSG_INPUT`. Messages are built inline where they are sent; [ws-messages.ts](../src/server/ws-messages.ts) holds the shared `worktreesChangedMessage` builder.
 
 Server-to-client delivery uses helpers in server.ts, chosen by scope:
 
@@ -60,9 +55,9 @@ Server-to-client delivery uses helpers in server.ts, chosen by scope:
 - `broadcastToProject(projectPath)`: clients subscribed to any worktree of the project, deduplicated (`refs_changed`, `log_changed`, `worktree_status_changed`, `localdb_changed`).
 - `broadcastAll`: every app client (`store_updated`, notifications, `log_error_count`, `update_status_changed`).
 - `sendToActiveWindow(windowId)`: one window (`open_file`, `open_folder`), see [Per-window identity](#per-window-identity).
-- `sendTo(owner)`: terminal and agent events go only to the connection that owns the session. The `ws-protocol.ts` comments list `terminal_exit` and `agent_*` under "Global (sent to all clients)", which does not match server.ts.
+- `sendTo(owner)`: terminal and agent events go only to the connection that owns the session.
 
-On the client, [client.ts](../src/api/client.ts) exports a singleton `wsClient` that reconnects every 2 s, queues JSON messages sent before the first connection (but drops the queue on reconnect), and on reconnect compares the server version from `/api/version` with the first one it saw: a change reloads the page, otherwise `onReconnect` listeners run so features re-create server-side state (worktree subscription, log subscription, terminal reattach).
+On the client, [client.ts](../src/api/client.ts) exports a singleton `wsClient` that reconnects every 2 s, queues JSON messages sent before the first connection (messages queued during a later disconnect are discarded on reconnect, since `onReconnect` listeners re-create server-side state), and on reconnect compares the server version from `/api/version` with the first one it saw: a change reloads the page, otherwise `onReconnect` listeners run so features re-create server-side state (worktree subscription, log subscription, terminal reattach).
 
 - [ws-bridge.ts](../src/queries/ws-bridge.ts) (`useWsBridge`, mounted in [App.tsx](../src/App.tsx)) connects the client and routes push messages into the TanStack Query cache (`setQueryData` or `invalidateQueries`) and into stores (logs, notifications, `store_updated`). Its `switch` ends in a `never` check, so adding a `WsMessage` variant fails typecheck until the bridge handles or explicitly ignores it.
 - Terminal and agent messages are ignored by the bridge and consumed by their own `wsClient.subscribe` listeners in [Terminal.tsx](../src/components/terminal/Terminal.tsx), [CodingAgentPanel.tsx](../src/components/coding-agent/CodingAgentPanel.tsx) and [AgentDevToolsPanel.tsx](../src/components/agent-devtools/AgentDevToolsPanel.tsx).
@@ -70,7 +65,7 @@ On the client, [client.ts](../src/api/client.ts) exports a singleton `wsClient` 
 
 ### TanStack Query
 
-[query-client.ts](../src/query-client.ts) sets `staleTime: Infinity`, `refetchOnWindowFocus: false` and a 30-minute `gcTime`: data is fresh until a WebSocket push or a mutation's `onSuccess` invalidates it. Keys come from [query-keys.ts](../src/queries/query-keys.ts) and lead with the project path (then worktree path where relevant), so repo-wide data such as refs is shared by the project's worktrees. [use-repo-queries.ts](../src/queries/use-repo-queries.ts) wraps `useQuery` with the active scope from [use-scope.ts](../src/queries/use-scope.ts); [use-git-mutations.ts](../src/queries/use-git-mutations.ts) holds mutations. Some features still build keys inline, for example the `["localdb", projectPath, ...]` keys in the localdb components and in ws-bridge.
+[query-client.ts](../src/query-client.ts) sets `staleTime: Infinity`, `refetchOnWindowFocus: false` and a 30-minute `gcTime`: data is fresh until a WebSocket push or a mutation's `onSuccess` invalidates it. Keys come from [query-keys.ts](../src/queries/query-keys.ts) and lead with the project path (then worktree path where relevant), so repo-wide data such as refs is shared by the project's worktrees. [use-repo-queries.ts](../src/queries/use-repo-queries.ts) wraps `useQuery` with the active scope from [use-scope.ts](../src/queries/use-scope.ts); [use-git-mutations.ts](../src/queries/use-git-mutations.ts) holds mutations.
 
 ### Adding an endpoint end-to-end
 
@@ -107,12 +102,12 @@ Services by scope:
 ## Observability
 
 - **Server logger** ([logger.ts](../src/server/logger.ts)): `logger.child(category)` emits `LogEntry` records ([log-entry-model.ts](../src/api/log-entry-model.ts)) with a closed `LOG_CATEGORIES` list. Each entry goes to a 5000-entry ring buffer and to an NDJSON file `<stateDir>/logs/server-<instanceId>.log` (rotated to `.log.1` above 5 MB; other instances' files older than 24 h are deleted). Entries at `info` and above are batched every 100 ms to sockets that sent `subscribe_logs`; an error-count delta is always broadcast to all clients for the Logs badge, and `subscribe_logs` replies with a `log_error_snapshot` total for reconciliation.
-- **Frontend and Electron logs** ([frontend-logger.ts](../src/lib/frontend-logger.ts), [main-perf-monitor.ts](../src/electron/main-perf-monitor.ts)): same `ChildLogger` API, sent fire-and-forget to `POST /api/log` and re-emitted by the server, so all processes share one stream. Entries carry no origin field; the category is the only hint. The error serializer is duplicated between the server and frontend loggers.
+- **Frontend and Electron logs** ([frontend-logger.ts](../src/lib/frontend-logger.ts), [main-perf-monitor.ts](../src/electron/main-perf-monitor.ts)): same `ChildLogger` API, sent fire-and-forget to `POST /api/log` and re-emitted by the server, so all processes share one stream. Entries carry no origin field; the category identifies the source.
 - **Logs panel**: [logs.ts](../src/store/logs.ts) loads history with `GET /api/logs` (newest first, paged by `before` id), appends live batches, and refcounts the `subscribe_logs` subscription, resending it on reconnect.
 - **Perf monitors**: [perf-monitor.ts](../src/lib/perf-monitor.ts) (renderer: FPS, long tasks, lag, heap), [server-perf-monitor.ts](../src/server/server-perf-monitor.ts) (event-loop lag, memory) and `main-perf-monitor.ts` (per-process CPU and memory) log summaries at `debug` and escalate anomalies to `warn`/`error`, all with `cat: "perf"`. Debug summaries reach the file and ring buffer but not the live stream.
-- **Stress detector** ([stress-detector.ts](../src/server/stress-detector.ts)): rate checkpoints (`broadcast`, `api-request`, `git-watch`, `pty-output`, ...) that log warnings when a call rate, or the same parameters, exceed a threshold; detection only. The default instance also configures `ts-completions`, `ts-references` and `ts-diagnostics`, which nothing tracks.
+- **Stress detector** ([stress-detector.ts](../src/server/stress-detector.ts)): rate checkpoints (`broadcast`, `api-request`, `git-watch`, `pty-output`, ...) that log warnings when a call rate, or the same parameters, exceed a threshold; detection only.
 - **LSP stderr** is rate-limited per session by [stderr-throttle.ts](../src/server/stderr-throttle.ts) so a chatty server does not flood the ring buffer.
-- **Reading logs locally**: open the Logs panel, or read the NDJSON files under `~/.local/state/loxel/loxel-dev/logs/` (dev) or `.../loxel/logs/` (prod), e.g. with `jq`. `@bizimind/logger` is listed in `package.json` but not imported by any loxel source file.
+- **Reading logs locally**: open the Logs panel, or read the NDJSON files under `~/.local/state/loxel/loxel-dev/logs/` (dev) or `.../loxel/logs/` (prod), e.g. with `jq`.
 
 ## Testing
 

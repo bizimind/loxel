@@ -22,8 +22,6 @@ Terminal sessions survive context switches. When you switch to another worktree 
 
 Scrollback defaults to **50,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines.
 
-> **Note:** The scrollback setting takes effect for new terminal sessions. Existing sessions retain the buffer size they were started with.
-
 ---
 
 ## Find

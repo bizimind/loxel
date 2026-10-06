@@ -13,7 +13,7 @@ The built-in coding agent gives you a dedicated timeline for every run — user 
 The coding agent uses models from [OpenRouter](https://openrouter.ai/). Set it up in two steps:
 
 1. **Settings > Models** — add the models you want to use. Each entry has a display name, an OpenRouter model ID, and its own API key; keys are stored encrypted.
-2. **Settings > Coding Agent** — pick a **Base Model**, used for every agent function. Turn on **Function Overrides** to use different models for specific functions: Planner, Executor, Fallback, Judge, WebSearch, and WS Fallback. WebSearch only works once it has an override. Plan mode runs on the planner model and execute mode on the executor.
+2. **Settings > Coding Agent** — pick a **Base Model**, used for every agent function. Turn on **Function Overrides** to use different models for specific functions: Planner, Executor, Fallback, Judge, WebSearch, and WS Fallback. WebSearch does not fall back to the base model, so give it an override to enable it. Plan mode runs on the planner model and execute mode on the executor.
 
 Settings apply to newly created sessions. The same section sets the default session mode (execute or plan) and the default tool profile.
 
@@ -26,8 +26,6 @@ Without settings, the agent falls back to environment variables from the environ
 A session starts when you open an agent panel. It is scoped to the active project + worktree.
 
 Sessions survive context switches. If you switch worktrees — or navigate away to another panel — the agent session keeps running in the background. When you come back, the session's history replays in the timeline (up to 5,000 events per session). You pick up exactly where you left off.
-
-Closing an agent tab detaches from the session; it keeps running in the background until Loxel quits.
 
 While a run is active, `Enter` stops it and sends your new message right away (steer), and `Cmd+Enter` queues the message until the run finishes. The agent tab's dot shows the session's state: green while running, amber while waiting for you, gray once it has exited.
 

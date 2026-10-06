@@ -67,7 +67,7 @@ Client wrappers are in [client.ts](../src/api/client.ts) (`getReviews`, `postPla
 
 - `content`: the selected lines verbatim.
 - `contextBefore` / `contextAfter`: up to 3 lines on each side (`CONTEXT_LINES`), truncated at file boundaries.
-- `contentHash`: FNV-1a of `content.join("\n")`. It is stored but not read anywhere: relocation compares lines directly.
+- `contentHash`: FNV-1a of `content.join("\n")`.
 
 The anchor and the creation-time `startLine`/`endLine` are immutable. Relocated positions are computed per request and never written back, so every placement starts from the original stored line.
 
@@ -94,7 +94,7 @@ Matching is exact string equality per line; there is no whitespace normalization
 - For `outdated`, attaches `originalContent` (the anchor) and `currentContent` (the lines now at the placed range).
 - Threads that are lost on both sides come back with `anchorStatus: "lost"` and their stored lines.
 
-Which threads are considered: the route calls `listThreads(reviewIds, allPaths)` with every old/new path in the request, so threads on files that are not in the current diff are not returned at all. They are neither placed nor lost; they reappear when a diff includes their file. The `!file` branch in `placeThreads` that marks a thread lost is therefore only reachable by direct callers (it is covered in [placement.test.ts](../src/server/placement.test.ts)).
+Which threads are considered: the route calls `listThreads(reviewIds, allPaths)` with every old/new path in the request, so threads on files that are not in the current diff are not returned at all. They are neither placed nor lost; they reappear when a diff includes their file.
 
 ## Client state
 
@@ -134,26 +134,17 @@ The code block shows the anchor's original `content`, not the current lines, and
 
 ## Relationship to git state
 
-- Reviews track no commits authoritatively. `ReviewContext` is a snapshot taken at creation (and replaceable via PATCH, though the client only ever renames) used only for picker sorting. A review created on one commit overlays onto any diff that touches the same files.
+- Reviews track no commits authoritatively. `ReviewContext` is a snapshot taken at creation (replaceable via PATCH) used only for picker sorting. A review created on one commit overlays onto any diff that touches the same files.
 - Threads are tied to file paths and content, not SHAs. After a rebase, amend, or squash the anchored lines are found again by content in whatever refs the current diff uses; the stored `startLine` only seeds the search. Old commit hashes in `ReviewContext` simply stop matching.
 - Uncommitted diffs read the new side from the working tree of the diff's `worktreePath`, so placement follows edits as soon as the diff data changes ([WATCHERS.md](WATCHERS.md) covers what triggers that).
 - Removing a worktree drops its client-side selection state but does not touch the database: its reviews remain visible from every other worktree of the repo, and the stale `worktreePath` only lowers their sort score. Worktree lifecycle is in [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md).
 - Deleting a project tears down its `ReviewDb` handle but leaves the `.db` file on disk.
 
-## Known inconsistencies
-
-- `useReviewContext` always sets `branchName: null`, so the +5 branch-match score in `ReviewSelector` never applies.
-- `contentHash` is computed and stored but never used.
-- `PlacedThread.currentContent` is computed by the server but no client code reads it; `OutdatedDiff` shows only `originalContent` (the current code is visible in the diff).
-- Line-number selection sets `pendingAnchor` even when no review is active. The composer needs `activeReviewId`, so nothing appears, and the add-comment button stays hidden while `pendingAnchor` is set, until the file changes or another selection replaces it.
-- Comments have `updatedAt` but there is no edit endpoint; only thread status changes after creation.
-- `updateReview` accepts `context`, but no client path sends it.
-
 ## Extending safely
 
 - **Adding a field to threads or comments.** Update the zod schema in `review-model.ts` (the API type derives from it), add the column to the SQLite schema behind a new `user_version` step that uses `ALTER TABLE` (do not drop tables), extend the row schema and row-to-model mapper in `review-db.ts`, the insert statements, and the request schema if clients set it. `PlacedThread` extends `CommentThread`, so it picks up the field; check `updateThreadInState` in `comments.ts`, which copies only selected fields from server responses.
 - **Changing anchor logic.** Stored anchors are permanent, so `relocateAnchor` must keep working for anchors created by every previous version. Prefer adding new steps or optional anchor fields over changing what existing fields mean; if `ContentAnchorSchema` gains a required field, existing rows will fail `ContentAnchorSchema.parse` on read. Keep the status semantics (`exact` / `relocated` mean the content is unchanged, `outdated` means only context matched), since decorations, the panel badge, and the markdown export key off them. `content-anchor.ts` runs in both the renderer and Bun, so it must stay free of Node or DOM APIs.
-- **Tests.** Anchor creation and relocation: [content-anchor.test.ts](../src/lib/content-anchor.test.ts). Two-sided placement, renames, outdated content: [placement.test.ts](../src/server/placement.test.ts) (mocks `git-commands`). Export format: [threads-to-markdown.test.ts](../src/lib/threads-to-markdown.test.ts). `review-db.ts`, `review-routes.ts`, and the stores have no tests.
+- **Tests.** Anchor creation and relocation: [content-anchor.test.ts](../src/lib/content-anchor.test.ts). Two-sided placement, renames, outdated content: [placement.test.ts](../src/server/placement.test.ts) (mocks `git-commands`). Export format: [threads-to-markdown.test.ts](../src/lib/threads-to-markdown.test.ts).
 
 ## Where to look
 

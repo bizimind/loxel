@@ -115,7 +115,7 @@ A collapsed zone keeps its group: `collapseZone` pins its size to 0 with constra
 
 ## Command palette and actions
 
-[CommandPaletteModal.tsx](../src/components/command-palette/CommandPaletteModal.tsx) lists every `ACTIONS` entry from the [action registry](../src/store/keybindings/action-registry.ts) that is not `hidden`, fuzzy-matched on its label, with its current binding. It runs the chosen action through [useActionHandler.ts](../src/hooks/useActionHandler.ts) on the next animation frame, after the dialog closes, so actions that open dialogs or move focus are not fighting the palette. It does not consult `isEnabled`. [command-palette.ts](../src/store/command-palette.ts) only holds `isOpen` and `query`; the `nav.commandPalette` action opens it.
+[CommandPaletteModal.tsx](../src/components/command-palette/CommandPaletteModal.tsx) lists every `ACTIONS` entry from the [action registry](../src/store/keybindings/action-registry.ts) that is not `hidden`, fuzzy-matched on its label, with its current binding. It runs the chosen action through [useActionHandler.ts](../src/hooks/useActionHandler.ts) on the next animation frame, after the dialog closes, so actions that open dialogs or move focus are not fighting the palette. [command-palette.ts](../src/store/command-palette.ts) only holds `isOpen` and `query`; the `nav.commandPalette` action opens it.
 
 `useActionHandler` is the single action dispatcher for keybindings and the palette. Panel actions resolve against `getCenterApi()`: `panel.new.*` dispatch the registry's `createEvent`; `panel.split.<dir>` / `panel.split.<type>.<dir>` / `panel.newTab` create a panel of the active (or given) type, refusing to clone singletons; `toggle.<panelId>` toggles sidebar panels. Its `switch` is exhaustive over `ActionId`, so a new action fails typechecking until handled.
 
@@ -125,7 +125,7 @@ A collapsed zone keeps its group: `collapseZone` pins its size to 0 with constra
 
 - **Storage** (per-window session and canonical keys, restore order, debounced saves, promotion on window close, crash recovery) is owned by [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md#layout-persistence). A version mismatch discards the saved layout (`LAYOUT_VERSION` in `default-layout.ts` for the outer layout, `CENTER_LAYOUT_VERSION` in `CenterHost.tsx`).
 - **Defaults.** When nothing is saved, `createDefaultLayout` runs: the outer default is built from `SIDEBAR_PANELS` and the user's layout settings (`getEffectiveLayoutConfig` in [settings-store.ts](../src/store/settings-store.ts)), the center default is empty.
-- **What is persisted** is only the dockview JSON (ids, params, titles, groups, sizes). The tools-bar store is rebuilt from it: `syncSidebarFromLayout` derives zone entries and sizes from the outer layout on the initial mount only (in `setupOuterDockview`), and `syncTerminalsFromLayout` rebuilds terminal bookkeeping after every center restore.
+- **What is persisted** is only the dockview JSON (ids, params, titles, groups, sizes). The tools-bar store is rebuilt from it: `syncSidebarFromLayout` derives zone entries and sizes from the outer layout, and `syncTerminalsFromLayout` rebuilds terminal bookkeeping after every center restore.
 
 On a worktree switch `activeWorktreePath` changes, so both `PersistedLayout`s see a new `layoutKey`. Each saves the outgoing layout to an in-memory cache and its session row, clears, then restores the new key from cache, server or default. The outer clear sets `outerSwapping` and removes `centerHost`, unmounting `CenterHost`; a fresh `CenterHost` then mounts for the new worktree with its own center layout. `onOuterLayoutRestored` re-hides headers, re-activates the store's active panels, re-applies zone constraints, clears `outerSwapping` and opens panels queued by `showPanelAfterLayoutRestore`. Because the layout is rebuilt, browser panels reload on a switch. Per-worktree store instances survive switches and are purged when a worktree is removed (`purgeWorktreeStores`).
 
@@ -150,10 +150,3 @@ Sidebar (tool) panel:
 2. Register the component in `outerComponents` in [panels.tsx](../src/components/dockview/panels.tsx); use `DraggablePanelHeader` for its header so it can be dragged between zones.
 3. Add a `toggle.<id>` action, its `useActionHandler` case, and optionally a default binding.
 4. Saved outer layouts and saved layout settings (`zonePanelOrder`) predate the panel, and nothing adds missing sidebar panels on restore; decide whether to bump `LAYOUT_VERSION` (resets all saved outer layouts) and add a settings migration.
-
-## Known inconsistencies
-
-- Comments in `panel-config.ts` and `tools-bar.ts` say drop handling (`onWillShowOverlay`, `onDidDrop`) is in `App.tsx`; it is in `outer-dockview-setup.ts`. The `syncSidebarFromLayout` comment says the layout is in `localStorage`; it is in the server store.
-- `localDb` is a singleton with `idPrefix: "localdb-"` but its panel id is `localdb-main`, so `getCenterPanelDef` / `isCenterPanel` do not recognize it (no close log, no split or reveal handling).
-- `ProjectFilesPanel` accepts `panelApi`, but `panels.tsx` renders it without one, so its `usePanelActive` is always `true`.
-- `syncSidebarFromLayout` runs only on the initial outer mount. Switching to a worktree not yet visited this session starts its tools-bar store from defaults even if the restored outer layout has panels in other zones (runtime effect not verified).

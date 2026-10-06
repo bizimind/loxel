@@ -64,7 +64,7 @@ Per-worktree state survives switching within a window's lifetime but not a reloa
 - **Value.** The raw string zustand persist produces: `{"state": <partialized state>, "version": n}`.
 - **Hydration.** `getItem` is async, so stores hydrate after the first render. Code that needs persisted values at startup waits for `persist.hasHydrated()` / `persist.onFinishHydration` (for example [schema-sync.ts](../src/lib/schema-sync.ts)).
 - **Legacy migration.** If the server has no row (or is unreachable), `getItem` falls back to `localStorage[name]`, uploads it, and removes the local copy only after the upload succeeds.
-- **Writes.** `setItem` is debounced per store (500 ms, last value wins) and tagged with a random nonce. Failures are swallowed: in-memory state is the source of truth and the next change retries. Pending store writes are not flushed on page unload.
+- **Writes.** `setItem` is debounced per store (500 ms, last value wins) and tagged with a random nonce. Failures are swallowed: in-memory state is the source of truth and the next change retries. Pending writes are flushed when the window closes.
 - **Deletes.** `removeItem` is a no-op; rows are never deleted through persist.
 
 ### Server: `/api/stores/:key` and `stores.db`
@@ -89,8 +89,6 @@ Two details matter when changing this:
 - zustand's `persist` wraps `api.setState`, so applying a remote update also schedules a write from the receiving window. Echo suppression therefore relies on `reconcile` returning the identical object when nothing changed; `reconcile` returns `incoming` whenever the key sets differ.
 - The `worktrees` target merges only `customOrder`/`hiddenPaths` into existing `byProject` entries, so runtime worktree lists are never overwritten by persisted data. `keybindings` re-validates overrides through `parseBindingOverrides` and re-derives lookup state.
 
-Known drift: the sync `getState` slices omit fields that `partialize` persists: `autoRevealInExplorer` (settings), `logTextFilter` (ui) and `autoExpandedProjectIds` (projects). For those stores every incoming update has more keys than the current slice, so it is always applied and re-written by the receiver. Reading the code, this can make windows bounce the same value back and forth; not verified at runtime.
-
 ### Versioning and migrations
 
 - `stores.db` has no schema migrations; its schema is one key/value table.
@@ -110,7 +108,7 @@ Panel structure is described in [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md); th
 - **Promotion.** When a window closes, Electron main calls `POST /api/layout/promote` with its window ID ([main.ts](../src/electron/main.ts)), and `promoteLayoutSession` moves that window's session rows to canonical in one transaction. The route accepts only UUID-shaped IDs so the `LIKE` prefix cannot match other windows' rows. New windows wait for in-flight promotions before reading.
 - **Crash recovery.** On server boot, `recoverOrphanLayoutSessions` copies the most recent session row per `<scope>:<worktreePath>` to canonical and deliberately keeps the session rows, so renderers reloaded after a server crash still find their own layout.
 
-Inner dockviews (for example the graph panel) are kept only in [worktree-cache.ts](../src/store/worktree-cache.ts). [layout-actions.ts](../src/store/layout-actions.ts) holds imperative collapse/expand logic that reads and writes `sidebarSizes` in the per-worktree tools-bar store; it does not persist anything itself. Layout rows are not deleted when a worktree is removed.
+Inner dockviews (for example the graph panel) are kept only in [worktree-cache.ts](../src/store/worktree-cache.ts). [layout-actions.ts](../src/store/layout-actions.ts) holds imperative collapse/expand logic that reads and writes `sidebarSizes` in the per-worktree tools-bar store; it does not persist anything itself. A worktree's layout rows are deleted when the worktree is removed.
 
 ## Server state directory
 
@@ -128,8 +126,6 @@ Inner dockviews (for example the graph panel) are kept only in [worktree-cache.t
 | `data-encryption-key.enc`                        | Electron main, [dek.ts](../src/electron/dek.ts)                                                                                         | Wrapped data encryption key; see [Secrets](#secrets)                                                                                                                  |
 
 All SQLite files are opened with `PRAGMA journal_mode = WAL` and `busy_timeout = 5000`. Server notifications are not persisted: [notification-store.ts](../src/server/notification-store.ts) is an in-memory list capped at 200 entries, lost on restart, and broadcast to clients by the caller.
-
-Note: [dek.ts](../src/electron/dek.ts) computes its own state directory from Electron's dev flag and does not read `LOXEL_STATE_DIR`.
 
 ## Settings
 
@@ -171,7 +167,7 @@ The renderer uses browser storage only where state is per window or must exist b
 1. Add the field and its default to the store, and add it to `partialize`.
 2. Add it to the store's `SyncTarget.getState` in [store-sync.ts](../src/store/store-sync.ts) with the same shape, plus `deserialize` if it is not plain JSON.
 3. If older persisted data lacks the field and the default spread is not enough, bump `version` and add a `migrate` step (settings) or handle it in `merge`.
-4. For a new persisted store, add a `createServerStorage("<key>")` instance in [server-storage.ts](../src/store/server-storage.ts) and a `SyncTarget` for the key. `server-storage.ts` also exports a `tools-bar` storage instance that no store currently uses.
+4. For a new persisted store, add a `createServerStorage("<key>")` instance in [server-storage.ts](../src/store/server-storage.ts) and a `SyncTarget` for the key.
 5. If the field contains a secret, make sure the server encrypts it before it reaches `stores.db`; do not add secrets to other stores.
 
 ## Where to look

@@ -53,8 +53,6 @@ Every file-backed editor (code, markdown, drawing) is built on [use-disk-synced-
 
 The HTTP response is not the completion signal: the `saving → clean` transition is driven by the echo. The response's (possibly formatted) content is stashed by nonce for 2 s so the echo handler can use it instead of refetching (`consumeSavedContent`). If no echo arrives within 10 s the nonce is dropped and the file returns to dirty. Pending saves are counted per worktree, and [useWsSubscription.ts](../src/hooks/useWsSubscription.ts) defers unsubscribing a worktree until `onWorktreeSavesDrained` fires so echoes are not lost on a worktree switch. Because all windows share one server and one nonce store, the saving window sees its own echo while other windows see an external change; see [SHARED_SERVER.md](SHARED_SERVER.md) and, for the watchers that produce events, [WATCHERS.md](WATCHERS.md).
 
-Note: `FilesSyncOptions.debounceMs` is documented as defaulting to 50 ms, but the constructor default is 10 ms.
-
 A `worktree_files_resynced` message (after a watcher pause/resume) invalidates clean editors' queries and pushes fresh content for every non-clean editor through `handleDiskChange` with no nonces.
 
 ## Code editor (Monaco)
@@ -70,7 +68,7 @@ Content flow: user edits call `handleChange(model.getValue())`. Clean-state disk
 
 Other per-panel behavior: language from `resolveLanguage(path, fileAssociations, content)` mapped by `toMonacoLanguage`; indentation from settings with `detectIndentation` off; `$schema` detection for JSON feeding [json-schema-registry.ts](../src/lib/json-schema-registry.ts); strict-JSON markers ([json-strict-validator.ts](../src/lib/json-strict-validator.ts)) for files resolved as `json` rather than `jsonc`; project TypeScript diagnostics applied as markers; and a TextMate scope inspector ([TextMateScopeInspector.ts](../src/components/code-editor/TextMateScopeInspector.ts)).
 
-Themes: [monaco-theme.ts](../src/lib/monaco-theme.ts) registers a fallback `loxel-dark` theme synchronously and replaces it with the Shiki-converted [loxel-themes.ts](../src/lib/loxel-themes.ts) theme once the highlighter loads, reading editor chrome colors from CSS variables and layering semantic-token rules. [useThemeSync.ts](../src/hooks/useThemeSync.ts) only toggles the `dark` class on `<html>`. Note: `getMonacoThemeName()` ignores its `darkMode` argument and always returns `loxel-dark`, so the editors' dark-mode effects do not change the Monaco theme.
+Themes: [monaco-theme.ts](../src/lib/monaco-theme.ts) registers a fallback `loxel-dark` theme synchronously and replaces it with the Shiki-converted [loxel-themes.ts](../src/lib/loxel-themes.ts) theme once the highlighter loads, reading editor chrome colors from CSS variables and layering semantic-token rules. [useThemeSync.ts](../src/hooks/useThemeSync.ts) toggles the `dark` class on `<html>`.
 
 [useFileTabRename.ts](../src/hooks/useFileTabRename.ts) gives a file tab a rename handler only for files in the active worktree, its drafts, or its Others folders, and delegates to `renameFile()` (see File operations).
 
@@ -101,7 +99,7 @@ The editor-side glue is `serializeBody` (use it instead of `crepe.getMarkdown()`
 Echo suppression differs from the code editor because Milkdown's `markdownUpdated` listener is debounced and ignores `addToHistory: false` transactions:
 
 - After a programmatic replace a stepless, listener-visible transaction is dispatched so the listener's previous-doc snapshot resyncs; otherwise a later user edit that restores that snapshot would never be reported.
-- `lastAppliedBodyRef` holds the body last applied; a listener callback whose live body equals it is swallowed as the programmatic echo, and anything else is a user edit.
+- `lastAppliedBodyRef` holds the body last applied; a listener callback whose live body equals it is ignored as the programmatic echo, and anything else is a user edit.
 - In the clean-state disk effect, live edits the debounced listener has not reported yet are 3-way merged onto the disk change (base: `lastSyncedDiskBodyRef`, the editor form of the previous disk content; `preferOurs`), and autosave is armed if the result differs from disk.
 
 "Accept disk version" destroys and recreates Crepe (`crepeKey`). Module-level `editorContentCache` and `editorSelectionCache` keep content and caret across remounts (tab and layout swaps) and are migrated by `renameEditorCacheKey` on moves.
