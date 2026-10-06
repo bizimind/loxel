@@ -10,212 +10,86 @@ description: >-
 
 # Using `wt`
 
-`wt` is a configless git worktree manager: git itself is the database (`git worktree list`), with no config or state file. Per-worktree setup, teardown and rename fixups live in optional shell hooks at the repo root.
+`wt` is a configless git worktree manager: git itself is the database (`git worktree list`), with no config or state file. Per-worktree setup, teardown and rename fixups live in optional shell hooks at the repo root. A common use is one worktree per task, each running its own coding agent, removed once the work lands.
 
-Source: `packages/wt` in the loxel monorepo.
-
-## Why worktrees
-
-`add` creates a worktree (and runs `init.wt.sh`), `remove` tears one down.
-
-A common reason to want isolated worktrees is running **multiple coding agents in parallel** — each gets its own working dir, branch, dependencies and services from one shared repo, so they never step on each other. You spin up a worktree per task, run an agent in it, and remove it once the work lands. `init.wt.sh` (below) bootstraps each checkout so it's runnable immediately.
+Full reference (every flag, the JSON shapes, the shell helpers, example hook sets, the library API, migrating from the old `wt.yaml` CLI): `packages/wt/README.md` in the loxel monorepo. Source: `packages/wt/src`.
 
 ## Commands
 
 ```sh
-wt add [name]        # create a worktree          (alias: create)
-wt list              # list worktrees             (alias: ls)
-wt view [name]       # show one worktree's details
-wt mv [old] <new>    # rename a worktree + branch (aliases: rename, move)
-wt remove [name]     # remove a worktree          (aliases: rm, delete)
-wt version           # print the installed version
-wt update            # update the binary in place
+wt add [name]        # create a worktree, run init.wt.sh        (alias: create)
+wt list              # list worktrees                           (alias: ls)
+wt view [name]       # one worktree's branch, head, dirty count, upstream divergence
+wt mv [old] <new>    # rename a worktree + its branch, run rename.wt.sh (aliases: rename, move)
+wt remove [name]     # run clean.wt.sh, remove the worktree     (aliases: rm, delete)
+wt version | update
 ```
 
-| Flag                    | Commands | Meaning                                                                                      |
-| ----------------------- | -------- | -------------------------------------------------------------------------------------------- |
-| `-j`, `--json`          | all      | JSON result on stdout; prompts/progress stay on stderr                                       |
-| `-b`, `--branch <b>`    | `add`    | Check out an existing branch instead of creating a new one                                   |
-| `--base <ref>`          | `add`    | Start the new branch from `<ref>` (default: `origin/<default>` as last fetched, else `HEAD`) |
-| `--branch <b>`          | `mv`     | Rename the branch to `<b>` instead of the new worktree name                                  |
-| `-B`, `--keep-branch`   | `mv`     | Rename the directory only, leave the branch alone                                            |
-| `-f`, `--force`         | `mv`     | Move a locked worktree                                                                       |
-| `-f`, `--force`         | `remove` | Remove even with uncommitted or untracked changes                                            |
-| `-d`, `--delete-branch` | `remove` | Also delete the branch; kept (warns) unless merged into `HEAD` or the remote default         |
-| `-D`, `--force-branch`  | `remove` | Delete the branch even if unmerged (implies `-d`)                                            |
-| `--keep-branch`         | `remove` | Keep the branch (don't prompt)                                                               |
+Key flags: `-j` (JSON, all commands); `add -b <branch>` (check out an existing branch), `add --base <ref>` (start the new branch elsewhere); `mv --branch <b>` / `mv -B` (rename the branch to `<b>` / leave it alone), `mv -f` (locked worktree); `remove -f` (dirty worktree), `remove -d` / `-D` / `--keep-branch` (delete the branch if merged / even if unmerged / keep it without prompting). Run `wt <cmd> --help` for the rest.
 
-**Interactive vs. unattended.** At a terminal `wt` prompts for missing values — the worktree name, which worktree to act on (type-to-filter picker: type to narrow, ↑/↓, Enter; Ctrl+C cancels), whether to reuse an existing branch, whether to force a dirty removal, whether to delete the branch. Pass everything as flags to run unattended; with no terminal (scripts, CI, agents) a missing required value errors instead of blocking. Cancelling a prompt, whether by choosing **Cancel** or by pressing Ctrl+C, is not an error — it returns `{"aborted":true,"reason":"..."}` with exit code 0.
+**Running unattended (agents, scripts).** Always pass the worktree name and every decision as flags. Without a terminal, a missing name or an undecided choice (existing branch, dirty removal) is an error, never a prompt, and `remove`/`view` never auto-pick a target. `mv` is the exception: with one name it renames the worktree you are in, so pass `wt mv <old> <new>` in scripts. Without `-d`/`-D`, a non-interactive `remove` keeps the branch.
 
-**Branch behavior.** `wt add <name>` creates a branch named after the worktree, started from the remote default branch as last fetched (`origin/main`; falls back to `HEAD` when the repo has no `origin` default: local-only, never fetched with a refspec, or a remote by another name). It never fetches, so run `git fetch` first for a newer base, and the new branch never tracks its start point, even with `--base origin/foo`. `--base <ref>` starts from any ref instead (`--base HEAD` for git's own behaviour). If that branch already exists, `wt` offers to reuse or recreate it (or, non-interactively, tells you to pass `-b`); if another worktree has it checked out, that's an error. Use `-b <branch>` to check out an existing branch instead.
+**Branches.** `wt add <name>` creates branch `<name>` from the remote default as of the last fetch (`origin/main`), or from `HEAD` when there is no `origin` default. It never fetches: run `git fetch` first for a newer base. The new branch tracks nothing. If branch `<name>` already exists, pass `-b <name>` to reuse it; if another worktree has it checked out, that is an error. `-d` deletes a branch only when it is merged into `HEAD` or the remote default.
 
-**Renaming.** `wt mv <new>` renames the worktree you're currently in; `wt mv <old> <new>` renames another; `wt mv` picks from a list and prompts for the new name. It moves the directory _and_ renames the branch — but only when the branch still matches the worktree name (as `wt add` leaves it). If they've diverged, the directory moves and the branch is left alone unless you pass `--branch <b>`; `-B` never touches it; a detached worktree moves with HEAD untouched. Uncommitted changes ride along. All checks run before anything moves, so a rejected rename leaves nothing half-applied; if the branch rename fails _after_ the move it warns and reports `branchRenamed: false`. Renaming the worktree a shell is sitting in strands that shell on a dead path — `wt` prints the `cd` (keeping your subdirectory), and the `wtm` helper below runs it for you. Other terminals in the old path must `cd` themselves.
+**Renaming.** `wt mv <new>` renames the worktree you are in; `wt mv <old> <new>` renames another. The branch is renamed too only while it still matches the worktree name. A shell sitting in the renamed worktree is left on a dead path: `cd` to the reported `.path`.
 
-`wt` refuses to rename or remove the **main** worktree.
-
-**Migrating from the old config-based CLI.** `wt.yaml` is ignored. Map `worktrees_dir` to `WT_DIR`, move add/clean commands into repo-root `init.wt.sh`/`clean.wt.sh`, replace file/template rules with shell commands in `init.wt.sh`, derive ports and resource names from `WT_NAME`, and use `WT_AUTO_UPDATE=1` for automatic updates. `wt init`, `wt open`, generated port offsets/unique names, and the global `--repo` selector no longer exist.
+**Removing.** A worktree with anything in `git status` needs `-f`. The main worktree of a non-bare repo cannot be renamed or removed; in the bare layout below, `.worktrees/main` is an ordinary worktree and can be.
 
 ## Repo layout
 
-`wt` is most commonly used with a **bare repo**: every checkout — including `main` — is a worktree under `.worktrees/`. Nothing is checked out at the root, so it stays a stable home for git internals, local-only files, and the hooks.
+`wt` is most commonly used with a **bare repo**: every checkout, including `main`, is a worktree under `.worktrees/`, and the root holds git internals, local-only files and the hooks.
 
 ```
-myrepo/                  # the bare repo  ← this is $WT_ROOT
-  HEAD, objects/, ...    # git internals (bare repo contents)
+myrepo/                  # the bare repo  ← $WT_ROOT
+  HEAD, objects/, ...    # git internals
   init.wt.sh             # runs after `wt add`     (in the new worktree)
   clean.wt.sh            # runs before `wt remove` (in the worktree being removed)
   rename.wt.sh           # runs after `wt mv`      (in the worktree at its new path)
   .env                   # local-only files live at the root, next to the hooks
   .worktrees/
     main/                # the main checkout is just another worktree
-    feature-x/           # ← a new `wt add feature-x` lands here ($WT_PATH)
-    bugfix-y/
+    feature-x/           # ← `wt add feature-x` lands here ($WT_PATH)
 ```
 
-Set this up once. A plain `git clone --bare` only records the remote URL — it sets **no fetch refspec**, so you get no `origin/*` tracking branches and `git fetch` won't update them. Add the refspec to make the bare repo behave like a normal one:
+A plain `git clone --bare` sets no fetch refspec, so add one to get `origin/*` branches:
 
 ```sh
 git clone --bare git@github.com:you/myrepo.git myrepo
 cd myrepo
 git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
-git fetch origin          # now origin/* tracking branches exist; wt add bases new branches on origin/<default>
-
-wt add main -b main       # check out the default branch as the first worktree
-# drop your .env, init.wt.sh, etc. at the repo root, then:
-wt add feature-x          # → .worktrees/feature-x
+git fetch origin
+wt add main -b main       # the default branch as the first worktree
 ```
 
-`wt` also works in a **regular (non-bare) repo** — there `$WT_ROOT` is the main worktree's top level and added worktrees go in `<repo>/.worktrees/<name>` beside your code; wt adds that directory to `.git/info/exclude` on first use so the main checkout's status stays clean. The bare layout is preferred: every branch is symmetric, with no privileged checkout mixed into the worktrees dir.
+In a regular (non-bare) repo, `$WT_ROOT` is the main worktree and added worktrees go in `<repo>/.worktrees/<name>` (wt adds it to `.git/info/exclude`). `WT_DIR` overrides the worktrees directory. Nested names work: `wt add feat/x` → `.worktrees/feat/x` on branch `feat/x`.
 
-Worktrees default to `<root>/.worktrees/<name>`; override with `WT_DIR`:
+## Hooks
 
-```sh
-WT_DIR=~/wt/myrepo wt add feature-x
-```
+Optional scripts at the **repo root**, run with `bash`, with the worktree as the working directory. They get `WT_NAME`, `WT_PATH`, `WT_ROOT` and `WT_BRANCH` (`(detached)` when detached); `rename.wt.sh` also gets `WT_OLD_NAME`, `WT_OLD_PATH` and `WT_OLD_BRANCH`. A failing hook only prints a warning; it never aborts the command.
 
-A worktree's name is its path under that directory, so nested names work: `wt add feat/voice-input` → `.worktrees/feat/voice-input` on branch `feat/voice-input`.
-
-`WT_AUTO_UPDATE=1` lets `wt` update itself before running a command.
-
-## Hooks: where they go and what to put in them
-
-Optional `bash` scripts at the **repo root** run automatically when present — _all_ per-worktree behavior lives here.
-
-| Script         | Runs                     | In which directory               |
-| -------------- | ------------------------ | -------------------------------- |
-| `init.wt.sh`   | right after `wt add`     | the new worktree                 |
-| `clean.wt.sh`  | right before `wt remove` | the worktree being removed       |
-| `rename.wt.sh` | right after `wt mv`      | the worktree at its **new** path |
-
-Each receives these environment variables:
-
-| Var         | Value                                                                                                                         |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `WT_NAME`   | the worktree name                                                                                                             |
-| `WT_PATH`   | absolute path to the worktree                                                                                                 |
-| `WT_ROOT`   | absolute path to the repo root — the **bare repo** itself in a bare setup, or the main worktree's top level in a regular repo |
-| `WT_BRANCH` | the worktree's branch (or `(detached)`)                                                                                       |
-
-A failing hook only prints a warning — it never aborts the add, rename or remove.
-
-### `init.wt.sh` — bootstrapping a new worktree
-
-The hook you'll write most. A fresh worktree has the tracked files but **none of the local, git-ignored state** that makes the repo runnable — `init.wt.sh` rebuilds it. Typical jobs:
-
-- **Copy local-only files** not in git — `.env`, credentials, certs.
-- **Install dependencies** — `pnpm install`, `uv sync`, `npm ci`.
-- **Restore caches / artifacts** — copy `node_modules`, `.venv`, or submodules from the `main` checkout instead of re-downloading.
-- **Start per-worktree services** on isolated ports/names so worktrees don't collide.
-
-Two things to know about paths:
-
-- **The script's working directory is the new worktree** (`$WT_PATH`), so `.` refers to it — `cp "$WT_ROOT/.env" .` copies _into_ the worktree. You rarely need `$WT_PATH` explicitly.
-- **`$WT_ROOT` is the repo root** — in a bare setup that's the bare repo (git internals), _not_ a checkout. Keep local-only files there. Things that only exist in a checkout (built `node_modules`, submodule trees) come from the main worktree at `$WT_ROOT/.worktrees/main`.
+**`init.wt.sh`** rebuilds the local, git-ignored state a fresh checkout lacks: copy local-only files (`.env`, credentials), install dependencies, restore caches, start per-worktree services. Paths: `.` is the new worktree; `$WT_ROOT` is the repo root, which in a bare setup is the bare repo, not a checkout, so things that only exist in a checkout (built `node_modules`, submodule trees) come from `$WT_ROOT/.worktrees/main`.
 
 ```sh
 #!/usr/bin/env bash
 set -euo pipefail
-# cwd is the new worktree; $WT_ROOT is the repo root (bare repo).
-MAIN="$WT_ROOT/.worktrees/main"
-
-cp "$WT_ROOT/.env" .              # local-only files kept at the root
-cp -Rc "$MAIN/node_modules" .     # restore a cache (APFS: -Rc is instant CoW)
-pnpm install                      # install deps against this worktree
-docker run -d --name "myapp-$WT_NAME" -p 5432 postgres:15   # isolated service
+cp "$WT_ROOT/.env" .                               # local-only files kept at the root
+cp -Rc "$WT_ROOT/.worktrees/main/node_modules" .   # restore a cache (APFS: instant CoW)
+pnpm install
+docker run -d --name "myapp-${WT_NAME//\//-}" -p 5432 postgres:15
 ```
 
-### `clean.wt.sh` — tearing it down
+**`clean.wt.sh`** tears down what `init.wt.sh` started, keyed off `WT_NAME`. **`rename.wt.sh`** fixes up anything named after the old worktree (containers, generated config holding absolute paths), using the `WT_OLD_*` vars.
 
-Runs in the worktree just before removal. Tear down whatever `init.wt.sh` started, keyed off `WT_NAME` so you only touch this worktree's resources:
-
-```sh
-#!/usr/bin/env bash
-docker rm -f "myapp-$WT_NAME" 2>/dev/null || true
-```
-
-### `rename.wt.sh` — following a rename
-
-Runs in the worktree at its new path after `wt mv`, with `WT_OLD_NAME`, `WT_OLD_PATH` and `WT_OLD_BRANCH` on top of the usual vars. Anything `init.wt.sh` named after the worktree — containers, volumes, generated config holding absolute paths — is now stale, and this is where you fix it:
-
-```sh
-#!/usr/bin/env bash
-docker rename "myapp-$WT_OLD_NAME" "myapp-$WT_NAME" 2>/dev/null || true
-sed -i '' "s|$WT_OLD_PATH|$WT_PATH|g" .env
-```
+wt assigns no ports and generates no names: derive them from `WT_NAME` in the hooks. The README has complete hook sets.
 
 ## Scripting with JSON
 
-With `-j`, **stdout is pure JSON** and prompts/progress go to stderr — so `wt add -j | jq` can still prompt for a name while piping clean JSON onward.
+With `-j`, stdout is only JSON; progress, hook output and prompts go to stderr. Errors are `{"error":true,"message":"..."}` on **stdout** with exit code 1, so re-surface `.message` when capturing output. Cancelling a prompt returns `{"aborted":true,"reason":"..."}` with exit code 0.
 
 ```sh
 wt list -j | jq -r '.worktrees[] | select(.main|not) | .name'
 cd "$(wt add feature-x -j | jq -r .path)"
-wt mv feature-x feature-y -j | jq -r .path
-wt remove feature-x -j -d | jq .
+wt remove feature-x -j -d | jq .branchDeleted
 ```
 
-Result shapes:
-
-```jsonc
-// list
-{"worktrees":[{"name","path","branch","head","main","locked"}, ...]}
-// add
-{"name","path","branch","created":true,"base":"origin/main","hookRan":true|false}
-// view
-{"name","path","branch","head","main","locked","dirty","ahead","behind"}
-// mv
-{"name","path","branch","oldName","oldPath","oldBranch","moved":true,"branchRenamed":true|false}
-// remove
-{"name","path","removed":true,"branchDeleted":true|false,"hookRan":true|false}
-// cancelled at a prompt (exit code 0)
-{"aborted":true,"reason":"User cancelled"}
-```
-
-Errors are `{"error":true,"message":"..."}` with exit code 1, carrying git's own stderr when git is what failed. That JSON lands on **stdout**, so anything capturing output must re-surface `.message` on stderr or failures look silent.
-
-`view`'s `ahead`/`behind` are `null` when the branch has no upstream. `branch` is the string `(detached)` for a detached worktree everywhere it appears. `head` is the full commit hash in `list` and abbreviated to 12 characters in `view`; git accepts either wherever a commit is expected.
-
-## Shell helpers (`wt.sh`)
-
-`add`, `view` and `mv` report the worktree's absolute `.path`, but only a shell can change its own directory. Download the released `wt.sh` wrappers and source them from `~/.zshrc` or `~/.bashrc` (zsh and bash, needs `jq`):
-
-```sh
-mkdir -p ~/.local/share/wt
-curl -fsSL https://loxel.bizimind.io/wt/wt.sh -o ~/.local/share/wt/wt.sh
-source ~/.local/share/wt/wt.sh
-```
-
-| Helper          | Does                                                                                    |
-| --------------- | --------------------------------------------------------------------------------------- |
-| `wta [name]`    | `wt add`, then cd into the new worktree                                                 |
-| `wtv [name]`    | `wt view`, then cd into it (picker when no name)                                        |
-| `wtr [name]`    | `wt remove`                                                                             |
-| `wtm [old] new` | `wt mv`, then follow the worktree to its new path, keeping the subdirectory you were in |
-
-`WT_BIN` (set before sourcing) points the helpers at a different binary — a locally built `dist/wt`, say. `wtm` exports `WT_SHELL_WRAPPER=1`, which tells the CLI to skip its own "run this cd" message because the wrapper does the `cd` itself.
-
-Prefer editing `wt.sh` in the repo over pasting wrappers into a dotfile — it's versioned alongside the `-j` shapes it parses.
-
-## Library API
-
-`@bizimind/wt/lib` exposes the same operations programmatically, split into `plan*` (inspect, no mutations) and `execute*`, so a UI can resolve decisions before anything changes: `planAdd`/`executeAdd`, `planMove`/`executeMove`, `planRemove`/`executeRemove`, plus `listManagedWorktrees`, `currentManagedWorktree` and `resolveWorktreesDir`.
+`add`, `view` and `mv` report the worktree's absolute `.path`; `mv` also reports `oldPath` and `branchRenamed`, `remove` reports `branchDeleted`. `branch` is `(detached)` for a detached worktree. For humans, `wt.sh` (sourced from the shell rc) provides `wta`/`wtv`/`wtm`, which cd into the result, and `wtr`.

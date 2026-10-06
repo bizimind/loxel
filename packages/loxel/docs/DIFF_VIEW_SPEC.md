@@ -1,5 +1,7 @@
 # Side-by-Side Diff View Specification
 
+How the side-by-side diff view keeps its two panels aligned while scrolling, highlights intra-line changes, and draws the gutter between the panels.
+
 ## Synchronized Scrolling Behavior (JetBrains-Style)
 
 ### Core Principle
@@ -38,14 +40,14 @@ When both panels have the same content:
 
 **Key Insight**: **Pause and Catch-Up** - one panel pauses while the other scrolls through its lines, then they resume together.
 
-**The Rule**: The side with MORE lines scrolls; the side with FEWER lines (or none) pauses.
+**The Rule**: The side with MORE lines scrolls; the side with FEWER lines (or none) pauses. This describes the visual result; when the panel being scrolled has fewer lines, the other panel jumps instead (see [Source Panel Never Pauses](#source-panel-never-pauses-smooth-scrolling-rule)).
 
-| Change Type          | Left Lines | Right Lines | Left Behavior                 | Right Behavior                   |
-| -------------------- | ---------- | ----------- | ----------------------------- | -------------------------------- |
-| Pure insertion (0→3) | 0          | 3           | **Pauses**                    | Scrolls                          |
-| Pure deletion (3→0)  | 3          | 0           | Scrolls                       | **Pauses**                       |
-| Modification (2→5)   | 2          | 5           | Scrolls first (2 lines)       | Then scrolls (remaining 3 lines) |
-| Modification (5→2)   | 5          | 2           | Scrolls first (3 extra lines) | Then both scroll together        |
+| Change Type          | Left Lines | Right Lines | Left Behavior                    | Right Behavior                   |
+| -------------------- | ---------- | ----------- | -------------------------------- | -------------------------------- |
+| Pure insertion (0→3) | 0          | 3           | **Pauses**                       | Scrolls                          |
+| Pure deletion (3→0)  | 3          | 0           | Scrolls                          | **Pauses**                       |
+| Modification (2→5)   | 2          | 5           | Scrolls 2 lines, then **pauses** | Scrolls 2 lines, then 3 more     |
+| Modification (5→2)   | 5          | 2           | Scrolls 2 lines, then 3 more     | Scrolls 2 lines, then **pauses** |
 
 **Behavior breakdown**:
 
@@ -119,7 +121,7 @@ Midpoint of insertion approaching 50% viewport mark:
 └─────────────────┘             └─────────────────┘
 ```
 
-**At the switch point (midpoint crosses 50%):**
+**At the switch point (midpoint crosses 50%), with the user scrolling the right panel:**
 
 - Left panel PAUSES
 - Right panel continues scrolling to catch up
@@ -137,6 +139,8 @@ After switch - left paused, right catching up:
 │ 7  unchanged    │ ←──────────→│ 9  unchanged    │
 └─────────────────┘             └─────────────────┘
 ```
+
+If the user scrolls the left panel instead, the left panel keeps moving 1:1 and the right panel jumps ahead by the inserted lines at the switch point (see [Source Panel Never Pauses](#source-panel-never-pauses-smooth-scrolling-rule)).
 
 ### Why 50%?
 
@@ -185,11 +189,12 @@ sourceScroll = scrollTop  // ALWAYS, no exceptions
 followerScroll = scrollTop + offset  // Offset changes at transition points
 ```
 
-**Note on "pausing"**: The visual effect of one panel pausing while the other scrolls is achieved through **offset jumps**, not actual pausing. At the transition point (when the change midpoint crosses viewport center), the follower's offset instantly changes. This creates the visual appearance of:
+How the follower crosses a change depends on which side holds the change's extra lines:
 
-- Before transition: Both panels scrolling together (offset = 0 for this change)
-- At transition: Follower "jumps" (offset applied instantly)
-- After transition: Both panels scrolling together again (with new offset)
+- **Extra lines on the source side**: the follower genuinely pauses. From the transition point (the change midpoint crossing the viewport center) it holds still while the source scrolls through the extra lines, then both continue together.
+- **Extra lines on the follower side**: the follower cannot pause backwards, so at the transition point its offset is applied at once and it jumps ahead by the extra lines.
+
+Before and after a change both panels scroll together, aligned to the previous and the next context respectively.
 
 ---
 
@@ -272,12 +277,13 @@ There is no fixed word or character granularity. Each modification block (a run 
 
 ## Gutter Connector Visualization
 
-The center gutter shows SVG connectors between corresponding regions:
+The center gutter shows SVG connectors between corresponding regions, drawn as filled bands with curved (Bezier) edges:
 
 - **Aligned sections**: No connector (context lines)
-- **Insertions**: Trapezoid narrowing from right (full height) to left (thin line)
-- **Deletions**: Trapezoid narrowing from left (full height) to right (thin line)
-- **Modifications**: Trapezoid connecting regions of different heights
+- **Insertions**: Band narrowing from the right region (full height) to a thin line on the left, continued across the left panel by the insertion marker
+- **Deletions**: Band narrowing from the left region (full height) to a thin line on the right, continued across the right panel by the deletion marker
+- **Modifications**: Band connecting regions of different heights
+- **Collapsed unchanged regions**: A wavy line across both panels, with gaps for its labels, joined by a smooth curve through the gutter
 
 ---
 
@@ -324,6 +330,7 @@ followerScroll = scrollTop + totalOffset  // Follower gets offset applied
 totalOffset = 0
 
 for each change section (in top-to-bottom order):
+  offset = followerPixels - sourcePixels
   // Calculate when this change's midpoint crosses viewport center
   if (content is on source side):
     transitionScroll = contentMidpoint - viewportCenter
@@ -331,26 +338,32 @@ for each change section (in top-to-bottom order):
     // Content on follower - account for accumulated offset
     transitionScroll = contentMidpoint - viewportCenter - totalOffset
 
-  // Apply offset if we've scrolled past the transition point
-  if (scrollTop >= transitionScroll):
-    totalOffset += (followerPixels - sourcePixels)
+  if (offset < 0):
+    // Source has the extra lines: pause the follower while the source scrolls through them
+    if (transitionScroll <= scrollTop < transitionScroll + |offset|):
+      return follower at transitionScroll + totalOffset
+    if (scrollTop >= transitionScroll + |offset|):
+      totalOffset += offset
+  else if (scrollTop >= transitionScroll):
+    // Follower has the extra lines: jump
+    totalOffset += offset
 ```
 
 **Key insights:**
 
 1. **Offset model**: Each change contributes `followerPx - sourcePx` to the total offset
-   - Insertions (right-only): positive offset (follower scrolls ahead)
-   - Deletions (left-only): negative offset (follower scrolls behind)
+   - Change lines on the follower side: positive offset (follower jumps ahead)
+   - Change lines on the source side: negative offset (follower pauses, then stays behind)
 
-2. **Transition point**: The offset is applied when `scrollTop >= transitionScroll`
-   - Before transition: `follower = source` (both aligned to previous context)
-   - After transition: `follower = source + offset` (both aligned to next context)
+2. **Transition point**: The change midpoint crossing the viewport center
+   - Before transition: the follower keeps the offset of the previous changes (aligned to previous context)
+   - After transition (and after the pause zone, for a negative offset): the offset includes this change (aligned to next context)
 
 3. **Coordinate systems**: When content is on the follower side, we must account for the accumulated offset when calculating where the midpoint appears in the viewport
 
 4. **Symmetry**: The algorithm is symmetric - scrolling left vs right just swaps which side is source/follower
 
-5. **Source side must be the panel under the pointer**: The mapping is not a bijection (the follower can be paused or clamped, and collapsed regions can leave one side with no scroll range at all). Re-translating from the wrong side is therefore not the inverse and produces jumps. Overlays that intercept wheel events outside the panel containers (the collapse indicator in `DiffGutter`) must call `scrollBy(side, deltaX, deltaY)` from `useMonacoSyncScroll` with the side resolved from the pointer position, never forward to a fixed side.
+5. **Source side must be the panel under the pointer**: The mapping is not a bijection (the follower can be paused or clamped, and collapsed regions can leave one side with no scroll range at all), so translating from the wrong side produces jumps. Overlays that intercept wheel events outside the panel containers (such as the collapse indicator in `DiffGutter`) call `scrollBy` from `useMonacoSyncScroll` with the side under the pointer, never a fixed side.
 
 ### Key Files
 

@@ -7,22 +7,29 @@ minimumReleaseAgeExclude:
   - "nanoid@3.3.18"
   - "nanoid@5.1.16"
   - "postcss@8.5.26"
+  # CVE-2026-93749 fix, published 2026-09-30; safe to remove after 2026-10-07
+  - "source-map-js@1.2.2"
   - "undici@7.29.0"
 
 overrides:
   # sass is a build-time tool mislisted as a runtime dep; drops chokidar@3 -> braces (CVE-2026-93687)
   "@excalidraw/excalidraw>sass": "-"
   "@ai-sdk/provider-utils@>=4.0.0 <4.0.33": "4.0.33"
+  "brace-expansion@<1.1.21": "1.1.21"
+  "brace-expansion@>=2.0.0 <2.1.7": "2.1.7"
+  "brace-expansion@>=4.0.0 <5.0.12": "5.0.12"
   devalue: "^5.9.4"
-  "dompurify@<3.4.14": "3.4.14"
+  "dompurify@<3.4.16": "3.4.16"
   js-yaml: "4.3.2"
   lodash-es: ">=4.18.0"
   "mermaid@<11.16.1": "11.16.1"
   "nanoid@<3.3.16": "3.3.18"
   "nanoid@>=4.0.0 <5.1.16": "5.1.16"
   postcss: "8.5.26"
+  # @tailwindcss/typography pins 6.0.10 exactly; 7.1.6 fixes GHSA-rj75-hqrm-r3gf
+  "postcss-selector-parser@<7.1.6": "7.1.6"
   sharp: "0.35.4"
-  "smol-toml@<=1.7.0": "1.7.1"
+  "smol-toml@<1.9.0": "1.9.0"
   svgo: "4.1.0"
   "tar@<=7.5.20": "7.5.22"
   "undici@>=6.0.0 <6.28.1": "6.28.1"

@@ -14,9 +14,9 @@ Provide a code review for the given pull request.
 ## Steps
 
 1. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
-   - The root CLAUDE.md file, if it exists
+   - The root CLAUDE.md file, if it exists (in this repo it is a symlink to `AGENTS.md`; cite `AGENTS.md` in links)
 
-   - Any CLAUDE.md files in directories containing files modified by the pull request
+   - Any CLAUDE.md or AGENTS.md files in directories containing files modified by the pull request
 
 2. Launch a sonnet agent to view the pull request and return a summary of the changes
 

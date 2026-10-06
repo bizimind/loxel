@@ -51,7 +51,7 @@ excalidraw -f d.excalidraw query my-node --connected --ids | excalidraw -f d.exc
 excalidraw -f d.excalidraw delete my-shape
 ```
 
-To skip cascade: `--no-cascade-arrows` or `--no-cascade-text`.
+To skip cascade: `--no-cascade`, or `--no-cascade-arrows` / `--no-cascade-text` for finer control.
 
 ## Lint reports binding issues
 
