@@ -20,7 +20,7 @@ To rename a terminal, double-click its tab title, or right-click the tab and cho
 
 Terminal sessions survive context switches. When you switch to another worktree — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included.
 
-Scrollback defaults to **3,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines.
+Scrollback defaults to **50,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines.
 
 > **Note:** The scrollback setting takes effect for new terminal sessions. Existing sessions retain the buffer size they were started with.
 

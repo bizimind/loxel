@@ -50,6 +50,6 @@ Undo/redo is per worktree, so two windows on the same worktree share one history
 
 ## Persistent state
 
-Persistent stores are SQLite databases opened in WAL mode with a 5-second busy timeout: the project list (`projects.db`), per-repo review comments (`comments/<hash>.db`) and persisted UI stores (`stores.db`). Server logs are written per process to `logs/server-{instanceId}.log`, and log files of other instances are cleaned up after 24 hours, so overlapping processes (for example a server shutting down while its replacement starts) never write the same file.
+Only the server opens the SQLite databases (WAL mode, 5-second busy timeout); what lives in the state directory is listed in [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md#server-state-directory). Server logs are written per process to `logs/server-{instanceId}.log`, and log files of other instances are cleaned up after 24 hours, so overlapping processes (for example a server shutting down while its replacement starts) never write the same file.
 
 Internal temporary worktrees (used for diagnostics of past commits) are named with `INTERNAL_WORKTREE_PREFIX`, hidden from worktree lists, and force-removed when a project is initialized, so ones left behind by a crash do not accumulate. This relies on a single server using a repository at a time.

@@ -15,7 +15,7 @@ Related internal docs: [ARCHITECTURE.md](ARCHITECTURE.md) for the process overvi
 
 [project-model.ts](../src/api/project-model.ts) defines `ProjectSchema` (`id`, `path`, `name`, `addedAt`, `isBare`) and `EnrichedProject`, which `GET /api/projects` returns with inline `worktrees` and `worktreesDir` (null when the server has not initialized the project). It also holds the Add Project wizard request/response types.
 
-[project-store.ts](../src/server/project-store.ts) persists projects in `<stateDir>/projects.db` (see [SHARED_SERVER.md](SHARED_SERVER.md) for the state directory and the one-time `projects.json` migration):
+[project-store.ts](../src/server/project-store.ts) persists projects in `<stateDir>/projects.db` (see [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md#server-state-directory) for the state directory and the one-time `projects.json` migration):
 
 - Table `projects(id TEXT PRIMARY KEY, path TEXT UNIQUE NOT NULL, name TEXT NOT NULL, added_at TEXT NOT NULL)`.
 - `id` is a random UUID; `path` is the uniqueness key. `addProject` resolves the git root first, then does `INSERT OR IGNORE` and re-selects by path, so concurrent adds of the same repo from two processes converge on one row, and re-adding an existing path returns the original id (convert-to-bare relies on this: the path is unchanged, so the id survives).

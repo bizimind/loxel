@@ -96,7 +96,7 @@ Services by scope:
 | Per project (`ProjectState`)       | `initializeProject` at startup or registration                        | Git `FileWatcher`, `ReviewDb`, `LocalDb`, `WorktreeStatusTracker`, worktrees dir                                                                               |
 | Per worktree (`WorktreeResources`) | first `subscribe_worktree`; torn down when the last subscriber leaves | file, file-operations (with undo history), drafts, external files and Others-folder services, a linked worktree's own Git watcher                              |
 | Per connection (`ClientState`)     | WebSocket `open`                                                      | owned terminals, subscribed worktrees, `windowId`                                                                                                              |
-| Per LSP socket                     | `/ws/<lsp>?wt=...` upgrade                                            | one language-server session per socket; see [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)                                                                         |
+| Per LSP socket                     | `/ws/<lsp>?wt=...` upgrade                                            | one language-server session per socket, at most one per worktree path for worktree-scoped servers; see [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)              |
 
 `resolveFilePath` maps an absolute path to its owning worktree resources (drafts first, then worktree files, then Others folders and external files, preferring the requester's worktree). Watcher wiring is in [WATCHERS.md](WATCHERS.md); projects and worktrees in [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md).
 
@@ -123,21 +123,30 @@ Services by scope:
 
 ## Internal docs
 
-- [ARCHITECTURE.md](ARCHITECTURE.md): this map.
-- [ELECTRON.md](ELECTRON.md): Electron process model, what ships in the app bundle versus in-app updates, browser panels, macOS integration.
-- [SHARED_SERVER.md](SHARED_SERVER.md): one server shared by all windows, discover-or-spawn, ownership, idle shutdown, state scopes, persistent stores.
-- [RELEASE_SIGNING.md](RELEASE_SIGNING.md): macOS code signing and the provisioning profile behind passkeys.
-- [WATCHERS.md](WATCHERS.md): filesystem and Git watchers, their ownership and the status refresh pipeline.
-- [GIT.md](GIT.md): Git command layer, status tracking, diff data and the commit graph.
-- [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md): Zustand stores, server-side persistence, SQLite stores, settings and secrets.
-- [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md): Dockview, panel registry and placement, tools bars, command palette, menus.
-- [KEYBINDINGS.md](KEYBINDINGS.md): action registry, chords, focus navigation, find in panel, shortcuts inside webviews.
-- [EDITOR.md](EDITOR.md): Monaco, the markdown editor, disk sync, drafts, external files, media, localdb UI.
-- [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md): LSP managers, routing, URI schemes, diagnostics, formatting, schemas, highlighting.
-- [TERMINALS.md](TERMINALS.md): PTYs, xterm.js, notifications, the CLI inside terminals, open routing.
-- [CODING_AGENT_INTEGRATION.md](CODING_AGENT_INTEGRATION.md): agent manager, sessions, replay, devtools, fork tree.
-- [CODE_REVIEW.md](CODE_REVIEW.md): reviews, comments, anchors, export.
-- [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md): project store, setup wizard, worktree lifecycle via `wt`, Others folders, reconcile.
-- [FILES_TREE.md](FILES_TREE.md): the shared `FilesTree` component: path identity, expansion, focus, reveal.
-- [PROJECT_EXPLORER.md](PROJECT_EXPLORER.md): the project files panel: path model, Drafts and Others sections, reveal.
-- [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md): side-by-side diff spec: synchronized scrolling, intra-line highlights, gutter connectors.
+The same index as the [package README](../README.md#internal-docs), grouped the same way.
+
+**Platform**
+
+- [ELECTRON.md](ELECTRON.md) — Electron process model, what ships in the app bundle versus in-app updates, browser panels, macOS integration
+- [SHARED_SERVER.md](SHARED_SERVER.md) — how all windows share one Bun server: discover-or-spawn, ownership, idle shutdown, state scopes
+- [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
+- [WATCHERS.md](WATCHERS.md) — filesystem and git watchers, their ownership and the status refresh pipeline
+- [RELEASE_SIGNING.md](RELEASE_SIGNING.md) — macOS code signing and the provisioning profile behind passkeys
+
+**Workspace**
+
+- [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md) — project and worktree models, setup flows, `wt` integration, context switching, Others folders
+- [GIT.md](GIT.md) — git command and parser layer, status pipeline, diff selection and base resolution, commit graph, mutations
+- [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md) — dockview zones, panel registry and identity, opening and focus, tools bars, layout persistence per worktree
+- [KEYBINDINGS.md](KEYBINDINGS.md) — action registry, chords, focus navigation, find in panel, shortcuts inside webviews
+
+**Features**
+
+- [EDITOR.md](EDITOR.md) — Monaco and markdown editors, disk sync and saving, file operations, drafts, Others files, localdb, search
+- [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md) — language-server managers and routing, URI schemes, diagnostics, formatting, schemas, highlighting
+- [TERMINALS.md](TERMINALS.md) — PTY sessions, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
+- [CODE_REVIEW.md](CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
+- [CODING_AGENT_INTEGRATION.md](CODING_AGENT_INTEGRATION.md) — hosting coding-agent sessions in the server, event buffering, rewind and fork, devtools, model settings
+- [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md) — side-by-side diff spec: synchronized scrolling, intra-line highlights, gutter connectors
+- [FILES_TREE.md](FILES_TREE.md) — the shared `FilesTree` component: path identity, expansion, focus, reveal
+- [PROJECT_EXPLORER.md](PROJECT_EXPLORER.md) — the Project Files panel: path model, Drafts and Others sections, reveal

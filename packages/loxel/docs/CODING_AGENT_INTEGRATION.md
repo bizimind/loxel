@@ -114,7 +114,7 @@ Unused code: `pendingFork`, `startFork`, `clearFork`, and [ForkToast.tsx](../src
 
 `buildSessionOptions` resolves entry ids into `SessionConfig.models` (`base` plus one key per override, remapping `websearch` to `webSearch`), and adds `mode` / `profile`. It returns `{}` if the base entry is missing or its key failed to decrypt; in that case overrides are dropped too. Missing values then fall back to the SDK model router's environment variables (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL_<PROFILE>`, `OPENROUTER_WEBSEARCH_MODEL`, ...; see the README "Configuration" table), read from the loxel server's `process.env`.
 
-API keys are encrypted at rest by [routes.ts](../src/server/routes.ts) for store keys ending in `-settings` (AES-256-GCM, `enc:v1:` prefix) using [secret-store.ts](../src/server/secret-store.ts), whose key is loaded from the macOS Keychain at startup. Keys are decrypted on `GET /api/stores/:key`, so the renderer holds plaintext keys and sends them in `agent_create.sessionOptions`. A key that fails to decrypt becomes `{ err }` (`ApiKeyError`) and the UI flags it. Storage details: [STATE_AND_STORAGE.md](./STATE_AND_STORAGE.md).
+The renderer holds API keys in plaintext and sends them in `agent_create.sessionOptions`; a key that fails to decrypt arrives as `{ err }` (`ApiKeyError`) and the UI flags it. How keys are stored and encrypted is in [STATE_AND_STORAGE.md](./STATE_AND_STORAGE.md#secrets).
 
 ## Invariants and gotchas
 
