@@ -15,15 +15,14 @@ cc-git-editor solves this by detecting agent mode (`CLAUDECODE=1`) and transform
 ## Installation
 
 ```bash
-# Build
-bun run build
+pnpm run build
 
-# Install to ~/.local/bin
+# Install to ~/.local/bin (ad-hoc signing is required on macOS)
 cp dist/git dist/agentic-editor dist/continue-rebase dist/apply-staged-edits ~/.local/bin/
 for bin in git agentic-editor continue-rebase apply-staged-edits; do codesign -s - ~/.local/bin/$bin; done
 ```
 
-Ensure `~/.local/bin` is in your PATH before `/usr/bin` so the wrapper intercepts git commands.
+Ensure `~/.local/bin` is in your PATH before `/usr/bin` so the wrapper intercepts git commands. Keep all four binaries in the same directory: the wrapper launches `agentic-editor` from its own directory and finds the real git by skipping itself on PATH.
 
 ## Binaries
 
@@ -81,7 +80,7 @@ When ready, run: apply-staged-edits
 To cancel, run: rm -rf /path/to/.git/.cc-git-editor/staged
 ```
 
-The agent can then:
+Only tracked files with unstaged changes (`git diff --name-only`) are copied. The agent can then:
 
 1. Edit the copied files in the staged directory
 2. Remove lines/changes that shouldn't be staged
@@ -93,44 +92,12 @@ Agent mode is enabled when `CLAUDECODE=1` environment variable is set. Claude Co
 
 All other git commands pass through to the real git unchanged.
 
-## Architecture
-
-```
-git (wrapper)
-├── Detects CLAUDECODE=1
-├── Intercepts: rebase -i, add -p
-└── Passes through all other commands
-
-agentic-editor (GIT_SEQUENCE_EDITOR)
-├── Prints todo file path
-├── Waits for SIGTERM
-└── Exits 0 on signal (rebase continues)
-
-continue-rebase
-├── Validates PID is agentic-editor
-└── Sends SIGTERM to continue
-
-apply-staged-edits
-├── Reads edited files from staging dir
-├── Uses git hash-object + update-index
-└── Stages exact content
-```
-
 ## Development
 
 ```bash
-# Build individual binaries
-bun run build:git
-bun run build:agentic-editor
-bun run build:continue-rebase
-bun run build:apply-staged-edits
-
-# Build all
-bun run build
-
-# Install all to ~/.local/bin
-cp dist/git dist/agentic-editor dist/continue-rebase dist/apply-staged-edits ~/.local/bin/
-for bin in git agentic-editor continue-rebase apply-staged-edits; do codesign -s - ~/.local/bin/$bin; done
+pnpm run build                        # Build all binaries into dist/
+pnpm run build:git                    # Or one of: build:agentic-editor, build:continue-rebase, build:apply-staged-edits
+pnpm run typecheck
 ```
 
 ## License

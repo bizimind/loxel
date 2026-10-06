@@ -1,21 +1,29 @@
 # code-analysis
 
-Live code visualization CLI. Pick an analysis type, point it at a directory, and get an interactive visualization in your browser that hot-reloads as files change.
+Code analysis CLI. Pick an analysis plugin, point it at a directory, and get the results as a table, as JSON, or as an interactive browser visualization that live-reloads as files change.
 
 ```
-code-analysis -p loc -w packages/my-package
+code-analysis -p loc -w packages/my-package --web
 ```
 
 ## Installation
 
+Download the released binary for your platform (listed in [the manifest](https://loxel.bizimind.io/code-analysis/manifest.json)):
+
 ```bash
-bun install
+curl -fsSL https://loxel.bizimind.io/code-analysis/darwin-arm64/code-analysis -o ~/.local/bin/code-analysis && chmod +x ~/.local/bin/code-analysis
 ```
 
-Or use it directly from the repo without installing:
+Or build from the loxel monorepo (`bun build --compile` into `dist/code-analysis`):
 
 ```bash
-bun run packages/code-analysis/src/cli.ts -p loc
+pnpm -C packages/code-analysis run build
+```
+
+Or run directly from source without building:
+
+```bash
+bun packages/code-analysis/src/cli.ts -p loc
 ```
 
 ## Usage
@@ -24,9 +32,9 @@ bun run packages/code-analysis/src/cli.ts -p loc
 code-analysis [options] [command]
 
 Commands:
-  list    List all available plugins
-  run     Run a plugin and open the visualization (default command)
-  help    Display help for a command
+  run            Run a plugin and print results, or serve a visualization with --web (default command)
+  list           List all available plugins
+  help <plugin>  Show a plugin's description and options
 ```
 
 ### Running an analysis
@@ -34,15 +42,19 @@ Commands:
 `run` is the default command — you don't need to type it:
 
 ```bash
-code-analysis -p <plugin> [-w <path>] [--port <n>] [--no-open]
+code-analysis -p <plugin> [-w <path>] [-a key=value ...] [--web [--port <n>]] [-j]
 ```
 
-| Flag            | Default      | Description                                                       |
-| --------------- | ------------ | ----------------------------------------------------------------- |
-| `-p, --plugin`  | _(required)_ | Plugin to run. See [plugin specifiers](#plugin-specifiers) below. |
-| `-w, --workdir` | cwd          | Directory to analyze.                                             |
-| `--port`        | `0` (random) | Port for the local dev server.                                    |
-| `--no-open`     | —            | Skip opening the browser automatically.                           |
+| Flag            | Default      | Description                                                                  |
+| --------------- | ------------ | ---------------------------------------------------------------------------- |
+| `-p, --plugin`  | _(required)_ | Plugin to run. See [plugin specifiers](#plugin-specifiers) below.            |
+| `-w, --workdir` | cwd          | Directory to analyze.                                                        |
+| `-a, --arg`     | —            | Plugin option as `key=value`. Repeatable. See `code-analysis help <plugin>`. |
+| `--web`         | off          | Serve an interactive visualization instead of printing results.              |
+| `--port`        | `0` (random) | Port for the web server (only with `--web`).                                 |
+| `-j, --json`    | off          | Print results as JSON.                                                       |
+
+Without `--web`, results are printed as a table of paths sorted by the plugin's value field. With `--web`, the server URL is printed (open it in a browser) and the process keeps running until `Ctrl-C`.
 
 ### Listing plugins
 
@@ -53,24 +65,21 @@ code-analysis list --json   # machine-readable JSON
 
 ## Plugin specifiers
 
-The `-p` flag accepts three forms:
+The `-p` flag accepts:
 
 ```bash
 # Built-in plugin by id
 code-analysis -p loc
 
-# Variant: append /<variant> to filter the view
-code-analysis -p lint-issues/no-console
-
 # Local file (relative or absolute path)
 code-analysis -p ./my-plugin.ts
 code-analysis -p /absolute/path/to/plugin.ts
 
-# npm package
-code-analysis -p code-analysis-plugin-custom
+# Scoped npm package
+code-analysis -p @my-scope/code-analysis-plugin
 ```
 
-A plugin loaded from a path or package is validated against the plugin schema on load. If the shape is wrong, you'll get a clear error before anything starts.
+A bare name that is not a built-in id is reported as an unknown plugin. A plugin loaded from a path or package is validated against the plugin schema on load; if the shape is wrong, you get an error before anything runs.
 
 ## Built-in plugins
 
@@ -87,7 +96,7 @@ code-analysis -p loc -w packages/my-package
 
 ### `languages` — File size by language
 
-Treemap grouped by file extension, sized by bytes. The top-level nodes are extensions (`ts`, `json`, `md`, …); children are the files.
+Treemap grouped by file extension, sized by bytes. The top-level nodes are extensions (`ts`, `json`, `md`, …); children are the files. Excludes `node_modules`, `.git`, and `dist`.
 
 ```bash
 code-analysis -p languages
@@ -107,7 +116,7 @@ code-analysis -p disk-utilization
 
 ### `git-churn` — Git commit churn
 
-Treemap sized by total lines changed across all commits (`additions + deletions`). Files touched most often by commits appear largest.
+Treemap sized by total lines changed across all commits (`additions + deletions`, from `git log --numstat`). Binary files are skipped.
 
 ```bash
 code-analysis -p git-churn
@@ -126,13 +135,12 @@ Treemap of lint violations per file. Each violation is one record; the map sizes
 code-analysis -p lint-issues
 
 # Filter to a single rule
-code-analysis -p lint-issues/no-console
-code-analysis -p lint-issues/no-unused-vars
+code-analysis -p lint-issues -a rule=no-console
 ```
 
-Tries **oxlint** first (`bunx oxlint -f json`), falls back to **ESLint** (`bunx eslint -f json`). Whichever produces valid JSON output is used.
+Tries **oxlint** first (`bunx oxlint -f json`), falls back to **ESLint** (`bunx eslint -f json`).
 
-**Variant:** rule name as it appears in the linter output (e.g. `no-console`, `typescript/no-explicit-any`).
+**Options:** `rule` — rule name as it appears in the linter output (e.g. `no-console`, `typescript/no-explicit-any`).
 
 ---
 
@@ -145,70 +153,67 @@ Treemap of TypeScript errors per file, sized by error count.
 code-analysis -p type-issues
 
 # Filter to a specific error code
-code-analysis -p type-issues/TS2345
-code-analysis -p type-issues/TS7006
+code-analysis -p type-issues -a code=TS2345
 ```
 
-Runs **tsc** with `--noEmit`, falling back to the preview-era **tsgo** command for projects
-that have not migrated yet.
+Runs `bunx tsc --noEmit`, falling back to the preview-era `tsgo` command for projects that have not migrated yet.
 
-**Variant:** TypeScript error code (e.g. `TS2345`, `TS7006`).
+**Options:** `code` — TypeScript error code (e.g. `TS2345`, `TS7006`).
 
 ---
 
 ### `import-graph` — Import dependency graph
 
-Force-directed network graph of `import` edges between source files. Nodes are files; edges are imports. Covers `.ts`, `.tsx`, `.js`, `.jsx`. Only relative imports are tracked (package imports are not file nodes).
+Force-directed network graph of import edges between source files, built with dependency-cruiser. Nodes are files; edges are imports. `node_modules` are not followed; `.git` and `dist` are excluded.
 
 ```bash
 # Full graph
-code-analysis -p import-graph
+code-analysis -p import-graph --web
 
 # Scoped to a subtree
-code-analysis -p import-graph/src/components
+code-analysis -p import-graph -a scope=src/components --web
 ```
 
-**Variant:** a path prefix — only files under that prefix appear as sources or targets.
+**Options:** `scope` — root path to scope the graph; `threshold` (default `3`) — modules imported more than N times are treated as shared modules: colored in the legend and shown as small dots on the nodes that import them. The threshold can also be adjusted in the page or via `?threshold=`.
 
 **Interaction:**
 
-- Drag nodes to pin them in place
+- Drag nodes to reposition them
 - Scroll to zoom, drag background to pan
-- Hover a node to see its in/out degree and full path
+- Hover a node to see its full path, in/out degree, and the shared modules it uses
 
 ---
 
 ## How live updates work
 
-The visualization is served by a local Vite dev server. When a source file matching the plugin's watch patterns changes on disk, the plugin re-runs and the browser reloads automatically — no manual refresh needed.
+With `--web`, the visualization is served by a local Bun server. When a file matching the plugin's `watchGlobs` changes on disk, the plugin re-runs and connected browsers reload automatically — no manual refresh needed.
 
 ```
 edit src/foo.ts → watcher fires → plugin re-runs → data.json rewritten → browser reloads
 ```
 
-Vite starts once and stays running until you press `Ctrl-C`. On exit, the dev server and temporary data files are cleaned up automatically.
+The server runs until you press `Ctrl-C`; temporary data files are cleaned up on exit.
 
 ---
 
 ## Building a plugin
 
-A plugin is any module with a default export that satisfies the `AnalysisPlugin` interface. You can write one in TypeScript and pass it directly with `-p ./my-plugin.ts`.
+A plugin is any module whose default export satisfies the `AnalysisPlugin` interface (defined in `src/plugin.ts`). You can write one in TypeScript and pass it directly with `-p ./my-plugin.ts`.
 
 ### Interface
 
 ```typescript
-import type { AnalysisPlugin, AnalysisRecord, VizConfig } from "code-analysis/plugin";
-
-const plugin: AnalysisPlugin = {
+const plugin = {
   meta: {
     id: "my-plugin", // unique id, shown in `list`
     description: "What it does",
     vizType: "treemap", // "treemap" | "network-graph"
     options: [
+      // passed via -a key=value; shown by `code-analysis help my-plugin`
       { key: "myOption", description: "What it controls", default: "default-value" },
       { key: "required", description: "This must be provided", required: true },
     ],
-    watchGlobs: ["src/**/*.ts"], // globs that trigger a re-run on change
+    watchGlobs: ["src/**/*.ts"], // globs that trigger a re-run on change (with --web)
   },
 
   async generate(workDir, args) {
@@ -233,6 +238,8 @@ const plugin: AnalysisPlugin = {
 export default plugin;
 ```
 
+`args` holds the `-a` values with option defaults applied; a missing `required` option exits with an error before `generate` runs.
+
 ### Treemap records
 
 For a treemap plugin, each record needs a `path` (slash-separated, becomes the hierarchy) and at least one numeric field used as `valueField`:
@@ -245,7 +252,7 @@ One path can appear in multiple records — values are summed. Categorical field
 
 ### Network graph records
 
-For a network-graph plugin, each record needs the source and target fields declared in the config:
+For a network-graph plugin, `buildConfig` returns `{ vizType: "network-graph", title, sourceField, targetField, weightField?, threshold? }`, and each record needs the declared source and target fields:
 
 ```typescript
 { path: "src/a.ts", source: "src/a.ts", target: "src/b.ts" }
@@ -253,32 +260,13 @@ For a network-graph plugin, each record needs the source and target fields decla
 
 (`path` is still required by the record schema; by convention, set it to `source`.)
 
-### Variant handling
-
-If `supportsVariants: true`, the part after `/` in the plugin specifier is passed as the second argument to both `generate` and `buildConfig`. You decide what it means.
-
-```bash
-code-analysis -p my-plugin/some-variant
-#                           ^^^^^^^^^^^^
-#                           variant === "some-variant"
-```
-
-Common patterns:
-
-- A filter key/value written into `config.filter` (used by the treemap HTML natively)
-- A path prefix to scope the analysis to a subtree
-- A specific rule, code, or category name
-
 ### Using an npm package
 
-Export your plugin as the package's default export and publish it. Users install and run it by package name:
+Export your plugin as the package's default export, publish it under a scope, install it where it can be resolved, and run it by package name:
 
 ```bash
-bun add -g code-analysis-plugin-my-tool
-code-analysis -p code-analysis-plugin-my-tool
+code-analysis -p @my-scope/code-analysis-plugin
 ```
-
-The plugin is validated on load — if the shape is wrong, a descriptive error is shown before the server starts.
 
 ---
 
@@ -297,6 +285,6 @@ URL params `?title=`, `?unit=`, `?valueField=` override `config.json` (useful fo
 
 ### Network graph
 
-Force-directed graph (d3-force). Nodes are files; edges are directed relationships. Zoom with the scroll wheel, pan by dragging the background, drag nodes to pin them.
+Force-directed graph (d3-force). Nodes are files; edges are directed relationships. Zoom with the scroll wheel, pan by dragging the background, drag nodes to reposition them.
 
-Same hot-reload contract as the treemap — rewrites `data.json` → Vite pushes a full reload.
+Same live-reload contract as the treemap.

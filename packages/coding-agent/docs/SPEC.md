@@ -1,4 +1,10 @@
-# `coding-agent` Specification (Programmatic-Only)
+# coding-agent design spec
+
+This is the original design spec for `coding-agent`, written before the implementation. The code implements most of it and is authoritative wherever the two differ. Clearly unbuilt aspirations (and the plan-era acceptance criteria, CI plan, and research notes) have been removed. The remaining requirements have not all been checked against the code line by line. Things the code added later, which this spec does not cover:
+
+- The high-level `Session` SDK API ([`../src/session/session.ts`](../src/session/session.ts)).
+- Loop control: cycle detection over tool calls, a periodic LLM progress check using the `judge` model profile, and a safety step cap ([`../src/orchestrator/loop-control.ts`](../src/orchestrator/loop-control.ts)).
+- Completion-condition checks that run before a run is allowed to finish ([`../src/orchestrator/completion-conditions.ts`](../src/orchestrator/completion-conditions.ts)).
 
 ## Goal
 
@@ -363,43 +369,11 @@ Policy requirements:
 
 ### 3.4) AI SDK v6 + Zod 4 Integration Decisions
 
-Core runtime decisions (SDK-native first):
-
-- use AI SDK v6 `generateText` / `streamText` for the core orchestration loop.
-- use `ToolLoopAgent` for reusable subagents where shared defaults are beneficial; keep primary orchestrator loop explicit for protocol/event control.
-- use `tool(...)` definitions as the canonical runtime tool contract.
-- use `ModelMessage`-style SDK message types directly in session state and wire payloads wherever possible.
-
-Loop control decisions:
-
-- explicit `stopWhen` policy per run (do not rely on hidden defaults), with hard cap and optional sentinel-based stop conditions (`hasToolCall` for finalization tools).
-- use step-level hooks (`prepareStep` / step callbacks) for dynamic tool/model shaping and policy injection.
-- support approval-gated tools through SDK `needsApproval` semantics, mapped into protocol `approval.*` events.
-
-Schema decisions (Zod 4):
-
-- author tool schemas in Zod 4 and derive TypeScript types from schemas only.
-- generate JSON Schema via `z.toJSONSchema(...)` where raw schemas are needed (transport/docs/provider compatibility).
-- set JSON Schema conversion behavior explicitly:
-  - `target`: default `draft-2020-12` unless downstream requires otherwise.
-  - `unrepresentable`: default `"throw"` in CI checks, optionally `"any"` only for controlled compatibility fallback.
-  - `cycles` / `reused`: use deterministic settings to avoid unstable schema output between runs.
-- avoid `z.fromJSONSchema()` as a core dependency path (documented experimental API); use only behind explicit compatibility adapters.
-
-Provider integration decisions:
-
-- OpenRouter is primary model transport.
-- prefer dedicated provider package when available (`@openrouter/ai-sdk-provider`); keep OpenAI-compatible base URL adapter as fallback.
-- pass provider-specific options through SDK provider option fields; avoid custom ad-hoc transport fields.
-- web search behavior is abstracted behind `WebSearch` tool contract, with provider/plugin differences normalized in adapter layer.
-
-Middleware decisions:
-
-- use AI SDK language-model middleware for cross-cutting concerns:
-  - telemetry and trace tags
-  - prompt segment diagnostics (dev only)
-  - redaction/safety preflight
-  - provider fallback instrumentation
+- the orchestration loop calls AI SDK v6 `streamText` directly, with an explicit `stopWhen` step cap, so the runtime keeps full control over protocol events.
+- tools are defined with AI SDK `tool(...)`; approval gating is done by the runtime (per-tool `requiresApproval` mapped to `approval.*` events), not by SDK `needsApproval`.
+- tool schemas are authored in Zod 4, and TypeScript types are derived from them with `z.infer`.
+- OpenRouter is the model transport via `@openrouter/ai-sdk-provider`; provider-specific options go through SDK provider option fields.
+- web search provider/plugin differences are hidden behind the `WebSearch` tool contract.
 
 ### 4) Human Interaction Tools
 
@@ -411,8 +385,6 @@ Host-side interaction primitives (protocol-level, UI-agnostic):
 
 - `human.input.requested` with typed payload (`question`, `options`, `multiSelect`, `metadata`)
 - `human.input.response` with selected option IDs + optional freeform text
-- `human.input.timeout`
-- `human.input.rejected`
 
 Approval events remain separate from general Q&A:
 
@@ -476,7 +448,7 @@ All approval and persistence rules in this section are `MUST`.
 
 Policy engine for escalation and consent:
 
-- classify action risk (`safe`, `needs_confirmation`, `blocked`)
+- each tool declares whether it requires approval (currently `Edit`, `Write`, `MultiEdit`, `Bash`, `TaskStop`, among others; see `requiresApproval` in `src/tools/handlers.ts`)
 - require explicit approval for destructive/system-affecting actions
 - support scoped reusable approvals with explicit user intent.
 
@@ -546,24 +518,6 @@ Prompt source strategy:
 - keep prompts versioned and testable as files
 - define a deterministic merge order for prompt layers
 - support profile-based prompt bundles per model family (GLM-5 vs Kimi K2.5)
-- use the referenced prompt corpus as input inspiration for mode/tool/system prompt coverage and gaps
-
-Prompt corpus extraction plan (from cloned `claude-code-system-prompts`):
-
-- build a normalized prompt catalog keyed by prompt type (`system`, `reminder`, `tool`, `agent`, `data`, `skill`)
-- map each tool prompt to explicit behavioral constraints (e.g., parallelism, read-only plan mode, approval handling)
-- distill token-efficient rules into reusable prompt snippets:
-  - prefer specialized tools over shell for file/search
-  - keep tool descriptions concise and task-specific
-  - keep intermediate updates short and progress-oriented
-  - require source citation behavior for web search-enabled responses
-- version these distilled prompts independently from runtime logic
-
-Prompt governance:
-
-- every prompt bundle has version + changelog metadata
-- runtime emits prompt profile/version in telemetry for reproducibility
-- keep prompt templates provider-agnostic where possible
 
 ### Prompt Taxonomy (What We Need To Author)
 
@@ -616,9 +570,6 @@ Prompt quality gates:
 
 - placeholder validation (no unresolved `${...}` at runtime).
 - capability validation (referenced tool must be declared or gated behind conditional checks).
-- token-budget lint.
-- contradiction lint against base policy rules.
-- snapshot tests for prompt assembly output by scenario.
 
 ## Progressive Disclosure Architecture
 
@@ -635,17 +586,6 @@ Observed patterns from harness research:
 - Codex rebuilds initial context each turn from composable components (permissions, collaboration mode, memory/app/skill directives, user instructions, environment context).
 - Codex emits post-event warnings (for example after compaction) as dedicated events rather than embedding all warnings in base prompts.
 - Claude Agent SDK permission `plan` mode explicitly allows planning and clarifying questions while blocking execution.
-
-Concrete research anchors used for this design:
-
-- OpenCode: `packages/opencode/src/session/prompt.ts` (`insertReminders`, plan/build transition injection, queued-message reminders).
-- OpenCode: `packages/opencode/src/tool/read.ts` + `packages/opencode/src/session/instruction.ts` (progressive instruction disclosure after `Read`).
-- OpenCode: `packages/opencode/src/tool/registry.ts` (runtime tool gating and optional tool enablement).
-- Codex: `codex-rs/core/src/codex.rs` (`build_initial_context` layered assembly each turn).
-- Codex: `codex-rs/core/templates/collaboration_mode/plan.md` and `default.md` (mode-specific instruction overlays).
-- Codex: `codex-rs/core/src/proposed_plan_parser.rs` + `stream_events_utils.rs` (plan-block parsing/stripping flow).
-- Codex: `codex-rs/core/src/compact.rs` (post-compaction warning event emission).
-- Claude prompt corpus: `system-reminder-plan-mode-*`, `system-reminder-exited-plan-mode.md`, `tool-description-{websearch,toolsearch,askuserquestion,enterplanmode,exitplanmode}.md`.
 
 ### Prompt Layers (Disclosure Order)
 
@@ -881,20 +821,22 @@ All persistent agent state lives under:
 
 - `~/.local/state/loxel/coding-agent/`
 
-Proposed hierarchy:
+Hierarchy:
 
 - `settings.json`
 - `permissions/`
-  - `project/<projectHash>.json` (`allow_always` rules)
+  - `project/<sha256 of workspace root>.json` (`allow_always` rules)
   - `session/<sessionId>.json` (`allow_this_session` rules)
 - `plans/`
   - `<random>.md` (global plan artifacts, reusable across forks/sessions)
 - `sessions/<sessionId>/`
   - `events.jsonl` (**strict source of truth**, append-only event log)
   - `branches/` (branch heads and branch metadata)
+  - `snapshots/` (per-message agent state snapshots used by rewind)
   - `artifacts/`
     - `compactions/<compactionId>.json` (compaction summaries + metadata)
     - `tool-output/` (large truncated outputs referenced by tools)
+    - `tasks/` (background task records and output)
 
 Storage rules:
 
@@ -995,138 +937,28 @@ Expose machine-readable telemetry:
 - token usage and estimated cost
 - failure categories and retry counts
 
-### 11) Implementation Quality Requirements
+### 11) Error Handling Requirements
 
-These requirements are normative and apply to package/module design, not only runtime behavior.
+Repo-wide module, type-safety, and control-flow standards live in the root `AGENTS.md`. Package-specific rules:
 
-Module structure and exports:
-
-- keep a single intentional SDK/public surface at `src/index.ts`.
-- avoid internal barrel files and re-export chains.
-- export symbols from the module where they are defined; import directly from that module.
-- avoid generic `types.ts` files; use domain-specific names (for example `model.ts`, `schema.ts`, `contracts.ts`) colocated with the owning module.
-
-Type safety:
-
-- no `any` for runtime data paths.
-- avoid unsafe assertions for untyped external data (tool input, protocol input, state files, JSONL lines, artifact files).
-- parse untrusted data with Zod (or explicit type guards) before use.
-- derive tool input/output types from Zod schemas with `z.infer`; do not duplicate manual interfaces when schemas already exist.
-- prefer deriving variant types with `pick`/`omit`/`exclude` instead of duplicating near-identical types.
-
-Control flow and readability:
-
-- prefer guard clauses and early return/throw to keep happy-path logic flat.
-- keep module responsibilities narrow and predictable.
-- avoid cross-module access to internals/private behaviors.
-
-Error handling:
-
+- the SDK surface is `src/index.ts`; `src/schemas.ts` is a browser-safe subset (Zod schemas and types only, no Node.js imports).
 - parse errors and corrupted event/state files MUST fail fast with clear, typed errors.
 - event replay MUST be strict: malformed JSONL lines, invalid event envelopes, or invalid known-event payloads are fatal.
 - `events.jsonl` reconstruction failures MUST never be silently skipped (including in listing APIs).
 
-## Testing Strategy + Fast Feedback Loop
+## Testing Strategy
 
-### Testing Principles (Non-Negotiable)
+Principles:
 
-- deterministic by default:
-  - fixed seeds, fixed clocks/timers where possible, deterministic IDs in tests.
-- hermetic:
-  - no live network in unit/integration tests unless explicitly marked `smoke`.
-- fast-first:
-  - prioritize pure-function and orchestrator-loop tests that run in milliseconds.
-- behavior-focused:
-  - verify event sequences, policy outcomes, and state transitions over implementation details.
-- minimal snapshots:
-  - snapshot only stable contracts (event envelopes, prompt assembly segments), not volatile token text.
+- deterministic by default: fixed clocks/timers where possible, deterministic IDs in tests.
+- hermetic: no live network or real model calls; loop tests use AI SDK mock models (`MockLanguageModelV3`, see `tests/helpers/mock-session.ts`).
+- behavior-focused: verify event sequences, policy outcomes, and state transitions over implementation details.
 
-### Test Layers
+Layers:
 
-1. Schema/contract tests:
-   - validate all tool input/output schemas and session event schemas.
-   - ensure Zod <-> JSON Schema parity for transport-facing schemas.
-2. Tool unit tests:
-   - each tool handler tested with mocked context, permission checks, and typed outputs.
-   - include policy edge cases (`approval_denied`, timeout, bad params).
-3. Orchestrator loop integration tests:
-   - use AI SDK mock models (`MockLanguageModelV3`, stream simulation utilities) for deterministic multi-step tool-calling flows.
-   - verify loop transitions: model -> tool -> human wait -> resume -> complete.
-4. Protocol contract tests:
-   - golden tests for stdio event streams (start/delta/tool/human/plan/complete).
-5. Provider smoke tests (opt-in/nightly):
-   - OpenRouter + selected models for compatibility drift detection only.
-
-### Fast Local Feedback Loop
-
-Core commands:
-
-- run focused tests by file/pattern first.
-- keep a watcher running during design/implementation.
-- fail fast by default for local iteration.
-
-Bun capabilities to use:
-
-- `--watch` for continuous feedback.
-- `--test-name-pattern` for surgical test runs.
-- `--bail` for immediate failure stop.
-- `--rerun-each` for flake detection loops.
-- `--randomize` + `--seed` for order sensitivity detection.
-- `--timeout` for strict upper bounds on slow tests.
-
-### What To Test For This Architecture
-
-- tool contract conformance to `claude-tools.json` required fields.
-- capability negotiation behavior when optional tools are absent/present.
-- progressive disclosure trigger matrix + cooldown logic.
-- plan mode invariants (non-mutating constraints, `ExitPlanMode` approval handshake).
-- background-task lifecycle (`Bash` + `TaskOutput` + `TaskStop`).
-- session lifecycle correctness (persist/resume/fork/rewind lineage + replay determinism).
-- rewind semantics correctness:
-  - `session.resume({sessionId, rewind_to_message_id})` restores the correct branch snapshot and creates new IDs for subsequent branch messages.
-  - rewind restores agent-controlled state (plan/todo/reminder) at the anchor.
-  - rewind does not rollback filesystem/tool side effects.
-- manual compaction correctness (`session.compact` event flow + post-compaction replay continuity).
-- `WebSearch` normalization and source-citation policy behavior.
-
-### Performance Budgets (Design Targets)
-
-- unit/schema tests: sub-second per package.
-- orchestrator integration suite: a few seconds, deterministic.
-- full local default test run: short enough for frequent invocation during development.
-- smoke/provider tests: excluded from default local loop, run in dedicated CI stage.
-
-### CI Strategy
-
-- split jobs by layer (`schema`, `tools`, `loop`, `protocol`, `smoke`).
-- gate merges on deterministic layers; smoke failures can be non-blocking initially with alerting.
-- collect flaky-test telemetry and quarantine/repair quickly.
-
-## Feature Matrix (Claude Code / Codex CLI-Inspired, Programmatic Angle)
-
-### Tooling
-
-- Structured tool registry with typed schemas
-- Parallel/sequential orchestration policy
-- Tool result attachment back into conversation state
-
-### Human-in-the-Loop
-
-- Ask-user primitives
-- Approval gates for risky actions
-- Timeout/escalation behavior
-
-### Planning
-
-- Explicit plan objects
-- Step status transitions + rationale
-- Plan-first workflow option before execution
-
-### Execution Governance
-
-- Mode flags (plan-first, direct-execute, approval-strict)
-- Command/tool guardrails via policy
-- Deterministic error envelopes for host recovery
+1. Schema/contract tests: tool input/output schemas and protocol request/event schemas, including the README protocol examples (`tests/readme-examples.test.ts`).
+2. Tool unit tests: each handler with a mocked context, permission checks, and policy edge cases (approval denied, timeout, bad params).
+3. Orchestrator loop and session tests: multi-step tool-calling flows, abort, resume, rewind, fork, and compaction against mock models.
 
 ## Appendix A: Tool Contract Matrix
 
@@ -1150,33 +982,3 @@ This appendix is normative for default runtime behavior.
 | `TodoWrite` / `TodoRead`         | `todos` (`TodoWrite`)                                           | none                                                                                   | single `in_progress` invariant                                              | `TOOL_VALIDATION_FAILED`, `TOOL_POLICY_VIOLATION`                                        |
 | `ToolSearch`                     | `query`, `max_results`                                          | none                                                                                   | provider/runtime constrained                                                | `TOOL_VALIDATION_FAILED`, `TOOL_RUNTIME_ERROR`                                           |
 | `Skill`                          | `skill`                                                         | `args`                                                                                 | runtime constrained                                                         | `TOOL_VALIDATION_FAILED`, `TOOL_NOT_AVAILABLE`, `TOOL_RUNTIME_ERROR`                     |
-
-## Acceptance Criteria
-
-- The specification clearly separates **protocol**, **orchestration**, **human interaction**, and **model routing** concerns.
-- Every critical interaction is representable as a typed JSON event.
-- Plan mode and ask-user flows are first-class and not bolted on.
-- OpenRouter with GLM-5/Kimi K2.5 is captured as a configurable provider strategy, not a hard dependency on single model behavior.
-- Scope remains strictly programmatic (no TUI requirements).
-- Protocol reuses Vercel AI SDK message/tool type semantics with minimal custom wrappers.
-- Tool definitions are DRY: schemas are the single source of truth for runtime validation and static typing.
-- The initial tool list and required schema fields are explicitly aligned to `claude-tools.json` (Claude MCP tool inventory).
-- Final tool surface is curated and minimal, includes the required tool catalog (`Read`, `Edit`, `Write`, `Glob`, `Grep`, `Bash`, `WebFetch`, `WebSearch`, `AskUserQuestion`, `EnterPlanMode`, `ExitPlanMode`, `Task`, `TaskOutput`, `TaskStop`, plus `TodoRead`/`TodoWrite`, `MultiEdit`).
-- Tool profiles explicitly define omissions/restrictions by mode (especially plan mode).
-- Notebook and slash-command tools are explicitly excluded from this package scope.
-- Progressive disclosure includes a concrete trigger matrix, counters/cooldowns, and dedupe rules.
-- `WebSearch` implementation path is explicitly defined (OpenRouter web plugin + fallback behavior + source-citation policy).
-- Prompt taxonomy and prompt-writing standards are explicitly documented with enforceable quality gates.
-- The agent loop/state machine is specified with stop conditions, event mapping, and concurrency/error model.
-- Testing strategy defines fast local iteration and deterministic CI layers with clear scope boundaries.
-- Session lifecycle includes resume/fork/rewind/compact with lineage metadata and no projection-only protocol mutations.
-- `events.jsonl` is the strict source of truth for session reconstruction.
-- Replay behavior is strict and fails fast on malformed events.
-- Relevant protocol/session events (including tool calls/results, human/approval flow, and subagent lifecycle) are persisted for reconstruction.
-- Rewind semantics are explicitly branch-aware and restore agent-controlled state (conversation context, plan, todo, reminders) without rolling back environmental side effects.
-- Manual compaction is first-class (`session.compact`) with explicit protocol events.
-- Compaction is explicitly summarize+replace for active context while preserving full raw history for future rewind/fork.
-- Plan mode requires a mandatory global plan file outside the project tree, with path-guarded edit/write permissions only for that file.
-- Permission decisions support `allow`, `allow_this_session`, `allow_always`, `deny` with explicit persistence hierarchy under `~/.local/state/loxel/coding-agent/`.
-- CLI integration plan explicitly uses monorepo `cli-common`.
-- Implementation quality constraints cover module structure, type safety, runtime parsing of untrusted data, and error-handling behavior.

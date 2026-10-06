@@ -4,17 +4,17 @@ description: The four foundational ideas behind how Loxel organizes your work.
 order: 2
 ---
 
-Before diving into specific features, it helps to understand the four ideas that shape how loxel organizes your work. Everything else builds on these.
+Before diving into specific features, it helps to understand the four ideas that shape how Loxel organizes your work. Everything else builds on these.
 
 ---
 
 ## Contexts
 
-Your unit of focus in loxel is a **context**: one project plus one worktree. When you switch worktrees, loxel restores exactly the state you left behind — open files, panel sizes and positions, agent sessions, search filters, and git graph selection. Nothing resets.
+Your unit of focus in Loxel is a **context**: one project plus one worktree. When you switch worktrees, Loxel restores exactly the state you left behind — open files, panel sizes and positions, agent sessions, search filters, and commit graph selection. Nothing resets.
 
-Context state is persisted server-side in SQLite, not just in the browser. This means it survives reloads and multi-window usage. The key is the worktree path, so each worktree has its own completely independent workspace.
+Context state is saved by Loxel, so it survives reloads, restarts, and multiple windows. Each worktree has its own completely independent workspace.
 
-Use `Cmd+Alt+W` to switch worktrees. Use `Ctrl+Alt+[` / `Ctrl+Alt+]` to go back and forward through the ones you visited.
+Click a worktree in the sidebar to switch to it. Use `Ctrl+Alt+[` / `Ctrl+Alt+]` to go back and forward through the ones you visited.
 
 ---
 
@@ -30,29 +30,29 @@ If you're working on a single branch and don't need parallelism, a regular repo 
 
 ## Drafts vs. repo files
 
-Not everything belongs in the repo immediately. Loxel has a **Detached** area in the file panel where you can create markdown notes and excalidraw drawings that don't live inside any repo. These are called **drafts**.
+Not everything belongs in the repo immediately. Loxel has a **Drafts** section in the Project Files panel where you can create markdown notes and Excalidraw drawings that don't live inside any repo. These are called **drafts**.
 
-Drafts are scoped per project + worktree — they're stored in `~/.local/state/loxel/detached/<projectHash>/<wtHash>/` and are not shared across worktrees. A draft you create while working on a feature branch stays with that worktree context.
+Drafts are scoped per project + worktree — they're stored in Loxel's [state directory](/docs/reference-env-files-cli-settings#file-locations) and are not shared across worktrees. A draft you create while working on a feature branch stays with that worktree context.
 
-When a draft is ready to become part of the repo, drag it from the Detached section into any folder in the project file tree. Loxel moves the file and updates any open editors. The typical flow: sketch a design doc or architecture diagram as a draft, hand it to the coding agent, then move it into the repo once it's worth keeping.
+When a draft is ready to become part of the repo, drag it from the Drafts section into any folder in the project file tree. Loxel moves the file and updates any open editors. The typical flow: sketch a design doc or architecture diagram as a draft, hand it to the coding agent, then move it into the repo once it's worth keeping.
 
 ---
 
 ## Review as a first-class workflow
 
-Code review isn't an afterthought in loxel — it's built into the editor. You can start a named **review session**, leave comments anchored to specific lines in a diff, and those comments track through code changes.
+Code review isn't an afterthought in Loxel — it's built into the editor. You can start a named **review session**, leave comments anchored to specific lines in a diff, and those comments track through code changes.
 
-The anchor system uses a content fingerprint of the commented lines plus surrounding context. When code changes, loxel re-locates the anchor: exact match, then nearby lines, then full-file search. If the code has been edited but context lines still match, the comment is marked `outdated` and shows a mini-diff of the original. Only if the code is gone entirely does a comment become `lost`.
+Each comment remembers the lines it was left on and the code around them. When the code changes, Loxel finds where those lines went — at the same spot, nearby, or elsewhere in the file. If the code has been edited but context lines still match, the comment is marked `outdated` and keeps the original lines so you can compare. Only if the code is gone entirely does a comment become `lost`.
 
 This is particularly useful when reviewing AI-generated code across multiple agent iterations. Leave comments that capture intent — questions, concerns, design rationale — and they'll follow the code through rewrites rather than becoming stale line-number artifacts.
 
-Review sessions are stored per repo (not per worktree), so all worktrees of the same repository share the same review history.
+Review sessions belong to the repo (not to a worktree), so all worktrees of the same repository share the same review history.
 
 ---
 
 ## See also
 
-- [Worktrees & Projects](/docs/worktrees-and-projects) — how loxel manages projects, bare repos, and per-context layout persistence
+- [Worktrees & Projects](/docs/worktrees-and-projects) — how Loxel manages projects, bare repos, and per-context layout persistence
 - [Drafts](/docs/drafts) — full reference for creating, storing, and moving draft files
 - [Code Review](/docs/code-review) — anchor system, sessions, threads, and export
 - [Getting Started](/docs/getting-started) — apply these concepts to a real project in minutes

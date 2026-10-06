@@ -101,7 +101,7 @@ Skills drift when steps lack quality criteria, not when they lack procedural det
 
 ## Structure
 
-Keep SKILL.md under 500 lines. Move detailed reference material to `references/` — Claude loads it on demand. Reference files should be one level deep from SKILL.md (no chains).
+In this repo, skills live in `.agents/skills/<skill-name>/` (`.claude/skills` is a symlink to it). Keep SKILL.md under 500 lines. Move detailed reference material to `references/` — Claude loads it on demand. Reference files should be one level deep from SKILL.md (no chains).
 
 ```
 skill-name/

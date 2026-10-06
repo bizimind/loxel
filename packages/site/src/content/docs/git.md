@@ -1,31 +1,31 @@
 ---
 title: Git
-description: Commit graph, staging, branch operations, cherry-pick, revert, and reset.
+description: Commit graph, Changes panel, branch operations, cherry-pick, revert, and reset.
 order: 6
 ---
 
-Loxel's git tooling is split across three panels that work together: the **commit graph** (an interactive DAG), the **Changes panel** (working tree and commit diffs), and the **Branches panel** (branch operations). Together they cover everything from staging a hunk to cherry-picking a range of commits.
+Loxel's git tooling is split across two panels that work together: the **Git panel**, with the interactive **commit graph** and the **branch list** (branch operations), and the **Changes panel** (working tree and commit diffs). Together they cover everything from discarding a file's changes to cherry-picking a range of commits.
 
-Open the git graph with `Ctrl+Shift+G`. The Changes panel is `Cmd+Shift+C`.
+Open the Git panel with `Ctrl+Shift+G`. The Changes panel is `Cmd+Shift+C`.
 
 ---
 
 ## Commit graph
 
-The graph shows the full commit DAG for the active worktree, with branch and tag labels on each ref.
+The graph shows the full commit history for the active worktree, with branch and tag labels on each ref.
 
 ### Selecting commits
 
 Click a commit to select it. The Changes panel updates immediately to show what changed in that commit.
 
-- `Cmd+Click` (macOS) or `Ctrl+Click` (Linux/Windows) — add or remove individual commits from the selection
-- `Shift+Click` — select a contiguous range from the last-clicked commit to the one you shift-clicked
+- `Cmd`-click (macOS) or `Ctrl`-click (Linux) — add or remove individual commits from the selection
+- `Shift`-click — select a contiguous range from the last-clicked commit to the one you shift-clicked
 
 Multi-select is useful for cherry-picking or reverting a group of commits, and for reviewing the combined diff across a range.
 
 ### Uncommitted changes row
 
-A virtual row sits just above the current branch tip whenever your working tree has staged, modified, or untracked files. It shows:
+A row sits just above a branch tip whenever the worktree that has it checked out has staged, modified, or untracked files — one row for each such worktree of the project. It shows:
 
 - An edit icon indicating it represents work in progress
 - An italic summary: "X staged, Y modified, Z untracked"
@@ -56,6 +56,7 @@ Right-click a selected commit (or range) for available operations:
 | Cherry-pick                 | Yes           | Yes          |
 | Revert                      | Yes           | Yes          |
 | Reset (soft / mixed / hard) | Yes           | No           |
+| Copy commit hash            | Yes           | No           |
 
 **Reset always shows a confirmation dialog** before executing. See [Reset](#reset) below for the three modes.
 
@@ -65,37 +66,33 @@ Right-click a selected commit (or range) for available operations:
 
 The Changes panel shows different content depending on your selection in the commit graph.
 
-**No commit selected:** shows the working tree — staged files, unstaged modifications, and untracked files. This is where you stage and unstage changes before committing.
+**No commit selected:** shows your local changes — every file that differs from HEAD, staged or not, in one tree with added/removed line counts. Double-click a file (or press `Enter`) to open its diff.
 
 **One or more commits selected:** shows the diff for that commit or range. A dropdown in the panel header lets you switch between:
 
 - **Local changes** — your working tree diff
-- **All branch changes** — all changes from the branch tip back to the merge base with main
+- **All branch changes** — all changes from the branch tip back to the merge base with the repository's default branch (for example `origin/main`)
 - A specific commit or range from the current selection
 
 ---
 
-## Staging
+## Changes panel actions
 
-### File-level staging
+Right-click a file or folder in the Changes panel for:
 
-Right-click any file in the Changes panel when no commit is selected:
+- **Open Diff** and **Open File**
+- **Reveal in Project Explorer**
+- **Copy Name**, **Copy Relative Path**, and **Copy Absolute Path**
+- **Reveal in Finder** and **Open In** (macOS)
+- **Discard Changes** — revert the file, or every changed file under the folder, to HEAD; new files are deleted and renames are undone. Shown while the panel lists local changes, and always asks for confirmation first.
 
-- **Stage** — move the file to the staged set
-- **Unstage** — move it back to unstaged
-- **Discard changes** — revert the file to HEAD (shows a confirmation dialog before executing)
-
-### Hunk-level staging
-
-Stage or unstage individual hunks from the diff viewer's **unified view**. Switch to unified mode with the toggle in the diff toolbar, then use the hunk action buttons that appear inline next to each hunk header.
-
-> **Note:** Hunk-level staging is available in unified view only. The side-by-side split view does not currently support per-hunk staging. See the [Diff Viewer](/docs/diff-viewer) page for more on the two modes.
+Loxel has no staging or commit UI; stage and commit from a terminal (or let your agent do it).
 
 ---
 
 ## Branch operations
 
-The Branches panel lists all local (and optionally remote) branches. Operations are available via the context menu on any branch row, or via the buttons in the panel header.
+The branch list in the Git panel shows all local (and optionally remote) branches. Operations are available via the context menu on any branch row, or via the buttons in the panel header.
 
 | Operation    | How to trigger                         | Notes                                                             |
 | ------------ | -------------------------------------- | ----------------------------------------------------------------- |
@@ -119,7 +116,7 @@ Reset moves the current branch pointer to a selected commit. There are three mod
 | **Mixed** | "Unstage"     | Staged changes become unstaged; working tree unchanged |
 | **Hard**  | "Discard all" | Both staged and unstaged changes are discarded         |
 
-> **Note:** A confirmation dialog always appears before a reset executes, regardless of mode. Hard reset is irreversible — loxel does not offer an undo for it.
+> **Note:** A confirmation dialog always appears before a reset executes, regardless of mode. Hard reset is irreversible — Loxel does not offer an undo for it.
 
 ---
 
@@ -135,11 +132,11 @@ Both cherry-pick and revert work on single or multi-select.
 
 ## Keyboard shortcuts
 
-Git operations in loxel are mouse-driven — there are no dedicated keyboard shortcuts for individual git actions. Use the panel shortcuts to keep your hands on the keyboard while navigating:
+Git operations in Loxel are mouse-driven — there are no dedicated keyboard shortcuts for individual git actions. Use the panel shortcuts to keep your hands on the keyboard while navigating:
 
 | Action             | Shortcut       |
 | ------------------ | -------------- |
-| Open git graph     | `Ctrl+Shift+G` |
+| Open Git panel     | `Ctrl+Shift+G` |
 | Open Changes panel | `Cmd+Shift+C`  |
 
 ---
@@ -150,5 +147,5 @@ Once you have a diff open, see [Code Review](/docs/code-review) to leave anchore
 
 ## See also
 
-- [Diff Viewer](/docs/diff-viewer) — full reference for split/unified modes, synchronized scrolling, and hunk-level staging
+- [Diff Viewer](/docs/diff-viewer) — full reference for split/unified modes, synchronized scrolling, and intra-line highlights
 - [Code Review](/docs/code-review) — starting a review session and leaving anchored comments after viewing a diff

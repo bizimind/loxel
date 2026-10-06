@@ -1,6 +1,6 @@
 # sandbox
 
-Provider-agnostic container SDK for running isolated workloads in Apple Containers, Docker, or Podman. The SDK consumes images; it does not build them.
+Provider-agnostic container SDK for running isolated workloads in Apple Containers, Docker, or Podman. The SDK consumes images; it does not build them. Use it from other workspace packages via `"@bizimind/sandbox": "workspace:*"`.
 
 ## Core concepts
 
@@ -11,12 +11,12 @@ Provider-agnostic container SDK for running isolated workloads in Apple Containe
   - `find()` lists SDK-managed containers matching a label filter.
 - **`Sandbox`** — a live container handle returned by `create()` / `attach()` / `find()`.
 
-All sandboxes created via the SDK are tagged with the baseline label `sandbox.sdk=bizimind`. `find()` always filters by this label, so the SDK never hands back containers it didn't create.
+All sandboxes created via the SDK are tagged with the baseline label `sandbox.sdk=bizimind` (exported as `SDK_LABEL` / `SDK_LABEL_VALUE`). `find()` always filters by this label, so the SDK never hands back containers it didn't create.
 
 ## Quick start
 
 ```ts
-import { SandboxTemplate } from "sandbox";
+import { SandboxTemplate } from "@bizimind/sandbox";
 
 const template = new SandboxTemplate({
   name: "my-sandbox",
@@ -75,7 +75,7 @@ Create and start a new container. All spec fields can be overridden:
 - `volumes`, `ports`: appended
 - everything else: replaced
 
-By default the final container name is `<spec.name>-<random>` — pass an explicit `name` override to use an exact name.
+By default the final container name is `<spec.name>-<random>` — pass an explicit `name` override to use an exact name. If a stopped container already has that name it is removed first; a running one throws `SandboxError({ code: "name_conflict" })`.
 
 ```ts
 const template = new SandboxTemplate({ name: "worker", image: "node:22", env: { ROLE: "worker" } });
@@ -213,12 +213,13 @@ All errors extend `SandboxError` and carry a `code`:
 | `not_found`            | Container not found by ID or name                                     | `ContainerNotFoundError` |
 | `cli_failed`           | CLI command exited non-zero (carries `command`, `exitCode`, `stderr`) | `CliError`               |
 | `destroyed`            | Called a method on a destroyed `Sandbox`                              | `SandboxError`           |
+| `name_conflict`        | `create()` target name belongs to a running container                 | `SandboxError`           |
 | `port_unmapped`        | `address()` / `resolveAddress()` couldn't resolve a port              | `SandboxError`           |
 | `unsupported`          | Feature not available on this provider                                | `SandboxError`           |
 | `invalid_spec`         | Spec failed Zod validation                                            | `SandboxError`           |
 
 ```ts
-import { SandboxError, CliError } from "sandbox";
+import { SandboxError, CliError } from "@bizimind/sandbox";
 
 try {
   await sandbox.copyTo("/a", "/b");
@@ -240,7 +241,7 @@ try {
 | `podman` | via Podman Machine        | Native | `localhost` + mapped port | Full feature set            |
 
 ```ts
-import { detectProviders, detectPreferredProvider, createProvider } from "sandbox";
+import { detectProviders, detectPreferredProvider, createProvider } from "@bizimind/sandbox";
 
 detectProviders(); // ["apple", "docker"]
 detectPreferredProvider(); // "apple" | null
@@ -251,44 +252,11 @@ Providers can be used directly if you need to bypass `Sandbox`/`SandboxTemplate`
 
 ## Sandbox image
 
-A reference agent-friendly image is built in `images/` via `docker buildx bake`. The SDK doesn't require it — any OCI image works — but it's what loxel ships and tests against.
+A reference agent-friendly image (`ghcr.io/bizimind/loxel/sandbox:latest`) is defined in `images/` and built with `docker buildx bake`. The SDK doesn't require it — any OCI image works. See [docs/SANDBOX_IMAGE.md](docs/SANDBOX_IMAGE.md) for the bundled tools, build instructions, and how to bump versions.
+
+## Development
 
 ```bash
-cd images
-docker buildx bake sandbox --set '*.platform=linux/<arch>' --load
-# image tag: ghcr.io/bizimind/loxel/sandbox:latest
+pnpm -C packages/sandbox run test        # Unit tests; integration tests run only when a container runtime is ready
+pnpm -C packages/sandbox run typecheck
 ```
-
-### Baked tools (version-pinned via `docker-bake.hcl`)
-
-Each tool is fetched with an SHA256 checksum and composed into the final image as `/usr/local/bin/<tool>`:
-
-| Category            | Tools                                                                                  |
-| ------------------- | -------------------------------------------------------------------------------------- |
-| Code search / files | `rg` (ripgrep), `fd`, `bat`, `fzf`, `jq`, `tree`                                       |
-| Languages           | `python3` + `pip` (python-build-standalone), `go`, `node` + `npm`, `pnpm`, `bun`, `uv` |
-| Cloud / infra       | `aws` (aws-cli), `terraform`, `kubectl`, `helm`                                        |
-| Source / CI         | `git` (baked), `gh`                                                                    |
-| Env / workflow      | `direnv`                                                                               |
-| Agents              | `claude`, `codex`                                                                      |
-
-### Apt-installed utilities
-
-Stable OS utilities with no agent-level version sensitivity: `perl`, `less`, `libcurl3-gnutls`, `wget`, `unzip`, `make`, `gcc`, `g++`, `zsh`, `openssh-client`, `gnupg`.
-
-### Shell
-
-Bash is the default `CMD`. Zsh + Oh My Zsh (theme `robbyrussell`, plugins `(git fzf)`) is installed system-wide at `/opt/oh-my-zsh` and opt-in via `zsh -l`. Oh My Zsh is pinned to a specific upstream commit for reproducibility.
-
-### Environment variables
-
-| Variable           | Value                                 | Why                                                                             |
-| ------------------ | ------------------------------------- | ------------------------------------------------------------------------------- |
-| `PATH`             | `/usr/local/bin:/usr/local/go/bin:…`  | Exposes baked binaries and Go toolchain.                                        |
-| `ZSH`              | `/opt/oh-my-zsh`                      | Oh My Zsh framework root.                                                       |
-| `GIT_EXEC_PATH`    | `/usr/local/lib/git-core`             | The baked git layout lives under `/usr/local`; without this, HTTPS clones fail. |
-| `GIT_TEMPLATE_DIR` | `/usr/local/share/git-core/templates` | Same rationale — `git init` picks up the correct default templates.             |
-
-### Updating versions
-
-Bump the relevant `<TOOL>_VERSION` and `<TOOL>_SHA256_{AMD64,ARM64}` variables at the top of `docker-bake.hcl`. Checksums are taken from upstream release artifacts (preferred) or computed directly when no checksum file is published.

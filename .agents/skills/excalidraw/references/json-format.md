@@ -12,7 +12,7 @@ This is a read-only reference for understanding diagram structure. Use the CLI f
   "version": 2,
   "source": "excalidraw-cli",
   "elements": [],
-  "appState": { "gridSize": null, "viewBackgroundColor": "#ffffff" },
+  "appState": { "gridSize": null, "viewBackgroundColor": "#ffffff", "theme": "dark" },
   "files": {}
 }
 ```

@@ -134,9 +134,7 @@ WT_DIR=~/wt/myrepo wt add feature-x
 
 A worktree's name is its path under the worktrees directory, so nested names work: `wt add feat/voice-input` creates `.worktrees/feat/voice-input` on branch `feat/voice-input`.
 
-`wt add <name>` creates a branch named after the worktree, started from the remote default branch as of your last fetch (`origin/main`, read from `origin/HEAD` or by name). This keeps a bare setup honest: local `main` is a mirror that only moves when someone pulls inside the `main` worktree, while `origin/main` moves on any fetch or pull from any worktree. wt never fetches for you; run `git fetch` when you want a newer base. The new branch does not track `origin/main`. Pass `--base <ref>` to start from any ref or commit instead (`--base HEAD` gives plain `git worktree add` behaviour), and `-b <branch>` to check out an existing branch. A repository with no `origin` default, local-only, a bare clone that never fetched with a refspec, or one whose only remote has another name, starts from `HEAD` like git does. A new branch never tracks its start point, even with `--base origin/foo`; set an upstream yourself if you want one. If a branch named after the worktree already exists, wt offers to reuse it or recreate it, unless another worktree has it checked out, which is an error.
-
-If a registered worktree's checkout directory disappears outside `wt`, it remains listable and removable. Git-dependent inspection reports no dirty changes or upstream divergence for that unavailable checkout, and a cleanup hook that cannot start there is skipped with a warning.
+`wt add <name>` creates a branch named after the worktree, started from the remote default branch as of your last fetch (`origin/main`, read from `origin/HEAD` or by name) rather than from local `main`, which in a bare setup only moves when someone pulls inside the `main` worktree. wt never fetches for you; run `git fetch` when you want a newer base. A repository with no `origin` default (local-only, a bare clone that never fetched with a refspec, or a remote with another name) starts from `HEAD` like git does. Pass `--base <ref>` to start from any ref or commit instead (`--base HEAD` gives plain `git worktree add` behaviour), or `-b <branch>` to check out an existing branch. A new branch never tracks its start point, even with `--base origin/foo`; set an upstream yourself if you want one. If a branch named after the worktree already exists, wt offers to reuse it or recreate it, unless another worktree has it checked out, which is an error.
 
 ### Environment
 
@@ -204,12 +202,12 @@ echo "DATABASE_URL=postgres://localhost:$((5432 + OFFSET))/myapp_${WT_NAME//\//_
 ```bash
 wt mv new-name              # rename the worktree you're currently in
 wt mv old-name new-name     # rename another one
-wt mv                       # pick from a list, then type the new name
+wt mv                       # current worktree (or pick one), then type the new name
 ```
 
 The branch follows the worktree name only when the two are already in sync, which they are for anything made by `wt add`. When they have diverged (an existing branch adopted via `add -b`), `mv` moves the directory and leaves the branch alone, saying so; pass `--branch <b>` to rename it anyway, or `-B` to never touch it. A detached worktree moves with its HEAD untouched. Uncommitted changes ride along, so there is no dirty-tree prompt.
 
-Every check runs before anything moves (the new name, the destination, the target branch), so a rejected rename leaves no half-applied state. The move is the only irreversible step: if the branch rename fails afterwards it warns and reports `branchRenamed: false` rather than failing.
+A rejected rename leaves nothing half-applied. If the branch rename fails after the directory has moved, wt warns and reports `branchRenamed: false` rather than failing. The main worktree of a non-bare repo cannot be renamed.
 
 Renaming the worktree your shell is sitting in leaves that shell on a path that no longer exists. `wt mv` prints the `cd` you need (keeping the subdirectory you were in); the `wtm` helper from [Shell Integration](#shell-integration) does it for you. Other terminals and processes in the old path have to move themselves.
 
@@ -234,7 +232,7 @@ Run interactively and wt prompts for the common decisions: the worktree name, wh
 
 ### `wt list` (alias: `ls`)
 
-List every worktree git knows about, marking the main worktree.
+List every worktree git knows about. In a non-bare repo the main worktree is marked with `*`; a bare repo has none.
 
 ```bash
 wt list
@@ -259,7 +257,7 @@ wt add feature-auth -b existing-branch # check out an existing branch instead
 
 ### `wt view [name]`
 
-Show one worktree's branch, head, path, lock state, dirty file count and upstream divergence. Picks from a list when the name is omitted. The dirty count is the number of entries `git status` reports, so a changed submodule counts once, and it is `null` when the status cannot be read.
+Show one worktree's branch, head, path, lock state, number of `git status` entries and upstream divergence. Picks from a list when the name is omitted.
 
 ### `wt mv [old] <new>` (aliases: `rename`, `move`)
 
@@ -267,11 +265,11 @@ Rename a worktree and its branch, then run `rename.wt.sh`. See [Renaming](#renam
 
 ### `wt remove [name]` (aliases: `rm`, `delete`)
 
-Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with commits merged into neither `HEAD` nor the remote default branch (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Judging against the remote default matters for a bare setup, where `HEAD` is the local `main` mirror and may lag the `origin/main` a branch started from. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused.
+Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to delete it, and `-d` refuses to delete a branch with commits merged into neither `HEAD` nor the remote default branch (it warns and reports `branchDeleted: false`); use `-D` to delete it anyway. Empty parent directories left behind by a nested name such as `feat/foo` are removed so the name can be reused. The main worktree of a non-bare repo cannot be removed, and a locked worktree must be unlocked (`git worktree unlock`) first, even with `--force`.
 
-Removal returns as soon as git has unregistered the worktree, without waiting for its files to be deleted. The checkout is renamed into `.wt-trash/` inside the worktrees directory (an instant rename on the same filesystem), git drops the worktree's metadata, and a background `rm -rf` deletes the files, so a checkout with installed dependencies goes in a fraction of a second instead of the many seconds its deletion takes. Each removal deletes only its own checkout from `.wt-trash/`; if the background deletion is interrupted (a reboot, say), the leftover stays there until you delete it. When the checkout cannot be renamed (it is already gone, for example), wt falls back to a plain `git worktree remove`. Skipping git's own clean check is safe because wt checks for changes itself, again after `clean.wt.sh` runs: changes the hook leaves behind make the removal refuse without `--force`.
+A worktree is dirty, and needs `--force`, when `git status` reports anything in it, checked both before and after `clean.wt.sh` runs. Only what `git status` shows counts: submodule content it hides (through `ignore` settings) and submodule commits that exist on no remote are deleted without asking for `--force`.
 
-Clean worktrees with initialized submodules can be removed without `--force`. A worktree is dirty when `git status` reports something; a submodule with changes, untracked files or a moved commit counts as one entry. Anything `git status` hides is not counted, whether the submodule is ignored by your git config, by the repository's `.gitmodules` or by a nested submodule's own settings, and removing the worktree deletes that hidden content without asking for `--force`. Dirtiness is the only check: commits inside a submodule that exist on no remote are not detected, and removing the worktree deletes them.
+The command returns as soon as git has unregistered the worktree; its files are deleted in the background from `.wt-trash/` inside the worktrees directory. If that deletion is interrupted (a reboot, say), the leftover stays in `.wt-trash/` until you delete it. A worktree whose directory was already deleted outside wt can still be listed and removed.
 
 ```bash
 wt remove feature-auth                 # prompts about the branch when interactive
@@ -297,7 +295,8 @@ With `-j`, stdout carries only JSON. Progress, hook output and prompts go to std
 {"name","path","branch","created":true,"base":"origin/main","hookRan":false}
 // mv
 {"name","path","branch","oldName","oldPath","oldBranch","moved":true,"branchRenamed":true}
-// view — `head` is abbreviated to 12 chars here, full in `list`; `ahead`/`behind` are null without an upstream
+// view — `head` is abbreviated to 12 chars here, full in `list`; `dirty` is null when the status
+// cannot be read, `ahead`/`behind` are null without an upstream
 {"name","path","branch","head","main","locked","dirty","ahead","behind"}
 // remove
 {"name","path","removed":true,"branchDeleted":false,"hookRan":true}
@@ -330,7 +329,7 @@ source ~/.local/share/wt/wt.sh
 | `wtr [name]`    | `wt remove`                                                                  |
 | `wtm [old] new` | `wt mv`, then follow the worktree to its new path, keeping your subdirectory |
 
-They call `wt` on PATH; set `WT_BIN` before sourcing to point somewhere else (a locally built `dist/wt`, say). They live beside the CLI so the wrappers and the `-j` shapes they parse stay versioned together.
+They call `wt` on PATH; set `WT_BIN` before sourcing to point somewhere else (a locally built `dist/wt`, say).
 
 ---
 
@@ -477,7 +476,7 @@ if (!forceReason("feat/bar", removal.dirty)) {
 }
 ```
 
-Also exported: `forceReason`, `lockedMessage`, `resolveWorktreesDir`, `listManagedWorktrees`, `currentManagedWorktree`, `getWorktreeName`, `detectRepoType`, `hasUncommittedChanges`, `getCurrentBranch`, `initBareRepo`, `transformToBare`, `ensureWorktreesDir`, the hook filename constants, and the `ProgressHandler` type.
+Each `execute*` also accepts `hookEnv`, the base environment for the hook (for example a resolved shell `PATH` when calling from a GUI app). The full export list, including worktree listing, repo helpers and the hook filename constants, is in [`src/lib/index.ts`](src/lib/index.ts).
 
 ---
 
@@ -505,7 +504,7 @@ pnpm -C packages/wt run typecheck
 pnpm -C packages/wt run build     # standalone binary at dist/wt
 ```
 
-The tests drive real git against temporary repositories created by `src/test-repo.ts`. Because wt removes worktrees and runs hooks, `test/safety-preload.ts` sandboxes every run. It is loaded by this package's `bunfig.toml`, so always run the tests with the package as cwd (`pnpm -C packages/wt run test`, or `bun test --cwd packages/wt <file>`); a `bun test packages/wt/...` from the repo root would skip it. The sandbox: `GIT_CEILING_DIRECTORIES` and a guard around wt's git helpers keep git away from this checkout, ambient `GIT_*`, `WT_*`, shell-startup and temp-dir variables are cleared, and `process.chdir`/`process.exit` are blocked. Always build fixtures with `createTestRepo()`; never point a test at a real repository.
+The tests drive real git against temporary repositories, sandboxed by `test/safety-preload.ts` so a bad test cannot touch a real checkout. The preload is loaded by this package's `bunfig.toml`, so always run the tests with the package as cwd (`pnpm -C packages/wt run test`, or `bun test --cwd packages/wt <file>`); a `bun test packages/wt/...` from the repo root would skip it. Build fixtures with `createTestRepo()` from `src/test-repo.ts`; never point a test at a real repository.
 
 ---
 
@@ -513,7 +512,7 @@ The tests drive real git against temporary repositories created by `src/test-rep
 
 - **Git** 2.31+ (`git worktree move` and `rev-parse --path-format`)
 - **bash** and **jq** for the hooks and shell helpers
-- **Bun** 1.0+ only when running or building from source
+- **Bun** 1.4+ only when running or building from source
 
 ---
 

@@ -40,4 +40,5 @@ excalidraw -f diagram.excalidraw view --scale 2
 ## Output
 
 - **Location:** PNG is saved alongside the `.excalidraw` file by default
+- **Theme:** PNGs render in Excalidraw's dark theme (dark background, colors inverted like the editor's dark mode); choose colors as you would in light mode
 - **Testing:** Open `.excalidraw` in https://excalidraw.com or the VS Code Excalidraw extension for interactive editing

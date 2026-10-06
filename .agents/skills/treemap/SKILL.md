@@ -146,7 +146,7 @@ git log --since='3 months ago' --numstat --pretty=format: \
 { "title": "Churn (3mo)", "unit": "lines changed", "valueField": "total" }
 ```
 
-Switch `valueField` to `"additions"` or `"deletions"` to see growth vs. deletion hotspots. Vendored files like `bun.lock` tend to dominate — filter or exclude by path prefix in your generator if they're noise.
+Switch `valueField` to `"additions"` or `"deletions"` to see growth vs. deletion hotspots. Lockfiles like `pnpm-lock.yaml` tend to dominate — filter or exclude by path prefix in your generator if they're noise.
 
 ### Bytes by language
 

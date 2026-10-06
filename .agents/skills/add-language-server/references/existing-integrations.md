@@ -25,7 +25,7 @@ The most complex manager. Unique behaviors not found in other LSPs:
 
 ## YAML — Global Singleton
 
-The only global LSP. Uses `attach(ws)` / `detach(ws)` instead of `createSession` / `destroySession`. Client is custom (doesn't use `createWorktreeLspClient`). In `index.ts`, the YAML route is handled separately from the `worktreeLspTypes` array.
+The only global LSP. Uses `attach(ws)` / `detach(ws)` instead of `createSession` / `destroySession`. Client is custom (doesn't use `createWorktreeLspClient`). In `server.ts`, the YAML route is handled separately from the `worktreeLspTypes` array.
 
 ## Docker — Three Non-Standard Behaviors
 

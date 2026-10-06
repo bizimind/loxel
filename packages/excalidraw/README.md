@@ -8,19 +8,17 @@ Coding agents can write code but have no way to produce visual artifacts. This C
 
 ## Install
 
-Requires [Bun](https://bun.sh) runtime.
-
 ```bash
 # From the monorepo root:
-bun run --cwd packages/excalidraw install-global
+pnpm -C packages/excalidraw run install-global
 ```
 
-This bundles the CLI and installs it to `~/.local/bin/excalidraw` with native dependencies (canvas for text measurement, resvg for PNG rendering). The install is self-contained — no link back to the repo.
+This compiles a standalone binary (`dist/excalidraw`, via `bun build --compile`), copies it to `~/.local/bin/excalidraw`, and ad-hoc signs it on macOS. The binary embeds the `@napi-rs/canvas` native module and fonts, which are extracted to `~/.cache/excalidraw-cli/` on first run.
 
-For development, run directly without installing:
+For development, run directly from source without installing:
 
 ```bash
-bun run --cwd packages/excalidraw dev -- -f diagram.excalidraw list
+bun packages/excalidraw/src/cli.ts -f diagram.excalidraw query
 ```
 
 ## Workflow
@@ -50,15 +48,20 @@ excalidraw -f diagram.excalidraw move abc123 --dx 50 --dy 0
 
 **Always use `view` to verify.** Coordinates alone don't tell you how the diagram looks — render and inspect the PNG.
 
+Pass `--id <name>` to `draw` to use a readable, stable ID instead of a generated one. Every command accepts `-j, --json` for structured output.
+
 ## Commands
 
 ### File management
 
-| Command       | Description                                     |
-| ------------- | ----------------------------------------------- |
-| `create`      | Create a new .excalidraw file                   |
-| `list` / `ls` | List all elements (IDs, types, positions, text) |
-| `view`        | Render to PNG for visual inspection             |
+| Command                              | Description                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| `create`                             | Create a new .excalidraw file (`--bg`, `--force`)                         |
+| `query [ids...]` (`q`, `list`, `ls`) | List elements, look up IDs, filter, or traverse arrow connections         |
+| `view`                               | Render to PNG for visual inspection (`-o`, `--scale`, `--padding`)        |
+| `lint`                               | Check binding integrity, arrow connections, duplicate IDs, bounding boxes |
+
+`query` options: `--type <type>`, `--text <glob>`, `--connected` with `--depth <n>` and `--direction in|out|both`, and `--ids` for newline-separated IDs suitable for piping. `view` writes `<input-basename>.png` next to the file by default and renders in Excalidraw's dark theme.
 
 ### Drawing shapes
 
@@ -71,20 +74,29 @@ excalidraw -f diagram.excalidraw move abc123 --dx 50 --dy 0
 | `draw line`           | Line (specify `--points`)                     |
 | `draw arrow`          | Arrow — use `--from`/`--to` to bind to shapes |
 | `draw freedraw`       | Hand-drawn path                               |
-| `draw frame`          | Frame container                               |
+| `draw frame`          | Frame container (`--name`, `--children`)      |
 
-Common options: `-x`, `-y`, `-w`, `-h`, `--stroke`, `--bg`, `--fill`, `--text`, `--opacity`, `--roughness`
+Common options: `--id`, `-x`, `-y`, `--stroke`, `--bg`, `--fill`, `--stroke-width`, `--stroke-style`, `--roughness`, `--opacity`. Shapes (`rect`, `ellipse`, `diamond`) add `-w`, `-h`, `--round`, `--text`, `--text-font-size`. Arrows add `--points`, `--start-head`/`--end-head` (`none|arrow|bar|dot|triangle`), and `--text`. Run `excalidraw draw <shape> --help` for the full list.
 
 ### Editing
 
-| Command             | Description                                                    |
-| ------------------- | -------------------------------------------------------------- |
-| `edit <id>`         | Change colors, text, stroke, opacity, etc.                     |
-| `move <ids...>`     | Move by offset (`--dx`/`--dy`) or absolute (`--to-x`/`--to-y`) |
-| `resize <id>`       | Resize by dimensions (`-w`/`-h`) or scale factor (`--scale`)   |
-| `delete <ids...>`   | Remove elements (cleans up bindings)                           |
-| `group <ids...>`    | Group elements together                                        |
-| `ungroup <groupId>` | Dissolve a group                                               |
+| Command                  | Description                                                                                          |
+| ------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `edit <id>`              | Change colors, text, stroke, opacity, font, lock state                                               |
+| `move [ids...]`          | Move by offset (`--dx`/`--dy`) or absolute (`--to-x`/`--to-y`)                                       |
+| `resize <id>`            | Resize by dimensions (`-w`/`-h`) or scale factor (`--scale`)                                         |
+| `delete [ids...]` (`rm`) | Remove elements and, by default, their bound text and connected arrows (`--no-cascade` to keep them) |
+| `group <ids...>`         | Group elements together                                                                              |
+| `ungroup <groupId>`      | Dissolve a group                                                                                     |
+
+### Piping
+
+`query`, `view`, `move`, and `delete` read element IDs from stdin when none are given as arguments. Input can be newline- or comma-separated IDs, a JSON array, or element objects (e.g. `jq` output — the `.id` field is extracted). Piping IDs to `view` renders only those elements (plus their bound text).
+
+```bash
+excalidraw -f d.excalidraw query api --connected --ids | excalidraw -f d.excalidraw delete
+excalidraw -f d.excalidraw query --type arrow --ids | excalidraw -f d.excalidraw view -o arrows.png
+```
 
 ### Batch operations
 
@@ -101,7 +113,7 @@ echo '[
 ]' | excalidraw -f diagram.excalidraw batch
 ```
 
-Supports: `draw`, `edit`, `move`, `resize`, `group`, `ungroup`, `delete`.
+Supports: `draw`, `edit`, `move`, `resize`, `group`, `ungroup`, `delete`. Fields mirror the CLI options in camelCase (`width`, `strokeStyle`, `startHead`, `fontSize`, …); `edit`/`resize` take `id`, `move`/`delete`/`group` take `ids` (or a single `id`), and `ungroup` takes `groupId`. Failed operations are reported per entry; the file is saved if any operation succeeded.
 
 ### Import
 
@@ -122,65 +134,16 @@ echo 'flowchart TD
 printf 'Service,Port\nAPI,8080\nDB,5432' | excalidraw -f d.excalidraw import table
 ```
 
-Options for `import mermaid`: `-x`/`-y` (offset), `-j` (JSON output).
-Options for `import table`: `-x`/`-y` (offset), `--cell-width`, `--cell-height`, `--header-bg`.
+Options for `import mermaid`: `-x`/`-y` (offset). Only flowchart/graph diagrams produce editable elements; other mermaid types are rejected.
 
-## Build
+Options for `import table`: `-x`/`-y` (offset), `--cell-width`, `--cell-height`, `--header-bg`. Markdown is detected by `|` characters; otherwise input is parsed as CSV.
 
-The CLI is a Bun script, not a compiled binary. Native addons (canvas, @resvg/resvg-js) are required at runtime for text measurement and PNG rendering.
+## Development
 
 ```bash
-bun run --cwd packages/excalidraw build           # Bundle to dist/cli.js
-bun run --cwd packages/excalidraw install-global   # Build + install to ~/.local/bin/
+pnpm -C packages/excalidraw run build            # Compile to dist/excalidraw
+pnpm -C packages/excalidraw run install-global   # Build + install to ~/.local/bin/
+pnpm -C packages/excalidraw run typecheck
 ```
 
-The `build` step patches css-tree's `createRequire()` calls (which break in bundled output) to use static imports, bundles everything except native addons into a single JS file, then restores the originals.
-
-The `install-global` step runs `build`, copies the bundle to `~/.local/lib/excalidraw/`, installs native addons there, and creates a shim at `~/.local/bin/excalidraw`.
-
-## Architecture
-
-```
-src/
-├── cli.ts                    # Command definitions (commander)
-├── version.ts                # Version from package.json
-├── dom-shim.ts               # DOM globals provider (linkedom + @napi-rs/canvas)
-├── svg-measure.ts            # SVG getBBox/getComputedTextLength for linkedom
-├── commands/
-│   ├── create.ts             # Create .excalidraw files
-│   ├── draw.ts               # Shape creation (rect, ellipse, arrow, etc.)
-│   ├── edit.ts               # Modify element properties
-│   ├── view.ts               # Render to PNG
-│   ├── move.ts               # Move elements
-│   ├── resize.ts             # Resize elements
-│   ├── delete.ts             # Delete elements
-│   ├── query.ts              # List, filter, and traverse elements
-│   ├── group.ts              # Group/ungroup
-│   ├── batch.ts              # Multi-command execution with back-references
-│   ├── import-mermaid.ts     # Import mermaid flowcharts from stdin
-│   └── import-table.ts       # Import CSV/markdown tables from stdin
-├── import/
-│   └── table-parser.ts       # CSV and markdown table parser
-├── elements/
-│   ├── element-factory.ts    # Build skeletons, convert via skeleton-converter
-│   ├── skeleton-converter.ts # Dispatch skeletons to @excalidraw/element factory functions
-│   ├── element-defaults.ts   # Default values (colors, sizes, fonts)
-│   ├── element-id.ts         # ID generation
-│   ├── element-query.ts      # Find elements by ID/type
-│   └── excalidraw-types.ts   # Type definitions
-├── file/
-│   └── excalidraw-file.ts    # Load/save .excalidraw JSON
-├── binding/
-│   └── arrow-binding.ts      # Cleanup bindings on delete
-└── render/
-    └── render-png.ts         # SVG → PNG via @resvg/resvg-js
-```
-
-Key dependencies:
-
-- **@excalidraw/element** — element creation via factory functions (`newElement`, `newArrowElement`, etc.)
-- **@excalidraw/utils** — SVG export via `exportToSvg`
-- **jsdom** — DOM environment required by @excalidraw APIs
-- **canvas** — text measurement for labeled shapes (native addon)
-- **@resvg/resvg-js** — SVG to PNG rendering (native addon)
-- **cli-common** — shared CLI utilities (output formatting, update system)
+Elements are created through `@excalidraw/element` factory functions inside a `linkedom` DOM shim, with `@napi-rs/canvas` providing text measurement and PNG rendering. Shared CLI output handling comes from `@bizimind/cli-common`.

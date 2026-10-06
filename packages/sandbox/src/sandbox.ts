@@ -142,9 +142,7 @@ export class Sandbox {
   /**
    * Execute a command with streaming stdio. Returns a handle exposing
    * web-standard stdin/stdout/stderr streams plus a `kill()` method.
-   *
-   * `tty: true` is not supported on Apple Containers; the provider throws
-   * `SandboxError({ code: "unsupported" })` in that case.
+   * `tty: true` passes `-t` to the provider's `exec` on all providers.
    */
   spawn(command: string[], options?: SpawnOptions): ExecHandle {
     return this.provider.spawn(this.requireAlive(), command, options);
