@@ -28,7 +28,7 @@ overrides:
   postcss: "8.5.26"
   # @tailwindcss/typography pins 6.0.10 exactly; 7.1.6 fixes GHSA-rj75-hqrm-r3gf
   "postcss-selector-parser@<7.1.6": "7.1.6"
-  sharp: "0.35.4"
+  sharp: "0.35.5"
   "smol-toml@<1.9.0": "1.9.0"
   svgo: "4.1.0"
   "tar@<=7.5.20": "7.5.22"
