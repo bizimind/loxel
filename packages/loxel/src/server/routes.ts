@@ -56,11 +56,16 @@ import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
 import * as projectStore from "./project-store";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
-import { decrypt, encrypt, isEncrypted } from "./secret-store";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
 import { listOthers, worktreeTree } from "./server-state";
 import { buildSpawnEnv } from "./shell-env";
 import * as storeDb from "./store-db";
+import {
+  decryptModelKeys,
+  encryptModelKeys,
+  hasPlaintextModelKeys,
+  isEncryptedStoreKey,
+} from "./store-encryption";
 import { stress } from "./stress-detector";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
 import { getCurrentVersion } from "./version";
@@ -201,54 +206,6 @@ function requireStringArray(body: Record<string, unknown>, field: string): strin
     throw new Error(`${field} must be a string array`);
   }
   return value;
-}
-
-// ---------------------------------------------------------------------------
-// Settings encryption — encrypt/decrypt apiKey fields in model entries
-// ---------------------------------------------------------------------------
-
-/** Store keys ending with this suffix contain model API keys that must be encrypted at rest. */
-const ENCRYPTED_STORE_SUFFIX = "-settings";
-
-function isEncryptedStoreKey(storeKey: string): boolean {
-  return storeKey.endsWith(ENCRYPTED_STORE_SUFFIX);
-}
-
-function transformModelKeys(
-  jsonStr: string,
-  transform: (apiKey: string) => string | { err: string },
-): string {
-  const parsed: unknown = JSON.parse(jsonStr);
-  if (typeof parsed !== "object" || parsed === null) return jsonStr;
-  const state = (parsed as Record<string, unknown>).state;
-  if (typeof state !== "object" || state === null) return jsonStr;
-  const models = (state as Record<string, unknown>).models;
-  if (!Array.isArray(models)) return jsonStr;
-  for (const model of models) {
-    if (
-      typeof model === "object" &&
-      model !== null &&
-      typeof model.apiKey === "string" &&
-      model.apiKey
-    ) {
-      model.apiKey = transform(model.apiKey);
-    }
-  }
-  return JSON.stringify(parsed);
-}
-
-function encryptModelKeys(jsonStr: string): string {
-  return transformModelKeys(jsonStr, (v) => (isEncrypted(v) ? v : encrypt(v)));
-}
-
-function decryptModelKeys(jsonStr: string): string {
-  return transformModelKeys(jsonStr, (v) => {
-    try {
-      return decrypt(v);
-    } catch {
-      return { err: "Decryption failed (encryption key changed)" };
-    }
-  });
 }
 
 function requireString(body: Record<string, unknown>, field: string): string {
@@ -3075,7 +3032,12 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
     const isSettings = isEncryptedStoreKey(storeKey);
     try {
       if (method === "GET") {
-        const value = storeDb.getStore(storeKey);
+        let value = storeDb.getStore(storeKey);
+        if (isSettings && value && hasPlaintextModelKeys(value)) {
+          // Rows written before API keys were encrypted at rest are migrated on first read.
+          value = encryptModelKeys(value);
+          storeDb.putStore(storeKey, value);
+        }
         return json({ value: isSettings && value ? decryptModelKeys(value) : value });
       }
       if (method === "PUT") {
