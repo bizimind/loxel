@@ -67,7 +67,7 @@ To open a diff, select one or more commits in the git graph, or click a file in 
 
 ## Navigation
 
-Move between files with the previous/next file buttons in the toolbar. There are no keyboard shortcuts for diff navigation currently — per-hunk keyboard navigation is planned.
+Move between files with the previous/next file buttons in the toolbar. They go through the files in the order the Changes panel lists them, and the Changes panel highlights and scrolls to the file shown. There are no keyboard shortcuts for diff navigation currently — per-hunk keyboard navigation is planned.
 
 ---
 

@@ -15,6 +15,7 @@ import { fileDiffPath } from "@/api/diff-model";
 import type { DiffFileContext } from "@/api/review-model";
 import { SideBySideDiffView } from "@/components/diff/SideBySideDiffView";
 import { Button } from "@/components/ui/button";
+import { useDiffFileSelection } from "@/hooks/useDiffFileSelection";
 import { useReviewContext } from "@/hooks/useReviewContext";
 import { type HighlightedHunk, useSyntaxHighlight } from "@/hooks/useSyntaxHighlight";
 import { FileTypeIcon } from "@/lib/file-icons";
@@ -25,7 +26,6 @@ import { useCommentStore } from "@/store/comments";
 import { useUIStore } from "@/store/ui";
 import { useRepositoryStore } from "@/store/worktree-repository";
 import { useReviewStore } from "@/store/worktree-reviews";
-import { useWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import {
@@ -86,8 +86,7 @@ function DiffContent({
   baseRef?: string;
   worktreePath?: string;
 }) {
-  const selectedFile = useWorktreeUI((s) => s.selectedDiffFile);
-  const setSelectedFile = useWorktreeUI((s) => s.setSelectedDiffFile);
+  const { selectedFile, setSelectedFile, orderedFiles } = useDiffFileSelection(diff.files);
   const setDiffViewMode = useUIStore((s) => s.setDiffViewMode);
 
   const selectedReviewIds = useReviewStore((s) => s.selectedReviewIds);
@@ -112,26 +111,20 @@ function DiffContent({
     }
   }, [selectedReviewIds, diffFiles, fetchPlacedThreads, clearAll]);
 
-  useEffect(() => {
-    if (!selectedFile || !diff.files.some((f) => fileDiffPath(f) === selectedFile)) {
-      const first = diff.files[0];
-      setSelectedFile(first ? fileDiffPath(first) : null);
-    }
-  }, [diff.files, selectedFile, setSelectedFile]);
-
-  const currentFile = diff.files.find((f) => fileDiffPath(f) === selectedFile) ?? diff.files[0];
-  const currentFileIndex = diff.files.findIndex((f) => fileDiffPath(f) === selectedFile);
+  // Previous/next and the "File N of M" counter follow the Changes tree's order.
+  const currentFile = orderedFiles.find((f) => fileDiffPath(f) === selectedFile) ?? orderedFiles[0];
+  const currentFileIndex = orderedFiles.findIndex((f) => fileDiffPath(f) === selectedFile);
 
   const goToPrevFile = () => {
-    const prevFile = diff.files[currentFileIndex - 1];
+    const prevFile = orderedFiles[currentFileIndex - 1];
     if (currentFileIndex > 0 && prevFile) {
       setSelectedFile(fileDiffPath(prevFile));
     }
   };
 
   const goToNextFile = () => {
-    const nextFile = diff.files[currentFileIndex + 1];
-    if (currentFileIndex < diff.files.length - 1 && nextFile) {
+    const nextFile = orderedFiles[currentFileIndex + 1];
+    if (currentFileIndex < orderedFiles.length - 1 && nextFile) {
       setSelectedFile(fileDiffPath(nextFile));
     }
   };
@@ -153,7 +146,7 @@ function DiffContent({
           variant="ghost"
           size="icon-xs"
           onClick={goToNextFile}
-          disabled={currentFileIndex >= diff.files.length - 1}
+          disabled={currentFileIndex >= orderedFiles.length - 1}
           title="Next file"
         >
           <ArrowRightIcon className="size-3.5" />
@@ -178,7 +171,7 @@ function DiffContent({
           <ArrowDownIcon className="size-3.5" />
         </Button>
         <span className="text-muted-foreground ml-2 text-[10px]">
-          File {currentFileIndex + 1} of {diff.files.length}
+          File {currentFileIndex + 1} of {orderedFiles.length}
         </span>
 
         <div className="flex-1" />

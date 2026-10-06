@@ -306,6 +306,66 @@ describe("FilesTree", () => {
     expect(document.activeElement).toBe(row("/c.ts"));
   });
 
+  test("revealActivePath expands the active row's folders without moving focus", async () => {
+    const nodes: TreeNode[] = [
+      {
+        path: "src",
+        name: "src",
+        isDir: true,
+        children: [
+          {
+            path: "src/lib",
+            name: "lib",
+            isDir: true,
+            children: [{ path: "src/lib/a.ts", name: "a.ts", isDir: false }],
+          },
+          { path: "src/b.ts", name: "b.ts", isDir: false },
+        ],
+      },
+    ];
+    const scrolled: string[] = [];
+    const scrollIntoView = spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
+      this: Element,
+    ) {
+      scrolled.push(this.getAttribute(TREE_PATH_ATTR) ?? "");
+    });
+    const tree = (activePath: string) => (
+      <FilesTree
+        nodes={nodes}
+        defaultExpandedPaths={["src"]}
+        compactRoot={false}
+        activePath={activePath}
+        revealActivePath
+        onOpen={() => {}}
+      />
+    );
+    const { container, rerender } = render(tree("src/b.ts"));
+    const row = (path: string) =>
+      container.querySelector<HTMLButtonElement>(`button[${TREE_PATH_ATTR}="${path}"]`);
+
+    row("src/b.ts")!.focus();
+    expect(row("src/lib/a.ts")).toBeNull();
+
+    rerender(tree("src/lib/a.ts"));
+    await waitFor(() => expect(row("src/lib/a.ts")).not.toBeNull());
+    expect(scrolled).toContain("src/lib/a.ts");
+    expect(document.activeElement).toBe(row("src/b.ts"));
+
+    scrollIntoView.mockRestore();
+  });
+
+  test("an active row in an inactive panel has a visible neutral background", () => {
+    render(
+      <FilesTree
+        nodes={[{ path: "/a.ts", name: "a.ts", isDir: false }]}
+        activePath="/a.ts"
+        isPanelActive={false}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /a\.ts/ })).toHaveClass("bg-foreground/10");
+  });
+
   test("focuses a row when it is clicked", () => {
     const onSelect = jest.fn();
     render(

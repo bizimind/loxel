@@ -80,7 +80,8 @@ export function TreeRow({
           isActive
             ? isPanelActive
               ? "bg-primary hover:bg-primary focus:bg-primary"
-              : "bg-muted hover:bg-muted focus:bg-muted"
+              : // A neutral grey: visible on the panel background, unlike --muted.
+                "bg-foreground/10 hover:bg-foreground/10 focus:bg-foreground/10"
             : "hover:bg-primary/30 focus:bg-primary/50 dark:hover:bg-primary/20 dark:focus:bg-primary/50",
           buttonClassName,
         )}

@@ -77,11 +77,13 @@ Rows expose their canonical path through `data-tree-path`. `FilesTree` calls `on
 
 The optional `focusedPath` prop marks (`data-tree-selected`) the row that focus lands on when it enters the tree. When `focusedPath` changes, DOM focus follows it only if focus was on the previous `focusedPath` row (or on the tree container): a keyboard cursor the user moved elsewhere, and unrelated UI, keep their focus.
 
-`focusedPath` is not the active/opened visual state. Mouse hover gets a light tint (`bg-primary/20` in the dark theme, `/30` in the light theme, whose primary is paler). The focused row — the keyboard cursor, also moved by clicking a row — gets a stronger tint (`/50`) and an inset `ring-1` outline (`--ring` in the dark theme, `foreground/50` in the light theme, whose `--ring` is a pale grey), so hover and focus never look alike. The active row is solid (`bg-primary`, or `bg-muted` while its panel is inactive), carries `aria-current`, and also gets the outline when focused.
+`focusedPath` is not the active/opened visual state. Mouse hover gets a light tint (`bg-primary/20` in the dark theme, `/30` in the light theme, whose primary is paler). The focused row — the keyboard cursor, also moved by clicking a row — gets a stronger tint (`/50`) and an inset `ring-1` outline (`--ring` in the dark theme, `foreground/50` in the light theme, whose `--ring` is a pale grey), so hover and focus never look alike. The active row is solid (`bg-primary`, or a neutral `bg-foreground/10` while its panel is inactive — `--muted` is indistinguishable from the panel background), carries `aria-current`, and also gets the outline when focused.
 
 The optional `activePath` prop marks the entry currently opened in the current active panel. Only
 `activePath` receives the stronger active background (`bg-primary` when the owning panel is active,
-`bg-muted` when it is not). Rows expose this state through `data-tree-active`.
+`bg-foreground/10` when it is not). Rows expose this state through `data-tree-active`.
+
+With `revealActivePath`, a change of `activePath` expands the folders containing it and scrolls its row into view (`block: "nearest"`) without moving focus. The Changes panel enables it, so a file selected from the diff viewer (previous/next file) is shown in the tree. Project Files does not; it reveals the active editor through its own auto-reveal setting.
 
 ## Keyboard
 

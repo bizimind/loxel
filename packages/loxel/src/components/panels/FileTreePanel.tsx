@@ -9,7 +9,9 @@ import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
 import { type TreeNode, FilesTree } from "@/components/tree";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { showToast } from "@/components/ui/toast";
+import { useDiffFileSelection } from "@/hooks/useDiffFileSelection";
 import { usePanelActive } from "@/hooks/usePanelActive";
+import { buildDiffFileTree } from "@/lib/diff-file-tree";
 import { dispatchOpenFile } from "@/lib/open-file";
 import { isWithin, pathName } from "@/lib/project-file-helpers";
 import { revealInProjectExplorer } from "@/lib/reveal-in-explorer";
@@ -17,67 +19,7 @@ import { cn } from "@/lib/utils";
 import { useRevertToHeadMutation } from "@/queries/use-git-mutations";
 import { useDiffQuery } from "@/queries/use-repo-queries";
 import { useRepositoryStore } from "@/store/worktree-repository";
-import { useWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
-
-// --- Tree building ---
-
-type BuildNode = Omit<TreeNode, "children"> & { children: BuildNode[] };
-
-function buildFileTree(files: FileDiff[]): TreeNode[] {
-  const root: BuildNode = { name: "", path: "", isDir: true, children: [] };
-
-  for (const file of files) {
-    const filePath = file.newPath || file.oldPath;
-    const parts = filePath.split("/");
-    let current = root;
-
-    for (let i = 0; i < parts.length; i++) {
-      const isLast = i === parts.length - 1;
-      const name = parts[i];
-      if (!name) continue;
-      const path = parts.slice(0, i + 1).join("/");
-
-      let child = current.children.find((c) => c.name === name);
-      if (!child) {
-        child = { name, path, isDir: !isLast, children: [] };
-        current.children.push(child);
-      }
-      current = child;
-    }
-  }
-
-  function sortTree(nodes: BuildNode[]): BuildNode[] {
-    return nodes
-      .map((node) => ({ ...node, children: sortTree(node.children) }))
-      .sort((a, b) => {
-        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-  }
-
-  return compactTree(sortTree(root.children));
-}
-
-function compactTree(nodes: TreeNode[]): TreeNode[] {
-  // oxlint-disable-next-line array-callback-return -- all paths return; false positive with while loop
-  return nodes.map((node) => {
-    if (!node.isDir) return node;
-    let name = node.name;
-    let current = node;
-    let onlyChild = current.children?.[0];
-    while (current.children?.length === 1 && onlyChild && onlyChild.isDir) {
-      current = onlyChild;
-      name = name + "/" + current.name;
-      onlyChild = current.children?.[0];
-    }
-    return {
-      ...current,
-      name,
-      children: current.children ? compactTree(current.children) : undefined,
-    };
-  });
-}
 
 interface DiscardTarget {
   worktree: string;
@@ -119,13 +61,12 @@ function discardDescription(target: DiscardTarget, activeWorktreePath: string | 
 export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
   const diffSource = useRepositoryStore((s) => s.diffSource);
   const { data: diff } = useDiffQuery(diffSource);
-  const selectedFile = useWorktreeUI((s) => s.selectedDiffFile);
-  const setSelectedFile = useWorktreeUI((s) => s.setSelectedDiffFile);
   const isPanelActive = usePanelActive(panelApi);
 
-  const files = diff?.files ?? [];
+  const files = useMemo(() => diff?.files ?? [], [diff?.files]);
+  const { selectedFile, setSelectedFile } = useDiffFileSelection(files);
 
-  const fileTree = useMemo(() => buildFileTree(files), [files]);
+  const fileTree = useMemo(() => buildDiffFileTree(files), [files]);
 
   const fileMap = useMemo(() => {
     const map = new Map<string, FileDiff>();
@@ -137,14 +78,6 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
   useEffect(() => {
     panelApi?.setTitle(`Files (${files.length})`);
   }, [panelApi, files.length]);
-
-  // Auto-select first file when selection is invalid
-  useEffect(() => {
-    if (!selectedFile || !files.some((f) => fileDiffPath(f) === selectedFile)) {
-      const first = files[0];
-      setSelectedFile(first ? fileDiffPath(first) : null);
-    }
-  }, [files, selectedFile, setSelectedFile]);
 
   const openDiffPanel = useCallback(() => {
     window.dispatchEvent(new CustomEvent("loxel-open-diff"));
@@ -260,6 +193,7 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
         <FilesTree
           nodes={fileTree}
           autoExpandDirs
+          revealActivePath
           focusedPath={selectedFile}
           activePath={selectedFile}
           isPanelActive={isPanelActive}

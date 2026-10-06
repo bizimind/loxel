@@ -55,6 +55,11 @@ export interface FilesTreeProps {
   compactRoot?: boolean;
   /** Skip built-in keyboard navigation (caller handles it at a higher level). */
   disableBuiltinKeyNav?: boolean;
+  /**
+   * When `activePath` changes, expand its ancestor folders and scroll its row into view, without
+   * moving focus (for a selection made outside the tree, e.g. the diff viewer's next file).
+   */
+  revealActivePath?: boolean;
 
   isPanelActive?: boolean;
   className?: string;
@@ -91,6 +96,7 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
     autoExpandDirs,
     compactRoot = true,
     disableBuiltinKeyNav,
+    revealActivePath,
     labelClassName,
     renderLabel,
     renderTrailing,
@@ -348,6 +354,33 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
     }
   }, [focusedPath]);
 
+  // --- activePath → expand ancestors and scroll into view (opt-in) ---
+
+  const [pendingActiveScroll, setPendingActiveScroll] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!revealActivePath || !activePath) return;
+    const ancestors = findAncestorDirs(nodes, childrenCache, activePath);
+    for (const dir of ancestors) userCollapsedRef.current.delete(dir);
+    updateExpandedPaths((prev) => {
+      const missing = ancestors.filter((dir) => !prev.has(dir));
+      if (missing.length === 0) return prev;
+      return new Set([...prev, ...missing]);
+    });
+    setPendingActiveScroll(activePath);
+    // Only a new active path is revealed: a later collapse of its folder by the user sticks.
+  }, [revealActivePath, activePath]);
+
+  useLayoutEffect(() => {
+    if (!pendingActiveScroll) return;
+    const btn = containerRef.current?.querySelector<HTMLButtonElement>(
+      `button[${TREE_PATH_ATTR}="${CSS.escape(pendingActiveScroll)}"]`,
+    );
+    if (!btn) return;
+    btn.scrollIntoView({ block: "nearest" });
+    setPendingActiveScroll(null);
+  }, [pendingActiveScroll, expandedPaths, childrenCache]);
+
   // --- revealPath target → DOM focus/scroll after render ---
 
   useLayoutEffect(() => {
@@ -603,6 +636,18 @@ function findNode(
     }
   }
   return undefined;
+}
+
+/** The directories in `nodes` (and loaded subtrees) that contain `path`, outermost first. */
+function findAncestorDirs(
+  nodes: TreeNode[],
+  childrenCache: ReadonlyMap<string, TreeNode[]>,
+  path: string,
+): string[] {
+  const ancestor = nodes.find((n) => n.isDir && path.startsWith(n.path + "/"));
+  if (!ancestor) return [];
+  const children = ancestor.children ?? childrenCache.get(ancestor.path) ?? [];
+  return [ancestor.path, ...findAncestorDirs(children, childrenCache, path)];
 }
 
 function remapPathSet(paths: Set<string>, oldPrefix: string, newPrefix: string): Set<string> {
