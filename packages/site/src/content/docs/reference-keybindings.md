@@ -92,9 +92,11 @@ Back/forward work like a browser's history, across all projects. Worktree number
 
 ## File tree
 
-| Action                    | Shortcut           |
-| ------------------------- | ------------------ |
-| Navigate                  | `↑` `↓` `←` `→`    |
-| Toggle expand/collapse    | `Space`            |
-| Open file / toggle folder | `Enter`            |
-| Rename                    | `F2` or `Shift+F6` |
+| Action                    | Shortcut               |
+| ------------------------- | ---------------------- |
+| Navigate                  | `↑` `↓` `←` `→`        |
+| First / last in folder    | `Cmd+↑` / `Cmd+↓`      |
+| Jump to name              | Type its first letters |
+| Toggle expand/collapse    | `Space`                |
+| Open file / toggle folder | `Enter`                |
+| Rename                    | `F2` or `Shift+F6`     |

@@ -155,6 +155,8 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   // when focus is inside the tree.
   "tree.focusNext": ["ArrowDown"],
   "tree.focusPrevious": ["ArrowUp"],
+  "tree.focusFirstSibling": ["Cmd+ArrowUp"],
+  "tree.focusLastSibling": ["Cmd+ArrowDown"],
   "tree.expandOrFocusChild": ["ArrowRight"],
   "tree.collapseOrFocusParent": ["ArrowLeft"],
   "tree.toggleExpanded": ["Space"],

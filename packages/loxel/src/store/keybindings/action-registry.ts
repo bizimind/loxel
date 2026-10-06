@@ -78,6 +78,8 @@ export type ActionId =
   | "file.revealInExplorer"
   | "tree.focusNext"
   | "tree.focusPrevious"
+  | "tree.focusFirstSibling"
+  | "tree.focusLastSibling"
   | "tree.expandOrFocusChild"
   | "tree.collapseOrFocusParent"
   | "tree.toggleExpanded"
@@ -243,6 +245,18 @@ export const ACTIONS: readonly ActionDef[] = [
   // Tree — handled locally by tree components, not shown in command palette
   { id: "tree.focusNext", label: "Tree: Focus Next Row", category: "tree", hidden: true },
   { id: "tree.focusPrevious", label: "Tree: Focus Previous Row", category: "tree", hidden: true },
+  {
+    id: "tree.focusFirstSibling",
+    label: "Tree: Focus First Entry in Folder",
+    category: "tree",
+    hidden: true,
+  },
+  {
+    id: "tree.focusLastSibling",
+    label: "Tree: Focus Last Entry in Folder",
+    category: "tree",
+    hidden: true,
+  },
   {
     id: "tree.expandOrFocusChild",
     label: "Tree: Expand or Focus Child",

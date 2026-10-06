@@ -403,6 +403,8 @@ export function useActionHandler(): (actionId: ActionId) => void {
       // -- Tree-local actions (handled by focused tree widgets) --
       case "tree.collapseOrFocusParent":
       case "tree.expandOrFocusChild":
+      case "tree.focusFirstSibling":
+      case "tree.focusLastSibling":
       case "tree.focusNext":
       case "tree.focusPrevious":
       case "tree.open":
