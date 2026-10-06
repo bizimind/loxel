@@ -70,16 +70,18 @@ export function TreeRow({
         {...(isActive ? { "data-tree-active": "" } : undefined)}
         data-tree-depth={depth}
         tabIndex={-1}
-        // Hover is a light tint; the focused row (by keyboard or click) is a stronger tint with an
-        // outline, so the two never look alike. The active row keeps its own background.
+        aria-current={isActive ? "true" : undefined}
+        // Hover is a light tint; the focused row (the keyboard cursor, also set by a click) is a
+        // stronger tint with an outline; the active row (the entry shown elsewhere, e.g. in the
+        // editor or diff viewer) is solid. Light --primary is pale, so the light theme keeps the
+        // tints well apart and outlines in a darker color than its grey --ring.
         className={cn(
-          "focus:ring-ring flex w-full items-center gap-1.5 rounded-md py-1 pr-3 text-left text-xs outline-0 focus:ring-1 focus:ring-inset",
+          "focus:ring-foreground/50 dark:focus:ring-ring flex w-full items-center gap-1.5 rounded-md py-1 pr-3 text-left text-xs outline-0 focus:ring-1 focus:ring-inset",
           isActive
             ? isPanelActive
               ? "bg-primary hover:bg-primary focus:bg-primary"
               : "bg-muted hover:bg-muted focus:bg-muted"
-            : // Light --primary is pale, so it needs stronger tints than the dark theme.
-              "hover:bg-primary/40 focus:bg-primary/80 dark:hover:bg-primary/20 dark:focus:bg-primary/50",
+            : "hover:bg-primary/30 focus:bg-primary/50 dark:hover:bg-primary/20 dark:focus:bg-primary/50",
           buttonClassName,
         )}
         style={{ paddingLeft: indentPx, ...buttonProps?.style }}

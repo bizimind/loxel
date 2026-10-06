@@ -5,6 +5,7 @@ export type TreeNodeRendererProps = Pick<
   FilesTreeProps,
   | "isPanelActive"
   | "onOpen"
+  | "onFileClick"
   | "onContextMenu"
   | "labelClassName"
   | "renderLabel"
@@ -33,6 +34,7 @@ export function TreeNodeRenderer({
   resolveChildren,
   toggleExpanded,
   onOpen,
+  onFileClick,
   onContextMenu,
   labelClassName,
   renderLabel,
@@ -101,6 +103,7 @@ export function TreeNodeRenderer({
               resolveChildren={resolveChildren}
               toggleExpanded={toggleExpanded}
               onOpen={onOpen}
+              onFileClick={onFileClick}
               onContextMenu={onContextMenu}
               labelClassName={labelClassName}
               renderLabel={renderLabel}
@@ -139,6 +142,8 @@ export function TreeNodeRenderer({
         onClick={() => {
           if (node.isDir) {
             toggleExpanded(node.path);
+          } else {
+            onFileClick?.(node.path);
           }
         }}
         onDoubleClick={() => {
@@ -159,6 +164,7 @@ export function TreeNodeRenderer({
             resolveChildren={resolveChildren}
             toggleExpanded={toggleExpanded}
             onOpen={onOpen}
+            onFileClick={onFileClick}
             onContextMenu={onContextMenu}
             labelClassName={labelClassName}
             renderLabel={renderLabel}

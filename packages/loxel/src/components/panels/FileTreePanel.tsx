@@ -146,7 +146,7 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
     }
   }, [files, selectedFile, setSelectedFile]);
 
-  const handleOpen = useCallback(() => {
+  const openDiffPanel = useCallback(() => {
     window.dispatchEvent(new CustomEvent("loxel-open-diff"));
   }, []);
 
@@ -196,12 +196,23 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
     }
   }, [discardTarget, revertMutation]);
 
-  const handleSelect = useCallback(
+  // The selected file is the one the diff viewer shows. Moving focus (arrow keys, type-ahead)
+  // only moves the tree's cursor: clicking a file selects it, and Enter or double-click selects
+  // it and opens the diff viewer.
+  const handleFileClick = useCallback(
+    (path: string) => {
+      if (fileMap.has(path)) setSelectedFile(path);
+    },
+    [fileMap, setSelectedFile],
+  );
+
+  const handleOpen = useCallback(
     (path: string) => {
       if (!fileMap.has(path)) return;
       setSelectedFile(path);
+      openDiffPanel();
     },
-    [fileMap, setSelectedFile],
+    [fileMap, setSelectedFile, openDiffPanel],
   );
 
   const renderTrailing = useCallback(
@@ -253,7 +264,7 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
           activePath={selectedFile}
           isPanelActive={isPanelActive}
           onOpen={handleOpen}
-          onSelect={handleSelect}
+          onFileClick={handleFileClick}
           onContextMenu={handleContextMenu}
           renderTrailing={renderTrailing}
           labelClassName={getLabelClassName}
@@ -268,14 +279,7 @@ export function FileTreePanel({ panelApi }: { panelApi?: DockviewPanelApi }) {
           absolutePath={`${filesRoot}/${contextMenu.path}`}
           isDir={contextMenu.isDir}
           onClose={() => setContextMenu(null)}
-          onOpenDiff={
-            contextMenu.isDir
-              ? undefined
-              : () => {
-                  setSelectedFile(contextMenu.path);
-                  handleOpen();
-                }
-          }
+          onOpenDiff={contextMenu.isDir ? undefined : () => handleOpen(contextMenu.path)}
           // The editor and the project explorer show the active worktree only.
           onOpenFile={
             !contextMenu.isDir && filesRoot === activeWorktreePath

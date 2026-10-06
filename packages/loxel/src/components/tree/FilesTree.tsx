@@ -25,7 +25,10 @@ export interface TreeNode {
 export interface FilesTreeProps {
   nodes: TreeNode[];
   onOpen: (path: string) => void;
+  /** A row received focus (by click, keyboard navigation or programmatically). */
   onSelect?: (path: string) => void;
+  /** A file row was clicked. Unlike `onSelect`, moving focus with the keyboard does not call it. */
+  onFileClick?: (path: string) => void;
   onToggle?: (path: string, expanded: boolean) => void;
   onContextMenu?: (e: React.MouseEvent, path: string, isDir: boolean) => void;
 
@@ -75,6 +78,7 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
     nodes,
     onOpen,
     onSelect,
+    onFileClick,
     onToggle,
     onContextMenu,
     focusedPath,
@@ -323,15 +327,23 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
 
   // --- focusedPath prop → DOM focus ---
 
+  // Focus follows `focusedPath` only while it was on the previous `focusedPath` (or on no row):
+  // a keyboard cursor the user moved elsewhere stays put when the selection changes under it.
+  const prevFocusedPathRef = useRef(focusedPath);
   useEffect(() => {
+    const prevFocusedPath = prevFocusedPathRef.current;
+    prevFocusedPathRef.current = focusedPath;
     if (focusedPath === null || focusedPath === undefined) return;
     const container = containerRef.current;
     if (!container) return;
-    if (!container.contains(document.activeElement)) return;
+    const active = document.activeElement;
+    if (!active || !container.contains(active)) return;
+    const focusedRow = active.closest(`button[${TREE_PATH_ATTR}]`);
+    if (focusedRow && focusedRow.getAttribute(TREE_PATH_ATTR) !== prevFocusedPath) return;
     const btn = container.querySelector<HTMLButtonElement>(
       `button[${TREE_PATH_ATTR}="${CSS.escape(focusedPath)}"]`,
     );
-    if (btn && btn !== document.activeElement) {
+    if (btn && btn !== active) {
       btn.focus({ preventScroll: true });
     }
   }, [focusedPath]);
@@ -543,6 +555,7 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
               resolveChildren={resolveChildren}
               toggleExpanded={toggleExpanded}
               onOpen={onOpen}
+              onFileClick={onFileClick}
               onContextMenu={onContextMenu}
               labelClassName={labelClassName}
               renderLabel={renderLabel}

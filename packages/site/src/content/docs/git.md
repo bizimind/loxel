@@ -73,6 +73,8 @@ The Changes panel shows different content depending on your selection in the com
 - **All branch changes** — all changes from the branch tip back to the merge base with main
 - A specific commit or range from the current selection
 
+Click a file to show its diff in the diff viewer; its row stays highlighted as the file being shown. The arrow keys and typing a name move the keyboard cursor without changing the diff — press `Enter` (or double-click a file) to show the file under the cursor and bring the diff viewer to the front.
+
 ---
 
 ## Staging

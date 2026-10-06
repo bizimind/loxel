@@ -90,6 +90,8 @@ describe("FilesTree", () => {
     expect(focused).toHaveClass("focus:ring-1");
 
     expect(active).toHaveAttribute("data-tree-active");
+    expect(active).toHaveAttribute("aria-current", "true");
+    expect(focused).not.toHaveAttribute("aria-current");
     expect(active).toHaveClass("bg-primary");
   });
 
@@ -280,6 +282,28 @@ describe("FilesTree", () => {
       <FilesTree nodes={[{ path: "/a.ts", name: "a.ts", isDir: false }, b]} onOpen={() => {}} />,
     );
     expect(document.activeElement).toBe(row);
+  });
+
+  test("focus follows focusedPath only while it is on the previous focusedPath", () => {
+    const nodes: TreeNode[] = ["a", "b", "c"].map((n) => ({
+      path: `/${n}.ts`,
+      name: `${n}.ts`,
+      isDir: false,
+    }));
+    const { container, rerender } = render(
+      <FilesTree nodes={nodes} focusedPath="/a.ts" onOpen={() => {}} />,
+    );
+    const row = (path: string) =>
+      container.querySelector<HTMLButtonElement>(`button[${TREE_PATH_ATTR}="${path}"]`)!;
+
+    row("/a.ts").focus();
+    rerender(<FilesTree nodes={nodes} focusedPath="/b.ts" onOpen={() => {}} />);
+    expect(document.activeElement).toBe(row("/b.ts"));
+
+    // The keyboard cursor moved away from the selection: a new selection leaves it alone.
+    row("/c.ts").focus();
+    rerender(<FilesTree nodes={nodes} focusedPath="/a.ts" onOpen={() => {}} />);
+    expect(document.activeElement).toBe(row("/c.ts"));
   });
 
   test("focuses a row when it is clicked", () => {

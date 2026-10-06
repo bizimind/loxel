@@ -73,14 +73,11 @@ but actions target the leaf path.
 
 ## Focus, Selection, And Active Rows
 
-Rows expose their canonical path through `data-tree-path`. `FilesTree` calls `onSelect(path)` when a
-row receives focus.
+Rows expose their canonical path through `data-tree-path`. `FilesTree` calls `onSelect(path)` when a row receives focus, whether by click, keyboard navigation or programmatically. `onFileClick(path)` is called only when a file row is clicked, so a panel can keep a selection that the keyboard cursor does not move: the Changes panel selects the diffed file on `onFileClick` and `onOpen` (Enter, double-click), never on focus, and passes it as both `activePath` and `focusedPath`, so entering the tree lands on the diffed file.
 
-The optional `focusedPath` prop marks and focuses the matching rendered row when focus is already
-inside the tree. This keeps external selection state and DOM focus aligned without stealing focus
-from unrelated UI.
+The optional `focusedPath` prop marks (`data-tree-selected`) the row that focus lands on when it enters the tree. When `focusedPath` changes, DOM focus follows it only if focus was on the previous `focusedPath` row (or on the tree container): a keyboard cursor the user moved elsewhere, and unrelated UI, keep their focus.
 
-`focusedPath` is not the active/opened visual state. Mouse hover gets a light tint (`bg-primary/20` in the dark theme, `/40` in the light theme, whose primary is paler). The focused row — reached by keyboard or by clicking it, since a click focuses its row — gets a stronger tint (`/50` dark, `/80` light) and an inset `ring-1` outline, so hover and focus never look alike. The active row keeps its own background and also gets the outline when focused.
+`focusedPath` is not the active/opened visual state. Mouse hover gets a light tint (`bg-primary/20` in the dark theme, `/30` in the light theme, whose primary is paler). The focused row — the keyboard cursor, also moved by clicking a row — gets a stronger tint (`/50`) and an inset `ring-1` outline (`--ring` in the dark theme, `foreground/50` in the light theme, whose `--ring` is a pale grey), so hover and focus never look alike. The active row is solid (`bg-primary`, or `bg-muted` while its panel is inactive), carries `aria-current`, and also gets the outline when focused.
 
 The optional `activePath` prop marks the entry currently opened in the current active panel. Only
 `activePath` receives the stronger active background (`bg-primary` when the owning panel is active,
