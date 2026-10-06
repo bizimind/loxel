@@ -27,7 +27,7 @@ wt version | update
 
 Key flags: `-j` (JSON, all commands); `add -b <branch>` (check out an existing branch), `add --base <ref>` (start the new branch elsewhere); `mv --branch <b>` / `mv -B` (rename the branch to `<b>` / leave it alone), `mv -f` (locked worktree); `remove -f` (dirty worktree), `remove -d` / `-D` / `--keep-branch` (delete the branch if merged / even if unmerged / keep it without prompting). Run `wt <cmd> --help` for the rest.
 
-**Running unattended (agents, scripts).** Always pass the worktree name and every decision as flags. Without a terminal, a missing name or an undecided choice (existing branch, dirty removal) is an error, never a prompt, and `remove`/`view`/`mv` never auto-pick a target. Without `-d`/`-D`, a non-interactive `remove` keeps the branch.
+**Running unattended (agents, scripts).** Always pass the worktree name and every decision as flags. Without a terminal, a missing name or an undecided choice (existing branch, dirty removal) is an error, never a prompt, and `remove`/`view` never auto-pick a target. `mv` is the exception: with one name it renames the worktree you are in, so pass `wt mv <old> <new>` in scripts. Without `-d`/`-D`, a non-interactive `remove` keeps the branch.
 
 **Branches.** `wt add <name>` creates branch `<name>` from the remote default as of the last fetch (`origin/main`), or from `HEAD` when there is no `origin` default. It never fetches: run `git fetch` first for a newer base. The new branch tracks nothing. If branch `<name>` already exists, pass `-b <name>` to reuse it; if another worktree has it checked out, that is an error. `-d` deletes a branch only when it is merged into `HEAD` or the remote default.
 

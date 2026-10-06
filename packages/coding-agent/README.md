@@ -38,7 +38,7 @@ Source of truth: [`./src/cli.ts`](./src/cli.ts)
 
 The package root exports the runtime. [`./src/index.ts`](./src/index.ts) lists the full public surface.
 
-- `Session`: the recommended in-process API. `Session.create(config)` and `Session.resume(id, config)` return a session with `send()` (resolves with the final text when the run completes, accepts an `AbortSignal`), `rewind()`, `fork()`, `compact()`, and `destroy()`. `config.handlers` must name a handler (or `null`) for every event type. `withAutoApprove()` fills in the rest and auto-allows approvals.
+- `Session`: the recommended in-process API. `Session.create(config)` and `Session.resume(id, config)` return a session with `send()` (resolves with `{ messageId, runId, text }` when the run completes, accepts an `AbortSignal`), `rewind()`, `fork()`, `compact()`, and `destroy()`. `config.handlers` must name a handler (or `null`) for every event type. `withAutoApprove()` fills in the rest and auto-allows approvals.
 - `CodingAgentSession` / `CodingAgentRuntime`: lower-level wrappers that take raw protocol requests and emit raw protocol events. Use them for protocol bridges.
 - `SessionStore`, `PermissionStore`, tool schemas and registry, and loop-control helpers are exported for direct use.
 
