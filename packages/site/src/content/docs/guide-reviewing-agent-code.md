@@ -20,7 +20,7 @@ The session is shared across all worktrees of the repo: select it in the Reviews
 
 ## Walk the diff in split view
 
-Open the diff from the [Git](/docs/git) graph or Changes panel. The [Diff Viewer](/docs/diff-viewer) defaults to split view — old code on the left, new on the right, synchronized scrolling. Your goal at this stage is not to catch every line — it's to understand what the agent built and whether the approach is right: is the abstraction sensible, are the boundaries clean, is this solving the right problem?
+Open the diff from the [commit graph](/docs/git#commit-graph) or the Changes panel. The [Diff Viewer](/docs/diff-viewer) defaults to split view — old code on the left, new on the right, synchronized scrolling. Your goal at this stage is not to catch every line — it's to understand what the agent built and whether the approach is right: is the abstraction sensible, are the boundaries clean, is this solving the right problem?
 
 Collapsed unchanged regions show as squiggly connectors in the gutter. Click one to expand it when you need context.
 
@@ -38,7 +38,7 @@ Avoid "fix this" or "wrong" — those don't survive a rewrite. Intent-based comm
 
 ## Iterate
 
-Feed your comments back to the agent as input. When it rewrites the code, loxel re-places every comment using its anchor system — comments end up `exact`, `relocated`, `outdated`, or `lost`. See [Code Review](/docs/code-review) for the full anchor state reference.
+Feed your comments back to the agent as input. When it rewrites the code, Loxel re-places every comment using its anchor system — comments end up `exact`, `relocated`, `outdated`, or `lost`. See [Code Review](/docs/code-review) for the full anchor state reference.
 
 `outdated` comments are where the most useful signal lives. Expand the thread in the Comments panel to see the original code under **"Original code at time of comment"** — compare it with the new code to see what the agent changed and decide if your concern was addressed or just worked around.
 

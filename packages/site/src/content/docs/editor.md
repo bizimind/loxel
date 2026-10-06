@@ -4,7 +4,7 @@ description: Quick Open, Find in Files, autosave, formatter auto-detection, and 
 order: 10
 ---
 
-The editor is Monaco-based with a few loxel-specific behaviors layered on top: fast file navigation, autosave with conflict detection, and formatter auto-detection that works across the languages and toolchains your project actually uses.
+The editor is Monaco-based with a few Loxel-specific behaviors layered on top: fast file navigation, autosave with conflict detection, and formatter auto-detection that works across the languages and toolchains your project actually uses.
 
 ---
 
@@ -28,7 +28,7 @@ Toggle controls in the search bar:
 - **Case-sensitive** — disable case folding
 - **Whole word** — match only at word boundaries
 
-Use the scope filter to narrow results by package, directory, or file extension. Search has a 300ms debounce — results update as you type without hammering the backend on every keystroke.
+Use the scope filter to narrow results by package, directory, or file extension. Results update as you type.
 
 ---
 
@@ -48,22 +48,22 @@ Loxel detects which formatters are available in the active worktree by inspectin
 
 Supported formatters:
 
-| Formatter      | Detected from                                              | How it runs                                     |
-| -------------- | ---------------------------------------------------------- | ----------------------------------------------- |
-| `prettier`     | A Prettier config file or `prettier` key in `package.json` | Loaded as a library — no per-file process spawn |
-| `oxfmt`        | An `.oxfmtrc.*` file or an `oxfmt` dependency              | Persistent LSP subprocess — no spawn overhead   |
-| `rustfmt`      | `rustfmt.toml`                                             | Invoked on `.rs` files                          |
-| `ruff`         | `pyproject.toml`                                           | Invoked on `.py` files                          |
-| `clang-format` | `.clang-format`                                            | Invoked on C and C++ files                      |
-| `deno`         | `deno.json`                                                | Invoked on JS and TS files                      |
+| Formatter      | Detected from                                              | Formats                                              |
+| -------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| `prettier`     | A Prettier config file or `prettier` key in `package.json` | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, GraphQL |
+| `oxfmt`        | An `.oxfmtrc.*` file or an `oxfmt` dependency              | The same as Prettier, plus TOML                      |
+| `rustfmt`      | `rustfmt.toml`                                             | `.rs` files                                          |
+| `ruff`         | `pyproject.toml`                                           | `.py` files                                          |
+| `clang-format` | `.clang-format`                                            | C and C++ files                                      |
+| `deno`         | `deno.json`                                                | JS and TS files                                      |
 
-Prettier and oxfmt both cover JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, and GraphQL (oxfmt also formats TOML). When a project has both, Prettier wins for the languages it supports. The formatters found in the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+When a project has both Prettier and oxfmt, Prettier wins for the languages it supports. The formatters found in the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
 
 ---
 
 ## Markdown files
 
-Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original bytes, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `:::localdb` blocks render as [database widgets](/docs/introduction#planning-and-visibility); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
+Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `:::localdb` blocks render as [database widgets](/docs/introduction#planning-and-visibility); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
 
 ---
 
@@ -82,16 +82,16 @@ You have two choices:
 
 ## File tree
 
-The file tree supports keyboard-only navigation:
+The file tree in the Project Files panel supports keyboard-only navigation:
 
-| Key                | Action                                                  |
-| ------------------ | ------------------------------------------------------- |
-| `↑` / `↓`          | Move between rows                                       |
-| `→`                | Expand folder, or focus first child if already expanded |
-| `←`                | Collapse folder, or jump to parent                      |
-| `Space`            | Toggle expand/collapse                                  |
-| `Enter`            | Open file / toggle folder                               |
-| `F2` or `Shift+F6` | Rename                                                  |
+| Key | Action |
+| --- | --- | --- |
+| `↑` / `↓` | Move between rows |
+| `→` | Expand folder, or focus first child if already expanded |
+| `←` | Collapse folder, or jump to parent |
+| `Space` | Toggle expand/collapse |
+| `Enter` | Open file / toggle folder |
+| `F2` or `Shift+F6` | Rename |
 
 **Git status coloring** is applied to every file and folder:
 
@@ -107,7 +107,7 @@ The file tree supports keyboard-only navigation:
 
 ### Other folders
 
-Folders outside every project can be opened in the **Others** section at the bottom of the file tree, next to files opened from outside the worktree. Open one with `loxel <folder>` (see [the `loxel` CLI](/docs/reference-env-files-cli-settings#loxel-cli)), or by Cmd-clicking a folder path in a terminal or a folder link in a markdown file. If the folder is inside a project's worktree instead, loxel switches to that worktree and reveals the folder in its tree.
+Folders outside every project can be opened in the **Others** section at the bottom of the file tree, next to files opened from outside the worktree. Open one with `loxel <folder>` (see [the `loxel` CLI](/docs/reference-env-files-cli-settings#loxel-cli)), or by `Cmd`-clicking a folder path in a terminal or a folder link in a markdown file. If the folder is inside a project's worktree instead, Loxel switches to that worktree and reveals the folder in its tree.
 
 A folder that contains one of your projects can't be opened this way, nor can the filesystem root or your home folder (they are too large to watch); open a folder inside them instead. Other folders belong to the worktree they were opened in and are remembered across restarts, until the worktree is removed. A folder opened in several worktrees stays in sync across all of them. They work like the project tree — open, edit and save files with conflict detection, create, rename, delete, cut/copy/paste and drag within the folder, undo with `Cmd+Z` — with these differences:
 
@@ -121,15 +121,15 @@ Right-click a folder's root row and choose **Remove from Others** to close it; n
 
 ### Opening files from Finder
 
-On macOS, loxel appears in Finder's **Open With** menu for text and source files and `.excalidraw` drawings. You can also drop files and folders on loxel's Dock icon, or open them with `open -a Loxel <path>`. loxel never takes over a file type another app already opens: to open, say, markdown files with loxel on double-click, select one, choose **File → Get Info**, pick loxel under **Open with**, and click **Change All…**. File types no other installed app handles, such as `.excalidraw`, open in loxel on double-click.
+On macOS, Loxel appears in Finder's **Open With** menu for text and source files and `.excalidraw` drawings. You can also drop files and folders on Loxel's Dock icon, or open them with `open -a Loxel <path>`. Loxel never takes over a file type another app already opens: to open, say, markdown files with Loxel on double-click, select one, choose **File → Get Info**, pick Loxel under **Open with**, and click **Change All…**. File types no other installed app handles, such as `.excalidraw`, open in Loxel on double-click.
 
-An opened file or folder goes to the most recently focused loxel window, launching loxel or opening a window first if needed. If it is inside one of your projects' worktrees, loxel switches to that worktree and opens it there; anything else opens in the active worktree's [Others section](#other-folders), which needs a project to be open. Files open in the editor for their type — markdown, Excalidraw or code.
+An opened file or folder goes to the most recently focused Loxel window, launching Loxel or opening a window first if needed. If it is inside one of your projects' worktrees, Loxel switches to that worktree and opens it there; anything else opens in the active worktree's [Others section](#other-folders), which needs a project to be open. Files open in the editor for their type — markdown, Excalidraw or code.
 
 ---
 
 ## TypeScript diagnostics
 
-Real-time errors and warnings from TypeScript appear as inline Monaco markers as you type — no manual run required. The full language server feature set (hover, go-to-definition, completions, rename, and more) is covered in [TypeScript Intelligence](/docs/typescript-intelligence).
+Real-time errors and warnings from TypeScript appear inline in the editor as you type — no manual run required. The full language server feature set (hover, go-to-definition, completions, rename, and more) is covered in [TypeScript Intelligence](/docs/typescript-intelligence).
 
 ---
 

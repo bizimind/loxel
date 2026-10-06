@@ -65,16 +65,16 @@ In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G`
 
 ---
 
-## Sidebar toggles
+## Tool panel toggles
 
-| Sidebar          | Shortcut       |
+| Panel            | Shortcut       |
 | ---------------- | -------------- |
-| Project files    | `Cmd+Shift+E`  |
+| Project Files    | `Cmd+Shift+E`  |
 | Changes          | `Cmd+Shift+C`  |
-| Git graph        | `Ctrl+Shift+G` |
+| Git              | `Ctrl+Shift+G` |
 | Comments         | `Ctrl+Shift+R` |
 | Logs             | `Ctrl+Shift+L` |
-| Fork tree        | `Ctrl+Shift+K` |
+| Fork Tree        | `Ctrl+Shift+K` |
 | Worktree sidebar | `Ctrl+Alt+B`   |
 
 ---

@@ -18,9 +18,9 @@ To rename a terminal, double-click its tab title, or right-click the tab and cho
 
 ## Session persistence
 
-Terminal sessions survive context switches. When you switch to another worktree — or navigate away to a different panel — the underlying PTY process keeps running. Come back and the session is exactly where you left it, scrollback included.
+Terminal sessions survive context switches. When you switch to another worktree — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included.
 
-The scrollback buffer is held server-side. Default: **3,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines.
+Scrollback defaults to **3,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines.
 
 > **Note:** The scrollback setting takes effect for new terminal sessions. Existing sessions retain the buffer size they were started with.
 
@@ -34,13 +34,13 @@ Press `Cmd+F` in a terminal to search its output and scrollback. Matches are hig
 
 ## Links
 
-`Cmd`-click a file path in terminal output to open it in the editor. Paths starting with `/`, `./`, `../` or `~/` are always clickable; bare names like `src/index.ts` are clickable when they match a file in the project. A `:line` or `:line:col` suffix jumps to that position. `Cmd`-click a URL to open it in a loxel browser panel; a plain click opens it in your default browser.
+`Cmd`-click a file path in terminal output to open it in the editor. Paths starting with `/`, `./`, `../` or `~/` are always clickable; bare names like `src/index.ts` are clickable when they match a file in the project. A `:line` or `:line:col` suffix jumps to that position. `Cmd`-click a URL to open it in a Loxel browser panel; a plain click opens it in your default browser.
 
 ---
 
 ## Notifications
 
-Terminal programs can raise loxel notifications with the OSC 9 (iTerm2), OSC 777 (rxvt-unicode) and OSC 99 (Kitty) escape sequences; choose which ones loxel listens to in **Settings > Terminal**. Notifications appear under the bell in the top bar and as a dot on the worktree in the sidebar. Press `` Ctrl+` `` to jump to the panel that raised the most recent one.
+Terminal programs can raise Loxel notifications with the OSC 9 (iTerm2), OSC 777 (rxvt-unicode) and OSC 99 (Kitty) escape sequences; choose which ones Loxel listens to in **Settings > Terminal**. Notifications appear under the bell in the top bar and as a dot on the worktree in the sidebar. Press `` Ctrl+` `` to jump to the panel that raised the most recent one.
 
 ---
 
@@ -52,22 +52,22 @@ Terminal colors follow your dark/light mode setting automatically. No manual con
 
 ## Injected environment variables
 
-Every loxel terminal starts with four environment variables already set:
+Every Loxel terminal starts with four environment variables already set:
 
-| Variable          | Value                                   |
-| ----------------- | --------------------------------------- |
-| `LOXEL`           | `1`                                     |
-| `LOXEL_PORT`      | Port of the running loxel server        |
-| `LOXEL_WORKTREE`  | Working directory path of this terminal |
-| `LOXEL_WINDOW_ID` | Electron window ID (desktop app only)   |
+| Variable          | Value                                     |
+| ----------------- | ----------------------------------------- |
+| `LOXEL`           | `1`                                       |
+| `LOXEL_PORT`      | Port of the running Loxel server          |
+| `LOXEL_WORKTREE`  | Working directory path of this terminal   |
+| `LOXEL_WINDOW_ID` | ID of the Loxel window (desktop app only) |
 
-`LOXEL=1` lets scripts detect they are running inside loxel. `LOXEL_PORT` and `LOXEL_WORKTREE` are the more useful ones — they are consumed by the `loxel` CLI and by TUI agents that want worktree context.
+`LOXEL=1` lets scripts detect they are running inside Loxel. `LOXEL_PORT` and `LOXEL_WORKTREE` are the more useful ones — they are consumed by the `loxel` CLI and by TUI agents that want worktree context.
 
 ---
 
 ## The `loxel` CLI inside a terminal
 
-From any loxel terminal, run `loxel` with a file path to open that file in the window that terminal belongs to:
+From any Loxel terminal, run `loxel` with a file path to open that file in the window that terminal belongs to:
 
 ```bash
 loxel src/app.ts
@@ -85,7 +85,7 @@ It also accepts URLs:
 loxel https://example.com
 ```
 
-Because the terminal already has `LOXEL_PORT` set, the CLI locates the running server instantly — no detection timeout. Outside a loxel terminal, the CLI has to probe for the server; inside one, it connects immediately.
+Because the terminal already has `LOXEL_PORT` set, the CLI connects to the running Loxel immediately.
 
 > For the full `loxel` CLI reference, including behavior when no server is running, see [Environment Variables & Settings](/docs/reference-env-files-cli-settings).
 
@@ -93,9 +93,9 @@ Because the terminal already has `LOXEL_PORT` set, the CLI locates the running s
 
 ## TUI agents
 
-Any terminal-based coding agent runs normally in loxel terminals. Claude Code, Codex, OpenCode, and Gemini CLI all work without special configuration. They inherit `LOXEL_WORKTREE`, which gives them the current worktree path as immediate context — no need to `cd` or pass a path manually. `Shift+Enter` and `Ctrl+Enter` send the modified-Enter sequences these agents use to insert a newline instead of submitting.
+Any terminal-based coding agent runs normally in Loxel terminals. Claude Code, Codex, OpenCode, and Gemini CLI all work without special configuration. They inherit `LOXEL_WORKTREE`, which gives them the current worktree path as immediate context — no need to `cd` or pass a path manually. `Shift+Enter` and `Ctrl+Enter` send the modified-Enter sequences these agents use to insert a newline instead of submitting.
 
-These are distinct from loxel's built-in coding agent, which has a dedicated timeline UI and runs outside the terminal. If you want the timeline, human interaction overlays, and structured tool calls integrated into your layout, see [Coding Agent](/docs/coding-agent). If you have an existing TUI agent workflow or want full CLI control, run it in a terminal here.
+These are distinct from Loxel's built-in coding agent, which has a dedicated timeline UI and runs outside the terminal. If you want the timeline, human interaction overlays, and structured tool calls integrated into your layout, see [Coding Agent](/docs/coding-agent). If you have an existing TUI agent workflow or want full CLI control, run it in a terminal here.
 
 ---
 

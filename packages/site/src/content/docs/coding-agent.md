@@ -12,12 +12,12 @@ The built-in coding agent gives you a dedicated timeline for every run — user 
 
 The coding agent uses models from [OpenRouter](https://openrouter.ai/). Set it up in two steps:
 
-1. **Settings > Models** — add the models you want to use. Each entry has a display name, an OpenRouter model ID, and its own API key; keys are encrypted at rest.
+1. **Settings > Models** — add the models you want to use. Each entry has a display name, an OpenRouter model ID, and its own API key; keys are stored encrypted.
 2. **Settings > Coding Agent** — pick a **Base Model**, used for every agent function. Turn on **Function Overrides** to use different models for specific functions: Planner, Executor, Fallback, Judge, WebSearch, and WS Fallback. WebSearch only works once it has an override. Plan mode runs on the planner model and execute mode on the executor.
 
 Settings apply to newly created sessions. The same section sets the default session mode (execute or plan) and the default tool profile.
 
-Without settings, the agent falls back to environment variables in the loxel server's environment: `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL_PLANNER`, `OPENROUTER_MODEL_EXECUTOR`, `OPENROUTER_MODEL_FALLBACK`, `OPENROUTER_MODEL_JUDGE`, `OPENROUTER_WEBSEARCH_MODEL`, and `OPENROUTER_WEBSEARCH_FALLBACK_MODEL` for each function's model. Loxel launched from Finder or the Dock doesn't read your shell profile's variables, so prefer Settings.
+Without settings, the agent falls back to environment variables from the environment Loxel starts in: `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL_PLANNER`, `OPENROUTER_MODEL_EXECUTOR`, `OPENROUTER_MODEL_FALLBACK`, `OPENROUTER_MODEL_JUDGE`, `OPENROUTER_WEBSEARCH_MODEL`, and `OPENROUTER_WEBSEARCH_FALLBACK_MODEL` for each function's model. Loxel launched from Finder or the Dock doesn't read your shell profile's variables, so prefer Settings.
 
 ---
 
@@ -25,9 +25,9 @@ Without settings, the agent falls back to environment variables in the loxel ser
 
 A session starts when you open an agent panel. It is scoped to the active project + worktree.
 
-Sessions survive context switches. If you switch worktrees — or navigate away to another panel — the agent session keeps running in the loxel server. When you come back, the full event history replays from the buffer (up to 5,000 events per session). You pick up exactly where you left off.
+Sessions survive context switches. If you switch worktrees — or navigate away to another panel — the agent session keeps running in the background. When you come back, the session's history replays in the timeline (up to 5,000 events per session). You pick up exactly where you left off.
 
-Closing an agent tab detaches from the session; it keeps running in the background until loxel quits.
+Closing an agent tab detaches from the session; it keeps running in the background until Loxel quits.
 
 While a run is active, `Enter` stops it and sends your new message right away (steer), and `Cmd+Enter` queues the message until the run finishes. The agent tab's dot shows the session's state: green while running, amber while waiting for you, gray once it has exited.
 
@@ -45,11 +45,11 @@ Every run produces a linear sequence of events:
 - **Tasks** — the agent's todo list
 - **System events** — errors, cancelled runs, and plan mode changes
 
-Scroll back through any prior run within the session buffer.
+Scroll back through any earlier run in the session's history.
 
 ### Rewind and fork
 
-Hover a message or tool call to rewind or fork from that point. **Rewind to here** rolls the session back; rewinding to one of your messages puts its text back in the input so you can edit and resend it. **Fork from here** opens a copy of the session up to that point in a new agent tab, leaving the original untouched. The **Fork tree** panel (`Ctrl+Shift+K`) shows a session's branches; double-click one to resume it.
+Hover a message or tool call to rewind or fork from that point. **Rewind to here** rolls the session back; rewinding to one of your messages puts its text back in the input so you can edit and resend it. **Fork from here** opens a copy of the session up to that point in a new agent tab, leaving the original untouched. The **Fork Tree** panel (`Ctrl+Shift+K`) shows a session's branches; double-click one to resume it.
 
 ---
 
@@ -90,13 +90,13 @@ Open a new agent panel with `Cmd+Shift+A`, or in a split with `Cmd+\` then `A` t
 
 ---
 
-> **Prefer a TUI agent?** Claude Code, Codex, OpenCode, Gemini CLI, and any other terminal-based agent run normally in loxel's integrated terminals. Use those when you want full CLI control or an agent workflow you've already configured. The built-in agent is for when you want the timeline visibility and human interaction overlays integrated directly into your layout. See [Terminals](/docs/terminals) for the TUI agent workflow.
+> **Prefer a TUI agent?** Claude Code, Codex, OpenCode, Gemini CLI, and any other terminal-based agent run normally in Loxel's integrated terminals. Use those when you want full CLI control or an agent workflow you've already configured. The built-in agent is for when you want the timeline visibility and human interaction overlays integrated directly into your layout. See [Terminals](/docs/terminals) for the TUI agent workflow.
 
 ---
 
 ## See also
 
-- [Terminals](/docs/terminals) — running TUI agents (Claude Code, Codex, Gemini CLI) in loxel's integrated terminals
+- [Terminals](/docs/terminals) — running TUI agents (Claude Code, Codex, Gemini CLI) in Loxel's integrated terminals
 - [Code Review](/docs/code-review) — reviewing code the agent produces, with anchored comments that survive rewrites
 - [Drafts](/docs/drafts) — using draft docs as context for agent tasks
 - [Guide: Parallel Workstreams](/docs/guide-parallel-workstreams) — running multiple agents on parallel worktrees

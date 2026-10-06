@@ -100,13 +100,30 @@ Server-side state lives under `~/.local/state/loxel/loxel/` (production) or `~/.
 
 ## Internal docs
 
-Architecture, conventions and design rationale for contributors:
+Architecture, conventions and design rationale for contributors. Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), the map of processes, source layout, the client-server contract, and testing; it links everything below.
+
+**Platform**
 
 - [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, what ships in the app bundle versus in-app updates, browser panels, macOS integration
-- [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) — macOS code signing and the provisioning profile behind passkeys
-- [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md) — action registry, chords, focus navigation, find in panel, shortcuts inside webviews
+- [docs/SHARED_SERVER.md](docs/SHARED_SERVER.md) — how all windows share one Bun server: discover-or-spawn, ownership, idle shutdown, state scopes
+- [docs/STATE_AND_STORAGE.md](docs/STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
 - [docs/WATCHERS.md](docs/WATCHERS.md) — filesystem and git watchers, their ownership and the status refresh pipeline
-- [docs/FILES_TREE.md](docs/FILES_TREE.md) — the shared `FilesTree` component: path identity, expansion, focus, reveal
-- [docs/PROJECT_EXPLORER.md](docs/PROJECT_EXPLORER.md) — the project files panel: path model, Drafts and Others sections, reveal
+- [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) — macOS code signing and the provisioning profile behind passkeys
+
+**Workspace**
+
+- [docs/PROJECTS_AND_WORKTREES.md](docs/PROJECTS_AND_WORKTREES.md) — project and worktree models, setup flows, `wt` integration, context switching, Others folders
+- [docs/GIT.md](docs/GIT.md) — git command and parser layer, status pipeline, diff selection and base resolution, commit graph, mutations
+- [docs/PANELS_AND_LAYOUT.md](docs/PANELS_AND_LAYOUT.md) — dockview zones, panel registry and identity, opening and focus, tools bars, layout persistence per worktree
+- [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md) — action registry, chords, focus navigation, find in panel, shortcuts inside webviews
+
+**Features**
+
+- [docs/EDITOR.md](docs/EDITOR.md) — Monaco and markdown editors, disk sync and saving, file operations, drafts, Others files, localdb, search
+- [docs/LANGUAGE_SERVERS.md](docs/LANGUAGE_SERVERS.md) — language-server managers and routing, URI schemes, diagnostics, formatting, schemas, highlighting
+- [docs/TERMINALS.md](docs/TERMINALS.md) — PTY sessions, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
+- [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
+- [docs/CODING_AGENT_INTEGRATION.md](docs/CODING_AGENT_INTEGRATION.md) — hosting coding-agent sessions in the server, event buffering, rewind and fork, devtools, model settings
 - [docs/DIFF_VIEW_SPEC.md](docs/DIFF_VIEW_SPEC.md) — side-by-side diff spec: synchronized scrolling, intra-line highlights, gutter connectors
-- [docs/SHARED_SERVER.md](docs/SHARED_SERVER.md) — shared server process: how all windows share one Bun server, discover-or-spawn, ownership, idle shutdown, and state scopes
+- [docs/FILES_TREE.md](docs/FILES_TREE.md) — the shared `FilesTree` component: path identity, expansion, focus, reveal
+- [docs/PROJECT_EXPLORER.md](docs/PROJECT_EXPLORER.md) — the Project Files panel: path model, Drafts and Others sections, reveal

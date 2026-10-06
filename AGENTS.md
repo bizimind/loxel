@@ -206,9 +206,12 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 - In every PR, check that the docs covering the code you changed are not stale, and fix them in the same PR if they are.
 
-- READMEs stay high-level and user-facing: what the package does, setup, commands, configuration, public APIs.
+- There are two kinds of docs, and they differ in audience, content, and style. Keep them separate:
+  - **Public docs** (the site pages under `packages/site/src/content/docs/`, and the user-facing parts of package READMEs) are feature- and usage-centric: what the product or tool can do, how to use it, and the configuration, commands, paths, and shortcuts a user needs. They never name source files, modules, internal data structures, or implementation mechanics, and they are written for someone who has not read the code.
+  - **Internal docs** (`packages/<pkg>/docs/*.md`, linked from the package README) are for contributors: architecture, data flow, module boundaries, internal APIs and protocols, invariants, conventions, and design choices with their rationale. They name the modules they describe and link to them, and they do not narrate features for end users or repeat what the public docs say.
+  - When user-visible behavior changes, update the public doc that owns the feature. When architecture, internal APIs, or conventions change, update the internal doc. A change rarely needs both.
 
-- Internal docs (nested docs and specs linked from the README) cover architecture, patterns and conventions, and design choices with their rationale.
+- READMEs stay high-level: what the package does, setup, commands, configuration, public APIs, and an index of the package's internal docs.
 
 - Add or expand docs only for significant changes. Write them at the most specific relevant level and link to them from the parent index instead of repeating the detail there.
 

@@ -4,7 +4,7 @@ description: Commit graph, Changes panel, branch operations, cherry-pick, revert
 order: 6
 ---
 
-Loxel's git tooling is split across two panels that work together: the **Git panel**, with the **commit graph** (an interactive DAG) and the **branch list** (branch operations), and the **Changes panel** (working tree and commit diffs). Together they cover everything from discarding a file's changes to cherry-picking a range of commits.
+Loxel's git tooling is split across two panels that work together: the **Git panel**, with the interactive **commit graph** and the **branch list** (branch operations), and the **Changes panel** (working tree and commit diffs). Together they cover everything from discarding a file's changes to cherry-picking a range of commits.
 
 Open the Git panel with `Ctrl+Shift+G`. The Changes panel is `Cmd+Shift+C`.
 
@@ -12,20 +12,20 @@ Open the Git panel with `Ctrl+Shift+G`. The Changes panel is `Cmd+Shift+C`.
 
 ## Commit graph
 
-The graph shows the full commit DAG for the active worktree, with branch and tag labels on each ref.
+The graph shows the full commit history for the active worktree, with branch and tag labels on each ref.
 
 ### Selecting commits
 
 Click a commit to select it. The Changes panel updates immediately to show what changed in that commit.
 
-- `Cmd+Click` (macOS) or `Ctrl+Click` (Linux/Windows) — add or remove individual commits from the selection
-- `Shift+Click` — select a contiguous range from the last-clicked commit to the one you shift-clicked
+- `Cmd`-click (macOS) or `Ctrl`-click (Linux) — add or remove individual commits from the selection
+- `Shift`-click — select a contiguous range from the last-clicked commit to the one you shift-clicked
 
 Multi-select is useful for cherry-picking or reverting a group of commits, and for reviewing the combined diff across a range.
 
 ### Uncommitted changes row
 
-A virtual row sits just above a branch tip whenever the worktree that has it checked out has staged, modified, or untracked files — one row for each such worktree of the project. It shows:
+A row sits just above a branch tip whenever the worktree that has it checked out has staged, modified, or untracked files — one row for each such worktree of the project. It shows:
 
 - An edit icon indicating it represents work in progress
 - An italic summary: "X staged, Y modified, Z untracked"
@@ -116,7 +116,7 @@ Reset moves the current branch pointer to a selected commit. There are three mod
 | **Mixed** | "Unstage"     | Staged changes become unstaged; working tree unchanged |
 | **Hard**  | "Discard all" | Both staged and unstaged changes are discarded         |
 
-> **Note:** A confirmation dialog always appears before a reset executes, regardless of mode. Hard reset is irreversible — loxel does not offer an undo for it.
+> **Note:** A confirmation dialog always appears before a reset executes, regardless of mode. Hard reset is irreversible — Loxel does not offer an undo for it.
 
 ---
 
@@ -132,7 +132,7 @@ Both cherry-pick and revert work on single or multi-select.
 
 ## Keyboard shortcuts
 
-Git operations in loxel are mouse-driven — there are no dedicated keyboard shortcuts for individual git actions. Use the panel shortcuts to keep your hands on the keyboard while navigating:
+Git operations in Loxel are mouse-driven — there are no dedicated keyboard shortcuts for individual git actions. Use the panel shortcuts to keep your hands on the keyboard while navigating:
 
 | Action             | Shortcut       |
 | ------------------ | -------------- |

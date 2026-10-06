@@ -14,19 +14,19 @@ Loxel's workspace is divided into five fixed zones. Within those zones, panels a
 
 The left sidebar holds dockable tool panels. By default it has:
 
-- **Project files** — the file tree for the active worktree
-- **Changes** — your uncommitted changes; shows a commit's or range's files when commits are selected in the git graph
+- **Project Files** — the file tree for the active worktree
+- **Changes** — your uncommitted changes; shows a commit's or range's files when commits are selected in the commit graph
 
 Every tool panel has an icon in the tool bars at the window's left and right edges; click an icon to show or hide its panel, or drag it to another zone's tool bar. Toggle panels without touching the mouse:
 
 | Panel            | Shortcut       |
 | ---------------- | -------------- |
-| Project files    | `Cmd+Shift+E`  |
+| Project Files    | `Cmd+Shift+E`  |
 | Changes          | `Cmd+Shift+C`  |
 | Git              | `Ctrl+Shift+G` |
 | Comments         | `Ctrl+Shift+R` |
 | Logs             | `Ctrl+Shift+L` |
-| Fork tree        | `Ctrl+Shift+K` |
+| Fork Tree        | `Ctrl+Shift+K` |
 | Worktree sidebar | `Ctrl+Alt+B`   |
 
 The **worktree sidebar** to the far left lists your projects and their worktrees. Collapsed, it is a narrow rail of worktree icons; expanded, drag its right edge to resize it (double-click the edge to reset the width).
@@ -38,7 +38,7 @@ The **worktree sidebar** to the far left lists your projects and their worktrees
 The center area is the main content area. Every editor and interactive view opens here by default:
 
 - **Diff viewer** — side-by-side or unified diff for commits and working tree changes
-- **Code editor** — Monaco-based editor with LSP, format on save, and autosave
+- **Code editor** — Monaco-based editor with language server features, format on save, and autosave
 - **Markdown editor** — live preview markdown editing for repo files and drafts
 - **Excalidraw** — whiteboard and diagram editor
 - **Coding agent** — the built-in agent's timeline UI
@@ -50,14 +50,14 @@ Double-click a terminal or file tab's title, or right-click the tab and choose *
 
 ### Right sidebar
 
-The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads) and the **Fork tree** of coding agent sessions.
+The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads) and the **Fork Tree** of coding agent sessions.
 
 ### Bottom
 
 The bottom zone holds views that benefit from a full-width horizontal strip. By default it has:
 
 - **Git** — the interactive commit graph with branch and tag labels, and the branch list
-- **Logs** — the loxel server's log stream
+- **Logs** — the Loxel server's log stream
 
 ### Status bar
 
@@ -124,12 +124,12 @@ Move focus between panels without the mouse.
 
 ## Per-context persistence
 
-Every aspect of the layout — panel positions, group splits, sizes, orientations, and the active panel in each group — is saved per worktree context. When you switch to a different worktree, loxel saves the current layout and restores the layout from the last time you were in the destination worktree.
+Every aspect of the layout — panel positions, group splits, sizes, orientations, and the active panel in each group — is saved per worktree context. When you switch to a different worktree, Loxel saves the current layout and restores the layout from the last time you were in the destination worktree.
 
-Layout state is stored server-side in SQLite, not in the browser. This means it survives window closes and is consistent across windows pointing at the same loxel server. See the [Worktrees & Projects](/docs/worktrees-and-projects) page for details on how context state is keyed and restored.
+Layouts are saved by Loxel, not by the window, so they survive closing windows and restarting the app. See [Worktrees & Projects](/docs/worktrees-and-projects#per-context-layout-persistence) for how layouts behave across multiple windows.
 
 ---
 
-## Error boundaries
+## When a panel fails
 
-Every panel has its own error boundary. If a panel's component throws a render error, that panel displays an inline error fallback — a message and a reload button. The rest of the layout continues to work normally. A crash in the diff viewer does not affect your terminal or the file tree.
+If a panel hits an error, it shows an error message and a reload button in place of its content. The rest of the layout continues to work normally. A crash in the diff viewer does not affect your terminal or the file tree.

@@ -4,7 +4,7 @@ description: Anchored comments, review sessions, threads, and export.
 order: 7
 ---
 
-Loxel has a built-in code review system that lives in the Comments panel. Comments are anchored to specific lines in a diff using a content fingerprint — not a line number — so they survive code changes, reformats, and repeated agent rewrites.
+Loxel has a built-in code review system that lives in the Comments panel. Comments are anchored to the code they were left on — not to a line number — so they survive code changes, reformats, and repeated agent rewrites.
 
 ---
 
@@ -18,7 +18,7 @@ You can have multiple named sessions per repo — one per feature, one per agent
 
 ## Adding comments
 
-Open a diff in the editor (from the git graph, the Changes panel, or any commit — see [Diff Viewer](/docs/diff-viewer) for the full viewer reference). Commenting needs an active review session and works in the diff viewer's **Split** mode. Then:
+Open a diff in the editor (from the commit graph, the Changes panel, or any commit — see [Diff Viewer](/docs/diff-viewer) for the full viewer reference). Commenting needs an active review session and works in the diff viewer's **Split** mode. Then:
 
 1. Select text on either side of the diff, or position your cursor on a line.
 2. A floating **Add comment** button appears in the gutter at the end line of your selection.
@@ -31,21 +31,12 @@ You can comment on either side of the diff — on the code as it was or as it is
 
 ## How anchors work
 
-Every comment stores the commented lines plus 3 lines of context before and after. When the underlying code changes, loxel runs a multi-step search to find where the comment belongs:
-
-1. Exact position
-2. ±20 lines from original position
-3. Full file scan
-4. Context match within ±100 lines
-5. Partial context match (2 of 3 context lines) within ±100 lines
-6. Lost
-
-The result is one of four anchor states:
+Every comment remembers the lines it was left on and a few lines of context around them. When the code changes, Loxel looks for those lines at their original position, then nearby, then anywhere in the file, and finally by their surrounding context. Each comment ends up in one of four anchor states:
 
 | State       | Meaning                                                                        |
 | ----------- | ------------------------------------------------------------------------------ |
 | `exact`     | Code unchanged at original position                                            |
-| `relocated` | Code moved but identical — found within ±20 lines or full file                 |
+| `relocated` | Code moved but identical                                                       |
 | `outdated`  | Code edited but context lines still match — keeps the original code to compare |
 | `lost`      | Code no longer traceable — grouped under "N lost comments" in the panel        |
 
@@ -69,7 +60,7 @@ To resolve a thread, click the resolve icon. The thread turns gray with a check 
 
 ## Markdown support
 
-Comments support GitHub Flavored Markdown via `react-markdown` and `remark-gfm`. You can use:
+Comments support GitHub Flavored Markdown. You can use:
 
 - Code blocks (fenced with triple backticks)
 - Inline code
@@ -101,13 +92,13 @@ From there you can move it into the repo, paste it into a PR description, or sha
 
 Click a thread's trash icon (**Delete thread**) to delete it. Individual thread deletion is immediate — no confirmation.
 
-To delete an entire review session, open the Reviews dropdown and delete from there; loxel asks for confirmation first. Deleting a session cascades to all its threads and comments.
+To delete an entire review session, open the Reviews dropdown and delete from there; Loxel asks for confirmation first. Deleting a session also deletes all its threads and comments.
 
 ---
 
-## Storage
+## Where reviews are stored
 
-Review sessions live in a SQLite file at `~/.local/state/loxel/loxel/comments/{repoHash}.db`. The hash is keyed by git's common directory, so every worktree of the same repo shares the same review database — start a review in one worktree, select it in another and pick it up there. See [Core Concepts](/docs/core-concepts#review-as-a-first-class-workflow) for the full mental model.
+Review sessions live in a SQLite file at `~/.local/state/loxel/loxel/comments/{repoHash}.db`, one per repository, so every worktree of the same repo shares the same reviews — start a review in one worktree, select it in another and pick it up there. See [Core Concepts](/docs/core-concepts#review-as-a-first-class-workflow) for the full mental model.
 
 ---
 

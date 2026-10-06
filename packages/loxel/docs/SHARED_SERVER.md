@@ -38,13 +38,13 @@ The renderer's WebSocket client reconnects on its own, so windows survive a serv
 
 The server keeps state at these scopes (`src/server/server-state.ts`):
 
-| Scope                       | Lifetime                             | Shared across windows?                                                                         |
-| --------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `ProjectState`              | per registered repo, server lifetime | Yes — one watcher, review database and worktree status list per repo                           |
-| `WorktreeResources`         | first subscriber to last             | Yes — file services and undo/redo history are shared by every window on the worktree           |
-| `ClientState`               | per app WebSocket connection         | No — its terminals, subscriptions and window ID belong to that connection                      |
-| Terminal and agent sessions | create to destroy                    | No — output goes to the owning connection; sessions detach on disconnect and can be reattached |
-| Language-server sessions    | per language-server WebSocket        | No — each connection gets its own language-server process                                      |
+| Scope                       | Lifetime                             | Shared across windows?                                                                                                                                                                                          |
+| --------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ProjectState`              | per registered repo, server lifetime | Yes — one watcher, review database and worktree status list per repo                                                                                                                                            |
+| `WorktreeResources`         | first subscriber to last             | Yes — file services and undo/redo history are shared by every window on the worktree                                                                                                                            |
+| `ClientState`               | per app WebSocket connection         | No — its terminals, subscriptions and window ID belong to that connection                                                                                                                                       |
+| Terminal and agent sessions | create to destroy                    | No — output goes to the owning connection; sessions detach on disconnect and can be reattached                                                                                                                  |
+| Language-server sessions    | per language-server WebSocket        | Partly — worktree-scoped managers keep one process per worktree path, so a second window on the same worktree displaces the first (see [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)); only YAML is per connection |
 
 Undo/redo is per worktree, so two windows on the same worktree share one history; that matches the single filesystem they both edit.
 

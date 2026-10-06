@@ -4,7 +4,7 @@ description: Running multiple agents on parallel worktrees from start to commit.
 order: 16
 ---
 
-A feature request lands. You want an agent on it immediately, but you're not willing to drop what you're doing. Here's how that plays out in loxel.
+A feature request lands. You want an agent on it immediately, but you're not willing to drop what you're doing. Here's how that plays out in Loxel.
 
 ---
 
@@ -38,9 +38,9 @@ You are unblocked. Do your other work.
 
 ## Return when the agent is done
 
-A dot on a worktree in the sidebar means one of its terminals raised a notification, and the git graph shows an uncommitted-changes row for each worktree with pending changes. When you see work accumulating in the task worktree, or when you want to check in, press `Ctrl+Alt+]` to switch back.
+A dot on a worktree in the sidebar means one of its terminals raised a notification, and the commit graph shows an uncommitted-changes row for each worktree with pending changes. When you see work accumulating in the task worktree, or when you want to check in, press `Ctrl+Alt+]` to switch back.
 
-If you used the built-in agent, the event history is waiting for you — buffered (up to 5,000 events) and replayed. Scroll back through the timeline to see what the agent did and why.
+If you used the built-in agent, the event history is waiting for you — up to 5,000 events, replayed in the timeline. Scroll back through the timeline to see what the agent did and why.
 
 If you used a TUI agent, switch to its terminal tab to check the output.
 

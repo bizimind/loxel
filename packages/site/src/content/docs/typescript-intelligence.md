@@ -4,7 +4,7 @@ description: Per-worktree language servers, supported features, and other langua
 order: 13
 ---
 
-Loxel runs a dedicated language server per worktree and wires it directly into Monaco. You get hover docs, go-to-definition, completions, rename, and more — isolated per context, with no cross-worktree interference.
+Loxel runs a dedicated TypeScript language server per worktree and connects it to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per context, with no cross-worktree interference.
 
 ---
 
@@ -34,19 +34,19 @@ These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quic
 
 ## Navigation
 
-`Cmd+Click` on any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. There is no inline peek; definitions always open as a full tab.
+`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. There is no inline peek; definitions always open as a full tab.
 
 ---
 
 ## Unused symbols
 
-Symbols flagged as unused by the language server are dimmed in the editor, and deprecated ones are struck through. This uses Monaco's `MarkerTag.Unnecessary` and `MarkerTag.Deprecated` — the same visual treatment as VS Code. TypeScript emits these diagnostics automatically; no extra configuration required.
+Symbols flagged as unused by the language server are dimmed in the editor, and deprecated ones are struck through. This is the same visual treatment as VS Code. TypeScript emits these diagnostics automatically; no extra configuration required.
 
 ---
 
 ## TypeScript server
 
-Loxel uses the official TypeScript 7 native compiler and language server (`tsc --lsp -stdio`). The same runtime provides diagnostics, completions, navigation, refactors, and other editor features.
+Loxel uses the official TypeScript 7 native compiler and language server. It provides diagnostics, completions, navigation, refactors, and other editor features.
 
 ---
 
@@ -63,11 +63,11 @@ Loxel runs language servers for six other languages. Each one is independent of 
 | Astro     | First matching file opened | `.astro`                                                         |
 | XML       | First matching file opened | `.xml`, `.xsd`, `.xsl`, `.xslt`, `.plist`, and other XML formats |
 
-YAML starts with loxel and stays running. The other servers are lazy — they spawn the first time you open a matching file and disconnect automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
+YAML starts with Loxel and stays running. The others start the first time you open a matching file and stop automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
 
 ---
 
 ## See also
 
-- [Editor](/docs/editor) — Monaco editor that surfaces TypeScript diagnostics as inline markers
+- [Editor](/docs/editor) — the code editor, where TypeScript diagnostics appear inline
 - [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — runtime configuration reference

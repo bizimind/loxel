@@ -12,11 +12,11 @@ This page gets you from a fresh install to your first change and worktree in a f
 
 Click **Add project** at the bottom of the worktree sidebar. The dialog has two tabs: **New Project** creates a new folder and repository, and **Import Existing** brings in something you already have:
 
-1. **Detect** — enter a path or browse to a folder on disk. Loxel identifies whether it's a bare repo, a regular repo, or a non-repo folder.
-2. **Add** — after detection, confirm to register the repo in loxel's project list.
-3. **Clone** — paste a remote URL. Choose single-workspace (regular clone) or multi-workspace (bare repo + first worktree) before confirming.
-4. **Init** — initialize git in an existing folder that isn't yet a repo. Same single/multi choice as Clone.
-5. **Convert** — choose multi-workspace on a detected regular repo to turn it into a bare repo with worktrees. Requires a clean working tree, a checked-out branch, and no existing linked worktrees.
+- **Detect** — enter a path or browse to a folder on disk. Loxel identifies whether it's a bare repo, a regular repo, or a non-repo folder.
+- **Add** — after detection, confirm to register the repo in Loxel's project list.
+- **Clone** — paste a remote URL. Choose single-workspace (regular clone) or multi-workspace (bare repo + first worktree) before confirming.
+- **Init** — initialize git in an existing folder that isn't yet a repo. Same single/multi choice as Clone.
+- **Convert** — choose multi-workspace on a detected regular repo to turn it into a bare repo with worktrees. Requires a clean working tree, a checked-out branch, and no existing linked worktrees.
 
 For most cases, Detect + Add is the fastest path. If you're planning to run multiple parallel workstreams on the same repo, choose the multi-workspace option during Clone or Init — it sets up a bare repo from the start. See [Worktrees & Projects](/docs/worktrees-and-projects) for the full breakdown.
 
@@ -26,13 +26,13 @@ For most cases, Detect + Add is the fastest path. If you're planning to run mult
 
 Loxel's interface is divided into five areas:
 
-- **Left sidebar** — project files and changes (`Cmd+Shift+E`, `Cmd+Shift+C`). The worktree sidebar with your projects and worktrees sits to its left (`Ctrl+Alt+B`).
+- **Left sidebar** — the Project Files and Changes panels (`Cmd+Shift+E`, `Cmd+Shift+C`). The worktree sidebar with your projects and worktrees sits to its left (`Ctrl+Alt+B`).
 - **Center** — editors, diff views, terminals, browsers, and agent panels. This is your main workspace.
-- **Right sidebar** — comments (`Ctrl+Shift+R`) and the agent fork tree; drag any tool panel here.
-- **Bottom** — the Git panel with the commit graph (`Ctrl+Shift+G`) and server logs.
+- **Right sidebar** — the Comments panel (`Ctrl+Shift+R`) and the agent Fork Tree; drag any tool panel here.
+- **Bottom** — the Git panel with the commit graph (`Ctrl+Shift+G`) and the Logs panel.
 - **Status bar** — active branch, upstream tracking (`↑ X ↓ Y`), and working tree counts.
 
-Panels are fully rearrangeable by drag and drop. Use `Cmd+1`–`9` to focus a specific panel, `Ctrl+Tab` / `Ctrl+Shift+Tab` to cycle through open panels. See [Panel Layout](/docs/panel-layout) for details on persistence and keyboard navigation.
+Panels are fully rearrangeable by drag and drop. Use `Cmd+1`–`9` to focus a specific panel, `Ctrl+Tab` / `Ctrl+Shift+Tab` to cycle through open panels. See [Panel Layout](/docs/panel-layout) for rearranging panels and keyboard navigation.
 
 ---
 
@@ -65,4 +65,4 @@ Type a name for the worktree and press `Enter`. The new worktree appears in the 
 
 Switch back to your previous worktree by clicking it in the sidebar, or use `Ctrl+Alt+[` / `Ctrl+Alt+]` to go back and forward through the worktrees you visited. Your layout and open files are restored exactly as you left them.
 
-See [Worktrees & Projects](/docs/worktrees-and-projects) for branch planning, dirty-status tracking, and the `wt` integration.
+See [Worktrees & Projects](/docs/worktrees-and-projects) for bare repos, uncommitted changes across worktrees, and the worktree sidebar.
