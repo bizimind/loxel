@@ -87,11 +87,16 @@ The file tree in the Project Files panel supports keyboard-only navigation:
 | Key                | Action                                                  |
 | ------------------ | ------------------------------------------------------- |
 | `↑` / `↓`          | Move between rows                                       |
+| `Cmd+↑` / `Cmd+↓`  | Jump to the first / last entry in the current folder    |
 | `→`                | Expand folder, or focus first child if already expanded |
 | `←`                | Collapse folder, or jump to parent                      |
 | `Space`            | Toggle expand/collapse                                  |
 | `Enter`            | Open file / toggle folder                               |
 | `F2` or `Shift+F6` | Rename                                                  |
+
+Type the start of a name to jump to the next visible entry that starts with it. Typing one letter repeatedly steps through the entries starting with that letter; letters typed in quick succession build up a longer prefix.
+
+Clicking an entry focuses it, so keyboard navigation continues from there.
 
 **Git status coloring** is applied to every file and folder:
 

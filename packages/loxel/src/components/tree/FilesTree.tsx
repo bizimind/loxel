@@ -1,6 +1,5 @@
 import type { HTMLAttributes, ReactNode } from "react";
 import {
-  Fragment,
   forwardRef,
   useCallback,
   useEffect,
@@ -14,7 +13,7 @@ import { getTreeActionForEvent, useTreeKeyboardNav } from "@/hooks/useTreeKeyboa
 import { panelAutofocusProps } from "@/lib/focus-targets";
 
 import { TreeNodeRenderer } from "./TreeNodeRenderer";
-import { TREE_PATH_ATTR } from "./TreeRow";
+import { TREE_PATH_ATTR, TREE_SECTION_ATTR } from "./TreeRow";
 
 export interface TreeNode {
   path: string;
@@ -508,6 +507,15 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
     [childrenCache],
   );
 
+  // A root header starts a new section: its roots are not siblings of the roots above it.
+  const sections: { header: ReactNode; roots: TreeNode[] }[] = [];
+  for (const [index, node] of nodes.entries()) {
+    const header = renderRootHeader?.(node, index);
+    const current = sections.at(-1);
+    if (current && !header) current.roots.push(node);
+    else sections.push({ header, roots: [node] });
+  }
+
   return (
     <div
       ref={containerRef}
@@ -518,29 +526,34 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
       onKeyDown={disableBuiltinKeyNav ? undefined : handleKeyDown}
       onFocusCapture={handleFocusIn}
     >
-      {nodes.map((node, index) => (
-        <Fragment key={node.path}>
-          {renderRootHeader?.(node, index)}
-          <TreeNodeRenderer
-            node={node}
-            depth={0}
-            expandedPaths={expandedPaths}
-            loadingPaths={loadingSnapshot}
-            isPanelActive={isPanelActive}
-            compactRoot={compactRoot}
-            resolveChildren={resolveChildren}
-            toggleExpanded={toggleExpanded}
-            onOpen={onOpen}
-            onContextMenu={onContextMenu}
-            labelClassName={labelClassName}
-            renderLabel={renderLabel}
-            renderTrailing={renderTrailing}
-            getRowProps={getRowProps}
-            getRowClassName={getRowClassName}
-            focusedPath={focusedPath}
-            activePath={activePath}
-          />
-        </Fragment>
+      {/* Sections are positional: keying one by its first root would remount every row (and drop
+          focus) whenever a different root sorts first. */}
+      {sections.map(({ header, roots }, sectionIndex) => (
+        <div key={sectionIndex} {...{ [TREE_SECTION_ATTR]: "" }}>
+          {header}
+          {roots.map((node) => (
+            <TreeNodeRenderer
+              key={node.path}
+              node={node}
+              depth={0}
+              expandedPaths={expandedPaths}
+              loadingPaths={loadingSnapshot}
+              isPanelActive={isPanelActive}
+              compactRoot={compactRoot}
+              resolveChildren={resolveChildren}
+              toggleExpanded={toggleExpanded}
+              onOpen={onOpen}
+              onContextMenu={onContextMenu}
+              labelClassName={labelClassName}
+              renderLabel={renderLabel}
+              renderTrailing={renderTrailing}
+              getRowProps={getRowProps}
+              getRowClassName={getRowClassName}
+              focusedPath={focusedPath}
+              activePath={activePath}
+            />
+          ))}
+        </div>
       ))}
     </div>
   );

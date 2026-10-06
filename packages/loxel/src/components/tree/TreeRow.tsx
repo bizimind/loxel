@@ -8,6 +8,13 @@ export const TREE_INDENT_BASE = 8;
 export const TREE_INDENT_STEP = 16;
 
 export const TREE_PATH_ATTR = "data-tree-path";
+/** The row's displayed name, matched by type-ahead. */
+export const TREE_NAME_ATTR = "data-tree-name";
+/**
+ * Marks a group of rows (e.g. Project Files' Drafts, worktree and Others sections). Root rows of
+ * different sections are not siblings for keyboard navigation.
+ */
+export const TREE_SECTION_ATTR = "data-tree-section";
 
 interface TreeRowProps {
   path: string;
@@ -56,24 +63,34 @@ export function TreeRow({
     <div className="px-1">
       <button
         {...buttonProps}
-        {...{ [TREE_PATH_ATTR]: path }}
+        {...{ [TREE_PATH_ATTR]: path, [TREE_NAME_ATTR]: name }}
         {...(isDir ? { "data-tree-dir": "" } : undefined)}
         {...(isDir && isExpanded ? { "data-tree-expanded": "" } : undefined)}
         {...(isSelected ? { "data-tree-selected": "" } : undefined)}
         {...(isActive ? { "data-tree-active": "" } : undefined)}
         data-tree-depth={depth}
         tabIndex={-1}
+        // Hover is a light tint; the focused row (by keyboard or click) is a stronger tint with an
+        // outline, so the two never look alike. The active row keeps its own background.
         className={cn(
-          "flex w-full items-center gap-1.5 rounded-md py-1 pr-3 text-left text-xs outline-0",
+          "focus:ring-ring flex w-full items-center gap-1.5 rounded-md py-1 pr-3 text-left text-xs outline-0 focus:ring-1 focus:ring-inset",
           isActive
             ? isPanelActive
-              ? "bg-primary hover:bg-primary focus-visible:bg-primary"
-              : "bg-muted hover:bg-muted focus-visible:bg-muted"
-            : "hover:bg-primary/50 focus-visible:bg-primary/50",
+              ? "bg-primary hover:bg-primary focus:bg-primary"
+              : "bg-muted hover:bg-muted focus:bg-muted"
+            : // Light --primary is pale, so it needs stronger tints than the dark theme.
+              "hover:bg-primary/40 focus:bg-primary/80 dark:hover:bg-primary/20 dark:focus:bg-primary/50",
           buttonClassName,
         )}
         style={{ paddingLeft: indentPx, ...buttonProps?.style }}
-        onClick={onClick}
+        onClick={(e) => {
+          // Clicking a row makes it the keyboard focus, so arrow keys continue from it. Focus
+          // already inside the row (its rename input) stays put.
+          if (!e.currentTarget.contains(document.activeElement)) {
+            e.currentTarget.focus({ preventScroll: true });
+          }
+          onClick?.();
+        }}
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
       >

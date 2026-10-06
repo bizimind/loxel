@@ -11,7 +11,7 @@ import { ProjectFileMenu } from "@/components/menus/ProjectFileMenu";
 import { DetachedFileNode } from "@/components/panels/DetachedFileNode";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
 import type { FilesTreeHandle, TreeNode } from "@/components/tree";
-import { FilesTree, InlineRenameInput, TREE_PATH_ATTR } from "@/components/tree";
+import { FilesTree, InlineRenameInput, TREE_PATH_ATTR, TREE_SECTION_ATTR } from "@/components/tree";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { showToast } from "@/components/ui/toast";
 import { useDragAutoScroll } from "@/hooks/useDragAutoScroll";
@@ -697,17 +697,19 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
                 Drafts
               </span>
             </div>
-            {detachedFiles.map((entry) => (
-              <DetachedFileNode
-                key={entry.name}
-                entry={entry}
-                isPanelActive={isPanelActive}
-                onContextMenu={handleContextMenu}
-                renamingPath={renamingPath}
-                onFinishRename={handleFinishRename}
-                onCancelRename={handleCancelRename}
-              />
-            ))}
+            <div {...{ [TREE_SECTION_ATTR]: "" }}>
+              {detachedFiles.map((entry) => (
+                <DetachedFileNode
+                  key={entry.name}
+                  entry={entry}
+                  isPanelActive={isPanelActive}
+                  onContextMenu={handleContextMenu}
+                  renamingPath={renamingPath}
+                  onFinishRename={handleFinishRename}
+                  onCancelRename={handleCancelRename}
+                />
+              ))}
+            </div>
             <div className="border-border mx-2 my-1.5 border-t" />
           </>
         )}

@@ -62,7 +62,7 @@ Rows expose their canonical path through `data-tree-path` (plus `data-tree-dir`,
 
 The optional `focusedPath` prop marks the matching row (`data-tree-selected`) and focuses it when focus is already inside the tree. This keeps external selection state and DOM focus aligned without stealing focus from unrelated UI. `focusPath(path)` focuses a row once it renders, and `focusTree()` focuses the selected or first row.
 
-`focusedPath` is not the active/opened visual state. Focus, keyboard navigation, and mouse hover use the lightweight hover treatment (`bg-primary/50`).
+`focusedPath` is not the active/opened visual state. Mouse hover gets a light tint (`bg-primary/20` in the dark theme, `/40` in the light theme, whose primary is paler). The focused row — reached by keyboard or by clicking it, since a click focuses its row — gets a stronger tint (`/50` dark, `/80` light) and an inset `ring-1` outline, so hover and focus never look alike. The active row keeps its own background and also gets the outline when focused.
 
 The optional `activePath` prop marks the entry currently opened in the active center panel. Only `activePath` receives the stronger active background (`bg-primary` when the owning panel is active, `bg-muted` when it is not). Rows expose this state through `data-tree-active`.
 
@@ -72,11 +72,13 @@ When built-in keyboard handling is enabled, keyboard input is resolved through t
 
 - `tree.focusNext` moves focus to the next visible row. Default: `ArrowDown`.
 - `tree.focusPrevious` moves focus to the previous visible row. Default: `ArrowUp`.
+- `tree.focusFirstSibling` / `tree.focusLastSibling` move focus to the first / last row in the focused row's folder (expanded children of its siblings are skipped). Root rows are siblings within their section only: `FilesTree` wraps each group of roots that starts at a `renderRootHeader` header in a `data-tree-section` element. Defaults: `Cmd+ArrowUp` / `Cmd+ArrowDown`.
 - `tree.expandOrFocusChild` expands a collapsed directory or focuses its first child. Default: `ArrowRight`.
 - `tree.collapseOrFocusParent` collapses an expanded directory or focuses its parent. Default: `ArrowLeft`.
 - `tree.toggleExpanded` toggles the focused directory. Default: `Space`.
 - `tree.open` opens focused files and toggles focused directories. Default: `Enter`.
 - `tree.rename` is exposed for panels that support inline rename. Defaults: `F2`, `Shift+F6`.
+- Type-ahead: a printable character without Cmd/Ctrl/Alt that no tree action takes moves focus to the next visible row whose `data-tree-name` starts with it (case-insensitive, wrapping around). Characters typed within 500ms of each other build up one prefix, which may include keys bound to tree actions such as Space; repeating one character steps through the names starting with it. Any tree action ends the prefix. A compacted row matches on its first segment.
 
 Callers can pass `disableBuiltinKeyNav` when a surrounding panel owns keyboard shortcuts. In that case the caller should still use the row `data-tree-path` and `data-tree-dir` attributes so keyboard behavior targets the same canonical row identity as mouse behavior, and resolve tree keyboard input through `useTreeKeyboardNav` / `getTreeActionForEvent()` instead of hardcoding key names.
 
@@ -105,4 +107,4 @@ If the target cannot be found after loading the known path, `revealPath()` retur
 
 ## Tests
 
-Behavior coverage lives in `src/components/tree/FilesTree.dom.test.tsx`.
+Behavior coverage lives in `src/components/tree/FilesTree.dom.test.tsx`, with type-ahead matching unit-tested in `src/hooks/useTreeKeyboardNav.test.ts`.
