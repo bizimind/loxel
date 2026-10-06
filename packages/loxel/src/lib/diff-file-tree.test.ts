@@ -33,4 +33,17 @@ describe("orderDiffFiles", () => {
     const files = [file("pkg/core/src/index.ts"), deleted];
     expect(orderDiffFiles(files)).toEqual([deleted, files[0]!]);
   });
+
+  test("keeps files whose path is a file on one side and a directory on the other", () => {
+    // A file `bin/foo` replaced by a directory `bin/foo/`, in Git's order.
+    const fileToDir = [file("bin/foo"), file("bin/foo/main.go")];
+    expect(orderDiffFiles(fileToDir).map(fileDiffPath).toSorted()).toEqual([
+      "bin/foo",
+      "bin/foo/main.go",
+    ]);
+
+    // A directory `docs/guide/` collapsed into a file `docs/guide`.
+    const dirToFile = ["docs/guide", "docs/guide/a.md", "docs/guide/b.md"].map(file);
+    expect(orderDiffFiles(dirToFile)).toHaveLength(3);
+  });
 });

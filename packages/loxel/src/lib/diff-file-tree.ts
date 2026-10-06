@@ -64,8 +64,9 @@ function compactTree(nodes: TreeNode[]): TreeNode[] {
 }
 
 /**
- * `files` in the order the Changes tree lists them. The diff viewer's previous/next file and its
- * "File N of M" counter follow this order, so they walk the tree top to bottom.
+ * `files` in the order the Changes tree lists them, as a permutation of `files`. The diff viewer's
+ * previous/next file and its "File N of M" counter follow this order, so they walk the tree top to
+ * bottom.
  */
 export function orderDiffFiles(files: FileDiff[]): FileDiff[] {
   const byPath = new Map(files.map((f) => [fileDiffPath(f), f]));
@@ -77,9 +78,13 @@ export function orderDiffFiles(files: FileDiff[]): FileDiff[] {
         continue;
       }
       const file = byPath.get(node.path);
-      if (file) ordered.push(file);
+      if (!file) continue;
+      ordered.push(file);
+      byPath.delete(node.path);
     }
   };
   visit(buildDiffFileTree(files));
-  return ordered;
+  // A path that is a file on one side of the diff and a directory on the other collapses into one
+  // tree node, so not every file gets a leaf. Keep the leftovers reachable, in Git's order.
+  return [...ordered, ...byPath.values()];
 }
