@@ -66,13 +66,15 @@ Right-click a selected commit (or range) for available operations:
 
 The Changes panel shows different content depending on your selection in the commit graph.
 
-**No commit selected:** shows your local changes — every file that differs from HEAD, staged or not, in one tree with added/removed line counts. Double-click a file (or press `Enter`) to open its diff.
+**No commit selected:** shows your local changes — every file that differs from HEAD, staged or not, in one tree with added/removed line counts.
 
 **One or more commits selected:** shows the diff for that commit or range. A dropdown in the panel header lets you switch between:
 
 - **Local changes** — your working tree diff
 - **All branch changes** — all changes from the branch tip back to the merge base with the repository's default branch (for example `origin/main`)
 - A specific commit or range from the current selection
+
+In either case, click a file to show its diff in the diff viewer, or double-click it (or press `Enter`) to also bring the diff viewer to the front. The arrow keys and typing a name move the keyboard cursor without changing the diff. The file being shown stays highlighted, also when you step through files with the diff viewer's previous/next buttons.
 
 ---
 

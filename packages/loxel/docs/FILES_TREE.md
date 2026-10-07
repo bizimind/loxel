@@ -58,13 +58,15 @@ For compacted rows, the canonical row identity is the leaf (child) directory pat
 
 ## Focus, Selection, And Active Rows
 
-Rows expose their canonical path through `data-tree-path` (plus `data-tree-dir`, `data-tree-expanded` and `data-tree-depth`). `FilesTree` calls `onSelect(path)` when a row receives focus. Focus entering the tree container from outside is moved to the selected row, else the first row.
+Rows expose their canonical path through `data-tree-path` (plus `data-tree-dir`, `data-tree-expanded` and `data-tree-depth`). `FilesTree` calls `onSelect(path)` when a row receives focus, by click, keyboard navigation or programmatically, and `onFileClick(path)` only when a file row is clicked. A caller whose selection must not follow the keyboard cursor (the Changes panel) selects on `onFileClick` and `onOpen` instead of `onSelect`. Focus entering the tree container from outside is moved to the selected row, else the first row.
 
-The optional `focusedPath` prop marks the matching row (`data-tree-selected`) and focuses it when focus is already inside the tree. This keeps external selection state and DOM focus aligned without stealing focus from unrelated UI. `focusPath(path)` focuses a row once it renders, and `focusTree()` focuses the selected or first row.
+The optional `focusedPath` prop marks the matching row (`data-tree-selected`). When it changes while focus is inside the tree, focus moves to its row only if focus was on the previous `focusedPath` row or on the container. This keeps external selection state and DOM focus aligned without stealing focus from unrelated UI or from a keyboard cursor the user moved elsewhere. `focusPath(path)` focuses a row once it renders, and `focusTree()` focuses the selected or first row.
 
-`focusedPath` is not the active/opened visual state. Mouse hover gets a light tint (`bg-primary/20` in the dark theme, `/40` in the light theme, whose primary is paler). The focused row — reached by keyboard or by clicking it, since a click focuses its row — gets a stronger tint (`/50` dark, `/80` light) and an inset `ring-1` outline, so hover and focus never look alike. The active row keeps its own background and also gets the outline when focused.
+`focusedPath` is not the active/opened visual state. Mouse hover gets a light tint (`bg-primary/20` in the dark theme, `/30` in the light theme, whose primary is paler). The focused row — reached by keyboard or by clicking it, since a click focuses its row — gets a stronger tint (`/50`) and an inset `ring-1` outline (`--ring` in the dark theme, `foreground/50` in the light theme, whose `--ring` is a pale grey), so hover, focus and the solid active row never look alike. The active row keeps its own background and also gets the outline when focused.
 
-The optional `activePath` prop marks the entry currently opened in the active center panel. Only `activePath` receives the stronger active background (`bg-primary` when the owning panel is active, `bg-muted` when it is not). Rows expose this state through `data-tree-active`.
+The optional `activePath` prop marks the entry currently opened in the active center panel. Only `activePath` receives the stronger active background (`bg-primary` when the owning panel is active, a neutral `bg-foreground/10` when it is not, since `--muted` is indistinguishable from the panel background). Rows expose this state through `data-tree-active` and `aria-current`.
+
+With `revealActivePath`, a change of `activePath` expands the directories containing it and scrolls its row into view (`block: "nearest"`) without moving focus. The Changes panel enables it so a file selected from the diff viewer is visible in the tree; the Project Explorer reveals the active editor through its own auto-reveal setting instead.
 
 ## Keyboard
 

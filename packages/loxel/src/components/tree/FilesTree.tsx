@@ -25,7 +25,10 @@ export interface TreeNode {
 export interface FilesTreeProps {
   nodes: TreeNode[];
   onOpen: (path: string) => void;
+  /** A row received focus (by click, keyboard navigation or programmatically). */
   onSelect?: (path: string) => void;
+  /** A file row was clicked. Unlike `onSelect`, moving focus with the keyboard does not call it. */
+  onFileClick?: (path: string) => void;
   onToggle?: (path: string, expanded: boolean) => void;
   onContextMenu?: (e: React.MouseEvent, path: string, isDir: boolean) => void;
 
@@ -52,6 +55,11 @@ export interface FilesTreeProps {
   compactRoot?: boolean;
   /** Skip built-in keyboard navigation (caller handles it at a higher level). */
   disableBuiltinKeyNav?: boolean;
+  /**
+   * When `activePath` changes, expand its ancestor folders and scroll its row into view, without
+   * moving focus (for a selection made outside the tree, e.g. the diff viewer's next file).
+   */
+  revealActivePath?: boolean;
 
   isPanelActive?: boolean;
   className?: string;
@@ -75,6 +83,7 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
     nodes,
     onOpen,
     onSelect,
+    onFileClick,
     onToggle,
     onContextMenu,
     focusedPath,
@@ -87,6 +96,7 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
     autoExpandDirs,
     compactRoot = true,
     disableBuiltinKeyNav,
+    revealActivePath,
     labelClassName,
     renderLabel,
     renderTrailing,
@@ -323,18 +333,53 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
 
   // --- focusedPath prop → DOM focus ---
 
+  // Focus follows `focusedPath` only while it was on the previous `focusedPath` (or on no row):
+  // a keyboard cursor the user moved elsewhere stays put when the selection changes under it.
+  const prevFocusedPathRef = useRef(focusedPath);
   useEffect(() => {
+    const prevFocusedPath = prevFocusedPathRef.current;
+    prevFocusedPathRef.current = focusedPath;
     if (focusedPath === null || focusedPath === undefined) return;
     const container = containerRef.current;
     if (!container) return;
-    if (!container.contains(document.activeElement)) return;
+    const active = document.activeElement;
+    if (!active || !container.contains(active)) return;
+    const focusedRow = active.closest(`button[${TREE_PATH_ATTR}]`);
+    if (focusedRow && focusedRow.getAttribute(TREE_PATH_ATTR) !== prevFocusedPath) return;
     const btn = container.querySelector<HTMLButtonElement>(
       `button[${TREE_PATH_ATTR}="${CSS.escape(focusedPath)}"]`,
     );
-    if (btn && btn !== document.activeElement) {
+    if (btn && btn !== active) {
       btn.focus({ preventScroll: true });
     }
   }, [focusedPath]);
+
+  // --- activePath → expand ancestors and scroll into view (opt-in) ---
+
+  const [pendingActiveScroll, setPendingActiveScroll] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!revealActivePath || !activePath) return;
+    const ancestors = findAncestorDirs(nodes, childrenCache, activePath);
+    for (const dir of ancestors) userCollapsedRef.current.delete(dir);
+    updateExpandedPaths((prev) => {
+      const missing = ancestors.filter((dir) => !prev.has(dir));
+      if (missing.length === 0) return prev;
+      return new Set([...prev, ...missing]);
+    });
+    setPendingActiveScroll(activePath);
+    // Only a new active path is revealed: a later collapse of its folder by the user sticks.
+  }, [revealActivePath, activePath]);
+
+  useLayoutEffect(() => {
+    if (!pendingActiveScroll) return;
+    const btn = containerRef.current?.querySelector<HTMLButtonElement>(
+      `button[${TREE_PATH_ATTR}="${CSS.escape(pendingActiveScroll)}"]`,
+    );
+    if (!btn) return;
+    btn.scrollIntoView({ block: "nearest" });
+    setPendingActiveScroll(null);
+  }, [pendingActiveScroll, expandedPaths, childrenCache]);
 
   // --- revealPath target → DOM focus/scroll after render ---
 
@@ -543,6 +588,7 @@ export const FilesTree = forwardRef<FilesTreeHandle, FilesTreeProps>(function Fi
               resolveChildren={resolveChildren}
               toggleExpanded={toggleExpanded}
               onOpen={onOpen}
+              onFileClick={onFileClick}
               onContextMenu={onContextMenu}
               labelClassName={labelClassName}
               renderLabel={renderLabel}
@@ -590,6 +636,18 @@ function findNode(
     }
   }
   return undefined;
+}
+
+/** The directories in `nodes` (and loaded subtrees) that contain `path`, outermost first. */
+function findAncestorDirs(
+  nodes: TreeNode[],
+  childrenCache: ReadonlyMap<string, TreeNode[]>,
+  path: string,
+): string[] {
+  const ancestor = nodes.find((n) => n.isDir && path.startsWith(n.path + "/"));
+  if (!ancestor) return [];
+  const children = ancestor.children ?? childrenCache.get(ancestor.path) ?? [];
+  return [ancestor.path, ...findAncestorDirs(children, childrenCache, path)];
 }
 
 function remapPathSet(paths: Set<string>, oldPrefix: string, newPrefix: string): Set<string> {

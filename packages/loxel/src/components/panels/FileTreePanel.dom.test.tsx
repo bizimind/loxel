@@ -109,6 +109,45 @@ describe("FileTreePanel", () => {
     });
   });
 
+  test("moving focus with the keyboard does not change the diffed file; a click does", async () => {
+    renderPanel();
+    const selected = () => getCurrentWorktreeUI().getState().selectedDiffFile;
+
+    const a = await screen.findByRole("button", { name: /^a\.ts/ });
+    fireEvent.click(a);
+    expect(selected()).toBe("src/a.ts");
+
+    fireEvent.keyDown(a, { key: "ArrowDown" });
+    const b = screen.getByRole("button", { name: /^b\.ts/ });
+    expect(document.activeElement).toBe(b);
+    expect(selected()).toBe("src/a.ts");
+    expect(a).toHaveAttribute("data-tree-active");
+    expect(b).not.toHaveAttribute("data-tree-active");
+
+    fireEvent.click(b);
+    expect(selected()).toBe("src/b.ts");
+    expect(b).toHaveAttribute("data-tree-active");
+  });
+
+  test("Enter and double-click select the file and open the diff viewer", async () => {
+    renderPanel();
+    const openDiff = jest.fn();
+    window.addEventListener("loxel-open-diff", openDiff);
+
+    const b = await screen.findByRole("button", { name: /^b\.ts/ });
+    b.focus();
+    expect(getCurrentWorktreeUI().getState().selectedDiffFile).toBe("src/a.ts");
+    fireEvent.keyDown(b, { key: "Enter" });
+    expect(getCurrentWorktreeUI().getState().selectedDiffFile).toBe("src/b.ts");
+    expect(openDiff).toHaveBeenCalledTimes(1);
+
+    fireEvent.doubleClick(screen.getByRole("button", { name: /^c\.ts/ }));
+    expect(getCurrentWorktreeUI().getState().selectedDiffFile).toBe("src/c.ts");
+    expect(openDiff).toHaveBeenCalledTimes(2);
+
+    window.removeEventListener("loxel-open-diff", openDiff);
+  });
+
   test("opens a file from the context menu", async () => {
     renderPanel();
 

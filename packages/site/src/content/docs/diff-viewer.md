@@ -65,7 +65,7 @@ To open a diff, select one or more commits in the commit graph, then double-clic
 
 ## Navigation
 
-Move between files with the previous/next file buttons in the toolbar. Diff navigation has no keyboard shortcuts.
+Move between files with the previous/next file buttons in the toolbar. They step through the files in the order the Changes panel lists them. Diff navigation has no keyboard shortcuts.
 
 ---
 
