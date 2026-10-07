@@ -1,7 +1,7 @@
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import {
   assertCanTransformToBare,
@@ -1471,8 +1471,8 @@ function handleBrowse(req: Request, _ctx: RouteContext): Response {
 
   // Defense-in-depth: restrict browsing to the user's home directory.
   // The server has no auth, so limit exposure of the filesystem.
-  const home = homedir();
-  if (!dirPath.startsWith(home + "/") && dirPath !== home) {
+  const fromHome = relative(homedir(), dirPath);
+  if (fromHome === ".." || fromHome.startsWith(`..${sep}`) || isAbsolute(fromHome)) {
     return json({ path: dirPath, dirs: [] });
   }
 

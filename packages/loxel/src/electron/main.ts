@@ -33,6 +33,17 @@ let isServerOwner = false;
 /** Consecutive crash count for owned server restart backoff. */
 let serverCrashCount = 0;
 
+/** Pending delayed restart of the owned server, so only one restart is ever in flight. */
+let serverRestartTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** When the current owned server process was spawned. */
+let serverStartedAt = 0;
+
+const SERVER_MAX_CRASH_RESTARTS = 3;
+
+/** An owned server that stayed up this long before crashing gets a fresh retry budget. */
+const SERVER_STABLE_UPTIME_MS = 60_000;
+
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
 
@@ -101,6 +112,7 @@ function getServerPaths(): { serverBin: string; rendererDir: string } {
 }
 
 function startServer(options: { dekBase64: string }): void {
+  serverStartedAt = Date.now();
   if (IS_DEV) {
     // In dev, spawn bun running the server source directly
     serverProcess = spawn("bun", ["run", "src/server/index.ts"], {
@@ -141,26 +153,47 @@ function startServer(options: { dekBase64: string }): void {
       return;
     }
 
-    if (isServerOwner && code !== 0) {
-      // Server crashed — attempt restart with backoff to avoid restart loops.
-      // Cap at 3 consecutive failures before giving up and dropping ownership.
-      serverCrashCount++;
-      if (serverCrashCount <= 3) {
-        const delayMs = serverCrashCount * 1000;
-        console.log(
-          `[electron] Owned server crashed (attempt ${serverCrashCount}/3), restarting in ${delayMs}ms...`,
-        );
-        setTimeout(() => {
-          startServer({ dekBase64: loadOrCreateDek() });
-        }, delayMs);
-      } else {
-        console.error("[electron] Owned server crashed 3 times, dropping ownership");
-        isServerOwner = false;
-        serverCrashCount = 0;
-        startServerHealthCheck();
-      }
-    }
+    if (isServerOwner && code !== 0) scheduleServerRestart();
   });
+}
+
+/**
+ * Restart a crashed owned server with linear backoff (1s, 2s, 3s). After
+ * SERVER_MAX_CRASH_RESTARTS consecutive quick crashes, drop ownership and fall back to
+ * polling so another instance's server can be adopted. Only one restart is in flight at a
+ * time; ensureServer() cancels it when it spawns the server itself (e.g. on macOS activate).
+ */
+function scheduleServerRestart(): void {
+  if (serverRestartTimer) return;
+  if (Date.now() - serverStartedAt >= SERVER_STABLE_UPTIME_MS) serverCrashCount = 0;
+
+  serverCrashCount++;
+  if (serverCrashCount > SERVER_MAX_CRASH_RESTARTS) {
+    console.error(
+      `[electron] Owned server crashed ${SERVER_MAX_CRASH_RESTARTS} times, dropping ownership`,
+    );
+    isServerOwner = false;
+    serverCrashCount = 0;
+    startServerHealthCheck();
+    return;
+  }
+
+  const delayMs = serverCrashCount * 1000;
+  console.log(
+    `[electron] Owned server crashed (attempt ${serverCrashCount}/${SERVER_MAX_CRASH_RESTARTS}), restarting in ${delayMs}ms...`,
+  );
+  serverRestartTimer = setTimeout(() => {
+    serverRestartTimer = null;
+    // ensureServer() already spawned a server meanwhile.
+    if (serverProcess) return;
+    startServer({ dekBase64: loadOrCreateDek() });
+  }, delayMs);
+}
+
+function cancelServerRestart(): void {
+  if (!serverRestartTimer) return;
+  clearTimeout(serverRestartTimer);
+  serverRestartTimer = null;
 }
 
 function waitForServer(url: string, timeoutMs = 10_000): Promise<void> {
@@ -346,6 +379,8 @@ async function createWindow(): Promise<BrowserWindow> {
 }
 
 function killServer(): void {
+  cancelServerRestart();
+  isServerOwner = false;
   if (serverProcess) {
     try {
       serverProcess.kill("SIGTERM");
@@ -653,6 +688,13 @@ async function ensureServer(): Promise<void> {
   const running = await isServerRunning();
   if (running) return;
 
+  // A server we spawned (e.g. a crash restart) is still booting — wait for it instead of
+  // racing it with a second spawn.
+  if (serverProcess) {
+    await waitForServer(SERVER_URL);
+    return;
+  }
+
   // If a pending update exists (left by a previous server exit code 42 whose owner
   // Electron already quit), apply it before spawning the new server. This ensures
   // updates are installed regardless of which Electron process spawns next.
@@ -665,6 +707,7 @@ async function ensureServer(): Promise<void> {
     }
   }
 
+  cancelServerRestart();
   startServer({ dekBase64: loadOrCreateDek() });
   isServerOwner = true;
 
@@ -677,11 +720,7 @@ async function ensureServer(): Promise<void> {
   if (!serverProcess) isServerOwner = false;
 
   // Server started successfully — clean up backup from any previous update
-  // and reset crash counter so future crashes get full retry budget.
-  if (isServerOwner) {
-    serverCrashCount = 0;
-    cleanupUpdateBackup();
-  }
+  if (isServerOwner) cleanupUpdateBackup();
 }
 
 // macOS: "New Window" in dock right-click menu

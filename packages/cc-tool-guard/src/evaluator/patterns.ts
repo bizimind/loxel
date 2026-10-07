@@ -9,6 +9,13 @@ interface PatternRule {
 }
 
 /**
+ * `rm` with a recursive flag (`-r`/`-R` in any short-flag cluster, or `--recursive`) anywhere
+ * among its options, followed by any options, an optional `--`, and any preceding operands.
+ * The matched position is the start of an operand, so rules can append the operand shape.
+ */
+const RM_RECURSIVE_ARGS = String.raw`\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:(?:-[a-zA-Z]+|--[a-zA-Z-]+)\s+)*(?:--\s+)?(?:\S+\s+)*`;
+
+/**
  * Dangerous patterns - these always require user confirmation
  */
 const DANGEROUS_PATTERNS: PatternRule[] = [
@@ -165,14 +172,14 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     reason: "Recursive delete in home",
   },
   {
-    pattern: /\brm\s+(-[rRf]+\s+)+\.(\s|\/|$)/,
+    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`\.{1,2}\/?(?:\s|$)`),
     classification: "uncertain",
-    reason: "Recursive delete of current directory",
+    reason: "Recursive delete of current or parent directory",
   },
   {
-    pattern: /\brm\s+(-[rRf]+\s+)+\*(\s|$)/,
+    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`(?:\.\/)?\*`),
     classification: "uncertain",
-    reason: "Recursive delete with wildcard glob",
+    reason: "Recursive delete with wildcard glob in current directory",
   },
 
   // Environment modification
