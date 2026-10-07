@@ -30,7 +30,7 @@ db.close();
 - `schema` — create, drop, rename, list, and describe tables; add, drop, and rename columns; `planAlterColumn()` returns a `MigrationPlan` to review before `applyMigration()` runs it.
 - `data` — `list` (filter tree of `AND`/`OR` conditions, sort, select, pagination), `get`, `insert`, `update`, `delete`. Writes are validated against the column definitions: invalid column values and uniqueness violations come back as `{ ok: false, issues }` (`ValidationIssue`s), while malformed requests (an invalid table name or payload, an unknown column, or an unknown option value) throw.
 - `views` — saved view configs (`table`, `kanban`, `form`, `calendar`, `graph`, `gantt`) per table.
-- `formula.evaluate(expression, row)` — evaluates a formula column expression against a row.
+- `formula.evaluate(expression, row)` — evaluates a formula column expression against a row. Expressions are parsed by a sandboxed parser (no `eval`/`new Function`) that supports arithmetic, comparisons, short-circuiting `&&`/`||`/`??`, ternaries, array literals, row property access, safe string/array/number methods, and the `Math`, `Number`, and `String` builtins; prototype-chain access (`constructor`, `__proto__`, ...) and anything outside that subset throws `FormulaError`.
 
 Column kinds (`ColumnDef` in `src/column-types/column-def.ts`; column names are derived from labels, e.g. `Title` → `title`): `text`, `longtext`, `url`, `color`, `number`, `boolean`, `date`, `datetime`, `duration`, `ref`, and computed `formula`. Text and number columns can carry option sets (inline, or referencing another table). Zod schemas for column definitions, view definitions, query options, and row payloads are exported for validating untrusted input (`src/validation/schemas.ts`).
 

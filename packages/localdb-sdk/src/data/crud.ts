@@ -125,9 +125,10 @@ export class DataLayer {
         if (typeof raw === "string") {
           try {
             arr = JSON.parse(raw) as unknown[];
-          } catch {
+          } catch (err) {
             console.warn(
               `Malformed JSON in column "${name}" (row id=${String(row["id"])}), defaulting to []`,
+              err,
             );
             arr = [];
           }

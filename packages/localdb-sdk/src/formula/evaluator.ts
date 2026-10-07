@@ -1,13 +1,15 @@
 /**
  * Evaluates a formula expression against a row of data.
  *
- * Security: Uses a recursive-descent expression parser that only allows
- * whitelisted operations. No `new Function`, no `eval`, no prototype chain
- * access. The parser supports arithmetic, comparisons, logical operators,
- * ternary, property access (with a blocklist), and safe method calls.
+ * Security: The expression is parsed into an AST by a recursive-descent parser
+ * that only accepts a whitelisted subset of JavaScript expression syntax, then
+ * evaluated by a tree walker. No `new Function`, no `eval`, no prototype chain
+ * access. Supported: arithmetic, comparisons, logical operators (short-circuiting),
+ * ternary, property access (with a blocklist), array literals, and safe method
+ * calls on strings, numbers, arrays, plus `Math`, `Number`, and `String`.
  *
  * Timeout: Infinite loops are impossible since there are no loop constructs.
- * A call-count guard prevents excessive recursion or deeply nested expressions.
+ * A node-count guard bounds parsing and evaluation of deeply nested expressions.
  */
 export function evaluateFormula(expression: string, row: Record<string, unknown>): unknown {
   let opCount = 0;
@@ -18,16 +20,16 @@ export function evaluateFormula(expression: string, row: Record<string, unknown>
 
   try {
     const tokens = tokenize(expression);
-    const parser = new Parser(tokens, row, guard);
-    const result = parser.parseExpression();
+    const parser = new Parser(tokens, guard);
+    const ast = parser.parseExpression();
     if (parser.pos < tokens.length) {
       throw new Error(`Unexpected token: ${tokens[parser.pos]!.value}`);
     }
-    return result;
+    return new Evaluator(row, guard).evaluate(ast);
   } catch (err) {
     if (err instanceof FormulaError) throw err;
     const message = err instanceof Error ? err.message : String(err);
-    throw new FormulaError(`Formula evaluation failed: ${message}`, expression);
+    throw new FormulaError(`Formula evaluation failed: ${message}`, expression, { cause: err });
   }
 }
 
@@ -35,8 +37,9 @@ export class FormulaError extends Error {
   constructor(
     message: string,
     public readonly expression: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "FormulaError";
   }
 }
@@ -214,6 +217,261 @@ function tokenize(expr: string): Token[] {
 
 // --- Parser & Evaluator ---
 
+// --- AST ---
+
+type UnaryOp = "-" | "+" | "!";
+type LogicalOp = "&&" | "||" | "??";
+type BinaryOp = "==" | "!=" | "===" | "!==" | "<" | ">" | "<=" | ">=" | "+" | "-" | "*" | "/" | "%";
+
+type Node =
+  | { type: "literal"; value: unknown }
+  | { type: "identifier"; name: string }
+  | { type: "array"; elements: Node[] }
+  | { type: "unary"; op: UnaryOp; operand: Node }
+  | { type: "binary"; op: BinaryOp; left: Node; right: Node }
+  | { type: "logical"; op: LogicalOp; left: Node; right: Node }
+  | { type: "conditional"; test: Node; consequent: Node; alternate: Node }
+  | { type: "member"; object: Node; property: Node }
+  | { type: "call"; callee: Node; args: Node[] };
+
+const EQUALITY_OPS: ReadonlySet<BinaryOp> = new Set(["==", "!=", "===", "!=="]);
+const COMPARISON_OPS: ReadonlySet<BinaryOp> = new Set(["<", ">", "<=", ">="]);
+const ADDITIVE_OPS: ReadonlySet<BinaryOp> = new Set(["+", "-"]);
+const MULTIPLICATIVE_OPS: ReadonlySet<BinaryOp> = new Set(["*", "/", "%"]);
+
+function isBinaryOp(value: string, ops: ReadonlySet<BinaryOp>): value is BinaryOp {
+  return (ops as ReadonlySet<string>).has(value);
+}
+
+// --- Parser ---
+
+/**
+ * Builds an AST from the token stream. Parsing never evaluates anything, so
+ * untaken ternary/logical branches are consumed without side effects.
+ */
+/** Maximum expression nesting depth; keeps recursive descent well within the call stack. */
+const MAX_DEPTH = 100;
+
+class Parser {
+  pos = 0;
+  private depth = 0;
+
+  constructor(
+    private readonly tokens: Token[],
+    private readonly guard: () => void,
+  ) {}
+
+  parseExpression(): Node {
+    return this.parseConditional();
+  }
+
+  private peek(): Token | undefined {
+    return this.tokens[this.pos];
+  }
+
+  private peekOp(ops: ReadonlySet<BinaryOp>): BinaryOp | undefined {
+    const t = this.peek();
+    return t?.kind === "op" && isBinaryOp(t.value, ops) ? t.value : undefined;
+  }
+
+  private peekIs(kind: TokenKind, value: string): boolean {
+    const t = this.peek();
+    return t?.kind === kind && t.value === value;
+  }
+
+  private advance(): Token {
+    const t = this.tokens[this.pos];
+    if (!t) throw new Error("Unexpected end of expression");
+    this.pos++;
+    return t;
+  }
+
+  private expect(kind: TokenKind, value?: string): Token {
+    const t = this.advance();
+    if (t.kind !== kind || (value !== undefined && t.value !== value)) {
+      throw new Error(`Expected ${value ?? kind}, got ${t.value}`);
+    }
+    return t;
+  }
+
+  // Conditional: expr ? expr : expr
+  private parseConditional(): Node {
+    this.guard();
+    if (++this.depth > MAX_DEPTH) throw new Error("Formula nesting too deep");
+    try {
+      const test = this.parseNullishCoalescing();
+      if (this.peek()?.kind !== "question") return test;
+      this.advance();
+      const consequent = this.parseConditional();
+      this.expect("colon");
+      const alternate = this.parseConditional();
+      return { type: "conditional", test, consequent, alternate };
+    } finally {
+      this.depth--;
+    }
+  }
+
+  // Nullish coalescing: ??
+  private parseNullishCoalescing(): Node {
+    return this.parseLogical("??", () => this.parseLogicalOr());
+  }
+
+  // Logical OR: ||
+  private parseLogicalOr(): Node {
+    return this.parseLogical("||", () => this.parseLogicalAnd());
+  }
+
+  // Logical AND: &&
+  private parseLogicalAnd(): Node {
+    return this.parseLogical("&&", () => this.parseEquality());
+  }
+
+  /** Left-associative chain of a single short-circuiting operator. */
+  private parseLogical(op: LogicalOp, parseOperand: () => Node): Node {
+    let left = parseOperand();
+    while (this.peekIs("op", op)) {
+      this.guard();
+      this.advance();
+      const right = parseOperand();
+      left = { type: "logical", op, left, right };
+    }
+    return left;
+  }
+
+  /** Left-associative chain of binary operators from one precedence level. */
+  private parseBinary(ops: ReadonlySet<BinaryOp>, parseOperand: () => Node): Node {
+    let left = parseOperand();
+    for (let op = this.peekOp(ops); op !== undefined; op = this.peekOp(ops)) {
+      this.guard();
+      this.advance();
+      const right = parseOperand();
+      left = { type: "binary", op, left, right };
+    }
+    return left;
+  }
+
+  // Equality: ==, !=, ===, !==
+  private parseEquality(): Node {
+    return this.parseBinary(EQUALITY_OPS, () => this.parseComparison());
+  }
+
+  // Comparison: <, >, <=, >=
+  private parseComparison(): Node {
+    return this.parseBinary(COMPARISON_OPS, () => this.parseAdditive());
+  }
+
+  // Addition/subtraction: +, -
+  private parseAdditive(): Node {
+    return this.parseBinary(ADDITIVE_OPS, () => this.parseMultiplicative());
+  }
+
+  // Multiplication/division/modulo: *, /, %
+  private parseMultiplicative(): Node {
+    return this.parseBinary(MULTIPLICATIVE_OPS, () => this.parseUnary());
+  }
+
+  // Unary: -, +, !
+  private parseUnary(): Node {
+    this.guard();
+    const t = this.peek();
+    if (t?.kind === "op" && (t.value === "-" || t.value === "+" || t.value === "!")) {
+      this.advance();
+      return { type: "unary", op: t.value, operand: this.parseUnary() };
+    }
+    return this.parsePostfix();
+  }
+
+  // Postfix: property access (.prop, [expr]) and calls (func(...args))
+  private parsePostfix(): Node {
+    let node = this.parsePrimary();
+
+    while (true) {
+      const t = this.peek();
+      if (!t) break;
+
+      if (t.kind === "dot") {
+        this.guard();
+        this.advance();
+        const prop = this.expect("ident").value;
+        node = { type: "member", object: node, property: { type: "literal", value: prop } };
+        continue;
+      }
+
+      if (t.kind === "bracket" && t.value === "[") {
+        this.guard();
+        this.advance();
+        const property = this.parseExpression();
+        this.expect("bracket", "]");
+        node = { type: "member", object: node, property };
+        continue;
+      }
+
+      if (t.kind === "paren" && t.value === "(") {
+        this.guard();
+        this.advance();
+        const args = this.parseList("paren", ")");
+        node = { type: "call", callee: node, args };
+        continue;
+      }
+
+      break;
+    }
+
+    return node;
+  }
+
+  /** Parses a comma-separated expression list up to (and consuming) the closing token. */
+  private parseList(closeKind: TokenKind, closeValue: string): Node[] {
+    const items: Node[] = [];
+    if (!this.peekIs(closeKind, closeValue)) {
+      items.push(this.parseExpression());
+      while (this.peek()?.kind === "comma") {
+        this.advance();
+        items.push(this.parseExpression());
+      }
+    }
+    this.expect(closeKind, closeValue);
+    return items;
+  }
+
+  // Primary: literals, identifiers, parenthesized expressions, array literals
+  private parsePrimary(): Node {
+    const t = this.peek();
+    if (!t) throw new Error("Unexpected end of expression");
+
+    if (t.kind === "number") {
+      this.advance();
+      return { type: "literal", value: Number(t.value) };
+    }
+
+    if (t.kind === "string") {
+      this.advance();
+      return { type: "literal", value: t.value };
+    }
+
+    if (t.kind === "paren" && t.value === "(") {
+      this.advance();
+      const node = this.parseExpression();
+      this.expect("paren", ")");
+      return node;
+    }
+
+    if (t.kind === "bracket" && t.value === "[") {
+      this.advance();
+      return { type: "array", elements: this.parseList("bracket", "]") };
+    }
+
+    if (t.kind === "ident") {
+      this.advance();
+      return { type: "identifier", name: t.value };
+    }
+
+    throw new Error(`Unexpected token: ${t.value}`);
+  }
+}
+
+// --- Evaluator ---
+
 /** Properties that must never be accessed from formula expressions. */
 const BLOCKED_PROPERTIES = new Set([
   "constructor",
@@ -270,7 +528,6 @@ const SAFE_STRING_METHODS = new Set([
 
 /** Safe array methods that can be called on array values. */
 const SAFE_ARRAY_METHODS = new Set([
-  "length",
   "includes",
   "indexOf",
   "lastIndexOf",
@@ -284,317 +541,155 @@ const SAFE_ARRAY_METHODS = new Set([
 /** Safe number methods. */
 const SAFE_NUMBER_METHODS = new Set(["toFixed", "toPrecision", "toString"]);
 
-class Parser {
-  pos = 0;
+/**
+ * Built-in namespaces exposed to formulas. `Number` and `String` are callable
+ * (`Number("3")`) and `Number` additionally carries static helpers, which
+ * `accessProperty` exposes via the own-enumerable-property rule for functions.
+ */
+const BUILTINS: Readonly<Record<string, unknown>> = Object.freeze({
+  true: true,
+  false: false,
+  null: null,
+  undefined,
+  NaN,
+  Infinity,
+  Math: Object.freeze({
+    PI: Math.PI,
+    E: Math.E,
+    LN2: Math.LN2,
+    LN10: Math.LN10,
+    SQRT2: Math.SQRT2,
+    ...SAFE_MATH,
+  }),
+  Number: Object.freeze(
+    Object.assign((value: unknown) => Number(value), {
+      isFinite: Number.isFinite,
+      isInteger: Number.isInteger,
+      isNaN: Number.isNaN,
+      parseFloat: Number.parseFloat,
+      parseInt: Number.parseInt,
+    }),
+  ),
+  String: Object.freeze((value: unknown) => String(value)),
+});
 
+class Evaluator {
   constructor(
-    private readonly tokens: Token[],
     private readonly scope: Record<string, unknown>,
     private readonly guard: () => void,
   ) {}
 
-  parseExpression(): unknown {
-    return this.parseTernary();
-  }
-
-  private peek(): Token | undefined {
-    return this.tokens[this.pos];
-  }
-
-  private advance(): Token {
-    const t = this.tokens[this.pos];
-    if (!t) throw new Error("Unexpected end of expression");
-    this.pos++;
-    return t;
-  }
-
-  private expect(kind: TokenKind, value?: string): Token {
-    const t = this.advance();
-    if (t.kind !== kind || (value !== undefined && t.value !== value)) {
-      throw new Error(`Expected ${value ?? kind}, got ${t.value}`);
-    }
-    return t;
-  }
-
-  // Ternary: expr ? expr : expr
-  private parseTernary(): unknown {
+  evaluate(node: Node): unknown {
     this.guard();
-    const condition = this.parseNullishCoalescing();
-    const t = this.peek();
-    if (t?.kind === "question") {
-      this.advance();
-      const consequent = this.parseTernary();
-      this.expect("colon");
-      const alternate = this.parseTernary();
-      return condition ? consequent : alternate;
-    }
-    return condition;
-  }
-
-  // Nullish coalescing: ??
-  private parseNullishCoalescing(): unknown {
-    let left = this.parseLogicalOr();
-    while (this.peek()?.kind === "op" && this.peek()!.value === "??") {
-      this.guard();
-      this.advance();
-      const right = this.parseLogicalOr();
-      left = left ?? right;
-    }
-    return left;
-  }
-
-  // Logical OR: ||
-  private parseLogicalOr(): unknown {
-    let left = this.parseLogicalAnd();
-    while (this.peek()?.kind === "op" && this.peek()!.value === "||") {
-      this.guard();
-      this.advance();
-      const right = this.parseLogicalAnd();
-      left = left || right;
-    }
-    return left;
-  }
-
-  // Logical AND: &&
-  private parseLogicalAnd(): unknown {
-    let left = this.parseEquality();
-    while (this.peek()?.kind === "op" && this.peek()!.value === "&&") {
-      this.guard();
-      this.advance();
-      const right = this.parseEquality();
-      left = left && right;
-    }
-    return left;
-  }
-
-  // Equality: ==, !=, ===, !==
-  private parseEquality(): unknown {
-    let left = this.parseComparison();
-    while (this.peek()?.kind === "op" && ["==", "!=", "===", "!=="].includes(this.peek()!.value)) {
-      this.guard();
-      const op = this.advance().value;
-      const right = this.parseComparison();
-      // oxlint-disable-next-line eqeqeq -- loose equality is intentional for formula semantics
-      if (op === "==") left = left == right;
-      // oxlint-disable-next-line eqeqeq -- loose equality is intentional for formula semantics
-      else if (op === "!=") left = left != right;
-      else if (op === "===") left = left === right;
-      else left = left !== right;
-    }
-    return left;
-  }
-
-  // Comparison: <, >, <=, >=
-  private parseComparison(): unknown {
-    let left = this.parseAdditive();
-    while (this.peek()?.kind === "op" && ["<", ">", "<=", ">="].includes(this.peek()!.value)) {
-      this.guard();
-      const op = this.advance().value;
-      const right = this.parseAdditive();
-      if (op === "<") left = (left as number) < (right as number);
-      else if (op === ">") left = (left as number) > (right as number);
-      else if (op === "<=") left = (left as number) <= (right as number);
-      else left = (left as number) >= (right as number);
-    }
-    return left;
-  }
-
-  // Addition/subtraction: +, -
-  private parseAdditive(): unknown {
-    let left = this.parseMultiplicative();
-    while (
-      this.peek()?.kind === "op" &&
-      (this.peek()!.value === "+" || this.peek()!.value === "-")
-    ) {
-      this.guard();
-      const op = this.advance().value;
-      const right = this.parseMultiplicative();
-      if (op === "+") {
-        left =
-          typeof left === "string" || typeof right === "string"
-            ? String(left) + String(right)
-            : (left as number) + (right as number);
-      } else {
-        left = (left as number) - (right as number);
+    switch (node.type) {
+      case "literal":
+        return node.value;
+      case "identifier":
+        return this.resolveIdentifier(node.name);
+      case "array":
+        return node.elements.map((el) => this.evaluate(el));
+      case "unary":
+        return this.evaluateUnary(node.op, this.evaluate(node.operand));
+      case "binary":
+        return this.evaluateBinary(node.op, this.evaluate(node.left), this.evaluate(node.right));
+      case "logical":
+        return this.evaluateLogical(node);
+      case "conditional":
+        return this.evaluate(node.test)
+          ? this.evaluate(node.consequent)
+          : this.evaluate(node.alternate);
+      case "member":
+        return this.accessProperty(this.evaluate(node.object), this.evaluate(node.property));
+      case "call": {
+        const callee = this.evaluate(node.callee);
+        // Only functions handed out by accessProperty/BUILTINS are reachable here.
+        if (typeof callee !== "function") throw new Error("Value is not callable");
+        const args = node.args.map((arg) => this.evaluate(arg));
+        return callee(...args);
+      }
+      default: {
+        const _exhaustive: never = node;
+        return _exhaustive;
       }
     }
-    return left;
   }
 
-  // Multiplication/division/modulo: *, /, %
-  private parseMultiplicative(): unknown {
-    let left = this.parseUnary();
-    while (
-      this.peek()?.kind === "op" &&
-      (this.peek()!.value === "*" || this.peek()!.value === "/" || this.peek()!.value === "%")
-    ) {
-      this.guard();
-      const op = this.advance().value;
-      const right = this.parseUnary();
-      if (op === "*") left = (left as number) * (right as number);
-      else if (op === "/") left = (left as number) / (right as number);
-      else left = (left as number) % (right as number);
-    }
-    return left;
+  private resolveIdentifier(name: string): unknown {
+    if (BLOCKED_PROPERTIES.has(name)) throw new Error(`Access to "${name}" is not allowed`);
+    if (Object.hasOwn(BUILTINS, name)) return BUILTINS[name];
+    if (!Object.hasOwn(this.scope, name)) throw new Error(`Unknown variable: ${name}`);
+    return this.scope[name];
   }
 
-  // Unary: -, +, !
-  private parseUnary(): unknown {
-    this.guard();
-    const t = this.peek();
-    if (t?.kind === "op") {
-      if (t.value === "-") {
-        this.advance();
-        return -(this.parseUnary() as number);
-      }
-      if (t.value === "+") {
-        this.advance();
-        return Number(this.parseUnary());
-      }
-      if (t.value === "!") {
-        this.advance();
-        return !this.parseUnary();
+  private evaluateUnary(op: UnaryOp, value: unknown): unknown {
+    switch (op) {
+      case "-":
+        return -(value as number);
+      case "+":
+        return Number(value);
+      case "!":
+        return !value;
+      default: {
+        const _exhaustive: never = op;
+        return _exhaustive;
       }
     }
-    return this.parsePostfix();
   }
 
-  // Postfix: property access (.prop, [expr]) and method calls (func(...args))
-  private parsePostfix(): unknown {
-    let value = this.parsePrimary();
-
-    while (true) {
-      const t = this.peek();
-      if (!t) break;
-
-      if (t.kind === "dot") {
-        this.guard();
-        this.advance();
-        const prop = this.expect("ident").value;
-        if (BLOCKED_PROPERTIES.has(prop)) {
-          throw new Error(`Access to "${prop}" is not allowed`);
-        }
-        value = this.accessProperty(value, prop);
-        continue;
+  // Short-circuits: the right operand is only evaluated when needed.
+  private evaluateLogical(node: Extract<Node, { type: "logical" }>): unknown {
+    const left = this.evaluate(node.left);
+    switch (node.op) {
+      case "&&":
+        return left && this.evaluate(node.right);
+      case "||":
+        return left || this.evaluate(node.right);
+      case "??":
+        return left ?? this.evaluate(node.right);
+      default: {
+        const _exhaustive: never = node.op;
+        return _exhaustive;
       }
-
-      if (t.kind === "bracket" && t.value === "[") {
-        this.guard();
-        this.advance();
-        const index = this.parseExpression();
-        this.expect("bracket", "]");
-        if (typeof index === "string" && BLOCKED_PROPERTIES.has(index)) {
-          throw new Error(`Access to "${index}" is not allowed`);
-        }
-        value = this.accessProperty(value, index);
-        continue;
-      }
-
-      if (t.kind === "paren" && t.value === "(") {
-        this.guard();
-        // Value must be a safe callable — resolved during property access
-        if (typeof value !== "function") {
-          throw new Error("Value is not callable");
-        }
-        this.advance();
-        const args = this.parseArgList();
-        this.expect("paren", ")");
-        value = value(...args);
-        continue;
-      }
-
-      break;
     }
-
-    return value;
   }
 
-  private parseArgList(): unknown[] {
-    const args: unknown[] = [];
-    if (this.peek()?.kind === "paren" && this.peek()!.value === ")") return args;
-
-    args.push(this.parseExpression());
-    while (this.peek()?.kind === "comma") {
-      this.advance();
-      args.push(this.parseExpression());
-    }
-    return args;
-  }
-
-  // Primary: literals, identifiers, parenthesized expressions, array literals
-  private parsePrimary(): unknown {
-    const t = this.peek();
-    if (!t) throw new Error("Unexpected end of expression");
-
-    // Number
-    if (t.kind === "number") {
-      this.advance();
-      return Number(t.value);
-    }
-
-    // String
-    if (t.kind === "string") {
-      this.advance();
-      return t.value;
-    }
-
-    // Parenthesized expression
-    if (t.kind === "paren" && t.value === "(") {
-      this.advance();
-      const value = this.parseExpression();
-      this.expect("paren", ")");
-      return value;
-    }
-
-    // Array literal
-    if (t.kind === "bracket" && t.value === "[") {
-      this.advance();
-      const elements: unknown[] = [];
-      if (!(this.peek()?.kind === "bracket" && this.peek()!.value === "]")) {
-        elements.push(this.parseExpression());
-        while (this.peek()?.kind === "comma") {
-          this.advance();
-          elements.push(this.parseExpression());
-        }
-      }
-      this.expect("bracket", "]");
-      return elements;
-    }
-
-    // Identifiers and keywords
-    if (t.kind === "ident") {
-      this.advance();
-      switch (t.value) {
-        case "true":
-          return true;
-        case "false":
-          return false;
-        case "null":
-          return null;
-        case "undefined":
-          return undefined;
-        case "NaN":
-          return NaN;
-        case "Infinity":
-          return Infinity;
-        case "Math":
-          return this.createMathProxy();
-        case "Number":
-          return this.createNumberProxy();
-        case "String":
-          return this.createStringProxy();
-        default:
-          if (BLOCKED_PROPERTIES.has(t.value)) {
-            throw new Error(`Access to "${t.value}" is not allowed`);
-          }
-          if (!(t.value in this.scope)) {
-            throw new Error(`Unknown variable: ${t.value}`);
-          }
-          return this.scope[t.value];
+  private evaluateBinary(op: BinaryOp, left: unknown, right: unknown): unknown {
+    switch (op) {
+      case "==":
+        // oxlint-disable-next-line eqeqeq -- loose equality is intentional for formula semantics
+        return left == right;
+      case "!=":
+        // oxlint-disable-next-line eqeqeq -- loose equality is intentional for formula semantics
+        return left != right;
+      case "===":
+        return left === right;
+      case "!==":
+        return left !== right;
+      case "<":
+        return (left as number) < (right as number);
+      case ">":
+        return (left as number) > (right as number);
+      case "<=":
+        return (left as number) <= (right as number);
+      case ">=":
+        return (left as number) >= (right as number);
+      case "+":
+        return typeof left === "string" || typeof right === "string"
+          ? String(left) + String(right)
+          : (left as number) + (right as number);
+      case "-":
+        return (left as number) - (right as number);
+      case "*":
+        return (left as number) * (right as number);
+      case "/":
+        return (left as number) / (right as number);
+      case "%":
+        return (left as number) % (right as number);
+      default: {
+        const _exhaustive: never = op;
+        return _exhaustive;
       }
     }
-
-    throw new Error(`Unexpected token: ${t.value}`);
   }
 
   private accessProperty(obj: unknown, prop: unknown): unknown {
@@ -603,23 +698,24 @@ class Parser {
     }
 
     const key = typeof prop === "number" ? prop : String(prop);
+    if (typeof key === "string" && BLOCKED_PROPERTIES.has(key)) {
+      throw new Error(`Access to "${key}" is not allowed`);
+    }
 
-    // Array property access
     if (Array.isArray(obj)) {
       if (typeof key === "number") return obj[key];
       if (key === "length") return obj.length;
-      if (typeof key === "string" && SAFE_ARRAY_METHODS.has(key)) {
+      if (SAFE_ARRAY_METHODS.has(key)) {
         const method = obj[key as keyof unknown[]];
         if (typeof method === "function") return method.bind(obj);
       }
       throw new Error(`Array property "${key}" is not allowed`);
     }
 
-    // String property access
     if (typeof obj === "string") {
       if (key === "length") return obj.length;
       if (typeof key === "number") return obj[key];
-      if (typeof key === "string" && SAFE_STRING_METHODS.has(key)) {
+      if (SAFE_STRING_METHODS.has(key)) {
         const method = obj[key as keyof string];
         if (typeof method === "function")
           return (method as (...args: unknown[]) => unknown).bind(obj);
@@ -627,7 +723,6 @@ class Parser {
       throw new Error(`String property "${key}" is not allowed`);
     }
 
-    // Number property access
     if (typeof obj === "number") {
       if (typeof key === "string" && SAFE_NUMBER_METHODS.has(key)) {
         const method = obj[key as keyof number];
@@ -637,42 +732,21 @@ class Parser {
       throw new Error(`Number property "${key}" is not allowed`);
     }
 
-    // Plain object property access (row data, hydrated option objects, etc.)
+    // Callable namespaces (`Number.isFinite`): only own enumerable properties,
+    // never inherited Function.prototype members like `call`/`apply`/`bind`.
+    if (typeof obj === "function") {
+      const members = obj as unknown as Record<string, unknown>;
+      if (typeof key === "string" && Object.keys(members).includes(key)) return members[key];
+      throw new Error(`Property "${String(key)}" is not allowed`);
+    }
+
+    // Plain object property access (row data, hydrated option objects, etc.).
+    // Own properties only, so inherited Object.prototype members stay unreachable.
     if (typeof obj === "object") {
-      if (typeof key === "string" && BLOCKED_PROPERTIES.has(key)) {
-        throw new Error(`Access to "${key}" is not allowed`);
-      }
-      return (obj as Record<string, unknown>)[String(key)];
+      const record = obj as Record<string, unknown>;
+      return Object.hasOwn(record, key) ? record[key] : undefined;
     }
 
     throw new Error(`Cannot access property "${String(key)}" on ${typeof obj}`);
-  }
-
-  private createMathProxy(): Record<string, unknown> {
-    const proxy: Record<string, unknown> = {
-      PI: Math.PI,
-      E: Math.E,
-      LN2: Math.LN2,
-      LN10: Math.LN10,
-      SQRT2: Math.SQRT2,
-    };
-    for (const [name, fn] of Object.entries(SAFE_MATH)) {
-      proxy[name] = fn;
-    }
-    return proxy;
-  }
-
-  private createNumberProxy(): (value: unknown) => number {
-    const fn = (value: unknown) => Number(value);
-    fn.isFinite = Number.isFinite;
-    fn.isInteger = Number.isInteger;
-    fn.isNaN = Number.isNaN;
-    fn.parseFloat = Number.parseFloat;
-    fn.parseInt = Number.parseInt;
-    return fn;
-  }
-
-  private createStringProxy(): (value: unknown) => string {
-    return (value: unknown) => String(value);
   }
 }
