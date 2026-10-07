@@ -8,7 +8,7 @@ WebSocket channel client library for peer-to-peer style communication via the [c
 - **Peer presence** — join/leave events and a live peer map with per-client metadata
 - **Auto-reconnection** — exponential backoff with jitter
 - **Delivery tracking** — per-message ACKs with retries, failure events, and backpressure signals
-- **JWT authentication** — tokens are verified by the relay, which restricts each channel to a single user
+- **JWT authentication** — the relay verifies the token before the WebSocket upgrade and again on `join`, and restricts each channel to a single user. A rejected upgrade surfaces as a `disconnected` event with reason `error` (the WebSocket API does not expose the HTTP status), so refresh the token with `setToken()` when it may have expired
 
 ## Installation
 
@@ -48,36 +48,36 @@ Everything public is exported from `src/index.ts`; option and event types live i
 
 ### `new ChannelClient(options)`
 
-| Option                 | Default | Description                                                   |
-| ---------------------- | ------- | ------------------------------------------------------------- |
-| `url`                  | —       | Relay URL; the client connects to `<url>/channel/<channelId>` |
-| `channelId`            | —       | Channel to join (1–128 chars)                                 |
-| `token`                | —       | JWT sent in the `join` message                                |
-| `meta`                 | `{}`    | Metadata shared with peers                                    |
-| `autoReconnect`        | `true`  | Reconnect after an unexpected disconnect                      |
-| `maxReconnectAttempts` | `10`    | Give up after this many attempts                              |
-| `reconnectBaseDelay`   | `1000`  | Backoff base delay (ms)                                       |
-| `reconnectMaxDelay`    | `30000` | Backoff cap (ms)                                              |
-| `pingInterval`         | `30000` | Keep-alive ping interval (ms)                                 |
-| `connectionTimeout`    | `10000` | Connect timeout (ms)                                          |
-| `enableAck`            | `true`  | Track ACKs and retry unacknowledged messages                  |
-| `ackTimeout`           | `5000`  | Wait before retrying an unacknowledged message (ms)           |
-| `maxRetries`           | `3`     | Retries before emitting `message_failed`                      |
-| `ackCheckInterval`     | `1000`  | How often pending messages are checked (ms)                   |
-| `maxPendingMessages`   | `100`   | Pending count that triggers backpressure                      |
+| Option                 | Default | Description                                                               |
+| ---------------------- | ------- | ------------------------------------------------------------------------- |
+| `url`                  | —       | Relay URL; the client connects to `<url>/channel/<channelId>?token=<jwt>` |
+| `channelId`            | —       | Channel to join (1–128 chars)                                             |
+| `token`                | —       | JWT, sent as the `token` query parameter and in the `join` message        |
+| `meta`                 | `{}`    | Metadata shared with peers                                                |
+| `autoReconnect`        | `true`  | Reconnect after an unexpected disconnect                                  |
+| `maxReconnectAttempts` | `10`    | Give up after this many attempts                                          |
+| `reconnectBaseDelay`   | `1000`  | Backoff base delay (ms)                                                   |
+| `reconnectMaxDelay`    | `30000` | Backoff cap (ms)                                                          |
+| `pingInterval`         | `30000` | Keep-alive ping interval (ms)                                             |
+| `connectionTimeout`    | `10000` | Connect timeout (ms)                                                      |
+| `enableAck`            | `true`  | Track ACKs and retry unacknowledged messages                              |
+| `ackTimeout`           | `5000`  | Wait before retrying an unacknowledged message (ms)                       |
+| `maxRetries`           | `3`     | Retries before emitting `message_failed`                                  |
+| `ackCheckInterval`     | `1000`  | How often pending messages are checked (ms)                               |
+| `maxPendingMessages`   | `100`   | Pending count that triggers backpressure                                  |
 
 ### Methods and properties
 
-| Member                                                                    | Description                                                            |
-| ------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `connect()`                                                               | Join the channel; resolves with the `connected` event                  |
-| `disconnect()`                                                            | Send `leave`, close the socket, and drop pending messages              |
-| `send(to, payload)` / `broadcast(payload)`                                | Send JSON to one peer / all peers; returns the sequence number         |
-| `sendBinary(to, data)` / `broadcastBinary(data)`                          | Same for `ArrayBuffer` payloads                                        |
-| `sendBinaryUnreliable(to, data)` / `broadcastBinaryUnreliable(data)`      | Fire-and-forget binary sends with no ACK tracking or retries           |
-| `on(type, handler)` / `off(type, handler)` / `onAny(handler)`             | Subscribe/unsubscribe; `on` and `onAny` return an unsubscribe function |
-| `setToken(token)`                                                         | Replace the JWT used on the next (re)connect                           |
-| `clientId`, `peers`, `state`, `isConnected`, `isBackpressured`, `lastSeq` | Read-only connection state                                             |
+| Member                                                                    | Description                                                                                                                                   |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connect()`                                                               | Join the channel; resolves with the `connected` event. Throws `InvalidStateError` unless `state` is `disconnected`                            |
+| `disconnect()`                                                            | Send `leave`, close the socket, and drop pending messages                                                                                     |
+| `send(to, payload)` / `broadcast(payload)`                                | Send JSON to one peer / all peers; returns the sequence number                                                                                |
+| `sendBinary(to, data)` / `broadcastBinary(data)`                          | Same for `ArrayBuffer` payloads                                                                                                               |
+| `sendBinaryUnreliable(to, data)` / `broadcastBinaryUnreliable(data)`      | Fire-and-forget binary sends with no ACK tracking or retries                                                                                  |
+| `on(type, handler)` / `off(type, handler)` / `onAny(handler)`             | Subscribe/unsubscribe; `on` and `onAny` return an unsubscribe function                                                                        |
+| `setToken(token)`                                                         | Replace the JWT used on the next connect or auto-reconnect                                                                                    |
+| `clientId`, `peers`, `state`, `isConnected`, `isBackpressured`, `lastSeq` | Read-only connection state; `state` is `disconnected`, `connecting`, `connected`, or `reconnecting` (auto-reconnect in progress after a drop) |
 
 ### Events
 

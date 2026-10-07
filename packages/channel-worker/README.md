@@ -14,11 +14,11 @@ The wire protocol (message types, binary frame layout, error codes, delivery rul
 
 ## Endpoints
 
-| Endpoint              | Method          | Description                                                          |
-| --------------------- | --------------- | -------------------------------------------------------------------- |
-| `/health`             | GET             | Health check, returns `{ status: "ok", timestamp: number }`          |
-| `/debug/jwks`         | GET             | Reports the derived JWKS URL/issuer and whether the JWKS fetch works |
-| `/channel/:channelId` | GET (WebSocket) | Channel connection (channel ID 1–128 characters)                     |
+| Endpoint              | Method          | Description                                                               |
+| --------------------- | --------------- | ------------------------------------------------------------------------- |
+| `/health`             | GET             | Health check, returns `{ status: "ok", timestamp: number }`               |
+| `/debug/jwks`         | GET             | Reports the derived JWKS URL/issuer and whether the JWKS fetch works      |
+| `/channel/:channelId` | GET (WebSocket) | Channel connection (channel ID 1–128 characters); requires `?token=<jwt>` |
 
 ## Configuration
 
@@ -31,6 +31,10 @@ The wire protocol (message types, binary frame layout, error codes, delivery rul
 
 Both secrets are required, including in `.dev.vars` for local development (every request fails without `AXIOM_TOKEN` because the Axiom logger cannot be created). The JWKS URL (`https://api.workos.com/sso/jwks/<client_id>`) and issuer (`https://api.workos.com/user_management/<client_id>`) are derived from `WORKOS_CLIENT_ID`. Tokens must be RS256-signed, carry `sub` and `exp`, and match that issuer (5 s clock tolerance). JWKS responses are cached in memory for an hour.
 
+## Authentication
+
+The JWT is verified twice. The Worker verifies the `token` query parameter and answers `401` before the WebSocket upgrade when it is missing or invalid, so unauthenticated sockets never reach a Durable Object; it strips the parameter before forwarding the request. The Durable Object then verifies the token sent in the `join` message and enforces the same-user rule. The token is in the URL because browsers cannot set headers on WebSocket requests; the Worker never logs request URLs.
+
 ## Development
 
 ```bash
@@ -39,7 +43,7 @@ pnpm -C packages/channel-worker run dev         # wrangler dev on ws://localhost
 pnpm -C packages/channel-worker run typecheck
 ```
 
-`.dev.vars` is loaded by `wrangler dev` and gitignored. To poke the relay manually, connect with `bunx wscat -c ws://localhost:8787/channel/test-room` and send a `join` envelope containing a valid WorkOS JWT.
+`.dev.vars` is loaded by `wrangler dev` and gitignored. To poke the relay manually, connect with `bunx wscat -c "ws://localhost:8787/channel/test-room?token=$JWT"` (a valid WorkOS JWT) and send a `join` envelope containing the same token.
 
 ## Deployment
 

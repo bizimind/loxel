@@ -34,19 +34,18 @@ interface RateLimiter {
 }
 
 /**
- * Buffered message for delivery on reconnect.
+ * Buffered message for delivery on reconnect (in-memory only).
  */
 interface BufferedMessage {
   seq: number;
   from: ClientId;
   to?: ClientId;
+  /** JSON payload; `null` for binary messages */
   payload: unknown;
   ts: number;
   isBroadcast: boolean;
-  /** Whether this is a binary message */
-  isBinary?: boolean;
-  /** Base64-encoded binary payload (for DO storage compatibility) */
-  binaryPayload?: string;
+  /** Binary payload (set only for binary frames) */
+  binaryPayload?: ArrayBuffer;
 }
 
 /**
@@ -108,6 +107,11 @@ export class ChannelRoom extends DurableObject<Env> {
       this.channelUserId = (await this.ctx.storage.get<string>("channelUserId")) ?? null;
     });
 
+    // Best-effort, non-blocking: nothing reads these keys anymore
+    this.deleteLegacyBuffers().catch((error: unknown) => {
+      this.logger.warn("Failed to delete legacy message buffers", { error });
+    });
+
     // Restore sessions from hibernation
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment() as WebSocketAttachment | null;
@@ -121,6 +125,21 @@ export class ChannelRoom extends DurableObject<Env> {
           this.channelUserId = attachment.session.userId;
         }
       }
+    }
+  }
+
+  /**
+   * Earlier deployments persisted message buffers under `buffer:<clientId>` keys that were
+   * never deleted (#398). Buffers are in-memory only now, so reclaim the storage they left.
+   */
+  private async deleteLegacyBuffers(): Promise<void> {
+    // storage.delete() accepts at most 128 keys per call
+    for (;;) {
+      const legacy = await this.ctx.storage.list({ prefix: "buffer:", limit: 128 });
+      if (legacy.size === 0) {
+        return;
+      }
+      await this.ctx.storage.delete([...legacy.keys()]);
     }
   }
 
@@ -374,8 +393,6 @@ export class ChannelRoom extends DurableObject<Env> {
     this.rateLimiters.delete(session.clientId);
     this.lastSeenSeq.delete(session.clientId);
     this.messageBuffers.delete(session.clientId);
-    // Delete persisted buffer from DO storage
-    this.ctx.storage.delete(`buffer:${session.clientId}`);
 
     // Notify remaining peers
     this.broadcastControl({
@@ -703,13 +720,10 @@ export class ChannelRoom extends DurableObject<Env> {
   }
 
   /**
-   * Buffer a message for a client (in-memory only).
+   * Buffer a message for a client (in-memory ring buffer of BUFFER_SIZE entries).
    *
-   * NOTE: Reconnect message recovery is currently limited because reconnecting
-   * clients receive a new server-generated clientId. Buffers keyed by the old
-   * clientId become unreachable. A proper fix requires a stable client identity
-   * (e.g., client-chosen session ID sent in the join message). For now, buffers
-   * only help within a single connection lifetime (e.g., deduplication).
+   * Replayed by sendBufferedMessages() when a client rejoins with `lastSeq`. Replay is
+   * currently ineffective because a rejoining client is assigned a new clientId; see #398.
    */
   private bufferMessage(clientId: ClientId, message: BufferedMessage): void {
     let buffer = this.messageBuffers.get(clientId);
@@ -728,7 +742,6 @@ export class ChannelRoom extends DurableObject<Env> {
 
   /**
    * Buffer a binary message for a client (for delivery on reconnect).
-   * Converts ArrayBuffer to base64 for JSON-compatible DO storage.
    */
   private bufferBinaryMessage(
     clientId: ClientId,
@@ -740,17 +753,7 @@ export class ChannelRoom extends DurableObject<Env> {
       isBroadcast: boolean;
     },
   ): void {
-    // Convert ArrayBuffer to base64 for storage using chunked encoding
-    // to avoid exceeding the JS engine's maximum call stack / argument limit
-    const bytes = new Uint8Array(frame.payload);
-    const CHUNK_SIZE = 8192;
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-      const chunk = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
-      binary += String.fromCharCode(...chunk);
-    }
-    const base64 = btoa(binary);
-
+    // frame.payload is already a copy (decodeBinaryFrame slices it), so it is safe to retain
     this.bufferMessage(clientId, {
       seq: frame.seq,
       from: frame.from,
@@ -758,34 +761,27 @@ export class ChannelRoom extends DurableObject<Env> {
       payload: null,
       ts: Date.now(),
       isBroadcast: frame.isBroadcast,
-      isBinary: true,
-      binaryPayload: base64,
+      binaryPayload: frame.payload,
     });
   }
 
   /**
    * Send buffered messages to a reconnecting client.
-   * Only sends messages with seq > lastSeq.
-   *
-   * NOTE: This currently has limited effectiveness because reconnecting clients
-   * receive a new clientId, so the buffer lookup will find an empty buffer.
-   * See bufferMessage() for details on the limitation.
+   * Only sends messages with seq > lastSeq. See bufferMessage() for the current limitation.
    */
   private sendBufferedMessages(ws: WebSocket, clientId: ClientId, lastSeq: number): void {
     const buffer = this.messageBuffers.get(clientId) ?? [];
 
     for (const msg of buffer) {
       if (msg.seq > lastSeq) {
-        if (msg.isBinary && msg.binaryPayload) {
-          // Reconstruct binary frame from base64 and send
-          const bytes = Uint8Array.from(atob(msg.binaryPayload), (c) => c.charCodeAt(0));
+        if (msg.binaryPayload) {
           const frame = encodeBinaryFrame({
             isBinary: true,
             isBroadcast: msg.isBroadcast,
             seq: msg.seq,
             from: msg.from,
             to: msg.to,
-            payload: bytes.buffer,
+            payload: msg.binaryPayload,
           });
           this.sendRaw(ws, frame);
         } else if (msg.isBroadcast) {
