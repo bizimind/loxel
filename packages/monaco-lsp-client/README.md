@@ -26,4 +26,4 @@ const client = new MonacoLspClient(transport, { languageId: ["typescript", "java
 
 Exports ([`src/index.ts`](src/index.ts)): `MonacoLspClient`, the transports `WebSocketTransport`, `createTransportToWorker`, and `createTransportToIFrame` (re-exported from `@hediet/json-rpc-*`), and the `capabilities` contract plus related types for registering extra client capabilities via `client.addStaticClientCapabilities()`.
 
-The package has no build, typecheck, or test scripts; loxel consumes it as TypeScript source and bundles it.
+The package has no build or test scripts (only `typecheck`); loxel consumes it as TypeScript source and bundles it. Call `client.dispose()` to unregister the Monaco providers and stop syncing models when the connection goes away.
