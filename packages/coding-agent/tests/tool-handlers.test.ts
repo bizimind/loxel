@@ -699,6 +699,105 @@ describe("tool handlers", () => {
     }
   });
 
+  test("Bash timeout kills children spawned by the shell", async () => {
+    const ctx = await createContext({ mode: "execute" });
+    // The marker script is a grandchild of the tool's shell and holds the stdout pipe open;
+    // killing only the shell would leave it running and the call would not return until
+    // the sleep finished.
+    const marker = `coding-agent-timeout-${process.pid}-${Date.now()}.sh`;
+    const script = path.join(ctx.workspaceRoot, marker);
+    await Bun.write(script, "sleep 30\n");
+    const command = `sh ${script} & wait`;
+
+    const started = Date.now();
+    const result = await invokeToolByName("Bash", { command, timeout: 200 }, ctx);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    const out = result.value as { interrupted: boolean };
+    expect(out.interrupted).toBe(true);
+
+    // Poll briefly: the group signal is delivered asynchronously.
+    const deadline = Date.now() + 3000;
+    let survivors = "";
+    do {
+      survivors = Bun.spawnSync(["pgrep", "-f", marker]).stdout.toString().trim();
+      if (!survivors) {
+        break;
+      }
+      await Bun.sleep(50);
+    } while (Date.now() < deadline);
+    expect(survivors).toBe("");
+  });
+
+  test("WebFetch rejects non-http(s) URLs", async () => {
+    const ctx = await createContext({ mode: "execute" });
+    for (const url of ["file:///etc/passwd", "ftp://example.com/x", "javascript:alert(1)"]) {
+      const result = await invokeToolByName("WebFetch", { url, prompt: "Summarize" }, ctx);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe("TOOL_VALIDATION_FAILED");
+      }
+    }
+  });
+
+  test("WebFetch distinguishes timeouts from other fetch failures", async () => {
+    const ctx = await createContext({ mode: "execute" });
+
+    globalThis.fetch = (async () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    }) as unknown as typeof fetch;
+    const timedOut = await invokeToolByName(
+      "WebFetch",
+      { url: "https://example.com", prompt: "Summarize" },
+      ctx,
+    );
+    expect(timedOut.ok).toBe(false);
+    if (!timedOut.ok) {
+      expect(timedOut.error.code).toBe("TOOL_TIMEOUT");
+      expect(timedOut.error.retriable).toBe(true);
+    }
+
+    globalThis.fetch = (async () => {
+      throw new Error("connection reset");
+    }) as unknown as typeof fetch;
+    const failed = await invokeToolByName(
+      "WebFetch",
+      { url: "https://example.com", prompt: "Summarize" },
+      ctx,
+    );
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) {
+      expect(failed.error.code).toBe("TOOL_RUNTIME_ERROR");
+      expect(failed.error.message).toContain("connection reset");
+    }
+  });
+
+  test("WebFetch reports body-read failures with their cause", async () => {
+    const ctx = await createContext({ mode: "execute" });
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            controller.error(new Error("stream broke"));
+          },
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+    const result = await invokeToolByName(
+      "WebFetch",
+      { url: "https://example.com", prompt: "Summarize" },
+      ctx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("TOOL_RUNTIME_ERROR");
+      expect(result.error.message).toContain("stream broke");
+    }
+  });
+
   test("WebFetch stores artifact path when response is truncated", async () => {
     globalThis.fetch = (async () =>
       new Response("x".repeat(READ_LIMITS.maxBytes + 64), {

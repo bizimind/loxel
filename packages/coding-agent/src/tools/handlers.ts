@@ -17,7 +17,11 @@ import { activateReminder, clearReminder } from "../prompts/reminders.ts";
 import { ensureStateLayout, getSessionPaths, getStateLayout } from "../state/layout.ts";
 import { createPlanFileName } from "../utils/ids.ts";
 import { isPathWithinResolved, normalizeWorkspacePath } from "../utils/path.ts";
-import { resolveShellBinary } from "../utils/shell.ts";
+import {
+  resolveShellBinary,
+  SHELL_PROCESS_GROUP_SPAWN_OPTIONS,
+  terminateProcessGroup,
+} from "../utils/shell.ts";
 import type { ToolRuntimeContext } from "./context.ts";
 import type { ToolResult } from "./contracts.ts";
 import { isToolAllowedInProfile } from "./profile.ts";
@@ -966,6 +970,7 @@ async function runBash(
 
   const shell = resolveShellBinary();
   const proc = Bun.spawn([shell, "-c", input.command], {
+    ...SHELL_PROCESS_GROUP_SPAWN_OPTIONS,
     cwd: ctx.workspaceRoot,
     stdout: "pipe",
     stderr: "pipe",
@@ -973,22 +978,12 @@ async function runBash(
   });
 
   let timedOut = false;
+  let cancelHardKill = (): void => {};
   const timer = setTimeout(() => {
     timedOut = true;
-    // Kill the entire process group so child processes don't keep stdout open
-    try {
-      process.kill(-proc.pid, "SIGTERM");
-    } catch {
-      proc.kill();
-    }
-    // Hard-kill after 2s if the group doesn't exit
-    setTimeout(() => {
-      try {
-        process.kill(-proc.pid, "SIGKILL");
-      } catch {
-        // already dead
-      }
-    }, 2000);
+    // Kill the whole process group so children holding the stdout pipe open cannot
+    // keep the tool call hanging after the shell itself exits.
+    cancelHardKill = terminateProcessGroup(proc);
   }, timeoutMs);
 
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -998,6 +993,7 @@ async function runBash(
   ]);
 
   clearTimeout(timer);
+  cancelHardKill();
 
   const combined = `${stdout}\n${stderr}`;
   const stdoutCapped = truncateByLinesAndBytes(stdout);
@@ -1211,6 +1207,28 @@ async function runTaskStop(
   return ok(taskStopOutputSchema.parse({ task_id: taskId, stopped }));
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+}
+
+function webFetchFailure(url: string, phase: string, error: unknown): ToolResult<never> {
+  if (isAbortError(error)) {
+    return err(
+      "TOOL_TIMEOUT",
+      `WebFetch ${phase} timed out after ${WEB_LIMITS.fetchTimeoutMs}ms for ${url}`,
+      true,
+      "Retry with a stable URL",
+    );
+  }
+  const cause = error instanceof Error ? error.message : String(error);
+  return err(
+    "TOOL_RUNTIME_ERROR",
+    `WebFetch ${phase} failed for ${url}: ${cause}`,
+    false,
+    "Check the URL and network connectivity",
+  );
+}
+
 async function runWebFetch(
   rawInput: unknown,
   ctx: ToolRuntimeContext,
@@ -1232,25 +1250,15 @@ async function runWebFetch(
   let response: Response;
   try {
     response = await fetch(input.url, { signal, headers: { "user-agent": "coding-agent/0.1.0" } });
-  } catch {
-    return err(
-      "TOOL_TIMEOUT",
-      `WebFetch timed out for ${input.url}`,
-      true,
-      "Retry with a stable URL",
-    );
+  } catch (error) {
+    return webFetchFailure(input.url, "request", error);
   }
 
   let body: string;
   try {
     body = await response.text();
-  } catch {
-    return err(
-      "TOOL_TIMEOUT",
-      `WebFetch body read timed out for ${input.url}`,
-      true,
-      "Retry with a stable URL",
-    );
+  } catch (error) {
+    return webFetchFailure(input.url, "body read", error);
   }
   const fullBytes = Buffer.byteLength(body, "utf8");
   const truncated = fullBytes > READ_LIMITS.maxBytes;
