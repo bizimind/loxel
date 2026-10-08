@@ -30,6 +30,23 @@ let serverProcess: ChildProcess | null = null;
 /** Whether this Electron process spawned the server (and should handle updates). */
 let isServerOwner = false;
 
+/** Consecutive crash count for owned server restart backoff. */
+let serverCrashCount = 0;
+
+/** Pending delayed restart of the owned server, so only one restart is ever in flight. */
+let serverRestartTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** When the current owned server process was spawned. */
+let serverStartedAt = 0;
+
+/** Non-owner poll of the shared server; a single interval for the process lifetime. */
+let serverHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
+
+const SERVER_MAX_CRASH_RESTARTS = 3;
+
+/** An owned server that stayed up this long before crashing gets a fresh retry budget. */
+const SERVER_STABLE_UPTIME_MS = 60_000;
+
 /** Whether the Cmd (Meta) key is currently held. Tracked via before-input-event on all webContents. */
 let metaKeyHeld = false;
 
@@ -98,6 +115,7 @@ function getServerPaths(): { serverBin: string; rendererDir: string } {
 }
 
 function startServer(options: { dekBase64: string }): void {
+  serverStartedAt = Date.now();
   if (IS_DEV) {
     // In dev, spawn bun running the server source directly
     serverProcess = spawn("bun", ["run", "src/server/index.ts"], {
@@ -138,11 +156,72 @@ function startServer(options: { dekBase64: string }): void {
       return;
     }
 
-    // Server failed to start (e.g., EADDRINUSE from spawn race) — drop ownership
-    if (isServerOwner && code !== 0) {
-      isServerOwner = false;
-    }
+    if (isServerOwner && code !== 0) void handleOwnedServerFailure();
   });
+}
+
+/**
+ * An owned server exited abnormally. If the port is already served, another instance won
+ * the spawn race (EADDRINUSE) and this process simply adopts the winner; otherwise it is a
+ * crash and the server is restarted.
+ */
+async function handleOwnedServerFailure(): Promise<void> {
+  const servedByOther = await isServerRunning();
+  // killServer() or ensureServer() intervened while we were probing the port.
+  if (!isServerOwner || serverProcess) return;
+
+  if (servedByOther) {
+    console.log("[electron] Server port is held by another instance, dropping ownership");
+    dropServerOwnership();
+    return;
+  }
+  scheduleServerRestart();
+}
+
+/** Stop acting as the server owner and poll for the shared server instead. */
+function dropServerOwnership(): void {
+  isServerOwner = false;
+  serverCrashCount = 0;
+  cancelServerRestart();
+  startServerHealthCheck();
+}
+
+/**
+ * Restart a crashed owned server with linear backoff (1s, 2s, 3s). After
+ * SERVER_MAX_CRASH_RESTARTS consecutive quick crashes, drop ownership and fall back to
+ * polling so another instance's server can be adopted. Only one restart is in flight at a
+ * time; ensureServer() cancels it when it spawns the server itself (e.g. on macOS activate),
+ * and dropping ownership cancels it too.
+ */
+function scheduleServerRestart(): void {
+  if (serverRestartTimer) return;
+  if (Date.now() - serverStartedAt >= SERVER_STABLE_UPTIME_MS) serverCrashCount = 0;
+
+  serverCrashCount++;
+  if (serverCrashCount > SERVER_MAX_CRASH_RESTARTS) {
+    console.error(
+      `[electron] Owned server crashed ${SERVER_MAX_CRASH_RESTARTS} times, dropping ownership`,
+    );
+    dropServerOwnership();
+    return;
+  }
+
+  const delayMs = serverCrashCount * 1000;
+  console.log(
+    `[electron] Owned server crashed (attempt ${serverCrashCount}/${SERVER_MAX_CRASH_RESTARTS}), restarting in ${delayMs}ms...`,
+  );
+  serverRestartTimer = setTimeout(() => {
+    serverRestartTimer = null;
+    // Ownership was dropped, or ensureServer() already spawned a server meanwhile.
+    if (!isServerOwner || serverProcess) return;
+    startServer({ dekBase64: loadOrCreateDek() });
+  }, delayMs);
+}
+
+function cancelServerRestart(): void {
+  if (!serverRestartTimer) return;
+  clearTimeout(serverRestartTimer);
+  serverRestartTimer = null;
 }
 
 function waitForServer(url: string, timeoutMs = 10_000): Promise<void> {
@@ -314,6 +393,12 @@ async function createWindow(): Promise<BrowserWindow> {
 }
 
 function killServer(): void {
+  cancelServerRestart();
+  if (serverHealthCheckTimer) {
+    clearInterval(serverHealthCheckTimer);
+    serverHealthCheckTimer = null;
+  }
+  isServerOwner = false;
   if (serverProcess) {
     try {
       serverProcess.kill("SIGTERM");
@@ -621,6 +706,13 @@ async function ensureServer(): Promise<void> {
   const running = await isServerRunning();
   if (running) return;
 
+  // A server we spawned (e.g. a crash restart) is still booting — wait for it instead of
+  // racing it with a second spawn.
+  if (serverProcess) {
+    await waitForServer(SERVER_URL);
+    return;
+  }
+
   // If a pending update exists (left by a previous server exit code 42 whose owner
   // Electron already quit), apply it before spawning the new server. This ensures
   // updates are installed regardless of which Electron process spawns next.
@@ -633,6 +725,7 @@ async function ensureServer(): Promise<void> {
     }
   }
 
+  cancelServerRestart();
   startServer({ dekBase64: loadOrCreateDek() });
   isServerOwner = true;
 
@@ -641,8 +734,9 @@ async function ensureServer(): Promise<void> {
   await waitForServer(SERVER_URL);
 
   // If our server process died during waitForServer but the port is up
-  // (another instance won the spawn race), we're not the owner.
-  if (!serverProcess) isServerOwner = false;
+  // (another instance won the spawn race), we're not the owner. The exit handler
+  // normally catches this itself, but its port probe may still be in flight.
+  if (!serverProcess) dropServerOwnership();
 
   // Server started successfully — clean up backup from any previous update
   if (isServerOwner) cleanupUpdateBackup();
@@ -737,7 +831,8 @@ app.on("open-file", (event, filePath) => {
 
 /** When we didn't spawn the server, poll for liveness so we can recover if it dies. */
 function startServerHealthCheck(): void {
-  setInterval(async () => {
+  if (serverHealthCheckTimer) return;
+  serverHealthCheckTimer = setInterval(async () => {
     if (isServerOwner) return; // owner has the exit handler, no need to poll
     if (await isServerRunning()) return;
 
