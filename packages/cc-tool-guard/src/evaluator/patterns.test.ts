@@ -60,6 +60,13 @@ describe("dangerous rm patterns", () => {
       "rm -rf '.*'",
       'rm -rf ".*"',
       "rm -rf dist .*",
+      "rm -rf {*,.*}",
+      "rm -rf {.,}*",
+      "rm -rf ./{*,.*}",
+      "rm -rf .{git,}",
+      "rm -rf .{a,b}*",
+      "rm -rf {dist,build}*",
+      "rm -rf ./{dist,}",
     ])("%s is uncertain", (command) => {
       expect(classify(command)).toBe("uncertain");
     });
@@ -76,9 +83,29 @@ describe("dangerous rm patterns", () => {
       "rm -rf dist/*.map",
       "rm -rf node_modules/*",
       "rm -rf ..cache",
+      "rm -rf {dist,build}",
+      "rm -rf dist/{a,b}",
     ])("%s is not uncertain", (command) => {
       expect(classify(command)).not.toBe("uncertain");
     });
+  });
+
+  describe("rm as a VCS or package manager subcommand is not a recursive delete", () => {
+    test.each(["git rm -r --cached .", "git rm -r --cached *", "pnpm rm -r .", "npm rm -r ."])(
+      "%s is not matched by the recursive rules",
+      (command) => {
+        expect(checkKnownPatterns(command, context)?.reason ?? "").not.toMatch(/Recursive delete/);
+      },
+    );
+  });
+
+  describe("prefixed and chained rm still match", () => {
+    test.each(["sudo rm -rf .", "cd x && rm -rf .", "env rm -rf *", "ls; rm -rf ./.*"])(
+      "%s is uncertain",
+      (command) => {
+        expect(classify(command)).toBe("uncertain");
+      },
+    );
   });
 
   test("non-recursive rm of a glob is not matched by the recursive rules", () => {
