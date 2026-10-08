@@ -593,10 +593,42 @@ const SAFE_ARRAY_METHODS = new Set([
 const SAFE_NUMBER_METHODS = new Set(["toFixed", "toPrecision", "toString"]);
 
 /**
- * Built-in namespaces exposed to formulas. `Number` and `String` are callable
- * (`Number("3")`) and `Number` additionally carries static helpers, which
- * `accessProperty` exposes via the own-enumerable-property rule for functions.
+ * Built-in namespaces exposed to formulas. `Math` is a plain object of constants and
+ * safe methods; `Number` and `String` are callable (`Number("3")`) and `Number`
+ * additionally carries static helpers. `accessProperty` exposes only their own
+ * enumerable properties and throws on anything else (see `BUILTIN_NAMESPACES`).
  */
+const MATH_NAMESPACE = Object.freeze({
+  PI: Math.PI,
+  E: Math.E,
+  LN2: Math.LN2,
+  LN10: Math.LN10,
+  LOG2E: Math.LOG2E,
+  LOG10E: Math.LOG10E,
+  SQRT2: Math.SQRT2,
+  SQRT1_2: Math.SQRT1_2,
+  ...SAFE_MATH,
+});
+
+const NUMBER_NAMESPACE = Object.freeze(
+  Object.assign((value: unknown) => Number(value), {
+    isFinite: Number.isFinite,
+    isInteger: Number.isInteger,
+    isNaN: Number.isNaN,
+    parseFloat: Number.parseFloat,
+    parseInt: Number.parseInt,
+  }),
+);
+
+const STRING_NAMESPACE = Object.freeze((value: unknown) => String(value));
+
+/** Namespace objects whose members are read strictly: a miss throws, never `undefined`. */
+const BUILTIN_NAMESPACES: ReadonlySet<object> = new Set<object>([
+  MATH_NAMESPACE,
+  NUMBER_NAMESPACE,
+  STRING_NAMESPACE,
+]);
+
 const BUILTINS: Readonly<Record<string, unknown>> = Object.freeze({
   true: true,
   false: false,
@@ -604,24 +636,9 @@ const BUILTINS: Readonly<Record<string, unknown>> = Object.freeze({
   undefined,
   NaN,
   Infinity,
-  Math: Object.freeze({
-    PI: Math.PI,
-    E: Math.E,
-    LN2: Math.LN2,
-    LN10: Math.LN10,
-    SQRT2: Math.SQRT2,
-    ...SAFE_MATH,
-  }),
-  Number: Object.freeze(
-    Object.assign((value: unknown) => Number(value), {
-      isFinite: Number.isFinite,
-      isInteger: Number.isInteger,
-      isNaN: Number.isNaN,
-      parseFloat: Number.parseFloat,
-      parseInt: Number.parseInt,
-    }),
-  ),
-  String: Object.freeze((value: unknown) => String(value)),
+  Math: MATH_NAMESPACE,
+  Number: NUMBER_NAMESPACE,
+  String: STRING_NAMESPACE,
 });
 
 class Evaluator {
@@ -783,10 +800,12 @@ class Evaluator {
       throw new Error(`Number property "${key}" is not allowed`);
     }
 
-    // Callable namespaces (`Number.isFinite`): only own enumerable properties,
-    // never inherited Function.prototype members like `call`/`apply`/`bind`.
-    if (typeof obj === "function") {
-      const members = obj as unknown as Record<string, unknown>;
+    // Builtin namespaces (`Math.max`, `Number.isFinite`) and any other function value: only
+    // own enumerable properties, never inherited Object.prototype/Function.prototype members
+    // like `call`/`apply`/`bind`. Unlike row data, an unknown member throws instead of
+    // yielding `undefined`, matching the primitive branches above.
+    if (typeof obj === "function" || BUILTIN_NAMESPACES.has(obj)) {
+      const members = obj as Record<string, unknown>;
       if (typeof key === "string" && Object.keys(members).includes(key)) return members[key];
       throw new Error(`Property "${String(key)}" is not allowed`);
     }

@@ -93,9 +93,15 @@ describe("formula evaluator: number literals", () => {
     }
   });
 
-  it("rejects a lone dot and exponent notation, which are not supported", () => {
+  it("rejects a lone dot, exponent notation, and hex literals, which are not supported", () => {
     expect(() => evaluateFormula(".", {})).toThrow(FormulaError);
     expect(() => evaluateFormula("1e3", {})).toThrow(FormulaError);
+    expect(() => evaluateFormula("0xff", {})).toThrow(FormulaError);
+  });
+
+  it("rejects the exponentiation operator; Math.pow is the supported form", () => {
+    expect(() => evaluateFormula("price ** 2", { price: 5 })).toThrow(FormulaError);
+    expect(evaluateFormula("Math.pow(price, 2)", { price: 5 })).toBe(25);
   });
 });
 
@@ -149,13 +155,24 @@ describe("formula evaluator: property access and methods", () => {
     expect(evaluateFormula("Number.parseFloat('1.25')", {})).toBe(1.25);
     expect(evaluateFormula("Number.parseInt('12px')", {})).toBe(12);
     expect(evaluateFormula("String(price) + '!'", row)).toBe("10!");
+    expect(evaluateFormula("price * Math.LOG2E", row)).toBe(10 * Math.LOG2E);
+    expect(evaluateFormula("Math.SQRT1_2", {})).toBe(Math.SQRT1_2);
+  });
+
+  it("throws on unknown builtin namespace members instead of yielding undefined", () => {
+    expect(() => evaluateFormula("Math.sin(1)", {})).toThrow(FormulaError);
+    expect(() => evaluateFormula("Math.sin(1)", {})).toThrow(/not allowed/);
+    expect(() => evaluateFormula("Math.nope", {})).toThrow(/not allowed/);
+    expect(() => evaluateFormula("Math.toString", {})).toThrow(/not allowed/);
+    expect(() => evaluateFormula("Number.MAX_SAFE_INTEGER", {})).toThrow(/not allowed/);
+    expect(() => evaluateFormula("String.raw", {})).toThrow(/not allowed/);
   });
 
   it("rejects unsafe methods on primitives", () => {
     expect(() => evaluateFormula("tags.map(1)", row)).toThrow(/not allowed/);
     expect(() => evaluateFormula("status.valueOf()", row)).toThrow(/not allowed/);
     expect(() => evaluateFormula("Number.call", {})).toThrow(/not allowed/);
-    expect(() => evaluateFormula("Math.random()", {})).toThrow(/not callable/);
+    expect(() => evaluateFormula("Math.random()", {})).toThrow(/not allowed/);
   });
 
   it("rejects inherited Object.prototype members on row objects", () => {
