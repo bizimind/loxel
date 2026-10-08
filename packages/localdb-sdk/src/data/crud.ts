@@ -14,6 +14,32 @@ import { validateRow, findUniqueViolations } from "./validate.ts";
 export type ColumnSpec = { name: string; def: ColumnDef; id: number };
 type Row = Record<string, unknown>;
 
+/**
+ * Decode a stored multi-value cell into an array. Anything that is not a JSON array
+ * (unparseable text, or JSON that parses to a scalar/object) is treated as corrupt:
+ * a warning is logged and the cell hydrates as `[]` so one bad row cannot break every
+ * `list`/`get` for the table.
+ */
+function parseMultiValue(raw: unknown, column: string, rowId: unknown): unknown[] {
+  let parsed: unknown = raw;
+  let cause: unknown;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      parsed = undefined;
+      cause = err;
+    }
+  }
+  if (Array.isArray(parsed)) return parsed;
+
+  console.warn(
+    `Malformed JSON in column "${column}" (row id=${String(rowId)}), defaulting to []`,
+    cause ?? new TypeError(`Stored value is not a JSON array: ${JSON.stringify(parsed)}`),
+  );
+  return [];
+}
+
 export class DataLayer {
   private readonly optionsMgr: OptionsManager;
 
@@ -121,20 +147,7 @@ export class DataLayer {
       if (raw === null || raw === undefined) continue;
 
       if (isMulti(def)) {
-        let arr: unknown[];
-        if (typeof raw === "string") {
-          try {
-            arr = JSON.parse(raw) as unknown[];
-          } catch (err) {
-            console.warn(
-              `Malformed JSON in column "${name}" (row id=${String(row["id"])}), defaulting to []`,
-              err,
-            );
-            arr = [];
-          }
-        } else {
-          arr = raw as unknown[];
-        }
+        const arr = parseMultiValue(raw, name, row["id"]);
         if (hasInlineOptions(def)) {
           const ids = arr as number[];
           result[name] = this.optionsMgr.resolveIdsToOptions(ids);

@@ -247,6 +247,31 @@ describe("data layer", () => {
     }
   });
 
+  it.each([
+    ["an object", '{"a":1}'],
+    ["a number", "42"],
+    ["a string", '"hi"'],
+    ["null", "null"],
+  ])("hydrates a multi column whose stored JSON is %s as an empty array", (_label, stored) => {
+    const ins = db.data.insert("tasks", { title: "Bad tags", tags: ["a"] }, columns);
+    if (!ins.ok) throw new Error("Insert failed");
+    const id = ins.row["id"] as number;
+
+    const raw = new Database(join(tmpDir, "test.db"));
+    raw.prepare('UPDATE "data_tasks" SET "tags" = ? WHERE id = ?').run(stored, id);
+    raw.close();
+
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(db.data.get("tasks", id, columns)?.["tags"]).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain('column "tags"');
+      expect(warn.mock.calls[0]?.[1]).toBeInstanceOf(TypeError);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("deletes a row", () => {
     const ins = db.data.insert("tasks", { title: "To delete" }, columns);
     if (!ins.ok) throw new Error("Insert failed");
