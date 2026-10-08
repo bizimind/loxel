@@ -177,6 +177,16 @@ function isLocal(url: string): boolean {
   }
 }
 
+/** Only allow http/https URLs to be opened externally — blocks file://, custom protocols, etc. */
+function isHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Tracks in-flight promote calls so window creation can await them — prevents the
  * race where a new (now-solo) window opens and reads stale canonical before the
@@ -289,10 +299,12 @@ async function createWindow(): Promise<BrowserWindow> {
     if (isLocal(url)) {
       return { action: "allow" };
     }
-    if (metaKeyHeld) {
-      openInBrowserTab(url);
-    } else {
-      shell.openExternal(url);
+    if (isHttpUrl(url)) {
+      if (metaKeyHeld) {
+        openInBrowserTab(url);
+      } else {
+        shell.openExternal(url);
+      }
     }
     return { action: "deny" };
   });
@@ -302,10 +314,12 @@ async function createWindow(): Promise<BrowserWindow> {
   win.webContents.on("will-navigate", (event, url) => {
     if (!isLocal(url)) {
       event.preventDefault();
-      if (metaKeyHeld) {
-        openInBrowserTab(url);
-      } else {
-        shell.openExternal(url);
+      if (isHttpUrl(url)) {
+        if (metaKeyHeld) {
+          openInBrowserTab(url);
+        } else {
+          shell.openExternal(url);
+        }
       }
     }
   });
@@ -594,7 +608,7 @@ app.on("web-contents-created", (_, contents) => {
   // (or browser panel tab when Cmd is held).
   // Each webview gets its own webContents, so mainWindow's handler doesn't cover them.
   contents.setWindowOpenHandler(({ url }) => {
-    if (!isLocal(url)) {
+    if (!isLocal(url) && isHttpUrl(url)) {
       if (metaKeyHeld) {
         openInBrowserTab(url);
       } else {
