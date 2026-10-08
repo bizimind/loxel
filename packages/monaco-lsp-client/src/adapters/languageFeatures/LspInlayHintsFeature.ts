@@ -233,5 +233,5 @@ function toMonacoTooltip(
     return tooltip;
   }
 
-  return { value: tooltip.value, isTrusted: true };
+  return { value: tooltip.value, isTrusted: false };
 }
