@@ -978,12 +978,12 @@ async function runBash(
   });
 
   let timedOut = false;
-  let cancelHardKill = (): void => {};
   const timer = setTimeout(() => {
     timedOut = true;
     // Kill the whole process group so children holding the stdout pipe open cannot
-    // keep the tool call hanging after the shell itself exits.
-    cancelHardKill = terminateProcessGroup(proc);
+    // keep the tool call hanging after the shell itself exits. The SIGKILL escalation is
+    // deliberately left armed: pipe EOF only proves the shell died, not its descendants.
+    terminateProcessGroup(proc);
   }, timeoutMs);
 
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -993,7 +993,6 @@ async function runBash(
   ]);
 
   clearTimeout(timer);
-  cancelHardKill();
 
   const combined = `${stdout}\n${stderr}`;
   const stdoutCapped = truncateByLinesAndBytes(stdout);
