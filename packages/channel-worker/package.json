@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "pnpm -w run lint",
     "lint:fix": "pnpm -w run lint:fix",
