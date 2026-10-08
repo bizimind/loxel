@@ -1,6 +1,6 @@
 import { createLogger, type AppLogger } from "@bizimind/logger";
 
-import { debugJwks } from "./auth.ts";
+import { debugJwks, validateJwt } from "./auth.ts";
 
 export { ChannelRoom } from "./channel-room.ts";
 
@@ -51,7 +51,7 @@ export function getIssuer(clientId: string): string {
  * Handle the fetch request and return a response.
  * Extracted to allow finally block to flush logger.
  */
-async function handleFetch(request: Request, env: Env, _logger: AppLogger): Promise<Response> {
+async function handleFetch(request: Request, env: Env, logger: AppLogger): Promise<Response> {
   const url = new URL(request.url);
 
   // CORS preflight
@@ -147,13 +147,35 @@ async function handleFetch(request: Request, env: Env, _logger: AppLogger): Prom
     );
   }
 
+  // Authenticate before upgrading. Browsers cannot set headers on WebSocket requests, so the
+  // JWT travels as a query parameter. It is fully verified here so unauthenticated clients never
+  // reach the Durable Object; the DO verifies the `join` token again to enforce same-user channels.
+  // Never log request URLs: they carry the credential.
+  const token = url.searchParams.get("token");
+  if (!token) {
+    return unauthorized("Missing token query parameter");
+  }
+  const clientId = env.WORKOS_CLIENT_ID;
+  const validation = await validateJwt(token, getJwksUrl(clientId), getIssuer(clientId), logger);
+  if (!validation.valid) {
+    return unauthorized(validation.error ?? "Authentication failed");
+  }
+
   // Route to Durable Object by channel ID
   // Using idFromName creates a consistent ID for the same channel
   const id = env.CHANNEL_ROOM.idFromName(channelId);
   const stub = env.CHANNEL_ROOM.get(id);
 
-  // Forward the request to the Durable Object
-  return stub.fetch(request);
+  // Strip the credential from the URL so it does not travel beyond this hop
+  url.searchParams.delete("token");
+  return stub.fetch(new Request(url, request));
+}
+
+function unauthorized(message: string): Response {
+  return new Response(JSON.stringify({ error: "Unauthorized", message }), {
+    status: 401,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+  });
 }
 
 export default {
