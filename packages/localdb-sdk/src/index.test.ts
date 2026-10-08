@@ -182,6 +182,21 @@ describe("data layer", () => {
     expect(result.issues[0]?.code).toBe("unique");
   });
 
+  it("excludes the updated row itself from the unique check", () => {
+    const ins = db.data.insert("tasks", { title: "Same", priority: 1 }, columns);
+    if (!ins.ok) throw new Error("Insert failed");
+    const id = ins.row["id"] as number;
+
+    const self = db.data.update("tasks", id, { title: "Same", priority: 2 }, columns);
+    expect(self.ok).toBe(true);
+
+    db.data.insert("tasks", { title: "Other" }, columns);
+    const clash = db.data.update("tasks", id, { title: "Other" }, columns);
+    expect(clash.ok).toBe(false);
+    if (clash.ok) return;
+    expect(clash.issues[0]?.code).toBe("unique");
+  });
+
   it("paginates results", () => {
     for (let i = 0; i < 5; i++) {
       db.data.insert("tasks", { title: `Task ${i}`, priority: i + 1 }, columns);
