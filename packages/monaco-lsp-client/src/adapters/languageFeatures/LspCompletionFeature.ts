@@ -105,8 +105,11 @@ class LspCompletionProvider implements monaco.languages.CompletionItemProvider {
     model: monaco.editor.ITextModel,
     position: monaco.Position,
     context: monaco.languages.CompletionContext,
-    _token: monaco.CancellationToken,
+    token: monaco.CancellationToken,
   ): Promise<monaco.languages.CompletionList & { suggestions: ExtendedCompletionItem[] }> {
+    if (token.isCancellationRequested) {
+      return { suggestions: [] };
+    }
     const translated = this._client.bridge.translate(model, position);
 
     const result = await this._client.server.textDocumentCompletion({
@@ -119,13 +122,15 @@ class LspCompletionProvider implements monaco.languages.CompletionItemProvider {
           }
         : undefined,
     });
-    if (!result) {
+    if (!result || token.isCancellationRequested) {
       return { suggestions: [] };
     }
 
     const items = Array.isArray(result) ? result : result.items;
+    const isIncomplete = !Array.isArray(result) && result.isIncomplete;
 
     return {
+      incomplete: isIncomplete,
       suggestions: items.map<ExtendedCompletionItem>((i) => {
         const item: ExtendedCompletionItem = {
           ...convertLspToMonacoCompletionItem(i, this._client.bridge, translated, model, position),
