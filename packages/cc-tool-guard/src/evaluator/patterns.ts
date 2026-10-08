@@ -9,6 +9,14 @@ interface PatternRule {
 }
 
 /**
+ * `rm` with a recursive flag (`-r`/`-R` in any short-flag cluster, or `--recursive`) anywhere
+ * among its options, followed by any options, an optional `--`, and any preceding operands.
+ * The matched position is the start of an operand (after an optional opening quote), so rules
+ * can append the operand shape.
+ */
+const RM_RECURSIVE_ARGS = String.raw`\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:(?:-[a-zA-Z]+|--[a-zA-Z-]+)\s+)*(?:--\s+)?(?:\S+\s+)*["']?`;
+
+/**
  * Dangerous patterns - these always require user confirmation
  */
 const DANGEROUS_PATTERNS: PatternRule[] = [
@@ -164,6 +172,18 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     classification: "uncertain",
     reason: "Recursive delete in home",
   },
+  {
+    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`\.{1,2}\/?["']?(?:\s|$)`),
+    classification: "uncertain",
+    reason: "Recursive delete of current or parent directory",
+  },
+  {
+    // `*`, `*.js`, `./*`, and dot globs such as `.*`, `.[!.]*`, `.??*` (which delete every
+    // dotfile and dot directory in cwd, including `.git`).
+    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`(?:\.\/)?\.?[*?[]`),
+    classification: "uncertain",
+    reason: "Recursive delete with wildcard glob in current directory",
+  },
 
   // Environment modification
   {
@@ -239,7 +259,7 @@ const SAFE_PATTERNS: PatternRule[] = [
 
   // Package managers - local operations
   {
-    pattern: /^bun\s+(test|build|run|install|add|remove|update|x)\b/,
+    pattern: /^bun\s+(test|build|run|install|add|remove|update)\b/,
     classification: "safe",
     reason: "Bun operation",
   },
@@ -258,7 +278,6 @@ const SAFE_PATTERNS: PatternRule[] = [
     classification: "safe",
     reason: "yarn operation",
   },
-  { pattern: /^npx\s+/, classification: "safe", reason: "npx execution" },
 
   // Build tools
   { pattern: /^(tsc|typescript)\b/, classification: "safe", reason: "TypeScript compiler" },
