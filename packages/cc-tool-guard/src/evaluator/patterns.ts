@@ -13,8 +13,12 @@ interface PatternRule {
  * its arguments, then skipping over any number of leading whitespace-separated arguments (options,
  * `--`, earlier operands). The matched position is the start of an argument (after an optional
  * opening quote), so rules can append the operand shape.
+ *
+ * The `rm` must not be a subcommand of a VCS or package manager (`git rm -r --cached .`,
+ * `pnpm rm -r .`), which do not delete from the working tree. Other prefixes (`sudo rm`, `env rm`,
+ * `\\rm`, `/bin/rm`, `cd x && rm`) still match.
  */
-const RM_RECURSIVE_ARGS = String.raw`\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
+const RM_RECURSIVE_ARGS = String.raw`(?<!\b(?:git|npm|pnpm|yarn|bun)\s)\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
 
 /**
  * Dangerous patterns - these always require user confirmation
@@ -180,8 +184,14 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
   },
   {
     // `*`, `*.js`, `./*`, `../*`, `../../*`, and dot globs such as `.*`, `.[!.]*`, `.??*` (which
-    // delete every dotfile and dot directory in the target directory, including `.git`).
-    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`(?:\.{1,2}\/)*\.?[*?[]`),
+    // delete every dotfile and dot directory in the target directory, including `.git`), plus the
+    // brace-expansion spellings of the same idiom: a glob character inside or right after a brace
+    // group (`{*,.*}`, `{.,}*`, `.{a,b}*`), or an empty alternative (`.{git,}` expands to `.git .`,
+    // `./{dist,}` to `./dist ./`). Scoped brace lists (`{dist,build}`, `dist/{a,b}`) are not matched.
+    pattern: new RegExp(
+      RM_RECURSIVE_ARGS +
+        String.raw`(?:\.{1,2}\/)*\.?(?:[*?[]|\{(?=[^}]*[*?[]|,|[^}]*,[,}])[^}]*\}|\{[^}]*\}\.?[*?[])`,
+    ),
     classification: "uncertain",
     reason: "Recursive delete with wildcard glob in current or parent directory",
   },
@@ -367,19 +377,25 @@ function evaluateCommandChain(
   context: ProjectContext,
 ): EvaluationResult | null {
   const results: EvaluationResult[] = [];
+  let hasUnknown = false;
 
   for (const cmd of commands) {
     const result = evaluateSingleCommand(cmd, context);
     if (result === null) {
-      return null;
+      hasUnknown = true;
+      continue;
+    }
+    // If any command is uncertain, the whole chain is uncertain, even if another command in the
+    // chain is unknown (`cd x && rm -rf .` must not be delegated to Haiku).
+    if (result.classification === "uncertain") {
+      return result;
     }
     results.push(result);
   }
 
-  // If any command is uncertain, the whole chain is uncertain
-  const uncertainResult = results.find((r) => r.classification === "uncertain");
-  if (uncertainResult) {
-    return uncertainResult;
+  // An unknown command with no dangerous siblings - let haiku evaluate the chain
+  if (hasUnknown) {
+    return null;
   }
 
   // Single command - return its result with pattern suggestion
