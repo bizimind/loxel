@@ -98,14 +98,21 @@ export class ChannelClient {
    * Connect to the channel.
    * Resolves when successfully joined the channel.
    *
-   * @throws {ChannelError} If already connected or connecting
+   * While an auto-reconnect is pending (`state` is `reconnecting`), calling this cancels the
+   * scheduled retry and connects immediately instead.
+   *
+   * @throws {InvalidStateError} If already connected or connecting
    * @throws {AuthenticationError} If authentication fails
    * @throws {ConnectionTimeoutError} If connection times out
    */
   async connect(): Promise<ConnectedEvent> {
-    if (this._state !== "disconnected") {
+    if (this._state === "connected" || this._state === "connecting") {
       throw new InvalidStateError("Already connected or connecting");
     }
+
+    // Cancel a pending auto-reconnect so the retry timer cannot open a second socket
+    this.connection?.close();
+    this.connection = null;
 
     this._state = "connecting";
 
@@ -147,7 +154,10 @@ export class ChannelClient {
 
         onClose: (reason, willReconnect) => {
           const wasConnected = this._state === "connected";
-          this._state = "disconnected";
+          // "reconnecting" lets callers tell a temporary drop (auto-reconnect pending) from a
+          // permanent disconnect, so they do not open a parallel connection in response to the
+          // disconnected event.
+          this._state = willReconnect ? "reconnecting" : "disconnected";
           this._clientId = null;
           this._peers.clear();
 
