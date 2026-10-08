@@ -17,7 +17,11 @@ import { activateReminder, clearReminder } from "../prompts/reminders.ts";
 import { ensureStateLayout, getSessionPaths, getStateLayout } from "../state/layout.ts";
 import { createPlanFileName } from "../utils/ids.ts";
 import { isPathWithinResolved, normalizeWorkspacePath } from "../utils/path.ts";
-import { resolveShellBinary } from "../utils/shell.ts";
+import {
+  resolveShellBinary,
+  SHELL_PROCESS_GROUP_SPAWN_OPTIONS,
+  terminateProcessGroup,
+} from "../utils/shell.ts";
 import type { ToolRuntimeContext } from "./context.ts";
 import type { ToolResult } from "./contracts.ts";
 import { isToolAllowedInProfile } from "./profile.ts";
@@ -966,6 +970,7 @@ async function runBash(
 
   const shell = resolveShellBinary();
   const proc = Bun.spawn([shell, "-c", input.command], {
+    ...SHELL_PROCESS_GROUP_SPAWN_OPTIONS,
     cwd: ctx.workspaceRoot,
     stdout: "pipe",
     stderr: "pipe",
@@ -973,9 +978,12 @@ async function runBash(
   });
 
   let timedOut = false;
+  let cancelHardKill = (): void => {};
   const timer = setTimeout(() => {
     timedOut = true;
-    proc.kill();
+    // Kill the whole process group so children holding the stdout pipe open cannot
+    // keep the tool call hanging after the shell itself exits.
+    cancelHardKill = terminateProcessGroup(proc);
   }, timeoutMs);
 
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -985,6 +993,7 @@ async function runBash(
   ]);
 
   clearTimeout(timer);
+  cancelHardKill();
 
   const combined = `${stdout}\n${stderr}`;
   const stdoutCapped = truncateByLinesAndBytes(stdout);

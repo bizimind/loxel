@@ -6,7 +6,11 @@ import { z } from "zod";
 import { BASH_LIMITS } from "../core/constants.ts";
 import { createTaskId } from "../utils/ids.ts";
 import { isPathWithin } from "../utils/path.ts";
-import { resolveShellBinary } from "../utils/shell.ts";
+import {
+  resolveShellBinary,
+  SHELL_PROCESS_GROUP_SPAWN_OPTIONS,
+  terminateProcessGroup,
+} from "../utils/shell.ts";
 
 export type ManagedTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -135,6 +139,7 @@ export class TaskManager {
 
     const shell = resolveShellBinary();
     const spawned = Bun.spawn([shell, "-c", command], {
+      ...SHELL_PROCESS_GROUP_SPAWN_OPTIONS,
       stdout: "pipe",
       stderr: "pipe",
       stdin: "ignore",
@@ -144,7 +149,7 @@ export class TaskManager {
 
     const onTimeout = setTimeout(() => {
       if (this.running.has(task.id)) {
-        spawned.kill();
+        terminateProcessGroup(spawned);
       }
     }, timeoutMs);
 
@@ -382,7 +387,9 @@ export class TaskManager {
       return true;
     }
 
-    running.process?.kill();
+    if (running.process) {
+      terminateProcessGroup(running.process);
+    }
     if (running.syntheticTimer) {
       clearTimeout(running.syntheticTimer);
     }
