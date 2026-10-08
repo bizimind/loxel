@@ -43,6 +43,7 @@ export class MonacoLspClient {
   private _connection: LspConnection;
   private readonly _capabilitiesRegistry: LspCapabilitiesRegistry;
   private readonly _bridge: TextDocumentSynchronizer;
+  private readonly _features: IDisposable;
 
   private _initPromise: Promise<void>;
 
@@ -66,9 +67,17 @@ export class MonacoLspClient {
       c,
       defaultLanguageIds,
     );
-    this.createFeatures();
+    this._features = this.createFeatures();
 
-    this._initPromise = this._init();
+    this._initPromise = this._init().catch((err: unknown) => {
+      console.error("[MonacoLspClient] initialization failed:", err);
+    });
+  }
+
+  dispose(): void {
+    this._features.dispose();
+    this._bridge.dispose();
+    this._capabilitiesRegistry.dispose();
   }
 
   /**
