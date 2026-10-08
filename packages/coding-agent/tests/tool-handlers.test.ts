@@ -699,6 +699,70 @@ describe("tool handlers", () => {
     }
   });
 
+  test("Bash timeout kills children spawned by the shell", async () => {
+    const ctx = await createContext({ mode: "execute" });
+    // The marker script is a grandchild of the tool's shell and holds the stdout pipe open;
+    // killing only the shell would leave it running and the call would not return until
+    // the sleep finished.
+    const marker = `coding-agent-timeout-${process.pid}-${Date.now()}.sh`;
+    const script = path.join(ctx.workspaceRoot, marker);
+    await Bun.write(script, "sleep 30\n");
+    const command = `sh ${script} & wait`;
+
+    const started = Date.now();
+    const result = await invokeToolByName("Bash", { command, timeout: 200 }, ctx);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    const out = result.value as { interrupted: boolean };
+    expect(out.interrupted).toBe(true);
+
+    // Poll briefly: the group signal is delivered asynchronously.
+    const deadline = Date.now() + 3000;
+    let survivors = "";
+    do {
+      survivors = Bun.spawnSync(["pgrep", "-f", marker]).stdout.toString().trim();
+      if (!survivors) {
+        break;
+      }
+      await Bun.sleep(50);
+    } while (Date.now() < deadline);
+    expect(survivors).toBe("");
+  });
+
+  test("Bash timeout escalates to SIGKILL when a grandchild ignores SIGTERM", async () => {
+    const ctx = await createContext({ mode: "execute" });
+    // The shell itself dies on SIGTERM, but the grandchild ignores it (and `sleep` inherits
+    // the ignored disposition), so only the SIGKILL escalation can end the call.
+    const marker = `coding-agent-sigkill-${process.pid}-${Date.now()}.sh`;
+    const script = path.join(ctx.workspaceRoot, marker);
+    await Bun.write(script, "trap '' TERM\nsleep 30\n");
+    const command = `sh ${script} & wait`;
+
+    const started = Date.now();
+    const result = await invokeToolByName("Bash", { command, timeout: 200 }, ctx);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    const out = result.value as { interrupted: boolean };
+    expect(out.interrupted).toBe(true);
+
+    const deadline = Date.now() + 3000;
+    let survivors = "";
+    do {
+      survivors = Bun.spawnSync(["pgrep", "-f", marker]).stdout.toString().trim();
+      if (!survivors) {
+        break;
+      }
+      await Bun.sleep(50);
+    } while (Date.now() < deadline);
+    expect(survivors).toBe("");
+  });
+
   test("WebFetch stores artifact path when response is truncated", async () => {
     globalThis.fetch = (async () =>
       new Response("x".repeat(READ_LIMITS.maxBytes + 64), {
