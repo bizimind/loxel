@@ -151,14 +151,20 @@ function tokenize(expr: string): Token[] {
       continue;
     }
 
-    // Number literals (including decimals)
+    // Number literals: digits with at most one decimal point (`1`, `1.5`, `.5`, `10.`).
+    // A second dot followed by a digit (`1.2.3`, `1..2`) is a malformed literal; a dot followed
+    // by an identifier (`1.5.toFixed(0)`) is member access and left to the punctuation scan.
     if (/\d/.test(ch) || (ch === "." && i + 1 < expr.length && /\d/.test(expr[i + 1]!))) {
-      let num = "";
-      while (i < expr.length && /[\d.]/.test(expr[i]!)) {
-        num += expr[i]!;
+      const start = i;
+      while (i < expr.length && /\d/.test(expr[i]!)) i++;
+      if (expr[i] === ".") {
         i++;
+        while (i < expr.length && /\d/.test(expr[i]!)) i++;
       }
-      tokens.push({ kind: "number", value: num });
+      if (expr[i] === "." && i + 1 < expr.length && /\d/.test(expr[i + 1]!)) {
+        throw new Error(`Malformed number literal: ${expr.slice(start, i + 2)}`);
+      }
+      tokens.push({ kind: "number", value: expr.slice(start, i) });
       continue;
     }
 

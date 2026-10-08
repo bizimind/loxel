@@ -72,6 +72,33 @@ describe("formula evaluator: arithmetic and operators", () => {
   });
 });
 
+describe("formula evaluator: number literals", () => {
+  it("accepts integers, decimals, a leading dot, and a trailing dot", () => {
+    expect(evaluateFormula("1", {})).toBe(1);
+    expect(evaluateFormula("1.5", {})).toBe(1.5);
+    expect(evaluateFormula(".5", {})).toBe(0.5);
+    expect(evaluateFormula("10.", {})).toBe(10);
+    expect(evaluateFormula("0.1 + 0.2 > 0.3", {})).toBe(true);
+  });
+
+  it("allows member access after a decimal literal", () => {
+    expect(evaluateFormula("1.5.toFixed(0)", {})).toBe("2");
+    expect(evaluateFormula("255.0.toString(16)", {})).toBe("ff");
+  });
+
+  it("rejects literals with more than one decimal point instead of yielding NaN", () => {
+    for (const expr of ["1.2.3", "1..2", "0.1.2 + 0", ".1.2"]) {
+      expect(() => evaluateFormula(expr, {})).toThrow(FormulaError);
+      expect(() => evaluateFormula(expr, {})).toThrow(/Malformed number literal/);
+    }
+  });
+
+  it("rejects a lone dot and exponent notation, which are not supported", () => {
+    expect(() => evaluateFormula(".", {})).toThrow(FormulaError);
+    expect(() => evaluateFormula("1e3", {})).toThrow(FormulaError);
+  });
+});
+
 describe("formula evaluator: short-circuiting", () => {
   it("does not evaluate the untaken ternary branch", () => {
     expect(evaluateFormula("missing == null ? 0 : missing.value", row)).toBe(0);
