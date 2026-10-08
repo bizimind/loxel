@@ -146,6 +146,16 @@ describe("formula evaluator: property access and methods", () => {
     expect(evaluateFormula("(price / qty).toFixed(2)", row)).toBe("3.33");
   });
 
+  it("treats canonical numeric index strings as array and string indices", () => {
+    const indexed = { tags: ["a", "b", "c"], idx: "1", s: "abc" };
+    expect(evaluateFormula('tags["1"]', indexed)).toBe("b");
+    expect(evaluateFormula("tags[idx]", indexed)).toBe("b");
+    expect(evaluateFormula('s["1"]', indexed)).toBe("b");
+    expect(evaluateFormula('tags["length"]', indexed)).toBe(3);
+    expect(() => evaluateFormula('tags["01"]', indexed)).toThrow();
+    expect(() => evaluateFormula('tags["-1"]', indexed)).toThrow();
+  });
+
   it("exposes Math, Number, and String builtins", () => {
     expect(evaluateFormula("Math.max(price, qty)", row)).toBe(10);
     expect(evaluateFormula("Math.round(Math.PI)", {})).toBe(3);

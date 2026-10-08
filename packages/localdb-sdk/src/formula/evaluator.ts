@@ -641,6 +641,17 @@ const BUILTINS: Readonly<Record<string, unknown>> = Object.freeze({
   String: STRING_NAMESPACE,
 });
 
+/**
+ * Canonical numeric index strings (e.g. `"1"` from a text column) are treated as numeric
+ * indices so `tags["1"]` behaves like `tags[1]`. Such strings can never name a prototype member.
+ */
+function normalizePropertyKey(prop: unknown): string | number {
+  if (typeof prop === "number") return prop;
+  const key = String(prop);
+  const n = Number(key);
+  return Number.isInteger(n) && n >= 0 && String(n) === key ? n : key;
+}
+
 class Evaluator {
   constructor(
     private readonly scope: Record<string, unknown>,
@@ -765,7 +776,7 @@ class Evaluator {
       throw new Error(`Cannot read property "${String(prop)}" of ${String(obj)}`);
     }
 
-    const key = typeof prop === "number" ? prop : String(prop);
+    const key = normalizePropertyKey(prop);
     if (typeof key === "string" && BLOCKED_PROPERTIES.has(key)) {
       throw new Error(`Access to "${key}" is not allowed`);
     }
