@@ -128,8 +128,8 @@ describe("ChannelClient connection state", () => {
       url: relay.url,
       channelId: "room",
       token: "jwt",
-      reconnectBaseDelay: 60_000,
-      reconnectMaxDelay: 60_000,
+      reconnectBaseDelay: 50,
+      reconnectMaxDelay: 50,
     });
 
     await expect(client.connect()).rejects.toBeInstanceOf(ChannelError);
@@ -144,8 +144,8 @@ describe("ChannelClient connection state", () => {
     expect(client.state).toBe("connected");
     expect(relay.upgrades).toBe(2);
 
-    // The cancelled retry timer must not open a third socket
-    await Bun.sleep(50);
+    // The cancelled retry timer (due in 50-62ms) must not open a third socket
+    await Bun.sleep(300);
     expect(relay.upgrades).toBe(2);
   });
 
