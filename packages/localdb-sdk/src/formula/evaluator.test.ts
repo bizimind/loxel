@@ -53,6 +53,7 @@ describe("formula evaluator: arithmetic and operators", () => {
     expect(evaluateFormula(String.raw`'\/'`, {})).toBe("/");
     expect(evaluateFormula(String.raw`'\x41\u00e9'`, {})).toBe("A\u00e9");
     expect(evaluateFormula(String.raw`'\u{1F600}'`, {})).toBe("\u{1F600}");
+    expect(evaluateFormula(String.raw`'\u{0000041}'`, {})).toBe("A");
     expect(evaluateFormula("'\u2014'", {})).toBe("\u2014");
   });
 
@@ -62,6 +63,7 @@ describe("formula evaluator: arithmetic and operators", () => {
     expect(() => evaluateFormula(String.raw`'\u12'`, {})).toThrow(/Invalid hex escape/);
     expect(() => evaluateFormula(String.raw`'\u{}'`, {})).toThrow(/Invalid unicode escape/);
     expect(() => evaluateFormula(String.raw`'\u{110000}'`, {})).toThrow(/Invalid unicode escape/);
+    expect(() => evaluateFormula(String.raw`'\u{00110000}'`, {})).toThrow(/Invalid unicode escape/);
     expect(() => evaluateFormula(String.raw`'\u{41'`, {})).toThrow(/Invalid unicode escape/);
     expect(() => evaluateFormula("'abc\\", {})).toThrow(/Unterminated string escape/);
   });

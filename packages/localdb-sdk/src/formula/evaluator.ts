@@ -127,7 +127,7 @@ function readStringEscape(expr: string, start: number): { text: string; next: nu
   if (esc === "u") {
     const close = expr.indexOf("}", start + 2);
     const hex = close === -1 ? "" : expr.slice(start + 2, close);
-    const codePoint = /^[0-9a-fA-F]{1,6}$/.test(hex) ? Number.parseInt(hex, 16) : Number.NaN;
+    const codePoint = /^[0-9a-fA-F]+$/.test(hex) ? Number.parseInt(hex, 16) : Number.NaN;
     if (!(codePoint <= 0x10ffff)) {
       throw new Error(
         `Invalid unicode escape in string literal: \\${expr.slice(start, start + 10)}`,
