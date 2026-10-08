@@ -242,7 +242,7 @@ Default limits (based on Claude/OpenCode/Codex behavior, tuned for low token was
 - `TaskOutput`:
   - default `block=true`, default timeout 30000ms, max timeout 600000ms
 - `WebFetch`:
-  - network timeout 30000ms
+  - network timeout 30000ms, covering both the response headers and the body read; non-timeout failures surface as `TOOL_RUNTIME_ERROR` with the underlying cause
   - post-processed output cap aligned to tool truncation policy (50 KiB preview + artifact path)
 - `WebSearch`:
   - default top results: 8
@@ -975,7 +975,7 @@ This appendix is normative for default runtime behavior.
 | `Task`                           | `description`, `prompt`, `subagent_type`                        | `resume`, `run_in_background`, `max_turns`, `mode`, `model`, `team_name`, `name`       | inherits parent scope; parent/child scope intersection is mandatory         | `TOOL_VALIDATION_FAILED`, `TOOL_POLICY_VIOLATION`, `TOOL_RUNTIME_ERROR`                  |
 | `TaskOutput`                     | `task_id`, `block`, `timeout`                                   | none                                                                                   | default `block=true`, timeout 30000ms, max 600000ms                         | `TOOL_VALIDATION_FAILED`, `TOOL_RUNTIME_ERROR`, `TOOL_TIMEOUT`                           |
 | `TaskStop`                       | none (at least one of `task_id` or `shell_id` MUST be provided) | `task_id`, `shell_id`                                                                  | generic stop for shell/subagent/remote tasks                                | `TOOL_VALIDATION_FAILED`, `TOOL_RUNTIME_ERROR`                                           |
-| `WebFetch`                       | `url`, `prompt`                                                 | none                                                                                   | 30000ms network timeout, tool truncation policy applies                     | `TOOL_VALIDATION_FAILED`, `TOOL_RUNTIME_ERROR`, `TOOL_TIMEOUT`                           |
+| `WebFetch`                       | `url`, `prompt`                                                 | none                                                                                   | 30000ms timeout covers headers and body; truncation policy applies          | `TOOL_VALIDATION_FAILED`, `TOOL_RUNTIME_ERROR`, `TOOL_TIMEOUT`                           |
 | `WebSearch`                      | `query`                                                         | `allowed_domains`, `blocked_domains`                                                   | default top 8, hard max 20 results                                          | `TOOL_VALIDATION_FAILED`, `WEBSEARCH_UNAVAILABLE`, `TOOL_RUNTIME_ERROR`                  |
 | `AskUserQuestion`                | `questions`                                                     | metadata/options per schema                                                            | host timeout policy                                                         | `TOOL_VALIDATION_FAILED`, `human_timeout`, `approval_denied`                             |
 | `EnterPlanMode` / `ExitPlanMode` | none                                                            | provider-specific optional fields for parity                                           | plan file precondition enforced for exit                                    | `TOOL_POLICY_VIOLATION`, `TOOL_RUNTIME_ERROR`                                            |
