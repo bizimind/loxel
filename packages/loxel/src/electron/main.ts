@@ -34,6 +34,7 @@ let isServerOwner = false;
 let metaKeyHeld = false;
 
 import { requestOpen } from "../open-request";
+import { isHttpUrl } from "../url-utils";
 import { BROWSER_PARTITION } from "./browser-partition";
 import {
   OPEN_FOLDER_DIALOG,
@@ -172,16 +173,6 @@ const APP_ORIGIN = new URL(process.env.VITE_DEV_SERVER_URL ?? SERVER_URL).origin
 function isLocal(url: string): boolean {
   try {
     return new URL(url).origin === APP_ORIGIN;
-  } catch {
-    return false;
-  }
-}
-
-/** Only allow http/https URLs to be opened externally — blocks file://, custom protocols, etc. */
-function isHttpUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
   }
