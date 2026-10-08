@@ -26,6 +26,10 @@ describe("dangerous rm patterns", () => {
       "rm --recursive --force .",
       "rm -rf -- .",
       "rm -rf ..",
+      "rm -rf ../",
+      "rm -rf ../..",
+      "rm -rf ./..",
+      "rm -rf ../../../..",
       "rm -rf dist .",
       "rm -rf . dist",
       'rm -rf "."',
@@ -36,7 +40,7 @@ describe("dangerous rm patterns", () => {
     });
   });
 
-  describe("recursive delete with a wildcard glob in the current directory", () => {
+  describe("recursive delete with a wildcard glob in the current or parent directory", () => {
     test.each([
       "rm -rf *",
       "rm -rf *.js",
@@ -47,6 +51,10 @@ describe("dangerous rm patterns", () => {
       "rm -fr .*",
       "rm --recursive .*",
       "rm -rf ./.*",
+      "rm -rf ../*",
+      "rm -rf ../../*",
+      "rm -rf ../.*",
+      "rm -rf -- ../*",
       "rm -rf .[!.]*",
       "rm -rf .??*",
       "rm -rf '.*'",
@@ -60,6 +68,8 @@ describe("dangerous rm patterns", () => {
   describe("scoped recursive deletes are not flagged as cwd deletes", () => {
     test.each([
       "rm -rf ./dist",
+      "rm -rf ../dist",
+      "rm -rf ../../dist",
       "rm -rf .cache",
       "rm -rf '.cache'",
       "rm -rf dist",

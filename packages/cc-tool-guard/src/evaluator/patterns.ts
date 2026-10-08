@@ -9,12 +9,12 @@ interface PatternRule {
 }
 
 /**
- * `rm` with a recursive flag (`-r`/`-R` in any short-flag cluster, or `--recursive`) anywhere
- * among its options, followed by any options, an optional `--`, and any preceding operands.
- * The matched position is the start of an operand (after an optional opening quote), so rules
- * can append the operand shape.
+ * `rm` with a recursive flag (`-r`/`-R` in any short-flag cluster, or `--recursive`) anywhere in
+ * its arguments, then skipping over any number of leading whitespace-separated arguments (options,
+ * `--`, earlier operands). The matched position is the start of an argument (after an optional
+ * opening quote), so rules can append the operand shape.
  */
-const RM_RECURSIVE_ARGS = String.raw`\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:(?:-[a-zA-Z]+|--[a-zA-Z-]+)\s+)*(?:--\s+)?(?:\S+\s+)*["']?`;
+const RM_RECURSIVE_ARGS = String.raw`\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
 
 /**
  * Dangerous patterns - these always require user confirmation
@@ -173,16 +173,17 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     reason: "Recursive delete in home",
   },
   {
-    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`\.{1,2}\/?["']?(?:\s|$)`),
+    // `.`, `..`, `./`, `../`, and any chain of those such as `../..` or `./..`.
+    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`(?:\.{1,2}\/)*\.{1,2}\/?["']?(?:\s|$)`),
     classification: "uncertain",
     reason: "Recursive delete of current or parent directory",
   },
   {
-    // `*`, `*.js`, `./*`, and dot globs such as `.*`, `.[!.]*`, `.??*` (which delete every
-    // dotfile and dot directory in cwd, including `.git`).
-    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`(?:\.\/)?\.?[*?[]`),
+    // `*`, `*.js`, `./*`, `../*`, `../../*`, and dot globs such as `.*`, `.[!.]*`, `.??*` (which
+    // delete every dotfile and dot directory in the target directory, including `.git`).
+    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`(?:\.{1,2}\/)*\.?[*?[]`),
     classification: "uncertain",
-    reason: "Recursive delete with wildcard glob in current directory",
+    reason: "Recursive delete with wildcard glob in current or parent directory",
   },
 
   // Environment modification
