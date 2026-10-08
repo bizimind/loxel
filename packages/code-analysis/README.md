@@ -51,10 +51,10 @@ code-analysis -p <plugin> [-w <path>] [-a key=value ...] [--web [--port <n>]] [-
 | `-w, --workdir` | cwd          | Directory to analyze.                                                        |
 | `-a, --arg`     | —            | Plugin option as `key=value`. Repeatable. See `code-analysis help <plugin>`. |
 | `--web`         | off          | Serve an interactive visualization instead of printing results.              |
-| `--port`        | `0` (random) | Port for the web server (only with `--web`).                                 |
+| `--port`        | `0` (random) | Port for the web server, bound to `127.0.0.1` (only with `--web`).           |
 | `-j, --json`    | off          | Print results as JSON.                                                       |
 
-Without `--web`, results are printed as a table of paths sorted by the plugin's value field. With `--web`, the server URL is printed (open it in a browser) and the process keeps running until `Ctrl-C`.
+Without `--web`, results are printed as a table of paths sorted by the plugin's value field. With `--web`, the server listens on `127.0.0.1` only, its URL is printed (open it in a browser), and the process keeps running until `Ctrl-C`.
 
 ### Listing plugins
 
