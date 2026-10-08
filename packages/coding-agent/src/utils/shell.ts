@@ -37,23 +37,16 @@ export function resolveShellBinary(): string {
  */
 export const SHELL_PROCESS_GROUP_SPAWN_OPTIONS = { detached: true } as const;
 
-function isNoSuchProcess(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH";
-}
-
 /**
  * Signals the process group led by `proc`. The process must have been spawned with
- * `SHELL_PROCESS_GROUP_SPAWN_OPTIONS`; otherwise it is not a group leader and the group
- * signal fails, in which case only `proc` itself is signalled as a fallback. A group whose
- * members have all exited (ESRCH) is silently ignored.
+ * `SHELL_PROCESS_GROUP_SPAWN_OPTIONS`; otherwise it is not a group leader, the group signal
+ * fails (ESRCH, since no group with that id exists), and only `proc` itself is signalled as
+ * a fallback. Signalling an already-exited process is a no-op in both paths.
  */
 export function killProcessGroup(proc: Bun.Subprocess, signal: NodeJS.Signals = "SIGTERM"): void {
   try {
     process.kill(-proc.pid, signal);
-  } catch (error) {
-    if (isNoSuchProcess(error)) {
-      return;
-    }
+  } catch {
     proc.kill(signal);
   }
 }
@@ -63,14 +56,13 @@ const HARD_KILL_GRACE_MS = 2000;
 /**
  * Terminates the process group led by `proc` with SIGTERM, escalating to SIGKILL after a
  * grace period. The escalation is unconditional: the shell (group leader) usually dies on
- * SIGTERM right away, but a descendant that ignores SIGTERM can outlive it while holding the
- * stdio pipes open, so the leader's own exit status says nothing about whether the group is
- * done. SIGKILL to an already-reaped group is a no-op. Returns a cleanup that cancels the
- * escalation once the caller has observed the group exit.
+ * SIGTERM right away, but a descendant that ignores SIGTERM, or one with a slow graceful
+ * shutdown handler, can outlive it. Neither the leader's exit nor EOF on the inherited stdio
+ * pipes proves the group is gone (a descendant that redirects its stdio releases the pipes
+ * the moment the shell dies), so callers must not cancel the escalation. SIGKILL to an
+ * already-reaped group is a no-op, and the timer is unref'd so it never keeps the process alive.
  */
-export function terminateProcessGroup(proc: Bun.Subprocess): () => void {
+export function terminateProcessGroup(proc: Bun.Subprocess): void {
   killProcessGroup(proc, "SIGTERM");
-  const hardKill = setTimeout(() => killProcessGroup(proc, "SIGKILL"), HARD_KILL_GRACE_MS);
-  hardKill.unref();
-  return () => clearTimeout(hardKill);
+  setTimeout(() => killProcessGroup(proc, "SIGKILL"), HARD_KILL_GRACE_MS).unref();
 }
