@@ -699,6 +699,17 @@ describe("tool handlers", () => {
     }
   });
 
+  test("WebFetch rejects non-http(s) URLs", async () => {
+    const ctx = await createContext({ mode: "execute" });
+    for (const url of ["file:///etc/passwd", "ftp://example.com/x", "javascript:alert(1)"]) {
+      const result = await invokeToolByName("WebFetch", { url, prompt: "Summarize" }, ctx);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe("TOOL_VALIDATION_FAILED");
+      }
+    }
+  });
+
   test("WebFetch stores artifact path when response is truncated", async () => {
     globalThis.fetch = (async () =>
       new Response("x".repeat(READ_LIMITS.maxBytes + 64), {
