@@ -63,6 +63,9 @@ class LspSignatureHelpProvider implements monaco.languages.SignatureHelpProvider
     token: monaco.CancellationToken,
     context: monaco.languages.SignatureHelpContext,
   ): Promise<monaco.languages.SignatureHelpResult | null> {
+    if (token.isCancellationRequested) {
+      return null;
+    }
     const translated = this._client.bridge.translate(model, position);
 
     const result = await this._client.server.textDocumentSignatureHelp({
@@ -75,7 +78,7 @@ class LspSignatureHelpProvider implements monaco.languages.SignatureHelpProvider
       },
     });
 
-    if (!result) {
+    if (!result || token.isCancellationRequested) {
       return null;
     }
 
