@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { Database } from "bun:sqlite";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -224,6 +225,51 @@ describe("data layer", () => {
     expect(upd.ok).toBe(true);
     if (!upd.ok) return;
     expect(upd.row["title"]).toBe("New");
+  });
+
+  it("hydrates a multi column with malformed stored JSON as an empty array", () => {
+    const ins = db.data.insert("tasks", { title: "Bad tags", tags: ["a", "b"] }, columns);
+    if (!ins.ok) throw new Error("Insert failed");
+    const id = ins.row["id"] as number;
+
+    const raw = new Database(join(tmpDir, "test.db"));
+    raw.prepare('UPDATE "data_tasks" SET "tags" = ? WHERE id = ?').run("{not json", id);
+    raw.close();
+
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(db.data.get("tasks", id, columns)?.["tags"]).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain('column "tags"');
+      expect(warn.mock.calls[0]?.[1]).toBeInstanceOf(SyntaxError);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    ["an object", '{"a":1}'],
+    ["a number", "42"],
+    ["a string", '"hi"'],
+    ["null", "null"],
+  ])("hydrates a multi column whose stored JSON is %s as an empty array", (_label, stored) => {
+    const ins = db.data.insert("tasks", { title: "Bad tags", tags: ["a"] }, columns);
+    if (!ins.ok) throw new Error("Insert failed");
+    const id = ins.row["id"] as number;
+
+    const raw = new Database(join(tmpDir, "test.db"));
+    raw.prepare('UPDATE "data_tasks" SET "tags" = ? WHERE id = ?').run(stored, id);
+    raw.close();
+
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(db.data.get("tasks", id, columns)?.["tags"]).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain('column "tags"');
+      expect(warn.mock.calls[0]?.[1]).toBeInstanceOf(TypeError);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("deletes a row", () => {
