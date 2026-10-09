@@ -62,19 +62,34 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
     }
 
     if (this._languageIds && !this._languageIds.has(m.getLanguageId())) return undefined;
-    const uriStr = m.uri.toString(true);
-    let mm = this._managedModels.get(m);
-    if (!mm) {
-      mm = new ManagedModel(m, this._server);
-      this._managedModels.set(m, mm);
-      this._managedModelsReverse.set(uriStr, m);
-    }
-    m.onWillDispose(() => {
-      mm!.dispose();
-      this._managedModels.delete(m);
-      this._managedModelsReverse.delete(uriStr);
-    });
+    const existing = this._managedModels.get(m);
+    if (existing) return existing;
+
+    const mm = new ManagedModel(m, this._server, () => this._removeManagedModel(m));
+    this._managedModels.set(m, mm);
+    this._managedModelsReverse.set(m.uri.toString(true), m);
     return mm;
+  }
+
+  private _removeManagedModel(m: monaco.editor.ITextModel): void {
+    const mm = this._managedModels.get(m);
+    if (!mm) return;
+    this._managedModels.delete(m);
+    this._managedModelsReverse.delete(m.uri.toString(true));
+    mm.dispose();
+  }
+
+  /**
+   * Closes every managed model (unsubscribing from content changes and sending
+   * `textDocument/didClose`) before disposing the registered capability
+   * handlers and the `onDidCreateModel` subscription.
+   */
+  override dispose(): void {
+    for (const m of [...this._managedModels.keys()]) {
+      this._removeManagedModel(m);
+    }
+    this._started = false;
+    super.dispose();
   }
 
   translateBack(
@@ -139,8 +154,11 @@ class ManagedModel extends Disposable {
   constructor(
     private readonly _textModel: monaco.editor.ITextModel,
     private readonly _api: typeof api.TServerInterface,
+    onWillDisposeModel: () => void,
   ) {
     super();
+
+    this._register(_textModel.onWillDispose(onWillDisposeModel));
 
     const uri = _textModel.uri.toString(true);
 
