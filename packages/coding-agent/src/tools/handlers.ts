@@ -1198,6 +1198,28 @@ async function runTaskStop(
   return ok(taskStopOutputSchema.parse({ task_id: taskId, stopped }));
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+}
+
+function webFetchFailure(url: string, phase: string, error: unknown): ToolResult<never> {
+  if (isAbortError(error)) {
+    return err(
+      "TOOL_TIMEOUT",
+      `WebFetch ${phase} timed out after ${WEB_LIMITS.fetchTimeoutMs}ms for ${url}`,
+      true,
+      "Retry with a stable URL",
+    );
+  }
+  const cause = error instanceof Error ? error.message : String(error);
+  return err(
+    "TOOL_RUNTIME_ERROR",
+    `WebFetch ${phase} failed for ${url}: ${cause}`,
+    false,
+    "Check the URL and network connectivity",
+  );
+}
+
 async function runWebFetch(
   rawInput: unknown,
   ctx: ToolRuntimeContext,
@@ -1214,28 +1236,21 @@ async function runWebFetch(
   const input = parsed.data;
 
   const started = Date.now();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), WEB_LIMITS.fetchTimeoutMs);
+  const signal = AbortSignal.timeout(WEB_LIMITS.fetchTimeoutMs);
 
   let response: Response;
   try {
-    response = await fetch(input.url, {
-      signal: controller.signal,
-      headers: { "user-agent": "coding-agent/0.1.0" },
-    });
-  } catch {
-    clearTimeout(timer);
-    return err(
-      "TOOL_TIMEOUT",
-      `WebFetch timed out for ${input.url}`,
-      true,
-      "Retry with a stable URL",
-    );
+    response = await fetch(input.url, { signal, headers: { "user-agent": "coding-agent/0.1.0" } });
+  } catch (error) {
+    return webFetchFailure(input.url, "request", error);
   }
 
-  clearTimeout(timer);
-
-  const body = await response.text();
+  let body: string;
+  try {
+    body = await response.text();
+  } catch (error) {
+    return webFetchFailure(input.url, "body read", error);
+  }
   const fullBytes = Buffer.byteLength(body, "utf8");
   const truncated = fullBytes > READ_LIMITS.maxBytes;
   const content = truncated ? body.slice(0, READ_LIMITS.maxBytes) : body;

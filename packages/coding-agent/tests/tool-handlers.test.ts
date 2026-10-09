@@ -699,6 +699,61 @@ describe("tool handlers", () => {
     }
   });
 
+  test("WebFetch distinguishes timeouts from other fetch failures", async () => {
+    const ctx = await createContext({ mode: "execute" });
+
+    globalThis.fetch = (async () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    }) as unknown as typeof fetch;
+    const timedOut = await invokeToolByName(
+      "WebFetch",
+      { url: "https://example.com", prompt: "Summarize" },
+      ctx,
+    );
+    expect(timedOut.ok).toBe(false);
+    if (!timedOut.ok) {
+      expect(timedOut.error.code).toBe("TOOL_TIMEOUT");
+      expect(timedOut.error.retriable).toBe(true);
+    }
+
+    globalThis.fetch = (async () => {
+      throw new Error("connection reset");
+    }) as unknown as typeof fetch;
+    const failed = await invokeToolByName(
+      "WebFetch",
+      { url: "https://example.com", prompt: "Summarize" },
+      ctx,
+    );
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) {
+      expect(failed.error.code).toBe("TOOL_RUNTIME_ERROR");
+      expect(failed.error.message).toContain("connection reset");
+    }
+  });
+
+  test("WebFetch reports body-read failures with their cause", async () => {
+    const ctx = await createContext({ mode: "execute" });
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            controller.error(new Error("stream broke"));
+          },
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+    const result = await invokeToolByName(
+      "WebFetch",
+      { url: "https://example.com", prompt: "Summarize" },
+      ctx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("TOOL_RUNTIME_ERROR");
+      expect(result.error.message).toContain("stream broke");
+    }
+  });
+
   test("WebFetch stores artifact path when response is truncated", async () => {
     globalThis.fetch = (async () =>
       new Response("x".repeat(READ_LIMITS.maxBytes + 64), {
