@@ -62,6 +62,7 @@ export async function serve(opts: ServeOptions): Promise<void> {
 
   const server = Bun.serve({
     port,
+    hostname: "127.0.0.1",
     fetch(req, srv) {
       const { pathname } = new URL(req.url);
 
