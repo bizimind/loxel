@@ -80,9 +80,9 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
   }
 
   /**
-   * Tears down every managed model (unsubscribing from content changes and
-   * sending `textDocument/didClose`) before the registered capability
-   * disposables, so the close notifications still go out over a live channel.
+   * Closes every managed model (unsubscribing from content changes and sending
+   * `textDocument/didClose`) before disposing the registered capability
+   * handlers and the `onDidCreateModel` subscription.
    */
   override dispose(): void {
     for (const m of [...this._managedModels.keys()]) {
