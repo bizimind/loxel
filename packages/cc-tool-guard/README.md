@@ -65,7 +65,8 @@ cc-tool-guard never denies; anything it is not sure about falls through to the u
 
 Commands are evaluated against patterns in `src/evaluator/patterns.ts`:
 
-- **Dangerous** patterns (e.g. `sudo`, global package installs) and pushes to `main`/`master` are deferred to the user
+- **Dangerous** patterns (e.g. `sudo`, global package installs, recursive deletes of the current directory or of globs in it such as `rm -rf .`, `rm -rf *` or `rm -rf .*`) and pushes to `main`/`master` are deferred to the user
+- Package runners that execute arbitrary packages (`npx`, `bun x`) are never auto-approved by pattern
 - **Safe** patterns (read-only commands, common build/test tools, pushes to feature branches) are approved
 - Write commands targeting paths outside the project (home directory, absolute paths other than `/tmp`) are deferred
 - Chained commands are approved only if every part is safe

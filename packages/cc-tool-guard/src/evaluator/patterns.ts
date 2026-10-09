@@ -9,6 +9,19 @@ interface PatternRule {
 }
 
 /**
+ * `rm` with a recursive flag (`-r`/`-R` in any short-flag cluster, or `--recursive`) anywhere in
+ * its arguments, then skipping over any number of leading whitespace-separated arguments (options,
+ * `--`, earlier operands). The matched position is the start of an argument (after an optional
+ * opening quote), so rules can append the operand shape.
+ *
+ * The `rm` must not be a package-manager subcommand (`pnpm rm -r .` removes dependencies, not
+ * files) or `git rm` with `--cached` (which only unstages). `git rm -r` without `--cached` does
+ * delete from the working tree, so it still matches, as do other prefixes (`sudo rm`, `env rm`,
+ * `\\rm`, `/bin/rm`, `cd x && rm`).
+ */
+const RM_RECURSIVE_ARGS = String.raw`(?<!\b(?:npm|pnpm|yarn|bun)\s)(?<!\bgit\s(?=(?:\S+\s+)*--cached))\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
+
+/**
  * Dangerous patterns - these always require user confirmation
  */
 const DANGEROUS_PATTERNS: PatternRule[] = [
@@ -164,6 +177,25 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     classification: "uncertain",
     reason: "Recursive delete in home",
   },
+  {
+    // `.`, `..`, `./`, `../`, and any chain of those such as `../..` or `./..`.
+    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`(?:\.{1,2}\/)*\.{1,2}\/?["']?(?:\s|$)`),
+    classification: "uncertain",
+    reason: "Recursive delete of current or parent directory",
+  },
+  {
+    // `*`, `*.js`, `./*`, `../*`, `../../*`, and dot globs such as `.*`, `.[!.]*`, `.??*` (which
+    // delete every dotfile and dot directory in the target directory, including `.git`), plus the
+    // brace-expansion spellings of the same idiom: a glob character inside or right after a brace
+    // group (`{*,.*}`, `{.,}*`, `.{a,b}*`), or an empty alternative (`.{git,}` expands to `.git .`,
+    // `./{dist,}` to `./dist ./`). Scoped brace lists (`{dist,build}`, `dist/{a,b}`) are not matched.
+    pattern: new RegExp(
+      RM_RECURSIVE_ARGS +
+        String.raw`(?:\.{1,2}\/)*\.?(?:[*?[]|\{(?=[^}]*[*?[]|,|[^}]*,[,}])[^}]*\}|\{[^}]*\}\.?[*?[])`,
+    ),
+    classification: "uncertain",
+    reason: "Recursive delete with wildcard glob in current or parent directory",
+  },
 
   // Environment modification
   {
@@ -239,7 +271,7 @@ const SAFE_PATTERNS: PatternRule[] = [
 
   // Package managers - local operations
   {
-    pattern: /^bun\s+(test|build|run|install|add|remove|update|x)\b/,
+    pattern: /^bun\s+(test|build|run|install|add|remove|update)\b/,
     classification: "safe",
     reason: "Bun operation",
   },
@@ -258,7 +290,6 @@ const SAFE_PATTERNS: PatternRule[] = [
     classification: "safe",
     reason: "yarn operation",
   },
-  { pattern: /^npx\s+/, classification: "safe", reason: "npx execution" },
 
   // Build tools
   { pattern: /^(tsc|typescript)\b/, classification: "safe", reason: "TypeScript compiler" },
@@ -347,19 +378,25 @@ function evaluateCommandChain(
   context: ProjectContext,
 ): EvaluationResult | null {
   const results: EvaluationResult[] = [];
+  let hasUnknown = false;
 
   for (const cmd of commands) {
     const result = evaluateSingleCommand(cmd, context);
     if (result === null) {
-      return null;
+      hasUnknown = true;
+      continue;
+    }
+    // If any command is uncertain, the whole chain is uncertain, even if another command in the
+    // chain is unknown (`cd x && rm -rf .` must not be delegated to Haiku).
+    if (result.classification === "uncertain") {
+      return result;
     }
     results.push(result);
   }
 
-  // If any command is uncertain, the whole chain is uncertain
-  const uncertainResult = results.find((r) => r.classification === "uncertain");
-  if (uncertainResult) {
-    return uncertainResult;
+  // An unknown command with no dangerous siblings - let haiku evaluate the chain
+  if (hasUnknown) {
+    return null;
   }
 
   // Single command - return its result with pattern suggestion
