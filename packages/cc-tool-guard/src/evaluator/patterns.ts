@@ -14,11 +14,12 @@ interface PatternRule {
  * `--`, earlier operands). The matched position is the start of an argument (after an optional
  * opening quote), so rules can append the operand shape.
  *
- * The `rm` must not be a subcommand of a VCS or package manager (`git rm -r --cached .`,
- * `pnpm rm -r .`), which do not delete from the working tree. Other prefixes (`sudo rm`, `env rm`,
- * `\\rm`, `/bin/rm`, `cd x && rm`) still match.
+ * The `rm` must not be a package-manager subcommand (`pnpm rm -r .` removes dependencies, not
+ * files) or `git rm` with `--cached` (which only unstages). `git rm -r` without `--cached` does
+ * delete from the working tree, so it still matches, as do other prefixes (`sudo rm`, `env rm`,
+ * `\\rm`, `/bin/rm`, `cd x && rm`).
  */
-const RM_RECURSIVE_ARGS = String.raw`(?<!\b(?:git|npm|pnpm|yarn|bun)\s)\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
+const RM_RECURSIVE_ARGS = String.raw`(?<!\b(?:npm|pnpm|yarn|bun)\s)(?<!\bgit\s(?=(?:\S+\s+)*--cached))\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
 
 /**
  * Dangerous patterns - these always require user confirmation

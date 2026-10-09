@@ -90,11 +90,23 @@ describe("dangerous rm patterns", () => {
     });
   });
 
-  describe("rm as a VCS or package manager subcommand is not a recursive delete", () => {
-    test.each(["git rm -r --cached .", "git rm -r --cached *", "pnpm rm -r .", "npm rm -r ."])(
-      "%s is not matched by the recursive rules",
+  describe("rm as a package manager subcommand or git rm --cached is not a recursive delete", () => {
+    test.each([
+      "git rm -r --cached .",
+      "git rm --cached -r .",
+      "git rm -r --cached *",
+      "pnpm rm -r .",
+      "npm rm -r .",
+    ])("%s is not matched by the recursive rules", (command) => {
+      expect(checkKnownPatterns(command, context)?.reason ?? "").not.toMatch(/Recursive delete/);
+    });
+  });
+
+  describe("git rm without --cached deletes from the working tree", () => {
+    test.each(["git rm -rf .", "git rm -r .", "git rm -rf ./*", "env git rm -rf ."])(
+      "%s is uncertain",
       (command) => {
-        expect(checkKnownPatterns(command, context)?.reason ?? "").not.toMatch(/Recursive delete/);
+        expect(classify(command)).toBe("uncertain");
       },
     );
   });
