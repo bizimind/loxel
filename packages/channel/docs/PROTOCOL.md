@@ -10,9 +10,9 @@ Wire protocol between `ChannelClient` and the [channel-worker](../../channel-wor
 
 ## Connection flow
 
-1. Client opens a WebSocket to `/channel/<channelId>`.
+1. Client opens a WebSocket to `/channel/<channelId>?token=<jwt>`. The relay verifies the JWT (RS256 via JWKS) and rejects the upgrade with `401` if it is missing or invalid.
 2. Client sends `join` with the channel ID, JWT, optional `meta`, and optional `lastSeq` (last received sequence number, for resumption).
-3. Relay verifies the JWT (RS256 via JWKS), checks the channel ID matches the URL, and enforces the channel owner.
+3. Relay verifies the JWT again, checks the channel ID matches the URL, and enforces the channel owner.
 4. Relay replies `joined` with the assigned `clientId` and the current peers, then sends `peer_joined` to the other peers.
 5. On `leave` or socket close, the relay sends `peer_left` (reason `leave`, `disconnect`, or `timeout`) to the remaining peers.
 

@@ -112,10 +112,9 @@ export class ChannelClient {
     return new Promise((resolve, reject) => {
       this.connectPromise = { resolve, reject };
 
-      const wsUrl = this.buildWebSocketUrl();
-
       this.connection = new Connection({
-        url: wsUrl,
+        // Rebuilt per attempt so setToken() applies to auto-reconnects
+        url: () => this.buildWebSocketUrl(),
         pingInterval: this.options.pingInterval,
         connectionTimeout: this.options.connectionTimeout,
         autoReconnect: this.options.autoReconnect,
@@ -411,7 +410,10 @@ export class ChannelClient {
 
   private buildWebSocketUrl(): string {
     const base = this.options.url.replace(/\/$/, "");
-    return `${base}/channel/${encodeURIComponent(this.options.channelId)}`;
+    // The token travels as a query parameter (WebSocket requests cannot carry custom headers)
+    // so the relay can verify it and reject the upgrade before the socket reaches the Durable
+    // Object. The `join` message carries it again for the same-user channel check.
+    return `${base}/channel/${encodeURIComponent(this.options.channelId)}?token=${encodeURIComponent(this.options.token)}`;
   }
 
   private handleServerMessage(envelope: ServerEnvelope): void {
