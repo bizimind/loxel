@@ -71,3 +71,4 @@ Binary data messages use a 37-byte header followed by the payload:
 - Data messages (`message`, `broadcast`, binary frames) carry a per-sender, positive, increasing `seq`. The relay ACKs each one after relaying it. A `seq` at or below the last one seen from that sender is treated as a retry: it is ACKed again but not relayed.
 - The client keeps unACKed messages pending, retries them after `ackTimeout`, and emits `message_failed` after `maxRetries`. Binary frames with `seq` 0 (the `*Unreliable` methods) skip ACKs entirely.
 - The relay rate-limits data messages per client with a token bucket (100 messages/s, burst of 200); control messages are not limited.
+- The relay keeps the last 100 relayed data messages (at most 4 MiB of payload) per recipient in memory only; nothing is persisted.

@@ -11,6 +11,7 @@ import {
 } from "../../channel/src/protocol.ts";
 import { validateJwt } from "./auth.ts";
 import { createRequestLogger, getIssuer, getJwksUrl, type Env } from "./index.ts";
+import { MessageBuffer, type BufferedMessage } from "./message-buffer.ts";
 
 /**
  * Session state for a connected client.
@@ -31,22 +32,6 @@ interface ClientSession {
 interface RateLimiter {
   tokens: number;
   lastRefill: number;
-}
-
-/**
- * Buffered message for delivery on reconnect.
- */
-interface BufferedMessage {
-  seq: number;
-  from: ClientId;
-  to?: ClientId;
-  payload: unknown;
-  ts: number;
-  isBroadcast: boolean;
-  /** Whether this is a binary message */
-  isBinary?: boolean;
-  /** Base64-encoded binary payload (for DO storage compatibility) */
-  binaryPayload?: string;
 }
 
 /**
@@ -89,13 +74,14 @@ export class ChannelRoom extends DurableObject<Env> {
   /** Rate limiters per client (token bucket) */
   private rateLimiters = new Map<ClientId, RateLimiter>();
 
-  /** Message buffers per client for delivery on reconnect */
-  private messageBuffers = new Map<ClientId, BufferedMessage[]>();
+  /** Message buffers per client for delivery on reconnect (in-memory only) */
+  private messageBuffers = new Map<ClientId, MessageBuffer>();
 
   // Configuration constants
   private readonly RATE_LIMIT = 100; // messages per second
   private readonly BUCKET_SIZE = 200; // burst allowance
   private readonly BUFFER_SIZE = 100; // last N messages per client
+  private readonly BUFFER_MAX_BYTES = 4 * 1024 * 1024; // payload bytes retained per client
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -106,6 +92,11 @@ export class ChannelRoom extends DurableObject<Env> {
     // Load persisted channel owner from storage (survives DO eviction)
     this.ctx.blockConcurrencyWhile(async () => {
       this.channelUserId = (await this.ctx.storage.get<string>("channelUserId")) ?? null;
+    });
+
+    // Best-effort, non-blocking: nothing reads these keys anymore
+    this.deleteLegacyBuffers().catch((error: unknown) => {
+      this.logger.warn("Failed to delete legacy message buffers", { error });
     });
 
     // Restore sessions from hibernation
@@ -121,6 +112,21 @@ export class ChannelRoom extends DurableObject<Env> {
           this.channelUserId = attachment.session.userId;
         }
       }
+    }
+  }
+
+  /**
+   * Earlier deployments persisted message buffers under `buffer:<clientId>` keys that were
+   * never deleted (#398). Buffers are in-memory only now, so reclaim the storage they left.
+   */
+  private async deleteLegacyBuffers(): Promise<void> {
+    // storage.delete() accepts at most 128 keys per call
+    for (;;) {
+      const legacy = await this.ctx.storage.list({ prefix: "buffer:", limit: 128 });
+      if (legacy.size === 0) {
+        return;
+      }
+      await this.ctx.storage.delete([...legacy.keys()]);
     }
   }
 
@@ -338,7 +344,7 @@ export class ChannelRoom extends DurableObject<Env> {
 
     // Send buffered messages if client is reconnecting with lastSeq
     if (lastSeq !== undefined) {
-      await this.sendBufferedMessages(ws, session.clientId, lastSeq);
+      this.sendBufferedMessages(ws, session.clientId, lastSeq);
     }
 
     // Notify existing peers
@@ -369,6 +375,11 @@ export class ChannelRoom extends DurableObject<Env> {
     // Remove from maps
     this.sessions.delete(ws);
     this.clientSockets.delete(session.clientId);
+
+    // Clean up per-client state
+    this.rateLimiters.delete(session.clientId);
+    this.lastSeenSeq.delete(session.clientId);
+    this.messageBuffers.delete(session.clientId);
 
     // Notify remaining peers
     this.broadcastControl({
@@ -543,13 +554,12 @@ export class ChannelRoom extends DurableObject<Env> {
           }
         }
       } else if (frame.to) {
-        // Buffer for recipient (for reconnect recovery)
-        if (frame.seq > 0) {
-          this.bufferBinaryMessage(frame.to, frame);
-        }
-        // Send to specific peer
+        // Send to specific peer — check existence before buffering
         const targetWs = this.clientSockets.get(frame.to);
         if (targetWs) {
+          if (frame.seq > 0) {
+            this.bufferBinaryMessage(frame.to, frame);
+          }
           this.sendRaw(targetWs, encoded);
         }
       }
@@ -697,31 +707,23 @@ export class ChannelRoom extends DurableObject<Env> {
   }
 
   /**
-   * Buffer a message for a client (for delivery on reconnect).
+   * Buffer a message for a client (in-memory ring buffer bounded by BUFFER_SIZE entries and
+   * BUFFER_MAX_BYTES of payload).
+   *
+   * Replayed by sendBufferedMessages() when a client rejoins with `lastSeq`. Replay is
+   * currently ineffective because a rejoining client is assigned a new clientId; see #398.
    */
   private bufferMessage(clientId: ClientId, message: BufferedMessage): void {
     let buffer = this.messageBuffers.get(clientId);
     if (!buffer) {
-      buffer = [];
+      buffer = new MessageBuffer({ maxEntries: this.BUFFER_SIZE, maxBytes: this.BUFFER_MAX_BYTES });
       this.messageBuffers.set(clientId, buffer);
     }
-
     buffer.push(message);
-
-    // Ring buffer: remove oldest if exceeds size
-    if (buffer.length > this.BUFFER_SIZE) {
-      buffer.shift();
-    }
-
-    // Persist to DO storage asynchronously for performance.
-    // Trade-off: If DO is evicted before write completes, recent messages
-    // may be lost. For stronger guarantees, await this call.
-    this.ctx.storage.put(`buffer:${clientId}`, buffer);
   }
 
   /**
    * Buffer a binary message for a client (for delivery on reconnect).
-   * Converts ArrayBuffer to base64 for JSON-compatible DO storage.
    */
   private bufferBinaryMessage(
     clientId: ClientId,
@@ -733,10 +735,7 @@ export class ChannelRoom extends DurableObject<Env> {
       isBroadcast: boolean;
     },
   ): void {
-    // Convert ArrayBuffer to base64 for storage
-    const bytes = new Uint8Array(frame.payload);
-    const base64 = btoa(String.fromCharCode(...bytes));
-
+    // frame.payload is already a copy (decodeBinaryFrame slices it), so it is safe to retain
     this.bufferMessage(clientId, {
       seq: frame.seq,
       from: frame.from,
@@ -744,61 +743,48 @@ export class ChannelRoom extends DurableObject<Env> {
       payload: null,
       ts: Date.now(),
       isBroadcast: frame.isBroadcast,
-      isBinary: true,
-      binaryPayload: base64,
+      binaryPayload: frame.payload,
     });
   }
 
   /**
    * Send buffered messages to a reconnecting client.
-   * Only sends messages with seq > lastSeq.
+   * Only sends messages with seq > lastSeq. See bufferMessage() for the current limitation.
    */
-  private async sendBufferedMessages(
-    ws: WebSocket,
-    clientId: ClientId,
-    lastSeq: number,
-  ): Promise<void> {
-    // Try in-memory first, then fall back to storage
-    let buffer = this.messageBuffers.get(clientId);
+  private sendBufferedMessages(ws: WebSocket, clientId: ClientId, lastSeq: number): void {
+    const buffer = this.messageBuffers.get(clientId);
     if (!buffer) {
-      buffer = (await this.ctx.storage.get<BufferedMessage[]>(`buffer:${clientId}`)) ?? [];
-      if (buffer.length > 0) {
-        this.messageBuffers.set(clientId, buffer);
-      }
+      return;
     }
 
-    for (const msg of buffer) {
-      if (msg.seq > lastSeq) {
-        if (msg.isBinary && msg.binaryPayload) {
-          // Reconstruct binary frame from base64 and send
-          const bytes = Uint8Array.from(atob(msg.binaryPayload), (c) => c.charCodeAt(0));
-          const frame = encodeBinaryFrame({
-            isBinary: true,
-            isBroadcast: msg.isBroadcast,
-            seq: msg.seq,
-            from: msg.from,
-            to: msg.to,
-            payload: bytes.buffer,
-          });
-          this.sendRaw(ws, frame);
-        } else if (msg.isBroadcast) {
-          this.send(ws, {
-            type: "broadcast",
-            ts: msg.ts,
-            seq: msg.seq,
-            from: msg.from,
-            payload: msg.payload,
-          });
-        } else {
-          this.send(ws, {
-            type: "message",
-            ts: msg.ts,
-            seq: msg.seq,
-            from: msg.from,
-            to: msg.to,
-            payload: msg.payload,
-          });
-        }
+    for (const msg of buffer.after(lastSeq)) {
+      if (msg.binaryPayload) {
+        const frame = encodeBinaryFrame({
+          isBinary: true,
+          isBroadcast: msg.isBroadcast,
+          seq: msg.seq,
+          from: msg.from,
+          to: msg.to,
+          payload: msg.binaryPayload,
+        });
+        this.sendRaw(ws, frame);
+      } else if (msg.isBroadcast) {
+        this.send(ws, {
+          type: "broadcast",
+          ts: msg.ts,
+          seq: msg.seq,
+          from: msg.from,
+          payload: msg.payload,
+        });
+      } else {
+        this.send(ws, {
+          type: "message",
+          ts: msg.ts,
+          seq: msg.seq,
+          from: msg.from,
+          to: msg.to,
+          payload: msg.payload,
+        });
       }
     }
   }

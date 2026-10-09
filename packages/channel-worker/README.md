@@ -37,6 +37,7 @@ Both secrets are required, including in `.dev.vars` for local development (every
 cp packages/channel-worker/.dev.vars.example packages/channel-worker/.dev.vars   # then fill in the values
 pnpm -C packages/channel-worker run dev         # wrangler dev on ws://localhost:8787
 pnpm -C packages/channel-worker run typecheck
+pnpm -C packages/channel-worker run test
 ```
 
 `.dev.vars` is loaded by `wrangler dev` and gitignored. To poke the relay manually, connect with `bunx wscat -c ws://localhost:8787/channel/test-room` and send a `join` envelope containing a valid WorkOS JWT.
