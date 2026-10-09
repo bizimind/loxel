@@ -68,16 +68,16 @@ Everything public is exported from `src/index.ts`; option and event types live i
 
 ### Methods and properties
 
-| Member                                                                    | Description                                                            |
-| ------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `connect()`                                                               | Join the channel; resolves with the `connected` event                  |
-| `disconnect()`                                                            | Send `leave`, close the socket, and drop pending messages              |
-| `send(to, payload)` / `broadcast(payload)`                                | Send JSON to one peer / all peers; returns the sequence number         |
-| `sendBinary(to, data)` / `broadcastBinary(data)`                          | Same for `ArrayBuffer` payloads                                        |
-| `sendBinaryUnreliable(to, data)` / `broadcastBinaryUnreliable(data)`      | Fire-and-forget binary sends with no ACK tracking or retries           |
-| `on(type, handler)` / `off(type, handler)` / `onAny(handler)`             | Subscribe/unsubscribe; `on` and `onAny` return an unsubscribe function |
-| `setToken(token)`                                                         | Replace the JWT used on the next (re)connect                           |
-| `clientId`, `peers`, `state`, `isConnected`, `isBackpressured`, `lastSeq` | Read-only connection state                                             |
+| Member                                                                    | Description                                                                                                                                                                             |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `connect()`                                                               | Join the channel; resolves with the `connected` event. Throws `InvalidStateError` while `connecting` or `connected`; while `reconnecting` it cancels the pending retry and connects now |
+| `disconnect()`                                                            | Send `leave`, close the socket, and drop pending messages                                                                                                                               |
+| `send(to, payload)` / `broadcast(payload)`                                | Send JSON to one peer / all peers; returns the sequence number                                                                                                                          |
+| `sendBinary(to, data)` / `broadcastBinary(data)`                          | Same for `ArrayBuffer` payloads                                                                                                                                                         |
+| `sendBinaryUnreliable(to, data)` / `broadcastBinaryUnreliable(data)`      | Fire-and-forget binary sends with no ACK tracking or retries                                                                                                                            |
+| `on(type, handler)` / `off(type, handler)` / `onAny(handler)`             | Subscribe/unsubscribe; `on` and `onAny` return an unsubscribe function                                                                                                                  |
+| `setToken(token)`                                                         | Replace the JWT used on the next (re)connect                                                                                                                                            |
+| `clientId`, `peers`, `state`, `isConnected`, `isBackpressured`, `lastSeq` | Read-only connection state; `state` is `disconnected`, `connecting`, `connected`, or `reconnecting` (auto-reconnect pending after a drop)                                               |
 
 ### Events
 
