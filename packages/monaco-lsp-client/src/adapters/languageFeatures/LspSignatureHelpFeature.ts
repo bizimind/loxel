@@ -107,5 +107,5 @@ function toMonacoDocumentation(
 ): string | monaco.IMarkdownString | undefined {
   if (!doc) return undefined;
   if (typeof doc === "string") return doc;
-  return { value: doc.value, isTrusted: true };
+  return { value: doc.value, isTrusted: false };
 }
