@@ -51,6 +51,7 @@ const SERVER_STABLE_UPTIME_MS = 60_000;
 let metaKeyHeld = false;
 
 import { requestOpen } from "../open-request";
+import { isHttpUrl } from "../url-utils";
 import { BROWSER_PARTITION } from "./browser-partition";
 import {
   OPEN_FOLDER_DIALOG,
@@ -368,10 +369,12 @@ async function createWindow(): Promise<BrowserWindow> {
     if (isLocal(url)) {
       return { action: "allow" };
     }
-    if (metaKeyHeld) {
-      openInBrowserTab(url);
-    } else {
-      shell.openExternal(url);
+    if (isHttpUrl(url)) {
+      if (metaKeyHeld) {
+        openInBrowserTab(url);
+      } else {
+        shell.openExternal(url);
+      }
     }
     return { action: "deny" };
   });
@@ -381,10 +384,12 @@ async function createWindow(): Promise<BrowserWindow> {
   win.webContents.on("will-navigate", (event, url) => {
     if (!isLocal(url)) {
       event.preventDefault();
-      if (metaKeyHeld) {
-        openInBrowserTab(url);
-      } else {
-        shell.openExternal(url);
+      if (isHttpUrl(url)) {
+        if (metaKeyHeld) {
+          openInBrowserTab(url);
+        } else {
+          shell.openExternal(url);
+        }
       }
     }
   });
@@ -679,7 +684,7 @@ app.on("web-contents-created", (_, contents) => {
   // (or browser panel tab when Cmd is held).
   // Each webview gets its own webContents, so mainWindow's handler doesn't cover them.
   contents.setWindowOpenHandler(({ url }) => {
-    if (!isLocal(url)) {
+    if (!isLocal(url) && isHttpUrl(url)) {
       if (metaKeyHeld) {
         openInBrowserTab(url);
       } else {
