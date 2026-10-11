@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseNotificationSequences } from "./terminal-settings";
+import { createNotificationSequencesCache, parseNotificationSequences } from "./terminal-settings";
 
 const all = { osc9: true, osc777: true, osc99: true };
 
@@ -23,5 +23,26 @@ describe("parseNotificationSequences", () => {
       version: 12,
     });
     expect(parseNotificationSequences(raw)).toEqual({ osc9: false, osc777: true, osc99: true });
+  });
+});
+
+describe("createNotificationSequencesCache", () => {
+  test("reads the store once until invalidated", () => {
+    let reads = 0;
+    let raw = JSON.stringify({ state: { terminal: { notificationSequences: { osc9: false } } } });
+    const cache = createNotificationSequencesCache(() => {
+      reads++;
+      return raw;
+    });
+    expect(cache.isEnabled("osc9")).toBe(false);
+    expect(cache.isEnabled("osc777")).toBe(true);
+    expect(cache.isEnabled("osc9")).toBe(false);
+    expect(reads).toBe(1);
+
+    raw = JSON.stringify({ state: { terminal: { notificationSequences: { osc9: true } } } });
+    expect(cache.isEnabled("osc9")).toBe(false);
+    cache.invalidate();
+    expect(cache.isEnabled("osc9")).toBe(true);
+    expect(reads).toBe(2);
   });
 });

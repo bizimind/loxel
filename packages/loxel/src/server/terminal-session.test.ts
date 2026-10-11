@@ -32,8 +32,11 @@ async function until(condition: () => boolean, timeoutMs = 5000): Promise<void> 
 }
 
 const sessions: TerminalSession[] = [];
-afterEach(() => {
-  for (const session of sessions.splice(0)) session.destroy();
+afterEach(async () => {
+  // Destroy and wait for the shells to be gone so nothing from this file outlives it.
+  const pending = sessions.splice(0);
+  for (const session of pending) session.destroy();
+  await Promise.race([Promise.all(pending.map((s) => s.exited)), Bun.sleep(2000)]);
 });
 
 /** Spawn a session running a shell script, with notification callbacks recorded. */
@@ -253,6 +256,23 @@ describe("TerminalSession", () => {
     session.destroy();
     await attach;
     expect(client.states).toHaveLength(0);
+  });
+
+  test("a shell exiting while the client is paused gets a final snapshot before the exit", async () => {
+    const line = "line %04d of output padding padding padding padding padding\\n";
+    const { session, exits } = spawnScript(
+      `i=0; while [ $i -lt 400 ]; do printf '${line}' $i; i=$((i+1)); done; exit 0`,
+      { flowControl: { highWaterBytes: 4096, lowWaterBytes: 1024 } },
+    );
+    const client = createRecordingSink();
+    await session.attach(client.sink);
+    await until(() => exits.length === 1);
+
+    expect(client.exits).toEqual([0]);
+    const last = client.states.at(-1)!;
+    expect(last.mode).toBe("snapshot");
+    expect(last.snapshot).toContain("line 0399");
+    expect(last.offset).toBe(session.outputOffset);
   });
 
   test("exit reaches the attached client and the owner callback", async () => {

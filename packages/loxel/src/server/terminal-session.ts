@@ -102,6 +102,8 @@ export class TerminalSession {
   readonly cwd: string;
   cols: number;
   rows: number;
+  /** Resolves with the shell's exit code once the process is gone. */
+  readonly exited: Promise<number>;
 
   private readonly proc: Subprocess;
   private readonly emulator: HeadlessTerminal;
@@ -153,7 +155,12 @@ export class TerminalSession {
         data: (_terminal, data) => this.onPtyData(data),
       },
     });
-    this.proc.exited.then((exitCode) => this.onExited(exitCode));
+    this.exited = this.proc.exited;
+    this.exited
+      .then((exitCode) => this.onExited(exitCode))
+      .catch((err: unknown) => {
+        log.error(`Terminal ${this.shortId} exit handling failed`, { error: err });
+      });
   }
 
   /** Total output bytes produced so far. */
@@ -289,11 +296,7 @@ export class TerminalSession {
     } catch (err) {
       // xterm throws once its write queue passes its discard watermark (tens of MB unparsed).
       // The screen will be stale until the next snapshot; log it once.
-      if (this.emulatorOverflowed) return;
-      this.emulatorOverflowed = true;
-      log.warn(`Terminal ${this.shortId} emulator overflowed, dropping output from the screen`, {
-        error: err,
-      });
+      this.noteEmulatorOverflow(err);
     }
   }
 
@@ -327,12 +330,28 @@ export class TerminalSession {
   private serialize(): Promise<string> {
     return new Promise((resolve) => {
       this.pendingSerialize = resolve;
-      this.emulator.write("", () => {
+      try {
+        this.emulator.write("", () => {
+          this.pendingSerialize = null;
+          // destroy() already resolved this promise; the disposed emulator must not be read.
+          if (this.disposed) return;
+          resolve(this.serializer.serialize());
+        });
+      } catch (err) {
+        // The write queue is past xterm's discard watermark (see feedEmulator). Serve the stale
+        // screen rather than leave the attach hanging with the session mute.
         this.pendingSerialize = null;
-        // destroy() already resolved this promise; the disposed emulator must not be read.
-        if (this.disposed) return;
+        this.noteEmulatorOverflow(err);
         resolve(this.serializer.serialize());
-      });
+      }
+    });
+  }
+
+  private noteEmulatorOverflow(err: unknown): void {
+    if (this.emulatorOverflowed) return;
+    this.emulatorOverflowed = true;
+    log.warn(`Terminal ${this.shortId} emulator overflowed, dropping output from the screen`, {
+      error: err,
     });
   }
 
@@ -355,8 +374,11 @@ export class TerminalSession {
     });
   }
 
-  private onExited(exitCode: number): void {
+  private async onExited(exitCode: number): Promise<void> {
     log.info(`Terminal ${this.shortId} exited with code ${exitCode}`);
+    // A paused client is still behind; without this final snapshot the tail of the output would
+    // be lost, since the manager destroys the session (ring and emulator) right after onExit.
+    if (this.sink && this.paused) await this.attach(this.sink);
     this.sink?.sendExit(exitCode);
     this.options.onExit(this, exitCode);
   }

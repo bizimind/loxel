@@ -6,7 +6,7 @@
 import type { NotificationSequence, NotificationSequences } from "@/api/ws-protocol";
 import { DEFAULT_NOTIFICATION_SEQUENCES, NOTIFICATION_SEQUENCES } from "@/api/ws-protocol";
 
-import { getStore } from "./store-db";
+import { getStore, onStoreChange } from "./store-db";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -37,7 +37,33 @@ export function parseNotificationSequences(raw: string | null): NotificationSequ
   return result;
 }
 
+/**
+ * Caches the parsed sequences until `invalidate()` is called. Sequences arrive at a rate the
+ * terminal program controls, so each one must not cost a database read and a JSON parse.
+ */
+export function createNotificationSequencesCache(read: () => string | null): {
+  isEnabled: (sequence: NotificationSequence) => boolean;
+  invalidate: () => void;
+} {
+  let cached: NotificationSequences | null = null;
+  return {
+    isEnabled: (sequence) => {
+      cached ??= parseNotificationSequences(read());
+      return cached[sequence];
+    },
+    invalidate: () => {
+      cached = null;
+    },
+  };
+}
+
+const SETTINGS_STORE_KEY = "settings";
+const cache = createNotificationSequencesCache(() => getStore(SETTINGS_STORE_KEY));
+onStoreChange((key) => {
+  if (key === SETTINGS_STORE_KEY) cache.invalidate();
+});
+
 /** Whether the given notification sequence is enabled in the persisted settings. */
 export function isNotificationSequenceEnabled(sequence: NotificationSequence): boolean {
-  return parseNotificationSequences(getStore("settings"))[sequence];
+  return cache.isEnabled(sequence);
 }

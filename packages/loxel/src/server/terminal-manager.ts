@@ -49,7 +49,7 @@ export class TerminalManager {
   }
 
   /** Attach a client to the session, spawning the shell first if the session does not exist. */
-  attach(id: string, sink: TerminalSink, options: TerminalAttachOptions): Promise<void> {
+  async attach(id: string, sink: TerminalSink, options: TerminalAttachOptions): Promise<void> {
     let session = this.sessions.get(id);
     if (session) {
       session.resize(options.cols, options.rows);

@@ -787,6 +787,8 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
         })
         .catch((err: unknown) => {
           log.error("Failed to attach terminal", { terminalId: msg.id, error: err });
+          clientState.terminals.delete(msg.id);
+          if (terminalOwners.get(msg.id) === ws) terminalOwners.delete(msg.id);
           sendTo(ws, { type: "error", message: "Failed to attach terminal" });
         });
       break;
