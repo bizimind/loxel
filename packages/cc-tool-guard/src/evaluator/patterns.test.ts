@@ -136,6 +136,10 @@ describe("dangerous rm patterns", () => {
       "pnpm rm -r .",
       "pnpm  rm -r .",
       "npm rm -r .",
+      "yarn rm -r .",
+      "bun rm -r .",
+      "env pnpm rm -r .",
+      "sudo npm rm -r .",
     ])("%s is not matched by the recursive rules", (command) => {
       expect(checkKnownPatterns(command, context)?.reason ?? "").not.toMatch(/Recursive delete/);
     });
@@ -148,6 +152,26 @@ describe("dangerous rm patterns", () => {
         expect(classify(command)).toBe("uncertain");
       },
     );
+  });
+
+  describe("a token that merely ends with a package manager name does not exclude rm", () => {
+    test.each([
+      "x=npm rm -rf .",
+      "bin/bun rm -rf .",
+      "env BUN=bun rm -rf .",
+      "env NPM=npm rm -rf *",
+      "PATH=/opt/bun rm -rf .",
+      "FOO=bar rm -rf .",
+      "echo pnpm rm -rf .",
+    ])("%s is uncertain", (command) => {
+      expect(classify(command)).toBe("uncertain");
+    });
+
+    // A leading `.` is treated as dot-sourcing by the command parser, so this one is delegated to
+    // Haiku rather than pattern-matched; it must still never be auto-approved.
+    test("./bun rm -rf . is not safe", () => {
+      expect(classify("./bun rm -rf .")).not.toBe("safe");
+    });
   });
 
   describe("prefixed and chained rm still match", () => {

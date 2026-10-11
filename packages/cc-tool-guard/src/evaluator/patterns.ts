@@ -27,19 +27,45 @@ function isGitRmCached(command: string): boolean {
   return tokens.includes("--cached", rmIndex + 1);
 }
 
+const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun"]);
+
+/** Tokens after which the next token is at command position (besides being the first token). */
+const COMMAND_POSITION_PREFIXES = new Set([";", "&&", "||", "|", "sudo", "env"]);
+
+/**
+ * Whether the `rm` token is a package-manager subcommand (`pnpm rm -r .` removes dependencies,
+ * not files). The token immediately before `rm` must be exactly `npm`/`pnpm`/`yarn`/`bun`, and
+ * that token must itself be at command position: first in the command, or right after a chain
+ * operator, `sudo`, or `env`. Matching the exact token (rather than a `\b`-anchored suffix)
+ * means `FOO=npm rm -rf .`, `./bun rm -rf .`, or `env BUN=bun rm -rf .` are not excluded. Same
+ * linear token scan as `isGitRmCached`.
+ */
+function isPackageManagerRm(command: string): boolean {
+  const tokens = command.split(/\s+/);
+  const rmIndex = tokens.indexOf("rm");
+  if (rmIndex < 1 || !PACKAGE_MANAGERS.has(tokens[rmIndex - 1]!)) {
+    return false;
+  }
+  return rmIndex === 1 || COMMAND_POSITION_PREFIXES.has(tokens[rmIndex - 2]!);
+}
+
+/** Pre-check for the recursive-delete rules, see `isGitRmCached` and `isPackageManagerRm`. */
+function isNonDeletingRm(command: string): boolean {
+  return isGitRmCached(command) || isPackageManagerRm(command);
+}
+
 /**
  * `rm` with a recursive flag (`-r`/`-R` in any short-flag cluster, or `--recursive`) anywhere in
  * its arguments, then skipping over any number of leading whitespace-separated arguments (options,
  * `--`, earlier operands). The matched position is the start of an argument (after an optional
  * opening quote), so rules can append the operand shape.
  *
- * The `rm` must not be a package-manager subcommand (`pnpm rm -r .` removes dependencies, not
- * files); that lookbehind is placed after `rm` so it only runs at `rm` tokens and allows any
- * amount of whitespace between the package manager and `rm`. `git rm --cached` (which only unstages) is excluded by the rules' `exclude` pre-check,
- * see `isGitRmCached`. `git rm -r` without `--cached` does delete from the working tree, so it
+ * Package-manager subcommands (`pnpm rm -r .` removes dependencies, not files) and
+ * `git rm --cached` (which only unstages) are excluded by the rules' `exclude` pre-check, see
+ * `isNonDeletingRm`. `git rm -r` without `--cached` does delete from the working tree, so it
  * still matches, as do other prefixes (`sudo rm`, `env rm`, `\\rm`, `/bin/rm`, `cd x && rm`).
  */
-const RM_RECURSIVE_ARGS = String.raw`\brm(?<!\b(?:npm|pnpm|yarn|bun)\s+rm)\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
+const RM_RECURSIVE_ARGS = String.raw`\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
 
 /**
  * Dangerous patterns - these always require user confirmation
@@ -202,7 +228,7 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`(?:\.{1,2}\/)*\.{1,2}\/?["']?(?:\s|$)`),
     classification: "uncertain",
     reason: "Recursive delete of current or parent directory",
-    exclude: isGitRmCached,
+    exclude: isNonDeletingRm,
   },
   {
     // `*`, `*.js`, `./*`, `../*`, `../../*`, and dot globs such as `.*`, `.[!.]*`, `.??*` (which
@@ -222,7 +248,7 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     ),
     classification: "uncertain",
     reason: "Recursive delete with wildcard glob in current or parent directory",
-    exclude: isGitRmCached,
+    exclude: isNonDeletingRm,
   },
 
   // Environment modification
