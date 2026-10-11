@@ -25,8 +25,6 @@ export const RESUME_RING_BYTES = 1024 * 1024;
 export const FLOW_HIGH_WATER_BYTES = 2 * 1024 * 1024;
 /** Unacknowledged bytes below which a paused client is brought back with a snapshot. */
 export const FLOW_LOW_WATER_BYTES = 128 * 1024;
-/** How often a snapshot is retaken when a flood evicts the bytes produced while serializing. */
-const MAX_SNAPSHOT_ATTEMPTS = 3;
 
 /** Where a session delivers messages for its attached client. */
 export interface TerminalSink {
@@ -55,11 +53,13 @@ export interface TerminalSessionOptions {
 
 /**
  * Recent output bytes indexed by absolute stream offset. Chunks are evicted oldest-first once the
- * capacity is exceeded; the newest chunk is always retained.
+ * capacity is exceeded; the newest chunk, and everything at or after a pinned offset, is always
+ * retained.
  */
 export class OutputRing {
   private chunks: { offset: number; data: Uint8Array }[] = [];
   private bytes = 0;
+  private pinnedFrom: number | null = null;
   /** Offset of the oldest retained byte. */
   start = 0;
   /** Offset one past the newest byte: the total number of bytes produced. */
@@ -72,10 +72,26 @@ export class OutputRing {
     this.end += data.byteLength;
     this.bytes += data.byteLength;
     while (this.bytes > this.capacity && this.chunks.length > 1) {
-      const evicted = this.chunks.shift()!;
-      this.bytes -= evicted.data.byteLength;
+      const oldest = this.chunks[0]!;
+      if (this.pinnedFrom !== null && oldest.offset + oldest.data.byteLength > this.pinnedFrom) {
+        break;
+      }
+      this.chunks.shift();
+      this.bytes -= oldest.data.byteLength;
       this.start = this.chunks[0]!.offset;
     }
+  }
+
+  /**
+   * Keep every byte from `offset` on until `unpin()`, regardless of capacity. Used while a
+   * snapshot at `offset` is being produced so the bytes after it can always be streamed.
+   */
+  pin(offset: number): void {
+    this.pinnedFrom = offset;
+  }
+
+  unpin(): void {
+    this.pinnedFrom = null;
   }
 
   /** Every byte from `offset` to the end, or null if any of them has been evicted. */
@@ -301,22 +317,23 @@ export class TerminalSession {
   }
 
   private async syncWithSnapshot(sink: TerminalSink, generation: number): Promise<void> {
-    let offset = this.ring.end;
-    let snapshot = await this.serialize();
-    for (let attempt = 1; ; attempt++) {
+    // The snapshot reflects the emulator at `offset`. Pin the ring so a flood cannot evict the
+    // bytes produced while serializing; they are streamed right after the snapshot.
+    const offset = this.ring.end;
+    this.ring.pin(offset);
+    try {
+      const snapshot = await this.serialize();
       if (generation !== this.attachGeneration || this.disposed) return;
       const produced = this.ring.readFrom(offset);
-      if (produced || attempt >= MAX_SNAPSHOT_ATTEMPTS) {
-        log.info(
-          `Attaching terminal ${this.shortId} with a ${snapshot.length}-byte snapshot at offset ${offset}`,
-        );
-        sink.sendState(this.state("snapshot", offset, snapshot));
-        this.goLive(sink, offset, produced ?? new Uint8Array());
-        return;
-      }
-      // A flood evicted the bytes produced while serializing; snapshot again.
-      offset = this.ring.end;
-      snapshot = await this.serialize();
+      if (!produced) throw new Error(`Output at offset ${offset} was evicted while pinned`);
+      log.info(
+        `Attaching terminal ${this.shortId} with a ${snapshot.length}-byte snapshot at offset ${offset}` +
+          (produced.byteLength > 0 ? ` (+${produced.byteLength} bytes produced meanwhile)` : ""),
+      );
+      sink.sendState(this.state("snapshot", offset, snapshot));
+      this.goLive(sink, offset, produced);
+    } finally {
+      this.ring.unpin();
     }
   }
 

@@ -83,6 +83,25 @@ describe("OutputRing", () => {
     expect([...ring.readFrom(4)!]).toEqual([5, 6, 7, 8, 9, 10, 11, 12]);
   });
 
+  test("a pin keeps everything from the pinned offset on, beyond capacity", () => {
+    const ring = new OutputRing(4);
+    ring.push(new Uint8Array([1, 2]));
+    ring.pin(2);
+    ring.push(new Uint8Array([3, 4]));
+    ring.push(new Uint8Array([5, 6]));
+    ring.push(new Uint8Array([7, 8]));
+    // The chunk before the pin was evicted; everything after it survived.
+    expect(ring.start).toBe(2);
+    expect([...ring.readFrom(2)!]).toEqual([3, 4, 5, 6, 7, 8]);
+    expect(ring.readFrom(1)).toBeNull();
+
+    ring.unpin();
+    ring.push(new Uint8Array([9]));
+    expect(ring.start).toBe(6);
+    expect(ring.readFrom(2)).toBeNull();
+    expect([...ring.readFrom(6)!]).toEqual([7, 8, 9]);
+  });
+
   test("always keeps the newest chunk even when it exceeds capacity", () => {
     const ring = new OutputRing(2);
     ring.push(new Uint8Array([1, 2, 3, 4, 5]));
@@ -167,6 +186,29 @@ describe("TerminalSession", () => {
     expect(second.output[0]!.offset).toBe(seen);
     expect(second.outputText()).toContain("second");
     expect(second.outputText()).not.toContain("first");
+  });
+
+  test("a flood during the snapshot is streamed after it, not lost", async () => {
+    // A 64-byte ring would normally evict everything produced while serializing; the pin keeps it.
+    const line = "line %04d of output padding padding padding padding padding\\n";
+    const { session } = spawnScript(
+      `sleep 0.2; i=0; while [ $i -lt 300 ]; do printf '${line}' $i; i=$((i+1)); done; exec sleep 30`,
+      { resumeRingBytes: 64 },
+    );
+    const client = createRecordingSink();
+    await session.attach(client.sink);
+    await until(() => client.outputText().includes("line 0299"));
+
+    const state = client.states[0]!;
+    expect(client.output[0]!.offset).toBe(state.offset);
+    // Frames are contiguous from the snapshot offset to the end of the stream: no hole.
+    let expected = state.offset;
+    for (const frame of client.output) {
+      expect(frame.offset).toBe(expected);
+      expected += frame.data.byteLength;
+    }
+    expect(expected).toBe(session.outputOffset);
+    expect(client.outputText()).toContain("line 0000");
   });
 
   test("resume falls back to a snapshot once the ring has evicted the offset", async () => {
