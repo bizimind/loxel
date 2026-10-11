@@ -171,21 +171,53 @@ describe("dangerous rm patterns", () => {
   describe("a token that merely ends with a package manager name does not exclude rm", () => {
     test.each([
       "x=npm rm -rf .",
-      "bin/bun rm -rf .",
       "env BUN=bun rm -rf .",
       "env NPM=npm rm -rf *",
       "PATH=/opt/bun rm -rf .",
       "FOO=bar rm -rf .",
-      "echo pnpm rm -rf .",
     ])("%s is uncertain", (command) => {
       expect(classify(command)).toBe("uncertain");
     });
 
-    // A leading `.` is treated as dot-sourcing by the command parser, so this one is delegated to
-    // Haiku rather than pattern-matched; it must still never be auto-approved.
-    test("./bun rm -rf . is not safe", () => {
-      expect(classify("./bun rm -rf .")).not.toBe("safe");
+    // Neither is an `rm` at command position: `bin/bun` is an unknown command (delegated to
+    // Haiku) and `./bun` is treated as dot-sourcing by the command parser (also delegated).
+    // Neither may ever be auto-approved.
+    test.each(["bin/bun rm -rf .", "./bun rm -rf ."])("%s is not safe", (command) => {
+      expect(classify(command)).not.toBe("safe");
     });
+  });
+
+  describe("rm that is not the command word is not a recursive delete", () => {
+    test("echo pnpm rm -rf . only prints", () => {
+      expect(classify("echo pnpm rm -rf .")).toBe("safe");
+    });
+  });
+
+  describe("quoting does not hide a recursive delete", () => {
+    test.each([
+      "rm '-rf' *",
+      'rm "-rf" *',
+      "rm -'r'f *",
+      "rm -r'f' *",
+      'rm -rf "./"*',
+      'rm -rf "."/*',
+      "rm -rf '.'*",
+      'env "rm" -rf *',
+      "env 'rm' -rf .*",
+      "\\rm -rf .",
+      "/bin/rm -rf .",
+    ])("%s is uncertain", (command) => {
+      expect(classify(command)).toBe("uncertain");
+    });
+  });
+
+  describe("operands that resolve back to the current directory", () => {
+    test.each(["rm -rf dist/..", "rm -rf a/../*", "rm -rf */..", "rm -rf {.,dist}"])(
+      "%s is uncertain",
+      (command) => {
+        expect(classify(command)).toBe("uncertain");
+      },
+    );
   });
 
   describe("prefixed and chained rm still match", () => {
@@ -213,26 +245,30 @@ describe("dangerous rm patterns", () => {
     });
   });
 
-  test("a long command evaluates in linear time", () => {
-    const paths = Array.from({ length: 1000 }, (_, i) => `path/to/file-${i}.txt`).join(" ");
-    const spaces = " ".repeat(10_000);
-    const slashes = "/".repeat(10_000);
+  test("a 200 KB command evaluates well within budget", () => {
+    const size = 200_000;
+    const paths = Array.from({ length: 10_000 }, (_, i) => `path/to/file-${i}.txt`).join(" ");
+    const spaces = " ".repeat(size);
+    const slashes = "/".repeat(size);
     const commands = [
       `rm -rf ${paths}`,
       `cp ${paths} dest`,
       `git rm -r --cached ${paths}`,
       `echo${spaces}rm -rf ${paths}`,
-      `rm -r ${"{a ".repeat(4000)}}`,
-      `rm -r ${"{a, ".repeat(3000)}}`,
+      `rm -r ${"{a ".repeat(size / 3)}}`,
+      `rm -r ${"{a, ".repeat(size / 4)}}`,
       `rm -rf ..${slashes}`,
       `rm -rf ..${slashes}*`,
-      `rm -rf ${"./".repeat(5000)}dist`,
+      `rm -rf ${"./".repeat(size / 2)}dist`,
+      `rm -rf ${"../".repeat(size / 3)}*`,
+      `rm -rf ${"a/../".repeat(size / 5)}*`,
+      `rm -rf "${"./".repeat(size / 2)}"dist`,
     ];
     for (const command of commands) {
-      expect(command.length).toBeGreaterThan(10_000);
+      expect(command.length).toBeGreaterThan(size);
       const start = performance.now();
       checkKnownPatterns(command, context);
-      expect(performance.now() - start).toBeLessThan(100);
+      expect(performance.now() - start).toBeLessThan(50);
     }
   });
 

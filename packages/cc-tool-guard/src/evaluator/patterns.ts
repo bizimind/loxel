@@ -4,86 +4,235 @@ import { parseCommand } from "./command-parser.ts";
 interface PatternRule {
   pattern: RegExp;
   classification: "safe" | "uncertain";
-  reason: string;
+  /**
+   * The reason to report. A function is called once `pattern` has matched and returns the reason,
+   * or null when the rule does not apply after all; it lets a rule use a cheap regex as a
+   * pre-filter and make the actual decision in code.
+   */
+  reason: string | ((command: string) => string | null);
   suggestedPattern?: string;
-  /** Cheap pre-check; when it returns true the rule is skipped without testing `pattern`. */
-  exclude?: (command: string) => boolean;
+}
+
+function resolveReason(rule: PatternRule, command: string): string | null {
+  return typeof rule.reason === "function" ? rule.reason(command) : rule.reason;
+}
+
+const RECURSIVE_DELETE_SELF = "Recursive delete of current or parent directory";
+const RECURSIVE_DELETE_GLOB = "Recursive delete with wildcard glob in current or parent directory";
+const RECURSIVE_DELETE_UNBALANCED_QUOTES = "Recursive delete check: unbalanced quotes";
+
+/**
+ * Split a single (already chain-split) command into shell words. Whitespace separates words;
+ * `'…'` and `"…"` spans and backslash escapes are part of the word they appear in, with the
+ * quotes and escaping backslashes removed (`-'r'f` is `-rf`, `"./"*` is `./*`, `\\rm` is `rm`).
+ * Returns null when a quote is unclosed. Single pass, linear in command length: a word is built
+ * from slices between its quotes/escapes rather than character by character.
+ */
+function shellWords(command: string): string[] | null {
+  const words: string[] = [];
+  let word = "";
+  let chunkStart = 0;
+  let inWord = false;
+  let quote: '"' | "'" | null = null;
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i]!;
+    if (quote !== null) {
+      if (char === quote) {
+        word += command.slice(chunkStart, i);
+        chunkStart = i + 1;
+        quote = null;
+      } else if (char === "\\" && quote === '"' && i + 1 < command.length) {
+        word += command.slice(chunkStart, i);
+        chunkStart = ++i;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      word += command.slice(chunkStart, i);
+      chunkStart = i + 1;
+      quote = char;
+      inWord = true;
+      continue;
+    }
+    if (char === "\\" && i + 1 < command.length) {
+      word += command.slice(chunkStart, i);
+      chunkStart = ++i;
+      inWord = true;
+      continue;
+    }
+    if (char === " " || char === "\t") {
+      if (inWord) {
+        words.push(word + command.slice(chunkStart, i));
+        word = "";
+        inWord = false;
+      }
+      chunkStart = i + 1;
+      continue;
+    }
+    inWord = true;
+  }
+
+  if (quote !== null) {
+    return null;
+  }
+  if (inWord) {
+    words.push(word + command.slice(chunkStart));
+  }
+  return words;
+}
+
+/** `sudo`/`env` and `VAR=value` assignments sit in front of the actual command word. */
+function isCommandPrefix(word: string): boolean {
+  return word === "sudo" || word === "env" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
 }
 
 /**
- * Whether the command is a `git rm` invocation carrying `--cached` (which only unstages and never
- * touches the working tree). Anchored on the `rm` token so git global options between `git` and
- * `rm` (`git -C dir rm`, `git --no-pager rm`) are tolerated without enumerating them. A linear
- * token scan rather than a regex lookbehind: a lookbehind with a nested lookahead is re-evaluated
- * at every start index and made every Bash permission check quadratic in command length on
- * JavaScriptCore.
+ * The arguments of the `rm` that this command executes, or null when it does not execute one.
+ * The command word is the first word after any prefixes, matched on its basename (`rm`, `/bin/rm`).
+ * `git rm` deletes from the working tree too, unless `--cached` is given (which only unstages),
+ * so its arguments are returned the same way; git global options between `git` and `rm`
+ * (`git -C dir rm`) are tolerated. Package-manager `rm` subcommands (`pnpm rm -r .` removes
+ * dependencies, not files) and any other command word (`echo`, `grep`, `sh -c '…'`) yield null.
+ * Because quoted spans are single words here, `git commit -m "… rm -rf * …"` is not an `rm`.
  */
-function isGitRmCached(command: string): boolean {
-  const tokens = command.split(/\s+/);
-  const rmIndex = tokens.indexOf("rm");
-  if (rmIndex === -1 || !tokens.slice(0, rmIndex).includes("git")) {
+function rmArguments(words: string[]): string[] | null {
+  let i = 0;
+  while (i < words.length && isCommandPrefix(words[i]!)) {
+    i++;
+  }
+  const commandWord = words[i];
+  if (commandWord === undefined) {
+    return null;
+  }
+  if (commandWord === "rm" || commandWord.endsWith("/rm")) {
+    return words.slice(i + 1);
+  }
+  if (commandWord !== "git") {
+    return null;
+  }
+  const rmIndex = words.indexOf("rm", i + 1);
+  if (rmIndex === -1) {
+    return null;
+  }
+  const args = words.slice(rmIndex + 1);
+  return args.includes("--cached") ? null : args;
+}
+
+/**
+ * Whether the arguments carry a recursive flag (`-r`/`-R` in any short-flag cluster, or
+ * `--recursive`) and which arguments are operands: every non-option word, plus everything after
+ * `--`.
+ */
+function splitRmArguments(args: string[]): { recursive: boolean; operands: string[] } {
+  let recursive = false;
+  const operands: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--") {
+      operands.push(...args.slice(i + 1));
+      break;
+    }
+    if (arg === "--recursive") {
+      recursive = true;
+    } else if (arg.startsWith("-") && arg.length > 1) {
+      recursive ||= !arg.startsWith("--") && /[rR]/.test(arg);
+    } else {
+      operands.push(arg);
+    }
+  }
+  return { recursive, operands };
+}
+
+/**
+ * Whether a brace group that is the whole final path segment (optionally dot-prefixed) has an
+ * alternative that expands to the directory itself: `.{git,}` expands to `.git .`, `{dist,}` to
+ * `dist` and the empty string, `{.,dist}` to `.` and `dist`. `{dist,build}` or `dist{,old}` do not.
+ */
+function braceExpandsToSelf(segment: string): boolean {
+  const match = segment.match(/^(\.?)\{([^{}]*)\}$/);
+  if (match === null) {
     return false;
   }
-  return tokens.includes("--cached", rmIndex + 1);
+  const [, prefix, body] = match;
+  return body!.split(",").some((alternative) => {
+    const expanded = prefix! + alternative;
+    return expanded === "" || expanded === "." || expanded === "..";
+  });
 }
 
-const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun"]);
-
-/** Tokens after which the next token is at command position (besides being the first token). */
-const COMMAND_POSITION_PREFIXES = new Set([";", "&&", "||", "|", "sudo", "env"]);
-
 /**
- * Whether the `rm` token is a package-manager subcommand (`pnpm rm -r .` removes dependencies,
- * not files). The token immediately before `rm` must be exactly `npm`/`pnpm`/`yarn`/`bun`, and
- * that token must itself be at command position: first in the command, or right after a chain
- * operator, `sudo`, or `env`. Matching the exact token (rather than a `\b`-anchored suffix)
- * means `FOO=npm rm -rf .`, `./bun rm -rf .`, or `env BUN=bun rm -rf .` are not excluded. Same
- * linear token scan as `isGitRmCached`.
+ * Whether a recursive `rm` of this operand deletes the current directory (or an ancestor) itself,
+ * or entries directly in it. The operand is resolved the way bash would: slash runs collapse,
+ * `.` segments and a trailing slash are dropped, and `..` steps back over the previous segment.
+ * - `self`: nothing is left (`.`, `./`, `.//`, `dist/..`) or only `..` steps (`..`, `../..`).
+ * - `glob`: the final segment is directly under that `.`/`..` chain and is a glob (`*`, `.*`,
+ *   `.[!.]*`, `dist*`, `../*`, `a/../*`) or a brace group that expands to the directory itself
+ *   (`.{git,}`, `./{dist,}`, `{*,.*}`), all of which expand to entries of the directory itself.
+ * - `other`: a named entry (`dist`, `.cache`, `../dist`), a deeper path (`packages/*\/dist`,
+ *   `**\/node_modules`, `dist*\/cache`), or an absolute/home path (left to the other rules).
+ * Quoted globs are treated like unquoted ones; the guard errs on the side of asking.
  */
-function isPackageManagerRm(command: string): boolean {
-  const tokens = command.split(/\s+/);
-  const rmIndex = tokens.indexOf("rm");
-  if (rmIndex < 1 || !PACKAGE_MANAGERS.has(tokens[rmIndex - 1]!)) {
-    return false;
+function classifyRmOperand(operand: string): "self" | "glob" | "other" {
+  if (operand.startsWith("/") || operand.startsWith("~")) {
+    return "other";
   }
-  return rmIndex === 1 || COMMAND_POSITION_PREFIXES.has(tokens[rmIndex - 2]!);
-}
-
-/**
- * The command with every `'…'`/`"…"` span replaced by a space. Quotes are balanced here because
- * `parseCommand` rejects unclosed quotes before any rule runs.
- */
-function stripQuotedSpans(command: string): string {
-  return command.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, " ");
-}
-
-/**
- * Pre-check for the recursive-delete rules. Skips them when `rm` only appears inside a quoted
- * string (`git commit -m "guard rm -rf * now"`, `grep -rn 'rm -rf .' src`), since the rules'
- * argument scan would otherwise walk through the quoted text, and when the `rm` is a non-deleting
- * subcommand, see `isGitRmCached` and `isPackageManagerRm`.
- */
-function isNonDeletingRm(command: string): boolean {
-  const unquoted = stripQuotedSpans(command);
-  if (!/\brm\b/.test(unquoted)) {
-    return true;
+  const segments: string[] = [];
+  for (const segment of operand.includes("/") ? operand.split("/") : [operand]) {
+    if (segment === "" || segment === ".") {
+      continue;
+    }
+    if (segment === ".." && segments.length > 0 && segments.at(-1) !== "..") {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
   }
-  return isGitRmCached(unquoted) || isPackageManagerRm(unquoted);
+  const last = segments.at(-1);
+  if (last === undefined || last === "..") {
+    return "self";
+  }
+  // `..` only occurs as a leading run, so the final segment is directly under the chain exactly
+  // when the segment before it (if any) is `..`.
+  if (segments.length >= 2 && segments.at(-2) !== "..") {
+    return "other";
+  }
+  if (/[*?[]/.test(last) || (last.endsWith("}") && braceExpandsToSelf(last))) {
+    return "glob";
+  }
+  return "other";
 }
 
 /**
- * `rm` with a recursive flag (`-r`/`-R` in any short-flag cluster, or `--recursive`) anywhere in
- * its arguments, then skipping over any number of leading whitespace-separated arguments (options,
- * `--`, earlier operands). The matched position is the start of an argument (after an optional
- * opening quote), so rules can append the operand shape.
- *
- * Package-manager subcommands (`pnpm rm -r .` removes dependencies, not files) and
- * `git rm --cached` (which only unstages) are excluded by the rules' `exclude` pre-check, see
- * `isNonDeletingRm`, which also skips the rules when `rm` only occurs inside a quoted string.
- * `git rm -r` without `--cached` does delete from the working tree, so it still matches, as do
- * other prefixes (`sudo rm`, `env rm`, `\\rm`, `/bin/rm`, `cd x && rm`).
+ * Decision for the recursive-delete rule, run after the `\brm\b` pre-filter: the reason to
+ * defer, or null when the command is not a recursive `rm` of the current/parent directory or of
+ * its entries. Works on shell words so quoting is handled once and in one place (`rm '-rf' *`,
+ * `rm -rf "./"*`, and `env "rm" -rf *` are all seen for what they execute, while
+ * `git commit -m "guard rm -rf * now"` is not). Unbalanced quotes are deferred rather than
+ * guessed at.
  */
-const RM_RECURSIVE_ARGS = String.raw`\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
+function recursiveDeleteReason(command: string): string | null {
+  const words = shellWords(command);
+  if (words === null) {
+    return RECURSIVE_DELETE_UNBALANCED_QUOTES;
+  }
+  const args = rmArguments(words);
+  if (args === null) {
+    return null;
+  }
+  const { recursive, operands } = splitRmArguments(args);
+  if (!recursive) {
+    return null;
+  }
+  const shapes = operands.map(classifyRmOperand);
+  if (shapes.includes("self")) {
+    return RECURSIVE_DELETE_SELF;
+  }
+  if (shapes.includes("glob")) {
+    return RECURSIVE_DELETE_GLOB;
+  }
+  return null;
+}
 
 /**
  * Dangerous patterns - these always require user confirmation
@@ -242,37 +391,12 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     reason: "Recursive delete in home",
   },
   {
-    // `.`, `..`, `./`, `../`, and any chain of those such as `../..` or `./..`. Bash collapses
-    // repeated slashes, so `.//` is accepted as `./`; the `(?!\/)` keeps the chain group from
-    // backtracking into a slash run, which keeps the pattern linear.
-    pattern: new RegExp(
-      RM_RECURSIVE_ARGS + String.raw`(?:\.{1,2}\/+(?!\/))*\.{1,2}\/*["']?(?:\s|$)`,
-    ),
+    // Recursive delete of the current or parent directory, or of a glob that expands to its
+    // entries. The regex is only a cheap linear pre-filter; `recursiveDeleteReason` makes the
+    // decision from shell words, see `classifyRmOperand` for the operand shapes.
+    pattern: /\brm\b/,
     classification: "uncertain",
-    reason: "Recursive delete of current or parent directory",
-    exclude: isNonDeletingRm,
-  },
-  {
-    // `*`, `*.js`, `./*`, `../*`, `../../*`, and dot globs such as `.*`, `.[!.]*`, `.??*` (which
-    // delete every dotfile and dot directory in the target directory, including `.git`), plus the
-    // brace-expansion spellings of the same idiom: a glob character inside or right after a brace
-    // group (`{*,.*}`, `{.,}*`, `.{a,b}*`), or an empty alternative (`.{git,}` expands to `.git .`,
-    // `./{dist,}` to `./dist ./`). Scoped brace lists (`{dist,build}`, `dist/{a,b}`) are not matched.
-    // The glob must be in the operand's final path segment (optionally under `.`/`..` chains,
-    // where a run of slashes counts as one separator since bash collapses them: `.//*` is `./*`)
-    // and may carry a literal prefix (`dist*`, `.git*`, `./build-*`, `a[ab]`): all of these
-    // expand to entries of the cwd itself. Globs such as `**/node_modules`, `*/dist`, `./*/build`,
-    // or `dist*/cache` only expand to entries inside subdirectories, so they are left to the other
-    // rules. Every span is whitespace-bounded (brace bodies too, as unquoted brace expansion
-    // cannot span whitespace) and the `(?!\/)` stops the chain group from backtracking into a
-    // slash run, so the pattern stays linear in command length.
-    pattern: new RegExp(
-      RM_RECURSIVE_ARGS +
-        String.raw`(?:\.{1,2}\/+(?!\/))*(?![^\s"']*\/[^\s"'\/])(?:[^\s"'\/{}*?[\]]*[*?[]|\.?\{(?=[^}\s]*[*?[]|,|[^}\s]*,[,}])[^}\s]*\}|[^\s"'\/{}*?[\]]*\{[^}\s]*\}\.?[*?[])`,
-    ),
-    classification: "uncertain",
-    reason: "Recursive delete with wildcard glob in current or parent directory",
-    exclude: isNonDeletingRm,
+    reason: recursiveDeleteReason,
   },
 
   // Environment modification
@@ -494,11 +618,12 @@ function evaluateSingleCommand(command: string, context: ProjectContext): Evalua
 
   // Check dangerous patterns first
   for (const rule of DANGEROUS_PATTERNS) {
-    if (rule.exclude?.(trimmedCommand)) {
+    if (!rule.pattern.test(trimmedCommand)) {
       continue;
     }
-    if (rule.pattern.test(trimmedCommand)) {
-      return { classification: rule.classification, reason: rule.reason };
+    const reason = resolveReason(rule, trimmedCommand);
+    if (reason !== null) {
+      return { classification: rule.classification, reason };
     }
   }
 
@@ -515,10 +640,14 @@ function evaluateSingleCommand(command: string, context: ProjectContext): Evalua
 
   // Check safe patterns
   for (const rule of SAFE_PATTERNS) {
-    if (rule.pattern.test(trimmedCommand)) {
+    if (!rule.pattern.test(trimmedCommand)) {
+      continue;
+    }
+    const reason = resolveReason(rule, trimmedCommand);
+    if (reason !== null) {
       return {
         classification: rule.classification,
-        reason: rule.reason,
+        reason,
         // suggestedPattern may be undefined - that's intentional
         suggestedPattern: rule.suggestedPattern,
       };
