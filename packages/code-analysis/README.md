@@ -164,7 +164,7 @@ Runs `bunx tsc --noEmit`, falling back to the preview-era `tsgo` command for pro
 
 ### `import-graph` — Import dependency graph
 
-Force-directed network graph of import edges between source files, built with dependency-cruiser. Nodes are files; edges are imports. `node_modules` are not followed; `.git` and `dist` are excluded.
+Force-directed network graph of import edges between source files, built with dependency-cruiser. Nodes are files; edges are imports. `node_modules` are not followed; `.git` and `dist` are excluded. Only imports that resolve to a file in the tree are kept: core modules and bare package imports (or anything else dependency-cruiser cannot resolve) are dropped rather than shown as dangling nodes. When `--workdir` contains a `tsconfig.json`, its `paths` aliases (for example `@/*`) are resolved so aliased imports produce real edges.
 
 ```bash
 # Full graph

@@ -2,7 +2,7 @@
 /**
  * Build script for code-analysis CLI.
  *
- * dependency-cruiser has two incompatibilities with Bun's ahead-of-time bundler:
+ * dependency-cruiser has three incompatibilities with Bun's ahead-of-time bundler:
  *
  * 1. `report/index.mjs` uses `import(variable)` for reporter selection — Bun
  *    can't bundle dynamic imports with non-literal strings. Patched to use
@@ -17,7 +17,15 @@
  *    implementation (always available in compiled binaries), and
  *    `try-import-available.mjs` is patched to return `true` for `typescript`.
  *
+ * 3. `javascript-wrap.mjs` resolves Acorn with `createRequire(import.meta.url)`
+ *    solely to report its version. In a compiled binary that URL points into
+ *    `$bunfs`, where package resolution is unavailable. Patched to use Acorn's
+ *    public static `version` export, which Bun can bundle normally.
+ *
  * All patches are applied before `bun build --compile` and restored afterward.
+ *
+ * After compiling, the binary runs the import-graph plugin over `src` as a smoke
+ * test so CI rejects a binary that compiles but fails on first use.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -86,28 +94,40 @@ const patches: Patch[] = [
       ].join("\n");
     },
   },
+  {
+    // Patch 4: replace Acorn's runtime require with its public static export.
+    path: join(nmDir, "extract/transpile/javascript-wrap.mjs"),
+    apply(_content) {
+      return [
+        `import { version } from "acorn";`,
+        ``,
+        `export default {`,
+        `  isAvailable: () => true,`,
+        `  version: () => \`acorn@\${version}\`,`,
+        `  transpile: (pSource) => pSource,`,
+        `};`,
+      ].join("\n");
+    },
+  },
 ];
-
-// Verify all patch targets exist and apply patches.
-for (const patch of patches) {
-  if (!existsSync(patch.path)) {
-    process.stderr.write(`build: cannot find ${patch.path}\n`);
-    process.exit(1);
-  }
-  patch.original = readFileSync(patch.path, "utf-8");
-  const patched = patch.apply(patch.original);
-  if (patched === patch.original && patches.indexOf(patch) < 2) {
-    // Patch 3 always changes (full replacement), patches 1-2 must find their target.
-    process.stderr.write(
-      `build: patch target not found in ${patch.path} — dependency-cruiser may have updated its internals\n`,
-    );
-    process.exit(1);
-  }
-  writeFileSync(patch.path, patched);
-}
 
 let exitCode = 0;
 try {
+  // Verify all patch targets exist and apply patches.
+  for (const patch of patches) {
+    if (!existsSync(patch.path)) {
+      throw new Error(`build: cannot find ${patch.path}`);
+    }
+    patch.original = readFileSync(patch.path, "utf-8");
+    const patched = patch.apply(patch.original);
+    if (patched === patch.original) {
+      throw new Error(
+        `build: patch target not found in ${patch.path} — dependency-cruiser may have updated its internals`,
+      );
+    }
+    writeFileSync(patch.path, patched);
+  }
+
   const proc = Bun.spawn(
     [
       "bun",
@@ -117,8 +137,11 @@ try {
       "src/cli.ts",
       "--outfile",
       "dist/code-analysis",
+      // tsconfig-paths-webpack-plugin keeps a legacy `require()` of this module for
+      // webpack < 4 resolvers; it is unreachable with enhanced-resolve 5 and does not
+      // exist in the installed version, so it must not be bundled.
       "--external",
-      "tsconfig-paths-webpack-plugin",
+      "enhanced-resolve/lib/createInnerCallback",
     ],
     { cwd: dir, stdout: "inherit", stderr: "inherit" },
   );
@@ -127,6 +150,56 @@ try {
   for (const patch of patches) {
     if (patch.original !== undefined) {
       writeFileSync(patch.path, patch.original);
+    }
+  }
+}
+
+const binary = join(dir, "dist/code-analysis");
+
+if (exitCode === 0 && process.platform === "darwin" && process.env.BUN_NO_CODESIGN_MACHO_BINARY) {
+  // Bun skipped its ad-hoc signature; macOS SIGKILLs unsigned arm64 binaries at exec,
+  // so sign before the smoke test. The release workflow re-signs afterwards.
+  const sign = Bun.spawn(["codesign", "-s", "-", "-f", binary], {
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  exitCode = await sign.exited;
+}
+
+if (exitCode === 0) {
+  const verification = Bun.spawn([binary, "run", "-p", "import-graph", "-w", "src", "--json"], {
+    cwd: dir,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, verificationExitCode] = await Promise.all([
+    new Response(verification.stdout).text(),
+    new Response(verification.stderr).text(),
+    verification.exited,
+  ]);
+
+  if (verificationExitCode !== 0) {
+    process.stderr.write(stderr);
+    exitCode = verificationExitCode;
+  } else {
+    const records: unknown = JSON.parse(stdout);
+    const hasTypeScriptEdge =
+      Array.isArray(records) &&
+      records.some(
+        (record) =>
+          typeof record === "object" &&
+          record !== null &&
+          "source" in record &&
+          "target" in record &&
+          typeof record.source === "string" &&
+          typeof record.target === "string" &&
+          record.source.endsWith(".ts") &&
+          record.target.endsWith(".ts"),
+      );
+
+    if (!hasTypeScriptEdge) {
+      process.stderr.write("build: compiled import-graph smoke test found no TypeScript edge\n");
+      exitCode = 1;
     }
   }
 }
