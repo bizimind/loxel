@@ -67,6 +67,9 @@ describe("dangerous rm patterns", () => {
       "rm -rf .{a,b}*",
       "rm -rf {dist,build}*",
       "rm -rf ./{dist,}",
+      "rm -rf */",
+      "rm -rf '*/'",
+      "rm -rf ../*/",
     ])("%s is uncertain", (command) => {
       expect(classify(command)).toBe("uncertain");
     });
@@ -85,6 +88,15 @@ describe("dangerous rm patterns", () => {
       "rm -rf ..cache",
       "rm -rf {dist,build}",
       "rm -rf dist/{a,b}",
+      "rm -rf **/node_modules",
+      "rm -rf */dist",
+      "rm -rf */node_modules",
+      "rm -rf **/*.map",
+      "rm -rf ./*/dist",
+      "rm -rf ./*/build",
+      "rm -rf ../*/dist",
+      "rm -rf packages/*/dist",
+      "rm -rf {*,.*}/dist",
     ])("%s is not uncertain", (command) => {
       expect(classify(command)).not.toBe("uncertain");
     });

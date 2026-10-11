@@ -189,9 +189,12 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     // brace-expansion spellings of the same idiom: a glob character inside or right after a brace
     // group (`{*,.*}`, `{.,}*`, `.{a,b}*`), or an empty alternative (`.{git,}` expands to `.git .`,
     // `./{dist,}` to `./dist ./`). Scoped brace lists (`{dist,build}`, `dist/{a,b}`) are not matched.
+    // The glob must be the operand's final path segment (optionally under `.`/`..` chains): globs
+    // such as `**/node_modules`, `*/dist`, or `./*/build` only expand to entries inside
+    // subdirectories, so they cannot touch the cwd itself and are left to the other rules.
     pattern: new RegExp(
       RM_RECURSIVE_ARGS +
-        String.raw`(?:\.{1,2}\/)*\.?(?:[*?[]|\{(?=[^}]*[*?[]|,|[^}]*,[,}])[^}]*\}|\{[^}]*\}\.?[*?[])`,
+        String.raw`(?:\.{1,2}\/)*\.?(?![^\s"']*\/[^\s"'\/])(?:[*?[]|\{(?=[^}]*[*?[]|,|[^}]*,[,}])[^}]*\}|\{[^}]*\}\.?[*?[])`,
     ),
     classification: "uncertain",
     reason: "Recursive delete with wildcard glob in current or parent directory",
