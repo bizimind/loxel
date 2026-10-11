@@ -30,6 +30,9 @@ describe("dangerous rm patterns", () => {
       "rm -rf ../..",
       "rm -rf ./..",
       "rm -rf ../../../..",
+      "rm -rf .//",
+      "rm -rf ..//.",
+      "rm -rf .///",
       "rm -rf dist .",
       "rm -rf . dist",
       'rm -rf "."',
@@ -85,6 +88,14 @@ describe("dangerous rm patterns", () => {
       "rm -rf */",
       "rm -rf '*/'",
       "rm -rf ../*/",
+      "rm -rf .//*",
+      "rm -rf ..//*",
+      "rm -rf .///*",
+      "rm -rf ..//.*",
+      "rm -rf .//.*",
+      "rm -rf .//dist*",
+      "rm -rf './/*'",
+      'rm -rf ".//*"',
     ])("%s is uncertain", (command) => {
       expect(classify(command)).toBe("uncertain");
     });
@@ -95,6 +106,9 @@ describe("dangerous rm patterns", () => {
       "rm -rf ./dist",
       "rm -rf ../dist",
       "rm -rf ../../dist",
+      "rm -rf .//dist",
+      "rm -rf ..//dist",
+      "rm -rf dist//*.map",
       "rm -rf .cache",
       "rm -rf '.cache'",
       "rm -rf dist",
@@ -183,14 +197,36 @@ describe("dangerous rm patterns", () => {
     );
   });
 
+  describe("rm that only appears inside a quoted string is not a recursive delete", () => {
+    test.each([
+      'git commit -m "guard rm -rf * now"',
+      'git commit -m "fix(cc-tool-guard): never auto-approve rm -rf ."',
+      "echo 'cleanup: rm -rf *'",
+      "grep -rn 'rm -rf .' src",
+      "grep -rn 'rm -rf .//*' src",
+    ])("%s is safe", (command) => {
+      expect(classify(command)).toBe("safe");
+    });
+
+    test("sh -c 'rm -rf .' is not auto-approved", () => {
+      expect(classify("sh -c 'rm -rf .'")).not.toBe("safe");
+    });
+  });
+
   test("a long command evaluates in linear time", () => {
     const paths = Array.from({ length: 1000 }, (_, i) => `path/to/file-${i}.txt`).join(" ");
     const spaces = " ".repeat(10_000);
+    const slashes = "/".repeat(10_000);
     const commands = [
       `rm -rf ${paths}`,
       `cp ${paths} dest`,
       `git rm -r --cached ${paths}`,
       `echo${spaces}rm -rf ${paths}`,
+      `rm -r ${"{a ".repeat(4000)}}`,
+      `rm -r ${"{a, ".repeat(3000)}}`,
+      `rm -rf ..${slashes}`,
+      `rm -rf ..${slashes}*`,
+      `rm -rf ${"./".repeat(5000)}dist`,
     ];
     for (const command of commands) {
       expect(command.length).toBeGreaterThan(10_000);

@@ -49,9 +49,26 @@ function isPackageManagerRm(command: string): boolean {
   return rmIndex === 1 || COMMAND_POSITION_PREFIXES.has(tokens[rmIndex - 2]!);
 }
 
-/** Pre-check for the recursive-delete rules, see `isGitRmCached` and `isPackageManagerRm`. */
+/**
+ * The command with every `'…'`/`"…"` span replaced by a space. Quotes are balanced here because
+ * `parseCommand` rejects unclosed quotes before any rule runs.
+ */
+function stripQuotedSpans(command: string): string {
+  return command.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, " ");
+}
+
+/**
+ * Pre-check for the recursive-delete rules. Skips them when `rm` only appears inside a quoted
+ * string (`git commit -m "guard rm -rf * now"`, `grep -rn 'rm -rf .' src`), since the rules'
+ * argument scan would otherwise walk through the quoted text, and when the `rm` is a non-deleting
+ * subcommand, see `isGitRmCached` and `isPackageManagerRm`.
+ */
 function isNonDeletingRm(command: string): boolean {
-  return isGitRmCached(command) || isPackageManagerRm(command);
+  const unquoted = stripQuotedSpans(command);
+  if (!/\brm\b/.test(unquoted)) {
+    return true;
+  }
+  return isGitRmCached(unquoted) || isPackageManagerRm(unquoted);
 }
 
 /**
@@ -62,8 +79,9 @@ function isNonDeletingRm(command: string): boolean {
  *
  * Package-manager subcommands (`pnpm rm -r .` removes dependencies, not files) and
  * `git rm --cached` (which only unstages) are excluded by the rules' `exclude` pre-check, see
- * `isNonDeletingRm`. `git rm -r` without `--cached` does delete from the working tree, so it
- * still matches, as do other prefixes (`sudo rm`, `env rm`, `\\rm`, `/bin/rm`, `cd x && rm`).
+ * `isNonDeletingRm`, which also skips the rules when `rm` only occurs inside a quoted string.
+ * `git rm -r` without `--cached` does delete from the working tree, so it still matches, as do
+ * other prefixes (`sudo rm`, `env rm`, `\\rm`, `/bin/rm`, `cd x && rm`).
  */
 const RM_RECURSIVE_ARGS = String.raw`\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
 
@@ -224,8 +242,12 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     reason: "Recursive delete in home",
   },
   {
-    // `.`, `..`, `./`, `../`, and any chain of those such as `../..` or `./..`.
-    pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`(?:\.{1,2}\/)*\.{1,2}\/?["']?(?:\s|$)`),
+    // `.`, `..`, `./`, `../`, and any chain of those such as `../..` or `./..`. Bash collapses
+    // repeated slashes, so `.//` is accepted as `./`; the `(?!\/)` keeps the chain group from
+    // backtracking into a slash run, which keeps the pattern linear.
+    pattern: new RegExp(
+      RM_RECURSIVE_ARGS + String.raw`(?:\.{1,2}\/+(?!\/))*\.{1,2}\/*["']?(?:\s|$)`,
+    ),
     classification: "uncertain",
     reason: "Recursive delete of current or parent directory",
     exclude: isNonDeletingRm,
@@ -236,15 +258,17 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     // brace-expansion spellings of the same idiom: a glob character inside or right after a brace
     // group (`{*,.*}`, `{.,}*`, `.{a,b}*`), or an empty alternative (`.{git,}` expands to `.git .`,
     // `./{dist,}` to `./dist ./`). Scoped brace lists (`{dist,build}`, `dist/{a,b}`) are not matched.
-    // The glob must be in the operand's final path segment (optionally under `.`/`..` chains) and
-    // may carry a literal prefix (`dist*`, `.git*`, `./build-*`, `a[ab]`): all of these expand to
-    // entries of the cwd itself. Globs such as `**/node_modules`, `*/dist`, `./*/build`, or
-    // `dist*/cache` only expand to entries inside subdirectories, so they are left to the other
-    // rules. The literal prefix excludes every glob/brace character so each alternative is matched
-    // by exactly one branch and the pattern stays linear.
+    // The glob must be in the operand's final path segment (optionally under `.`/`..` chains,
+    // where a run of slashes counts as one separator since bash collapses them: `.//*` is `./*`)
+    // and may carry a literal prefix (`dist*`, `.git*`, `./build-*`, `a[ab]`): all of these
+    // expand to entries of the cwd itself. Globs such as `**/node_modules`, `*/dist`, `./*/build`,
+    // or `dist*/cache` only expand to entries inside subdirectories, so they are left to the other
+    // rules. Every span is whitespace-bounded (brace bodies too, as unquoted brace expansion
+    // cannot span whitespace) and the `(?!\/)` stops the chain group from backtracking into a
+    // slash run, so the pattern stays linear in command length.
     pattern: new RegExp(
       RM_RECURSIVE_ARGS +
-        String.raw`(?:\.{1,2}\/)*(?![^\s"']*\/[^\s"'\/])(?:[^\s"'\/{}*?[\]]*[*?[]|\.?\{(?=[^}]*[*?[]|,|[^}]*,[,}])[^}]*\}|[^\s"'\/{}*?[\]]*\{[^}]*\}\.?[*?[])`,
+        String.raw`(?:\.{1,2}\/+(?!\/))*(?![^\s"']*\/[^\s"'\/])(?:[^\s"'\/{}*?[\]]*[*?[]|\.?\{(?=[^}\s]*[*?[]|,|[^}\s]*,[,}])[^}\s]*\}|[^\s"'\/{}*?[\]]*\{[^}\s]*\}\.?[*?[])`,
     ),
     classification: "uncertain",
     reason: "Recursive delete with wildcard glob in current or parent directory",

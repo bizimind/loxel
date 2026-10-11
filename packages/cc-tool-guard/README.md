@@ -66,6 +66,7 @@ cc-tool-guard never denies; anything it is not sure about falls through to the u
 Commands are evaluated against patterns in `src/evaluator/patterns.ts`:
 
 - **Dangerous** patterns (e.g. `sudo`, global package installs, recursive deletes of the current directory or of globs that expand to its entries such as `rm -rf .`, `rm -rf *`, `rm -rf .*` or `rm -rf dist*`) and pushes to `main`/`master` are deferred to the user
+- The recursive-delete rules match `rm` anywhere on the command line (`sudo rm`, `cd x && rm`, `git rm -r`) but ignore `rm` that only appears inside a quoted string, so commit messages or greps that mention `rm -rf .` are not deferred
 - Package runners that execute arbitrary packages (`npx`, `bun x`) are never auto-approved by pattern
 - **Safe** patterns (read-only commands, common build/test tools, pushes to feature branches) are approved
 - Write commands targeting paths outside the project (home directory, absolute paths other than `/tmp`) are deferred
