@@ -57,7 +57,30 @@ export function CellEditor({
     );
   }
 
-  // Native fallback — type-aware
+  return (
+    <div>
+      <NativeCellEditor
+        def={def}
+        value={value}
+        onChange={onChange}
+        onCommit={onCommit}
+        onCancel={onCancel}
+        autoFocus={autoFocus}
+      />
+      <CellIssue issues={issues} />
+    </div>
+  );
+}
+
+/** Type-aware native fallback for column kinds without a registered field component. */
+function NativeCellEditor({
+  def,
+  value,
+  onChange,
+  onCommit,
+  onCancel,
+  autoFocus,
+}: Omit<Props, "componentKey" | "issues">) {
   function keyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && def.kind !== "longtext") {
       e.preventDefault();

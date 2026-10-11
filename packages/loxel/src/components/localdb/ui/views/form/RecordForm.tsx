@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 
 import type { DataAdapter } from "../../adapters/data-adapter.ts";
 import { FieldInput } from "../../fields/field-ui.tsx";
+import { groupIssuesByColumn } from "../../fields/issue-message.ts";
 import { getField, defaultComponentKeyForColumn } from "../../fields/registry.ts";
 
 interface Props {
@@ -72,13 +73,8 @@ export function RecordForm({
         }
         onSuccess?.(result.row as Record<string, unknown>);
       } else {
-        const grouped: Record<string, ValidationIssue[]> = {};
-        for (const issue of result.issues) {
-          const key = issue.path[0] ?? "_";
-          (grouped[key] ??= []).push(issue);
-        }
         setSuccessMessage(null);
-        setIssues(grouped);
+        setIssues(groupIssuesByColumn(result.issues));
       }
     } finally {
       setSubmitting(false);

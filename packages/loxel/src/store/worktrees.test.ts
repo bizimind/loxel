@@ -285,6 +285,47 @@ afterEach(() => {
   useWorktreeStore.getState().reset();
 });
 
+describe("applyEnrichedProjects", () => {
+  const project = {
+    id: "p1",
+    path: PROJECT,
+    name: "repo",
+    addedAt: "",
+    isBare: true,
+    worktreesDir: "/repo/.worktrees",
+  };
+
+  test("keeps persisted order and hidden lists when the server returns no worktrees", () => {
+    useWorktreeStore.setState({
+      byProject: {
+        [PROJECT]: { worktrees: [worktree], customOrder: [WT_PATH], hiddenPaths: [WT_PATH] },
+      },
+    });
+
+    useWorktreeStore.getState().applyEnrichedProjects([{ ...project, worktrees: [] }]);
+
+    const state = useWorktreeStore.getState().byProject[PROJECT];
+    expect(state?.worktrees).toEqual([worktree]);
+    expect(state?.customOrder).toEqual([WT_PATH]);
+    expect(state?.hiddenPaths).toEqual([WT_PATH]);
+  });
+
+  test("prunes persisted lists against a non-empty server response", () => {
+    const gone = "/repo/.worktrees/gone";
+    useWorktreeStore.setState({
+      byProject: {
+        [PROJECT]: { worktrees: [worktree], customOrder: [gone, WT_PATH], hiddenPaths: [gone] },
+      },
+    });
+
+    useWorktreeStore.getState().applyEnrichedProjects([{ ...project, worktrees: [worktree] }]);
+
+    const state = useWorktreeStore.getState().byProject[PROJECT];
+    expect(state?.customOrder).toEqual([WT_PATH]);
+    expect(state?.hiddenPaths).toEqual([]);
+  });
+});
+
 describe("requestRemoveWorktree", () => {
   test("always stages a pending plan for confirmation", async () => {
     await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);

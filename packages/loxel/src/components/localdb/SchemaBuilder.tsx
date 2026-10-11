@@ -105,13 +105,16 @@ export function SchemaBuilder({ schema, adapter: _adapter, onSchemaChange }: Pro
 
       {saveError && <p className="text-destructive text-xs">{saveError}</p>}
 
-      <ColumnDefEditor
-        open={dialogOpen}
-        initial={editingCol?.def}
-        onSave={handleSave}
-        saving={saving}
-        onCancel={() => setDialogOpen(false)}
-      />
+      {/* Mounted per open so the editor's state is seeded fresh from `initial`. */}
+      {dialogOpen && (
+        <ColumnDefEditor
+          open
+          initial={editingCol?.def}
+          onSave={handleSave}
+          saving={saving}
+          onCancel={() => setDialogOpen(false)}
+        />
+      )}
     </div>
   );
 }
