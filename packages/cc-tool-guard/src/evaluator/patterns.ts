@@ -12,17 +12,19 @@ interface PatternRule {
 
 /**
  * Whether the command is a `git rm` invocation carrying `--cached` (which only unstages and never
- * touches the working tree). A linear token scan rather than a regex lookbehind: a lookbehind with
- * a nested lookahead is re-evaluated at every start index and made every Bash permission check
- * quadratic in command length on JavaScriptCore.
+ * touches the working tree). Anchored on the `rm` token so git global options between `git` and
+ * `rm` (`git -C dir rm`, `git --no-pager rm`) are tolerated without enumerating them. A linear
+ * token scan rather than a regex lookbehind: a lookbehind with a nested lookahead is re-evaluated
+ * at every start index and made every Bash permission check quadratic in command length on
+ * JavaScriptCore.
  */
 function isGitRmCached(command: string): boolean {
   const tokens = command.split(/\s+/);
-  const gitIndex = tokens.indexOf("git");
-  if (gitIndex === -1 || tokens[gitIndex + 1] !== "rm") {
+  const rmIndex = tokens.indexOf("rm");
+  if (rmIndex === -1 || !tokens.slice(0, rmIndex).includes("git")) {
     return false;
   }
-  return tokens.includes("--cached", gitIndex + 2);
+  return tokens.includes("--cached", rmIndex + 1);
 }
 
 /**
@@ -32,11 +34,12 @@ function isGitRmCached(command: string): boolean {
  * opening quote), so rules can append the operand shape.
  *
  * The `rm` must not be a package-manager subcommand (`pnpm rm -r .` removes dependencies, not
- * files). `git rm --cached` (which only unstages) is excluded by the rules' `exclude` pre-check,
+ * files); that lookbehind is placed after `rm` so it only runs at `rm` tokens and allows any
+ * amount of whitespace between the package manager and `rm`. `git rm --cached` (which only unstages) is excluded by the rules' `exclude` pre-check,
  * see `isGitRmCached`. `git rm -r` without `--cached` does delete from the working tree, so it
  * still matches, as do other prefixes (`sudo rm`, `env rm`, `\\rm`, `/bin/rm`, `cd x && rm`).
  */
-const RM_RECURSIVE_ARGS = String.raw`(?<!\b(?:npm|pnpm|yarn|bun)\s)\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
+const RM_RECURSIVE_ARGS = String.raw`\brm(?<!\b(?:npm|pnpm|yarn|bun)\s+rm)\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
 
 /**
  * Dangerous patterns - these always require user confirmation

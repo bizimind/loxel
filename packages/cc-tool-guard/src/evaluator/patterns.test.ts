@@ -108,7 +108,11 @@ describe("dangerous rm patterns", () => {
       "git rm --cached -r .",
       "git rm -r --cached *",
       "git   rm   -r   --cached   .",
+      "git -C sub rm --cached -r .",
+      "git --no-pager rm --cached -r .",
+      "git -C packages/wt rm -r --cached *",
       "pnpm rm -r .",
+      "pnpm  rm -r .",
       "npm rm -r .",
     ])("%s is not matched by the recursive rules", (command) => {
       expect(checkKnownPatterns(command, context)?.reason ?? "").not.toMatch(/Recursive delete/);
@@ -135,7 +139,13 @@ describe("dangerous rm patterns", () => {
 
   test("a long command evaluates in linear time", () => {
     const paths = Array.from({ length: 1000 }, (_, i) => `path/to/file-${i}.txt`).join(" ");
-    const commands = [`rm -rf ${paths}`, `cp ${paths} dest`, `git rm -r --cached ${paths}`];
+    const spaces = " ".repeat(10_000);
+    const commands = [
+      `rm -rf ${paths}`,
+      `cp ${paths} dest`,
+      `git rm -r --cached ${paths}`,
+      `echo${spaces}rm -rf ${paths}`,
+    ];
     for (const command of commands) {
       expect(command.length).toBeGreaterThan(10_000);
       const start = performance.now();
