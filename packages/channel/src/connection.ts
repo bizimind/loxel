@@ -11,8 +11,8 @@ import {
  * Configuration for the WebSocket connection.
  */
 export interface ConnectionOptions {
-  /** WebSocket URL to connect to */
-  url: string;
+  /** Returns the WebSocket URL; called on every connect and reconnect so the token can change */
+  url: () => string;
 
   /** Ping interval in milliseconds */
   pingInterval: number;
@@ -119,7 +119,7 @@ export class Connection {
 
   private createWebSocket(): void {
     try {
-      this.ws = new WebSocket(this.options.url);
+      this.ws = new WebSocket(this.options.url());
       this.ws.binaryType = "arraybuffer";
       this.setupEventHandlers();
       this.startConnectionTimeout();
