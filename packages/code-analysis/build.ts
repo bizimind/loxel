@@ -23,6 +23,9 @@
  *    public static `version` export, which Bun can bundle normally.
  *
  * All patches are applied before `bun build --compile` and restored afterward.
+ *
+ * After compiling, the binary runs the import-graph plugin over `src` as a smoke
+ * test so CI rejects a binary that compiles but fails on first use.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -134,8 +137,11 @@ try {
       "src/cli.ts",
       "--outfile",
       "dist/code-analysis",
+      // tsconfig-paths-webpack-plugin keeps a legacy `require()` of this module for
+      // webpack < 4 resolvers; it is unreachable with enhanced-resolve 5 and does not
+      // exist in the installed version, so it must not be bundled.
       "--external",
-      "tsconfig-paths-webpack-plugin",
+      "enhanced-resolve/lib/createInnerCallback",
     ],
     { cwd: dir, stdout: "inherit", stderr: "inherit" },
   );
@@ -148,11 +154,24 @@ try {
   }
 }
 
+const binary = join(dir, "dist/code-analysis");
+
+if (exitCode === 0 && process.platform === "darwin" && process.env.BUN_NO_CODESIGN_MACHO_BINARY) {
+  // Bun skipped its ad-hoc signature; macOS SIGKILLs unsigned arm64 binaries at exec,
+  // so sign before the smoke test. The release workflow re-signs afterwards.
+  const sign = Bun.spawn(["codesign", "-s", "-", "-f", binary], {
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  exitCode = await sign.exited;
+}
+
 if (exitCode === 0) {
-  const verification = Bun.spawn(
-    [join(dir, "dist/code-analysis"), "run", "-p", "import-graph", "-w", "src", "--json"],
-    { cwd: dir, stdout: "pipe", stderr: "pipe" },
-  );
+  const verification = Bun.spawn([binary, "run", "-p", "import-graph", "-w", "src", "--json"], {
+    cwd: dir,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const [stdout, stderr, verificationExitCode] = await Promise.all([
     new Response(verification.stdout).text(),
     new Response(verification.stderr).text(),

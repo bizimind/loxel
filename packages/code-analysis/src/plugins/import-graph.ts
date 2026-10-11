@@ -24,9 +24,15 @@ const plugin: AnalysisPlugin = {
   async generate(workDir, args): Promise<AnalysisRecord[]> {
     const roots = args.scope ? [join(workDir, args.scope)] : [workDir];
 
+    // dependency-cruiser only honors tsconfig `paths` aliases when given a tsconfig
+    // explicitly, and throws when the given file does not exist.
+    const tsconfigPath = join(workDir, "tsconfig.json");
+    const hasTsconfig = await Bun.file(tsconfigPath).exists();
+
     const result = await cruise(roots, {
       doNotFollow: { path: "node_modules" },
       exclude: { path: ["node_modules", "\\.git", "dist"] },
+      ...(hasTsconfig ? { tsConfig: { fileName: tsconfigPath } } : {}),
     });
 
     const cruiseResult = result.output as ICruiseResult;
