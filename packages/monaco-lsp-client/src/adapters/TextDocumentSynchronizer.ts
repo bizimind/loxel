@@ -72,9 +72,7 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
     const existing = this._managedModels.get(m);
     if (existing) return existing;
 
-    const mm = new ManagedModel(m, this._server, this._syncKind, () =>
-      this._removeManagedModel(m),
-    );
+    const mm = new ManagedModel(m, this._server, this._syncKind, () => this._removeManagedModel(m));
     this._managedModels.set(m, mm);
     this._managedModelsReverse.set(m.uri.toString(true), m);
     return mm;
