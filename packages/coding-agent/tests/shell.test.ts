@@ -6,15 +6,45 @@ import {
   terminateProcessGroup,
 } from "../src/utils/shell.ts";
 
+/** Polls until `pid` no longer exists (ESRCH) or the deadline passes. */
+async function waitForProcessGone(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await Bun.sleep(20);
+  }
+  return false;
+}
+
 describe("killProcessGroup", () => {
   test("signals the whole group when the process is a group leader", async () => {
-    const proc = Bun.spawn(["sh", "-c", "sleep 30 & wait"], {
+    // The leader exits non-zero whenever it is signalled at all, so the only evidence of
+    // group semantics is the backgrounded grandchild dying. The shell prints the grandchild's
+    // pid first, which also guarantees it exists before we signal.
+    const proc = Bun.spawn(["sh", "-c", "sleep 30 & echo $!; wait"], {
       ...SHELL_PROCESS_GROUP_SPAWN_OPTIONS,
-      stdout: "ignore",
+      stdout: "pipe",
       stderr: "ignore",
     });
-    killProcessGroup(proc, "SIGTERM");
-    expect(await proc.exited).not.toBe(0);
+    const reader = proc.stdout.getReader();
+    const childPid = Number.parseInt(new TextDecoder().decode((await reader.read()).value), 10);
+    expect(Number.isInteger(childPid) && childPid > 0).toBe(true);
+    try {
+      killProcessGroup(proc, "SIGTERM");
+      expect(await proc.exited).not.toBe(0);
+      expect(await waitForProcessGone(childPid, 2000)).toBe(true);
+    } finally {
+      // Never leave a stray `sleep` behind if the assertion fails.
+      try {
+        process.kill(childPid, "SIGKILL");
+      } catch {
+        // Already gone (ESRCH): the expected outcome.
+      }
+    }
   });
 
   test("falls back to signalling the process itself when it is not a group leader", async () => {
