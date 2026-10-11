@@ -7,7 +7,9 @@ import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client
  * The connect function is idempotent per worktree path — calling it with the
  * same path while already connected is a no-op. Calling with a different path
  * disposes the old transport (killing the server-side subprocess) and opens a
- * new connection.
+ * new connection. Both the worktree switch and `disconnect()` dispose the
+ * client (unregistering providers and closing synced documents) before the
+ * transport.
  */
 export function createWorktreeLspClient(wsPath: string, languageId?: string | readonly string[]) {
   let currentWtPath: string | null = null;
@@ -21,9 +23,7 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
     // calls each open a WebSocket before the first resolves.
     if (currentWtPath === wtPath && (currentClient || connecting)) return;
     currentWtPath = wtPath;
-    currentTransport?.dispose();
-    currentTransport = null;
-    currentClient = null;
+    teardown();
     connecting = true;
 
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -48,10 +48,17 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
     );
   }
 
-  function disconnect(): void {
+  // Dispose the client before the transport so its `textDocument/didClose`
+  // notifications still go out over a live socket.
+  function teardown(): void {
+    currentClient?.dispose();
+    currentClient = null;
     currentTransport?.dispose();
     currentTransport = null;
-    currentClient = null;
+  }
+
+  function disconnect(): void {
+    teardown();
     currentWtPath = null;
     connecting = false;
   }
