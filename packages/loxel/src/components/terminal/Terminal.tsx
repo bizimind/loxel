@@ -203,8 +203,9 @@ class OutputStream {
 
   applyState(state: TerminalState): void {
     if (state.mode === "snapshot") {
-      this.terminal.reset();
-      this.terminal.write(state.snapshot ?? "");
+      // RIS in-band instead of terminal.reset(): write() is async, so a synchronous reset would
+      // clear the screen before output still queued in xterm's write buffer is parsed onto it.
+      this.terminal.write(`\x1bc${state.snapshot ?? ""}`);
     }
     this.epoch = state.epoch;
     this.nextOffset = state.offset;

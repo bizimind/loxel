@@ -98,6 +98,17 @@ export type WsMessage =
   | { type: "notifications_sync"; data: readonly ServerNotification[] }
   | { type: "store_updated"; key: string; state: Record<string, unknown>; nonce?: string };
 
+/** Terminal notification sequences Loxel understands; see docs/TERMINALS.md#notifications. */
+export const NOTIFICATION_SEQUENCES = ["osc9", "osc777", "osc99"] as const;
+/** `osc9`: iTerm2 style; `osc777`: rxvt-unicode style; `osc99`: Kitty style. */
+export type NotificationSequence = (typeof NOTIFICATION_SEQUENCES)[number];
+export type NotificationSequences = Record<NotificationSequence, boolean>;
+export const DEFAULT_NOTIFICATION_SEQUENCES: NotificationSequences = {
+  osc9: true,
+  osc777: true,
+  osc99: true,
+};
+
 /** Default number of scrollback lines. Shared by client settings and server fallback. */
 export const DEFAULT_SCROLLBACK_LINES = 50_000;
 

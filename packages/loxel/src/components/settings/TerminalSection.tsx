@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
+import type { NotificationSequence } from "@/api/ws-protocol";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import type { NotificationSequences } from "@/store/settings-store";
 import { DEFAULT_TERMINAL_SCROLLBACK, useSettingsStore } from "@/store/settings-store";
 
 export function TerminalSection() {
@@ -30,7 +30,7 @@ export function TerminalSection() {
   }, [localValue, scrollbackLines, updateTerminal]);
 
   const toggleSequence = useCallback(
-    (key: keyof NotificationSequences) => {
+    (key: NotificationSequence) => {
       updateTerminal({
         notificationSequences: { ...notificationSequences, [key]: !notificationSequences[key] },
       });

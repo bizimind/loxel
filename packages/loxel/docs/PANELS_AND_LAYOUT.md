@@ -109,7 +109,7 @@ A collapsed zone keeps its group: `collapseZone` pins its size to 0 with constra
 ## Badges, notifications and status bar
 
 - [panel-badges.ts](../src/store/panel-badges.ts): global counts per sidebar `PanelId`, shown as a dot on the tools bar icon while the panel is not active and cleared by `togglePanel`. Only `logs` uses it today: it reconciles against the server's monotonic error total using a `lastSeenErrorTotal` kept in `localStorage`.
-- [panel-notifications.ts](../src/store/panel-notifications.ts): a mirror of the server's notification store; `panelIndex` drives terminal tab dots and `worktreeIndex` drives worktree dots in the sidebar. Notification sources, replay suppression and navigation are in [TERMINALS.md](TERMINALS.md#notifications).
+- [panel-notifications.ts](../src/store/panel-notifications.ts): a mirror of the server's notification store; `panelIndex` drives terminal tab dots and `worktreeIndex` drives worktree dots in the sidebar. Notification sources and navigation are in [TERMINALS.md](TERMINALS.md#notifications).
 - [NotificationBell.tsx](../src/components/notifications/NotificationBell.tsx) (in the top bar) lists notifications. `useLoxelEventListeners` mirrors the count to the macOS dock badge.
 - [StatusBar.tsx](../src/components/panels/StatusBar.tsx): git status of the active worktree, the pending-chord indicator, and quick-create buttons.
 

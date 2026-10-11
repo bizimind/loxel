@@ -2,11 +2,12 @@
  * Terminal sessions keyed by the client-generated terminal ID. Spawns the shell on first attach,
  * tracks orphaned sessions, and owns the shell environment. See docs/TERMINALS.md.
  */
+import type { NotificationSequence } from "@/api/ws-protocol";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
-import type { NotificationSequence, TerminalSink } from "./terminal-session";
+import type { TerminalSink } from "./terminal-session";
 import { TerminalSession } from "./terminal-session";
 
 const log = logger.child("terminal");

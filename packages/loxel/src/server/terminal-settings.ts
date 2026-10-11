@@ -3,12 +3,10 @@
  * (zustand persist JSON: `{ state: { terminal: { notificationSequences } }, version }`).
  * Notification sequences are detected on the server, so it has to know which ones are enabled.
  */
+import type { NotificationSequence, NotificationSequences } from "@/api/ws-protocol";
+import { DEFAULT_NOTIFICATION_SEQUENCES, NOTIFICATION_SEQUENCES } from "@/api/ws-protocol";
+
 import { getStore } from "./store-db";
-import type { NotificationSequence } from "./terminal-session";
-
-export type NotificationSequences = Record<NotificationSequence, boolean>;
-
-const ALL_ENABLED: NotificationSequences = { osc9: true, osc777: true, osc99: true };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -16,24 +14,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Extract the enabled notification sequences from a persisted settings JSON string.
- * Anything missing or malformed defaults to enabled, matching the renderer's defaults.
+ * Anything missing or malformed falls back to `DEFAULT_NOTIFICATION_SEQUENCES`.
  */
 export function parseNotificationSequences(raw: string | null): NotificationSequences {
-  if (!raw) return ALL_ENABLED;
+  if (!raw) return DEFAULT_NOTIFICATION_SEQUENCES;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return ALL_ENABLED;
+    return DEFAULT_NOTIFICATION_SEQUENCES;
   }
   if (!isRecord(parsed) || !isRecord(parsed.state) || !isRecord(parsed.state.terminal)) {
-    return ALL_ENABLED;
+    return DEFAULT_NOTIFICATION_SEQUENCES;
   }
   const sequences = parsed.state.terminal.notificationSequences;
-  if (!isRecord(sequences)) return ALL_ENABLED;
-  const flag = (key: NotificationSequence): boolean =>
-    typeof sequences[key] === "boolean" ? sequences[key] : true;
-  return { osc9: flag("osc9"), osc777: flag("osc777"), osc99: flag("osc99") };
+  if (!isRecord(sequences)) return DEFAULT_NOTIFICATION_SEQUENCES;
+  const result = { ...DEFAULT_NOTIFICATION_SEQUENCES };
+  for (const key of NOTIFICATION_SEQUENCES) {
+    const flag = sequences[key];
+    if (typeof flag === "boolean") result[key] = flag;
+  }
+  return result;
 }
 
 /** Whether the given notification sequence is enabled in the persisted settings. */

@@ -9,7 +9,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import type { Subprocess } from "bun";
 
-import type { TerminalState } from "@/api/ws-protocol";
+import type { NotificationSequence, TerminalState } from "@/api/ws-protocol";
 import { clampScrollbackLines } from "@/api/ws-protocol";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
@@ -27,8 +27,6 @@ export const FLOW_HIGH_WATER_BYTES = 2 * 1024 * 1024;
 export const FLOW_LOW_WATER_BYTES = 128 * 1024;
 /** How often a snapshot is retaken when a flood evicts the bytes produced while serializing. */
 const MAX_SNAPSHOT_ATTEMPTS = 3;
-
-export type NotificationSequence = "osc9" | "osc777" | "osc99";
 
 /** Where a session delivers messages for its attached client. */
 export interface TerminalSink {
@@ -272,9 +270,14 @@ export class TerminalSession {
     stress.track("pty-output");
 
     if (!this.sink || !this.streaming || this.paused) return;
-    this.sink.sendOutput(offset, chunk);
-    this.unacked += chunk.byteLength;
-    if (this.unacked > this.highWater) {
+    this.forward(this.sink, offset, chunk);
+  }
+
+  /** Send output to the client and account for it against the flow-control budget. */
+  private forward(sink: TerminalSink, offset: number, data: Uint8Array): void {
+    sink.sendOutput(offset, data);
+    this.unacked += data.byteLength;
+    if (this.unacked > this.highWater && !this.paused) {
       this.paused = true;
       log.info(`Terminal ${this.shortId} client is ${this.unacked} bytes behind, pausing output`);
     }
@@ -316,10 +319,7 @@ export class TerminalSession {
 
   private goLive(sink: TerminalSink, offset: number, pending: Uint8Array): void {
     this.syncOffset = offset;
-    if (pending.byteLength > 0) {
-      sink.sendOutput(offset, pending);
-      this.unacked += pending.byteLength;
-    }
+    if (pending.byteLength > 0) this.forward(sink, offset, pending);
     this.streaming = true;
   }
 
