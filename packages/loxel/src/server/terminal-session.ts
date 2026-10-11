@@ -262,6 +262,8 @@ export class TerminalSession {
   }
 
   private onPtyData(data: Uint8Array): void {
+    // The PTY can deliver a final chunk after destroy(); the emulator is gone by then.
+    if (this.disposed) return;
     // Copy: Bun may reuse the read buffer after the callback returns.
     const chunk = new Uint8Array(data);
     const offset = this.ring.end;
@@ -327,6 +329,8 @@ export class TerminalSession {
       this.pendingSerialize = resolve;
       this.emulator.write("", () => {
         this.pendingSerialize = null;
+        // destroy() already resolved this promise; the disposed emulator must not be read.
+        if (this.disposed) return;
         resolve(this.serializer.serialize());
       });
     });

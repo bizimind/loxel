@@ -60,7 +60,7 @@ function spawnScript(
 }
 
 /** Prints a line with terminal queries and a notification, then idles so the session stays alive. */
-const QUERY_SCRIPT = String.raw`printf 'hello \033]11;?\033\\ \033[6n \033]9;done\007 world\n'; sleep 30`;
+const QUERY_SCRIPT = String.raw`printf 'hello \033]11;?\033\\ \033[6n \033]9;done\007 world\n'; exec sleep 30`;
 
 describe("OutputRing", () => {
   test("reads from any retained offset and reports evicted ranges", () => {
@@ -133,7 +133,7 @@ describe("TerminalSession", () => {
   });
 
   test("live output streams with stream offsets after attach", async () => {
-    const { session } = spawnScript(`sleep 0.2; printf 'later\\n'; sleep 30`);
+    const { session } = spawnScript(`sleep 0.2; printf 'later\\n'; exec sleep 30`);
     const client = createRecordingSink();
     await session.attach(client.sink);
     const snapshotOffset = client.states[0]!.offset;
@@ -144,7 +144,9 @@ describe("TerminalSession", () => {
   });
 
   test("resume attach streams only the bytes the client missed", async () => {
-    const { session } = spawnScript(`printf 'first\\n'; sleep 0.3; printf 'second\\n'; sleep 30`);
+    const { session } = spawnScript(
+      `printf 'first\\n'; sleep 0.3; printf 'second\\n'; exec sleep 30`,
+    );
     const first = createRecordingSink();
     await session.attach(first.sink);
     await until(
@@ -166,7 +168,7 @@ describe("TerminalSession", () => {
 
   test("resume falls back to a snapshot once the ring has evicted the offset", async () => {
     const { session } = spawnScript(
-      String.raw`printf 'hello\n'; sleep 0.2; printf 'more\n'; sleep 30`,
+      String.raw`printf 'hello\n'; sleep 0.2; printf 'more\n'; exec sleep 30`,
       { resumeRingBytes: 8 },
     );
     await until(() => session.outputOffset > 0);
@@ -192,7 +194,7 @@ describe("TerminalSession", () => {
   });
 
   test("a detached session is reported as not attached", async () => {
-    const { session } = spawnScript("sleep 30");
+    const { session } = spawnScript("exec sleep 30");
     expect(session.attached).toBe(false);
     const attach = session.attach(createRecordingSink().sink);
     expect(session.attached).toBe(true);
@@ -202,7 +204,7 @@ describe("TerminalSession", () => {
   });
 
   test("resize applies to the PTY and the emulator", async () => {
-    const { session } = spawnScript(`stty size; sleep 0.3; stty size; sleep 30`);
+    const { session } = spawnScript(`stty size; sleep 0.3; stty size; exec sleep 30`);
     const client = createRecordingSink();
     await session.attach(client.sink);
     session.resize(100, 30);
@@ -212,8 +214,13 @@ describe("TerminalSession", () => {
   });
 
   test("pauses a client that stops acking and resyncs with a snapshot once it catches up", async () => {
+    // Two bursts: the first crosses the high-water mark (a PTY may deliver it as one chunk, which
+    // is still forwarded whole); the second arrives while paused and must not be streamed.
+    const line = "line %04d of output padding padding padding padding padding\\n";
+    const burst = (from: number, to: number) =>
+      `i=${from}; while [ $i -lt ${to} ]; do printf '${line}' $i; i=$((i+1)); done`;
     const { session } = spawnScript(
-      `i=0; while [ $i -lt 400 ]; do printf 'line %04d of output padding padding padding padding padding\\n' $i; i=$((i+1)); done; sleep 30`,
+      `${burst(0, 100)}; sleep 0.3; ${burst(100, 400)}; exec sleep 30`,
       { flowControl: { highWaterBytes: 4096, lowWaterBytes: 1024 } },
     );
     const client = createRecordingSink();
@@ -221,9 +228,10 @@ describe("TerminalSession", () => {
     await until(() => session.outputOffset > 20_000);
     await Bun.sleep(50);
 
-    // Streaming stopped at the high-water mark; the emulator kept parsing.
+    // Streaming stopped at the high-water mark during the first burst; the emulator kept parsing.
     const streamed = client.outputBytes();
-    expect(streamed).toBeLessThan(session.outputOffset);
+    expect(streamed).toBeGreaterThan(4096);
+    expect(streamed).toBeLessThan(10_000);
     expect(client.states).toHaveLength(1);
 
     // Acks from an earlier sync are ignored.
@@ -239,7 +247,7 @@ describe("TerminalSession", () => {
   });
 
   test("destroy settles an attach whose snapshot is still pending", async () => {
-    const { session } = spawnScript("sleep 30");
+    const { session } = spawnScript("exec sleep 30");
     const client = createRecordingSink();
     const attach = session.attach(client.sink);
     session.destroy();

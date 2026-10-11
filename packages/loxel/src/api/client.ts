@@ -838,7 +838,9 @@ class WsClient {
         if (buf[0] !== BIN_MSG_OUTPUT) return;
         const frame = parseOutputFrame(buf);
         if (!frame) return;
-        this.terminalOutputHandlers.get(frame.terminalId)?.(frame.offset, frame.payload);
+        const handler = this.terminalOutputHandlers.get(frame.terminalId);
+        if (typeof handler !== "function") return;
+        handler(frame.offset, frame.payload);
       }
     };
 
