@@ -12,8 +12,7 @@ import type { AgentEventPayload, WsClientMessage, WsMessage } from "@/api/ws-pro
 import {
   BIN_HEADER_SIZE,
   BIN_MSG_INPUT,
-  BIN_MSG_OUTPUT,
-  encodeBinaryFrame,
+  encodeOutputFrame,
   parseBinaryHeader,
 } from "@/api/ws-protocol";
 
@@ -36,7 +35,6 @@ import { logger } from "./logger";
 import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
-import { PtyManager } from "./pty-manager";
 import { PythonLspManager } from "./python-lsp-manager";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import { handleRequest } from "./routes";
@@ -60,6 +58,9 @@ import type {
 import { resolveLoginShellEnv } from "./shell-env";
 import { recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
+import { TerminalManager } from "./terminal-manager";
+import type { TerminalSink } from "./terminal-session";
+import { isNotificationSequenceEnabled } from "./terminal-settings";
 import { TerraformLspManager } from "./terraform-lsp-manager";
 import { TsLspManager } from "./ts-lsp-manager";
 import { WorktreeStatusTracker } from "./worktree-status-tracker";
@@ -667,7 +668,24 @@ const clients = new Map<ServerWebSocket<WsData>, ClientState>();
 const terminalOwners = new Map<string, ServerWebSocket<WsData>>();
 const agentOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
-const ptyManager = new PtyManager();
+const terminalManager = new TerminalManager({
+  isSequenceEnabled: isNotificationSequenceEnabled,
+  onNotification: (session, payload) => {
+    const notification = notificationStore.add({
+      source: { kind: "terminal", panelId: session.id, worktreePath: session.cwd },
+      title: payload.title,
+      body: payload.body,
+      urgency: payload.urgency ?? "normal",
+    });
+    broadcastAll({ type: "notification_added", data: notification });
+  },
+  onExit: (session) => {
+    // The session already sent terminal_exit to its attached client.
+    const owner = terminalOwners.get(session.id);
+    if (owner) clients.get(owner)?.terminals.delete(session.id);
+    terminalOwners.delete(session.id);
+  },
+});
 const agentManager = new AgentManager();
 const notificationStore = new NotificationStore();
 const schemaService = new SchemaService();
@@ -738,12 +756,15 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       lastFocusedClient = ws;
       break;
 
-    case "terminal_create": {
+    case "terminal_attach": {
       const clientState = clients.get(ws);
       if (!clientState) return;
 
-      // Register ownership before create — reattach replays scrollback synchronously
-      // through the onOutput callback which reads from terminalOwners.
+      // Take ownership before attaching: the session delivers through the sink immediately.
+      const previousOwner = terminalOwners.get(msg.id);
+      if (previousOwner && previousOwner !== ws) {
+        clients.get(previousOwner)?.terminals.delete(msg.id);
+      }
       clientState.terminals.add(msg.id);
       terminalOwners.set(msg.id, ws);
 
@@ -754,44 +775,54 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       };
       if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
 
-      ptyManager.create(
-        msg.id,
-        {
+      terminalManager
+        .attach(msg.id, createTerminalSink(ws, msg.id), {
           cols: msg.cols,
           rows: msg.rows,
           cwd: msg.cwd,
-          scrollbackLines: msg.scrollbackLines,
           envOverrides,
-        },
-        (id, data) => {
-          const owner = terminalOwners.get(id);
-          if (owner) owner.send(encodeBinaryFrame(BIN_MSG_OUTPUT, id, data));
-        },
-        (id, exitCode) => {
-          const owner = terminalOwners.get(id);
-          if (owner) {
-            sendTo(owner, { type: "terminal_exit", id, exitCode });
-            clients.get(owner)?.terminals.delete(id);
-          }
-          terminalOwners.delete(id);
-        },
-      );
+          scrollbackLines: msg.scrollbackLines,
+          sinceEpoch: msg.sinceEpoch,
+          sinceOffset: msg.sinceOffset,
+        })
+        .catch((err: unknown) => {
+          log.error("Failed to attach terminal", { terminalId: msg.id, error: err });
+          sendTo(ws, { type: "error", message: "Failed to attach terminal" });
+        });
       break;
     }
 
-    case "terminal_resize":
+    case "terminal_detach":
       if (terminalOwners.get(msg.id) === ws) {
-        ptyManager.resize(msg.id, msg.cols, msg.rows);
-      }
-      break;
-
-    case "terminal_destroy":
-      if (terminalOwners.get(msg.id) === ws) {
-        ptyManager.destroy(msg.id);
+        terminalManager.detach(msg.id);
         clients.get(ws)?.terminals.delete(msg.id);
         terminalOwners.delete(msg.id);
       }
       break;
+
+    case "terminal_resize":
+      if (terminalOwners.get(msg.id) === ws) {
+        terminalManager.resize(msg.id, msg.cols, msg.rows);
+      }
+      break;
+
+    case "terminal_ack":
+      if (terminalOwners.get(msg.id) === ws) {
+        terminalManager.ack(msg.id, msg.syncOffset, msg.bytes);
+      }
+      break;
+
+    case "terminal_destroy": {
+      // The panel may already have detached (unmount runs before the panel-removed handler), so
+      // an ownerless session is destroyable too; only another window's session is protected.
+      const owner = terminalOwners.get(msg.id);
+      if (owner === undefined || owner === ws) {
+        terminalManager.destroy(msg.id);
+        clients.get(ws)?.terminals.delete(msg.id);
+        terminalOwners.delete(msg.id);
+      }
+      break;
+    }
 
     case "agent_create": {
       const existingOwner = agentOwners.get(msg.id);
@@ -871,17 +902,6 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
 
     // --- Notifications ---
 
-    case "notification_add": {
-      const notification = notificationStore.add({
-        source: msg.source,
-        title: msg.title,
-        body: msg.body,
-        urgency: msg.urgency ?? "normal",
-      });
-      broadcastAll({ type: "notification_added", data: notification });
-      break;
-    }
-
     case "notification_dismiss": {
       if (notificationStore.dismiss(msg.id)) {
         broadcastAll({ type: "notification_dismissed", id: msg.id });
@@ -917,7 +937,7 @@ function handleBinaryMessage(ws: ServerWebSocket<WsData>, data: Buffer) {
   );
   if (type === BIN_MSG_INPUT) {
     if (terminalOwners.get(terminalId) !== ws) return;
-    ptyManager.writeBinary(terminalId, data.subarray(BIN_HEADER_SIZE));
+    terminalManager.write(terminalId, data.subarray(BIN_HEADER_SIZE));
   }
 }
 
@@ -928,10 +948,21 @@ function handleBinaryMessage(ws: ServerWebSocket<WsData>, data: Buffer) {
 function detachClientTerminals(ws: ServerWebSocket<WsData>) {
   const clientState = clients.get(ws);
   if (!clientState) return;
-  ptyManager.detachAll(clientState.terminals);
+  terminalManager.detachAll(clientState.terminals);
   for (const id of clientState.terminals) {
     terminalOwners.delete(id);
   }
+}
+
+/** Deliver a terminal session's messages to the socket that attached it. */
+function createTerminalSink(ws: ServerWebSocket<WsData>, id: string): TerminalSink {
+  return {
+    sendState: (state) => sendTo(ws, { type: "terminal_state", ...state }),
+    sendOutput: (offset, data) => {
+      ws.send(encodeOutputFrame(id, offset, data));
+    },
+    sendExit: (exitCode) => sendTo(ws, { type: "terminal_exit", id, exitCode }),
+  };
 }
 
 /** Detach (not destroy) all agent sessions owned by this client. */
@@ -1174,7 +1205,7 @@ const server = Bun.serve<WsData>({
       log.debug(`Client disconnected (${clients.size} remaining)`);
 
       if (clients.size === 0 && !idleShutdownTimer && !shuttingDown) {
-        const hasOrphans = ptyManager.hasOrphanSessions() || agentManager.hasOrphanSessions();
+        const hasOrphans = terminalManager.hasOrphanSessions() || agentManager.hasOrphanSessions();
         if (hasOrphans) {
           // Orphaned sessions exist — give clients time to reconnect (e.g. after hibernation wake)
           // before destroying them and shutting down
@@ -1183,7 +1214,7 @@ const server = Bun.serve<WsData>({
               `(${ORPHAN_CLEANUP_MS / 1000}s timeout)`,
           );
           idleShutdownTimer = setTimeout(() => {
-            const destroyed = ptyManager.destroyOrphans();
+            const destroyed = terminalManager.destroyOrphans();
             if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
             log.info("Idle timeout reached, shutting down");
             shutdown();
@@ -1284,7 +1315,7 @@ function shutdown(exitCode = 0) {
     teardownProject(cwd);
   }
 
-  ptyManager.destroyAll();
+  terminalManager.destroyAll();
   agentManager.destroyAll().catch(() => {});
   formatService.destroy();
   yamlLspManager.destroy();

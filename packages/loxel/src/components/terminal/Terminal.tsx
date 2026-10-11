@@ -12,16 +12,14 @@ import { useCallback, useEffect, useRef } from "react";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
+import type { TerminalState } from "@/api/ws-protocol";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { FindBar } from "@/components/ui/find-bar";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
 import { frontendLog } from "@/lib/frontend-logger";
-import type { OscPayload } from "@/lib/osc-notification-parser";
-import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
 import { WINDOW_ID } from "@/lib/window-id";
 import { useFileSearchStore } from "@/store/file-search";
-import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
@@ -124,18 +122,119 @@ function fitAndSendResize(terminalId: string, terminal: XTerm, fitAddon: FitAddo
   });
 }
 
-/** Send terminal_create with current dimensions and the panel's working directory. */
-function sendCreate(terminalId: string, terminal: XTerm, cwd: string) {
+/** Output bytes parsed between flow-control acks to the server. */
+const ACK_BYTES = 64 * 1024;
+
+/**
+ * Send terminal_attach with current dimensions and the panel's working directory. `sinceOffset`
+ * is the stream offset this xterm is already current to (a reconnect with live content); omitted
+ * for a fresh xterm, which gets a snapshot.
+ */
+function sendAttach(
+  terminalId: string,
+  terminal: XTerm,
+  cwd: string,
+  since?: { epoch: string; offset: number },
+) {
   wsClient.send({
-    type: "terminal_create",
+    type: "terminal_attach",
     id: terminalId,
     cols: terminal.cols,
     rows: terminal.rows,
     cwd,
     scrollbackLines: useSettingsStore.getState().terminal.scrollbackLines,
     windowId: WINDOW_ID,
+    ...(since === undefined ? {} : { sinceEpoch: since.epoch, sinceOffset: since.offset }),
   });
-  termLog.info("Terminal created", { terminalId, cwd, cols: terminal.cols, rows: terminal.rows });
+  termLog.info("Terminal attach requested", {
+    terminalId,
+    cwd,
+    cols: terminal.cols,
+    rows: terminal.rows,
+    since,
+  });
+}
+
+interface OutputFrame {
+  offset: number;
+  data: Uint8Array;
+}
+
+/**
+ * Keeps an xterm in step with the server's output stream. Between an attach request and its
+ * `terminal_state` reply, frames are queued; the reply says which offset the xterm is current to,
+ * and queued frames before it are dropped. Live frames are acked in `ACK_BYTES` steps once parsed.
+ */
+class OutputStream {
+  /** Offset the xterm is current to, or null before the first state. */
+  nextOffset: number | null = null;
+  /** Epoch of the session the offset belongs to. */
+  epoch: string | null = null;
+  /** Offset of the current sync's state message; acks quote it. */
+  private syncOffset = 0;
+  private awaitingState = false;
+  private queued: OutputFrame[] = [];
+  private unackedBytes = 0;
+
+  constructor(
+    private readonly terminalId: string,
+    private readonly terminal: XTerm,
+  ) {}
+
+  /** Mark that an attach has been sent; frames queue until the state reply. */
+  expectState(): void {
+    this.awaitingState = true;
+    this.queued = [];
+  }
+
+  receive(offset: number, data: Uint8Array): void {
+    if (this.awaitingState) {
+      this.queued.push({ offset, data });
+      return;
+    }
+    this.writeLive(offset, data);
+  }
+
+  /** The sync point to resume from after a reconnect, if the xterm has one. */
+  get since(): { epoch: string; offset: number } | undefined {
+    if (this.epoch === null || this.nextOffset === null) return undefined;
+    return { epoch: this.epoch, offset: this.nextOffset };
+  }
+
+  applyState(state: TerminalState): void {
+    if (state.mode === "snapshot") {
+      this.terminal.reset();
+      this.terminal.write(state.snapshot ?? "");
+    }
+    this.epoch = state.epoch;
+    this.nextOffset = state.offset;
+    this.syncOffset = state.offset;
+    this.awaitingState = false;
+    this.unackedBytes = 0;
+    const queued = this.queued;
+    this.queued = [];
+    for (const frame of queued) {
+      if (frame.offset >= state.offset) this.writeLive(frame.offset, frame.data);
+    }
+  }
+
+  private writeLive(offset: number, data: Uint8Array): void {
+    this.nextOffset = offset + data.byteLength;
+    const syncOffset = this.syncOffset;
+    this.terminal.write(data, () => {
+      // Bytes written under an earlier sync are not counted against the current one.
+      if (syncOffset !== this.syncOffset) return;
+      this.unackedBytes += data.byteLength;
+      if (this.unackedBytes < ACK_BYTES) return;
+      wsClient.send({
+        type: "terminal_ack",
+        id: this.terminalId,
+        syncOffset,
+        bytes: this.unackedBytes,
+      });
+      this.unackedBytes = 0;
+    });
+  }
 }
 
 interface TerminalProps {
@@ -159,7 +258,7 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const exitedRef = useRef(false);
-  const createdRef = useRef(false);
+  const attachedRef = useRef(false);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const { barProps: findBarProps, setMatches: setFindMatches } = usePanelFind(rootRef, {
@@ -228,42 +327,6 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
         () => fileIndexRef.current,
       ),
     );
-
-    // Register OSC notification handlers — always register all three, check
-    // settings at fire time so toggling in Settings takes effect immediately.
-    // Sends parsed payloads to the server for multi-instance sync.
-    const sendNotification = (payload: OscPayload) => {
-      const store = usePanelNotificationStore.getState();
-      const worktreePath = store.panelWorktreeMap[terminalId];
-      if (!worktreePath) return;
-      wsClient.send({
-        type: "notification_add",
-        source: { kind: "terminal", panelId: terminalId, worktreePath },
-        title: payload.title,
-        body: payload.body,
-        urgency: payload.urgency,
-      });
-    };
-    const notifDisposables = [
-      terminal.parser.registerOscHandler(9, (data) => {
-        if (useSettingsStore.getState().terminal.notificationSequences.osc9) {
-          sendNotification(parseOsc9(data));
-        }
-        return false;
-      }),
-      terminal.parser.registerOscHandler(777, (data) => {
-        if (!useSettingsStore.getState().terminal.notificationSequences.osc777) return false;
-        const parsed = parseOsc777(data);
-        if (parsed) sendNotification(parsed);
-        return false;
-      }),
-      terminal.parser.registerOscHandler(99, (data) => {
-        if (useSettingsStore.getState().terminal.notificationSequences.osc99) {
-          sendNotification(parseOsc99(data));
-        }
-        return false;
-      }),
-    ];
 
     // Keyboard shortcuts
     terminal.attachCustomKeyEventHandler((event) => {
@@ -343,14 +406,16 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
     // WebGL only while visible: hidden tabs don't count against Chromium's context cap. Switching
     // renderers changes the cell size; the ResizeObserver refits when the panel is shown again.
     const webglRenderer = createWebglRenderer(terminal, terminalId, () => {
-      if (createdRef.current) fitAndSendResize(terminalId, terminal, fitAddon);
+      if (attachedRef.current) fitAndSendResize(terminalId, terminal, fitAddon);
     });
     const visibility = panelApi.onDidVisibilityChange(({ isVisible }) => {
       if (isVisible) webglRenderer.attach();
       else webglRenderer.detach();
     });
 
-    // Open once the font is ready, then fit and send create to server
+    const output = new OutputStream(terminalId, terminal);
+
+    // Open once the font is ready, then fit and attach to the server session
     const container = containerRef.current;
     let disposed = false;
     let rafId = 0;
@@ -362,9 +427,11 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       if (panelApi.isActive && panelApi.isGroupActive) terminal.focus();
       rafId = requestAnimationFrame(() => {
         fitAddon.fit();
-        if (cwdRef.current) sendCreate(terminalId, terminal, cwdRef.current);
-        createdRef.current = true;
-        exitedRef.current = false;
+        if (cwdRef.current) {
+          output.expectState();
+          sendAttach(terminalId, terminal, cwdRef.current);
+          attachedRef.current = true;
+        }
       });
     });
 
@@ -372,22 +439,41 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
     exitedRef.current = false;
-    createdRef.current = false;
+    attachedRef.current = false;
 
-    // Send user input as binary frames
+    // Send user input (and xterm's replies to terminal queries) as binary frames
     const inputDisposable = terminal.onData((data) => {
       if (!exitedRef.current) {
         wsClient.sendTerminalInput(terminalId, data);
       }
     });
 
-    // Receive raw PTY output as binary frames
-    const unsubOutput = wsClient.onTerminalOutput(terminalId, (data) => {
-      terminal.write(data);
+    // Receive raw PTY output as offset-tagged binary frames
+    const unsubOutput = wsClient.onTerminalOutput(terminalId, (offset, data) => {
+      output.receive(offset, data);
     });
 
-    // Listen for terminal exit
+    // Terminal state (attach replies, resyncs) and exit
     const unsubscribe = wsClient.subscribe((msg) => {
+      if (msg.type === "terminal_state" && msg.id === terminalId) {
+        output.applyState(msg);
+        termLog.info("Terminal state applied", {
+          terminalId,
+          mode: msg.mode,
+          offset: msg.offset,
+          snapshotBytes: msg.snapshot?.length,
+        });
+        // A fit may have changed the xterm between the attach request and this state.
+        if (msg.cols !== terminal.cols || msg.rows !== terminal.rows) {
+          wsClient.send({
+            type: "terminal_resize",
+            id: terminalId,
+            cols: terminal.cols,
+            rows: terminal.rows,
+          });
+        }
+        return;
+      }
       if (msg.type === "terminal_exit" && msg.id === terminalId) {
         exitedRef.current = true;
         terminal.write(`\r\n\x1b[90m[Process exited with code ${msg.exitCode}]\x1b[0m\r\n`);
@@ -395,12 +481,13 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       }
     });
 
-    // On WebSocket reconnect, re-create the PTY
+    // On WebSocket reconnect, re-attach. The xterm keeps its content: the server resumes from the
+    // offset it is current to, or answers with a snapshot (which resets it) if that is gone.
     const unsubReconnect = wsClient.onReconnect(() => {
-      // Before the initial create, the pending open sends terminal_create itself.
-      if (exitedRef.current || !createdRef.current) return;
-      terminal.reset();
-      if (cwdRef.current) sendCreate(terminalId, terminal, cwdRef.current);
+      // Before the initial attach, the pending open sends terminal_attach itself.
+      if (exitedRef.current || !attachedRef.current || !cwdRef.current) return;
+      output.expectState();
+      sendAttach(terminalId, terminal, cwdRef.current, output.since);
       termLog.info("Terminal reconnected", { terminalId });
     });
 
@@ -408,10 +495,12 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       disposed = true;
       cancelAnimationFrame(rafId);
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+      if (attachedRef.current && !exitedRef.current) {
+        wsClient.send({ type: "terminal_detach", id: terminalId });
+      }
       inputDisposable.dispose();
       searchResults.dispose();
       fileLinks.dispose();
-      for (const d of notifDisposables) d.dispose();
       unsubOutput();
       unsubscribe();
       unsubReconnect();
@@ -453,7 +542,7 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
     if (!containerRef.current) return;
 
     const scheduleFit = () => {
-      if (!fitAddonRef.current || !xtermRef.current || !createdRef.current) return;
+      if (!fitAddonRef.current || !xtermRef.current || !attachedRef.current) return;
 
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       resizeTimerRef.current = setTimeout(() => {

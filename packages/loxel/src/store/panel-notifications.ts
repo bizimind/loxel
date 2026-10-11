@@ -1,8 +1,9 @@
 /**
  * Panel notification state.
  *
- * Server is the source of truth — this store mirrors WS broadcasts.
- * Multiple loxel instances stay in sync via the server-side NotificationStore.
+ * Server is the source of truth — notifications are detected server-side from terminal output
+ * and this store mirrors WS broadcasts. Multiple loxel instances stay in sync via the
+ * server-side NotificationStore.
  *
  * Tracks which panels have unread notifications so that:
  * - Panel tabs show a badge dot when the tab is not active
@@ -13,15 +14,6 @@ import { create } from "zustand";
 
 import { wsClient } from "@/api/client";
 import type { ServerNotification } from "@/api/notification-model";
-
-/**
- * How long to suppress notifications after panel registration (ms).
- * Covers scrollback replay when a terminal remounts after a worktree switch.
- */
-const SUPPRESS_AFTER_REGISTER_MS = 3000;
-
-/** Timestamps of recent panel registrations. Not in Zustand state — doesn't drive UI. */
-const registeredAt = new Map<string, number>();
 
 function extractPanelId(n: ServerNotification): string | undefined {
   if (n.source.kind === "terminal") return n.source.panelId;
@@ -57,12 +49,7 @@ interface PanelNotificationState {
   /** Derived: worktreePaths with at least one notification. Rebuilt on every mutation. */
   worktreeIndex: Set<string>;
 
-  /** Panel ID → worktree path mapping (set at panel creation). Client-side only. */
-  panelWorktreeMap: Record<string, string>;
-
-  /** Register a panel with its owning worktree path (client-side, for suppression). */
-  registerPanel: (panelId: string, worktreePath: string) => void;
-  /** Unregister a panel and dismiss its notifications on the server. */
+  /** Dismiss a closed panel's notifications on the server. */
   unregisterPanel: (panelId: string) => void;
 
   /** Server-sync: replace all notifications (sent on connect/reconnect). */
@@ -94,31 +81,13 @@ export function hasWorktreeNotification(s: PanelNotificationState, worktreePath:
   return s.worktreeIndex.has(worktreePath);
 }
 
-/** Check whether a panelId is within the scrollback suppression window. */
-function isSuppressed(panelId: string): boolean {
-  const ts = registeredAt.get(panelId);
-  return !!ts && Date.now() - ts < SUPPRESS_AFTER_REGISTER_MS;
-}
-
 export const usePanelNotificationStore = create<PanelNotificationState>()((set) => ({
   notifications: [],
   panelIndex: new Set(),
   worktreeIndex: new Set(),
-  panelWorktreeMap: {},
-
-  registerPanel: (panelId, worktreePath) => {
-    registeredAt.set(panelId, Date.now());
-    set((s) => ({ panelWorktreeMap: { ...s.panelWorktreeMap, [panelId]: worktreePath } }));
-  },
 
   unregisterPanel: (panelId) => {
-    registeredAt.delete(panelId);
-    // Dismiss server-side notifications for this panel
     wsClient.send({ type: "notification_dismiss_panel", panelId });
-    set((s) => {
-      const { [panelId]: _, ...remainingMap } = s.panelWorktreeMap;
-      return { panelWorktreeMap: remainingMap };
-    });
   },
 
   // --- Server sync ---
@@ -131,11 +100,6 @@ export const usePanelNotificationStore = create<PanelNotificationState>()((set) 
 
   addFromServer: (notification) =>
     set((s) => {
-      // Skip locally if within scrollback suppression window (don't send dismiss —
-      // suppression is a local, transient concern and should not affect other clients)
-      const panelId = extractPanelId(notification);
-      if (panelId && isSuppressed(panelId)) return s;
-
       const notifications = [notification, ...s.notifications];
       const { panelIndex, worktreeIndex } = buildIndexes(notifications);
       return { notifications, panelIndex, worktreeIndex };

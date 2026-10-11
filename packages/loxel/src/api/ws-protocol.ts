@@ -2,7 +2,7 @@ import type { SessionConfig } from "@bizimind/coding-agent";
 
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
-import type { ServerNotification, NotificationSource } from "./notification-model";
+import type { ServerNotification } from "./notification-model";
 import type { DirEntry } from "./project-files-model";
 import type { UpdateState } from "./update-model";
 
@@ -76,6 +76,7 @@ export type WsMessage =
   // Global (sent to all clients)
   | { type: "error"; message: string }
   | { type: "terminal_exit"; id: string; exitCode: number }
+  | ({ type: "terminal_state" } & TerminalState)
   | { type: "agent_event"; id: string; seq: number; event: AgentEventPayload }
   | { type: "agent_exit"; id: string; exitCode: number }
   | {
@@ -100,6 +101,40 @@ export type WsMessage =
 /** Default number of scrollback lines. Shared by client settings and server fallback. */
 export const DEFAULT_SCROLLBACK_LINES = 50_000;
 
+/** Bounds for the scrollback setting, enforced on both sides. */
+export const MIN_SCROLLBACK_LINES = 1_000;
+export const MAX_SCROLLBACK_LINES = 100_000;
+
+export function clampScrollbackLines(lines: number | undefined): number {
+  return Math.max(
+    MIN_SCROLLBACK_LINES,
+    Math.min(MAX_SCROLLBACK_LINES, lines ?? DEFAULT_SCROLLBACK_LINES),
+  );
+}
+
+/**
+ * How a `terminal_state` message brings the client's xterm in line with the server's session.
+ *
+ * - `snapshot`: the serialized screen and scrollback of the server-side emulator at `offset`.
+ *   The client resets its xterm and writes `snapshot`, then applies output frames from `offset`.
+ * - `resume`: the client's xterm is already current up to `offset`; output frames continue
+ *   from there with nothing to replay.
+ */
+export type TerminalStateMode = "snapshot" | "resume";
+
+export interface TerminalState {
+  id: string;
+  /** Random per spawn. Offsets are only comparable within one epoch. */
+  epoch: string;
+  mode: TerminalStateMode;
+  /** Stream offset the client's xterm is current to once this message is applied. */
+  offset: number;
+  /** Present only for `snapshot`. */
+  snapshot?: string;
+  cols: number;
+  rows: number;
+}
+
 /** Client-to-server WebSocket message types (JSON text frames) */
 export type WsClientMessage =
   | { type: "subscribe_worktree"; worktreePath: string }
@@ -107,16 +142,32 @@ export type WsClientMessage =
   | { type: "subscribe_logs" }
   | { type: "unsubscribe_logs" }
   | {
-      type: "terminal_create";
+      /**
+       * Bind a mounted xterm to a terminal session, spawning the shell if the session does not
+       * exist. `cwd`, `windowId` and the env apply only when spawning; `cols`, `rows` and
+       * `scrollbackLines` are applied on every attach. `sinceEpoch`/`sinceOffset` identify the
+       * session and stream offset the client's xterm is already current to (a reconnect with a
+       * live xterm); omit them for a fresh xterm.
+       */
+      type: "terminal_attach";
       id: string;
       cols: number;
       rows: number;
       cwd: string;
       scrollbackLines?: number;
       windowId?: string;
+      sinceEpoch?: string;
+      sinceOffset?: number;
     }
+  /** Stop streaming output to this client; the session keeps running. Sent on unmount. */
+  | { type: "terminal_detach"; id: string }
   | { type: "terminal_resize"; id: string; cols: number; rows: number }
   | { type: "terminal_destroy"; id: string }
+  /**
+   * Flow control: the client has parsed `bytes` more bytes of output under the sync whose
+   * `terminal_state` carried `syncOffset`; acks for an older sync are ignored.
+   */
+  | { type: "terminal_ack"; id: string; syncOffset: number; bytes: number }
   | {
       type: "agent_create";
       id: string;
@@ -139,13 +190,6 @@ export type WsClientMessage =
   | { type: "window_hello"; windowId: string }
   | { type: "window_focused" }
   // Notifications
-  | {
-      type: "notification_add";
-      source: NotificationSource;
-      title?: string;
-      body?: string;
-      urgency?: ServerNotification["urgency"];
-    }
   | { type: "notification_dismiss"; id: string }
   | { type: "notification_dismiss_panel"; panelId: string }
   | { type: "notifications_clear" };
@@ -154,33 +198,58 @@ export type WsClientMessage =
  * Binary WebSocket frame protocol for terminal I/O.
  * Used for high-frequency data to avoid JSON overhead and preserve raw bytes.
  *
- * Frame format: [type: 1 byte][terminalId: 36 bytes ASCII UUID][payload: rest]
- *
- * Types:
- *   0x01 = terminal output (server → client) — payload is raw PTY bytes
- *   0x02 = terminal input  (client → server) — payload is UTF-8 input
+ * Output (server → client): [0x01][terminalId: 36 ASCII bytes][offset: u64 BE][payload]
+ *   `offset` is the position of the payload's first byte in the session's output stream,
+ *   counted from spawn. The client tracks `offset + payload.length` as the offset it is current
+ *   to and sends it back as `sinceOffset` when it re-attaches after a reconnect.
+ * Input (client → server):  [0x02][terminalId: 36 ASCII bytes][payload]
+ *   `payload` is UTF-8 keyboard input or a terminal reply, written to the PTY verbatim.
  */
 export const BIN_MSG_OUTPUT = 0x01;
 export const BIN_MSG_INPUT = 0x02;
 export const BIN_HEADER_SIZE = 1 + 36; // type byte + UUID
+const OFFSET_SIZE = 8;
+export const BIN_OUTPUT_HEADER_SIZE = BIN_HEADER_SIZE + OFFSET_SIZE;
 
 const textEncoder = new TextEncoder();
 
-export function encodeBinaryFrame(
-  type: number,
-  terminalId: string,
-  payload: Uint8Array,
-): Uint8Array {
-  const buf = new Uint8Array(BIN_HEADER_SIZE + payload.byteLength);
+function writeHeader(buf: Uint8Array, type: number, terminalId: string): void {
   buf[0] = type;
   buf.set(textEncoder.encode(terminalId), 1);
+}
+
+export function encodeInputFrame(terminalId: string, payload: Uint8Array): Uint8Array {
+  const buf = new Uint8Array(BIN_HEADER_SIZE + payload.byteLength);
+  writeHeader(buf, BIN_MSG_INPUT, terminalId);
   buf.set(payload, BIN_HEADER_SIZE);
   return buf;
 }
 
+export function encodeOutputFrame(
+  terminalId: string,
+  offset: number,
+  payload: Uint8Array,
+): Uint8Array {
+  const buf = new Uint8Array(BIN_OUTPUT_HEADER_SIZE + payload.byteLength);
+  writeHeader(buf, BIN_MSG_OUTPUT, terminalId);
+  new DataView(buf.buffer, buf.byteOffset).setBigUint64(BIN_HEADER_SIZE, BigInt(offset));
+  buf.set(payload, BIN_OUTPUT_HEADER_SIZE);
+  return buf;
+}
+
+/** Parse the common header. The caller guarantees `data.byteLength >= BIN_HEADER_SIZE`. */
 export function parseBinaryHeader(data: Uint8Array): { type: number; terminalId: string } {
-  // index access on Uint8Array is safe after length check by caller
   const type = data[0]!;
   const terminalId = String.fromCharCode(...data.subarray(1, BIN_HEADER_SIZE));
   return { type, terminalId };
+}
+
+/** Parse an output frame's offset and payload. Returns null if the frame is too short. */
+export function parseOutputFrame(
+  data: Uint8Array,
+): { terminalId: string; offset: number; payload: Uint8Array } | null {
+  if (data.byteLength < BIN_OUTPUT_HEADER_SIZE) return null;
+  const { terminalId } = parseBinaryHeader(data);
+  const offset = Number(new DataView(data.buffer, data.byteOffset).getBigUint64(BIN_HEADER_SIZE));
+  return { terminalId, offset, payload: data.subarray(BIN_OUTPUT_HEADER_SIZE) };
 }

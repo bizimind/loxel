@@ -10,9 +10,7 @@ import {
   DEFAULT_TOOLBAR_ENTRIES,
   ZONE_INITIAL_SIZES,
 } from "./panel-config";
-import { usePanelNotificationStore } from "./panel-notifications";
 import { createWorktreeStore } from "./worktree-store";
-import { useWorktreeStore } from "./worktrees";
 
 export interface SidebarSizes {
   left: number;
@@ -66,10 +64,6 @@ export const {
 
   addTerminal: (instance) => {
     set((s) => ({ terminals: [...s.terminals, instance] }));
-    const wtPath = useWorktreeStore.getState().activeWorktreePath;
-    if (wtPath) {
-      usePanelNotificationStore.getState().registerPanel(instance.terminalId, wtPath);
-    }
   },
 
   removeTerminal: (id) => {

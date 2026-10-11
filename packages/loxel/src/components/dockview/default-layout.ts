@@ -9,11 +9,9 @@ import {
   getPanelTitle,
   isCenterPanel,
 } from "@/store/panel-config";
-import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { buildToolbarEntries, getEffectiveLayoutConfig } from "@/store/settings-store";
 import type { ToolsBarEntry } from "@/store/worktree-tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
-import { useWorktreeStore } from "@/store/worktrees";
 
 // Bump when the default layout structure changes to force a reset of saved layouts.
 export const LAYOUT_VERSION = 29;
@@ -194,15 +192,6 @@ export function syncTerminalsFromLayout(api: DockviewApi): void {
     });
 
   getCurrentWorktreeToolsBar().setState({ terminals });
-
-  // Register all restored terminals with the notification store
-  const wtPath = useWorktreeStore.getState().activeWorktreePath;
-  if (wtPath) {
-    const store = usePanelNotificationStore.getState();
-    for (const t of terminals) {
-      store.registerPanel(t.terminalId, wtPath);
-    }
-  }
 }
 
 export type SplitPosition = {

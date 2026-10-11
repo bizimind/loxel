@@ -37,13 +37,7 @@ import type {
 } from "./review-model";
 import type { UpdateState } from "./update-model";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
-import {
-  BIN_HEADER_SIZE,
-  BIN_MSG_INPUT,
-  BIN_MSG_OUTPUT,
-  encodeBinaryFrame,
-  parseBinaryHeader,
-} from "./ws-protocol";
+import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./ws-protocol";
 
 const API_BASE = "/api";
 
@@ -777,8 +771,9 @@ export async function deleteCommentThread(wt: string, threadId: string) {
   });
 }
 
-// Terminal output handler: receives raw PTY bytes for a specific terminal
-type TerminalOutputHandler = (data: Uint8Array) => void;
+// Terminal output handler: receives raw PTY bytes for a specific terminal, tagged with the
+// stream offset of their first byte.
+type TerminalOutputHandler = (offset: number, data: Uint8Array) => void;
 
 // WebSocket singleton client with send support
 class WsClient {
@@ -789,7 +784,6 @@ class WsClient {
   private listeners = new Set<(msg: WsMessage) => void>();
   private reconnectListeners = new Set<() => void>();
   private terminalOutputHandlers = new Map<string, TerminalOutputHandler>();
-  private terminalDataListeners = new Set<(terminalId: string, data: Uint8Array) => void>();
   private pendingMessages: (string | ArrayBuffer)[] = [];
 
   connect(): void {
@@ -839,19 +833,12 @@ class WsClient {
           });
         }
       } else {
-        // Binary frame — terminal I/O
+        // Binary frame — terminal output
         const buf = new Uint8Array(event.data as ArrayBuffer);
-        if (buf.byteLength < BIN_HEADER_SIZE) return;
-
-        const { type, terminalId } = parseBinaryHeader(buf);
-        if (type === BIN_MSG_OUTPUT) {
-          const payload = buf.subarray(BIN_HEADER_SIZE);
-          const handler = this.terminalOutputHandlers.get(terminalId);
-          if (typeof handler === "function") handler(payload);
-          for (const listener of this.terminalDataListeners) {
-            listener(terminalId, payload);
-          }
-        }
+        if (buf[0] !== BIN_MSG_OUTPUT) return;
+        const frame = parseOutputFrame(buf);
+        if (!frame) return;
+        this.terminalOutputHandlers.get(frame.terminalId)?.(frame.offset, frame.payload);
       }
     };
 
@@ -926,7 +913,7 @@ class WsClient {
 
   /** Send terminal input as a binary frame. */
   sendTerminalInput(terminalId: string, data: string): void {
-    const frame = encodeBinaryFrame(BIN_MSG_INPUT, terminalId, new TextEncoder().encode(data));
+    const frame = encodeInputFrame(terminalId, new TextEncoder().encode(data));
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(frame as BufferSource);
     }
@@ -943,17 +930,6 @@ class WsClient {
   onTerminalOutput(terminalId: string, handler: TerminalOutputHandler): () => void {
     this.terminalOutputHandlers.set(terminalId, handler);
     return () => this.terminalOutputHandlers.delete(terminalId);
-  }
-
-  /** Whether a primary output handler is registered for a terminal (i.e. xterm.js is mounted). */
-  hasTerminalHandler(terminalId: string): boolean {
-    return this.terminalOutputHandlers.has(terminalId);
-  }
-
-  /** Subscribe to all terminal output for notification scanning. */
-  onTerminalData(handler: (terminalId: string, data: Uint8Array) => void): () => void {
-    this.terminalDataListeners.add(handler);
-    return () => this.terminalDataListeners.delete(handler);
   }
 
   /** Subscribe to reconnection events. Listeners should re-create any server-side state. */
