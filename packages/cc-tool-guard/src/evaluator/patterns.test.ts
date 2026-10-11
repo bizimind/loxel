@@ -107,6 +107,7 @@ describe("dangerous rm patterns", () => {
       "git rm -r --cached .",
       "git rm --cached -r .",
       "git rm -r --cached *",
+      "git   rm   -r   --cached   .",
       "pnpm rm -r .",
       "npm rm -r .",
     ])("%s is not matched by the recursive rules", (command) => {
@@ -130,6 +131,17 @@ describe("dangerous rm patterns", () => {
         expect(classify(command)).toBe("uncertain");
       },
     );
+  });
+
+  test("a long command evaluates in linear time", () => {
+    const paths = Array.from({ length: 1000 }, (_, i) => `path/to/file-${i}.txt`).join(" ");
+    const commands = [`rm -rf ${paths}`, `cp ${paths} dest`, `git rm -r --cached ${paths}`];
+    for (const command of commands) {
+      expect(command.length).toBeGreaterThan(10_000);
+      const start = performance.now();
+      checkKnownPatterns(command, context);
+      expect(performance.now() - start).toBeLessThan(100);
+    }
   });
 
   test("non-recursive rm of a glob is not matched by the recursive rules", () => {

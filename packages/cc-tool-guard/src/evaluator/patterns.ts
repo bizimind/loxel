@@ -6,6 +6,23 @@ interface PatternRule {
   classification: "safe" | "uncertain";
   reason: string;
   suggestedPattern?: string;
+  /** Cheap pre-check; when it returns true the rule is skipped without testing `pattern`. */
+  exclude?: (command: string) => boolean;
+}
+
+/**
+ * Whether the command is a `git rm` invocation carrying `--cached` (which only unstages and never
+ * touches the working tree). A linear token scan rather than a regex lookbehind: a lookbehind with
+ * a nested lookahead is re-evaluated at every start index and made every Bash permission check
+ * quadratic in command length on JavaScriptCore.
+ */
+function isGitRmCached(command: string): boolean {
+  const tokens = command.split(/\s+/);
+  const gitIndex = tokens.indexOf("git");
+  if (gitIndex === -1 || tokens[gitIndex + 1] !== "rm") {
+    return false;
+  }
+  return tokens.includes("--cached", gitIndex + 2);
 }
 
 /**
@@ -15,11 +32,11 @@ interface PatternRule {
  * opening quote), so rules can append the operand shape.
  *
  * The `rm` must not be a package-manager subcommand (`pnpm rm -r .` removes dependencies, not
- * files) or `git rm` with `--cached` (which only unstages). `git rm -r` without `--cached` does
- * delete from the working tree, so it still matches, as do other prefixes (`sudo rm`, `env rm`,
- * `\\rm`, `/bin/rm`, `cd x && rm`).
+ * files). `git rm --cached` (which only unstages) is excluded by the rules' `exclude` pre-check,
+ * see `isGitRmCached`. `git rm -r` without `--cached` does delete from the working tree, so it
+ * still matches, as do other prefixes (`sudo rm`, `env rm`, `\\rm`, `/bin/rm`, `cd x && rm`).
  */
-const RM_RECURSIVE_ARGS = String.raw`(?<!\b(?:npm|pnpm|yarn|bun)\s)(?<!\bgit\s(?=(?:\S+\s+)*--cached))\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
+const RM_RECURSIVE_ARGS = String.raw`(?<!\b(?:npm|pnpm|yarn|bun)\s)\brm\s+(?=(?:\S+\s+)*?(?:-[a-zA-Z]*[rR]|--recursive))(?:\S+\s+)*["']?`;
 
 /**
  * Dangerous patterns - these always require user confirmation
@@ -182,6 +199,7 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     pattern: new RegExp(RM_RECURSIVE_ARGS + String.raw`(?:\.{1,2}\/)*\.{1,2}\/?["']?(?:\s|$)`),
     classification: "uncertain",
     reason: "Recursive delete of current or parent directory",
+    exclude: isGitRmCached,
   },
   {
     // `*`, `*.js`, `./*`, `../*`, `../../*`, and dot globs such as `.*`, `.[!.]*`, `.??*` (which
@@ -198,6 +216,7 @@ const DANGEROUS_PATTERNS: PatternRule[] = [
     ),
     classification: "uncertain",
     reason: "Recursive delete with wildcard glob in current or parent directory",
+    exclude: isGitRmCached,
   },
 
   // Environment modification
@@ -419,6 +438,9 @@ function evaluateSingleCommand(command: string, context: ProjectContext): Evalua
 
   // Check dangerous patterns first
   for (const rule of DANGEROUS_PATTERNS) {
+    if (rule.exclude?.(trimmedCommand)) {
+      continue;
+    }
     if (rule.pattern.test(trimmedCommand)) {
       return { classification: rule.classification, reason: rule.reason };
     }
