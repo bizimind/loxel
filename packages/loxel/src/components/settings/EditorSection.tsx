@@ -272,7 +272,7 @@ export function EditorSection() {
         <div>
           <label className="text-muted-foreground text-xs">Markdown Output</label>
           <p className="text-muted-foreground mt-1 text-[10px]">
-            Markers the markdown editor writes. When format on save is enabled and a markdown
+            Block markers the markdown editor writes. When format on save is enabled and a markdown
             formatter (prettier, oxfmt) is detected, it overrides these on save.
           </p>
         </div>
@@ -333,8 +333,6 @@ interface MarkdownOutputField {
 const MARKDOWN_OUTPUT_FIELDS: MarkdownOutputField[] = [
   { key: "bullet", label: "Bullet marker" },
   { key: "bulletOrdered", label: "Ordered marker", labels: { ".": "1.", ")": "1)" } },
-  { key: "emphasis", label: "Emphasis", labels: { _: "_text_", "*": "*text*" } },
-  { key: "strong", label: "Strong", labels: { "*": "**text**", _: "__text__" } },
   { key: "fence", label: "Code fence", labels: { "`": "```", "~": "~~~" } },
   { key: "rule", label: "Horizontal rule", labels: { "-": "---", "*": "***", _: "___" } },
   {

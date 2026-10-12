@@ -20,8 +20,8 @@ export interface FormattingSettings {
   /** Manual per-extension overrides (highest priority over auto-detect). */
   overrides: FormatterOverride[];
   /**
-   * Markers the markdown editor emits when serializing. Only matters when no markdown
-   * formatter rewrites the file on save (formatters normalize markers themselves).
+   * Block-level markers the markdown editor emits when serializing. Only matters when no
+   * markdown formatter rewrites the file on save (formatters normalize markers themselves).
    */
   markdownOutput: MarkdownOutputSettings;
 }
@@ -33,8 +33,6 @@ type MarkdownOutputKey =
   | "bullet"
   | "bulletOrdered"
   | "incrementListMarker"
-  | "emphasis"
-  | "strong"
   | "fence"
   | "rule"
   | "listItemIndent"
@@ -51,8 +49,6 @@ export type MarkdownOutputChoiceKey = Exclude<MarkdownOutputKey, "incrementListM
 export const MARKDOWN_OUTPUT_CHOICES = {
   bullet: ["-", "*", "+"],
   bulletOrdered: [".", ")"],
-  emphasis: ["_", "*"],
-  strong: ["*", "_"],
   fence: ["`", "~"],
   rule: ["-", "*", "_"],
   listItemIndent: ["one", "tab", "mixed"],
@@ -65,8 +61,6 @@ export const DEFAULT_MARKDOWN_OUTPUT_SETTINGS: MarkdownOutputSettings = {
   bullet: "-",
   bulletOrdered: ".",
   incrementListMarker: true,
-  emphasis: "_",
-  strong: "*",
   fence: "`",
   rule: "-",
   listItemIndent: "one",
@@ -96,8 +90,6 @@ export function parseMarkdownOutputSettings(input: unknown): MarkdownOutputSetti
       typeof raw.incrementListMarker === "boolean"
         ? raw.incrementListMarker
         : d.incrementListMarker,
-    emphasis: isMarkdownOutputChoice("emphasis", raw.emphasis) ? raw.emphasis : d.emphasis,
-    strong: isMarkdownOutputChoice("strong", raw.strong) ? raw.strong : d.strong,
     fence: isMarkdownOutputChoice("fence", raw.fence) ? raw.fence : d.fence,
     rule: isMarkdownOutputChoice("rule", raw.rule) ? raw.rule : d.rule,
     listItemIndent: isMarkdownOutputChoice("listItemIndent", raw.listItemIndent)

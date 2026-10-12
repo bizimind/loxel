@@ -51,7 +51,7 @@ describe("markdown output options against installed remark-stringify", () => {
         "1. first",
         "2. second",
         "",
-        "_em_ **strong**",
+        "*em* **strong**",
         "",
         "```",
         "code",
@@ -75,14 +75,6 @@ describe("markdown output options against installed remark-stringify", () => {
 
   test("incrementListMarker false repeats the first number", () => {
     expect(serialize({ incrementListMarker: false })).toContain("\n1. first\n1. second\n");
-  });
-
-  test.each([...MARKDOWN_OUTPUT_CHOICES.emphasis])("emphasis %s", (emphasis) => {
-    expect(serialize({ emphasis })).toContain(`\n${emphasis}em${emphasis} `);
-  });
-
-  test.each([...MARKDOWN_OUTPUT_CHOICES.strong])("strong %s", (strong) => {
-    expect(serialize({ strong })).toContain(` ${strong}${strong}strong${strong}${strong}\n`);
   });
 
   test.each([...MARKDOWN_OUTPUT_CHOICES.fence])("fence %s", (fence) => {

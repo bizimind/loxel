@@ -88,6 +88,6 @@ Open settings with `Cmd+,`. Settings and keybindings are saved in `stores.db` in
 | Keybindings       | Per-action shortcut overrides — see [Keyboard Shortcuts](/docs/reference-keybindings)                                                                                   |
 | Layout            | Which panels each side zone (left, bottom, right) holds and opens by default, and the zone sizes; applies to new worktree layouts                                       |
 | Terminal          | Scrollback buffer size (1,000–100,000 lines; default 50,000), notification sequences — see [Terminals](/docs/terminals)                                                 |
-| Editor            | Indentation and per-extension overrides, format on save and on autosave, formatter auto-detection and manual formatter overrides — see [Editor](/docs/editor)           |
+| Editor            | Indentation and per-extension overrides, format on save and on autosave, formatter detection/overrides, markdown output markers — see [Editor](/docs/editor)            |
 | File Associations | Glob-to-language mappings for custom file types                                                                                                                         |
 | Schemas           | JSON and YAML schema mappings; `tsconfig.json`, `package.json`, and GitHub workflow files are built in                                                                  |

@@ -51,10 +51,7 @@ import { useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
-import {
-  buildRemarkStringifyOptions,
-  remarkForgetSourceMarkers,
-} from "./markdown-stringify-options";
+import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 
 import "@/styles/milkdown-theme.css";
 
@@ -429,7 +426,6 @@ export function MarkdownEditor({
     for (const plugin of localDbDirectivePlugins) {
       crepe.editor.use(plugin);
     }
-    crepe.editor.use(remarkForgetSourceMarkers);
 
     // Markers the serializer emits (Settings > Editor > Markdown output). Milkdown builds
     // remark-stringify at init, so changes recreate the editor via the effect deps below.
