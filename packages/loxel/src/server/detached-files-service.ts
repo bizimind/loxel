@@ -1,10 +1,11 @@
 import { constants, copyFile, mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 
 import type { DirEntry } from "@/api/project-files-model";
 
 import type { FileChange } from "./file-sync-service";
 import { FilesSyncService } from "./file-sync-service";
+import { extractRelativeImageRefs, isImageExtension } from "./image-upload";
 import { logger } from "./logger";
 
 const log = logger.child("detached");
@@ -124,6 +125,52 @@ export class DetachedFilesService {
     }
   }
 
+  /** Create a new file exclusively (throws `EEXIST` if it exists), with nonce tracking. */
+  async writeNewFile(name: string, content: Uint8Array, nonce: string): Promise<void> {
+    await this.syncService.writeWithNonce(name, nonce, () =>
+      writeFile(join(this.dir, name), content, { flag: "wx" }),
+    );
+    this.cachedEntries = await this.readDir();
+    this.onListChanged(this.cachedEntries);
+  }
+
+  /**
+   * Images referenced by relative path from a markdown draft (`![alt](./x.png)`).
+   * Drafts are a flat directory, so only bare image filenames that exist there qualify.
+   * Non-markdown files never carry companions. Read-only: does not touch `cachedEntries`.
+   */
+  private async findCompanionImages(name: string): Promise<string[]> {
+    if (extname(name).toLowerCase() !== ".md") return [];
+    const refs = await this.readImageRefs(name);
+    const existing = new Set((await this.readDir()).map((e) => e.name));
+    return refs.filter(
+      (ref) =>
+        ref !== name &&
+        !ref.includes("/") &&
+        isImageExtension(extname(ref).slice(1)) &&
+        existing.has(ref),
+    );
+  }
+
+  /** Image names that markdown drafts other than `name` still reference. */
+  private async imagesReferencedByOtherDrafts(name: string): Promise<Set<string>> {
+    const shared = new Set<string>();
+    for (const entry of await this.readDir()) {
+      if (entry.name === name || extname(entry.name).toLowerCase() !== ".md") continue;
+      for (const ref of await this.readImageRefs(entry.name)) shared.add(ref);
+    }
+    return shared;
+  }
+
+  private async readImageRefs(name: string): Promise<string[]> {
+    try {
+      return extractRelativeImageRefs(await this.readFileContent(name));
+    } catch (err) {
+      log.warn("Failed to read draft content for companion images", { name, error: err });
+      return [];
+    }
+  }
+
   async renameFile(oldName: string, newName: string): Promise<void> {
     const src = join(this.dir, oldName);
     const dest = join(this.dir, newName);
@@ -149,12 +196,25 @@ export class DetachedFilesService {
    * Returns the absolute path of the new file.
    */
   async copyToProject(name: string, destDir: string, worktreeCwd: string): Promise<string> {
-    const src = join(this.dir, name);
     const targetDir = destDir ? join(worktreeCwd, destDir) : worktreeCwd;
     await mkdir(targetDir, { recursive: true });
-    const dest = join(targetDir, name);
-    await copyFile(src, dest, constants.COPYFILE_EXCL);
-    return dest;
+    const companions = await this.findCompanionImages(name);
+    await this.assertNoneExist([name, ...companions], targetDir, destDir);
+    for (const file of [name, ...companions]) {
+      await copyFile(join(this.dir, file), join(targetDir, file), constants.COPYFILE_EXCL);
+    }
+    return join(targetDir, name);
+  }
+
+  /** Reject the move/copy up front so a name clash never leaves a half-moved draft. */
+  private async assertNoneExist(names: string[], targetDir: string, destDir: string) {
+    for (const file of names) {
+      const exists = await stat(join(targetDir, file)).then(
+        () => true,
+        () => false,
+      );
+      if (exists) throw new Error(`File already exists: ${destDir ? `${destDir}/${file}` : file}`);
+    }
   }
 
   /**
@@ -162,30 +222,24 @@ export class DetachedFilesService {
    * Returns the absolute path of the new file.
    */
   async moveToProject(name: string, destDir: string, worktreeCwd: string): Promise<string> {
-    const src = join(this.dir, name);
     const targetDir = destDir ? join(worktreeCwd, destDir) : worktreeCwd;
     await mkdir(targetDir, { recursive: true });
-    const dest = join(targetDir, name);
+    const companions = await this.findCompanionImages(name);
     // Prevent silently overwriting existing project files
-    const exists = await stat(dest).then(
-      () => true,
-      () => false,
-    );
-    if (exists) throw new Error(`File already exists: ${destDir ? `${destDir}/${name}` : name}`);
-    try {
-      await rename(src, dest);
-    } catch (err: unknown) {
-      // rename() fails across filesystem boundaries (EXDEV) — fall back to copy+delete
-      if ((err as NodeJS.ErrnoException).code === "EXDEV") {
-        await copyFile(src, dest, constants.COPYFILE_EXCL);
-        await rm(src);
+    await this.assertNoneExist([name, ...companions], targetDir, destDir);
+    // Images another draft still references are copied so that draft keeps rendering.
+    const shared = await this.imagesReferencedByOtherDrafts(name);
+    await moveFile(join(this.dir, name), join(targetDir, name));
+    for (const file of companions) {
+      if (shared.has(file)) {
+        await copyFile(join(this.dir, file), join(targetDir, file), constants.COPYFILE_EXCL);
       } else {
-        throw err;
+        await moveFile(join(this.dir, file), join(targetDir, file));
       }
     }
     this.cachedEntries = await this.readDir();
     this.onListChanged(this.cachedEntries);
-    return dest;
+    return join(targetDir, name);
   }
 
   private async readDir(): Promise<DirEntry[]> {
@@ -231,6 +285,17 @@ export class DetachedFilesService {
         }
       }
     }
+  }
+}
+
+/** rename() fails across filesystem boundaries (EXDEV) — fall back to copy+delete. */
+async function moveFile(src: string, dest: string): Promise<void> {
+  try {
+    await rename(src, dest);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+    await copyFile(src, dest, constants.COPYFILE_EXCL);
+    await rm(src);
   }
 }
 
