@@ -107,6 +107,16 @@ function err(
   return { ok: false, error: toToolError(code, message, retriable, suggestedFix) };
 }
 
+/**
+ * Re-throws the run's abort reason when `signal` has fired, so a cancelled run surfaces as
+ * a cancellation rather than as whatever secondary error the interrupted call produced.
+ */
+function rethrowIfAborted(signal: AbortSignal | undefined, error: unknown): void {
+  if (signal?.aborted) {
+    throw signal.reason ?? error;
+  }
+}
+
 function parseWithSchema<TSchema extends z.ZodTypeAny>(
   schema: TSchema,
   input: unknown,
@@ -941,6 +951,7 @@ async function runBash(
   if (!approval.ok) {
     return approval;
   }
+  ctx.abortSignal?.throwIfAborted();
 
   const timeoutMs = Math.min(
     input.timeout ?? BASH_LIMITS.defaultTimeoutMs,
@@ -985,14 +996,24 @@ async function runBash(
     // deliberately left armed: pipe EOF only proves the shell died, not its descendants.
     terminateProcessGroup(proc);
   }, timeoutMs);
+  // Run cancellation kills the same process group so no shell outlives its run.
+  const onAbort = () => terminateProcessGroup(proc);
+  ctx.abortSignal?.addEventListener("abort", onAbort, { once: true });
 
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-
-  clearTimeout(timer);
+  let stdout: string;
+  let stderr: string;
+  let exitCode: number;
+  try {
+    [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    ctx.abortSignal?.throwIfAborted();
+  } finally {
+    clearTimeout(timer);
+    ctx.abortSignal?.removeEventListener("abort", onAbort);
+  }
 
   const combined = `${stdout}\n${stderr}`;
   const stdoutCapped = truncateByLinesAndBytes(stdout);
@@ -1119,7 +1140,12 @@ async function runTaskOutput(
   }
   const input = parsed.data;
 
-  const task = await ctx.taskManager.getOutput(input.task_id, input.block, input.timeout);
+  const task = await ctx.taskManager.getOutput(
+    input.task_id,
+    input.block,
+    input.timeout,
+    ctx.abortSignal,
+  );
   if (!task) {
     return err(
       "TOOL_RUNTIME_ERROR",
@@ -1244,12 +1270,17 @@ async function runWebFetch(
   const input = parsed.data;
 
   const started = Date.now();
-  const signal = AbortSignal.timeout(WEB_LIMITS.fetchTimeoutMs);
+  // The per-call timeout and run cancellation both abort the request and the body read.
+  const timeoutSignal = AbortSignal.timeout(WEB_LIMITS.fetchTimeoutMs);
+  const signal = ctx.abortSignal
+    ? AbortSignal.any([timeoutSignal, ctx.abortSignal])
+    : timeoutSignal;
 
   let response: Response;
   try {
     response = await fetch(input.url, { signal, headers: { "user-agent": "coding-agent/0.1.0" } });
   } catch (error) {
+    rethrowIfAborted(ctx.abortSignal, error);
     return webFetchFailure(input.url, "request", error);
   }
 
@@ -1257,8 +1288,10 @@ async function runWebFetch(
   try {
     body = await response.text();
   } catch (error) {
+    rethrowIfAborted(ctx.abortSignal, error);
     return webFetchFailure(input.url, "body read", error);
   }
+
   const fullBytes = Buffer.byteLength(body, "utf8");
   const truncated = fullBytes > READ_LIMITS.maxBytes;
   const content = truncated ? body.slice(0, READ_LIMITS.maxBytes) : body;
@@ -1338,6 +1371,7 @@ async function runWebSearch(
   async function searchWithModel(modelId: string, overrideProvider?: OpenRouterProvider) {
     const { object } = await generateObject({
       model: (overrideProvider ?? provider)(modelId),
+      abortSignal: ctx.abortSignal,
       schema: resultSchema,
       prompt: `Search the web for: ${fullQuery}. Return at most ${topK} results.`,
       providerOptions: {
@@ -1354,6 +1388,7 @@ async function runWebSearch(
   try {
     searchOutput = await searchWithModel(primaryModel);
   } catch (primaryError) {
+    rethrowIfAborted(ctx.abortSignal, primaryError);
     if (!fallbackModel) {
       return err(
         "WEBSEARCH_UNAVAILABLE",
@@ -1371,6 +1406,7 @@ async function runWebSearch(
           : undefined;
       searchOutput = await searchWithModel(fallbackModel, fbProvider);
     } catch (fallbackError) {
+      rethrowIfAborted(ctx.abortSignal, fallbackError);
       return err(
         "WEBSEARCH_UNAVAILABLE",
         fallbackError instanceof Error ? fallbackError.message : "WebSearch fallback failed",
@@ -1763,6 +1799,8 @@ export async function invokeToolByName(
   rawInput: unknown,
   ctx: ToolRuntimeContext,
 ): Promise<ToolResult<unknown>> {
+  ctx.abortSignal?.throwIfAborted();
+
   const normalized = normalizeToolName(rawName);
   if (!normalized) {
     return err(
@@ -1788,7 +1826,9 @@ export async function invokeToolByName(
     );
   }
 
+  ctx.abortSignal?.throwIfAborted();
   const result = await tool.execute(rawInput, ctx);
+  ctx.abortSignal?.throwIfAborted();
 
   return result;
 }

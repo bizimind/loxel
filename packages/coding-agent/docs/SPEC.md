@@ -15,7 +15,7 @@ Design a `coding-agent` package that provides Claude Code / Codex CLI-like capab
 - Plan mode (structured planning + progress tracking)
 - Approval gates for risky actions
 
-Primary model routing is through **OpenRouter** using **Vercel AI SDK 6**, targeting **GLM-5** and **Kimi K2.5**.
+Primary model routing is through **OpenRouter** using **Vercel AI SDK 7**, targeting **GLM-5** and **Kimi K2.5**.
 
 ## Non-Goals
 
@@ -26,7 +26,7 @@ Primary model routing is through **OpenRouter** using **Vercel AI SDK 6**, targe
 ## Tech Constraints
 
 - Runtime: TypeScript + Bun
-- Model SDK: Vercel AI SDK 6
+- Model SDK: Vercel AI SDK 7
 - Validation: Zod 4
 - Provider: OpenRouter (model aliases/configurable fallbacks)
 - Transport: stdio JSON stream (newline-delimited JSON events)
@@ -105,7 +105,7 @@ Each request emits structured stream events:
 
 ### 2) Message Model
 
-Use Vercel AI SDK message types directly (`CoreMessage`/SDK-equivalent in v6) as the canonical conversation format.
+Use Vercel AI SDK message types directly (`ModelMessage` in v7) as the canonical conversation format.
 
 Include a thin envelope only for runtime metadata:
 
@@ -346,7 +346,7 @@ Optional compatibility aliases (only when needed for external parity surfaces):
 - `BashOutput` delegates to `TaskOutput`.
 - `KillShell` delegates to `TaskStop`.
 
-### 3.3) `WebSearch` Backend Specification (OpenRouter + Vercel AI SDK 6)
+### 3.3) `WebSearch` Backend Specification (OpenRouter + Vercel AI SDK 7)
 
 Primary backend decision:
 
@@ -369,9 +369,10 @@ Policy requirements:
 - enforce mandatory final response `Sources:` section with markdown links.
 - retain raw URLs in tool metadata for deterministic downstream citation rendering.
 
-### 3.4) AI SDK v6 + Zod 4 Integration Decisions
+### 3.4) AI SDK v7 + Zod 4 Integration Decisions
 
-- the orchestration loop calls AI SDK v6 `streamText` directly, with an explicit `stopWhen` step cap, so the runtime keeps full control over protocol events.
+- the orchestration loop calls AI SDK v7 `streamText` directly, with an explicit `stopWhen` step cap, so the runtime keeps full control over protocol events.
+- every run owns an `AbortSignal` (`runTurn` requires it) that is passed to `streamText` and to tool execution; aborting it is the only cancellation mechanism and stops generation, later tool execution, fallback retries, in-flight `Bash` process groups, `WebFetch`/`WebSearch` requests, and blocking `TaskOutput` waits.
 - tools are defined with AI SDK `tool(...)`; approval gating is done by the runtime (per-tool `requiresApproval` mapped to `approval.*` events), not by SDK `needsApproval`.
 - tool schemas are authored in Zod 4, and TypeScript types are derived from them with `z.infer`.
 - OpenRouter is the model transport via `@openrouter/ai-sdk-provider`; provider-specific options go through SDK provider option fields.
@@ -724,6 +725,8 @@ Mode-aware invariants:
    - parse tool calls in order; execute safe parallelism where independent.
    - for gated calls, emit `approval.requested` and transition to `WAIT_HUMAN`.
    - for `AskUserQuestion`, emit `human.input.requested` and transition to `WAIT_HUMAN`.
+   - register pending interactions before publishing their request events so in-process hosts may respond synchronously.
+   - cancellation rejects pending interactions; later responses to their expired keys are logged and ignored.
 5. Tool result append:
    - validate outputs against output schema.
    - append tool result messages back into conversation.
@@ -953,7 +956,7 @@ Repo-wide module, type-safety, and control-flow standards live in the root `AGEN
 Principles:
 
 - deterministic by default: fixed clocks/timers where possible, deterministic IDs in tests.
-- hermetic: no live network or real model calls; loop tests use AI SDK mock models (`MockLanguageModelV3`, see `tests/helpers/mock-session.ts`).
+- hermetic: no live network or real model calls; loop tests use AI SDK mock models (`MockLanguageModelV4`, see `tests/helpers/mock-session.ts`).
 - behavior-focused: verify event sequences, policy outcomes, and state transitions over implementation details.
 
 Layers:
