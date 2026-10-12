@@ -51,15 +51,20 @@ export interface TerminalSessionOptions {
   flowControl?: { highWaterBytes: number; lowWaterBytes: number };
 }
 
+/** Handle returned by `OutputRing.pin()`; only its holder can release that pin. */
+export interface RingPin {
+  readonly offset: number;
+}
+
 /**
  * Recent output bytes indexed by absolute stream offset. Chunks are evicted oldest-first once the
- * capacity is exceeded; the newest chunk, and everything at or after a pinned offset, is always
- * retained.
+ * capacity is exceeded; the newest chunk, and everything at or after the oldest pinned offset, is
+ * always retained.
  */
 export class OutputRing {
   private chunks: { offset: number; data: Uint8Array }[] = [];
   private bytes = 0;
-  private pinnedFrom: number | null = null;
+  private pins = new Set<RingPin>();
   /** Offset of the oldest retained byte. */
   start = 0;
   /** Offset one past the newest byte: the total number of bytes produced. */
@@ -71,11 +76,10 @@ export class OutputRing {
     this.chunks.push({ offset: this.end, data });
     this.end += data.byteLength;
     this.bytes += data.byteLength;
+    const pinnedFrom = this.pinnedFrom();
     while (this.bytes > this.capacity && this.chunks.length > 1) {
       const oldest = this.chunks[0]!;
-      if (this.pinnedFrom !== null && oldest.offset + oldest.data.byteLength > this.pinnedFrom) {
-        break;
-      }
+      if (pinnedFrom !== null && oldest.offset + oldest.data.byteLength > pinnedFrom) break;
       this.chunks.shift();
       this.bytes -= oldest.data.byteLength;
       this.start = this.chunks[0]!.offset;
@@ -83,15 +87,27 @@ export class OutputRing {
   }
 
   /**
-   * Keep every byte from `offset` on until `unpin()`, regardless of capacity. Used while a
-   * snapshot at `offset` is being produced so the bytes after it can always be streamed.
+   * Keep every byte from `offset` on, regardless of capacity, until the returned pin is released.
+   * Used while a snapshot at `offset` is being produced so the bytes after it can always be
+   * streamed. Pins are independent: overlapping snapshots each hold their own.
    */
-  pin(offset: number): void {
-    this.pinnedFrom = offset;
+  pin(offset: number): RingPin {
+    const pin: RingPin = { offset };
+    this.pins.add(pin);
+    return pin;
   }
 
-  unpin(): void {
-    this.pinnedFrom = null;
+  unpin(pin: RingPin): void {
+    this.pins.delete(pin);
+  }
+
+  /** Oldest pinned offset, or null when nothing is pinned. */
+  private pinnedFrom(): number | null {
+    let min: number | null = null;
+    for (const pin of this.pins) {
+      if (min === null || pin.offset < min) min = pin.offset;
+    }
+    return min;
   }
 
   /** Every byte from `offset` to the end, or null if any of them has been evicted. */
@@ -134,7 +150,8 @@ export class TerminalSession {
   private streaming = false;
   /** Offset of the state message the current sync started from; acks must quote it. */
   private syncOffset = 0;
-  private pendingSerialize: ((snapshot: string) => void) | null = null;
+  /** Resolvers of snapshots still waiting on the emulator; settled with "" on destroy. */
+  private pendingSerializes = new Set<(snapshot: string) => void>();
   /** Invalidates in-flight snapshots when the client changes. */
   private attachGeneration = 0;
   private unacked = 0;
@@ -262,8 +279,9 @@ export class TerminalSession {
     this.disposed = true;
     this.attachGeneration++;
     this.sink = null;
-    // A snapshot in flight would otherwise await a write callback that never fires.
-    this.pendingSerialize?.("");
+    // Snapshots in flight would otherwise await write callbacks that never fire.
+    for (const resolve of this.pendingSerializes) resolve("");
+    this.pendingSerializes.clear();
     this.emulator.dispose();
     try {
       this.proc.terminal?.close();
@@ -320,7 +338,7 @@ export class TerminalSession {
     // The snapshot reflects the emulator at `offset`. Pin the ring so a flood cannot evict the
     // bytes produced while serializing; they are streamed right after the snapshot.
     const offset = this.ring.end;
-    this.ring.pin(offset);
+    const pin = this.ring.pin(offset);
     try {
       const snapshot = await this.serialize();
       if (generation !== this.attachGeneration || this.disposed) return;
@@ -333,7 +351,7 @@ export class TerminalSession {
       sink.sendState(this.state("snapshot", offset, snapshot));
       this.goLive(sink, offset, produced);
     } finally {
-      this.ring.unpin();
+      this.ring.unpin(pin);
     }
   }
 
@@ -346,10 +364,10 @@ export class TerminalSession {
   /** Serialize the emulator once everything written so far has been parsed. */
   private serialize(): Promise<string> {
     return new Promise((resolve) => {
-      this.pendingSerialize = resolve;
+      this.pendingSerializes.add(resolve);
       try {
         this.emulator.write("", () => {
-          this.pendingSerialize = null;
+          this.pendingSerializes.delete(resolve);
           // destroy() already resolved this promise; the disposed emulator must not be read.
           if (this.disposed) return;
           resolve(this.serializer.serialize());
@@ -357,7 +375,7 @@ export class TerminalSession {
       } catch (err) {
         // The write queue is past xterm's discard watermark (see feedEmulator). Serve the stale
         // screen rather than leave the attach hanging with the session mute.
-        this.pendingSerialize = null;
+        this.pendingSerializes.delete(resolve);
         this.noteEmulatorOverflow(err);
         resolve(this.serializer.serialize());
       }

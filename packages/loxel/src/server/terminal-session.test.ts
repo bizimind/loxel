@@ -86,7 +86,7 @@ describe("OutputRing", () => {
   test("a pin keeps everything from the pinned offset on, beyond capacity", () => {
     const ring = new OutputRing(4);
     ring.push(new Uint8Array([1, 2]));
-    ring.pin(2);
+    const pin = ring.pin(2);
     ring.push(new Uint8Array([3, 4]));
     ring.push(new Uint8Array([5, 6]));
     ring.push(new Uint8Array([7, 8]));
@@ -95,11 +95,31 @@ describe("OutputRing", () => {
     expect([...ring.readFrom(2)!]).toEqual([3, 4, 5, 6, 7, 8]);
     expect(ring.readFrom(1)).toBeNull();
 
-    ring.unpin();
+    ring.unpin(pin);
     ring.push(new Uint8Array([9]));
     expect(ring.start).toBe(6);
     expect(ring.readFrom(2)).toBeNull();
     expect([...ring.readFrom(6)!]).toEqual([7, 8, 9]);
+  });
+
+  test("overlapping pins are independent; the oldest one wins", () => {
+    const ring = new OutputRing(2);
+    ring.push(new Uint8Array([1, 2]));
+    const older = ring.pin(2);
+    ring.push(new Uint8Array([3, 4]));
+    const newer = ring.pin(4);
+    ring.push(new Uint8Array([5, 6]));
+    expect(ring.start).toBe(2);
+
+    // Releasing the older pin must not release the newer one.
+    ring.unpin(older);
+    ring.push(new Uint8Array([7, 8]));
+    expect(ring.start).toBe(4);
+    expect([...ring.readFrom(4)!]).toEqual([5, 6, 7, 8]);
+
+    ring.unpin(newer);
+    ring.push(new Uint8Array([9]));
+    expect(ring.start).toBe(8);
   });
 
   test("always keeps the newest chunk even when it exceeds capacity", () => {
@@ -211,6 +231,31 @@ describe("TerminalSession", () => {
     expect(client.outputText()).toContain("line 0000");
   });
 
+  test("a second attach during a snapshot supersedes the first and keeps the stream intact", async () => {
+    const line = "line %04d of output padding padding padding padding padding\\n";
+    const { session } = spawnScript(
+      `sleep 0.2; i=0; while [ $i -lt 300 ]; do printf '${line}' $i; i=$((i+1)); done; exec sleep 30`,
+      { resumeRingBytes: 64 },
+    );
+    const first = createRecordingSink();
+    const second = createRecordingSink();
+    const attach1 = session.attach(first.sink);
+    const attach2 = session.attach(second.sink);
+    await Promise.all([attach1, attach2]);
+    await until(() => second.outputText().includes("line 0299"));
+
+    expect(first.states).toHaveLength(0);
+    expect(first.output).toHaveLength(0);
+    const state = second.states[0]!;
+    expect(state.mode).toBe("snapshot");
+    let expected = state.offset;
+    for (const frame of second.output) {
+      expect(frame.offset).toBe(expected);
+      expected += frame.data.byteLength;
+    }
+    expect(expected).toBe(session.outputOffset);
+  });
+
   test("resume falls back to a snapshot once the ring has evicted the offset", async () => {
     const { session } = spawnScript(
       String.raw`printf 'hello\n'; sleep 0.2; printf 'more\n'; exec sleep 30`,
@@ -291,13 +336,16 @@ describe("TerminalSession", () => {
     expect(client.states[1]!.offset).toBe(session.outputOffset);
   });
 
-  test("destroy settles an attach whose snapshot is still pending", async () => {
+  test("destroy settles every attach whose snapshot is still pending", async () => {
     const { session } = spawnScript("exec sleep 30");
-    const client = createRecordingSink();
-    const attach = session.attach(client.sink);
+    const first = createRecordingSink();
+    const second = createRecordingSink();
+    const attach1 = session.attach(first.sink);
+    const attach2 = session.attach(second.sink);
     session.destroy();
-    await attach;
-    expect(client.states).toHaveLength(0);
+    await Promise.all([attach1, attach2]);
+    expect(first.states).toHaveLength(0);
+    expect(second.states).toHaveLength(0);
   });
 
   test("a shell exiting while the client is paused gets a final snapshot before the exit", async () => {
