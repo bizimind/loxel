@@ -6,6 +6,7 @@ import {
   BIN_MSG_OUTPUT,
   BIN_OUTPUT_HEADER_SIZE,
   clampScrollbackLines,
+  clampTerminalSize,
   DEFAULT_SCROLLBACK_LINES,
   encodeInputFrame,
   encodeOutputFrame,
@@ -47,6 +48,16 @@ describe("terminal binary frames", () => {
     const frame = encodeInputFrame(TERMINAL_ID, payload);
     expect(parseBinaryHeader(frame)).toEqual({ type: BIN_MSG_INPUT, terminalId: TERMINAL_ID });
     expect([...frame.subarray(BIN_HEADER_SIZE)]).toEqual([...payload]);
+  });
+});
+
+describe("clampTerminalSize", () => {
+  test("floors, clamps and falls back for non-finite values", () => {
+    expect(clampTerminalSize(120, 40)).toEqual({ cols: 120, rows: 40 });
+    expect(clampTerminalSize(120.9, 40.2)).toEqual({ cols: 120, rows: 40 });
+    expect(clampTerminalSize(0, 0)).toEqual({ cols: 2, rows: 1 });
+    expect(clampTerminalSize(50_000, 50_000)).toEqual({ cols: 1_000, rows: 500 });
+    expect(clampTerminalSize(Infinity, NaN)).toEqual({ cols: 80, rows: 24 });
   });
 });
 

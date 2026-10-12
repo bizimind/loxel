@@ -10,7 +10,7 @@ import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import type { Subprocess } from "bun";
 
 import type { NotificationSequence, TerminalState } from "@/api/ws-protocol";
-import { clampScrollbackLines } from "@/api/ws-protocol";
+import { clampScrollbackLines, clampTerminalSize } from "@/api/ws-protocol";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
 
@@ -162,15 +162,16 @@ export class TerminalSession {
   constructor(private readonly options: TerminalSessionOptions) {
     this.id = options.id;
     this.cwd = options.cwd;
-    this.cols = options.cols;
-    this.rows = options.rows;
+    const size = clampTerminalSize(options.cols, options.rows);
+    this.cols = size.cols;
+    this.rows = size.rows;
     this.ring = new OutputRing(options.resumeRingBytes ?? RESUME_RING_BYTES);
     this.highWater = options.flowControl?.highWaterBytes ?? FLOW_HIGH_WATER_BYTES;
     this.lowWater = options.flowControl?.lowWaterBytes ?? FLOW_LOW_WATER_BYTES;
 
     this.emulator = new HeadlessTerminal({
-      cols: options.cols,
-      rows: options.rows,
+      cols: size.cols,
+      rows: size.rows,
       scrollback: clampScrollbackLines(options.scrollbackLines),
       allowProposedApi: true,
     });
@@ -183,8 +184,8 @@ export class TerminalSession {
       cwd: options.cwd,
       env: options.env,
       terminal: {
-        cols: options.cols,
-        rows: options.rows,
+        cols: size.cols,
+        rows: size.rows,
         data: (_terminal, data) => this.onPtyData(data),
       },
     });
@@ -251,7 +252,8 @@ export class TerminalSession {
     this.proc.terminal?.write(data);
   }
 
-  resize(cols: number, rows: number): void {
+  resize(requestedCols: number, requestedRows: number): void {
+    const { cols, rows } = clampTerminalSize(requestedCols, requestedRows);
     if (cols === this.cols && rows === this.rows) return;
     this.cols = cols;
     this.rows = rows;

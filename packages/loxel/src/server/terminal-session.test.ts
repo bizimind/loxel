@@ -293,6 +293,21 @@ describe("TerminalSession", () => {
     expect(session.attached).toBe(false);
   });
 
+  test("sizes from the client are clamped before they reach the PTY and the emulator", async () => {
+    const { session } = spawnScript(`stty size; sleep 0.3; stty size; exec sleep 30`, {
+      cols: 50_000,
+      rows: Infinity,
+    });
+    expect(session.cols).toBe(1_000);
+    expect(session.rows).toBe(24);
+    const client = createRecordingSink();
+    await session.attach(client.sink);
+    session.resize(0.5, 9_999);
+    await until(() => client.outputText().includes("500 2"));
+    expect(session.cols).toBe(2);
+    expect(session.rows).toBe(500);
+  });
+
   test("resize applies to the PTY and the emulator", async () => {
     const { session } = spawnScript(`stty size; sleep 0.3; stty size; exec sleep 30`);
     const client = createRecordingSink();
