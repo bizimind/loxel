@@ -10,6 +10,7 @@ import { editorViewCtx, remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import { undo } from "@milkdown/kit/prose/history";
 import { TextSelection } from "@milkdown/kit/prose/state";
 
+import { installMarkdownImages } from "./markdown-images";
 import {
   applyBodyToEditor,
   serializeBody,
@@ -257,6 +258,52 @@ describe("serializeBody source preservation", () => {
       ctx.get(editorViewCtx).state.doc.forEach((node) => lists.push(node.type.name));
       expect(lists.filter((name) => name === "bullet_list")).toHaveLength(2);
     });
+  });
+
+  test("inline images survive the baseline and keep their bytes when untouched", async () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    // Non-canonical spacing and title quoting so the serializer alone would rewrite the block;
+    // `#`/space in the src exercise the `<...>` destination form the serializer would emit.
+    const withImage =
+      "Intro\n\n![A  shot](<./assets/Screenshot #1.png> 'title')\n\n* one\n* two\n\nlast paragraph\n";
+    const editor = new Crepe({
+      root: el,
+      defaultValue: withImage,
+      features: { [Crepe.Feature.ImageBlock]: false },
+    });
+    installMarkdownImages(editor.editor, { filePath: "/repo/wt/docs/plan.md" });
+    try {
+      await editor.create();
+      setSourceBaseline(editor, withImage);
+      expect(serializeBody(editor)).toBe(withImage);
+      // The image node view mounts asynchronously; its DOM src is proxied, the markdown is not.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      const img = el.querySelector("img.image-inline");
+      expect(img?.getAttribute("src")).toBe(
+        "/api/file-raw?path=%2Frepo%2Fwt%2Fdocs%2Fassets%2FScreenshot+%231.png",
+      );
+      // Editing another block leaves the image block byte-identical.
+      editor.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        let found = false;
+        view.state.doc.descendants((node, pos) => {
+          if (found || !node.isTextblock || node.textContent !== "last paragraph") return !found;
+          found = true;
+          view.dispatch(view.state.tr.insertText("last paragraph, edited", pos + 1, pos + 15));
+          return false;
+        });
+        expect(found).toBe(true);
+      });
+      expect(serializeBody(editor)).toBe(
+        withImage.replace("last paragraph", "last paragraph, edited"),
+      );
+    } finally {
+      await editor.destroy();
+      el.remove();
+    }
   });
 
   test("an own echo of the preserved body is a no-op", () => {

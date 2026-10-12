@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { DetachedFilesService } from "./detached-files-service";
+import type { FileTree } from "./external-folders-service";
 import { MAX_IMAGE_UPLOAD_BYTES } from "./image-upload";
 import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
@@ -16,33 +17,46 @@ describe("POST /api/file-upload", () => {
   let root: string;
   let wt: string;
   let detachedDir: string;
+  let othersDir: string;
   let service: DetachedFilesService;
   let ctx: RouteContext;
   const nonceWrites: string[] = [];
+  const othersNonceWrites: string[] = [];
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "loxel-upload-"));
     wt = join(root, "worktree");
     detachedDir = join(root, "detached");
+    othersDir = join(root, "others");
     await mkdir(join(wt, "docs"), { recursive: true });
     await mkdir(detachedDir, { recursive: true });
+    await mkdir(othersDir, { recursive: true });
     await writeFile(join(wt, "docs", "plan.md"), "# plan");
     await writeFile(join(detachedDir, "Note 1.md"), "draft");
+    await writeFile(join(othersDir, "notes.md"), "# notes");
 
     service = new DetachedFilesService(detachedDir, () => {});
     await service.start();
     nonceWrites.length = 0;
+    othersNonceWrites.length = 0;
 
+    const recordingFilesService = (writes: string[]) => ({
+      writeFile: async (path: string, nonce: string, fn: () => Promise<void>) => {
+        writes.push(`${path}:${nonce}`);
+        await fn();
+      },
+    });
     const resources = {
       detachedFilesService: service,
-      filesService: {
-        writeFile: async (path: string, nonce: string, fn: () => Promise<void>) => {
-          nonceWrites.push(`${path}:${nonce}`);
-          await fn();
-        },
-      },
+      filesService: recordingFilesService(nonceWrites),
       externalFilesService: { hasFile: () => false },
     } as unknown as WorktreeResources;
+    const worktreeTree = { root: wt, filesService: resources.filesService } as FileTree;
+    // An Others folder: owned by `wt` but rooted outside it.
+    const othersTree = {
+      root: othersDir,
+      filesService: recordingFilesService(othersNonceWrites),
+    } as unknown as FileTree;
 
     // Mirrors the server's resolveFilePath: normalize then prefix-match.
     const resolveFilePath = (absolutePath: string): ResolvedFilePath | null => {
@@ -50,13 +64,19 @@ describe("POST /api/file-upload", () => {
       if (normalized.startsWith(detachedDir + "/")) {
         return { type: "detached", wtPath: wt, resources, name: normalized.split("/").pop()! };
       }
-      if (normalized.startsWith(wt + "/")) {
-        return {
-          type: "project",
-          wtPath: wt,
-          resources,
-          relativePath: normalized.slice(wt.length + 1),
-        };
+      for (const tree of [worktreeTree, othersTree]) {
+        if (normalized === tree.root) {
+          return { type: "tree", wtPath: wt, resources, tree, relativePath: "" };
+        }
+        if (normalized.startsWith(tree.root + "/")) {
+          return {
+            type: "tree",
+            wtPath: wt,
+            resources,
+            tree,
+            relativePath: normalized.slice(tree.root.length + 1),
+          };
+        }
       }
       if (normalized === join(root, "external.md")) {
         return { type: "external", wtPath: wt, resources, absolutePath: normalized };
@@ -68,6 +88,8 @@ describe("POST /api/file-upload", () => {
       broadcastToSubscribers: () => {},
       broadcastToProject: () => {},
       broadcastAll: () => {},
+      sendToActiveWindow: () => false,
+      externalFolderConflict: () => null,
       getProject: () => undefined,
       findProjectForPath: () => undefined,
       getWorktreeResources: (path) => (path === wt ? resources : undefined),
@@ -109,6 +131,25 @@ describe("POST /api/file-upload", () => {
     expect(body.src).toMatch(/^\.\/shot-\d{8}-\d{6}\.png$/);
     expect(body.path).toBe(join(detachedDir, body.src.slice(2)));
     expect(existsSync(body.path)).toBe(true);
+  });
+
+  test("stores an image for a markdown file in an Others folder under that folder", async () => {
+    const res = await upload({ path: join(othersDir, "notes.md"), file: png("shot.png") });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.src).toMatch(/^\.\/assets\/shot-\d{8}-\d{6}\.png$/);
+    expect(body.path).toBe(join(othersDir, body.src.slice(2)));
+    expect(await Bun.file(body.path).bytes()).toEqual(PNG);
+    // Written through the Others folder's own files service, not the worktree's.
+    expect(othersNonceWrites).toEqual([`${body.src.slice(2)}:nonce-1`]);
+    expect(nonceWrites).toEqual([]);
+    expect(existsSync(join(wt, "assets"))).toBe(false);
+  });
+
+  test("rejects a tree root (folder) as the upload target", async () => {
+    const res = await upload({ path: othersDir, file: png("shot.png") });
+    expect(res.status).toBe(400);
   });
 
   test("never overwrites: a same-second clash gets a numbered suffix", async () => {
