@@ -36,7 +36,7 @@ import type {
 import type { SearchMatch } from "@/api/search-model";
 import type { WsMessage } from "@/api/ws-protocol";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
-import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
+import type { FormatOnSaveSettings, FormatterOverride } from "@/lib/formatting-model";
 import { getMediaType } from "@/lib/media-extensions";
 import { isWithin } from "@/lib/project-file-helpers";
 import { isHttpUrl } from "@/url-utils";
@@ -117,7 +117,7 @@ export interface RouteContext {
     content: string,
     filePath: string,
     worktreePath: string | undefined,
-    settings: FormattingSettings,
+    settings: FormatOnSaveSettings,
   ) => Promise<string | null>;
   /** Return detected formatters for a worktree. */
   getDetectedFormatters: (worktreePath: string) => { command: string; extensions: string[] }[];
@@ -217,7 +217,7 @@ function requireString(body: Record<string, unknown>, field: string): string {
 }
 
 /** Validate and narrow the formatting settings from the request body. */
-function parseFormattingSettings(raw: unknown): FormattingSettings | undefined {
+function parseFormatOnSaveSettings(raw: unknown): FormatOnSaveSettings | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const obj = raw as Record<string, unknown>;
   if (typeof obj.enabled !== "boolean" || typeof obj.autoDetect !== "boolean") return undefined;
@@ -855,7 +855,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
   const nonce = requireString(body, "nonce");
   const shouldFormat = body.format === true;
   const formattingSettings = shouldFormat
-    ? parseFormattingSettings(body.formattingSettings)
+    ? parseFormatOnSaveSettings(body.formattingSettings)
     : undefined;
 
   async function maybeFormat(c: string, fp: string, wtPath: string): Promise<string> {
