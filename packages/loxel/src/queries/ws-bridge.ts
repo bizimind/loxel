@@ -7,7 +7,6 @@ import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { openFile, openFolder } from "@/lib/open-path";
 import { consumeSavedContent } from "@/lib/save-editor-content";
-import { initTerminalNotificationScanner } from "@/lib/terminal-notification-scanner";
 import { queryClient } from "@/query-client";
 import { useEditorStateStore } from "@/store/editor-state";
 import { useLogStore } from "@/store/logs";
@@ -33,7 +32,6 @@ const log = frontendLog.child("files");
 export function useWsBridge(): void {
   useEffect(() => {
     wsClient.connect();
-    const unsubNotifScanner = initTerminalNotificationScanner(wsClient);
 
     // On reconnect, invalidate update status so React Query refetches from the (new) server.
     // This clears the stale "installing" state when the version didn't change (failed update
@@ -354,6 +352,7 @@ export function useWsBridge(): void {
           break;
 
         case "terminal_exit":
+        case "terminal_state":
         case "error":
         case "agent_event":
         case "agent_exit":
@@ -374,7 +373,6 @@ export function useWsBridge(): void {
     return () => {
       unsubReconnect();
       unsubscribe();
-      unsubNotifScanner();
       wsClient.disconnect();
     };
   }, []);

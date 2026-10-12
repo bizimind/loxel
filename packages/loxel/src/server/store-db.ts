@@ -14,6 +14,18 @@ const DB_PATH = join(config.stateDir, "stores.db");
 
 let db: Database | null = null;
 
+const changeListeners = new Set<(key: string) => void>();
+
+/** Subscribe to store writes and deletes by key. Returns an unsubscribe function. */
+export function onStoreChange(listener: (key: string) => void): () => void {
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+
+function notifyStoreChange(key: string): void {
+  for (const listener of changeListeners) listener(key);
+}
+
 function getDb(): Database {
   if (db) return db;
 
@@ -48,11 +60,13 @@ export function putStore(key: string, value: string): void {
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     )
     .run(key, value, new Date().toISOString());
+  notifyStoreChange(key);
 }
 
 /** Delete a store by key (no-op when missing). */
 export function deleteStore(key: string): void {
   getDb().prepare("DELETE FROM stores WHERE key = ?").run(key);
+  notifyStoreChange(key);
 }
 
 /**

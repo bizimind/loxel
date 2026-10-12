@@ -1,21 +1,26 @@
 # Terminals
 
-How terminal panels work end to end: PTY sessions in the server, the binary WebSocket protocol, the xterm.js client, terminal notifications, and the `loxel` CLI that runs inside terminals.
+How terminal panels work end to end: terminal sessions and the server-side emulator, the attach/snapshot/resume protocol, the xterm.js client, terminal notifications, and the `loxel` CLI that runs inside terminals.
 
 ## Overview
 
-A terminal panel is an xterm.js instance in the renderer bound to a PTY session in the shared Bun server (see [SHARED_SERVER.md](SHARED_SERVER.md)) by a client-generated UUID, the `terminalId`. The renderer creates the UUID once ([panel-creators.ts](../src/lib/panel-creators.ts) `createTerminal`), stores it in the Dockview panel params together with the worktree path, and the persisted layout keeps it across reloads. The PTY lives as long as the server or until the panel is closed; the xterm.js instance lives only while the panel is mounted. Everything below follows from that split.
+A terminal panel is an xterm.js instance in the renderer bound to a terminal session in the shared Bun server (see [SHARED_SERVER.md](SHARED_SERVER.md)) by a client-generated UUID, the `terminalId`. The renderer creates the UUID once ([panel-creators.ts](../src/lib/panel-creators.ts) `createTerminal`), stores it in the Dockview panel params together with the worktree path, and the persisted layout keeps it across reloads. The session lives as long as the server or until the panel is closed; the xterm.js instance lives only while the panel is mounted.
 
-## Server: PTY sessions
+The server, not the renderer, owns the screen. Each session pairs the PTY with a headless xterm (`@xterm/headless`) that parses every byte the shell produces, so the server always knows the current screen, scrollback, cursor, modes and size. The renderer's xterm is a view of that state: when it mounts it receives a serialized snapshot, and from then on the live output stream. Raw history is never replayed into a fresh xterm. This matters because a terminal byte stream is a sequence of commands, not a document: replaying old output re-executes every side effect in it, so a background-color query or cursor-position request a program sent days ago would be answered again, into a shell that is no longer expecting it, and old notifications would fire again. tmux, mosh and VS Code's pty host all keep the emulator on the surviving side for the same reason.
 
-[pty-manager.ts](../src/server/pty-manager.ts) owns a `Map<terminalId, PtySession>`. Each session holds the `Bun.spawn` subprocess (Bun's built-in `terminal` option provides the PTY), the current size, a scrollback buffer and two mutable callbacks, `onOutput` and `onExit`.
+## Server: terminal sessions
 
-- **Spawn.** `create()` runs `$SHELL -il` (falling back to `/bin/bash`) as an interactive login shell in the requested `cwd`. Nothing else is wrapped around the shell.
-- **Idempotent create = reattach.** If a session with that ID already exists, `create()` swaps in the new callbacks and replays the scrollback through `onOutput` synchronously. `cwd` and env apply only at spawn.
-- **Scrollback.** Output chunks are appended to an array and the oldest chunks are evicted once the byte total exceeds `maxScrollback`. The cap is derived from the client's scrollback setting: lines are clamped to 1,000–100,000 (default `DEFAULT_SCROLLBACK_LINES` = 50,000 in [ws-protocol.ts](../src/api/ws-protocol.ts)) and multiplied by an estimated 100 bytes per line. Eviction is per chunk.
-- **Detach.** `detach()` nulls both callbacks. Output keeps being produced and buffered; it is just not delivered. `hasOrphanSessions()` and `destroyOrphans()` treat "no `onOutput`" as orphaned.
-- **Destroy.** `destroy()` closes the PTY and kills the process. A natural exit removes the session and fires `onExit`.
-- **Input.** `writeBinary()` decodes the frame payload with `TextDecoder` because Bun's `terminal.write` takes a string.
+[terminal-session.ts](../src/server/terminal-session.ts) implements one session; [terminal-manager.ts](../src/server/terminal-manager.ts) keys them by `terminalId`, spawns on first attach and tracks orphans.
+
+- **Spawn.** The manager runs `$SHELL -il` (falling back to `/bin/bash`) as an interactive login shell in the requested `cwd`, with Bun's built-in `terminal` option providing the PTY. Nothing else is wrapped around the shell. `cwd` and the environment apply only at spawn.
+- **Emulator.** Every output chunk is written to the session's headless xterm, sized like the PTY and with the client's scrollback setting (clamped to 1,000–100,000 lines by `clampScrollbackLines` in [ws-protocol.ts](../src/api/ws-protocol.ts)). The emulator's own replies to terminal queries are discarded: while a client is attached, its xterm is the one that answers, and while nobody is attached a querying program simply times out, as it would in a detached tmux pane. If a flood outruns the parser (xterm's write queue discards past tens of megabytes unparsed), the session logs it once and the screen is stale until the next snapshot.
+- **Stream offsets and the resume ring.** Output bytes are numbered from spawn, and every spawn gets a random `epoch` so offsets from a shell that no longer exists can never be mistaken for offsets into its replacement. The last `RESUME_RING_BYTES` (1 MiB) are kept in an `OutputRing`, oldest chunk evicted first, newest chunk always retained, so a client that still has a current xterm can be given exactly the bytes it missed.
+- **Attach.** `attach(sink, since?)` replaces any previous client; the session counts as attached from that call on. Bytes sent to catch a client up count against the flow-control budget like live output. If `since` names this epoch and an offset still covered by the ring, the client gets `terminal_state { mode: "resume" }` followed by the missed bytes. Otherwise the session serializes the emulator (`@xterm/addon-serialize`, after everything written so far has been parsed) and sends `terminal_state { mode: "snapshot", snapshot, offset }`, then any bytes produced while serializing, then goes live. A snapshot contains screen contents, colors, cursor and modes, never requests, so nothing in it can be answered twice. While a snapshot is being produced the ring is pinned at the snapshot offset, so a flood during serialization cannot evict the bytes that have to follow it; the ring briefly grows past its capacity instead, bounded by how long one serialization takes.
+- **Flow control.** The attached client acknowledges bytes it has parsed (`terminal_ack`, quoting the `offset` of the `terminal_state` it is working under; acks for an older sync are ignored). Above `FLOW_HIGH_WATER_BYTES` (2 MiB) unacknowledged, the session stops forwarding output; the emulator keeps parsing. Once acks bring the backlog under `FLOW_LOW_WATER_BYTES` (128 KiB) the client is resynced with a fresh snapshot and streaming resumes. Bun's PTY cannot be paused, so the shell is never slowed down; the renderer is never more than 2 MiB behind what it has parsed, and a flood costs it one snapshot instead of the whole backlog.
+- **Detach.** `detach()` drops the sink. Output keeps being parsed and ringed; nothing is sent. A session without an attached client is an orphan for `hasOrphanSessions()` and `destroyOrphans()`.
+- **Resize and scrollback.** `resize()` applies to the PTY and the emulator (no-op when unchanged, so no spurious `SIGWINCH`); the manager applies the size and scrollback setting from every `terminal_attach`, so a reattached terminal always matches its new xterm. Sizes are clamped by `clampTerminalSize` (2–1,000 columns, 1–500 rows) because the emulator allocates its cell grid eagerly; a clamped size is reported back in `terminal_state`, and the client refits.
+- **Destroy.** `destroy()` disposes the emulator (settling any snapshot still in flight), closes the PTY and kills the process. A natural exit first resyncs a paused client with a final snapshot, so the tail of a flood is not lost, then sends `terminal_exit`, removes the session and invokes the manager's `onExit` hook.
+- **Input.** `write()` passes the frame payload to `terminal.write` verbatim.
 
 Every output chunk is counted by the stress detector under `pty-output` ([stress-detector.ts](../src/server/stress-detector.ts)); it only logs, it never throttles.
 
@@ -23,11 +28,11 @@ Every output chunk is counted by the stress detector under `pty-output` ([stress
 
 [server.ts](../src/server/server.ts) maps each terminal to exactly one owning WebSocket (`terminalOwners`) and records the IDs in that connection's `ClientState.terminals`.
 
-- `terminal_create` registers ownership **before** calling `ptyManager.create()`, because a reattach replays scrollback synchronously through the callback, which looks up the owner. Any connection that sends `terminal_create` for an existing ID becomes its owner.
-- `terminal_resize`, `terminal_destroy` and binary input are ignored unless they come from the current owner.
+- `terminal_attach` registers ownership, builds a `TerminalSink` for that socket (state and exit as JSON, output as binary frames) and calls `terminalManager.attach()`. Any connection that attaches an existing ID becomes its owner; the previous owner stops receiving output.
+- `terminal_detach`, `terminal_resize`, `terminal_ack` and binary input are ignored unless they come from the current owner. `terminal_destroy` is also accepted for a session nobody owns, because the panel's unmount detaches before the panel-removed handler sends destroy.
 - On socket close, `detachClientTerminals()` detaches (never destroys) that connection's sessions.
 - When the last app client disconnects and orphaned terminal or agent sessions exist, the server waits 5 minutes (`ORPHAN_CLEANUP_MS`) instead of 30 seconds, then destroys orphans and shuts down. Any client connecting cancels the timer. See [SHARED_SERVER.md](SHARED_SERVER.md) for the idle-shutdown rules.
-- `shutdown()` calls `ptyManager.destroyAll()`, so no shell outlives the server.
+- `shutdown()` calls `terminalManager.destroyAll()`, so no shell outlives the server.
 
 ### Environment
 
@@ -48,25 +53,29 @@ These are fixed at spawn. A session reattached by another window keeps the origi
 
 Terminal messages are part of the main app socket (`/ws`). Types live in [ws-protocol.ts](../src/api/ws-protocol.ts); note that [ws-messages.ts](../src/server/ws-messages.ts) only builds the `worktrees_changed` message and has nothing terminal-specific.
 
-- **JSON control frames (client to server):** `terminal_create { id, cols, rows, cwd, scrollbackLines?, windowId? }`, `terminal_resize { id, cols, rows }`, `terminal_destroy { id }`.
-- **JSON control frame (server to client):** `terminal_exit { id, exitCode }`, sent only to the owner.
-- **Binary frames** for I/O, to avoid JSON overhead and keep raw bytes: `[type: 1 byte][terminalId: 36 ASCII bytes][payload]`. `0x01` is output (server to client, raw PTY bytes), `0x02` is input (client to server, UTF-8). `encodeBinaryFrame` / `parseBinaryHeader` are shared by both sides, which is why terminal IDs must be 36-character UUIDs.
+- **JSON control frames (client to server):** `terminal_attach { id, cols, rows, cwd, scrollbackLines?, windowId?, sinceEpoch?, sinceOffset? }` binds a mounted xterm, spawning the shell if needed; `sinceEpoch`/`sinceOffset` are sent only by a reconnecting client whose xterm is still current. `terminal_detach { id }` is sent on unmount. `terminal_resize { id, cols, rows }`, `terminal_destroy { id }` and `terminal_ack { id, syncOffset, bytes }` (flow control).
+- **JSON control frames (server to client):** `terminal_state { id, epoch, mode, offset, snapshot?, cols, rows }` answers every attach and every flow-control resync; `mode` is `snapshot` (reset the xterm and write `snapshot`) or `resume` (nothing to replay). `offset` is the stream position the xterm is current to once the message is applied. `terminal_exit { id, exitCode }` is sent only to the owner.
+- **Binary frames** for I/O, to avoid JSON overhead and keep raw bytes. Output (server to client) is `[0x01][terminalId: 36 ASCII bytes][offset: u64 big-endian][payload]`, where `offset` is the stream position of the payload's first byte. Input (client to server) is `[0x02][terminalId][payload]`, UTF-8 keystrokes or the xterm's replies to terminal queries. `encodeOutputFrame` / `parseOutputFrame` / `encodeInputFrame` / `parseBinaryHeader` are shared by both sides, which is why terminal IDs must be 36-character UUIDs.
 
-On the client, [client.ts](../src/api/client.ts) routes binary output to at most one handler per terminal (`onTerminalOutput`, registered by a mounted `Terminal`) and to every `onTerminalData` listener (the background notification scanner). `sendTerminalInput` drops input while disconnected rather than queueing it; JSON `send` queues until the first connection only.
+Ordering is what makes the offsets work: the server sends `terminal_state` before any output frame at or past its `offset`, and the client applies frames strictly in offset order after the state they belong to.
+
+On the client, [client.ts](../src/api/client.ts) routes binary output to at most one handler per terminal (`onTerminalOutput`, registered by a mounted `Terminal`), passing the offset along. `sendTerminalInput` drops input while disconnected rather than queueing it; JSON `send` queues until the first connection only.
 
 ## Client: the Terminal component
 
-[Terminal.tsx](../src/components/terminal/Terminal.tsx) is mounted by `TerminalPanelComponent` in [panels.tsx](../src/components/dockview/panels.tsx), which provides the panel's `worktreePath` param through `PanelContext`. That worktree path is the shell's `cwd`; if it is missing, no `terminal_create` is sent and the panel stays empty.
+[Terminal.tsx](../src/components/terminal/Terminal.tsx) is mounted by `TerminalPanelComponent` in [panels.tsx](../src/components/dockview/panels.tsx), which provides the panel's `worktreePath` param through `PanelContext`. That worktree path is the shell's `cwd`; if it is missing, no `terminal_attach` is sent and the panel stays empty.
 
 ### Lifecycle
 
-1. Construct `XTerm` with the theme read from CSS variables (`--editor-surface`, `--term-*`), the fit, search and web-links addons, the file-path link provider and the OSC handlers.
-2. Wait for the font (below), then `terminal.open()`, attach WebGL if visible, and on the next animation frame `fit()` and send `terminal_create` with the fitted size, the scrollback setting and `WINDOW_ID`.
-3. Input from `terminal.onData` goes out as binary frames until `terminal_exit` arrives, after which the component prints `[Process exited with code N]` and stops sending.
-4. On WebSocket reconnect (same server version; a changed version reloads the page instead), it calls `terminal.reset()` and re-sends `terminal_create`. Against the same server process this reattaches and replays scrollback into the cleared terminal; against a restarted server it spawns a fresh shell under the same ID.
-5. Unmount disposes the xterm instance and handlers but sends nothing to the server.
+1. Construct `XTerm` with the theme read from CSS variables (`--editor-surface`, `--term-*`), the fit, search and web-links addons and the file-path link provider.
+2. Wait for the font (below), then `terminal.open()`, attach WebGL if visible, and on the next animation frame `fit()` and send `terminal_attach` with the fitted size, the scrollback setting and `WINDOW_ID`. Until the matching `terminal_state` arrives, incoming output frames are queued.
+3. On `terminal_state`: a `snapshot` is written as an in-band full reset (`ESC c`) followed by the snapshot, so anything still queued in xterm's asynchronous write buffer is parsed before the screen is cleared; `resume` writes nothing. Queued frames older than `state.offset` are dropped, the rest are written in order, and the component records the epoch and the offset it is now current to (`offset + payload length` after each frame). If the xterm was refitted while the attach was in flight, so `cols`/`rows` in the state differ from its own, it sends `terminal_resize`.
+4. Input from `terminal.onData` (keystrokes and the xterm's replies to queries in live output) goes out as binary frames until `terminal_exit` arrives, after which the component prints `[Process exited with code N]` and stops sending.
+5. Every 64 KiB of live output written (measured in xterm's write callback, so it counts parsed bytes) the component sends `terminal_ack` quoting the current sync's offset; bytes written under an earlier sync are not counted.
+6. On WebSocket reconnect (same server version; a changed version reloads the page instead), it sends `terminal_attach` again with the epoch and offset it is current to, without resetting. Against the same server process this resumes from the ring, or snapshots if the gap was evicted; against a restarted server the ID is unknown, so a fresh shell with a new epoch is spawned and the snapshot branch clears the old screen.
+7. Unmount sends `terminal_detach` and disposes the xterm instance and handlers. The shell keeps running and the server stops streaming to nobody.
 
-Sizing: a `ResizeObserver` and a device-pixel-ratio media query schedule a 100 ms debounced `fit()`; `terminal_resize` is sent only when cols or rows actually changed. Theme and scrollback options are updated in place when dark mode or the setting changes.
+Sizing: a `ResizeObserver` and a device-pixel-ratio media query schedule a 100 ms debounced `fit()`; `terminal_resize` is sent only when cols or rows actually changed. Theme and scrollback options are updated in place when dark mode or the setting changes; the server-side emulator picks the scrollback setting up at the next attach.
 
 ### Font loading
 
@@ -90,12 +99,12 @@ xterm measures the cell grid and the WebGL renderer rasterizes its glyph atlas a
 
 Terminal programs can raise notifications with OSC sequences; they become badge dots and entries in the notification center.
 
-- **Parsing.** [osc-notification-parser.ts](../src/lib/osc-notification-parser.ts) has pure parsers for OSC 9 (iTerm2, whole payload is the body), OSC 777 (`notify;title;body`, anything else ignored) and OSC 99 (Kitty; `p=` selects title or body, `e=0..3` maps to `low`..`critical`; multi-part `d=0` sequences are not coalesced). Each sequence can be disabled in settings (`terminal.notificationSequences`, all on by default); settings are read at fire time.
-- **Two detection paths.** A mounted terminal registers xterm parser hooks for 9, 777 and 99 in `Terminal.tsx`. Terminals without a mounted xterm (typically those in background worktrees, whose layout is swapped out) are covered by [terminal-notification-scanner.ts](../src/lib/terminal-notification-scanner.ts), started from [ws-bridge.ts](../src/queries/ws-bridge.ts): it scans raw output bytes for `ESC ]` or C1 `0x9d`, the OSC number and a BEL or `ESC \` terminator, skipping any terminal that has an output handler.
+- **Parsing.** [osc-notification-parser.ts](../src/lib/osc-notification-parser.ts) has pure parsers for OSC 9 (iTerm2, whole payload is the body), OSC 777 (`notify;title;body`, anything else ignored) and OSC 99 (Kitty; `p=` selects title or body, `e=0..3` maps to `low`..`critical`; multi-part `d=0` sequences are not coalesced).
+- **Detection is server-side, once.** The session's headless emulator registers parser hooks for 9, 777 and 99, so a sequence is seen exactly once no matter how many windows are open, whether the panel is mounted, or how often it remounts; the xterm in the renderer has no notification hooks. Split sequences are no concern because the emulator is a real parser, not a chunk scanner.
+- **Settings.** Each sequence can be disabled in settings (`terminal.notificationSequences`, all on by default). The server reads the persisted settings store ([terminal-settings.ts](../src/server/terminal-settings.ts)), caching the parsed flags until the store row is written again (`onStoreChange` in [store-db.ts](../src/server/store-db.ts)), so toggling takes effect immediately and a flood of sequences costs no database reads.
 - **The bell.** A bare BEL (`0x07`) is not a notification; there is no `onBell` handler. BEL appears only as an OSC terminator.
-- **Server store.** Both paths send `notification_add` with source `{ kind: "terminal", panelId: terminalId, worktreePath }`, where the worktree comes from the client-side `panelWorktreeMap`. [notification-store.ts](../src/server/notification-store.ts) keeps an in-memory, newest-first list capped at 200 and loses it on restart; `server.ts` broadcasts every change to all clients and sends `notifications_sync` on connect. The model is [notification-model.ts](../src/api/notification-model.ts).
+- **Server store.** The manager's `onNotification` hook adds `{ kind: "terminal", panelId: terminalId, worktreePath }` to [notification-store.ts](../src/server/notification-store.ts), where the worktree is the session's spawn `cwd`. The store keeps an in-memory, newest-first list capped at 200 and loses it on restart; `server.ts` broadcasts every change to all clients and sends `notifications_sync` on connect. The model is [notification-model.ts](../src/api/notification-model.ts).
 - **Client mirror.** [panel-notifications.ts](../src/store/panel-notifications.ts) mirrors the server list and derives `panelIndex` and `worktreeIndex`. The terminal tab ([terminal-tab.tsx](../src/components/dockview/terminal-tab.tsx)) shows a dot when its terminal is in `panelIndex` and the tab is inactive, and dismisses that panel's notifications whenever the tab becomes active. The sidebar shows a dot for worktrees in `worktreeIndex`. In Electron the count also drives the Dock badge (`useLoxelEventListeners`).
-- **Registration and replay suppression.** Panels are registered with their worktree when created (`addTerminal` in [worktree-tools-bar.ts](../src/store/worktree-tools-bar.ts)) or restored (`syncTerminalsFromLayout` in [default-layout.ts](../src/components/dockview/default-layout.ts)). For 3 seconds after registration, `addFromServer` drops notifications from that panel locally so scrollback replay after a remount does not re-raise old notifications.
 - **Navigation.** [notification-navigation.ts](../src/lib/notification-navigation.ts) `navigateToNotification()` switches to the source worktree if needed, then activates the source terminal's tab, retrying once after 150 ms because the swapped-in layout may not be mounted yet. It is used by the notification center items and the "recent notification" action.
 - **Cleanup.** Closing a terminal panel calls `unregisterPanel`, which sends `notification_dismiss_panel`.
 
@@ -123,19 +132,23 @@ In the renderer, `openFile()` and `openFolder()` in [open-path.ts](../src/lib/op
 
 ## Invariants
 
-- **Survives reloads, not server exit.** Terminal IDs are persisted in the layout's panel params and the PTY is keyed by them, so a renderer reload or a WebSocket drop reattaches with replayed scrollback. Server shutdown destroys every PTY; after a restart the client respawns a fresh shell under the same ID, in the same worktree.
-- **Worktree switches keep shells running.** Switching worktrees swaps the center layout and unmounts terminal components, but `CenterHost` skips `terminal_destroy` during layout swaps. Output keeps flowing to the owning socket, where only the notification scanner reads it; switching back remounts and replays the server-side scrollback.
+- **Survives reloads, not server exit.** Terminal IDs are persisted in the layout's panel params and the session is keyed by them, so a renderer reload or a WebSocket drop reattaches: with a snapshot into a fresh xterm, or by resuming the missed bytes into a live one. Server shutdown destroys every session; after a restart the client's attach spawns a fresh shell under the same ID, in the same worktree.
+- **History is state, not a stream.** The only thing ever written into a fresh xterm is a serialized snapshot. Old output is never replayed, so queries, bells and notifications in it never fire twice.
+- **Worktree switches keep shells running.** Switching worktrees swaps the center layout and unmounts terminal components, which detach; `CenterHost` skips `terminal_destroy` during layout swaps. The server keeps parsing output into the emulator and sends nothing until the panel remounts and takes a snapshot.
 - **Per-worktree cwd.** A terminal's cwd and `LOXEL_WORKTREE` are the panel's `worktreePath` param at creation. Link resolution uses that path, not the live shell cwd.
-- **Many terminals.** Output of every live terminal is sent to its owner whether or not it is mounted, and each holds up to `scrollbackLines × 100` bytes on the server (about 5 MB at the default). WebGL contexts are held only by visible terminals.
+- **Many terminals.** Only mounted terminals cost bandwidth; every live session costs one headless emulator plus a 1 MiB resume ring on the server. The emulator stores 12 bytes per cell for every line it has filled, so a terminal that has scrolled through its full default 50,000 lines at 200 columns holds about 120 MB; the scrollback setting is the lever, and an idle shell costs almost nothing. WebGL contexts are held only by visible terminals.
+- **The renderer is never flooded.** Unacknowledged output is capped at 2 MiB per terminal; past that the client is brought back with a snapshot instead of a backlog.
 - **Modified Enter.** Shift+Enter and Ctrl+Enter are forwarded as `ESC CR` and `ESC [13;5u` at the key-handler level; there is no per-program detection.
 
 ## Where to look
 
-- [src/server/pty-manager.ts](../src/server/pty-manager.ts): session model, scrollback, detach and orphans
-- [src/server/server.ts](../src/server/server.ts): ownership, `terminal_*` handlers, `LOXEL_*` env, idle shutdown, notification handlers, `sendToActiveWindow`
+- [src/server/terminal-session.ts](../src/server/terminal-session.ts): the headless emulator, stream offsets, resume ring, snapshots, flow control, notification hooks
+- [src/server/terminal-manager.ts](../src/server/terminal-manager.ts): spawn on attach, shell env, orphans
+- [src/server/server.ts](../src/server/server.ts): ownership, `terminal_*` handlers, `LOXEL_*` env, idle shutdown, notification broadcast, `sendToActiveWindow`
+- [src/server/terminal-settings.ts](../src/server/terminal-settings.ts): notification-sequence settings read from the persisted settings store
 - [src/server/shell-env.ts](../src/server/shell-env.ts): login-shell `PATH`
 - [src/api/ws-protocol.ts](../src/api/ws-protocol.ts): terminal messages and the binary frame format
-- [src/api/client.ts](../src/api/client.ts): binary routing, reconnect listeners
+- [src/api/client.ts](../src/api/client.ts): binary frame routing with offsets, reconnect listeners
 - [src/components/terminal/](../src/components/terminal/): xterm.js setup, WebGL, links, search decorations
-- [src/lib/osc-notification-parser.ts](../src/lib/osc-notification-parser.ts), [src/lib/terminal-notification-scanner.ts](../src/lib/terminal-notification-scanner.ts), [src/server/notification-store.ts](../src/server/notification-store.ts), [src/store/panel-notifications.ts](../src/store/panel-notifications.ts), [src/lib/notification-navigation.ts](../src/lib/notification-navigation.ts): notifications
+- [src/lib/osc-notification-parser.ts](../src/lib/osc-notification-parser.ts), [src/server/notification-store.ts](../src/server/notification-store.ts), [src/store/panel-notifications.ts](../src/store/panel-notifications.ts), [src/lib/notification-navigation.ts](../src/lib/notification-navigation.ts): notifications
 - [src/cli.ts](../src/cli.ts), [src/open-request.ts](../src/open-request.ts), `handleOpen` in [src/server/routes.ts](../src/server/routes.ts), [src/lib/open-path.ts](../src/lib/open-path.ts), [src/lib/open-file.ts](../src/lib/open-file.ts): the CLI and open requests

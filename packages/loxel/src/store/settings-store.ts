@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import { DEFAULT_SCROLLBACK_LINES, type AgentSessionOptions } from "@/api/ws-protocol";
+import {
+  DEFAULT_SCROLLBACK_LINES,
+  type AgentSessionOptions,
+  DEFAULT_NOTIFICATION_SEQUENCES,
+  type NotificationSequences,
+} from "@/api/ws-protocol";
 import { STORAGE_PREFIX } from "@/lib/env";
 
 import type { PanelId } from "./panel-config";
@@ -57,15 +62,6 @@ export interface CodingAgentSettings {
   defaultMode?: "execute" | "plan";
   /** Default tool profile for new agent sessions. */
   defaultProfile?: "execute" | "plan" | "minimal";
-}
-
-export interface NotificationSequences {
-  /** OSC 9 — iTerm2 style notifications. */
-  osc9: boolean;
-  /** OSC 777 — rxvt-unicode style notifications. */
-  osc777: boolean;
-  /** OSC 99 — Kitty style notifications. */
-  osc99: boolean;
 }
 
 export interface TerminalSettings {
@@ -124,12 +120,6 @@ export function resolveIndentation(editor: EditorSettings, filePath: string): In
   if (override) return { tabSize: override.tabSize, insertSpaces: override.insertSpaces };
   return editor.indentation;
 }
-
-export const DEFAULT_NOTIFICATION_SEQUENCES: NotificationSequences = {
-  osc9: true,
-  osc777: true,
-  osc99: true,
-};
 
 /** Per-zone default: size + which panel is active, or `false` (zone closed). */
 export interface ZoneDefault {
