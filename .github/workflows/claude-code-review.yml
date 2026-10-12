@@ -6,10 +6,12 @@ on:
 
 jobs:
   claude-review:
+    # Fork PRs get no repository secrets on pull_request, so the review would fail with an empty token.
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.state == 'open' &&
-      github.actor != 'dependabot[bot]'
+      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 56
     permissions:
