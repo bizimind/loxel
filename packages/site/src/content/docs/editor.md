@@ -65,6 +65,8 @@ When a project has both Prettier and oxfmt, Prettier wins for the languages it s
 
 Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `:::localdb` blocks render as [database widgets](/docs/introduction#planning-and-visibility); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
 
+Images referenced by relative path (`![alt](./diagram.png)`) render inline, resolved against the markdown file's location; `http(s)` and `data:` URLs render as-is. Paste or drop image files (PNG, JPEG, GIF, WebP, SVG, up to 10 MB) to upload them: in a repo file they are stored next to it under `assets/` and inserted as `![name](./assets/name-<timestamp>.png)`; in a [draft](/docs/drafts) they are stored alongside the draft. The markdown keeps the relative path you see, so the file stays portable. A failed upload shows a toast and inserts nothing; an image that cannot be loaded shows a dashed placeholder with its alt text.
+
 ---
 
 ## Conflict detection
