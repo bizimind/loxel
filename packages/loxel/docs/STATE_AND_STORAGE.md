@@ -92,7 +92,7 @@ Two details matter when changing this:
 ### Versioning and migrations
 
 - `stores.db` has no schema migrations; its schema is one key/value table.
-- Persisted store shapes are versioned by zustand: `settings-store.ts` is at `version: 10` with a stepwise `migrate` (each `version <= n` block upgrades one step), and `keybinding-store.ts` is at `version: 1`. Stores without `version` rely on `merge` or default spreading to tolerate missing fields.
+- Persisted store shapes are versioned by zustand: `settings-store.ts` is at `version: 11` with a stepwise `migrate` (each `version <= n` block upgrades one step), and `keybinding-store.ts` is at `version: 1`. Stores without `version` rely on `merge` or default spreading to tolerate missing fields.
 - Layouts carry their own `layoutVersion`; a mismatch discards the saved layout instead of migrating it (see below).
 - `projects.db` creates its table if missing and imports a legacy `projects.json` once, renaming it to `projects.json.bak`.
 - Review databases use `PRAGMA user_version` (currently 2).
