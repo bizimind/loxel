@@ -418,14 +418,14 @@ export function MarkdownEditor({
       },
     });
 
+    // Images: render relative paths via /api/file-raw, upload pasted/dropped files
+    installMarkdownImages(crepe.editor, { filePath });
+    const stopImageErrorObserver = observeImageLoadErrors(containerRef.current);
+
     // LocalDb directive plugin: :::localdb blocks rendered as inline widgets
     for (const plugin of localDbDirectivePlugins) {
       crepe.editor.use(plugin);
     }
-
-    // Images: render relative paths via /api/file-raw, upload pasted/dropped files
-    installMarkdownImages(crepe.editor, { filePath });
-    const stopImageErrorObserver = observeImageLoadErrors(containerRef.current);
 
     // Align remark-stringify output with oxfmt/Prettier markdown defaults.
     crepe.editor.config((ctx) => {
