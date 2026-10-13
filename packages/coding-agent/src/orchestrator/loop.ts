@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { createNoopLogger, type AppLogger } from "@bizimind/logger";
-import { streamText, stepCountIs, type ModelMessage } from "ai";
+import { isStepCount, streamText, type ModelMessage } from "ai";
 
 import { LoopControlBreakError, isToolPolicyViolation } from "../core/errors.ts";
 import { PermissionStore } from "../permissions/store.ts";
@@ -37,7 +37,6 @@ export interface OrchestratorCallbacks {
   emitEvent: (event: ProtocolEvent) => Promise<void>;
   onHumanQuestion: ToolRuntimeContext["onHumanQuestion"];
   onApproval: ToolRuntimeContext["onApproval"];
-  isCancelled: (runId: string) => boolean;
 }
 
 export interface RunInputMessage {
@@ -63,6 +62,12 @@ export interface RunTurnInput {
   rewindToMessageId?: string;
   messages: RunInputMessage[];
   runId?: string;
+  /**
+   * The only cancellation mechanism for a run. Aborting it stops the model stream, prevents
+   * later tool execution and fallback retries, and rejects pending approvals and questions
+   * with the signal's reason.
+   */
+  abortSignal: AbortSignal;
   approvalOverrides?: Partial<Record<CanonicalToolName, "allow" | "deny">>;
   loopControl?: LoopControlOptions;
 }
@@ -213,6 +218,7 @@ export class Orchestrator {
   }
 
   async runTurn(input: RunTurnInput): Promise<RunTurnResult> {
+    input.abortSignal.throwIfAborted();
     let session = await this.sessionStore.loadSession(input.sessionId);
 
     if (input.rewindToMessageId) {
@@ -382,33 +388,27 @@ export class Orchestrator {
       const result = streamText({
         model: this.modelRouter.getModel(profile),
         messages: modelMessages,
-        system: systemPrompt,
+        instructions: systemPrompt,
+        // The local protocol explicitly supports trusted persisted system messages.
+        allowSystemInMessages: true,
+        abortSignal: input.abortSignal,
         tools,
-        stopWhen: [stepCountIs(MAX_AGENT_STEPS)],
-        onStepFinish: async (stepResult) => {
-          const stepData = asRecord(stepResult) ?? {};
-          const toolCalls = Array.isArray(stepData.toolCalls) ? stepData.toolCalls : [];
-          const toolResults = Array.isArray(stepData.toolResults) ? stepData.toolResults : [];
+        stopWhen: [isStepCount(MAX_AGENT_STEPS)],
+        onStepEnd: async (stepResult) => {
+          const { finishReason, toolCalls, toolResults } = stepResult;
           modelStepCount += 1;
-          const usageRecord = asRecord(stepData.usage);
-          const usage = usageRecord
-            ? {
-                inputTokens:
-                  typeof usageRecord.inputTokens === "number" ? usageRecord.inputTokens : 0,
-                outputTokens:
-                  typeof usageRecord.outputTokens === "number" ? usageRecord.outputTokens : 0,
-                reasoningTokens:
-                  typeof usageRecord.reasoningTokens === "number" ? usageRecord.reasoningTokens : 0,
-              }
-            : undefined;
-          totalInputTokens += usage?.inputTokens ?? 0;
-          totalOutputTokens += usage?.outputTokens ?? 0;
-          totalReasoningTokens += usage?.reasoningTokens ?? 0;
+          const usage = {
+            inputTokens: stepResult.usage.inputTokens ?? 0,
+            outputTokens: stepResult.usage.outputTokens ?? 0,
+            reasoningTokens: stepResult.usage.outputTokenDetails.reasoningTokens ?? 0,
+          };
+          totalInputTokens += usage.inputTokens;
+          totalOutputTokens += usage.outputTokens;
+          totalReasoningTokens += usage.reasoningTokens;
           log.debug("Completed model step", {
             profile,
             step: stepIndex,
-            finishReason:
-              typeof stepData.finishReason === "string" ? stepData.finishReason : undefined,
+            finishReason,
             toolCallCount: toolCalls.length,
             usage,
           });
@@ -420,8 +420,7 @@ export class Orchestrator {
             timestamp: nowIso(),
             payload: {
               step: stepIndex,
-              finish_reason:
-                typeof stepData.finishReason === "string" ? stepData.finishReason : undefined,
+              finish_reason: finishReason,
               tool_call_count: toolCalls.length,
               usage,
             },
@@ -492,37 +491,15 @@ export class Orchestrator {
           });
 
           for (const toolResult of toolResults) {
-            const toolResultRecord = asRecord(toolResult);
-            if (!toolResultRecord) {
-              continue;
-            }
-
-            const toolName =
-              typeof toolResultRecord.toolName === "string" ? toolResultRecord.toolName : null;
-            const toolCallId =
-              typeof toolResultRecord.toolCallId === "string" ? toolResultRecord.toolCallId : null;
-            if (!toolName || !toolCallId) {
-              continue;
-            }
-
-            const output =
-              "output" in toolResultRecord ? toolResultRecord.output : toolResultRecord.result;
+            const { input: toolInput, output, toolCallId, toolName } = toolResult;
             for (const source of collectWebSourcesFromToolOutput(toolName, output)) {
               webSources.add(source);
             }
 
-            // Extract tool input from the original tool call for persistence
-            const matchingCall = toolCalls.find(
-              (tc: Record<string, unknown>) => (tc.toolCallId ?? tc.tool_call_id) === toolCallId,
-            );
-            const toolInputArgs = matchingCall
-              ? (matchingCall.args ?? matchingCall.input ?? {})
-              : {};
-
             const toolMsg = await this.sessionStore.appendMessage(
               session,
               "tool",
-              { tool_name: toolName, tool_call_id: toolCallId, input: toolInputArgs, output },
+              { tool_name: toolName, tool_call_id: toolCallId, input: toolInput, output },
               runId,
             );
 
@@ -554,8 +531,7 @@ export class Orchestrator {
 
             // Process loop control for this tool call
             if (loopController) {
-              const inputArgs = matchingCall ? (matchingCall.args ?? matchingCall.input ?? {}) : {};
-              const action = await loopController.onToolCall(toolName, inputArgs, output);
+              const action = await loopController.onToolCall(toolName, toolInput, output);
 
               if (action.action === "break") {
                 loopControlBreakReason = action.reason;
@@ -597,10 +573,6 @@ export class Orchestrator {
           stepIndex += 1;
         },
         onChunk: async ({ chunk }) => {
-          if (this.callbacks.isCancelled(runId)) {
-            throw new Error(`Run cancelled: ${runId}`);
-          }
-
           if (chunk.type === "reasoning-delta") {
             await this.callbacks.emitEvent({
               type: "run.reasoning",
@@ -679,7 +651,12 @@ export class Orchestrator {
     try {
       const result = await runModel(modelProfile);
       outputText = await result.text;
+      input.abortSignal.throwIfAborted();
     } catch (firstError) {
+      if (input.abortSignal.aborted) {
+        throw input.abortSignal.reason ?? firstError;
+      }
+
       // Check if this was a loop control break (not a real error)
       if (firstError instanceof LoopControlBreakError) {
         wasLoopControlBreak = true;
@@ -700,12 +677,15 @@ export class Orchestrator {
         try {
           const fallback = await runModel("fallback");
           outputText = await fallback.text;
+          input.abortSignal.throwIfAborted();
         } catch (fallbackError) {
           log.error("Fallback model run failed", { error: fallbackError });
           throw fallbackError;
         }
       }
     }
+
+    input.abortSignal.throwIfAborted();
 
     outputText = ensureSourcesSection(outputText, Array.from(webSources.values()));
 
@@ -752,6 +732,8 @@ export class Orchestrator {
         outputText = `${outputText}\n\n---\n**Completion Check Failed:**\n${reminderText}`;
       }
     }
+
+    input.abortSignal.throwIfAborted();
 
     const assistantMsg = await this.sessionStore.appendMessage(
       session,

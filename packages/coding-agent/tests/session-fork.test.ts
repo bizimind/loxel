@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { MockLanguageModelV3 } from "ai/test";
+import { MockLanguageModelV4 } from "ai/test";
 
 import {
   type TestEnv,
@@ -239,7 +239,7 @@ describe("Session fork", () => {
     // Create a blocking model for the second send
     const doStreamStarted = Promise.withResolvers<void>();
     const unblock = Promise.withResolvers<void>();
-    const blockingModel = new MockLanguageModelV3({
+    const blockingModel = new MockLanguageModelV4({
       doStream: async () => {
         doStreamStarted.resolve();
         await unblock.promise;

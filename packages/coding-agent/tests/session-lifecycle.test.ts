@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { MockLanguageModelV3 } from "ai/test";
+import { MockLanguageModelV4 } from "ai/test";
 
 import {
   type TestEnv,
@@ -66,7 +66,7 @@ describe("Session lifecycle", () => {
     session = await Session.create({ workspaceRoot: env.workspaceRoot, handlers: events.handlers });
     const doStreamStarted = Promise.withResolvers<void>();
     const unblockStream = Promise.withResolvers<void>();
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: async () => {
         doStreamStarted.resolve();
         await unblockStream.promise;
@@ -91,7 +91,7 @@ describe("Session lifecycle", () => {
     const events = collectEvents();
     session = await Session.create({ workspaceRoot: env.workspaceRoot, handlers: events.handlers });
     const doStreamStarted = Promise.withResolvers<void>();
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: () => {
         doStreamStarted.resolve();
         return new Promise(() => {}); // never resolves
@@ -186,7 +186,7 @@ describe("Session lifecycle", () => {
     session = await Session.create({ workspaceRoot: env.workspaceRoot, handlers: events.handlers });
 
     // First send with a model that throws
-    const failingModel = new MockLanguageModelV3({
+    const failingModel = new MockLanguageModelV4({
       doStream: async () => {
         throw new Error("model exploded");
       },
@@ -209,7 +209,7 @@ describe("Session lifecycle", () => {
     // First send with abort — use a model that blocks in doStream
     const controller = new AbortController();
     const doStreamStarted = Promise.withResolvers<void>();
-    const blockingModel = new MockLanguageModelV3({
+    const blockingModel = new MockLanguageModelV4({
       doStream: () => {
         doStreamStarted.resolve();
         return new Promise(() => {}); // never resolves
