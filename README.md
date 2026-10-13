@@ -7,7 +7,6 @@ A monorepo (pnpm + Bun) built around [Loxel](packages/loxel), an IDE for the age
 | Package                                         | Description                                                                                                    |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | [cc-git-editor](packages/cc-git-editor)         | Agent-friendly git commands that intercept `git rebase -i` and `git add -p` for non-blocking execution         |
-| [cc-tool-guard](packages/cc-tool-guard)         | Permission request hook that auto-approves safe Bash/Read operations using pattern matching                    |
 | [channel](packages/channel)                     | WebSocket client library and wire protocol for peer-to-peer messaging via relay                                |
 | [channel-worker](packages/channel-worker)       | Cloudflare Worker relay for WebSocket channels (Durable Objects, WorkOS JWT auth)                              |
 | [cli-common](packages/cli-common)               | Shared CLI utilities: output modes, formatters, logging, self-update                                           |
