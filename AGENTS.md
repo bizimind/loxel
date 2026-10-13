@@ -24,7 +24,7 @@ The `.env` file is copied to the worktree root by the repo-root `init.wt.sh` hoo
 pnpm install                                   # Install all dependencies
 
 # Build a package (root `build` is intentionally disabled; packages with a build script:
-# cc-git-editor, cc-tool-guard, code-analysis, coding-agent, excalidraw, loxel, site, whisper-cpp, wt)
+# cc-git-editor, code-analysis, coding-agent, excalidraw, loxel, site, whisper-cpp, wt)
 pnpm -C packages/<package> run build
 
 # Lint and format (root-level, or from any package via aliases)
@@ -68,8 +68,6 @@ Each package README is the authoritative doc for that package; this list only or
 
 - **cc-git-editor**: Intercepts `git rebase -i` and `git add -p` to provide non-blocking execution for agents. Detects agent mode via `CLAUDECODE=1`. See `packages/cc-git-editor/README.md`.
 
-- **cc-tool-guard**: PermissionRequest hook that auto-approves safe Bash/Read operations and defers everything else to the user (never denies), using pattern matching with a Haiku fallback. See `packages/cc-tool-guard/README.md`.
-
 - **excalidraw**: CLI for agents to create, edit, query, and render Excalidraw diagrams, with JSON-over-stdin batch operations. See `packages/excalidraw/README.md` and the `excalidraw` skill.
 
 - **code-analysis**: Code analysis CLI with built-in plugins (loc, languages, git-churn, lint/type issues, import graph) that prints results or serves a live treemap or graph visualization. See `packages/code-analysis/README.md`.
@@ -101,8 +99,6 @@ Each package README is the authoritative doc for that package; this list only or
 **Agent Detection**: Check `CLAUDECODE=1` environment variable to branch between agent (non-blocking) and human (standard) behavior.
 
 **Standalone Binaries**: Packages compile to standalone executables via `bun build --compile`. Production binaries are built and signed in CI and placed in `~/.local/bin/`. If specifically requested to use a locally built binary, copy it to `~/.local/bin/` and ad-hoc sign with `codesign -s -` (required on macOS or the binary gets SIGKILL'd).
-
-**Hook Protocol**: Tools integrate with Claude Code via JSON-over-stdin/stdout. See `cc-tool-guard/src/tool-guard.ts` for the pattern.
 
 ## Bun Guidelines
 

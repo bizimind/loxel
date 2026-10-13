@@ -56,8 +56,6 @@ importers:
 
   packages/cc-git-editor: {}
 
-  packages/cc-tool-guard: {}
-
   packages/channel:
     dependencies:
       zod:
