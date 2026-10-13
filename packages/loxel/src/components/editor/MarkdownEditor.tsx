@@ -28,6 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
+import { installMarkdownImages, observeImageLoadErrors } from "@/components/editor/markdown-images";
 import {
   type MergeCallbacks,
   AUTOSAVE_DEBOUNCE_MS,
@@ -417,6 +418,10 @@ export function MarkdownEditor({
       },
     });
 
+    // Images: render relative paths via /api/file-raw, upload pasted/dropped files
+    installMarkdownImages(crepe.editor, { filePath });
+    const stopImageErrorObserver = observeImageLoadErrors(containerRef.current);
+
     // LocalDb directive plugin: :::localdb blocks rendered as inline widgets
     for (const plugin of localDbDirectivePlugins) {
       crepe.editor.use(plugin);
@@ -648,6 +653,7 @@ export function MarkdownEditor({
       }
       popoverObserver?.disconnect();
       portalRoot?.remove();
+      stopImageErrorObserver();
       // crepe.destroy() retries forever while create() is still pending (status stuck at
       // OnCreate if it rejected), so only destroy once creation has settled successfully.
       if (created) crepe.destroy();

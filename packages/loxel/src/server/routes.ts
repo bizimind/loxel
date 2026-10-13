@@ -1,7 +1,7 @@
 import { accessSync, chmodSync, constants, existsSync, mkdirSync, readdirSync } from "node:fs";
-import { realpath, rm, stat } from "node:fs/promises";
+import { mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   assertCanTransformToBare,
@@ -49,6 +49,12 @@ import { externalFoldersStoreKey } from "./external-folders-service";
 import type { HistoryStep } from "./file-operations-service";
 import { listFolderApps } from "./folder-apps";
 import * as git from "./git-commands";
+import {
+  IMAGE_ASSETS_DIR,
+  MAX_IMAGE_UPLOAD_BYTES,
+  detectImageExtension,
+  writeWithUniqueName,
+} from "./image-upload";
 import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
@@ -911,6 +917,68 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     await git.writeWorkingTreeFileContent(resolved.cwd, resolved.wtPath, filePath, content);
   }
   return json({ success: true, content });
+}
+
+// POST /api/file-upload — Store an image pasted/dropped into a markdown editor.
+// Multipart body: `path` (absolute path of the markdown file), `nonce`, `file`.
+// Project files get `<md dir>/assets/<slug>-<timestamp>.<ext>`; drafts are stored flat in
+// the drafts directory. Responds with the absolute path and the markdown-relative `src`.
+async function handleFileUpload(req: Request, ctx: RouteContext): Promise<Response> {
+  const declaredLength = Number(req.headers.get("Content-Length") ?? 0);
+  if (declaredLength > MAX_IMAGE_UPLOAD_BYTES * 1.5) return error("Image too large", 413);
+
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return error("Expected multipart form data", 400);
+  }
+  const mdPath = form.get("path");
+  const nonce = form.get("nonce");
+  const file = form.get("file");
+  if (typeof mdPath !== "string" || !mdPath.startsWith("/")) {
+    return error("Missing or invalid path", 400);
+  }
+  if (typeof nonce !== "string" || !nonce) return error("Missing nonce", 400);
+  if (!(file instanceof File)) return error("Missing file", 400);
+  if (file.size > MAX_IMAGE_UPLOAD_BYTES) return error("Image too large", 413);
+  // The declared MIME type is not consulted: Bun derives File.type from the filename, so it
+  // says nothing about the content. `detectImageExtension` decides from the bytes below.
+
+  // Only files already owned by a worktree (project tree or drafts) can receive images.
+  // Deliberately not using resolveFilePathWithHint: it would register unknown paths as
+  // external files as a side effect.
+  const resolved = ctx.resolveFilePath(mdPath);
+  if (!resolved) return error("File not found in any active worktree", 404);
+  if (resolved.type === "external") {
+    return error("Image upload is only supported for project files and drafts", 400);
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const ext = detectImageExtension(bytes);
+  if (!ext) return error("Unsupported image format", 415);
+
+  if (resolved.type === "detached") {
+    const { detachedFilesService } = resolved.resources;
+    const name = await writeWithUniqueName(file.name, ext, (candidate) =>
+      detachedFilesService.writeNewFile(candidate, bytes, nonce),
+    );
+    return json({ path: join(detachedFilesService.dir, name), src: `./${name}` });
+  }
+
+  // `relativePath` comes from resolveFilePath, which already normalized the path and proved it
+  // sits inside the tree (the worktree's own, or an Others folder whose root differs from
+  // `wtPath`) — no git-argument validation needed for a plain fs write.
+  const { tree, relativePath } = resolved;
+  if (!relativePath) return error("Cannot upload into a folder", 400);
+  const relativeDir = join(dirname(relativePath), IMAGE_ASSETS_DIR);
+  await mkdir(join(tree.root, relativeDir), { recursive: true });
+  const name = await writeWithUniqueName(file.name, ext, (candidate) =>
+    tree.filesService.writeFile(join(relativeDir, candidate), nonce, () =>
+      writeFile(join(tree.root, relativeDir, candidate), bytes, { flag: "wx" }),
+    ),
+  );
+  return json({ path: join(tree.root, relativeDir, name), src: `./${IMAGE_ASSETS_DIR}/${name}` });
 }
 
 // GET /api/detected-formatters?wt= — Return auto-detected formatters for a worktree
@@ -2920,6 +2988,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/stage-hunk": handleStageHunk,
     "/api/unstage-hunk": handleUnstageHunk,
     "/api/file-write": handleFileWrite,
+    "/api/file-upload": handleFileUpload,
     "/api/worktree/plan-add": handlePlanAddWorktree,
     "/api/worktree/create": handleCreateWorktree,
     "/api/worktree/plan-remove": handlePlanRemoveWorktree,

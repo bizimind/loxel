@@ -108,6 +108,14 @@ Search navigation uses `rawLineToProsePosition` ([prosemirror-position.ts](../sr
 
 Tables are Crepe's GFM table feature (prosemirror-tables) with no custom node; Loxel only restyles them in [milkdown-theme.css](../src/styles/milkdown-theme.css).
 
+### Images
+
+[markdown-images.ts](../src/components/editor/markdown-images.ts) adds images on top of the commonmark inline `image` node (Crepe's ImageBlock stays off: its serializer writes the aspect ratio as `alt` and the caption as `title`, clobbering real alt text on every save, whereas the inline node round-trips alt/title verbatim and is byte-preserved like any other untouched block).
+
+- **Rendering.** `@milkdown/kit/component/image-inline`'s `proxyDomURL` rewrites only the DOM `src`: relative paths resolve against the markdown file's directory (every path segment is percent-encoded, so `#`, `?` and `%` in file or worktree names stay literal) and load through `GET /api/file-raw?path=<absolute>` with no worktree hint, so the server only serves files it already owns (worktree tree, Others folder or drafts) and never registers paths as external files. `http(s):`/`data:` URLs pass through. `observeImageLoadErrors` adds a `broken` class to the node view of an image that fails to load; the theme shows a dashed placeholder with the alt text. Styles live in the "Images" section of [milkdown-theme.css](../src/styles/milkdown-theme.css).
+- **Upload.** Pasting or dropping image files (the upload plugin's `uploader`) and the "Upload" button of an empty `![]()` node (`onUpload`) both post to `POST /api/file-upload` (multipart `path`, `nonce`, `file`). A failed upload toasts and inserts nothing, so `blob:`/`data:` URLs are never persisted. Pastes that carry HTML alongside files (copied from a browser page) are left to the regular clipboard handler.
+- **Server.** `handleFileUpload` in [routes.ts](../src/server/routes.ts) resolves the markdown file with `resolveFilePath` (no hint, no external-file registration) and only accepts tree files (the worktree's own and Others folders) and drafts. Content is sniffed by magic bytes ([image-upload.ts](../src/server/image-upload.ts)); the declared MIME type is ignored because Bun derives `File.type` from the filename. Uploads are capped at 10 MB. Tree files store images as `<md dir>/assets/<slug>-<timestamp>.<ext>` under the tree root (inserted as `./assets/...`); drafts store them flat in the drafts directory (inserted as `./<name>`). Writes use the `wx` flag with a numbered suffix on clashes and go through the owning files service with the nonce, so the watcher recognizes the echo.
+
 ### Directives and the localdb widget
 
 [localdb-directive/remark-plugin.ts](../src/components/editor/localdb-directive/remark-plugin.ts) installs directive syntax restricted to what the editor understands:
@@ -150,7 +158,7 @@ Drafts (detached files) are files outside the repository, one flat directory per
 
 - Names are `<prefix> <n>[.<ext>]` with the lowest unused `n`. Creation uses the `wx` flag and retries on `EEXIST`, so concurrent creates from several windows cannot collide. The panel creators use `Note` + `md`, `Drawing` + `excalidraw`, and `Untitled` for code files.
 - Listing changes broadcast `detached_files_changed`; content changes of existing files go through the shared `file_content_changed` broadcast with nonces, so drafts save exactly like worktree files.
-- `moveToProject` refuses to overwrite and falls back to copy + delete across filesystems (`EXDEV`); `copyToProject` uses `COPYFILE_EXCL`. After a move the client dispatches `loxel-file-moved`, so an open draft tab becomes a worktree tab. The Drafts section UI is in [PROJECT_EXPLORER.md](PROJECT_EXPLORER.md).
+- `moveToProject` refuses to overwrite and falls back to copy + delete across filesystems (`EXDEV`); `copyToProject` uses `COPYFILE_EXCL`. Both carry along images a markdown draft references by relative path (`findCompanionImages`: bare filenames with an image extension that exist in the drafts directory), checking name clashes up front so nothing is half-moved; an image another draft still references is copied rather than moved. After a move the client dispatches `loxel-file-moved`, so an open draft tab becomes a worktree tab. The Drafts section UI is in [PROJECT_EXPLORER.md](PROJECT_EXPLORER.md).
 
 [detached-path.ts](../src/lib/detached-path.ts) only holds display-name and directory-normalization helpers.
 

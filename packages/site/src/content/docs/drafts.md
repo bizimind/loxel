@@ -52,7 +52,7 @@ Drafts autosave on the same schedule as the code editor (250ms after you stop ty
 
 ## Moving a draft into the repo
 
-When a draft is ready to become part of the project, drag it from the Drafts section into any folder in the active worktree's file tree (drop it on empty space for the worktree root). You can also cut it (`Cmd+X`) and paste it (`Cmd+V`) into a folder, or copy and paste to keep the draft as well. The move fails if a file with the same name already exists there.
+When a draft is ready to become part of the project, drag it from the Drafts section into any folder in the active worktree's file tree (drop it on empty space for the worktree root). You can also cut it (`Cmd+X`) and paste it (`Cmd+V`) into a folder, or copy and paste to keep the draft as well. The move fails if a file with the same name already exists there. Images a markdown draft references by relative path (pasted or dropped into it) move or copy along with it, into the same folder; if one of those image names already exists in the target folder, the move fails before anything is moved. An image that another draft still references is copied rather than moved.
 
 Loxel moves the file and any open editor for it keeps working — no need to reopen it. After the move, the file is a regular repo file, tracked by git like any other.
 
