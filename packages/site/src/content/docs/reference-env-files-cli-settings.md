@@ -59,20 +59,32 @@ The `loxel` CLI is introduced in [Terminals](/docs/terminals#the-loxel-cli-insid
 
 ```
 loxel [file-path | folder-path | url]
+loxel terminal [--cwd <dir>] [--title <name>] [--] [command...]
 ```
 
-| Invocation          | Behavior                                                  |
-| ------------------- | --------------------------------------------------------- |
-| `loxel`             | Launch Loxel if not running, or focus the existing window |
-| `loxel src/app.ts`  | Open a file in an editor (see below)                      |
-| `loxel ~/notes`     | Reveal a folder in the file tree (see below)              |
-| `loxel https://...` | Open a URL in Loxel's browser panel                       |
+| Invocation                              | Behavior                                                  |
+| --------------------------------------- | --------------------------------------------------------- |
+| `loxel`                                 | Launch Loxel if not running, or focus the existing window |
+| `loxel src/app.ts`                      | Open a file in an editor (see below)                      |
+| `loxel ~/notes`                         | Reveal a folder in the file tree (see below)              |
+| `loxel https://...`                     | Open a URL in Loxel's browser panel                       |
+| `loxel terminal`                        | Open a terminal panel in the current directory            |
+| `loxel terminal -- claude "Fix the CI"` | Open a terminal and run a command in it (see below)       |
 
 **Finding Loxel:** inside a Loxel terminal, `loxel` connects through `LOXEL_PORT`. Elsewhere it looks for a running Loxel on port 7433 (prod), then 7434 (dev). If no server is found, Loxel launches and the CLI waits up to 15 seconds for it to become ready.
 
 **Files and folders:** `loxel <path>` goes to the window you are working in: the window of the Loxel terminal it runs in, or else the most recently focused Loxel window. Other windows are left alone. A file or folder inside one of your projects' worktrees opens in that worktree, switching to it if needed (a folder is revealed in the file tree). Anything else opens in the [Others section](/docs/editor#other-folders) of that window's active worktree, so files don't need to be inside a git repository. If Loxel is still starting, the CLI prints `waiting for a Loxel window...` and waits up to 30 seconds for a window to connect. Files and folders opened from Finder take the same path (see [Opening files from Finder](/docs/editor#opening-files-from-finder)).
 
 **URLs:** `loxel <url>` opens in the windows showing the worktree that contains the current directory. Inside a Loxel terminal, it falls back to `LOXEL_WORKTREE` when the current directory isn't in a git repository; otherwise the command errors.
+
+**Terminals:** `loxel terminal` opens a new terminal panel in the same window as a file would: the window of the Loxel terminal it runs in, or else the most recently focused window. The shell starts in the current directory, or in `--cwd <dir>`. A directory inside one of your worktrees opens the panel in that worktree, switching to it if needed; any other directory gets a panel in the window's active worktree. `--title <name>` names the tab. Everything after the flags (or after `--`) is a command typed into the shell once it starts, exactly as if you had entered it: your login shell, aliases and history all apply, and the shell stays open after the command exits. A single argument is a shell command line (`loxel terminal 'cd src && make'`); several arguments are passed as one command with each argument quoted where needed, so `loxel terminal -- claude "Fix the failing tests"` types `claude 'Fix the failing tests'` and an alias for `claude` still applies. Put `--` before commands that have flags of their own. The CLI returns as soon as the request reaches a Loxel window; it does not wait for the command. The command is typed before your shell finishes starting, so a startup script that reads from the terminal would consume it. Since `terminal` is a subcommand, open a file or folder of that name as `loxel ./terminal`.
+
+A typical use is starting an agent in a fresh worktree right after creating it:
+
+```bash
+wt add feat/retry-uploads
+loxel terminal --cwd .worktrees/feat/retry-uploads --title claude -- claude "Add retries to the upload client"
+```
 
 ---
 

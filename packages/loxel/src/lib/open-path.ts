@@ -1,13 +1,16 @@
 import * as api from "@/api/client";
+import type { OpenTerminalPanel } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
 import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
 import { getCenterApiWorktree, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
+import type { PendingOpen } from "@/store/worktree-ui";
 import { getCurrentWorktreeUI, getWorktreeUI } from "@/store/worktree-ui";
 import { deriveOwningWorktree, useWorktreeStore } from "@/store/worktrees";
 
 import { frontendLog } from "./frontend-logger";
+import { dispatchLoxelEvent } from "./loxel-events";
 import type { FileLocation } from "./open-file";
 import { dispatchOpenFile } from "./open-file";
 
@@ -70,7 +73,7 @@ export async function openFolder(rawPath: string): Promise<void> {
 export async function openFile(path: string): Promise<void> {
   await whenProjectsLoaded();
   const { projects } = useProjectStore.getState();
-  const { activeWorktreePath, switchWorktree, byProject } = useWorktreeStore.getState();
+  const { activeWorktreePath, byProject } = useWorktreeStore.getState();
 
   const target = deriveOwningWorktree(path, projects, byProject) ?? activeWorktreePath;
   if (!target) {
@@ -78,16 +81,61 @@ export async function openFile(path: string): Promise<void> {
     return;
   }
 
-  // Open now if the target's editor area is mounted; otherwise — while a worktree switch swaps it
-  // in, or before it first mounts — queue the file for it, behind any file already waiting there.
-  const ui = getWorktreeUI(target).getState();
-  const centerReady = target === activeWorktreePath && getCenterApiWorktree() === target;
-  if (centerReady && ui.pendingOpenFiles.length === 0) {
-    dispatchOpenFile(path);
+  await openInWorktree(target, { kind: "file", path });
+}
+
+/**
+ * Open a terminal sent from outside the window (`loxel terminal`). The shell starts in `cwd`; the
+ * panel goes to the worktree containing `cwd`, switching to it if needed, else to the active one.
+ * A worktree created moments ago (`wt add` from a shell) may not be listed yet, so the owning
+ * project's worktrees are refreshed before giving up on finding an owner.
+ */
+export async function openTerminal(terminal: OpenTerminalPanel): Promise<void> {
+  await whenProjectsLoaded();
+  const { projects } = useProjectStore.getState();
+  const { activeWorktreePath, byProject, refreshProjectWorktrees } = useWorktreeStore.getState();
+
+  let owner = deriveOwningWorktree(terminal.cwd, projects, byProject);
+  if (!owner) {
+    const project = deriveProject(terminal.cwd, projects);
+    if (project) {
+      await refreshProjectWorktrees(project.path);
+      owner = deriveOwningWorktree(terminal.cwd, projects, useWorktreeStore.getState().byProject);
+    }
+  }
+
+  const target = owner ?? activeWorktreePath;
+  if (!target) {
+    showToast("Open a project before opening terminals");
     return;
   }
-  ui.queueOpenFile(path);
+  await openInWorktree(target, { kind: "terminal", terminal });
+}
+
+/**
+ * Open now if the target's editor area is mounted; otherwise — while a worktree switch swaps it
+ * in, or before it first mounts — queue the panel for it, behind anything already waiting there.
+ */
+async function openInWorktree(target: string, open: PendingOpen): Promise<void> {
+  const { activeWorktreePath, switchWorktree } = useWorktreeStore.getState();
+  const ui = getWorktreeUI(target).getState();
+  const centerReady = target === activeWorktreePath && getCenterApiWorktree() === target;
+  if (centerReady && ui.pendingOpens.length === 0) {
+    dispatchPendingOpen(open);
+    return;
+  }
+  ui.queueOpen(open);
   if (target !== activeWorktreePath) await switchWorktree(target);
+}
+
+/**
+ * Create the panel a {@link PendingOpen} describes in the mounted center layout. Creation goes
+ * through the typed window events, like every other panel, so this module does not depend on the
+ * panel creators.
+ */
+export function dispatchPendingOpen(open: PendingOpen): void {
+  if (open.kind === "file") dispatchOpenFile(open.path);
+  else dispatchLoxelEvent("loxel-create-terminal", open.terminal);
 }
 
 /**

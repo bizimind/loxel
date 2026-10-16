@@ -98,6 +98,7 @@ describe("Others folders routes", () => {
       updateYamlSchemas: () => {},
       formatContent: async () => null,
       getDetectedFormatters: () => [],
+      setTerminalCommand: () => {},
     };
   });
 

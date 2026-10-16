@@ -5,11 +5,23 @@
 const WINDOW_WAIT_MS = 30_000;
 const RETRY_INTERVAL_MS = 300;
 
+/** A terminal to open: where its shell starts, what to type into it, and the tab title. */
+export interface OpenTerminalRequest {
+  /** Absolute directory the shell starts in. */
+  cwd: string;
+  /** Shell command line typed into the shell once it is running. */
+  command?: string;
+  title?: string;
+}
+
 /**
- * Body of `POST /api/open`: a file or folder (optionally for a specific window), or a URL for the
- * windows showing a worktree.
+ * Body of `POST /api/open`: a file or folder or a new terminal (optionally for a specific window),
+ * or a URL for the windows showing a worktree.
  */
-export type OpenRequest = { filePath: string; windowId?: string } | { url: string; wtPath: string };
+export type OpenRequest =
+  | { filePath: string; windowId?: string }
+  | { url: string; wtPath: string }
+  | { terminal: OpenTerminalRequest; windowId?: string };
 
 interface RequestOpenOptions {
   /** Called once when no window has connected yet and the request starts waiting for one. */

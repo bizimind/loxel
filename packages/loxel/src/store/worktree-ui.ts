@@ -2,6 +2,8 @@
  * Per-worktree UI state (selections, search, panel layout).
  * Each worktree gets its own store instance via the worktree store factory.
  */
+import type { OpenTerminalPanel } from "@/api/ws-protocol";
+
 import { createWorktreeStore } from "./worktree-store";
 
 export type PanelSide = "left" | "right";
@@ -38,6 +40,11 @@ export interface PendingReveal {
   path: string;
   expand: boolean;
 }
+
+/** A panel waiting for its worktree's editor area to mount: a file for an editor, or a terminal. */
+export type PendingOpen =
+  | { kind: "file"; path: string }
+  | { kind: "terminal"; terminal: OpenTerminalPanel };
 
 interface WorktreeUIState {
   // Branches panel collapse & side (used by GraphPanel's inner dockview)
@@ -85,12 +92,12 @@ interface WorktreeUIState {
   pendingReveal: PendingReveal | null;
   setPendingReveal: (reveal: PendingReveal | null) => void;
   /**
-   * Files to open once this worktree's editor area is mounted — queued across a worktree switch,
+   * Panels to open once this worktree's editor area is mounted — queued across a worktree switch,
    * or while the window is still launching. Taken by the center layout when it mounts.
    */
-  pendingOpenFiles: string[];
-  queueOpenFile: (path: string) => void;
-  takePendingOpenFiles: () => string[];
+  pendingOpens: PendingOpen[];
+  queueOpen: (open: PendingOpen) => void;
+  takePendingOpens: () => PendingOpen[];
 }
 
 export const {
@@ -136,12 +143,12 @@ export const {
   setExpandedProjectFolders: (folders) => set({ expandedProjectFolders: new Set(folders) }),
   pendingReveal: null,
   setPendingReveal: (reveal) => set({ pendingReveal: reveal }),
-  pendingOpenFiles: [],
-  queueOpenFile: (path) => set((s) => ({ pendingOpenFiles: [...s.pendingOpenFiles, path] })),
-  takePendingOpenFiles: () => {
-    const paths = get().pendingOpenFiles;
-    if (paths.length > 0) set({ pendingOpenFiles: [] });
-    return paths;
+  pendingOpens: [],
+  queueOpen: (open) => set((s) => ({ pendingOpens: [...s.pendingOpens, open] })),
+  takePendingOpens: () => {
+    const opens = get().pendingOpens;
+    if (opens.length > 0) set({ pendingOpens: [] });
+    return opens;
   },
   renameProjectPaths: (oldPrefix, newPrefix) =>
     set((s) => {

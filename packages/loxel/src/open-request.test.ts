@@ -36,6 +36,14 @@ describe("requestOpen", () => {
     expect(bodies).toEqual([{ filePath: "/tmp/a.md", windowId: "w1" }]);
   });
 
+  test("posts a terminal request", async () => {
+    const { bodies } = serve([{ status: 200, body: { ok: true, terminalId: "t" } }]);
+
+    await requestOpen(SERVER, { terminal: { cwd: "/tmp", command: "ls" }, windowId: "w1" });
+
+    expect(bodies).toEqual([{ terminal: { cwd: "/tmp", command: "ls" }, windowId: "w1" }]);
+  });
+
   test("waits for a window to connect", async () => {
     const { bodies } = serve([NO_WINDOW, NO_WINDOW, { status: 200, body: { ok: true } }]);
     let waits = 0;

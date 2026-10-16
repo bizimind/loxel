@@ -106,14 +106,15 @@ function DiffViewerComponent(_props: IDockviewPanelProps) {
   return <DiffViewerPanel />;
 }
 
-/** Terminal panel in the center group. */
+/** Terminal panel in the center group. `cwd` is set only when the shell starts outside the worktree. */
 function TerminalPanelComponent(
-  props: IDockviewPanelProps<{ terminalId: string; worktreePath?: string }>,
+  props: IDockviewPanelProps<{ terminalId: string; worktreePath?: string; cwd?: string }>,
 ) {
   return (
     <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
       <Terminal
         terminalId={props.params.terminalId}
+        cwd={props.params.cwd}
         onClose={() => props.api.close()}
         onCreateNew={() => {
           window.dispatchEvent(new CustomEvent("loxel-create-terminal"));

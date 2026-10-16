@@ -121,6 +121,8 @@ export interface RouteContext {
   ) => Promise<string | null>;
   /** Return detected formatters for a worktree. */
   getDetectedFormatters: (worktreePath: string) => { command: string; extensions: string[] }[];
+  /** Type `command` into terminal `terminalId` when its panel attaches and the shell spawns. */
+  setTerminalCommand: (terminalId: string, command: string) => void;
 }
 
 type RouteHandler = (req: Request, ctx: RouteContext) => Promise<Response> | Response;
@@ -2467,10 +2469,43 @@ async function handleExternalFolderRemove(req: Request, ctx: RouteContext): Prom
 // Open file, folder or URL (CLI and Finder integration)
 // ---------------------------------------------------------------------------
 
-// POST /api/open — open a file, folder or URL in the appropriate panel (triggered by the `loxel`
-// CLI and by files and folders macOS hands to the app)
+// POST /api/open — open a file, folder, URL or terminal in the appropriate panel (triggered by the
+// `loxel` CLI and by files and folders macOS hands to the app)
 async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
+  const windowId = typeof body.windowId === "string" ? body.windowId : null;
+
+  // Terminal mode: a new terminal panel in the window in use, its shell started in `cwd`, with an
+  // optional command typed into it. The command stays on the server until the panel attaches, so
+  // it is never persisted with the layout and cannot run twice.
+  if (body.terminal !== undefined) {
+    const terminal = body.terminal;
+    if (typeof terminal !== "object" || terminal === null || Array.isArray(terminal)) {
+      return error("terminal must be an object", 400);
+    }
+    const { cwd: rawCwd, command, title } = terminal as Record<string, unknown>;
+    if (typeof rawCwd !== "string") return error("Missing terminal.cwd in body", 400);
+    if (command !== undefined && typeof command !== "string") {
+      return error("terminal.command must be a string", 400);
+    }
+    if (title !== undefined && typeof title !== "string") {
+      return error("terminal.title must be a string", 400);
+    }
+    const cwd = await canonicalPath(rawCwd);
+    const cwdStats = cwd ? await stat(cwd).catch(() => null) : null;
+    if (!cwd || !cwdStats) return error("Directory not found", 404);
+    if (!cwdStats.isDirectory()) return error("Not a directory", 400);
+
+    const terminalId = crypto.randomUUID();
+    const sent = ctx.sendToActiveWindow(windowId, {
+      type: "open_terminal",
+      data: { terminalId, cwd, ...(title ? { title } : {}) },
+    });
+    if (!sent) return error("No Loxel window is open", 503);
+    // Registered only once a window has the request: the attach arrives later over the socket.
+    if (command) ctx.setTerminalCommand(terminalId, command);
+    return json({ ok: true, terminalId });
+  }
 
   // URL mode: open in browser panel
   if (typeof body.url === "string") {
@@ -2498,7 +2533,6 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   // Files and folders go to the window in use — from a loxel terminal, that terminal's window;
   // otherwise the focused one — which opens them in their worktree or its Others section.
   const path = (await canonicalPath(absolutePath)) ?? absolutePath;
-  const windowId = typeof body.windowId === "string" ? body.windowId : null;
   const sent = ctx.sendToActiveWindow(
     windowId,
     stats.isDirectory()

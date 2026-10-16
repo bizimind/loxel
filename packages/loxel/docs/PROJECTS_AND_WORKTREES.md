@@ -118,7 +118,7 @@ Each window has its own active worktree: `activeWorktreePath` is mirrored to `se
 
 Differences from worktrees: no git, no `wt`, no project row; a folder is live only while a subscribed worktree lists it. `externalFolderConflict` in [server-state.ts](../src/server/server-state.ts) rejects `/`, the home directory, folders inside a project (cwd or `worktreesDir`) and folders containing a project. `POST /api/external-folders/add` canonicalizes with `realpath` and requires the worktree to have live resources (503 otherwise).
 
-Entry points: `loxel <folder>` and Finder both reach `POST /api/open`, which sends `open_folder`/`open_file` to a window ([ELECTRON.md](ELECTRON.md), [TERMINALS.md](TERMINALS.md)). [open-path.ts](../src/lib/open-path.ts) then switches to the owning worktree when the path is inside one (`deriveOwningWorktree`), refuses paths inside a project but outside its worktrees, and otherwise adds the folder to the active worktree's Others. UI behavior is in [PROJECT_EXPLORER.md](PROJECT_EXPLORER.md).
+Entry points: `loxel <folder>` and Finder both reach `POST /api/open`, which sends `open_folder`/`open_file` (or `open_terminal` for `loxel terminal`) to a window ([ELECTRON.md](ELECTRON.md), [TERMINALS.md](TERMINALS.md)). [open-path.ts](../src/lib/open-path.ts) then switches to the owning worktree when the path is inside one (`deriveOwningWorktree`), refuses paths inside a project but outside its worktrees, and otherwise adds the folder to the active worktree's Others. UI behavior is in [PROJECT_EXPLORER.md](PROJECT_EXPLORER.md).
 
 ## Sidebar
 

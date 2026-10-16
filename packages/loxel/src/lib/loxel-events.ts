@@ -5,11 +5,12 @@
  * raw `new CustomEvent()` and `as CustomEvent<T>` casts.
  */
 import type { SplitPosition } from "@/components/dockview/default-layout";
+import type { CreateTerminalOptions } from "@/lib/panel-creators";
 
 /** Detail shapes for all loxel custom events. */
 export interface LoxelEventMap {
   "loxel-create-agent": { split?: SplitPosition };
-  "loxel-create-terminal": { split?: SplitPosition };
+  "loxel-create-terminal": CreateTerminalOptions;
   "loxel-create-editor": { split?: SplitPosition };
   "loxel-create-drawing": { split?: SplitPosition };
   "loxel-create-browser": { url?: string; split?: SplitPosition };

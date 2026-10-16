@@ -83,6 +83,13 @@ It also accepts URLs:
 loxel https://example.com
 ```
 
+And it can open more terminals, optionally running a command in them. The new tab opens in the worktree that contains the directory, switching to it if needed, and the command is typed into your shell as if you had entered it, so the shell stays open when it finishes:
+
+```bash
+loxel terminal                                   # a shell in the current directory
+loxel terminal --cwd ../other-worktree -- claude  # start an agent in another worktree
+```
+
 Because the terminal already has `LOXEL_PORT` set, the CLI connects to the running Loxel immediately.
 
 > For the full `loxel` CLI reference, including behavior when no server is running, see [Environment Variables & Settings](/docs/reference-env-files-cli-settings).

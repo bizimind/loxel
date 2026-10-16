@@ -42,7 +42,7 @@ Three processes:
 - **Renderer** (React 19, Vite, `src/`) — Zustand stores (`src/store/`) persisted to the server, TanStack Query for server data (`src/queries/`), shared request/response and WebSocket models (`src/api/`), Monaco, xterm.js, Dockview, Milkdown and Excalidraw components (`src/components/`).
 - **Electron shell** (`src/electron/`) — spawns or reuses the server, opens windows on its URL, and handles native integrations. See [docs/ELECTRON.md](docs/ELECTRON.md).
 
-The `loxel` CLI (`src/cli.ts`) talks to a running server to open files, folders and URLs.
+The `loxel` CLI (`src/cli.ts`) talks to a running server to open files, folders, URLs and terminals.
 
 Always-on performance monitors in all three processes (`src/lib/perf-monitor.ts`, `src/electron/main-perf-monitor.ts`, `src/server/server-perf-monitor.ts`) log summaries and anomalies with `cat: "perf"`; filter the Logs panel or the server log files by that category.
 

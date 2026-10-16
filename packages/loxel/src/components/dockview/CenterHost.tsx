@@ -12,7 +12,7 @@ import { wsClient } from "@/api/client";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
-import { dispatchOpenFile } from "@/lib/open-file";
+import { dispatchPendingOpen } from "@/lib/open-path";
 import { useAgentDevToolsStore } from "@/store/agent-devtools";
 import { reattachActiveContent } from "@/store/layout-actions";
 import { getCenterPanelDef } from "@/store/panel-config";
@@ -114,16 +114,16 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
       }
     });
 
-    // Open files queued for this worktree while its editor area was being swapped in or had not
-    // mounted yet (see openFile). Deferred so only the instance that stays mounted takes them —
-    // React StrictMode mounts the layout twice in dev — and left queued if the worktree was
-    // switched away again meanwhile, for the next center mounted for it.
+    // Open panels queued for this worktree while its editor area was being swapped in or had not
+    // mounted yet (see openFile and openTerminal). Deferred so only the instance that stays
+    // mounted takes them — React StrictMode mounts the layout twice in dev — and left queued if
+    // the worktree was switched away again meanwhile, for the next center mounted for it.
     queueMicrotask(() => {
       const worktreePath = worktreePathRef.current;
       if (getCenterApi() !== api || !worktreePath) return;
       if (useWorktreeStore.getState().activeWorktreePath !== worktreePath) return;
-      for (const filePath of getWorktreeUI(worktreePath).getState().takePendingOpenFiles()) {
-        dispatchOpenFile(filePath);
+      for (const open of getWorktreeUI(worktreePath).getState().takePendingOpens()) {
+        dispatchPendingOpen(open);
       }
     });
   }, []);

@@ -39,6 +39,7 @@ import { PythonLspManager } from "./python-lsp-manager";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
+import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
@@ -674,7 +675,7 @@ const terminalManager = new TerminalManager({
   isSequenceEnabled: isNotificationSequenceEnabled,
   onNotification: (session, payload) => {
     const notification = notificationStore.add({
-      source: { kind: "terminal", panelId: session.id, worktreePath: session.cwd },
+      source: { kind: "terminal", panelId: session.id, worktreePath: session.worktreePath },
       title: payload.title,
       body: payload.body,
       urgency: payload.urgency ?? "normal",
@@ -773,15 +774,24 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       const envOverrides: Record<string, string> = {
         LOXEL: "1",
         LOXEL_PORT: String(config.port),
-        LOXEL_WORKTREE: msg.cwd,
+        LOXEL_WORKTREE: msg.worktreePath ?? msg.cwd,
       };
       if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
+
+      // A persisted cwd (`loxel terminal --cwd`) may be gone by the time the panel respawns, e.g.
+      // after a server restart; start in the worktree then rather than failing the attach.
+      let cwd = msg.cwd;
+      if (msg.worktreePath && msg.worktreePath !== cwd && !existsSync(cwd)) {
+        log.warn("Terminal cwd is gone, starting in the worktree", { terminalId: msg.id, cwd });
+        cwd = msg.worktreePath;
+      }
 
       terminalManager
         .attach(msg.id, createTerminalSink(ws, msg.id), {
           cols: msg.cols,
           rows: msg.rows,
-          cwd: msg.cwd,
+          cwd,
+          worktreePath: msg.worktreePath,
           envOverrides,
           scrollbackLines: msg.scrollbackLines,
           sinceEpoch: msg.sinceEpoch,
@@ -1036,6 +1046,31 @@ const requestPolicy = {
   allowDevOrigins: config.isDev,
 } satisfies RequestOriginPolicy;
 
+/** What the REST routes may do to server state; see routes.ts. */
+const routeContext: RouteContext = {
+  broadcastToSubscribers,
+  broadcastToProject,
+  broadcastAll,
+  sendToActiveWindow,
+  externalFolderConflict: externalFolderConflictFor,
+  getProject: (cwd: string) => projects.get(cwd),
+  findProjectForPath,
+  getWorktreeResources: (wtPath: string) => wtResources.get(wtPath),
+  suspendWorktreeWatchers,
+  completeWorktreeRemoval,
+  resolveFilePath,
+  initializeProject,
+  teardownProject,
+  shutdown,
+  resolveSchema: (url, baseDir) => schemaService.resolve(url, baseDir),
+  updateYamlSchemas: (schemaMap) => yamlLspManager.updateSchemas(schemaMap),
+  formatContent: (content, filePath, wtPath, settings) =>
+    formatService.format(content, filePath, wtPath, settings),
+  getDetectedFormatters: (wtPath) => formatService.getDetectedFormatters(wtPath),
+  setTerminalCommand: (terminalId, command) =>
+    terminalManager.setInitialCommand(terminalId, command),
+};
+
 const server = Bun.serve<WsData>({
   port: config.port,
   hostname: "127.0.0.1",
@@ -1086,27 +1121,7 @@ const server = Bun.serve<WsData>({
     }
 
     if (url.pathname.startsWith("/api")) {
-      return handleRequest(req, {
-        broadcastToSubscribers,
-        broadcastToProject,
-        broadcastAll,
-        sendToActiveWindow,
-        externalFolderConflict: externalFolderConflictFor,
-        getProject: (cwd: string) => projects.get(cwd),
-        findProjectForPath,
-        getWorktreeResources: (wtPath: string) => wtResources.get(wtPath),
-        suspendWorktreeWatchers,
-        completeWorktreeRemoval,
-        resolveFilePath,
-        initializeProject,
-        teardownProject,
-        shutdown,
-        resolveSchema: (url, baseDir) => schemaService.resolve(url, baseDir),
-        updateYamlSchemas: (schemaMap) => yamlLspManager.updateSchemas(schemaMap),
-        formatContent: (content, filePath, wtPath, settings) =>
-          formatService.format(content, filePath, wtPath, settings),
-        getDetectedFormatters: (wtPath) => formatService.getDetectedFormatters(wtPath),
-      });
+      return handleRequest(req, routeContext);
     }
 
     // Serve static files from dist/ when available (production mode)
@@ -1120,27 +1135,7 @@ const server = Bun.serve<WsData>({
       return new Response(Bun.file(join(distDir, "index.html")));
     }
 
-    return handleRequest(req, {
-      broadcastToSubscribers,
-      broadcastToProject,
-      broadcastAll,
-      sendToActiveWindow,
-      externalFolderConflict: externalFolderConflictFor,
-      getProject: (cwd: string) => projects.get(cwd),
-      findProjectForPath,
-      getWorktreeResources: (wtPath: string) => wtResources.get(wtPath),
-      suspendWorktreeWatchers,
-      completeWorktreeRemoval,
-      resolveFilePath,
-      initializeProject,
-      teardownProject,
-      shutdown,
-      resolveSchema: (url, baseDir) => schemaService.resolve(url, baseDir),
-      updateYamlSchemas: (schemaMap) => yamlLspManager.updateSchemas(schemaMap),
-      formatContent: (content, filePath, wtPath, settings) =>
-        formatService.format(content, filePath, wtPath, settings),
-      getDetectedFormatters: (wtPath) => formatService.getDetectedFormatters(wtPath),
-    });
+    return handleRequest(req, routeContext);
   },
 
   websocket: {
