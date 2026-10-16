@@ -106,15 +106,36 @@ describe("checkRequest: Sec-Fetch-Site", () => {
     expect(status(request("GET", { "Sec-Fetch-Site": "none" }))).toBeNull();
   });
 
-  test("rejects cross-site requests of any method except top-level navigations", () => {
-    expect(status(jsonPost({ "Sec-Fetch-Site": "cross-site" }))).toBe(403);
-    expect(status(request("GET", { "Sec-Fetch-Site": "cross-site" }))).toBe(403);
-    expect(
-      status(request("GET", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" })),
-    ).toBe(403);
-    expect(
-      status(request("GET", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" })),
-    ).toBeNull();
+  test("admits cross-site top-level document navigations (a link into the app)", () => {
+    const navigation = { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" };
+    expect(status(request("GET", { ...navigation, "Sec-Fetch-Dest": "document" }))).toBeNull();
+  });
+
+  test("rejects cross-site fetches, subresource loads and framing of any method", () => {
+    const crossSite = { "Sec-Fetch-Site": "cross-site" };
+    expect(status(jsonPost(crossSite))).toBe(403);
+    expect(status(request("GET", crossSite))).toBe(403);
+    for (const [mode, dest] of [
+      ["no-cors", "image"],
+      ["no-cors", "video"],
+      ["cors", "empty"],
+      ["navigate", "iframe"],
+      ["navigate", "object"],
+      ["navigate", "embed"],
+      ["navigate", "frame"],
+    ]) {
+      const headers = { ...crossSite, "Sec-Fetch-Mode": mode!, "Sec-Fetch-Dest": dest! };
+      expect(status(request("GET", headers))).toBe(403);
+    }
+    expect(status(request("GET", { ...crossSite, "Sec-Fetch-Mode": "navigate" }))).toBe(403);
+  });
+
+  test("admits same-origin subresource loads such as the media viewer's frame content", () => {
+    const image = { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "no-cors" };
+    expect(status(request("GET", { ...image, "Sec-Fetch-Dest": "image" }))).toBeNull();
+    expect(status(request("GET", { ...image, "Sec-Fetch-Dest": "video" }))).toBeNull();
+    const frame = { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate" };
+    expect(status(request("GET", { ...frame, "Sec-Fetch-Dest": "iframe" }))).toBeNull();
   });
 });
 

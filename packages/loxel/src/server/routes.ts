@@ -638,13 +638,15 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
 </head>
 <body>${bodyContent}</body></html>`;
 
-  // CSP varies by media type:
-  // - SVGs: inlined content may contain scripts (for animations). CSP blocks
-  //   ALL network access (no server origin, no https:) so scripts can't reach
-  //   the loxel API or exfiltrate data. Only data:/blob: for embedded resources.
-  // - Images/Videos: loaded from /api/file-raw, so CSP needs the server origin.
-  //   No untrusted scripts run — only our trusted inline code (postMessage, controls).
-  //   The server origin is safe here because there's no user-controlled script.
+  // CSP varies by media type (the iframe sandbox in MediaViewerPanel varies with it):
+  // - SVGs: inlined content may contain scripts (for animations). The frame has an opaque
+  //   origin (sandbox without allow-same-origin) and CSP blocks ALL network access (no server
+  //   origin, no https:) so scripts can't reach the loxel API or exfiltrate data. Only
+  //   data:/blob: for embedded resources.
+  // - Images/Videos: loaded from /api/file-raw, so CSP needs the server origin, and the frame
+  //   keeps the server origin (allow-same-origin) so that load is same-origin rather than a
+  //   cross-site subresource request, which request-origin.ts rejects. No untrusted scripts
+  //   run — only our trusted inline code (postMessage, controls).
   const baseCsp = [
     "default-src 'none'",
     "script-src 'unsafe-inline'",

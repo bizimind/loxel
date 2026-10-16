@@ -65,8 +65,10 @@ function mimeType(contentType: string | null): string | null {
  * - `Host` must be a loopback host with the server's port (blocks DNS rebinding).
  * - `Origin`, when present, must be the server's own origin (plus the Vite dev origin in dev).
  * - Requests the browser marks `Sec-Fetch-Site: cross-site` are rejected, except top-level
- *   navigations (`Sec-Fetch-Mode: navigate`), so a link into the app still opens it while
- *   cross-site subresource loads and fetches cannot reach endpoints.
+ *   document navigations (`Sec-Fetch-Mode: navigate` with `Sec-Fetch-Dest: document`), so a link
+ *   into the app still opens it while cross-site fetches and subresource loads, including
+ *   `<iframe>`, `<object>` and `<embed>` (navigations whose destination is not `document`),
+ *   cannot reach endpoints.
  * - State-changing methods must declare `Content-Type: application/json`, which browsers only
  *   send cross-site after a CORS preflight that this server never approves.
  */
@@ -87,7 +89,9 @@ export function checkRequest(
 
   const fetchSite = req.headers.get("Sec-Fetch-Site")?.toLowerCase();
   const fetchMode = req.headers.get("Sec-Fetch-Mode")?.toLowerCase();
-  if (fetchSite === "cross-site" && fetchMode !== "navigate") {
+  const fetchDest = req.headers.get("Sec-Fetch-Dest")?.toLowerCase();
+  const topLevelNavigation = fetchMode === "navigate" && fetchDest === "document";
+  if (fetchSite === "cross-site" && !topLevelNavigation) {
     return { status: 403, reason: "Cross-site request not allowed", details };
   }
 
