@@ -9,6 +9,7 @@ import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
+import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { type MergeCallbacks, useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { computeLineEdits } from "@/lib/compute-line-edits";
@@ -186,7 +187,9 @@ export function CodeEditorPanel({
   const {
     diskContent,
     editorFileState,
+    isDeleted,
     saveNow,
+    recreateFile,
     saveOptionsRef,
     autoSaveOptionsRef,
     handleAcceptDisk: hookAcceptDisk,
@@ -635,6 +638,7 @@ export function CodeEditorPanel({
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
+      {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
       )}

@@ -13,6 +13,8 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import * as api from "@/api/client";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
+import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
+import { getDisplayFilename } from "@/lib/detached-path";
 import { type SaveOptions, saveEditorContent } from "@/lib/save-editor-content";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
@@ -49,6 +51,8 @@ export interface DiskSyncedContent<T> {
   diskContent: T | null;
   /** Current file state from the editor state machine. */
   editorFileState: EditorFileState;
+  /** The file no longer exists on disk. Autosave is suspended; see `saveNow` / `recreateFile`. */
+  isDeleted: boolean;
   /** Cache key (absolute file path). */
   cacheKey: string;
   /** Whether the active query errored. */
@@ -57,8 +61,13 @@ export interface DiskSyncedContent<T> {
   getSerializedContentRef: MutableRefObject<(() => string | null) | null>;
   /** Trigger a save. Uses getSerializedContentRef to read current content. Includes saveOptionsRef. */
   save: () => Promise<void>;
-  /** Save immediately and clear any pending auto-save timers. Use for explicit Cmd+S. */
+  /**
+   * Save immediately and clear any pending auto-save timers. Use for explicit Cmd+S.
+   * When the file was deleted from disk, asks the user to confirm re-creating it first.
+   */
   saveNow: () => Promise<void>;
+  /** Write a deleted file back to disk without asking (the user already clicked "Re-create"). */
+  recreateFile: () => Promise<void>;
   /**
    * Ref for save options on explicit saves (Cmd+S, flush on worktree switch).
    * Set by editors that support format-on-save to include formatting settings.
@@ -118,7 +127,7 @@ export function useDiskSyncedContent<T>(
       autosaveCapTimerRef.current = null;
     }
     const fn = getSerializedContentRef.current;
-    if (fn) {
+    if (fn && !isFileDeleted(filePathRef.current)) {
       const content = fn();
       if (content !== null) {
         saveEditorContent(filePathRef.current, content, worktreePathRef.current);
@@ -135,6 +144,7 @@ export function useDiskSyncedContent<T>(
 
   // --- Editor state ---
   const editorFileState = useEditorStateStore((s) => s.files.get(filePath)?.state ?? "clean");
+  const isDeleted = useEditorStateStore((s) => s.files.get(filePath)?.deleted ?? false);
 
   // --- File registration ---
   useEffect(() => {
@@ -151,7 +161,7 @@ export function useDiskSyncedContent<T>(
           autosaveCapTimerRef.current = null;
         }
         const fn = getSerializedContentRef.current;
-        if (fn) {
+        if (fn && !isFileDeleted(filePath)) {
           const content = fn();
           if (content !== null) {
             saveEditorContent(filePath, content, worktreePathRef.current, saveOptionsRef.current);
@@ -173,7 +183,7 @@ export function useDiskSyncedContent<T>(
   }, [filePath, mergeCallbacks]);
 
   // --- Query ---
-  const { data, isError } = useQuery({
+  const { data, isError, error } = useQuery({
     queryKey: queryKeys.fileContent(
       activeProjectPath,
       filePath,
@@ -185,7 +195,21 @@ export function useDiskSyncedContent<T>(
     // that occurred while the worktree was unsubscribed (e.g. switched to another tab).
     // With staleTime: Infinity, the default `true` never refetches — "always" overrides that.
     refetchOnMount: "always",
+    // A confirmed-missing file will not appear by retrying; anything else (including a 404 for a
+    // worktree the server has not finished subscribing) keeps the default single retry.
+    retry: (failureCount, err) => !api.isFileMissingError(err) && failureCount < 1,
   });
+
+  // --- Existence tracking ---
+  // Clean editors learn about a deletion through this query: the change event invalidates it
+  // and the refetch returns 404 (`data` keeps the last content). Dirty editors are refetched
+  // directly by the WebSocket bridge, which sets the flag itself. Content arriving through
+  // either path (an external restore or the echo of a confirmed re-create) clears it again.
+  const isMissingOnDisk = isError && api.isFileMissingError(error);
+  useEffect(() => {
+    if (isMissingOnDisk) useEditorStateStore.getState().setDeleted(filePath, true);
+    else if (data) useEditorStateStore.getState().setDeleted(filePath, false);
+  }, [isMissingOnDisk, data, filePath]);
 
   // --- Set base content when data is available and state is clean ---
   useEffect(() => {
@@ -210,6 +234,8 @@ export function useDiskSyncedContent<T>(
 
   /** Auto-save: uses autoSaveOptionsRef (format only if formatOnAutoSave is enabled). */
   const save = useCallback(async () => {
+    // Never re-create a deleted file implicitly; only an explicit, confirmed save may.
+    if (isFileDeleted(filePathRef.current)) return;
     const fn = getSerializedContentRef.current;
     if (!fn) return;
     const content = fn();
@@ -222,8 +248,11 @@ export function useDiskSyncedContent<T>(
     );
   }, []);
 
-  /** Explicit save: clears auto-save timers, uses saveOptionsRef (always formats if enabled). */
-  const saveNow = useCallback(async () => {
+  /**
+   * Explicit write: clears auto-save timers, uses saveOptionsRef (always formats if enabled).
+   * Does not check `deleted`, so it is also what re-creates a deleted file.
+   */
+  const writeNow = useCallback(async () => {
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
@@ -243,6 +272,39 @@ export function useDiskSyncedContent<T>(
       saveOptionsRef.current,
     );
   }, []);
+
+  const saveNow = useCallback(async () => {
+    const path = filePathRef.current;
+    if (isFileDeleted(path)) {
+      const confirmed = await requestConfirmation({
+        title: "Re-create deleted file?",
+        description: `"${getDisplayFilename(path)}" was removed from disk. Saving will create it again with the editor's current content.`,
+        confirmLabel: "Re-create",
+      });
+      if (!confirmed || path !== filePathRef.current) return;
+      // The file may have come back while the dialog was open. If that restore conflicted with
+      // the editor, let the conflict banner decide instead of overwriting the restored content.
+      const entry = useEditorStateStore.getState().files.get(path);
+      if (!entry?.deleted && entry?.state === "diverged") return;
+    }
+    await writeNow();
+  }, [writeNow]);
+
+  // --- Resume autosave once a deleted file exists again ---
+  // Edits made while the file was gone were never written. If the restore merged cleanly with
+  // the editor still dirty, nothing re-arms the timers, so do it here.
+  const wasDeletedRef = useRef(false);
+  useEffect(() => {
+    const wasDeleted = wasDeletedRef.current;
+    wasDeletedRef.current = isDeleted;
+    if (!wasDeleted || isDeleted) return;
+    if (useEditorStateStore.getState().files.get(filePath)?.state !== "dirty") return;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      autosaveTimerRef.current = null;
+      save();
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }, [isDeleted, filePath, save]);
 
   // --- Conflict resolution ---
   const handleAcceptDisk = useCallback((): T | null => {
@@ -312,11 +374,13 @@ export function useDiskSyncedContent<T>(
   return {
     diskContent,
     editorFileState,
+    isDeleted,
     cacheKey,
     isError,
     getSerializedContentRef,
     save,
     saveNow,
+    recreateFile: writeNow,
     saveOptionsRef,
     autoSaveOptionsRef,
     handleAcceptDisk,
@@ -325,4 +389,8 @@ export function useDiskSyncedContent<T>(
     isProgrammaticRef,
     autosaveTimerRef,
   };
+}
+
+function isFileDeleted(filePath: string): boolean {
+  return useEditorStateStore.getState().files.get(filePath)?.deleted ?? false;
 }

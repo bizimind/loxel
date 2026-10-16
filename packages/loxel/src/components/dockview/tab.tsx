@@ -6,6 +6,7 @@ import { InlineRenameInput } from "@/components/tree";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { copyToClipboard } from "@/lib/clipboard";
 import { relativeTo } from "@/lib/project-file-helpers";
+import { cn } from "@/lib/utils";
 
 import { TabCloseButton } from "./tab-close-button";
 
@@ -70,6 +71,10 @@ interface TabProps {
   onRename?: (newName: string) => void;
   /** When renaming, initially select only the part before the extension (file names). */
   selectBaseName?: boolean;
+  /** Extra classes for the title text (e.g. a deleted-file strikethrough). */
+  titleClassName?: string;
+  /** Tooltip for the title text. */
+  titleTooltip?: string;
 }
 
 /**
@@ -85,6 +90,8 @@ export function Tab({
   contextMenuItems,
   onRename,
   selectBaseName,
+  titleClassName,
+  titleTooltip,
 }: TabProps) {
   const [ctxOpen, setCtxOpen] = useState(false);
   const [ctxPosition, setCtxPosition] = useState({ x: 0, y: 0 });
@@ -161,7 +168,8 @@ export function Tab({
             />
           ) : (
             <span
-              className="truncate"
+              className={cn("truncate", titleClassName)}
+              title={titleTooltip}
               onDoubleClick={onRename ? () => setIsRenaming(true) : undefined}
             >
               {title}

@@ -533,3 +533,28 @@ describe("auto-merge apply failure", () => {
     expect(getEntry()!.baseContent).toBe("a\nb\nc");
   });
 });
+
+describe("deleted files — echoes", () => {
+  test("a superseded echo still clears deleted", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.markDirty(FILE);
+    store.markSaving(FILE, "n1");
+    store.markSaving(FILE, "n2");
+    store.setDeleted(FILE, true);
+
+    store.handleDiskChange(FILE, ["n1"], "first");
+
+    expect(getEntry()?.deleted).toBe(false);
+    expect(getEntry()?.pendingNonces.has("n1")).toBe(false);
+    expect(getEntry()?.pendingNonces.has("n2")).toBe(true);
+    expect(getEntry()?.state).toBe("saving");
+  });
+
+  test("setDeleted and handleDiskChange ignore unknown paths", () => {
+    const store = useEditorStateStore.getState();
+    store.setDeleted("missing.md", true);
+    store.handleDiskChange("missing.md", [], "x");
+    expect(store.files.size).toBe(0);
+  });
+});

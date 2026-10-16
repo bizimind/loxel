@@ -22,6 +22,7 @@ import { SettingsModal } from "./components/settings/SettingsModal";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { LeftToolsBar } from "./components/tools-bar/LeftToolsBar";
 import { RightToolsBar } from "./components/tools-bar/RightToolsBar";
+import { ConfirmDialogHost } from "./components/ui/confirm-dialog-host";
 import { ToastContainer } from "./components/ui/toast";
 import { useDiffSource } from "./hooks/useDiffSource";
 import { useKeybindings } from "./hooks/useKeybindings";
@@ -108,6 +109,7 @@ export default function App() {
       <FileSearchModal />
       <CommandPaletteModal />
       <ToastContainer />
+      <ConfirmDialogHost />
     </div>
   );
 }

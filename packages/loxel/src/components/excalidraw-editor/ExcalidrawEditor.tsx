@@ -9,6 +9,7 @@ import type { DockviewPanelApi } from "dockview-react";
 import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
 
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
+import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -230,6 +231,8 @@ export function ExcalidrawEditor({
   const {
     diskContent,
     editorFileState,
+    isDeleted,
+    recreateFile,
     cacheKey,
     isError,
     saveNow,
@@ -354,7 +357,9 @@ export function ExcalidrawEditor({
     }
   }, [diskContent, isProgrammaticRef, filePath]);
 
-  if (isError) {
+  // A file deleted after it loaded keeps its editor (and the deleted banner) so the content can
+  // be re-created; only a file that never loaded has nothing to show.
+  if (isError && !initialData) {
     return (
       <div
         className="text-muted-foreground flex h-full items-center justify-center text-sm"
@@ -385,6 +390,7 @@ export function ExcalidrawEditor({
       className="flex h-full w-full flex-col"
       style={{ backgroundColor: "var(--editor-surface)" }}
     >
+      {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
       )}

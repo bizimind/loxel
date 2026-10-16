@@ -49,14 +49,37 @@ function withScope(path: string, scope: { wt?: string; project?: string }): stri
   return `${url.pathname}${url.search}`;
 }
 
+/** Error thrown for non-2xx API responses, with the HTTP status and the server's optional reason code. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/**
+ * The server confirmed the file does not exist on disk (`404` with `code: "ENOENT"`). A plain
+ * 404 only means the path could not be resolved, e.g. its worktree is not subscribed yet.
+ */
+export function isFileMissingError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404 && err.code === "ENOENT";
+}
+
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(error.error || "Request failed");
+    const body: unknown = await response.json().catch(() => null);
+    const fields = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const message = typeof fields.error === "string" ? fields.error : "Request failed";
+    const code = typeof fields.code === "string" ? fields.code : undefined;
+    throw new ApiError(message, response.status, code);
   }
 
   return response.json();

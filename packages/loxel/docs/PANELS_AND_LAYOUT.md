@@ -73,7 +73,7 @@ Creation is decoupled through typed window events. [loxel-events.ts](../src/lib/
 ### File and panel lifecycle
 
 - `handleFileMoved` (on `loxel-file-moved`, e.g. after a rename) replaces the old tab with one for the new path at the same index, keeps it visible only if it was, never changes the active group, and migrates editor/drawing caches. Covered by [panel-creators.test.ts](../src/lib/panel-creators.test.ts).
-- `handleFileDeleted` closes tabs for the path and anything under it.
+- `handleFileDeleted` closes tabs for the path and anything under it. This is only for in-app deletes; a file deleted externally keeps its tab, marked as deleted (see [EDITOR.md](EDITOR.md#deleted-files)).
 - `CenterHost`'s `onDidRemovePanel` owns close-side effects: terminals send `terminal_destroy` and unregister notifications, agents send `agent_detach`, DevTools drop their session, and files outside the worktree send `close_external_file`. It is skipped while either layout is swapping, so a worktree switch does not kill PTYs or agents.
 
 ## Tabs and context menus

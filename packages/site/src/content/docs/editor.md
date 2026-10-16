@@ -1,6 +1,6 @@
 ---
 title: Editor
-description: Quick Open, Find in Files, autosave, formatter auto-detection, and conflict handling.
+description: Quick Open, Find in Files, autosave, formatter auto-detection, conflict handling, and deleted files.
 order: 10
 ---
 
@@ -77,6 +77,12 @@ You have two choices:
 
 - **Accept disk version** — discard your in-editor edits and load the version from disk
 - **Keep my changes** — dismiss the banner and keep your current edits; the on-disk change is ignored until the next save
+
+## Deleted files
+
+If a file you have open is deleted outside Loxel (a `git checkout`, an agent cleaning up, `rm` in a terminal), the tab stays open but its name is struck through and dimmed, and a banner at the top of the editor says the file was deleted from disk. Your content stays in the editor and you can keep editing, but nothing is written while the file is gone: autosave does not quietly bring it back.
+
+To restore the file from Loxel, press `Cmd+S` and confirm in the dialog, or click **Re-create file** in the banner. Either writes the editor's current content back to disk. If something else restores the file first, the tab returns to normal on its own: a clean editor reloads the new content, and an editor with unsaved edits merges them with the usual conflict detection.
 
 ---
 

@@ -26,6 +26,7 @@ import { CheckIcon, ClipboardIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
+import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
 import {
@@ -298,6 +299,8 @@ export function MarkdownEditor({
   const {
     diskContent,
     editorFileState,
+    isDeleted,
+    recreateFile,
     cacheKey,
     isError,
     save,
@@ -868,7 +871,9 @@ export function MarkdownEditor({
     });
   }, [cacheKey]);
 
-  if (isError) {
+  // A file deleted after it loaded keeps its editor (and the deleted banner) so the content can
+  // be re-created; only a file that never loaded has nothing to show.
+  if (isError && diskContent === null) {
     return (
       <div
         className="text-muted-foreground flex h-full items-center justify-center text-sm"
@@ -884,6 +889,7 @@ export function MarkdownEditor({
       className="group/editor relative flex h-full w-full flex-col overflow-hidden"
       style={{ backgroundColor: "var(--editor-surface)" }}
     >
+      {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
       )}

@@ -13,13 +13,14 @@ interface EditorTabProps {
 
 /**
  * Shared dockview tab for file-backed editor panels (code, markdown, excalidraw).
- * Shows an icon, filename, diverged indicator, and close button.
+ * Shows an icon, filename, diverged indicator, deleted-from-disk styling, and close button.
  */
 export function EditorTab({ props, icon }: EditorTabProps) {
   const filePath = props.params.filePath;
   const filename = getDisplayFilename(filePath);
   const handleRename = useFileTabRename(filePath);
   const isDiverged = useEditorStateStore((s) => s.files.get(filePath)?.state === "diverged");
+  const isDeleted = useEditorStateStore((s) => s.files.get(filePath)?.deleted ?? false);
 
   const leading = isDiverged ? (
     <span
@@ -36,6 +37,8 @@ export function EditorTab({ props, icon }: EditorTabProps) {
       onRename={handleRename}
       selectBaseName
       leading={leading}
+      titleClassName={isDeleted ? "line-through opacity-50" : undefined}
+      titleTooltip={isDeleted ? "File deleted from disk" : undefined}
       contextMenuItems={
         <FileContextMenuItems
           filename={filename}
