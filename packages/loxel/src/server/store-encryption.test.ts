@@ -76,6 +76,7 @@ describe("GET /api/stores/settings", () => {
     updateYamlSchemas: () => {},
     formatContent: async () => null,
     getDetectedFormatters: () => [],
+    setTerminalCommand: () => {},
   } as RouteContext;
 
   test("migrates a plaintext row to encrypted at rest and returns plaintext", async () => {

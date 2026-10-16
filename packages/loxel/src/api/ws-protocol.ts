@@ -1,5 +1,7 @@
 import type { SessionConfig } from "@bizimind/coding-agent";
 
+import type { OpenTerminalRequest } from "@/open-request";
+
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
 import type { ServerNotification } from "./notification-model";
@@ -63,6 +65,7 @@ export type WsMessage =
   // Window-scoped (sent to the window the user is working in)
   | { type: "open_file"; data: { filePath: string } }
   | { type: "open_folder"; data: { path: string } }
+  | { type: "open_terminal"; data: OpenTerminalPanel }
   // Project-scoped (sent to all subscribers under project)
   | { type: "refs_changed"; projectPath: string; data: RefInfo[] }
   | { type: "log_changed"; projectPath: string }
@@ -167,6 +170,13 @@ export interface TerminalState {
   rows: number;
 }
 
+/**
+ * A terminal panel the server asks a window to create (`loxel terminal`). The server has already
+ * minted `terminalId` and holds the command to type into the shell, if any, until the panel
+ * attaches; the renderer only places the panel and starts the shell in `cwd`.
+ */
+export type OpenTerminalPanel = Omit<OpenTerminalRequest, "command"> & { terminalId: string };
+
 /** Client-to-server WebSocket message types (JSON text frames) */
 export type WsClientMessage =
   | { type: "subscribe_worktree"; worktreePath: string }
@@ -176,16 +186,19 @@ export type WsClientMessage =
   | {
       /**
        * Bind a mounted xterm to a terminal session, spawning the shell if the session does not
-       * exist. `cwd`, `windowId` and the env apply only when spawning; `cols`, `rows` and
-       * `scrollbackLines` are applied on every attach. `sinceEpoch`/`sinceOffset` identify the
-       * session and stream offset the client's xterm is already current to (a reconnect with a
-       * live xterm); omit them for a fresh xterm.
+       * exist. `cwd`, `worktreePath`, `windowId` and the env apply only when spawning; `cols`,
+       * `rows` and `scrollbackLines` are applied on every attach. `sinceEpoch`/`sinceOffset`
+       * identify the session and stream offset the client's xterm is already current to (a
+       * reconnect with a live xterm); omit them for a fresh xterm.
        */
       type: "terminal_attach";
       id: string;
       cols: number;
       rows: number;
+      /** Directory the shell starts in. */
       cwd: string;
+      /** The panel's worktree, exposed to the shell as `LOXEL_WORKTREE`; defaults to `cwd`. */
+      worktreePath?: string;
       scrollbackLines?: number;
       windowId?: string;
       sinceEpoch?: string;

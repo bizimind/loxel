@@ -27,7 +27,8 @@ export function useLoxelEventListeners(): void {
   useEffect(() => {
     const cleanups = [
       onLoxelEvent("loxel-create-agent", (d) => createAgent(d?.split)),
-      onLoxelEvent("loxel-create-terminal", (d) => createTerminal(d?.split)),
+      // A CustomEvent dispatched without a detail carries null, which the default parameter does not cover.
+      onLoxelEvent("loxel-create-terminal", (d) => createTerminal(d ?? {})),
       onLoxelEvent("loxel-create-editor", (d) => createEditor({ split: d?.split })),
       onLoxelEvent("loxel-create-drawing", (d) => createDrawing(d?.split)),
       onLoxelEvent("loxel-create-browser", (d) => createBrowser(d?.url, d?.split)),

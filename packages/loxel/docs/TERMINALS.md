@@ -4,7 +4,7 @@ How terminal panels work end to end: terminal sessions and the server-side emula
 
 ## Overview
 
-A terminal panel is an xterm.js instance in the renderer bound to a terminal session in the shared Bun server (see [SHARED_SERVER.md](SHARED_SERVER.md)) by a client-generated UUID, the `terminalId`. The renderer creates the UUID once ([panel-creators.ts](../src/lib/panel-creators.ts) `createTerminal`), stores it in the Dockview panel params together with the worktree path, and the persisted layout keeps it across reloads. The session lives as long as the server or until the panel is closed; the xterm.js instance lives only while the panel is mounted.
+A terminal panel is an xterm.js instance in the renderer bound to a terminal session in the shared Bun server (see [SHARED_SERVER.md](SHARED_SERVER.md)) by a UUID, the `terminalId`. For an ordinary terminal the renderer mints it once ([panel-creators.ts](../src/lib/panel-creators.ts) `createTerminal`); for `loxel terminal` the server mints it and the renderer adopts it. Either way it is stored in the Dockview panel params together with the worktree path and, when the shell starts elsewhere, the `cwd`, and the persisted layout keeps them across reloads. The session lives as long as the server or until the panel is closed; the xterm.js instance lives only while the panel is mounted.
 
 The server, not the renderer, owns the screen. Each session pairs the PTY with a headless xterm (`@xterm/headless`) that parses every byte the shell produces, so the server always knows the current screen, scrollback, cursor, modes and size. The renderer's xterm is a view of that state: when it mounts it receives a serialized snapshot, and from then on the live output stream. Raw history is never replayed into a fresh xterm. This matters because a terminal byte stream is a sequence of commands, not a document: replaying old output re-executes every side effect in it, so a background-color query or cursor-position request a program sent days ago would be answered again, into a shell that is no longer expecting it, and old notifications would fire again. tmux, mosh and VS Code's pty host all keep the emulator on the surviving side for the same reason.
 
@@ -40,12 +40,12 @@ Every output chunk is counted by the stress detector under `pty-output` ([stress
 
 `server.ts` then adds per-terminal overrides:
 
-| Variable          | Value                                     | Why                                                                               |
-| ----------------- | ----------------------------------------- | --------------------------------------------------------------------------------- |
-| `LOXEL`           | `1`                                       | Lets the CLI (and user scripts) detect they run inside a Loxel terminal           |
-| `LOXEL_PORT`      | `config.port`                             | The CLI talks to the exact server that owns the terminal (dev and prod differ)    |
-| `LOXEL_WORKTREE`  | the panel's worktree path (`msg.cwd`)     | CLI fallback for URL requests when the shell's cwd is not inside a git repository |
-| `LOXEL_WINDOW_ID` | the creating window's `WINDOW_ID`, if any | Routes `loxel <file>` back to the window the terminal belongs to                  |
+| Variable          | Value                                                     | Why                                                                               |
+| ----------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `LOXEL`           | `1`                                                       | Lets the CLI (and user scripts) detect they run inside a Loxel terminal           |
+| `LOXEL_PORT`      | `config.port`                                             | The CLI talks to the exact server that owns the terminal (dev and prod differ)    |
+| `LOXEL_WORKTREE`  | the panel's worktree (`msg.worktreePath`, else `msg.cwd`) | CLI fallback for URL requests when the shell's cwd is not inside a git repository |
+| `LOXEL_WINDOW_ID` | the creating window's `WINDOW_ID`, if any                 | Routes `loxel <file>` back to the window the terminal belongs to                  |
 
 These are fixed at spawn. A session reattached by another window keeps the original `LOXEL_WINDOW_ID`.
 
@@ -53,7 +53,7 @@ These are fixed at spawn. A session reattached by another window keeps the origi
 
 Terminal messages are part of the main app socket (`/ws`). Types live in [ws-protocol.ts](../src/api/ws-protocol.ts); note that [ws-messages.ts](../src/server/ws-messages.ts) only builds the `worktrees_changed` message and has nothing terminal-specific.
 
-- **JSON control frames (client to server):** `terminal_attach { id, cols, rows, cwd, scrollbackLines?, windowId?, sinceEpoch?, sinceOffset? }` binds a mounted xterm, spawning the shell if needed; `sinceEpoch`/`sinceOffset` are sent only by a reconnecting client whose xterm is still current. `terminal_detach { id }` is sent on unmount. `terminal_resize { id, cols, rows }`, `terminal_destroy { id }` and `terminal_ack { id, syncOffset, bytes }` (flow control).
+- **JSON control frames (client to server):** `terminal_attach { id, cols, rows, cwd, worktreePath?, scrollbackLines?, windowId?, sinceEpoch?, sinceOffset? }` binds a mounted xterm, spawning the shell in `cwd` if needed (`worktreePath` is the panel's worktree, which the renderer always sends; it defaults to `cwd`, and the shell starts there instead when a persisted `cwd` no longer exists); `sinceEpoch`/`sinceOffset` are sent only by a reconnecting client whose xterm is still current. `terminal_detach { id }` is sent on unmount. `terminal_resize { id, cols, rows }`, `terminal_destroy { id }` and `terminal_ack { id, syncOffset, bytes }` (flow control).
 - **JSON control frames (server to client):** `terminal_state { id, epoch, mode, offset, snapshot?, cols, rows }` answers every attach and every flow-control resync; `mode` is `snapshot` (reset the xterm and write `snapshot`) or `resume` (nothing to replay). `offset` is the stream position the xterm is current to once the message is applied. `terminal_exit { id, exitCode }` is sent only to the owner.
 - **Binary frames** for I/O, to avoid JSON overhead and keep raw bytes. Output (server to client) is `[0x01][terminalId: 36 ASCII bytes][offset: u64 big-endian][payload]`, where `offset` is the stream position of the payload's first byte. Input (client to server) is `[0x02][terminalId][payload]`, UTF-8 keystrokes or the xterm's replies to terminal queries. `encodeOutputFrame` / `parseOutputFrame` / `encodeInputFrame` / `parseBinaryHeader` are shared by both sides, which is why terminal IDs must be 36-character UUIDs.
 
@@ -63,7 +63,7 @@ On the client, [client.ts](../src/api/client.ts) routes binary output to at most
 
 ## Client: the Terminal component
 
-[Terminal.tsx](../src/components/terminal/Terminal.tsx) is mounted by `TerminalPanelComponent` in [panels.tsx](../src/components/dockview/panels.tsx), which provides the panel's `worktreePath` param through `PanelContext`. That worktree path is the shell's `cwd`; if it is missing, no `terminal_attach` is sent and the panel stays empty.
+[Terminal.tsx](../src/components/terminal/Terminal.tsx) is mounted by `TerminalPanelComponent` in [panels.tsx](../src/components/dockview/panels.tsx), which provides the panel's `worktreePath` param through `PanelContext` and passes the optional `cwd` param as a prop. The shell starts in `cwd`, else in the worktree path; if the worktree path is missing, no `terminal_attach` is sent and the panel stays empty.
 
 ### Lifecycle
 
@@ -116,6 +116,7 @@ The CLI entry is [cli.ts](../src/cli.ts); `pnpm run build:cli` compiles it with 
 - **Finding the server:** inside a Loxel terminal (`LOXEL=1` and `LOXEL_PORT` set) it uses `LOXEL_PORT` directly. Otherwise it probes `GET /api/version` on 7433, then 7434 (1 second each), runs `open -a Loxel` to focus or launch the app, and if nothing answered waits up to 15 seconds for port 7433.
 - **URLs** (`http:`/`https:`, per [url-utils.ts](../src/url-utils.ts)): the worktree is `git rev-parse --show-toplevel` of the cwd, falling back to `LOXEL_WORKTREE` inside a Loxel terminal. The request is `{ url, wtPath }`.
 - **Everything else** is treated as a path: `{ filePath: resolve(arg), windowId? }`, with `LOXEL_WINDOW_ID` included only inside a Loxel terminal.
+- **`loxel terminal [--cwd <dir>] [--title <name>] [--] [command...]`** opens a terminal panel: `{ terminal: { cwd, command?, title? }, windowId? }`. [terminal-args.ts](../src/terminal-args.ts) parses the flags (until `--` or the first non-flag argument) and builds the command line: one argument is used verbatim, several are `shellQuote`d and joined. `cwd` defaults to the process cwd.
 
 [open-request.ts](../src/open-request.ts) `requestOpen()` posts to `POST /api/open` and, on `503` (no window connected yet), retries every 300 ms for up to 30 seconds. The Electron main process reuses it for files macOS hands to the app (see [ELECTRON.md](ELECTRON.md)).
 
@@ -123,8 +124,9 @@ The CLI entry is [cli.ts](../src/cli.ts); `pnpm run build:cli` compiles it with 
 
 - URL: rejects non-http(s), requires `wtPath` to belong to a known project, and broadcasts `open_url` to every client subscribed to that worktree, which [ws-bridge.ts](../src/queries/ws-bridge.ts) turns into `loxel-create-browser`.
 - Path: `stat`s it (404 if missing; 400 for anything that is not a regular file or directory, since pipes and devices would hang the editor), canonicalizes it (`~/` expansion, `realpath`), and calls `sendToActiveWindow()` in `server.ts` with `open_file` or `open_folder`. That targets every connection whose `window_hello` reported the given window ID, else the most recently focused window (`window_focused`, from [useWindowPresence.ts](../src/hooks/useWindowPresence.ts)), else any client; with no client it returns 503.
+- Terminal: canonicalizes `cwd` and requires it to be a directory, mints the `terminalId`, and sends `open_terminal { terminalId, cwd, title? }` to the window the same way. Only once a window has it does the route hand the command to `terminalManager.setInitialCommand()`, which keeps it for one minute or until that ID's first `terminal_attach` spawns the shell. The command is then typed into the PTY with a trailing newline, ahead of the prompt, so it lands in the shell's history like user input. It never reaches the renderer or the persisted layout, so a reload or a respawn after a server restart gets a plain shell and cannot run it twice.
 
-In the renderer, `openFile()` and `openFolder()` in [open-path.ts](../src/lib/open-path.ts) pick the owning worktree, switching to it if needed, or fall back to the active worktree's Others section. A file for a worktree whose center Dockview is not mounted yet is queued in the worktree UI store (`queueOpenFile`) and opened once the layout is restored. Panel creation itself is covered in [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md); worktree switching in [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md).
+In the renderer, `openFile()`, `openFolder()` and `openTerminal()` in [open-path.ts](../src/lib/open-path.ts) pick the owning worktree, switching to it if needed, or fall back to the active worktree (files and folders: its Others section; terminals: a panel there whose shell starts in `cwd`). `openTerminal` refreshes the owning project's worktree list when `cwd` is inside a project but no listed worktree, since `wt add` from a shell may have created it a moment ago. A file or terminal for a worktree whose center Dockview is not mounted yet is queued in the worktree UI store (`queueOpen`, a `PendingOpen`) and created once the layout is restored; `createTerminal()` in [panel-creators.ts](../src/lib/panel-creators.ts) takes the server's `terminalId`, the `cwd` and the title. Panel creation itself is covered in [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md); worktree switching in [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md).
 
 ## Opening things in external apps
 
@@ -135,7 +137,7 @@ In the renderer, `openFile()` and `openFolder()` in [open-path.ts](../src/lib/op
 - **Survives reloads, not server exit.** Terminal IDs are persisted in the layout's panel params and the session is keyed by them, so a renderer reload or a WebSocket drop reattaches: with a snapshot into a fresh xterm, or by resuming the missed bytes into a live one. Server shutdown destroys every session; after a restart the client's attach spawns a fresh shell under the same ID, in the same worktree.
 - **History is state, not a stream.** The only thing ever written into a fresh xterm is a serialized snapshot. Old output is never replayed, so queries, bells and notifications in it never fire twice.
 - **Worktree switches keep shells running.** Switching worktrees swaps the center layout and unmounts terminal components, which detach; `CenterHost` skips `terminal_destroy` during layout swaps. The server keeps parsing output into the emulator and sends nothing until the panel remounts and takes a snapshot.
-- **Per-worktree cwd.** A terminal's cwd and `LOXEL_WORKTREE` are the panel's `worktreePath` param at creation. Link resolution uses that path, not the live shell cwd.
+- **Per-worktree cwd.** A terminal's cwd and `LOXEL_WORKTREE` are the panel's `worktreePath` param at creation; a terminal opened with `loxel terminal --cwd` keeps the directory in its `cwd` param and `LOXEL_WORKTREE` stays the worktree. Link resolution uses the starting directory, not the live shell cwd.
 - **Many terminals.** Only mounted terminals cost bandwidth; every live session costs one headless emulator plus a 1 MiB resume ring on the server. The emulator stores 12 bytes per cell for every line it has filled, so a terminal that has scrolled through its full default 50,000 lines at 200 columns holds about 120 MB; the scrollback setting is the lever, and an idle shell costs almost nothing. WebGL contexts are held only by visible terminals.
 - **The renderer is never flooded.** Unacknowledged output is capped at 2 MiB per terminal; past that the client is brought back with a snapshot instead of a backlog.
 - **Modified Enter.** Shift+Enter and Ctrl+Enter are forwarded as `ESC CR` and `ESC [13;5u` at the key-handler level; there is no per-program detection.
@@ -151,4 +153,4 @@ In the renderer, `openFile()` and `openFolder()` in [open-path.ts](../src/lib/op
 - [src/api/client.ts](../src/api/client.ts): binary frame routing with offsets, reconnect listeners
 - [src/components/terminal/](../src/components/terminal/): xterm.js setup, WebGL, links, search decorations
 - [src/lib/osc-notification-parser.ts](../src/lib/osc-notification-parser.ts), [src/server/notification-store.ts](../src/server/notification-store.ts), [src/store/panel-notifications.ts](../src/store/panel-notifications.ts), [src/lib/notification-navigation.ts](../src/lib/notification-navigation.ts): notifications
-- [src/cli.ts](../src/cli.ts), [src/open-request.ts](../src/open-request.ts), `handleOpen` in [src/server/routes.ts](../src/server/routes.ts), [src/lib/open-path.ts](../src/lib/open-path.ts), [src/lib/open-file.ts](../src/lib/open-file.ts): the CLI and open requests
+- [src/cli.ts](../src/cli.ts), [src/terminal-args.ts](../src/terminal-args.ts), [src/open-request.ts](../src/open-request.ts), `handleOpen` in [src/server/routes.ts](../src/server/routes.ts), [src/lib/open-path.ts](../src/lib/open-path.ts), [src/lib/open-file.ts](../src/lib/open-file.ts): the CLI and open requests

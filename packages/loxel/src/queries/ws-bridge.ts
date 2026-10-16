@@ -5,7 +5,7 @@ import { wsClient } from "@/api/client";
 import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
-import { openFile, openFolder } from "@/lib/open-path";
+import { openFile, openFolder, openTerminal } from "@/lib/open-path";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -244,6 +244,10 @@ export function useWsBridge(): void {
 
         case "open_folder":
           void openFolder(message.data.path);
+          break;
+
+        case "open_terminal":
+          void openTerminal(message.data);
           break;
 
         case "open_url":

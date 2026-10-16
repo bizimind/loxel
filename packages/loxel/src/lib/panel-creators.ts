@@ -52,16 +52,25 @@ function panelPosition(api: DockviewApi, split?: SplitPosition) {
 
 // -- Panel creators --
 
-export function createTerminal(split?: SplitPosition): void {
+export interface CreateTerminalOptions {
+  split?: SplitPosition;
+  /** Session ID to bind to; minted here when absent. The server names it for `loxel terminal`. */
+  terminalId?: string;
+  /** Directory the shell starts in; the active worktree when absent. */
+  cwd?: string;
+  title?: string;
+}
+
+export function createTerminal({ split, cwd, ...options }: CreateTerminalOptions = {}): void {
   const cApi = getCenterApi();
   if (!cApi) return;
 
-  const terminalId = crypto.randomUUID();
-  const title = nextPanelTitle(cApi, "Terminal");
+  const terminalId = options.terminalId ?? crypto.randomUUID();
+  const title = options.title ?? nextPanelTitle(cApi, "Terminal");
   const panelId = `terminal-${terminalId}`;
 
   getCurrentWorktreeToolsBar().getState().addTerminal({ id: panelId, title, terminalId });
-  uiLog.info("Panel created", { panelType: "terminal", panelId, terminalId });
+  uiLog.info("Panel created", { panelType: "terminal", panelId, terminalId, cwd });
 
   const worktreePath = useWorktreeStore.getState().activeWorktreePath;
   cApi.addPanel({
@@ -69,7 +78,7 @@ export function createTerminal(split?: SplitPosition): void {
     component: "terminal",
     tabComponent: "terminalTab",
     title,
-    params: { terminalId, worktreePath },
+    params: { terminalId, worktreePath, ...(cwd && cwd !== worktreePath ? { cwd } : {}) },
     position: panelPosition(cApi, split),
   });
 }

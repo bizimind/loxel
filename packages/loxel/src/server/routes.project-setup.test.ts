@@ -82,6 +82,7 @@ describe("project conversion preflight", () => {
       updateYamlSchemas: () => {},
       formatContent: async () => null,
       getDetectedFormatters: () => [],
+      setTerminalCommand: () => {},
     };
   }
 

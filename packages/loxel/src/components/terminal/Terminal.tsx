@@ -125,15 +125,21 @@ function fitAndSendResize(terminalId: string, terminal: XTerm, fitAddon: FitAddo
 /** Output bytes parsed between flow-control acks to the server. */
 const ACK_BYTES = 64 * 1024;
 
+/** Where a terminal's shell starts and which worktree the panel belongs to. */
+interface SpawnTarget {
+  cwd: string;
+  worktreePath: string;
+}
+
 /**
- * Send terminal_attach with current dimensions and the panel's working directory. `sinceOffset`
- * is the stream offset this xterm is already current to (a reconnect with live content); omitted
- * for a fresh xterm, which gets a snapshot.
+ * Send terminal_attach with current dimensions and the panel's spawn target. `sinceOffset` is the
+ * stream offset this xterm is already current to (a reconnect with live content); omitted for a
+ * fresh xterm, which gets a snapshot.
  */
 function sendAttach(
   terminalId: string,
   terminal: XTerm,
-  cwd: string,
+  { cwd, worktreePath }: SpawnTarget,
   since?: { epoch: string; offset: number },
 ) {
   wsClient.send({
@@ -142,6 +148,7 @@ function sendAttach(
     cols: terminal.cols,
     rows: terminal.rows,
     cwd,
+    worktreePath,
     scrollbackLines: useSettingsStore.getState().terminal.scrollbackLines,
     windowId: WINDOW_ID,
     ...(since === undefined ? {} : { sinceEpoch: since.epoch, sinceOffset: since.offset }),
@@ -149,6 +156,7 @@ function sendAttach(
   termLog.info("Terminal attach requested", {
     terminalId,
     cwd,
+    worktreePath,
     cols: terminal.cols,
     rows: terminal.rows,
     since,
@@ -240,12 +248,14 @@ class OutputStream {
 
 interface TerminalProps {
   terminalId: string;
+  /** Directory the shell starts in when it is not the panel's worktree. */
+  cwd?: string;
   onClose?: () => void;
   onCreateNew?: () => void;
   panelApi: DockviewPanelApi;
 }
 
-export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: TerminalProps) {
+export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: TerminalProps) {
   const panelWorktreePath = usePanelWorktreePath();
   const darkMode = useUIStore((s) => s.darkMode);
   const scrollbackLines = useSettingsStore((s) => s.terminal.scrollbackLines);
@@ -279,8 +289,11 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
     },
   });
 
-  const cwdRef = useRef(panelWorktreePath);
-  cwdRef.current = panelWorktreePath;
+  const spawnTarget: SpawnTarget | null = panelWorktreePath
+    ? { cwd: cwd ?? panelWorktreePath, worktreePath: panelWorktreePath }
+    : null;
+  const spawnTargetRef = useRef(spawnTarget);
+  spawnTargetRef.current = spawnTarget;
   const fileIndexRef = useRef<FileIndex | null>(null);
   const onCloseRef = useRef(onClose);
   const onCreateNewRef = useRef(onCreateNew);
@@ -324,7 +337,7 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
     const fileLinks = terminal.registerLinkProvider(
       createFilePathLinkProvider(
         terminal,
-        () => cwdRef.current,
+        () => spawnTargetRef.current?.cwd ?? null,
         () => fileIndexRef.current,
       ),
     );
@@ -428,9 +441,9 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
       if (panelApi.isActive && panelApi.isGroupActive) terminal.focus();
       rafId = requestAnimationFrame(() => {
         fitAddon.fit();
-        if (cwdRef.current) {
+        if (spawnTargetRef.current) {
           output.expectState();
-          sendAttach(terminalId, terminal, cwdRef.current);
+          sendAttach(terminalId, terminal, spawnTargetRef.current);
           attachedRef.current = true;
         }
       });
@@ -486,9 +499,9 @@ export function Terminal({ terminalId, onClose, onCreateNew, panelApi }: Termina
     // offset it is current to, or answers with a snapshot (which resets it) if that is gone.
     const unsubReconnect = wsClient.onReconnect(() => {
       // Before the initial attach, the pending open sends terminal_attach itself.
-      if (exitedRef.current || !attachedRef.current || !cwdRef.current) return;
+      if (exitedRef.current || !attachedRef.current || !spawnTargetRef.current) return;
       output.expectState();
-      sendAttach(terminalId, terminal, cwdRef.current, output.since);
+      sendAttach(terminalId, terminal, spawnTargetRef.current, output.since);
       termLog.info("Terminal reconnected", { terminalId });
     });
 
