@@ -54,7 +54,7 @@ gh issue create --label fix,package:loxel,component:diff --title "..." --body ".
 
 ## Issue Labels
 
-Every issue carries labels from three groups. The vocabularies below are closed; do not invent new labels without updating this section.
+Every issue carries one type label and at least one package label; component labels are optional. The vocabularies below are closed; do not invent new labels without updating this section.
 
 **Type** (exactly one):
 
@@ -64,7 +64,7 @@ Every issue carries labels from three groups. The vocabularies below are closed;
 | `fix`   | Something broken or behaving wrongly, including performance bugs and security fixes   |
 | `chore` | Tests, docs, CI, refactors, dependency and tooling work, cleanup, process             |
 
-**Package** (one or more): `package:<name>` for each package directory the work touches: `loxel`, `wt`, `site`, `coding-agent`, `channel`, `channel-worker`, `cli-common`, `code-analysis`, `excalidraw`, `logger`, `sandbox`, `localdb-sdk`, `monaco-lsp-client`, `whisper-cpp`, `cc-git-editor`. Use `package:repo` for repo-wide work (CI, dependencies, root tooling) that no single package owns.
+**Package** (one or more): one `package:<dir>` label per directory under `packages/` the work touches (for example `package:loxel`, `package:wt`); a new package gets a new label. Use `package:repo` for repo-wide work (CI, dependencies, root tooling) that no single package owns.
 
 **Component** (zero or more, prefer one or two): `component:<name>` only where it helps someone understand what the issue touches.
 

@@ -25,7 +25,7 @@ Loxel is built around these needs.
 - **Panels** — a Dockview layout with center panels (editors, diffs, markdown, Excalidraw, coding agent, terminals, browser) and dockable tool panels in the left, right and bottom zones (project files, changes, comments, fork tree, git graph, logs). Everything is reachable from the keyboard and remappable. See [Panel Layout](../site/src/content/docs/panel-layout.md) and [Keyboard Shortcuts](../site/src/content/docs/reference-keybindings.md).
 - **Planning** — a rich markdown editor (Milkdown) and an Excalidraw canvas, saved to disk with autosave. New files start as Drafts outside the repo and can be dragged into it. See [Drafts](../site/src/content/docs/drafts.md).
 - **Coding agent** — a timeline UI for the built-in agent from `packages/coding-agent`, with inline questions and approvals. Sessions are scoped per project + worktree and keep running across navigation. See [Coding Agent](../site/src/content/docs/coding-agent.md).
-- **Terminals** — xterm.js terminals backed by server-side PTYs, for CLI agents (Claude Code, Codex, etc.) and everyday commands. Sessions survive project and worktree switches. See [Terminals](../site/src/content/docs/terminals.md).
+- **Terminals** — xterm.js terminals backed by server-side PTYs, for CLI agents (Claude Code, Codex, etc.) and everyday commands. Sessions survive project and worktree switches, and `loxel terminal` opens a terminal panel and runs a command in it. See [Terminals](../site/src/content/docs/terminals.md).
 - **Code review** — local review sessions with comment threads anchored to code ranges that survive edits, stored per repo and shared across its worktrees. See [Code Review](../site/src/content/docs/code-review.md).
 - **Diff viewer** — side-by-side (JetBrains-style synchronized scrolling), split and unified Monaco diffs with intra-line highlights. See [Diff Viewer](../site/src/content/docs/diff-viewer.md).
 - **Git** — commit graph, changes panel, branches, cherry-pick, revert, reset and discard changes from context menus and inline forms. There is no staging or commit UI. See [Git](../site/src/content/docs/git.md).
@@ -121,7 +121,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 
 - [docs/EDITOR.md](docs/EDITOR.md) — Monaco and markdown editors, disk sync and saving, file operations, drafts, Others files, localdb, search
 - [docs/LANGUAGE_SERVERS.md](docs/LANGUAGE_SERVERS.md) — language-server managers and routing, URI schemes, diagnostics, formatting, schemas, highlighting
-- [docs/TERMINALS.md](docs/TERMINALS.md) — PTY sessions, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
+- [docs/TERMINALS.md](docs/TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
 - [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
 - [docs/CODING_AGENT_INTEGRATION.md](docs/CODING_AGENT_INTEGRATION.md) — hosting coding-agent sessions in the server, event buffering, rewind and fork, devtools, model settings
 - [docs/DIFF_VIEW_SPEC.md](docs/DIFF_VIEW_SPEC.md) — side-by-side diff spec: synchronized scrolling, intra-line highlights, gutter connectors

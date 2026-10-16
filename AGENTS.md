@@ -4,7 +4,7 @@ This file provides guidance to coding agents working in this repository (`CLAUDE
 
 ## Project Overview
 
-loxel is a monorepo (pnpm for package management, Bun for runtime) built around **Loxel**, an IDE for agentic coding (`packages/loxel`, Electron app plus Bun server), its docs site (`packages/site`), and a set of CLI tools, libraries, and services that support agent-driven development workflows: a configless worktree manager (`wt`), Claude Code hooks and wrappers that make standard tools non-blocking for agents while preserving normal UX for humans, and shared libraries for logging, CLI output, and WebSocket channels.
+loxel is a monorepo (pnpm for package management, Bun for runtime) built around **Loxel**, an IDE for agentic coding (`packages/loxel`, Electron app plus Bun server), its docs site (`packages/site`), and a set of CLI tools, libraries, and services that support agent-driven development workflows: a configless worktree manager (`wt`), a wrapper that makes interactive git commands non-blocking for agents while preserving normal UX for humans (`cc-git-editor`), and shared libraries for logging, CLI output, and WebSocket channels.
 
 ## Environment Setup
 
@@ -200,18 +200,18 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 - Docs use progressive disclosure: this file is an index pointing to package READMEs, and a large package's README (e.g. `packages/loxel`) is in turn an index pointing to its nested docs and specs.
 
-- In every PR, check that the docs covering the code you changed are not stale, and fix them in the same PR if they are.
+- In every PR, search the package's `docs/`, its README, the indexes that link them, and the site pages for every identifier, file, message type, and behavior you changed or moved, and fix every stale hit in the same PR, not only the section you set out to edit. If a doc's scope changes, update its one-line description in each index that links it.
 
 - There are two kinds of docs, and they differ in audience, content, and style. Keep them separate:
   - **Public docs** (the site pages under `packages/site/src/content/docs/`, and the user-facing parts of package READMEs) are feature- and usage-centric: what the product or tool can do, how to use it, and the configuration, commands, paths, and shortcuts a user needs. They never name source files, modules, internal data structures, or implementation mechanics, and they are written for someone who has not read the code.
-  - **Internal docs** (`packages/<pkg>/docs/*.md`, linked from the package README) are for contributors: architecture, data flow, module boundaries, internal APIs and protocols, invariants, conventions, and design choices with their rationale. They name the modules they describe and link to them, and they do not narrate features for end users or repeat what the public docs say.
+  - **Internal docs** (`packages/<pkg>/docs/*.md`, linked from the package README) are for contributors: architecture, data flow, module boundaries, internal APIs and protocols, invariants, conventions, and design choices with their rationale. They name the modules they describe and link to them, and they do not narrate features for end users or repeat what the public docs say. A package's docs describe that package's own behavior; how another package uses it belongs in the consumer's docs.
   - When user-visible behavior changes, update the public doc that owns the feature. When architecture, internal APIs, or conventions change, update the internal doc. A change rarely needs both.
 
 - READMEs stay high-level: what the package does, setup, commands, configuration, public APIs, and an index of the package's internal docs.
 
 - Add or expand docs only for significant changes. Write them at the most specific relevant level and link to them from the parent index instead of repeating the detail there.
 
-- Explain small fixes and local implementation details in code comments next to the code, not in docs.
+- Explain small fixes and local implementation details in code comments next to the code, not in docs. This does not exempt a small fix from updating existing docs that name what it moved, renamed, or changed.
 
 - Markdown prose is soft-wrapped: one paragraph (or list item) per line, never hard-wrapped at a column. Readers view docs at many widths and the viewer should do the wrapping. Tables, code blocks, and diagrams are the only multi-line constructs.
 
@@ -259,7 +259,7 @@ Type checking uses the official TypeScript 7 native compiler (`@typescript/nativ
 
 ## Workflow
 
-When asked to implement a feature, fix a bug, or execute a plan, the expected deliverable is a PR. After completing implementation:
+When asked to implement a feature, fix a bug, or execute a plan, the expected deliverable is a PR. Any GitHub issue you file gets labels at creation per [Issue Labels](CONTRIBUTING.md#issue-labels). After completing implementation:
 
 1. Run `pnpm run lint:fix` and `pnpm run fmt`
 
@@ -270,7 +270,7 @@ When asked to implement a feature, fix a bug, or execute a plan, the expected de
 4. Task two sub agents in parallel:
    - **Code review**: review your changes for correctness, quality, and security (provide full context: the task, files changed, and relevant architecture)
 
-   - **Follow-up ideas**: explore feature ideas, improvements, or optimizations related to the current work — file GitHub issues for worthwhile ones, with labels applied at creation per the [Issue Labels](CONTRIBUTING.md#issue-labels) section of CONTRIBUTING.md
+   - **Follow-up ideas**: explore feature ideas, improvements, or optimizations related to the current work — file GitHub issues for worthwhile ones
 
 5. Fix review findings directly in the PR. Only create GitHub issues for items that are clearly out of scope and low urgency (e.g., a broader refactor or a pattern change affecting many files).
 

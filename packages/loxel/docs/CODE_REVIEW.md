@@ -26,7 +26,7 @@ Schemas live in [review-model.ts](../src/api/review-model.ts) and [comment-model
 - `PlacedThread`: a `CommentThread` plus server-computed `displaySide`, `displayStartLine`, `displayEndLine`, `anchorStatus` (`exact` | `relocated` | `outdated` | `lost`), and for `outdated` only, `originalContent` and `currentContent`.
 - `DiffFileContext`: what the client sends per diff file: `oldPath`, `newPath`, `oldRef`, `newRef` (null means "not a ref"), optional `worktreePath`.
 
-Request bodies (`CreateThreadRequest`, `CreateReviewRequest`, `UpdateReviewRequest`, `UpdateThreadRequest`, `AddReplyRequest`, `PlacedThreadsRequest`) are defined in the same file and validated with `safeParse` in the routes.
+Request body schemas (`CreateThreadRequestSchema`, `CreateReviewRequestSchema`, `UpdateReviewRequestSchema`, `UpdateThreadRequestSchema`, `AddReplyRequestSchema`, `PlacedThreadsRequestSchema`) are defined in the same file and validated with `safeParse` in [review-routes.ts](../src/server/review-routes.ts).
 
 ## Storage
 

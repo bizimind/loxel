@@ -47,7 +47,7 @@ Request bodies are validated on the server: [review-routes.ts](../src/server/rev
 
 ### WebSocket
 
-The app socket (`/ws`) carries JSON text frames typed in [ws-protocol.ts](../src/api/ws-protocol.ts): `WsMessage` (server to client) and `WsClientMessage` (client to server). Terminal I/O uses binary frames on the same socket: `[type byte][36-byte terminal UUID][payload]`, with `BIN_MSG_OUTPUT` and `BIN_MSG_INPUT`. Messages are built inline where they are sent; [ws-messages.ts](../src/server/ws-messages.ts) holds the shared `worktreesChangedMessage` builder.
+The app socket (`/ws`) carries JSON text frames typed in [ws-protocol.ts](../src/api/ws-protocol.ts): `WsMessage` (server to client) and `WsClientMessage` (client to server). Terminal I/O uses binary frames on the same socket (`BIN_MSG_OUTPUT`, `BIN_MSG_INPUT`); their layout is specified in [TERMINALS.md](TERMINALS.md#websocket-protocol). Messages are built inline where they are sent; [ws-messages.ts](../src/server/ws-messages.ts) holds the shared `worktreesChangedMessage` builder.
 
 Server-to-client delivery uses helpers in server.ts, chosen by scope:
 
@@ -150,7 +150,7 @@ The same index as the [package README](../README.md#internal-docs), grouped the 
 
 - [EDITOR.md](EDITOR.md) — Monaco and markdown editors, disk sync and saving, file operations, drafts, Others files, localdb, search
 - [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md) — language-server managers and routing, URI schemes, diagnostics, formatting, schemas, highlighting
-- [TERMINALS.md](TERMINALS.md) — PTY sessions, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
+- [TERMINALS.md](TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
 - [CODE_REVIEW.md](CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
 - [CODING_AGENT_INTEGRATION.md](CODING_AGENT_INTEGRATION.md) — hosting coding-agent sessions in the server, event buffering, rewind and fork, devtools, model settings
 - [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md) — side-by-side diff spec: synchronized scrolling, intra-line highlights, gutter connectors
