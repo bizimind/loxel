@@ -45,14 +45,8 @@ async function resolveTarget(
   return { path, isDirectory: info.isDirectory() };
 }
 
-/**
- * POST bodies must be declared as JSON. Browsers only send that content type cross-site after
- * a CORS preflight, which this server never approves, so other web pages can't trigger these
- * actions with a plain form-style POST.
- */
+/** Malformed JSON becomes `null`, which the schema parse below rejects as an invalid request. */
 async function readJsonBody(req: Request): Promise<unknown> {
-  const mimeType = req.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
-  if (mimeType !== "application/json") return null;
   return req.json().catch(() => null);
 }
 

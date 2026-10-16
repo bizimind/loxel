@@ -125,9 +125,11 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         "/api": { target: `http://127.0.0.1:${serverPort}`, changeOrigin: true },
-        "/ws/yaml-lsp": { target: `ws://127.0.0.1:${serverPort}`, ws: true },
-        "/ws/ts-lsp": { target: `ws://127.0.0.1:${serverPort}`, ws: true },
-        "/ws": { target: `ws://127.0.0.1:${serverPort}`, ws: true },
+        // changeOrigin rewrites Host to the server's own host:port; the server rejects upgrades
+        // whose Host names any other port (src/server/request-origin.ts).
+        "/ws/yaml-lsp": { target: `ws://127.0.0.1:${serverPort}`, ws: true, changeOrigin: true },
+        "/ws/ts-lsp": { target: `ws://127.0.0.1:${serverPort}`, ws: true, changeOrigin: true },
+        "/ws": { target: `ws://127.0.0.1:${serverPort}`, ws: true, changeOrigin: true },
       },
     },
   };
