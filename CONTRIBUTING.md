@@ -54,7 +54,7 @@ gh issue create --label fix,package:loxel,component:diff --title "..." --body ".
 
 ## Issue Labels
 
-Every issue carries one type label and at least one package label; component labels are optional. The vocabularies below are closed; do not invent new labels without updating this section.
+Every issue carries one type label and at least one package label; component labels are optional. Package labels follow from the directories under `packages/`. The type and component vocabularies below are closed; do not invent new labels in them without updating this section.
 
 **Type** (exactly one):
 
