@@ -23,7 +23,12 @@ import { useFileSearchStore } from "@/store/file-search";
 import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
-import { type FileIndex, buildFileIndex, createFilePathLinkProvider } from "./file-link-provider";
+import {
+  type FileIndex,
+  type TerminalPaths,
+  buildFileIndex,
+  createFilePathLinkProvider,
+} from "./file-link-provider";
 import { SEARCH_DECORATIONS } from "./search-decorations";
 import { createWebglRenderer } from "./webgl-renderer";
 
@@ -125,12 +130,6 @@ function fitAndSendResize(terminalId: string, terminal: XTerm, fitAddon: FitAddo
 /** Output bytes parsed between flow-control acks to the server. */
 const ACK_BYTES = 64 * 1024;
 
-/** Where a terminal's shell starts and which worktree the panel belongs to. */
-interface SpawnTarget {
-  cwd: string;
-  worktreePath: string;
-}
-
 /**
  * Send terminal_attach with current dimensions and the panel's spawn target. `sinceOffset` is the
  * stream offset this xterm is already current to (a reconnect with live content); omitted for a
@@ -139,7 +138,7 @@ interface SpawnTarget {
 function sendAttach(
   terminalId: string,
   terminal: XTerm,
-  { cwd, worktreePath }: SpawnTarget,
+  { cwd, worktreePath }: TerminalPaths,
   since?: { epoch: string; offset: number },
 ) {
   wsClient.send({
@@ -289,7 +288,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     },
   });
 
-  const spawnTarget: SpawnTarget | null = panelWorktreePath
+  const spawnTarget: TerminalPaths | null = panelWorktreePath
     ? { cwd: cwd ?? panelWorktreePath, worktreePath: panelWorktreePath }
     : null;
   const spawnTargetRef = useRef(spawnTarget);
@@ -337,7 +336,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     const fileLinks = terminal.registerLinkProvider(
       createFilePathLinkProvider(
         terminal,
-        () => spawnTargetRef.current?.cwd ?? null,
+        () => spawnTargetRef.current,
         () => fileIndexRef.current,
       ),
     );

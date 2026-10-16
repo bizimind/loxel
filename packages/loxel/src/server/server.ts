@@ -675,7 +675,7 @@ const terminalManager = new TerminalManager({
   isSequenceEnabled: isNotificationSequenceEnabled,
   onNotification: (session, payload) => {
     const notification = notificationStore.add({
-      source: { kind: "terminal", panelId: session.id, worktreePath: session.cwd },
+      source: { kind: "terminal", panelId: session.id, worktreePath: session.worktreePath },
       title: payload.title,
       body: payload.body,
       urgency: payload.urgency ?? "normal",
@@ -791,6 +791,7 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
           cols: msg.cols,
           rows: msg.rows,
           cwd,
+          worktreePath: msg.worktreePath,
           envOverrides,
           scrollbackLines: msg.scrollbackLines,
           sinceEpoch: msg.sinceEpoch,

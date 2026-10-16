@@ -21,6 +21,8 @@ export interface TerminalAttachOptions {
   rows: number;
   /** Applied only when the session is spawned. */
   cwd: string;
+  /** The panel's worktree when the shell starts elsewhere; applied only when spawned. */
+  worktreePath?: string;
   /** Applied only when the session is spawned. */
   envOverrides?: Record<string, string>;
   scrollbackLines?: number;
@@ -103,7 +105,7 @@ export class TerminalManager {
 
   private spawn(id: string, options: TerminalAttachOptions): TerminalSession {
     const shell = process.env.SHELL || "/bin/bash";
-    const { cols, rows, cwd } = options;
+    const { cols, rows, cwd, worktreePath } = options;
     log.info(`Spawning terminal ${id.slice(0, 8)} with ${shell} (${cols}x${rows}) in ${cwd}`);
 
     const env = buildTerminalEnv();
@@ -114,6 +116,7 @@ export class TerminalManager {
       cols,
       rows,
       cwd,
+      worktreePath,
       scrollbackLines: options.scrollbackLines,
       env,
       command: [shell, "-il"],

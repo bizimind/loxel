@@ -38,6 +38,8 @@ export interface TerminalSessionOptions {
   cols: number;
   rows: number;
   cwd: string;
+  /** The worktree the panel belongs to; notifications are filed under it. Defaults to `cwd`. */
+  worktreePath?: string;
   scrollbackLines?: number;
   env: Record<string, string | undefined>;
   /** Command to run in the PTY. Defaults to the user's login shell. */
@@ -132,6 +134,7 @@ export class TerminalSession {
   /** Identifies this spawn; a client may only resume with offsets it got under this epoch. */
   readonly epoch = crypto.randomUUID();
   readonly cwd: string;
+  readonly worktreePath: string;
   cols: number;
   rows: number;
   /** Resolves with the shell's exit code once the process is gone. */
@@ -162,6 +165,7 @@ export class TerminalSession {
   constructor(private readonly options: TerminalSessionOptions) {
     this.id = options.id;
     this.cwd = options.cwd;
+    this.worktreePath = options.worktreePath ?? options.cwd;
     const size = clampTerminalSize(options.cols, options.rows);
     this.cols = size.cols;
     this.rows = size.rows;

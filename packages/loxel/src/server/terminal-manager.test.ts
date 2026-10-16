@@ -87,6 +87,19 @@ describe("TerminalManager initial commands", () => {
     expect(sink.outputText()).not.toContain("hello-from-42");
   });
 
+  test("the session keeps the panel's worktree apart from the shell's cwd", async () => {
+    process.env.SHELL = "/bin/sh";
+    const manager = createManager();
+    const id = crypto.randomUUID();
+    await manager.attach(id, createRecordingSink().sink, { ...attachOptions, worktreePath: "/" });
+    expect(manager.get(id)?.cwd).toBe("/tmp");
+    expect(manager.get(id)?.worktreePath).toBe("/");
+
+    const plain = crypto.randomUUID();
+    await manager.attach(plain, createRecordingSink().sink, attachOptions);
+    expect(manager.get(plain)?.worktreePath).toBe("/tmp");
+  });
+
   test("a command can be cleared before the panel attaches", async () => {
     process.env.SHELL = "/bin/sh";
     const manager = createManager();
