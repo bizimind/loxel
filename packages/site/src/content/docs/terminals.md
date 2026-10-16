@@ -20,7 +20,7 @@ To rename a terminal, double-click its tab title, or right-click the tab and cho
 
 Terminal sessions survive context switches. When you switch to another worktree — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included.
 
-Scrollback defaults to **50,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines. Scrollback is kept by the Loxel server for every open terminal, mounted or not, so with many long-running, chatty terminals a lower setting saves memory: a terminal that has filled all 50,000 lines can hold around 100 MB.
+Scrollback defaults to **50,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines. Scrollback is kept by the Loxel server for every open terminal, visible or not, so with many long-running, chatty terminals a lower setting saves memory: a 200-column terminal that has filled all 50,000 lines can hold around 120 MB.
 
 ---
 
@@ -52,12 +52,12 @@ Terminal colors follow your dark/light mode setting automatically. No manual con
 
 Every Loxel terminal starts with four environment variables already set:
 
-| Variable          | Value                                     |
-| ----------------- | ----------------------------------------- |
-| `LOXEL`           | `1`                                       |
-| `LOXEL_PORT`      | Port of the running Loxel server          |
-| `LOXEL_WORKTREE`  | Working directory path of this terminal   |
-| `LOXEL_WINDOW_ID` | ID of the Loxel window (desktop app only) |
+| Variable          | Value                                         |
+| ----------------- | --------------------------------------------- |
+| `LOXEL`           | `1`                                           |
+| `LOXEL_PORT`      | Port of the running Loxel server              |
+| `LOXEL_WORKTREE`  | Path of the worktree this terminal belongs to |
+| `LOXEL_WINDOW_ID` | ID of the Loxel window (desktop app only)     |
 
 `LOXEL=1` lets scripts detect they are running inside Loxel. `LOXEL_PORT` and `LOXEL_WORKTREE` are the more useful ones — they are consumed by the `loxel` CLI and by TUI agents that want worktree context.
 
