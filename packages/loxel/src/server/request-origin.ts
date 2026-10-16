@@ -3,9 +3,10 @@
  *
  * The server listens on loopback without authentication, so these checks keep web pages (browser
  * tabs and pages inside Loxel's own browser panels) from driving it. Browsers attach `Origin` to
- * every WebSocket upgrade and to every cross-site or state-changing fetch, while native clients
- * (the `loxel` CLI, the Electron main process, curl) send none, so the rules key off that header
- * together with `Host`, `Sec-Fetch-Site`, `Sec-Fetch-Mode` and `Content-Type`.
+ * WebSocket upgrades, CORS-mode fetches and non-GET/HEAD requests, but not to no-cors GET loads
+ * or navigations, and native clients (the `loxel` CLI, the Electron main process, curl) send none,
+ * so no single header is conclusive: the rules combine `Host`, `Origin`, `Sec-Fetch-Site`,
+ * `Sec-Fetch-Mode`, `Sec-Fetch-Dest` and `Content-Type`.
  *
  * Every rule here describes intended policy; `server.ts` applies them to each incoming request
  * before routing, and `RequestOriginPolicy` lets tests pin the port and dev-mode allowances.
@@ -43,8 +44,10 @@ function isLoopbackHost(host: string | null, port: number): boolean {
 }
 
 /**
- * A missing `Origin` means a non-browser client or a same-origin GET and is allowed; browsers
- * always send one on WebSocket upgrades and on cross-origin or state-changing fetches.
+ * Only decides requests that carry an `Origin`. A missing one is ambiguous: a native client, a
+ * same-origin GET, or a cross-site no-cors GET (`<img>`, `<script>`, `<video>`) or navigation,
+ * which browsers send without `Origin`. Those cross-site cases are rejected by the
+ * `Sec-Fetch-Site` rule in `checkRequest`, not here.
  */
 function isAllowedOrigin(origin: string | null, policy: RequestOriginPolicy): boolean {
   if (origin === null) return true;
