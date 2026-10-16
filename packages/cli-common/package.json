@@ -5,7 +5,6 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./errors": "./src/errors.ts",
     "./output": "./src/output.ts",
     "./logging": "./src/logging.ts",
     "./update": "./src/update/index.ts",
