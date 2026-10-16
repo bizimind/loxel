@@ -122,7 +122,10 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: "127.0.0.1",
+      // The server only admits this origin in dev (src/server/request-origin.ts), so fail
+      // loudly instead of silently moving to another port.
       port: 5173,
+      strictPort: true,
       proxy: {
         "/api": { target: `http://127.0.0.1:${serverPort}`, changeOrigin: true },
         // changeOrigin rewrites Host to the server's own host:port; the server rejects upgrades

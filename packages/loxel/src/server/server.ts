@@ -36,7 +36,8 @@ import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
 import { PythonLspManager } from "./python-lsp-manager";
-import { checkRequest } from "./request-origin";
+import { type RequestOriginPolicy, checkRequest } from "./request-origin";
+import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import { handleRequest } from "./routes";
 import { SchemaService } from "./schema-service";
@@ -1030,7 +1031,10 @@ if (distDir) log.info(`Serving static files from ${distDir}`);
 
 // The Vite dev server (dev:app / dev:client) proxies the renderer, so its origin is only valid
 // for a dev server; see request-origin.ts for the full policy.
-const requestPolicy = { port: config.port, allowDevOrigins: config.isDev };
+const requestPolicy = {
+  port: config.port,
+  allowDevOrigins: config.isDev,
+} satisfies RequestOriginPolicy;
 
 const server = Bun.serve<WsData>({
   port: config.port,
@@ -1045,7 +1049,7 @@ const server = Bun.serve<WsData>({
         ...rejection.details,
         path: url.pathname,
       });
-      return new Response(rejection.reason, { status: rejection.status });
+      return error(rejection.reason, rejection.status);
     }
 
     if (url.pathname === "/ws/yaml-lsp") {

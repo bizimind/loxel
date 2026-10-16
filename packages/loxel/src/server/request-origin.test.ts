@@ -1,12 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  type RequestOriginPolicy,
-  allowedOrigins,
-  checkRequest,
-  isAllowedOrigin,
-  isLoopbackHost,
-} from "./request-origin";
+import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 
 const PORT = 7433;
 const prod: RequestOriginPolicy = { port: PORT, allowDevOrigins: false };
@@ -21,115 +15,137 @@ function request(method: string, headers: Record<string, string> = {}) {
 const jsonPost = (headers: Record<string, string> = {}) =>
   request("POST", { "Content-Type": "application/json", ...headers });
 
-describe("isLoopbackHost", () => {
+const status = (req: ReturnType<typeof request>, policy = prod) =>
+  checkRequest(req, policy)?.status ?? null;
+
+describe("checkRequest: Host", () => {
   test("accepts loopback hosts on the server port only", () => {
-    expect(isLoopbackHost("127.0.0.1:7433", PORT)).toBe(true);
-    expect(isLoopbackHost("localhost:7433", PORT)).toBe(true);
-    expect(isLoopbackHost("LOCALHOST:7433", PORT)).toBe(true);
-    expect(isLoopbackHost("[::1]:7433", PORT)).toBe(true);
-    expect(isLoopbackHost("127.0.0.1:7434", PORT)).toBe(false);
-    expect(isLoopbackHost("127.0.0.1", PORT)).toBe(false);
-    expect(isLoopbackHost("evil.example:7433", PORT)).toBe(false);
-    expect(isLoopbackHost("127.0.0.1.evil.example:7433", PORT)).toBe(false);
-    expect(isLoopbackHost(null, PORT)).toBe(false);
-    expect(isLoopbackHost("", PORT)).toBe(false);
+    expect(status(request("GET", { Host: `127.0.0.1:${PORT}` }))).toBeNull();
+    expect(status(request("GET", { Host: `localhost:${PORT}` }))).toBeNull();
+    expect(status(request("GET", { Host: `LOCALHOST:${PORT}` }))).toBeNull();
+    expect(status(request("GET", { Host: `[::1]:${PORT}` }))).toBeNull();
+  });
+
+  test("rejects any other Host with 400", () => {
+    for (const host of [
+      `127.0.0.1:${PORT + 1}`,
+      "127.0.0.1",
+      "evil.example",
+      `evil.example:${PORT}`,
+      `127.0.0.1.evil.example:${PORT}`,
+      `localhost.:${PORT}`,
+      `127.0.0.1:${PORT}, 127.0.0.1:${PORT}`,
+      "",
+    ]) {
+      expect(status(request("GET", { Host: host }))).toBe(400);
+    }
+    expect(status({ method: "GET", headers: new Headers() })).toBe(400);
+  });
+
+  test("reports the offending host and checks Host before anything else", () => {
+    const rejection = checkRequest(
+      request("POST", {
+        Host: "evil.example",
+        Origin: "https://evil.example",
+        "Content-Type": "text/plain",
+      }),
+      prod,
+    );
+    expect(rejection).toMatchObject({ status: 400, details: { host: "evil.example" } });
   });
 });
 
-describe("isAllowedOrigin", () => {
-  test("allows requests without an Origin header (non-browser clients)", () => {
-    expect(isAllowedOrigin(null, prod)).toBe(true);
+describe("checkRequest: Origin", () => {
+  test("allows requests without an Origin header (native clients, same-origin GETs)", () => {
+    expect(status(request("GET"))).toBeNull();
+    expect(status(jsonPost())).toBeNull();
   });
 
   test("allows the server's own loopback origins", () => {
-    expect(isAllowedOrigin("http://127.0.0.1:7433", prod)).toBe(true);
-    expect(isAllowedOrigin("http://localhost:7433", prod)).toBe(true);
-    expect(isAllowedOrigin("HTTP://LOCALHOST:7433", prod)).toBe(true);
+    expect(status(request("GET", { Origin: `http://127.0.0.1:${PORT}` }))).toBeNull();
+    expect(status(request("GET", { Origin: `http://localhost:${PORT}` }))).toBeNull();
+    expect(status(request("GET", { Origin: `HTTP://LOCALHOST:${PORT}` }))).toBeNull();
+    expect(status(jsonPost({ Origin: `http://127.0.0.1:${PORT}` }))).toBeNull();
   });
 
-  test("rejects foreign, null, https, and wrong-port origins", () => {
-    expect(isAllowedOrigin("https://evil.example", prod)).toBe(false);
-    expect(isAllowedOrigin("null", prod)).toBe(false);
-    expect(isAllowedOrigin("https://127.0.0.1:7433", prod)).toBe(false);
-    expect(isAllowedOrigin("http://127.0.0.1:7434", prod)).toBe(false);
-    expect(isAllowedOrigin("http://127.0.0.1:7433.evil.example", prod)).toBe(false);
-    expect(isAllowedOrigin("http://localhost:5173", prod)).toBe(false);
+  test("rejects foreign, null, https, and wrong-port origins for any method", () => {
+    for (const origin of [
+      "https://evil.example",
+      "null",
+      `https://127.0.0.1:${PORT}`,
+      `http://127.0.0.1:${PORT + 1}`,
+      `http://127.0.0.1:${PORT}.evil.example`,
+      "http://localhost:5173",
+    ]) {
+      expect(status(request("GET", { Origin: origin }))).toBe(403);
+      expect(status(jsonPost({ Origin: origin }))).toBe(403);
+    }
+    const rejection = checkRequest(jsonPost({ Origin: "https://evil.example" }), prod);
+    expect(rejection).toMatchObject({ status: 403, details: { origin: "https://evil.example" } });
+  });
+
+  test("checks Origin before the body rules", () => {
+    const req = request("POST", { Origin: "https://evil.example", "Content-Type": "text/plain" });
+    expect(status(req)).toBe(403);
   });
 
   test("allows the Vite dev-server origin only when dev origins are enabled", () => {
-    expect(isAllowedOrigin("http://localhost:5173", dev)).toBe(true);
-    expect(isAllowedOrigin("http://127.0.0.1:5173", dev)).toBe(true);
-    expect(isAllowedOrigin("http://127.0.0.1:7434", dev)).toBe(true);
-    expect(allowedOrigins(dev)).toContain("http://127.0.0.1:5173");
-    expect(allowedOrigins(prod)).not.toContain("http://127.0.0.1:5173");
+    const devHost = { Host: "127.0.0.1:7434" };
+    expect(status(request("GET", { ...devHost, Origin: "http://localhost:5173" }), dev)).toBeNull();
+    expect(status(request("GET", { ...devHost, Origin: "http://127.0.0.1:5173" }), dev)).toBeNull();
+    expect(status(request("GET", { ...devHost, Origin: "http://127.0.0.1:7434" }), dev)).toBeNull();
+    expect(status(request("GET", { ...devHost, Origin: "http://127.0.0.1:5174" }), dev)).toBe(403);
+    expect(status(request("GET", { Origin: "http://127.0.0.1:5173" }), prod)).toBe(403);
   });
 });
 
-describe("checkRequest", () => {
-  test("admits GET requests from native clients and the app's own origin", () => {
-    expect(checkRequest(request("GET"), prod)).toBeNull();
-    expect(checkRequest(request("GET", { Origin: `http://localhost:${PORT}` }), prod)).toBeNull();
-    expect(checkRequest(request("GET", { Host: `localhost:${PORT}` }), prod)).toBeNull();
+describe("checkRequest: Sec-Fetch-Site", () => {
+  test("admits same-origin and same-site requests", () => {
+    expect(status(request("GET", { "Sec-Fetch-Site": "same-origin" }))).toBeNull();
+    expect(status(jsonPost({ "Sec-Fetch-Site": "same-origin" }))).toBeNull();
+    expect(status(request("GET", { "Sec-Fetch-Site": "none" }))).toBeNull();
   });
 
-  test("rejects any request whose Host is not this server", () => {
-    expect(checkRequest(request("GET", { Host: "evil.example" }), prod)).toMatchObject({
-      status: 400,
-      details: { host: "evil.example" },
-    });
-    expect(checkRequest(jsonPost({ Host: `127.0.0.1:${PORT + 1}` }), prod)?.status).toBe(400);
-  });
-
-  test("rejects any request with a foreign Origin, including GET", () => {
-    const rejection = checkRequest(request("GET", { Origin: "https://evil.example" }), prod);
-    expect(rejection).toMatchObject({ status: 403, details: { origin: "https://evil.example" } });
-    expect(checkRequest(jsonPost({ Origin: "https://evil.example" }), prod)?.status).toBe(403);
-    expect(checkRequest(jsonPost({ Origin: "null" }), prod)?.status).toBe(403);
-  });
-
-  test("admits JSON mutations from native clients and allowed origins", () => {
-    expect(checkRequest(jsonPost(), prod)).toBeNull();
-    expect(checkRequest(jsonPost({ Origin: `http://127.0.0.1:${PORT}` }), prod)).toBeNull();
+  test("rejects cross-site requests of any method except top-level navigations", () => {
+    expect(status(jsonPost({ "Sec-Fetch-Site": "cross-site" }))).toBe(403);
+    expect(status(request("GET", { "Sec-Fetch-Site": "cross-site" }))).toBe(403);
     expect(
-      checkRequest(
-        jsonPost({ Origin: `http://127.0.0.1:${PORT}`, "Sec-Fetch-Site": "same-origin" }),
-        prod,
-      ),
-    ).toBeNull();
+      status(request("GET", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" })),
+    ).toBe(403);
     expect(
-      checkRequest(request("DELETE", { "Content-Type": "application/json; charset=utf-8" }), prod),
+      status(request("GET", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" })),
     ).toBeNull();
   });
+});
 
-  test("rejects mutations marked cross-site by the browser", () => {
-    expect(checkRequest(jsonPost({ "Sec-Fetch-Site": "cross-site" }), prod)?.status).toBe(403);
-    expect(checkRequest(request("GET", { "Sec-Fetch-Site": "cross-site" }), prod)).toBeNull();
-  });
-
-  test("rejects mutations without a JSON content type", () => {
+describe("checkRequest: mutation bodies", () => {
+  test("admits JSON mutations, including charset parameters and mixed case", () => {
     for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
-      expect(checkRequest(request(method), prod)?.status).toBe(415);
+      expect(status(request(method, { "Content-Type": "application/json" }))).toBeNull();
+    }
+    const charset = { "Content-Type": "application/json; charset=utf-8" };
+    expect(status(request("DELETE", charset))).toBeNull();
+    expect(status(request("PUT", { "Content-Type": "Application/JSON" }))).toBeNull();
+  });
+
+  test("rejects mutations without a JSON content type with 415", () => {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(status(request(method))).toBe(415);
     }
     const textPost = request("POST", { "Content-Type": "text/plain" });
     expect(checkRequest(textPost, prod)).toMatchObject({
       status: 415,
       details: { contentType: "text/plain" },
     });
-    const formPost = request("POST", { "Content-Type": "application/x-www-form-urlencoded" });
-    expect(checkRequest(formPost, prod)?.status).toBe(415);
+    for (const type of ["application/x-www-form-urlencoded", "multipart/form-data", ""]) {
+      expect(status(request("POST", { "Content-Type": type }))).toBe(415);
+    }
   });
 
-  test("checks Host before Origin and Origin before body rules", () => {
-    const everythingWrong = request("POST", {
-      Host: "evil.example",
-      Origin: "https://evil.example",
-      "Content-Type": "text/plain",
-    });
-    expect(checkRequest(everythingWrong, prod)?.status).toBe(400);
-    const badOriginAndBody = request("POST", {
-      Origin: "https://evil.example",
-      "Content-Type": "text/plain",
-    });
-    expect(checkRequest(badOriginAndBody, prod)?.status).toBe(403);
+  test("leaves non-mutating methods alone", () => {
+    for (const method of ["GET", "HEAD", "OPTIONS"]) {
+      expect(status(request(method))).toBeNull();
+      expect(status(request(method, { "Content-Type": "text/plain" }))).toBeNull();
+    }
   });
 });
