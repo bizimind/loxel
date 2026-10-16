@@ -94,6 +94,10 @@ Each package README is the authoritative doc for that package; this list only or
 
 - **channel-worker**: Cloudflare Worker (Durable Objects) that relays channel WebSocket traffic, with WorkOS JWT auth and same-user channels. See `packages/channel-worker/README.md`.
 
+### Skills
+
+`.agents/skills/` holds the skills for agents working on this repo (`.claude/skills` symlinks to it). `skills/` holds user-facing skills that Loxel users install in their own agents (see `skills/README.md`). Write those self-contained, with no references to this repo's layout, and update them when the behavior they describe changes.
+
 ### Key Patterns
 
 **Agent Detection**: Check `CLAUDECODE=1` environment variable to branch between agent (non-blocking) and human (standard) behavior.

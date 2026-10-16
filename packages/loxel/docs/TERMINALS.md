@@ -110,7 +110,7 @@ Terminal programs can raise notifications with OSC sequences; they become badge 
 
 ## The `loxel` CLI
 
-The CLI entry is [cli.ts](../src/cli.ts); `pnpm run build:cli` compiles it with `bun build --compile` to `build/loxel`. Bundling it with the app and installing it on `PATH` is planned (#322).
+The CLI entry is [cli.ts](../src/cli.ts); `pnpm run build:cli` compiles it with `bun build --compile` to `build/loxel`. Bundling it with the app and installing it on `PATH` is planned (#322). The user-facing [`loxel` agent skill](../../../skills/loxel/SKILL.md) teaches agents the CLI, so update it when a command, flag or behavior below changes.
 
 - **No argument:** runs `open -a Loxel`.
 - **Finding the server:** inside a Loxel terminal (`LOXEL=1` and `LOXEL_PORT` set) it uses `LOXEL_PORT` directly. Otherwise it probes `GET /api/version` on 7433, then 7434 (1 second each), runs `open -a Loxel` to focus or launch the app, and if nothing answered waits up to 15 seconds for port 7433.

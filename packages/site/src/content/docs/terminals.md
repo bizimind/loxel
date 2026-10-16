@@ -102,6 +102,25 @@ Any terminal-based coding agent runs normally in Loxel terminals. Claude Code, C
 
 These are distinct from Loxel's built-in coding agent, which has a dedicated timeline UI and runs outside the terminal. If you want the timeline, human interaction overlays, and structured tool calls integrated into your layout, see [Coding Agent](/docs/coding-agent). If you have an existing TUI agent workflow or want full CLI control, run it in a terminal here.
 
+### Teach your agent about Loxel
+
+The [`loxel` agent skill](https://github.com/bizimind/loxel/tree/main/skills/loxel) tells Claude Code, or any other agent that supports skills, that it is running inside Loxel and how to use the `loxel` CLI: opening the files it wants you to review, showing the dev server or PR it just started in a browser panel, and starting long-running commands or other agents in their own terminals. The agent needs the `loxel` CLI on its `PATH`. To install the skill for Claude Code (run it again to update):
+
+```bash
+mkdir -p ~/.claude/skills/loxel
+curl -fsSL https://raw.githubusercontent.com/bizimind/loxel/main/skills/loxel/SKILL.md -o ~/.claude/skills/loxel/SKILL.md
+```
+
+Or link it from a clone of the repository, so `git pull` there keeps it current:
+
+```bash
+git clone https://github.com/bizimind/loxel.git ~/src/loxel
+mkdir -p ~/.claude/skills && rm -rf ~/.claude/skills/loxel
+ln -s ~/src/loxel/skills/loxel ~/.claude/skills/loxel
+```
+
+For other agents, put the `skills/loxel` folder in their skills directory.
+
 ---
 
 ## See also

@@ -22,6 +22,8 @@ A monorepo (pnpm + Bun) built around [Loxel](packages/loxel), an IDE for the age
 | [whisper-cpp](packages/whisper-cpp)             | Node addon wrapping whisper.cpp for local speech-to-text                                                       |
 | [wt](packages/wt)                               | Configless Git worktree manager with repo-root setup, teardown, and rename hooks                               |
 
+Agent skills for Loxel users, to install in your own coding agent, are in [skills](skills).
+
 ## Installation
 
 ```bash

@@ -55,7 +55,7 @@ Draft folder names are the first 12 hex characters of the SHA-256 of the project
 
 ## `loxel` CLI
 
-The `loxel` CLI is introduced in [Terminals](/docs/terminals#the-loxel-cli-inside-a-terminal). Full reference:
+The `loxel` CLI is introduced in [Terminals](/docs/terminals#the-loxel-cli-inside-a-terminal), which also shows how to [teach your coding agent to use it](/docs/terminals#teach-your-agent-about-loxel). Full reference:
 
 ```
 loxel [file-path | folder-path | url]
