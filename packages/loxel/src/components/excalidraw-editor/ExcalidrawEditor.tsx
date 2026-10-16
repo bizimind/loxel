@@ -10,6 +10,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
 
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
+import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
 import { useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -197,6 +198,8 @@ function applyScene(
 
 interface ExcalidrawEditorProps {
   filePath: string;
+  /** Previous path when the file was moved outside Loxel (tab parameter); shows a notice. */
+  movedFrom?: string;
   onClose?: () => void;
   onCreateNew?: () => void;
   panelApi: DockviewPanelApi;
@@ -204,6 +207,7 @@ interface ExcalidrawEditorProps {
 
 export function ExcalidrawEditor({
   filePath,
+  movedFrom,
   onClose,
   onCreateNew,
   panelApi,
@@ -391,6 +395,7 @@ export function ExcalidrawEditor({
       style={{ backgroundColor: "var(--editor-surface)" }}
     >
       {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
+      <MovedFileBanner movedFrom={movedFrom} filePath={filePath} panelApi={panelApi} />
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
       )}

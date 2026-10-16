@@ -52,12 +52,24 @@ export interface AgentEventPayload {
   [key: string]: unknown;
 }
 
+/**
+ * Who moved a file: Loxel (a file operation in any window) or another process. Only moves from
+ * another process are announced to the user; Loxel's own are already visible where they happened.
+ */
+export type FileMoveSource = "loxel" | "external";
+
 /** Server-to-client WebSocket message types (JSON text frames) */
 export type WsMessage =
   // Worktree-scoped (sent to worktree subscribers only)
   | { type: "status_changed"; wtPath: string; data: StatusInfo }
   | { type: "files_dir_changed"; wtPath: string; data: { dir: string; entries: DirEntry[] } }
   | { type: "file_content_changed"; wtPath: string; data: { path: string; nonces: string[] } }
+  /** A file an editor has open was renamed or moved (absolute paths). */
+  | {
+      type: "file_moved";
+      wtPath: string;
+      data: { oldPath: string; newPath: string; source: FileMoveSource };
+    }
   | { type: "detached_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }

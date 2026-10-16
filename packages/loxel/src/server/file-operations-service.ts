@@ -116,6 +116,11 @@ export interface FileOperationsServiceOptions {
   git?: boolean;
   /** The owning worktree's history, which orders undo/redo across all its services. */
   history?: FileOperationsHistory;
+  /**
+   * Called as each operation starts; the returned function is called when it ends. Lets the
+   * tree's watcher attribute the moves it sees meanwhile to Loxel.
+   */
+  onOperation?: () => () => void;
 }
 
 /**
@@ -178,7 +183,15 @@ export class FileOperationsService {
   // --- Serialization ---
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(fn, fn);
+    const run = async (): Promise<T> => {
+      const end = this.options.onOperation?.();
+      try {
+        return await fn();
+      } finally {
+        end?.();
+      }
+    };
+    const next = this.queue.then(run, run);
     this.queue = next.catch(() => {});
     return next;
   }

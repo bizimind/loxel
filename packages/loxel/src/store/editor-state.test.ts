@@ -558,3 +558,25 @@ describe("deleted files — echoes", () => {
     expect(store.files.size).toBe(0);
   });
 });
+
+describe("moved files", () => {
+  test("setMovedTo records the new path on existing entries only", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.setMovedTo(FILE, "new.md");
+    expect(getEntry()?.movedTo).toBe("new.md");
+
+    store.setMovedTo("unknown.md", "x.md");
+    expect(useEditorStateStore.getState().files.has("unknown.md")).toBe(false);
+  });
+
+  test("registerPendingEditFlush sets and clears the editor's flush", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    const flush = () => {};
+    store.registerPendingEditFlush(FILE, flush);
+    expect(getEntry()?.flushPendingEdit).toBe(flush);
+    store.registerPendingEditFlush(FILE, null);
+    expect(getEntry()?.flushPendingEdit).toBeNull();
+  });
+});

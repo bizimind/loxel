@@ -150,3 +150,50 @@ describe("ProjectFilesService tree status", () => {
     expect(inside).toEqual({ "ïgn.log": "ignored", "kept.txt": "untracked" });
   }, 20000);
 });
+
+describe("ProjectFilesService move reporting", () => {
+  test("reports a tracked file's rename as a move before the change events", async () => {
+    const repo = await seedRepo();
+    const events: string[] = [];
+    const service = new ProjectFilesService(
+      repo,
+      () => {},
+      (filePath) => events.push(`changed ${path.basename(filePath)}`),
+      undefined,
+      {
+        onFileMoved: (oldPath, newPath, source) =>
+          events.push(`moved ${path.basename(oldPath)} ${path.basename(newPath)} ${source}`),
+      },
+    );
+    cleanups.push(() => service.stop());
+    await service.start();
+    await service.trackFile("a.txt");
+
+    await Bun.$`mv ${path.join(repo, "a.txt")} ${path.join(repo, "b.txt")}`.quiet();
+    await service.notifyChanges(["a.txt", "b.txt"]);
+
+    const moved = events.indexOf("moved a.txt b.txt external");
+    expect(moved).not.toBe(-1);
+    // The old path is still reported (the diff view needs it); editors ignore it once moved.
+    expect(events.indexOf("changed a.txt")).toBeGreaterThan(moved);
+  }, 20000);
+
+  test("attributes a move made during a Loxel operation to Loxel", async () => {
+    const repo = await seedRepo();
+    const sources: string[] = [];
+    const service = new ProjectFilesService(repo, () => {}, undefined, undefined, {
+      onFileMoved: (_old, _new, source) => sources.push(source),
+    });
+    cleanups.push(() => service.stop());
+    await service.start();
+    await service.trackFile("a.txt");
+
+    const end = service.beginOperation();
+    await Bun.$`mv ${path.join(repo, "a.txt")} ${path.join(repo, "b.txt")}`.quiet();
+    end();
+    await service.notifyChanges(["a.txt", "b.txt"]);
+
+    expect(sources).toContain("loxel");
+    expect(sources).not.toContain("external");
+  }, 20000);
+});

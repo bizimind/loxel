@@ -29,6 +29,7 @@ import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
+import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
 import {
   type MergeCallbacks,
   AUTOSAVE_DEBOUNCE_MS,
@@ -244,6 +245,8 @@ function scrollCursorNearTop(view: ProseMirrorView): void {
 
 interface MarkdownEditorProps {
   filePath: string;
+  /** Previous path when the file was moved outside Loxel (tab parameter); shows a notice. */
+  movedFrom?: string;
   line?: number;
   column?: number;
   onClose?: () => void;
@@ -253,6 +256,7 @@ interface MarkdownEditorProps {
 
 export function MarkdownEditor({
   filePath,
+  movedFrom,
   line,
   column,
   onClose,
@@ -890,6 +894,7 @@ export function MarkdownEditor({
       style={{ backgroundColor: "var(--editor-surface)" }}
     >
       {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
+      <MovedFileBanner movedFrom={movedFrom} filePath={filePath} panelApi={panelApi} />
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
       )}

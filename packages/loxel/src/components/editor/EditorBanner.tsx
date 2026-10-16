@@ -7,6 +7,10 @@ const TONE_CLASSES = {
     bar: "border-yellow-600/50 bg-yellow-900/50 text-yellow-200",
     button: "bg-yellow-700/60 hover:bg-yellow-700/80",
   },
+  info: {
+    bar: "border-sky-600/50 bg-sky-950/60 text-sky-200",
+    button: "bg-sky-800/60 hover:bg-sky-800/80",
+  },
   danger: {
     bar: "border-red-600/50 bg-red-900/40 text-red-200",
     button: "bg-red-700/60 hover:bg-red-700/80",

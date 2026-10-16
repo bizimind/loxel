@@ -161,10 +161,11 @@ export function useDiskSyncedContent<T>(
           autosaveCapTimerRef.current = null;
         }
         const fn = getSerializedContentRef.current;
-        if (fn && !isFileDeleted(filePath)) {
+        const target = flushTarget(filePath);
+        if (fn && target) {
           const content = fn();
           if (content !== null) {
-            saveEditorContent(filePath, content, worktreePathRef.current, saveOptionsRef.current);
+            saveEditorContent(target, content, worktreePathRef.current, saveOptionsRef.current);
           }
         }
       }
@@ -173,6 +174,27 @@ export function useDiskSyncedContent<T>(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath, cacheKey]);
+
+  // --- Pending-edit flush, for moves ---
+  useEffect(() => {
+    const flush = (targetPath: string) => {
+      // Decided by state, not only by a pending timer: an editor can be dirty with no timer
+      // (edits made while the file was missing never armed a save that wrote anything).
+      const state = useEditorStateStore.getState().files.get(filePath)?.state;
+      const hasUnsavedEdit =
+        autosaveTimerRef.current !== null || state === "dirty" || state === "saving";
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      if (autosaveCapTimerRef.current) clearTimeout(autosaveCapTimerRef.current);
+      autosaveTimerRef.current = null;
+      autosaveCapTimerRef.current = null;
+      if (!hasUnsavedEdit) return;
+      const content = getSerializedContentRef.current?.() ?? null;
+      if (content === null) return;
+      saveEditorContent(targetPath, content, worktreePathRef.current, saveOptionsRef.current);
+    };
+    useEditorStateStore.getState().registerPendingEditFlush(filePath, flush);
+    return () => useEditorStateStore.getState().registerPendingEditFlush(filePath, null);
+  }, [filePath]);
 
   // --- Merge callbacks registration ---
   useEffect(() => {
@@ -393,4 +415,15 @@ export function useDiskSyncedContent<T>(
 
 function isFileDeleted(filePath: string): boolean {
   return useEditorStateStore.getState().files.get(filePath)?.deleted ?? false;
+}
+
+/**
+ * Where an unmounting editor writes its pending edit: the new path of a moved file, nothing for
+ * a deleted file or one whose entry a delete or move handler already closed, else the file.
+ */
+function flushTarget(filePath: string): string | null {
+  const entry = useEditorStateStore.getState().files.get(filePath);
+  if (!entry) return null;
+  if (entry.movedTo) return entry.movedTo;
+  return entry.deleted ? null : filePath;
 }

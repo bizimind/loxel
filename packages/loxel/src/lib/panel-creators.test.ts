@@ -13,6 +13,7 @@ mock.module("@/components/excalidraw-editor/ExcalidrawEditor", () => ({
 
 const { handleFileMoved } = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
+const { useEditorStateStore } = await import("@/store/editor-state");
 
 /** A center dockview with two groups: `left` (a.ts, b.ts) and `right` (c.ts). */
 function setup() {
@@ -48,6 +49,7 @@ function tabIds(api: DockviewApi, groupIndex: number) {
 afterEach(() => {
   setCenterApi(null);
   document.body.innerHTML = "";
+  useEditorStateStore.setState({ files: new Map() });
 });
 
 describe("handleFileMoved", () => {
@@ -105,5 +107,73 @@ describe("handleFileMoved", () => {
     expect(tabIds(api, 0)).toEqual(["codeeditor-/repo/a.ts"]);
     expect(tabIds(api, 1)).toEqual(["codeeditor-/repo/c.ts"]);
     expect(api.activePanel?.id).toBe("codeeditor-/repo/a.ts");
+  });
+
+  test("points the old editor entry at the new path so its pending edit is saved there", () => {
+    setup();
+    useEditorStateStore.getState().openFile("/repo/b.ts");
+
+    expect(handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(true);
+
+    expect(useEditorStateStore.getState().files.get("/repo/b.ts")?.movedTo).toBe(
+      "/repo/renamed.ts",
+    );
+  });
+
+  test("flushes the old editor's pending edit to the new path before opening it", () => {
+    setup();
+    const store = useEditorStateStore.getState();
+    store.openFile("/repo/b.ts");
+    const flushedTo: string[] = [];
+    store.registerPendingEditFlush("/repo/b.ts", (target) => {
+      flushedTo.push(target);
+      // The new tab must not have an editor entry yet when the edit is written.
+      expect(useEditorStateStore.getState().files.has("/repo/renamed.ts")).toBe(false);
+    });
+
+    handleFileMoved("/repo/b.ts", "/repo/renamed.ts");
+
+    expect(flushedTo).toEqual(["/repo/renamed.ts"]);
+  });
+
+  test("closes the old entry when the new path is already open, and reports no replacement", () => {
+    setup();
+    useEditorStateStore.getState().openFile("/repo/b.ts");
+
+    expect(handleFileMoved("/repo/b.ts", "/repo/c.ts")).toBe(false);
+
+    expect(useEditorStateStore.getState().files.has("/repo/b.ts")).toBe(false);
+  });
+
+  test("records the old path on the new tab only when the move is announced", () => {
+    const { api } = setup();
+
+    handleFileMoved("/repo/b.ts", "/repo/renamed.ts", { announce: true });
+    handleFileMoved("/repo/c.ts", "/repo/quiet.ts");
+
+    expect(api.getPanel("codeeditor-/repo/renamed.ts")?.params?.movedFrom).toBe("/repo/b.ts");
+    expect(api.getPanel("codeeditor-/repo/quiet.ts")?.params?.movedFrom).toBeUndefined();
+  });
+
+  test("leaves a tab in conflict on its old path, without writing anything", () => {
+    const { api } = setup();
+    const store = useEditorStateStore.getState();
+    store.openFile("/repo/b.ts");
+    store.markDirty("/repo/b.ts");
+    store.handleDiskChange("/repo/b.ts", [], "theirs");
+    expect(useEditorStateStore.getState().files.get("/repo/b.ts")?.state).toBe("diverged");
+    const flushedTo: string[] = [];
+    store.registerPendingEditFlush("/repo/b.ts", (target) => flushedTo.push(target));
+
+    expect(handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(false);
+
+    expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
+    expect(api.getPanel("codeeditor-/repo/renamed.ts")).toBeUndefined();
+    expect(flushedTo).toEqual([]);
+  });
+
+  test("is a no-op for a path with no tab", () => {
+    setup();
+    expect(handleFileMoved("/repo/none.ts", "/repo/renamed.ts")).toBe(false);
   });
 });

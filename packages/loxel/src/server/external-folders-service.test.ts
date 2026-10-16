@@ -35,6 +35,7 @@ function createRegistry() {
   const registry = new ExternalFolderRegistry({
     onDirChanged: (worktrees, dir) => dirEvents.push({ worktrees, dir }),
     onFileChanged: (worktrees, path) => fileEvents.push({ worktrees, path }),
+    onFileMoved: () => {},
   });
   return { registry, fileEvents, dirEvents };
 }

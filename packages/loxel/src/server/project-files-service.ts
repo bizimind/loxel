@@ -6,7 +6,9 @@ import { $ } from "bun";
 
 import type { StatusInfo } from "@/api/git-models";
 import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
+import type { FileMoveSource } from "@/api/ws-protocol";
 
+import { FileMoveDetector } from "./file-move-detector";
 import type { FileChange } from "./file-sync-service";
 import { FilesSyncService } from "./file-sync-service";
 import { getStatus, readOnlyGitEnv } from "./git-commands";
@@ -21,6 +23,8 @@ export interface ProjectFilesServiceOptions {
    * relative to this root.
    */
   gitStatus?: boolean;
+  /** Called with absolute paths when a tracked file (see `trackFile`) was renamed or moved. */
+  onFileMoved?: (oldPath: string, newPath: string, source: FileMoveSource) => void;
 }
 
 /** Work accumulated while a refresh pass is running, applied by the next pass as one unit. */
@@ -35,6 +39,8 @@ interface PendingRefresh {
    * (checkout, reset, stash) and may have rewritten files whose events FSEvents dropped.
    */
   rescanAll: boolean;
+  /** Some of the changes arrived while a Loxel file operation ran: moves among them are Loxel's. */
+  duringOperation: boolean;
   waiters: Array<() => void>;
 }
 
@@ -91,6 +97,7 @@ export class ProjectFilesService {
   private stopped = false;
 
   private syncService: FilesSyncService;
+  private moveDetector: FileMoveDetector;
 
   constructor(
     private worktreeCwd: string,
@@ -105,6 +112,7 @@ export class ProjectFilesService {
     private onStatusChanged?: (status: StatusInfo) => void,
     private options: ProjectFilesServiceOptions = {},
   ) {
+    this.moveDetector = new FileMoveDetector(worktreeCwd);
     this.syncService = new FilesSyncService({
       watchDir: worktreeCwd,
       recursive: true,
@@ -119,7 +127,11 @@ export class ProjectFilesService {
         return true;
       },
       normalizeKey: (filename) => filename.replaceAll(sep, "/"),
-      onFlush: (changes) => this.request((work) => addChanges(work, changes)),
+      onFlush: (changes) =>
+        this.request((work) => {
+          addChanges(work, changes);
+          this.noteOperation(work);
+        }),
       onUnknownChange: () =>
         this.request((work) => {
           work.rescanAll = true;
@@ -161,6 +173,22 @@ export class ProjectFilesService {
   /** The most recent status snapshot, or null before the first successful read. */
   getStatusSnapshot(): StatusInfo | null {
     return this.status;
+  }
+
+  /**
+   * Remember a file an editor read or wrote, so a later rename or move of it is reported through
+   * `onFileMoved` instead of as a deletion.
+   */
+  trackFile(relPath: string): Promise<void> {
+    return this.moveDetector.track(relPath);
+  }
+
+  /**
+   * Mark a Loxel file operation (rename, move, undo, …) on this tree as running; moves seen
+   * meanwhile are reported with source `loxel`. Call the returned function when it ends.
+   */
+  beginOperation(): () => void {
+    return this.moveDetector.beginOperation();
   }
 
   /**
@@ -240,6 +268,7 @@ export class ProjectFilesService {
         work,
         keys.map((key) => ({ key, nonces: [] })),
       );
+      this.noteOperation(work);
     });
   }
 
@@ -255,6 +284,11 @@ export class ProjectFilesService {
   }
 
   // --- Private implementation ---
+
+  /** Attribute the changes being queued to Loxel if one of its file operations is running. */
+  private noteOperation(work: PendingRefresh): void {
+    if (this.moveDetector.isOperationActive()) work.duringOperation = true;
+  }
 
   /**
    * Merge work into the next pass and make sure the drain loop runs. The returned promise
@@ -323,6 +357,21 @@ export class ProjectFilesService {
       await this.applyFileChanges(work.changes);
     }
     if (this.stopped) return;
+
+    // Moves before change events, so editors follow a moved file before they would hear that
+    // its old path is gone (they ignore the old path once the move is applied).
+    const moves = await this.moveDetector.detect(
+      work.changes.keys(),
+      work.duringOperation ? "loxel" : "external",
+    );
+    if (this.stopped) return;
+    for (const move of moves) {
+      this.options.onFileMoved?.(
+        join(this.worktreeCwd, move.from),
+        join(this.worktreeCwd, move.to),
+        move.source,
+      );
+    }
 
     // Emit per-file change events for editor live updates
     if (this.onFileChanged) {
@@ -629,7 +678,13 @@ function markParentsModified(dirStatusMap: Map<string, ProjectFileStatus>, path:
 }
 
 function emptyPendingRefresh(): PendingRefresh {
-  return { changes: new Map(), purgeDirs: new Set(), rescanAll: false, waiters: [] };
+  return {
+    changes: new Map(),
+    purgeDirs: new Set(),
+    rescanAll: false,
+    duringOperation: false,
+    waiters: [],
+  };
 }
 
 /** Merge a flush batch into pending work, keeping every nonce matched for a key. */

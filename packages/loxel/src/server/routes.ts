@@ -439,9 +439,12 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
         resolved.resources.externalFilesService.readFileContent(resolved.absolutePath),
       );
     }
-    return readFileContentResponse(() =>
-      Bun.file(join(resolved.tree.root, resolved.relativePath)).text(),
-    );
+    return readFileContentResponse(async () => {
+      const content = await Bun.file(join(resolved.tree.root, resolved.relativePath)).text();
+      // An editor has this file open: follow it if it is renamed or moved.
+      void resolved.tree.filesService.trackFile(resolved.relativePath);
+      return content;
+    });
   }
 
   // Relative path mode (legacy): use wt/ref params, returns { lines }
@@ -905,6 +908,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     await tree.filesService.writeFile(relativePath, nonce, async () => {
       await Bun.write(join(tree.root, relativePath), content);
     });
+    void tree.filesService.trackFile(relativePath);
     return json({ success: true, content });
   }
 

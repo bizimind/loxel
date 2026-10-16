@@ -320,7 +320,7 @@ type FileBackedPlacement = Required<Pick<AddPanelOptions, "position" | "inactive
 export function openFileBacked(
   type: FilePanelType,
   filePath: string,
-  extra?: { line?: number; column?: number },
+  extra?: { line?: number; column?: number; movedFrom?: string },
   placement?: FileBackedPlacement,
 ): IDockviewPanel | undefined {
   const cApi = getCenterApi();
@@ -361,22 +361,40 @@ function getPanelFilePath(params: unknown): string | undefined {
 /**
  * Handle file-moved events: migrate caches and replace the old panel with one for the new path
  * in the old tab's place. The new tab is visible only if the old one was, and the move never
- * changes which group is active.
+ * changes which group is active. Idempotent: an in-app move is reported both locally and by the
+ * server, and the second report finds no tab on the old path.
+ *
+ * `announce` (a move made outside Loxel) records the old path in the new tab's `movedFrom`
+ * parameter, which its editor shows until dismissed. Returns whether the tab was replaced.
  */
-export function handleFileMoved(oldPath: string, newPath: string): void {
+export function handleFileMoved(
+  oldPath: string,
+  newPath: string,
+  options?: { announce?: boolean },
+): boolean {
   const dv = getCenterApi();
-  if (!dv) return;
+  if (!dv) return false;
 
   const oldPanel = dv.panels.find((p) => getPanelFilePath(p.params) === oldPath);
-  if (!oldPanel) return;
+  if (!oldPanel) return false;
 
-  useEditorStateStore.getState().closeFile(oldPath);
+  // An editor in conflict holds edits that may not overwrite the disk version, so it cannot be
+  // carried over by saving; it stays on the old path, which then shows as deleted.
+  const store = useEditorStateStore.getState();
+  if (store.files.get(oldPath)?.state === "diverged") return false;
+
   // A tab already open on the new path (e.g. for a file deleted outside the app) keeps its own
-  // state; just drop the old tab.
+  // state; just drop the old tab, and with it any unsaved edit.
   if (dv.panels.some((p) => getPanelFilePath(p.params) === newPath)) {
+    store.closeFile(oldPath);
     oldPanel.api.close();
-    return;
+    return false;
   }
+  // Save a pending edit to the new path now, before a tab exists there: the write then reaches
+  // the new editor as plain disk content instead of as a save it never made. Marking the old
+  // entry moved keeps its unmount flush (if any) off the old path and its disk events ignored.
+  store.files.get(oldPath)?.flushPendingEdit?.(newPath);
+  store.setMovedTo(oldPath, newPath);
 
   renameEditorCacheKey(oldPath, newPath);
   renameDrawingCacheKey(oldPath, newPath);
@@ -385,10 +403,15 @@ export function handleFileMoved(oldPath: string, newPath: string): void {
   // isn't removed from the layout in between.
   const { group } = oldPanel;
   const wasVisible = group.activePanel === oldPanel;
-  const newPanel = openFileBacked(filePanelType(newPath), newPath, undefined, {
-    position: { referenceGroup: group, index: group.panels.indexOf(oldPanel) + 1 },
-    inactive: true,
-  });
+  const newPanel = openFileBacked(
+    filePanelType(newPath),
+    newPath,
+    options?.announce ? { movedFrom: oldPath } : undefined,
+    {
+      position: { referenceGroup: group, index: group.panels.indexOf(oldPanel) + 1 },
+      inactive: true,
+    },
+  );
   if (newPanel && wasVisible) {
     if (dv.activeGroup === group) {
       activatePanel(dv, newPanel);
@@ -397,6 +420,7 @@ export function handleFileMoved(oldPath: string, newPath: string): void {
     }
   }
   oldPanel.api.close();
+  return newPanel !== undefined;
 }
 
 /** Handle file-deleted events: close any open panel for the deleted file/directory. */

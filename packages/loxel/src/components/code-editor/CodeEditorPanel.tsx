@@ -10,6 +10,7 @@ import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeIn
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
+import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
 import { type MergeCallbacks, useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { computeLineEdits } from "@/lib/compute-line-edits";
@@ -122,6 +123,8 @@ function extractDollarSchema(content: string): string | null {
 
 interface CodeEditorPanelProps {
   filePath: string;
+  /** Previous path when the file was moved outside Loxel (tab parameter); shows a notice. */
+  movedFrom?: string;
   line?: number;
   column?: number;
   onClose: () => void;
@@ -132,6 +135,7 @@ export function CodeEditorPanel({
   filePath,
   line,
   column,
+  movedFrom,
   onClose,
   panelApi,
 }: CodeEditorPanelProps) {
@@ -639,6 +643,7 @@ export function CodeEditorPanel({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
+      <MovedFileBanner movedFrom={movedFrom} filePath={filePath} panelApi={panelApi} />
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
       )}

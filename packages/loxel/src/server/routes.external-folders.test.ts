@@ -37,7 +37,11 @@ describe("Others folders routes", () => {
     const externalFoldersService = new ExternalFoldersService({
       wtPath: wt,
       history: fileOpsHistory,
-      registry: new ExternalFolderRegistry({ onDirChanged: () => {}, onFileChanged: () => {} }),
+      registry: new ExternalFolderRegistry({
+        onDirChanged: () => {},
+        onFileChanged: () => {},
+        onFileMoved: () => {},
+      }),
       storage: { load: () => [], save: () => {} },
       conflict: () => null,
       onListChanged: () => {},

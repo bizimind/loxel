@@ -204,12 +204,13 @@ function ForkTreePanelComponent(_props: IDockviewPanelProps) {
 
 /** Standalone excalidraw drawing panel in the center group. */
 function ExcalidrawPanelComponent(
-  props: IDockviewPanelProps<{ filePath: string; worktreePath?: string }>,
+  props: IDockviewPanelProps<{ filePath: string; worktreePath?: string; movedFrom?: string }>,
 ) {
   return (
     <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
       <ExcalidrawEditor
         filePath={props.params.filePath}
+        movedFrom={props.params.movedFrom}
         onClose={() => props.api.close()}
         onCreateNew={() => {
           window.dispatchEvent(new CustomEvent("loxel-create-drawing"));
@@ -227,6 +228,7 @@ function CodeEditorPanelComponent(
     worktreePath?: string;
     line?: number;
     column?: number;
+    movedFrom?: string;
   }>,
 ) {
   return (
@@ -235,6 +237,7 @@ function CodeEditorPanelComponent(
         filePath={props.params.filePath}
         line={props.params.line}
         column={props.params.column}
+        movedFrom={props.params.movedFrom}
         onClose={() => props.api.close()}
         panelApi={props.api}
       />

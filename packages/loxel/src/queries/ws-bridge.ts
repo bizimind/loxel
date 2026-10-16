@@ -6,6 +6,7 @@ import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { openFile, openFolder, openTerminal } from "@/lib/open-path";
+import { handleFileMoved } from "@/lib/panel-creators";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -34,7 +35,8 @@ function refreshOpenFile(
 ): void {
   const editorStore = useEditorStateStore.getState();
   const entry = editorStore.files.get(path);
-  if (!entry) return;
+  // A moved file's tab is being replaced; the old path no longer concerns it.
+  if (!entry || entry.movedTo) return;
 
   const queryKey = queryKeys.fileContent(projectPath, path, undefined, wtPath);
   // Content from the file-write response (matched by nonce) saves an HTTP round-trip.
@@ -114,6 +116,7 @@ async function checkOpenFileExists(
   path: string,
 ): Promise<void> {
   const editorStore = useEditorStateStore.getState();
+  if (editorStore.files.get(path)?.movedTo) return;
   try {
     const data = await api.getFileContentByPath(path, wtPath);
     if (!editorStore.files.get(path)?.deleted) return;
@@ -216,6 +219,15 @@ export function useWsBridge(): void {
               void checkOpenFileExists(projectPath, message.wtPath, openPath);
             }
           }
+          break;
+        }
+
+        case "file_moved": {
+          const { oldPath, newPath, source } = message.data;
+          // Moves done in Loxel are also reported here so every window's tabs follow them;
+          // the window that made the move has usually handled it already (a no-op then).
+          // Only a move from outside Loxel is announced in the editor.
+          handleFileMoved(oldPath, newPath, { announce: source === "external" });
           break;
         }
 

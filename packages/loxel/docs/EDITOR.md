@@ -30,6 +30,7 @@ Every file-backed editor (code, markdown, drawing) is built on [use-disk-synced-
 | ----------------------------------------- | --------------------------------------------------------------------------------- |
 | `state`                                   | `clean`, `dirty`, `saving` or `diverged`                                          |
 | `deleted`                                 | the file is missing on disk; orthogonal to `state`, see below                     |
+| `movedTo` / `flushPendingEdit`            | rename/move bookkeeping on the old entry, see "Moved files"                       |
 | `pendingNonces`                           | nonces of in-flight saves; several can overlap while the user keeps typing        |
 | `savedSnapshots`                          | editor content captured per nonce at save start, the merge base for format echoes |
 | `baseContent`                             | content at the last clean point, the merge base for external changes              |
@@ -68,6 +69,23 @@ The server does not distinguish a deletion from a modification: both arrive as `
 - Drafts: `DetachedFilesService` reports a content change for a draft that was deleted or re-created, not only for one that was modified, so draft editors follow the same path.
 
 In-app deletes (file tree, undo/redo) do not use this: they dispatch `loxel-file-deleted` and `handleFileDeleted` closes the tabs.
+
+### Moved files
+
+A rename or move reaches an editor in one of two ways, both ending in `handleFileMoved` ([panel-creators.ts](../src/lib/panel-creators.ts)), which replaces the tab with one for the new path in the same slot:
+
+- The window that performed an in-app rename, move, paste or undo dispatches `loxel-file-moved` itself.
+- The server reports moves of files editors have open as `file_moved` (detection is described in [WATCHERS.md](WATCHERS.md#working-tree-file-events)). Every window applies it, so tabs in other windows follow in-app moves too; for the window that made the move, whichever report arrives second finds no tab on the old path and does nothing. Files inside a moved directory are reported one by one.
+
+Before opening the new tab, `handleFileMoved` calls the old entry's `flushPendingEdit(newPath)`, which every editor registers. If the editor has unsaved edits (a pending autosave, or state `dirty`/`saving`, which also covers edits made while the file was briefly marked `deleted`), they are written to the new path while no editor entry exists there yet, so the new editor sees them as ordinary disk content. Flushing later, after the new entry exists, would mark the new editor `saving` before it had content, and it would never apply disk content. It then sets `movedTo` on the old entry instead of closing it: an unmount flush still goes to `movedTo`, and the bridge ignores disk events for that entry, so the old path is never re-created.
+
+Exceptions:
+
+- A tab in `diverged` state is not moved, because its edits may not overwrite the disk version; it stays on the old path, whose change event then marks it deleted, and keeps its conflict banner.
+- If a tab is already open on the new path, the old entry is closed outright and its pending edit dropped.
+- An unmount flush is skipped when the entry is already gone, which is what keeps an in-app delete from re-creating the file.
+
+For a move with source `external`, `handleFileMoved` opens the new tab with a `movedFrom` panel parameter, which the panel wrappers pass to the editor (dockview's `getParameters()` only reflects later `updateParameters` calls, so read it from the props), and [MovedFileBanner.tsx](../src/components/editor/MovedFileBanner.tsx) shows both paths until Dismiss clears it with `updateParameters`. Being a panel parameter, it lives and dies with the tab and is saved with the layout, so it survives a reload until dismissed.
 
 ## Code editor (Monaco)
 
@@ -188,9 +206,10 @@ Both open results through `dispatchOpenFile` with a line and column; the markdow
 - One open file is one absolute path: one panel per path and type in a layout, one editor-state entry, one cache key. Paths from the server and the client must be normalized the same way (`resolve`, `canonicalPath`).
 - Editor writes go only through `saveEditorContent`, which always sends a fresh nonce (`/api/file-write` requires one). A write without a nonce is seen as an external change by every editor, including the one that made it.
 - Completion of a save is the nonce echo, not the HTTP response. Do not mark files clean elsewhere.
+- An unmounting editor flushes only to its own path or its entry's `movedTo`; never to a path a delete or move handler already closed.
 - A file marked `deleted` is never written implicitly: only `saveNow` (after confirmation) or `recreateFile` may re-create it, and only `handleDiskChange` or a successful content fetch clears the flag.
 - Imperative editor updates must be invisible to the change listener (`isProgrammaticRef`, or `lastAppliedBodyRef` in markdown) or they trigger save, echo, apply loops.
 - Merged or disk content is applied as minimal edits (`computeLineEdits`, `createMinimalReplaceTransaction`), never as a whole-content reset with a restored offset.
 - Markdown round trip: blocks the user did not edit are written back byte-for-byte, and preservation is validated so it can only fall back to canonical output. Edited blocks take canonical form, trailing newlines collapse to one, and the frontmatter separator is normalized to one blank line.
 
-When touching save or sync paths, run the package tests (`pnpm -C packages/loxel run test`) and check these suites in particular: [editor-state.test.ts](../src/store/editor-state.test.ts) (state machine, superseded echoes, typing during an echo), [three-way-merge.test.ts](../src/lib/three-way-merge.test.ts), [markdown-source-preservation.test.ts](../src/lib/markdown-source-preservation.test.ts), [MarkdownEditor.dom.test.ts](../src/components/editor/MarkdownEditor.dom.test.ts) (listener resync, `toEditorBody`, `applyBodyToEditor`), [prosemirror-replace.test.ts](../src/lib/prosemirror-replace.test.ts), [prosemirror-position.test.ts](../src/lib/prosemirror-position.test.ts), the localdb directive tests, [file-sync-service.test.ts](../src/server/file-sync-service.test.ts), [detached-files-service.test.ts](../src/server/detached-files-service.test.ts), and the route tests for drafts and Others folders ([routes.detached.test.ts](../src/server/routes.detached.test.ts), [routes.external-folders.test.ts](../src/server/routes.external-folders.test.ts)).
+When touching save or sync paths, run the package tests (`pnpm -C packages/loxel run test`) and check these suites in particular: [editor-state.test.ts](../src/store/editor-state.test.ts) (state machine, superseded echoes, typing during an echo), [three-way-merge.test.ts](../src/lib/three-way-merge.test.ts), [markdown-source-preservation.test.ts](../src/lib/markdown-source-preservation.test.ts), [MarkdownEditor.dom.test.ts](../src/components/editor/MarkdownEditor.dom.test.ts) (listener resync, `toEditorBody`, `applyBodyToEditor`), [prosemirror-replace.test.ts](../src/lib/prosemirror-replace.test.ts), [prosemirror-position.test.ts](../src/lib/prosemirror-position.test.ts), the localdb directive tests, [file-sync-service.test.ts](../src/server/file-sync-service.test.ts), [detached-files-service.test.ts](../src/server/detached-files-service.test.ts), [file-move-detector.test.ts](../src/server/file-move-detector.test.ts), and the route tests for drafts and Others folders ([routes.detached.test.ts](../src/server/routes.detached.test.ts), [routes.external-folders.test.ts](../src/server/routes.external-folders.test.ts)).

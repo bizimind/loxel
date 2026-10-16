@@ -11,6 +11,13 @@ export interface EditorFileEntry {
    *  from a confirmed explicit save that re-creates it. Orthogonal to `state`, which keeps
    *  tracking the editor's edits so a restore can still be merged. */
   deleted: boolean;
+  /** The file was renamed or moved and its tab is being replaced by one for this path. A pending
+   *  edit is flushed there instead of to the old path, and disk events for the old path are
+   *  ignored. */
+  movedTo: string | null;
+  /** Registered by every file-backed editor: write a pending autosave now, to `targetPath`, and
+   *  cancel its timers. Used before a move replaces the tab. null while unmounted. */
+  flushPendingEdit: ((targetPath: string) => void) | null;
   /** Nonces of in-flight save requests. Multiple saves can overlap when the user
    *  types between saves — each generates a new nonce, and the previous echo may
    *  arrive after the next save has already started. */
@@ -51,6 +58,13 @@ interface EditorStateStore {
   clearPendingNonce: (filePath: string, nonce: string) => void;
   /** Record whether the file exists on disk. `handleDiskChange` clears the flag itself. */
   setDeleted: (filePath: string, deleted: boolean) => void;
+  /** Mark an open file as moved to `newPath`; see `EditorFileEntry.movedTo`. */
+  setMovedTo: (filePath: string, newPath: string) => void;
+  /** Register (or clear, with null) the editor's pending-edit flush. */
+  registerPendingEditFlush: (
+    filePath: string,
+    flush: ((targetPath: string) => void) | null,
+  ) => void;
   /** Set the merge base content (called when state reaches clean). */
   setBaseContent: (filePath: string, content: string) => void;
   /** Register editor callbacks for 3-way auto-merge. */
@@ -67,6 +81,8 @@ function defaultEntry(): EditorFileEntry {
   return {
     state: "clean",
     deleted: false,
+    movedTo: null,
+    flushPendingEdit: null,
     pendingNonces: new Set(),
     diskContent: null,
     baseContent: null,
@@ -390,6 +406,26 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
       if (!entry || entry.deleted === deleted) return s;
       const files = new Map(s.files);
       files.set(filePath, { ...entry, deleted });
+      return { files };
+    });
+  },
+
+  setMovedTo: (filePath, newPath) => {
+    set((s) => {
+      const entry = s.files.get(filePath);
+      if (!entry || entry.movedTo === newPath) return s;
+      const files = new Map(s.files);
+      files.set(filePath, { ...entry, movedTo: newPath });
+      return { files };
+    });
+  },
+
+  registerPendingEditFlush: (filePath, flush) => {
+    set((s) => {
+      const entry = s.files.get(filePath);
+      if (!entry || entry.flushPendingEdit === flush) return s;
+      const files = new Map(s.files);
+      files.set(filePath, { ...entry, flushPendingEdit: flush });
       return { files };
     });
   },
