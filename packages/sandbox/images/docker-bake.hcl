@@ -45,9 +45,9 @@ variable "PNPM_VERSION"      { default = "10.33.0" }
 variable "PNPM_SHA256_AMD64" { default = "aa02280c8d6925b43ded806f22a46ba17a44700271ec6b58679bbe1ffe537973" }
 variable "PNPM_SHA256_ARM64" { default = "eac3104a8cf3fb1a4c22d6045d017d27d33226f0dda6ec5c1690a28f2f29273b" }
 
-variable "BUN_VERSION"      { default = "1.4.2" }
-variable "BUN_SHA256_AMD64" { default = "36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913" }
-variable "BUN_SHA256_ARM64" { default = "54328bbc2d9c8e0c9f892c544d66c57a83b84139e34909e5ee81758f1ac8fda7" }
+variable "BUN_VERSION"      { default = "1.4.3" }
+variable "BUN_SHA256_AMD64" { default = "3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18" }
+variable "BUN_SHA256_ARM64" { default = "efa9813da5ed72423bf847f916e8d2c47c0d776add972354026a75e10da9aa21" }
 
 variable "JQ_VERSION"      { default = "1.8.1" }
 variable "JQ_SHA256_AMD64" { default = "020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d" }
