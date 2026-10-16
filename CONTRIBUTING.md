@@ -45,3 +45,55 @@ Releases are automated from `main` (see the CI & Releases section of [AGENTS.md]
 ## Reporting Issues
 
 Use [GitHub Issues](../../issues) for bugs and feature requests. For security vulnerabilities, see [SECURITY.md](SECURITY.md).
+
+Apply labels when you create an issue (see [Issue Labels](#issue-labels)), whether you file it by hand or from an agent, so it does not need a separate triage pass:
+
+```bash
+gh issue create --label fix,package:loxel,component:diff --title "..." --body "..."
+```
+
+## Issue Labels
+
+Every issue carries labels from three groups. The vocabularies below are closed; do not invent new labels without updating this section.
+
+**Type** (exactly one):
+
+| Label   | Meaning                                                                               |
+| ------- | ------------------------------------------------------------------------------------- |
+| `feat`  | New capability or enhancement, including performance improvements that add capability |
+| `fix`   | Something broken or behaving wrongly, including performance bugs and security fixes   |
+| `chore` | Tests, docs, CI, refactors, dependency and tooling work, cleanup, process             |
+
+**Package** (one or more): `package:<name>` for each package directory the work touches: `loxel`, `wt`, `site`, `coding-agent`, `channel`, `channel-worker`, `cli-common`, `code-analysis`, `excalidraw`, `logger`, `sandbox`, `localdb-sdk`, `monaco-lsp-client`, `whisper-cpp`, `cc-git-editor`. Use `package:repo` for repo-wide work (CI, dependencies, root tooling) that no single package owns.
+
+**Component** (zero or more, prefer one or two): `component:<name>` only where it helps someone understand what the issue touches.
+
+| Label                 | Meaning                                           |
+| --------------------- | ------------------------------------------------- |
+| `component:terminal`  | Terminals and PTY sessions                        |
+| `component:editor`    | Code editor (Monaco)                              |
+| `component:markdown`  | Markdown editor                                   |
+| `component:diff`      | Diff viewer and review                            |
+| `component:git`       | Git operations, commit graph, status              |
+| `component:worktrees` | Worktree and project management, sidebar          |
+| `component:files`     | Project files explorer and Others folders         |
+| `component:browser`   | Browser panels                                    |
+| `component:lsp`       | Language servers and diagnostics                  |
+| `component:agent`     | Coding agent panel                                |
+| `component:layout`    | Panels, tabs, dockview, top bar                   |
+| `component:keyboard`  | Shortcuts, focus navigation, accessibility        |
+| `component:cli`       | loxel CLI                                         |
+| `component:electron`  | Packaging, native shell, updates, passkeys        |
+| `component:server`    | Watchers, WebSocket, state sync, server lifecycle |
+| `component:settings`  | Settings and preferences                          |
+| `component:ci`        | CI and release workflows                          |
+| `component:docs`      | Documentation                                     |
+| `component:tests`     | Test coverage and flakiness                       |
+
+Examples:
+
+- A diff viewer that mis-highlights moved lines: `fix`, `package:loxel`, `component:diff`
+- A new `wt` subcommand: `feat`, `package:wt`
+- Flaky CI on the release workflow: `chore`, `package:repo`, `component:ci`, `component:tests`
+
+The `dependencies`, `javascript`, and `github_actions` labels are applied by Dependabot to its pull requests and are not part of the issue scheme.

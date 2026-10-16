@@ -270,7 +270,7 @@ When asked to implement a feature, fix a bug, or execute a plan, the expected de
 4. Task two sub agents in parallel:
    - **Code review**: review your changes for correctness, quality, and security (provide full context: the task, files changed, and relevant architecture)
 
-   - **Follow-up ideas**: explore feature ideas, improvements, or optimizations related to the current work — file GitHub issues for worthwhile ones
+   - **Follow-up ideas**: explore feature ideas, improvements, or optimizations related to the current work — file GitHub issues for worthwhile ones, with labels applied at creation per the [Issue Labels](CONTRIBUTING.md#issue-labels) section of CONTRIBUTING.md
 
 5. Fix review findings directly in the PR. Only create GitHub issues for items that are clearly out of scope and low urgency (e.g., a broader refactor or a pattern change affecting many files).
 
