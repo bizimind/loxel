@@ -110,20 +110,31 @@ async function fetchIntoOpenFile(
  * deleted on a confirmed 404; if it was deleted and is back, feeds the content to the state
  * machine like an external restore. A file that exists and was not deleted is left alone.
  */
-async function checkOpenFileExists(
+export async function checkOpenFileExists(
   projectPath: string | null,
   wtPath: string,
   path: string,
 ): Promise<void> {
-  const editorStore = useEditorStateStore.getState();
-  if (editorStore.files.get(path)?.movedTo) return;
+  if (useEditorStateStore.getState().files.get(path)?.movedTo) return;
   try {
     const data = await api.getFileContentByPath(path, wtPath);
-    if (!editorStore.files.get(path)?.deleted) return;
-    editorStore.handleDiskChange(path, [], data.content);
+    // Read the entry after the fetch: another request (e.g. the editor's own refetch) may have
+    // marked it deleted, or a move may have started, while this one was in flight.
+    const entry = useEditorStateStore.getState().files.get(path);
+    if (!entry?.deleted || entry.movedTo) return;
+    useEditorStateStore.getState().handleDiskChange(path, [], data.content);
     await applyFetchedContent(queryKeys.fileContent(projectPath, path, undefined, wtPath), data);
   } catch (error: unknown) {
-    if (api.isFileMissingError(error)) editorStore.setDeleted(path, true);
+    if (api.isFileMissingError(error)) {
+      useEditorStateStore.getState().setDeleted(path, true);
+      return;
+    }
+    log.error("Failed to check an open file after its directory changed", {
+      error,
+      path,
+      projectPath,
+      worktreePath: wtPath,
+    });
   }
 }
 
