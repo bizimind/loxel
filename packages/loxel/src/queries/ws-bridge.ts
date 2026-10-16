@@ -27,7 +27,7 @@ const log = frontendLog.child("files");
  * Apply a `file_content_changed` event to a file open in an editor: clean editors refresh their
  * query (or take the stashed content of their own write), dirty ones go through the state machine.
  */
-function refreshOpenFile(
+export function refreshOpenFile(
   projectPath: string | null,
   wtPath: string,
   path: string,
@@ -46,7 +46,9 @@ function refreshOpenFile(
     if (stashedContent !== undefined) break;
   }
 
-  if (entry.state === "clean") {
+  // A file marked deleted needs its content run through the state machine, which clears the
+  // flag: a clean editor's refetch alone may not (identical content keeps the same query data).
+  if (entry.state === "clean" && !entry.deleted) {
     for (const n of nonces) {
       if (entry.pendingNonces.has(n)) editorStore.clearPendingNonce(path, n);
     }
@@ -238,7 +240,7 @@ export function useWsBridge(): void {
           // Moves done in Loxel are also reported here so every window's tabs follow them;
           // the window that made the move has usually handled it already (a no-op then).
           // Only a move from outside Loxel is announced in the editor.
-          handleFileMoved(oldPath, newPath, { announce: source === "external" });
+          void handleFileMoved(oldPath, newPath, { announce: source === "external" });
           break;
         }
 

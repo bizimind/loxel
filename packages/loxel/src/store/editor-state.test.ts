@@ -570,13 +570,13 @@ describe("moved files", () => {
     expect(useEditorStateStore.getState().files.has("unknown.md")).toBe(false);
   });
 
-  test("registerPendingEditFlush sets and clears the editor's flush", () => {
+  test("registerPendingEdit sets and clears the editor's pending-edit taker", () => {
     const store = useEditorStateStore.getState();
     store.openFile(FILE);
-    const flush = () => {};
-    store.registerPendingEditFlush(FILE, flush);
-    expect(getEntry()?.flushPendingEdit).toBe(flush);
-    store.registerPendingEditFlush(FILE, null);
-    expect(getEntry()?.flushPendingEdit).toBeNull();
+    const take = () => null;
+    store.registerPendingEdit(FILE, take);
+    expect(getEntry()?.takePendingEdit).toBe(take);
+    store.registerPendingEdit(FILE, null);
+    expect(getEntry()?.takePendingEdit).toBeNull();
   });
 });

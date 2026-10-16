@@ -88,7 +88,7 @@ To restore the file from Loxel, press `Cmd+S` and confirm in the dialog, or clic
 
 ## Moved and renamed files
 
-When a file you have open is renamed or moved, by Loxel or by anything else (`mv`, `git mv`, an agent refactoring, another editor), its tab follows it: the tab takes the new name and keeps its place, and unsaved edits are saved to the new location. Moving a folder works the same way for every open file inside it.
+When a file you have open is renamed or moved, by Loxel or by anything else (`mv`, `git mv`, an agent refactoring, another editor), its tab follows it: the tab takes the new name and keeps its place, and unsaved edits are saved to the new location. If the file was also changed at its new location, your edits are merged into that version; if they overlap, the tab stays where it was and shows as deleted, so neither side is lost. Moving a folder works the same way for every open file inside it.
 
 If the move happened outside Loxel, a banner at the top of the editor shows where the file was and where it is now, so the changed tab doesn't come as a surprise. It stays until you click **Dismiss**. Renames and moves you make in Loxel don't show the banner, and other Loxel windows on the same worktree follow them too.
 

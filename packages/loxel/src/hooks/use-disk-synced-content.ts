@@ -175,25 +175,23 @@ export function useDiskSyncedContent<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath, cacheKey]);
 
-  // --- Pending-edit flush, for moves ---
+  // --- Unsaved edits, taken over by a move ---
   useEffect(() => {
-    const flush = (targetPath: string) => {
+    const take = () => {
       // Decided by state, not only by a pending timer: an editor can be dirty with no timer
       // (edits made while the file was missing never armed a save that wrote anything).
       const state = useEditorStateStore.getState().files.get(filePath)?.state;
-      const hasUnsavedEdit =
-        autosaveTimerRef.current !== null || state === "dirty" || state === "saving";
+      const unsaved = autosaveTimerRef.current !== null || state === "dirty" || state === "saving";
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       if (autosaveCapTimerRef.current) clearTimeout(autosaveCapTimerRef.current);
       autosaveTimerRef.current = null;
       autosaveCapTimerRef.current = null;
-      if (!hasUnsavedEdit) return;
+      if (!unsaved) return null;
       const content = getSerializedContentRef.current?.() ?? null;
-      if (content === null) return;
-      saveEditorContent(targetPath, content, worktreePathRef.current, saveOptionsRef.current);
+      return content === null ? null : { content, options: saveOptionsRef.current };
     };
-    useEditorStateStore.getState().registerPendingEditFlush(filePath, flush);
-    return () => useEditorStateStore.getState().registerPendingEditFlush(filePath, null);
+    useEditorStateStore.getState().registerPendingEdit(filePath, take);
+    return () => useEditorStateStore.getState().registerPendingEdit(filePath, null);
   }, [filePath]);
 
   // --- Merge callbacks registration ---
@@ -205,7 +203,7 @@ export function useDiskSyncedContent<T>(
   }, [filePath, mergeCallbacks]);
 
   // --- Query ---
-  const { data, isError, error } = useQuery({
+  const { data, dataUpdatedAt, isError, error } = useQuery({
     queryKey: queryKeys.fileContent(
       activeProjectPath,
       filePath,
@@ -223,15 +221,16 @@ export function useDiskSyncedContent<T>(
   });
 
   // --- Existence tracking ---
-  // Clean editors learn about a deletion through this query: the change event invalidates it
-  // and the refetch returns 404 (`data` keeps the last content). Dirty editors are refetched
-  // directly by the WebSocket bridge, which sets the flag itself. Content arriving through
-  // either path (an external restore or the echo of a confirmed re-create) clears it again.
+  // Clean editors usually learn about a deletion through this query: the change event
+  // invalidates it and the refetch returns 404 (`data` keeps the last content). The WebSocket
+  // bridge also sets the flag itself (dirty editors, parent-directory events). Any successful
+  // fetch clears it: keyed on `dataUpdatedAt`, because a restore with identical content keeps
+  // the same `data` object (structural sharing) and would otherwise change nothing here.
   const isMissingOnDisk = isError && api.isFileMissingError(error);
   useEffect(() => {
     if (isMissingOnDisk) useEditorStateStore.getState().setDeleted(filePath, true);
-    else if (data) useEditorStateStore.getState().setDeleted(filePath, false);
-  }, [isMissingOnDisk, data, filePath]);
+    else if (dataUpdatedAt > 0) useEditorStateStore.getState().setDeleted(filePath, false);
+  }, [isMissingOnDisk, dataUpdatedAt, filePath]);
 
   // --- Set base content when data is available and state is clean ---
   useEffect(() => {
@@ -256,8 +255,9 @@ export function useDiskSyncedContent<T>(
 
   /** Auto-save: uses autoSaveOptionsRef (format only if formatOnAutoSave is enabled). */
   const save = useCallback(async () => {
-    // Never re-create a deleted file implicitly; only an explicit, confirmed save may.
-    if (isFileDeleted(filePathRef.current)) return;
+    // Never re-create a deleted file implicitly (only an explicit, confirmed save may), and
+    // never write to the old path of a file that is being moved.
+    if (isFileDeleted(filePathRef.current) || isFileMoving(filePathRef.current)) return;
     const fn = getSerializedContentRef.current;
     if (!fn) return;
     const content = fn();
@@ -415,6 +415,10 @@ export function useDiskSyncedContent<T>(
 
 function isFileDeleted(filePath: string): boolean {
   return useEditorStateStore.getState().files.get(filePath)?.deleted ?? false;
+}
+
+function isFileMoving(filePath: string): boolean {
+  return Boolean(useEditorStateStore.getState().files.get(filePath)?.movedTo);
 }
 
 /**

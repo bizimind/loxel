@@ -13,7 +13,7 @@ mock.module("@/api/client", () => ({
     }),
 }));
 
-const { checkOpenFileExists } = await import("./ws-bridge");
+const { checkOpenFileExists, refreshOpenFile } = await import("./ws-bridge");
 const { useEditorStateStore } = await import("@/store/editor-state");
 
 afterEach(() => {
@@ -49,5 +49,20 @@ describe("checkOpenFileExists", () => {
     await check;
 
     expect(useEditorStateStore.getState().files.get(PATH)?.deleted).toBe(true);
+  });
+});
+
+describe("refreshOpenFile", () => {
+  test("clears deleted on a clean editor when the file comes back unchanged", async () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(PATH);
+    // Marked deleted by a parent-directory check: the editor's own query never saw a 404.
+    store.setDeleted(PATH, true);
+
+    refreshOpenFile("/repo", "/repo", PATH, []);
+    resolveFetch({ content: "same as before" });
+    await Bun.sleep(0);
+
+    expect(useEditorStateStore.getState().files.get(PATH)?.deleted).toBe(false);
   });
 });
