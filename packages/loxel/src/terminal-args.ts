@@ -9,6 +9,15 @@ import { shellQuote } from "@bizimind/wt/lib";
 
 import type { OpenTerminalRequest } from "./open-request";
 
+/**
+ * Arguments made only of these characters need no quoting: no whitespace, no quotes, and none of
+ * the characters that start tilde, parameter, glob or command substitution. Leaving such words bare
+ * keeps the command word unquoted, which POSIX shells require for alias expansion.
+ */
+const SAFE_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+const quoteArg = (arg: string): string => (SAFE_WORD.test(arg) ? arg : shellQuote(arg));
+
 export const TERMINAL_USAGE =
   "usage: loxel terminal [--cwd <dir>] [--title <name>] [--] [command...]";
 
@@ -16,8 +25,8 @@ export const TERMINAL_USAGE =
  * Parse the arguments after `terminal`. Flags are read until `--` or the first argument that is
  * not a flag; everything after is the command. A single command argument is a shell command line
  * used verbatim (like tmux and ssh), so `loxel terminal 'cd src && make'` works. Several arguments
- * are quoted individually and joined, so `loxel terminal -- claude "Fix the tests"` passes the
- * prompt to claude as one argument. Relative `--cwd` values resolve against `baseDir`.
+ * are quoted where needed and joined, so `loxel terminal -- claude "Fix the tests"` passes the
+ * prompt to claude as one argument while the command word stays bare for alias expansion. Relative `--cwd` values resolve against `baseDir`.
  */
 export function parseTerminalArgs(args: string[], baseDir: string): OpenTerminalRequest {
   let cwd = baseDir;
@@ -60,7 +69,7 @@ export function parseTerminalArgs(args: string[], baseDir: string): OpenTerminal
       ? undefined
       : commandArgs.length === 1
         ? commandArgs[0]
-        : commandArgs.map(shellQuote).join(" ");
+        : commandArgs.map(quoteArg).join(" ");
 
   return { cwd, ...(command ? { command } : {}), ...(title ? { title } : {}) };
 }

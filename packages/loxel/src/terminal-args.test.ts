@@ -16,17 +16,21 @@ describe("parseTerminalArgs", () => {
     });
   });
 
-  test("several command arguments are quoted individually", () => {
+  test("several command arguments are quoted only where needed, keeping the command word bare", () => {
     expect(parseTerminalArgs(["--", "claude", "Fix the tests", "--model", "it's"], BASE)).toEqual({
       cwd: BASE,
-      command: `'claude' 'Fix the tests' '--model' 'it'\\''s'`,
+      command: `claude 'Fix the tests' --model 'it'\\''s'`,
+    });
+    expect(parseTerminalArgs(["echo", "~/x", "$HOME", "*.ts", "a;b", ""], BASE)).toEqual({
+      cwd: BASE,
+      command: `echo '~/x' '$HOME' '*.ts' 'a;b' ''`,
     });
   });
 
   test("flags stop at the first non-flag so the command keeps its own flags", () => {
     expect(parseTerminalArgs(["--title", "agent", "claude", "--resume"], BASE)).toEqual({
       cwd: BASE,
-      command: "'claude' '--resume'",
+      command: "claude --resume",
       title: "agent",
     });
   });
@@ -44,7 +48,7 @@ describe("parseTerminalArgs", () => {
     expect(parseTerminalArgs(["--", "-v"], BASE)).toEqual({ cwd: BASE, command: "-v" });
     expect(parseTerminalArgs(["--", "--cwd", "x"], BASE)).toEqual({
       cwd: BASE,
-      command: "'--cwd' 'x'",
+      command: "--cwd x",
     });
   });
 
