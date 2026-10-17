@@ -431,8 +431,8 @@ export async function handleFileMoved(
  * Write the old editor's unsaved edits to the new path before a tab exists there, so they reach
  * the new editor as plain disk content rather than as a save it never made. Reads the new path
  * first: if another program changed the file since the editor last saw it, the edits are
- * three-way merged onto that version. Resolves false on a conflict or a failed read, leaving
- * the edits in the old editor.
+ * three-way merged onto that version. Resolves false on a conflict, a failed read or a failed
+ * write, leaving the edits in the old editor.
  */
 async function carryPendingEdit(
   oldPath: string,
@@ -462,8 +462,8 @@ async function carryPendingEdit(
     if (!merged.ok) return false;
     content = merged.merged;
   }
-  void saveEditorContent(newPath, content, worktreePath, pending.options);
-  return true;
+  // Awaited: if the write fails, the edits must stay in the old tab rather than be dropped.
+  return saveEditorContent(newPath, content, worktreePath, pending.options);
 }
 
 /** Open the moved file's tab in the old tab's place and close the old one. */

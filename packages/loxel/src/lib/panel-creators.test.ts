@@ -14,6 +14,7 @@ mock.module("@/components/excalidraw-editor/ExcalidrawEditor", () => ({
 // The moved file's content on disk, and the writes the move makes.
 let diskContent: Record<string, string> = {};
 let writes: Array<{ path: string; content: string }> = [];
+let failWrites = false;
 const actualClient = await import("@/api/client");
 mock.module("@/api/client", () => ({
   ...actualClient,
@@ -23,6 +24,7 @@ mock.module("@/api/client", () => ({
     return { content };
   },
   writeFileContent: async (options: { path: string; content: string }) => {
+    if (failWrites) throw new Error("write failed");
     writes.push({ path: options.path, content: options.content });
     return { success: true };
   },
@@ -69,6 +71,7 @@ afterEach(() => {
   useEditorStateStore.setState({ files: new Map() });
   diskContent = {};
   writes = [];
+  failWrites = false;
 });
 
 describe("handleFileMoved", () => {
@@ -178,6 +181,21 @@ describe("handleFileMoved", () => {
     expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(false);
 
     expect(writes).toEqual([]);
+    expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
+    expect(api.getPanel("codeeditor-/repo/renamed.ts")).toBeUndefined();
+    const entry = useEditorStateStore.getState().files.get("/repo/b.ts");
+    expect(entry?.movedTo).toBeNull();
+    expect(entry?.deleted).toBe(true);
+  });
+
+  test("keeps the tab and its edits when writing them to the new path fails", async () => {
+    const { api } = setup();
+    dirtyEditor("a\n", "a\nmine\n");
+    diskContent["/repo/renamed.ts"] = "a\n";
+    failWrites = true;
+
+    expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(false);
+
     expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
     expect(api.getPanel("codeeditor-/repo/renamed.ts")).toBeUndefined();
     const entry = useEditorStateStore.getState().files.get("/repo/b.ts");
