@@ -1,6 +1,7 @@
 import type { DockviewPanelApi } from "dockview-react";
 
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
+import { relativeTo } from "@/lib/project-file-helpers";
 
 import { EditorBanner } from "./EditorBanner";
 
@@ -20,9 +21,7 @@ export function MovedFileBanner({ movedFrom, filePath, panelApi }: MovedFileBann
   if (!movedFrom) return null;
 
   const display = (path: string) =>
-    worktreePath && path.startsWith(worktreePath + "/")
-      ? path.slice(worktreePath.length + 1)
-      : path;
+    (worktreePath ? relativeTo(path, worktreePath) : undefined) ?? path;
   return (
     <EditorBanner
       tone="info"
