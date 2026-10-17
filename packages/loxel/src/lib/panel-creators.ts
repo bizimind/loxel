@@ -16,6 +16,8 @@ import { getDisplayFilename } from "@/lib/detached-path";
 import { frontendLog } from "@/lib/frontend-logger";
 import { filePanelType } from "@/lib/open-file";
 import type { FilePanelType } from "@/lib/open-file";
+import { saveEditorContent } from "@/lib/save-editor-content";
+import { threeWayMerge } from "@/lib/three-way-merge";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
@@ -27,6 +29,7 @@ import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
 const uiLog = frontendLog.child("ui");
+const filesLog = frontendLog.child("files");
 
 function invalidateDetachedFiles(): void {
   const { activeProjectPath, activeWorktreePath } = getQueryScope();
@@ -320,7 +323,7 @@ type FileBackedPlacement = Required<Pick<AddPanelOptions, "position" | "inactive
 export function openFileBacked(
   type: FilePanelType,
   filePath: string,
-  extra?: { line?: number; column?: number },
+  extra?: { line?: number; column?: number; movedFrom?: string },
   placement?: FileBackedPlacement,
 ): IDockviewPanel | undefined {
   const cApi = getCenterApi();
@@ -352,30 +355,136 @@ export function openFileBacked(
 
 // -- File lifecycle handlers --
 
+function getPanelWorktreePath(panel: IDockviewPanel): string | null {
+  const params: unknown = panel.params;
+  if (typeof params !== "object" || params === null || !("worktreePath" in params)) return null;
+  const { worktreePath } = params as Record<string, unknown>;
+  return typeof worktreePath === "string" ? worktreePath : null;
+}
+
 function getPanelFilePath(params: unknown): string | undefined {
   if (typeof params !== "object" || params === null || !("filePath" in params)) return undefined;
   const { filePath } = params as Record<string, unknown>;
   return typeof filePath === "string" ? filePath : undefined;
 }
 
+/** Old paths whose move is being applied; a second report of the same move is ignored. */
+const movesInProgress = new Set<string>();
+
 /**
  * Handle file-moved events: migrate caches and replace the old panel with one for the new path
  * in the old tab's place. The new tab is visible only if the old one was, and the move never
- * changes which group is active.
+ * changes which group is active. Idempotent: an in-app move is reported both locally and by the
+ * server, and the second report finds the move in progress or no tab on the old path.
+ *
+ * Unsaved edits are carried to the new path (see `carryPendingEdit`); if they conflict with
+ * what is now on disk there, the tab is not moved and shows its old path as deleted.
+ *
+ * `announce` (a move made outside Loxel) records the old path in the new tab's `movedFrom`
+ * parameter, which its editor shows until dismissed. Resolves to whether the tab was replaced.
  */
-export function handleFileMoved(oldPath: string, newPath: string): void {
+export async function handleFileMoved(
+  oldPath: string,
+  newPath: string,
+  options?: { announce?: boolean },
+): Promise<boolean> {
   const dv = getCenterApi();
-  if (!dv) return;
+  if (!dv || movesInProgress.has(oldPath)) return false;
 
   const oldPanel = dv.panels.find((p) => getPanelFilePath(p.params) === oldPath);
-  if (!oldPanel) return;
+  if (!oldPanel) return false;
 
-  useEditorStateStore.getState().closeFile(oldPath);
+  // An editor in conflict holds edits that may not overwrite the disk version, so it cannot be
+  // carried over by saving; it stays on the old path, which then shows as deleted.
+  const store = useEditorStateStore.getState();
+  if (store.files.get(oldPath)?.state === "diverged") return false;
+
   // A tab already open on the new path (e.g. for a file deleted outside the app) keeps its own
-  // state; just drop the old tab.
+  // state. A clean old tab is just dropped; one with unsaved edits stays on its old path, shown
+  // as deleted, since there is no tab to carry the edits into.
+  if (dv.panels.some((p) => getPanelFilePath(p.params) === newPath)) {
+    const oldState = store.files.get(oldPath)?.state;
+    if (oldState === "dirty" || oldState === "saving") {
+      store.setDeleted(oldPath, true);
+      return false;
+    }
+    store.closeFile(oldPath);
+    oldPanel.api.close();
+    return false;
+  }
+
+  movesInProgress.add(oldPath);
+  try {
+    // From here on the old path's autosave and disk events no longer apply.
+    store.setMovedTo(oldPath, newPath);
+    const state = store.files.get(oldPath)?.state;
+    if (state === "dirty" || state === "saving") {
+      const carried = await carryPendingEdit(oldPath, newPath, getPanelWorktreePath(oldPanel));
+      if (!carried) {
+        const current = useEditorStateStore.getState();
+        current.setMovedTo(oldPath, null);
+        current.setDeleted(oldPath, true);
+        return false;
+      }
+    }
+    return replaceMovedPanel(dv, oldPath, newPath, options?.announce ?? false);
+  } finally {
+    movesInProgress.delete(oldPath);
+  }
+}
+
+/**
+ * Write the old editor's unsaved edits to the new path before a tab exists there, so they reach
+ * the new editor as plain disk content rather than as a save it never made. Reads the new path
+ * first: if another program changed the file since the editor last saw it, the edits are
+ * three-way merged onto that version. Resolves false on a conflict, a failed read or a failed
+ * write, leaving the edits in the old editor.
+ */
+async function carryPendingEdit(
+  oldPath: string,
+  newPath: string,
+  worktreePath: string | null,
+): Promise<boolean> {
+  let onDisk: string;
+  try {
+    ({ content: onDisk } = await api.getFileContentByPath(newPath, worktreePath));
+  } catch (error: unknown) {
+    filesLog.warn("Could not read a moved file; leaving its tab in place", { error, newPath });
+    return false;
+  }
+  // Taken after the read, so edits typed meanwhile are included (autosave is off while moving).
+  const entry = useEditorStateStore.getState().files.get(oldPath);
+  const pending = entry?.takePendingEdit?.() ?? null;
+  if (!entry || !pending) return true;
+
+  // Our own versions: the last clean content, and any save of ours that landed before the move.
+  const own = [entry.baseContent, ...entry.savedSnapshots.values()];
+  let content = pending.content;
+  if (!own.includes(onDisk)) {
+    // No merge base means the editor never reconciled with disk, so its buffer may not be a
+    // version of this file at all: never overwrite a change it has not seen (as `tryAutoMerge`).
+    if (entry.baseContent === null) return false;
+    const merged = threeWayMerge(entry.baseContent, pending.content, onDisk);
+    if (!merged.ok) return false;
+    content = merged.merged;
+  }
+  // Awaited: if the write fails, the edits must stay in the old tab rather than be dropped.
+  return saveEditorContent(newPath, content, worktreePath, pending.options);
+}
+
+/** Open the moved file's tab in the old tab's place and close the old one. */
+function replaceMovedPanel(
+  dv: DockviewApi,
+  oldPath: string,
+  newPath: string,
+  announce: boolean,
+): boolean {
+  // The old tab may have closed, or the new path opened, while the moved file was read.
+  const oldPanel = dv.panels.find((p) => getPanelFilePath(p.params) === oldPath);
+  if (!oldPanel) return false;
   if (dv.panels.some((p) => getPanelFilePath(p.params) === newPath)) {
     oldPanel.api.close();
-    return;
+    return false;
   }
 
   renameEditorCacheKey(oldPath, newPath);
@@ -385,10 +494,15 @@ export function handleFileMoved(oldPath: string, newPath: string): void {
   // isn't removed from the layout in between.
   const { group } = oldPanel;
   const wasVisible = group.activePanel === oldPanel;
-  const newPanel = openFileBacked(filePanelType(newPath), newPath, undefined, {
-    position: { referenceGroup: group, index: group.panels.indexOf(oldPanel) + 1 },
-    inactive: true,
-  });
+  const newPanel = openFileBacked(
+    filePanelType(newPath),
+    newPath,
+    announce ? { movedFrom: oldPath } : undefined,
+    {
+      position: { referenceGroup: group, index: group.panels.indexOf(oldPanel) + 1 },
+      inactive: true,
+    },
+  );
   if (newPanel && wasVisible) {
     if (dv.activeGroup === group) {
       activatePanel(dv, newPanel);
@@ -397,6 +511,7 @@ export function handleFileMoved(oldPath: string, newPath: string): void {
     }
   }
   oldPanel.api.close();
+  return newPanel !== undefined;
 }
 
 /** Handle file-deleted events: close any open panel for the deleted file/directory. */

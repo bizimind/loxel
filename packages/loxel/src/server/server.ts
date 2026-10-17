@@ -8,7 +8,12 @@ import type { ServerWebSocket } from "bun";
 
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import type { DirEntry } from "@/api/project-files-model";
-import type { AgentEventPayload, WsClientMessage, WsMessage } from "@/api/ws-protocol";
+import type {
+  AgentEventPayload,
+  FileMoveSource,
+  WsClientMessage,
+  WsMessage,
+} from "@/api/ws-protocol";
 import {
   BIN_HEADER_SIZE,
   BIN_MSG_INPUT,
@@ -304,6 +309,20 @@ function broadcastFileChanged(wtPath: string, path: string, nonces: string[]): v
   broadcastToSubscribers(wtPath, { type: "file_content_changed", wtPath, data: { path, nonces } });
 }
 
+/** Tell a worktree's subscribers that a file an editor has open was renamed or moved. */
+function broadcastFileMoved(
+  wtPath: string,
+  oldPath: string,
+  newPath: string,
+  source: FileMoveSource,
+): void {
+  broadcastToSubscribers(wtPath, {
+    type: "file_moved",
+    wtPath,
+    data: { oldPath, newPath, source },
+  });
+}
+
 /** Folders open in Others sections, shared by every worktree listing them. */
 const externalFolderRegistry = new ExternalFolderRegistry({
   onDirChanged: (worktrees, dir, entries) => {
@@ -311,6 +330,9 @@ const externalFolderRegistry = new ExternalFolderRegistry({
   },
   onFileChanged: (worktrees, path, nonces) => {
     for (const wtPath of worktrees) broadcastFileChanged(wtPath, path, nonces);
+  },
+  onFileMoved: (worktrees, oldPath, newPath, source) => {
+    for (const wtPath of worktrees) broadcastFileMoved(wtPath, oldPath, newPath, source);
   },
 });
 
@@ -331,6 +353,10 @@ function createFilesService(wtPath: string): ProjectFilesService {
     (dir, entries) => broadcastDirChanged(wtPath, dir, entries),
     (filePath, nonces) => broadcastFileChanged(wtPath, filePath, nonces),
     (status) => publishWorktreeStatus(wtPath, service, status),
+    {
+      onFileMoved: (oldPath, newPath, source) =>
+        broadcastFileMoved(wtPath, oldPath, newPath, source),
+    },
   );
   return service;
 }
@@ -376,7 +402,10 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
   await detachedFilesService.start();
 
   const fileOpsHistory = new FileOperationsHistory();
-  const fileOpsService = new FileOperationsService(wtPath, { history: fileOpsHistory });
+  const fileOpsService = new FileOperationsService(wtPath, {
+    history: fileOpsHistory,
+    onOperation: () => filesService.beginOperation(),
+  });
 
   const externalFilesService = new ExternalFilesService(
     () => broadcastOthers(wtPath),

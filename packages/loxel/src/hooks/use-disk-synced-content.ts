@@ -13,6 +13,8 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import * as api from "@/api/client";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
+import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
+import { getDisplayFilename } from "@/lib/detached-path";
 import { type SaveOptions, saveEditorContent } from "@/lib/save-editor-content";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
@@ -49,6 +51,8 @@ export interface DiskSyncedContent<T> {
   diskContent: T | null;
   /** Current file state from the editor state machine. */
   editorFileState: EditorFileState;
+  /** The file no longer exists on disk. Autosave is suspended; see `saveNow` / `recreateFile`. */
+  isDeleted: boolean;
   /** Cache key (absolute file path). */
   cacheKey: string;
   /** Whether the active query errored. */
@@ -57,8 +61,13 @@ export interface DiskSyncedContent<T> {
   getSerializedContentRef: MutableRefObject<(() => string | null) | null>;
   /** Trigger a save. Uses getSerializedContentRef to read current content. Includes saveOptionsRef. */
   save: () => Promise<void>;
-  /** Save immediately and clear any pending auto-save timers. Use for explicit Cmd+S. */
+  /**
+   * Save immediately and clear any pending auto-save timers. Use for explicit Cmd+S.
+   * When the file was deleted from disk, asks the user to confirm re-creating it first.
+   */
   saveNow: () => Promise<void>;
+  /** Write a deleted file back to disk without asking (the user already clicked "Re-create"). */
+  recreateFile: () => Promise<void>;
   /**
    * Ref for save options on explicit saves (Cmd+S, flush on worktree switch).
    * Set by editors that support format-on-save to include formatting settings.
@@ -118,7 +127,7 @@ export function useDiskSyncedContent<T>(
       autosaveCapTimerRef.current = null;
     }
     const fn = getSerializedContentRef.current;
-    if (fn) {
+    if (fn && !isFileDeleted(filePathRef.current)) {
       const content = fn();
       if (content !== null) {
         saveEditorContent(filePathRef.current, content, worktreePathRef.current);
@@ -135,6 +144,7 @@ export function useDiskSyncedContent<T>(
 
   // --- Editor state ---
   const editorFileState = useEditorStateStore((s) => s.files.get(filePath)?.state ?? "clean");
+  const isDeleted = useEditorStateStore((s) => s.files.get(filePath)?.deleted ?? false);
 
   // --- File registration ---
   useEffect(() => {
@@ -151,10 +161,11 @@ export function useDiskSyncedContent<T>(
           autosaveCapTimerRef.current = null;
         }
         const fn = getSerializedContentRef.current;
-        if (fn) {
+        const target = flushTarget(filePath);
+        if (fn && target) {
           const content = fn();
           if (content !== null) {
-            saveEditorContent(filePath, content, worktreePathRef.current, saveOptionsRef.current);
+            saveEditorContent(target, content, worktreePathRef.current, saveOptionsRef.current);
           }
         }
       }
@@ -163,6 +174,25 @@ export function useDiskSyncedContent<T>(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath, cacheKey]);
+
+  // --- Unsaved edits, taken over by a move ---
+  useEffect(() => {
+    const take = () => {
+      // Decided by state, not only by a pending timer: an editor can be dirty with no timer
+      // (edits made while the file was missing never armed a save that wrote anything).
+      const state = useEditorStateStore.getState().files.get(filePath)?.state;
+      const unsaved = autosaveTimerRef.current !== null || state === "dirty" || state === "saving";
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      if (autosaveCapTimerRef.current) clearTimeout(autosaveCapTimerRef.current);
+      autosaveTimerRef.current = null;
+      autosaveCapTimerRef.current = null;
+      if (!unsaved) return null;
+      const content = getSerializedContentRef.current?.() ?? null;
+      return content === null ? null : { content, options: saveOptionsRef.current };
+    };
+    useEditorStateStore.getState().registerPendingEdit(filePath, take);
+    return () => useEditorStateStore.getState().registerPendingEdit(filePath, null);
+  }, [filePath]);
 
   // --- Merge callbacks registration ---
   useEffect(() => {
@@ -173,7 +203,7 @@ export function useDiskSyncedContent<T>(
   }, [filePath, mergeCallbacks]);
 
   // --- Query ---
-  const { data, isError } = useQuery({
+  const { data, dataUpdatedAt, isError, error } = useQuery({
     queryKey: queryKeys.fileContent(
       activeProjectPath,
       filePath,
@@ -185,7 +215,22 @@ export function useDiskSyncedContent<T>(
     // that occurred while the worktree was unsubscribed (e.g. switched to another tab).
     // With staleTime: Infinity, the default `true` never refetches — "always" overrides that.
     refetchOnMount: "always",
+    // A confirmed-missing file will not appear by retrying; anything else (including a 404 for a
+    // worktree the server has not finished subscribing) keeps the default single retry.
+    retry: (failureCount, err) => !api.isFileMissingError(err) && failureCount < 1,
   });
+
+  // --- Existence tracking ---
+  // Clean editors usually learn about a deletion through this query: the change event
+  // invalidates it and the refetch returns 404 (`data` keeps the last content). The WebSocket
+  // bridge also sets the flag itself (dirty editors, parent-directory events). Any successful
+  // fetch clears it: keyed on `dataUpdatedAt`, because a restore with identical content keeps
+  // the same `data` object (structural sharing) and would otherwise change nothing here.
+  const isMissingOnDisk = isError && api.isFileMissingError(error);
+  useEffect(() => {
+    if (isMissingOnDisk) useEditorStateStore.getState().setDeleted(filePath, true);
+    else if (dataUpdatedAt > 0) useEditorStateStore.getState().setDeleted(filePath, false);
+  }, [isMissingOnDisk, dataUpdatedAt, filePath]);
 
   // --- Set base content when data is available and state is clean ---
   useEffect(() => {
@@ -210,6 +255,9 @@ export function useDiskSyncedContent<T>(
 
   /** Auto-save: uses autoSaveOptionsRef (format only if formatOnAutoSave is enabled). */
   const save = useCallback(async () => {
+    // Never re-create a deleted file implicitly (only an explicit, confirmed save may), and
+    // never write to the old path of a file that is being moved.
+    if (isFileDeleted(filePathRef.current) || isFileMoving(filePathRef.current)) return;
     const fn = getSerializedContentRef.current;
     if (!fn) return;
     const content = fn();
@@ -222,8 +270,11 @@ export function useDiskSyncedContent<T>(
     );
   }, []);
 
-  /** Explicit save: clears auto-save timers, uses saveOptionsRef (always formats if enabled). */
-  const saveNow = useCallback(async () => {
+  /**
+   * Explicit write: clears auto-save timers, uses saveOptionsRef (always formats if enabled).
+   * Does not check `deleted`, so it is also what re-creates a deleted file.
+   */
+  const writeNow = useCallback(async () => {
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
@@ -243,6 +294,39 @@ export function useDiskSyncedContent<T>(
       saveOptionsRef.current,
     );
   }, []);
+
+  const saveNow = useCallback(async () => {
+    const path = filePathRef.current;
+    if (isFileDeleted(path)) {
+      const confirmed = await requestConfirmation({
+        title: "Re-create deleted file?",
+        description: `"${getDisplayFilename(path)}" was removed from disk. Saving will create it again with the editor's current content.`,
+        confirmLabel: "Re-create",
+      });
+      if (!confirmed || path !== filePathRef.current) return;
+      // The file may have come back while the dialog was open. If that restore conflicted with
+      // the editor, let the conflict banner decide instead of overwriting the restored content.
+      const entry = useEditorStateStore.getState().files.get(path);
+      if (!entry?.deleted && entry?.state === "diverged") return;
+    }
+    await writeNow();
+  }, [writeNow]);
+
+  // --- Resume autosave once a deleted file exists again ---
+  // Edits made while the file was gone were never written. If the restore merged cleanly with
+  // the editor still dirty, nothing re-arms the timers, so do it here.
+  const wasDeletedRef = useRef(false);
+  useEffect(() => {
+    const wasDeleted = wasDeletedRef.current;
+    wasDeletedRef.current = isDeleted;
+    if (!wasDeleted || isDeleted) return;
+    if (useEditorStateStore.getState().files.get(filePath)?.state !== "dirty") return;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      autosaveTimerRef.current = null;
+      save();
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }, [isDeleted, filePath, save]);
 
   // --- Conflict resolution ---
   const handleAcceptDisk = useCallback((): T | null => {
@@ -312,11 +396,13 @@ export function useDiskSyncedContent<T>(
   return {
     diskContent,
     editorFileState,
+    isDeleted,
     cacheKey,
     isError,
     getSerializedContentRef,
     save,
     saveNow,
+    recreateFile: writeNow,
     saveOptionsRef,
     autoSaveOptionsRef,
     handleAcceptDisk,
@@ -325,4 +411,23 @@ export function useDiskSyncedContent<T>(
     isProgrammaticRef,
     autosaveTimerRef,
   };
+}
+
+function isFileDeleted(filePath: string): boolean {
+  return useEditorStateStore.getState().files.get(filePath)?.deleted ?? false;
+}
+
+function isFileMoving(filePath: string): boolean {
+  return Boolean(useEditorStateStore.getState().files.get(filePath)?.movedTo);
+}
+
+/**
+ * Where an unmounting editor writes its pending edit: the new path of a moved file, nothing for
+ * a deleted file or one whose entry a delete or move handler already closed, else the file.
+ */
+function flushTarget(filePath: string): string | null {
+  const entry = useEditorStateStore.getState().files.get(filePath);
+  if (!entry) return null;
+  if (entry.movedTo) return entry.movedTo;
+  return entry.deleted ? null : filePath;
 }

@@ -72,12 +72,17 @@ function stashContent(nonce: string, content: string): void {
   setTimeout(() => savedContentByNonce.delete(nonce), STASH_EXPIRY_MS);
 }
 
+/**
+ * Write editor content with a fresh nonce. Resolves to whether the server accepted the write;
+ * completion of the save is still the nonce echo. Callers that keep the content elsewhere on
+ * failure (e.g. a move carrying edits) use the result; others can ignore it.
+ */
 export async function saveEditorContent(
   filePath: string,
   content: string,
   worktreePath?: string | null,
   options?: SaveOptions,
-): Promise<void> {
+): Promise<boolean> {
   const nonce = crypto.randomUUID();
   const wtKey = worktreePath ?? "";
   useEditorStateStore.getState().markSaving(filePath, nonce);
@@ -108,11 +113,13 @@ export async function saveEditorContent(
         useEditorStateStore.getState().handleSaveError(filePath, nonce);
       }
     }, 10_000);
+    return true;
   } catch (err) {
     frontendLog
       .child("files")
       .error("Failed to save file", { filePath, error: err instanceof Error ? err : undefined });
     useEditorStateStore.getState().handleSaveError(filePath, nonce);
+    return false;
   } finally {
     if (wtKey) decrementPending(wtKey);
   }

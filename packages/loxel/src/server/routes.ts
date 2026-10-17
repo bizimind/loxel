@@ -399,6 +399,21 @@ async function handleFileLines(req: Request, ctx: RouteContext): Promise<Respons
 }
 
 // GET /api/file-content - Get full file content at a ref or from worktree disk
+/**
+ * Read a resolved file for `GET /api/file-content`. A missing file (or a missing parent) is a
+ * 404 with `code: "ENOENT"`, which editors use to mark their file as deleted; any other read
+ * failure propagates as a server error so it is never mistaken for a deletion.
+ */
+async function readFileContentResponse(read: () => Promise<string>): Promise<Response> {
+  try {
+    return json({ content: await read() });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return error("File not found", 404, "ENOENT");
+    throw err;
+  }
+}
+
 async function handleFileContent(req: Request, ctx: RouteContext): Promise<Response> {
   const url = new URL(req.url);
   const path = url.searchParams.get("path");
@@ -412,27 +427,24 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
   // Absolute path mode: resolve via ctx.resolveFilePath
   if (path.startsWith("/")) {
     const resolved = resolveFilePathWithHint(ctx, path, url.searchParams.get("wt"));
+    // No `code`: the path is not in a subscribed worktree (yet), which says nothing about the file.
     if (!resolved) return error("File not found in any active worktree", 404);
     if (resolved.type === "detached") {
-      const content = await resolved.resources.detachedFilesService.readFileContent(resolved.name);
-      return json({ content });
+      return readFileContentResponse(() =>
+        resolved.resources.detachedFilesService.readFileContent(resolved.name),
+      );
     }
     if (resolved.type === "external") {
-      try {
-        const content = await resolved.resources.externalFilesService.readFileContent(
-          resolved.absolutePath,
-        );
-        return json({ content });
-      } catch {
-        return error("File not found", 404);
-      }
+      return readFileContentResponse(() =>
+        resolved.resources.externalFilesService.readFileContent(resolved.absolutePath),
+      );
     }
-    try {
+    return readFileContentResponse(async () => {
       const content = await Bun.file(join(resolved.tree.root, resolved.relativePath)).text();
-      return json({ content });
-    } catch {
-      return error("File not found", 404);
-    }
+      // An editor has this file open: follow it if it is renamed or moved.
+      void resolved.tree.filesService.trackFile(resolved.relativePath);
+      return content;
+    });
   }
 
   // Relative path mode (legacy): use wt/ref params, returns { lines }
@@ -896,6 +908,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     await tree.filesService.writeFile(relativePath, nonce, async () => {
       await Bun.write(join(tree.root, relativePath), content);
     });
+    void tree.filesService.trackFile(relativePath);
     return json({ success: true, content });
   }
 

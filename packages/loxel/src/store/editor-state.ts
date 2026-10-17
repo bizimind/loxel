@@ -1,11 +1,23 @@
 import { create } from "zustand";
 
+import type { SaveOptions } from "../lib/save-editor-content";
 import { threeWayMerge } from "../lib/three-way-merge";
 
 export type EditorFileState = "clean" | "dirty" | "saving" | "diverged";
 
 export interface EditorFileEntry {
   state: EditorFileState;
+  /** The file no longer exists on disk (deleted externally after it was opened, or missing on
+   *  load). Autosave is suspended until content arrives again — from an external restore or
+   *  from a confirmed explicit save that re-creates it. Orthogonal to `state`, which keeps
+   *  tracking the editor's edits so a restore can still be merged. */
+  deleted: boolean;
+  /** The file was renamed or moved and its tab is being replaced by one for this path. Autosave
+   *  and disk events for the old path stop; an unmount flush goes here instead. */
+  movedTo: string | null;
+  /** Registered by every file-backed editor: cancel pending autosaves and return the unsaved
+   *  content, or null when there is none. Used to carry edits over a move. null while unmounted. */
+  takePendingEdit: (() => PendingEdit | null) | null;
   /** Nonces of in-flight save requests. Multiple saves can overlap when the user
    *  types between saves — each generates a new nonce, and the previous echo may
    *  arrive after the next save has already started. */
@@ -31,6 +43,12 @@ export interface EditorFileEntry {
   savedSnapshots: Map<string, string>;
 }
 
+/** Unsaved editor content taken over by a move, with the save options it would have used. */
+export interface PendingEdit {
+  content: string;
+  options?: SaveOptions;
+}
+
 interface EditorStateStore {
   files: Map<string, EditorFileEntry>;
 
@@ -44,6 +62,12 @@ interface EditorStateStore {
   acceptDiskVersion: (filePath: string) => void;
   keepMyChanges: (filePath: string) => void;
   clearPendingNonce: (filePath: string, nonce: string) => void;
+  /** Record whether the file exists on disk. `handleDiskChange` clears the flag itself. */
+  setDeleted: (filePath: string, deleted: boolean) => void;
+  /** Mark an open file as moving to `newPath`, or clear it (null) if the move is abandoned. */
+  setMovedTo: (filePath: string, newPath: string | null) => void;
+  /** Register (or clear, with null) the editor's `takePendingEdit`. */
+  registerPendingEdit: (filePath: string, take: (() => PendingEdit | null) | null) => void;
   /** Set the merge base content (called when state reaches clean). */
   setBaseContent: (filePath: string, content: string) => void;
   /** Register editor callbacks for 3-way auto-merge. */
@@ -59,6 +83,9 @@ interface EditorStateStore {
 function defaultEntry(): EditorFileEntry {
   return {
     state: "clean",
+    deleted: false,
+    movedTo: null,
+    takePendingEdit: null,
     pendingNonces: new Set(),
     diskContent: null,
     baseContent: null,
@@ -134,6 +161,8 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
   },
 
   handleDiskChange: (filePath, nonces, diskContent) => {
+    // Disk content arriving means the file exists (again).
+    get().setDeleted(filePath, false);
     const entry = get().files.get(filePath);
     if (!entry) return;
     const matchedNonces = nonces.filter((n) => entry.pendingNonces.has(n));
@@ -370,6 +399,36 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
       const savedSnapshots = new Map(entry.savedSnapshots);
       savedSnapshots.delete(nonce);
       files.set(filePath, { ...entry, pendingNonces, savedSnapshots });
+      return { files };
+    });
+  },
+
+  setDeleted: (filePath, deleted) => {
+    set((s) => {
+      const entry = s.files.get(filePath);
+      if (!entry || entry.deleted === deleted) return s;
+      const files = new Map(s.files);
+      files.set(filePath, { ...entry, deleted });
+      return { files };
+    });
+  },
+
+  setMovedTo: (filePath, newPath) => {
+    set((s) => {
+      const entry = s.files.get(filePath);
+      if (!entry || entry.movedTo === newPath) return s;
+      const files = new Map(s.files);
+      files.set(filePath, { ...entry, movedTo: newPath });
+      return { files };
+    });
+  },
+
+  registerPendingEdit: (filePath, take) => {
+    set((s) => {
+      const entry = s.files.get(filePath);
+      if (!entry || entry.takePendingEdit === take) return s;
+      const files = new Map(s.files);
+      files.set(filePath, { ...entry, takePendingEdit: take });
       return { files };
     });
   },

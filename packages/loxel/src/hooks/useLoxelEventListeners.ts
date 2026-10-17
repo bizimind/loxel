@@ -49,7 +49,7 @@ export function useLoxelEventListeners(): void {
       onLoxelEvent("loxel-open-media-viewer", (d) => openFileBacked("media", d.filePath)),
       onLoxelEvent("loxel-open-diff", () => openDiff()),
       onLoxelEvent("loxel-open-localdb", () => openLocalDb()),
-      onLoxelEvent("loxel-file-moved", (d) => handleFileMoved(d.oldPath, d.newPath)),
+      onLoxelEvent("loxel-file-moved", (d) => void handleFileMoved(d.oldPath, d.newPath)),
       onLoxelEvent("loxel-file-deleted", (d) => handleFileDeleted(d.filePath)),
     ];
 

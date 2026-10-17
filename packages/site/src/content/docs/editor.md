@@ -1,6 +1,6 @@
 ---
 title: Editor
-description: Quick Open, Find in Files, autosave, formatter auto-detection, and conflict handling.
+description: Quick Open, Find in Files, autosave, formatter auto-detection, conflict handling, and deleted or moved files.
 order: 10
 ---
 
@@ -77,6 +77,24 @@ You have two choices:
 
 - **Accept disk version** — discard your in-editor edits and load the version from disk
 - **Keep my changes** — dismiss the banner and keep your current edits; the on-disk change is ignored until the next save
+
+## Deleted files
+
+If a file you have open is deleted outside Loxel (a `git checkout`, an agent cleaning up, `rm` in a terminal), the tab stays open but its name is struck through and dimmed, and a banner at the top of the editor says the file was deleted from disk. Your content stays in the editor and you can keep editing, but nothing is written while the file is gone: autosave does not quietly bring it back.
+
+To restore the file from Loxel, press `Cmd+S` and confirm in the dialog, or click **Re-create file** in the banner. Either writes the editor's current content back to disk. If something else restores the file first, the tab returns to normal on its own: a clean editor reloads the new content, and an editor with unsaved edits merges them with the usual conflict detection.
+
+---
+
+## Moved and renamed files
+
+When a file you have open is renamed or moved, by Loxel or by anything else (`mv`, `git mv`, an agent refactoring, another editor), its tab follows it: the tab takes the new name and keeps its place, and unsaved edits are saved to the new location. If the file was also changed at its new location, your edits are merged into that version; if they overlap, the tab stays where it was and shows as deleted, so neither side is lost. Moving a folder works the same way for every open file inside it.
+
+If the move happened outside Loxel, a banner at the top of the editor shows where the file was and where it is now, so the changed tab doesn't come as a surprise. It stays until you click **Dismiss**. Renames and moves you make in Loxel don't show the banner, and other Loxel windows on the same worktree follow them too.
+
+A file showing the [conflict banner](#conflict-detection) doesn't follow a move, because saving your side at the new location would overwrite the other change. Its tab stays where it was and shows as deleted, so you can copy what you need or re-create it.
+
+A file moved to another disk, or into a folder Loxel doesn't watch (such as a git-ignored folder or one outside the project), can't be followed, so it shows as [deleted](#deleted-files) instead. The same applies to drafts and to files opened on their own from outside a project.
 
 ---
 

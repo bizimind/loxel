@@ -13,6 +13,7 @@ export function MarkdownEditorPanelComponent(
     worktreePath?: string;
     line?: number;
     column?: number;
+    movedFrom?: string;
   }>,
 ) {
   return (
@@ -21,6 +22,7 @@ export function MarkdownEditorPanelComponent(
         filePath={props.params.filePath}
         line={props.params.line}
         column={props.params.column}
+        movedFrom={props.params.movedFrom}
         onClose={() => props.api.close()}
         onCreateNew={() => {
           window.dispatchEvent(new CustomEvent("loxel-create-editor"));

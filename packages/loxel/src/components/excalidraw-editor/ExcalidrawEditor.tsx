@@ -9,6 +9,8 @@ import type { DockviewPanelApi } from "dockview-react";
 import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
 
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
+import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
+import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
 import { useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -196,6 +198,8 @@ function applyScene(
 
 interface ExcalidrawEditorProps {
   filePath: string;
+  /** Previous path when the file was moved outside Loxel (tab parameter); shows a notice. */
+  movedFrom?: string;
   onClose?: () => void;
   onCreateNew?: () => void;
   panelApi: DockviewPanelApi;
@@ -203,6 +207,7 @@ interface ExcalidrawEditorProps {
 
 export function ExcalidrawEditor({
   filePath,
+  movedFrom,
   onClose,
   onCreateNew,
   panelApi,
@@ -230,6 +235,8 @@ export function ExcalidrawEditor({
   const {
     diskContent,
     editorFileState,
+    isDeleted,
+    recreateFile,
     cacheKey,
     isError,
     saveNow,
@@ -354,7 +361,9 @@ export function ExcalidrawEditor({
     }
   }, [diskContent, isProgrammaticRef, filePath]);
 
-  if (isError) {
+  // A file deleted after it loaded keeps its editor (and the deleted banner) so the content can
+  // be re-created; only a file that never loaded has nothing to show.
+  if (isError && !initialData) {
     return (
       <div
         className="text-muted-foreground flex h-full items-center justify-center text-sm"
@@ -385,6 +394,8 @@ export function ExcalidrawEditor({
       className="flex h-full w-full flex-col"
       style={{ backgroundColor: "var(--editor-surface)" }}
     >
+      {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
+      <MovedFileBanner movedFrom={movedFrom} filePath={filePath} panelApi={panelApi} />
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
       )}
