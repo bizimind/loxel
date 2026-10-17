@@ -63,7 +63,7 @@ When a project has both Prettier and oxfmt, Prettier wins for the languages it s
 
 ## Markdown files
 
-Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `:::localdb` blocks render as [database widgets](/docs/introduction#planning-and-visibility); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
+Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. The block markers the editor writes for changed blocks — bullet (`-`, `*`, `+`), ordered list marker (`1.` or `1)`), whether ordered lists count up, code fence (backticks or tildes), horizontal rule, list item indent and underlined (setext) headings — are configurable under **Settings > Editor > Markdown Output**; the defaults match Prettier and oxfmt. If a markdown formatter is detected and format on save is on, the formatter's style wins on save. `:::localdb` blocks render as [database widgets](/docs/introduction#planning-and-visibility); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
 
 ---
 
