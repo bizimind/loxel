@@ -185,6 +185,22 @@ describe("handleFileMoved", () => {
     expect(entry?.deleted).toBe(true);
   });
 
+  test("does not overwrite a changed new path when the editor has no merge base", async () => {
+    const { api } = setup();
+    const store = useEditorStateStore.getState();
+    // Typed into before its first load resolved: dirty, but never reconciled with disk.
+    store.openFile("/repo/b.ts");
+    store.markDirty("/repo/b.ts");
+    store.registerPendingEdit("/repo/b.ts", () => ({ content: "mine\n" }));
+    diskContent["/repo/renamed.ts"] = "theirs\n";
+
+    expect(await handleFileMoved("/repo/b.ts", "/repo/renamed.ts")).toBe(false);
+
+    expect(writes).toEqual([]);
+    expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
+    expect(useEditorStateStore.getState().files.get("/repo/b.ts")?.deleted).toBe(true);
+  });
+
   test("treats a save of ours that landed before the move as our own version", async () => {
     setup();
     dirtyEditor("a\n", "a\nmore\nmore again\n");

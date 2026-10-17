@@ -454,7 +454,10 @@ async function carryPendingEdit(
   // Our own versions: the last clean content, and any save of ours that landed before the move.
   const own = [entry.baseContent, ...entry.savedSnapshots.values()];
   let content = pending.content;
-  if (entry.baseContent !== null && !own.includes(onDisk)) {
+  if (!own.includes(onDisk)) {
+    // No merge base means the editor never reconciled with disk, so its buffer may not be a
+    // version of this file at all: never overwrite a change it has not seen (as `tryAutoMerge`).
+    if (entry.baseContent === null) return false;
     const merged = threeWayMerge(entry.baseContent, pending.content, onDisk);
     if (!merged.ok) return false;
     content = merged.merged;
