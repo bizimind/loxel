@@ -24,7 +24,7 @@
     "@excalidraw/element": "0.18.0-9036812b6",
     "@excalidraw/mermaid-to-excalidraw": "^2.2.2",
     "@excalidraw/utils": "^0.1.5",
-    "@napi-rs/canvas": "^1.0.9",
+    "@napi-rs/canvas": "^1.0.10",
     "commander": "^15.0.0",
     "linkedom": "^0.18.13",
     "roughjs": "^4.6.6",
@@ -32,7 +32,7 @@
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
-    "@types/node": "^24.19.0"
+    "@types/node": "^24.19.1"
   },
   "engines": {
     "bun": ">=1.4.0"
