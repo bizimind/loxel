@@ -400,8 +400,14 @@ export async function handleFileMoved(
   if (store.files.get(oldPath)?.state === "diverged") return false;
 
   // A tab already open on the new path (e.g. for a file deleted outside the app) keeps its own
-  // state; just drop the old tab, and with it any unsaved edit.
+  // state. A clean old tab is just dropped; one with unsaved edits stays on its old path, shown
+  // as deleted, since there is no tab to carry the edits into.
   if (dv.panels.some((p) => getPanelFilePath(p.params) === newPath)) {
+    const oldState = store.files.get(oldPath)?.state;
+    if (oldState === "dirty" || oldState === "saving") {
+      store.setDeleted(oldPath, true);
+      return false;
+    }
     store.closeFile(oldPath);
     oldPanel.api.close();
     return false;

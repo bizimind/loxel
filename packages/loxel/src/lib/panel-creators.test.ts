@@ -188,6 +188,20 @@ describe("handleFileMoved", () => {
     expect(entry?.deleted).toBe(true);
   });
 
+  test("keeps a tab with unsaved edits when the new path is already open", async () => {
+    const { api } = setup();
+    dirtyEditor("a\n", "a\nmine\n");
+
+    expect(await handleFileMoved("/repo/b.ts", "/repo/c.ts")).toBe(false);
+
+    expect(writes).toEqual([]);
+    expect(api.getPanel("codeeditor-/repo/b.ts")).toBeDefined();
+    expect(api.getPanel("codeeditor-/repo/c.ts")).toBeDefined();
+    const entry = useEditorStateStore.getState().files.get("/repo/b.ts");
+    expect(entry?.deleted).toBe(true);
+    expect(entry?.movedTo).toBeNull();
+  });
+
   test("keeps the tab and its edits when writing them to the new path fails", async () => {
     const { api } = setup();
     dirtyEditor("a\n", "a\nmine\n");

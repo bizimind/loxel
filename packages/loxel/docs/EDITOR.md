@@ -83,7 +83,7 @@ A rename or move reaches an editor in one of two ways, both ending in `handleFil
 Exceptions:
 
 - A tab in `diverged` state is not moved, because its edits may not overwrite the disk version; it stays on the old path, whose change event then marks it deleted, and keeps its conflict banner.
-- If a tab is already open on the new path, the old entry is closed outright and its pending edit dropped.
+- If a tab is already open on the new path, a clean old tab is closed; one with unsaved edits stays on its old path, marked deleted, since there is no tab to carry them into.
 - An unmount flush is skipped when the entry is already gone, which is what keeps an in-app delete from re-creating the file.
 
 For a move with source `external`, `handleFileMoved` opens the new tab with a `movedFrom` panel parameter, which the panel wrappers pass to the editor (dockview's `getParameters()` only reflects later `updateParameters` calls, so read it from the props), and [MovedFileBanner.tsx](../src/components/editor/MovedFileBanner.tsx) shows both paths until Dismiss clears it with `updateParameters`. Being a panel parameter, it lives and dies with the tab and is saved with the layout, so it survives a reload until dismissed.
@@ -175,7 +175,7 @@ Client side:
 - [rename-file.ts](../src/lib/rename-file.ts): the shared rename used by the tree and tabs.
 - [project-file-helpers.ts](../src/lib/project-file-helpers.ts): `isWithin`, `findTreeRoot`, `fileParentDir` and related path helpers.
 
-After any move, rename or delete the client remaps per-worktree UI paths (`renameProjectPaths`), dispatches `loxel-file-moved` or `loxel-file-deleted`, and invalidates parent directory queries. `handleFileMoved` closes the old editor-state entry, migrates content caches, and opens the new panel in the old tab's position before closing the old one; `handleFileDeleted` closes panels for the path and everything under it. Draft operations go through the drafts routes and are not in the undo history. Tree UI behavior is in [PROJECT_EXPLORER.md](PROJECT_EXPLORER.md) and [FILES_TREE.md](FILES_TREE.md).
+After any move, rename or delete the client remaps per-worktree UI paths (`renameProjectPaths`), dispatches `loxel-file-moved` or `loxel-file-deleted`, and invalidates parent directory queries. `handleFileMoved` marks the old editor-state entry `movedTo`, carries over any unsaved edits, migrates content caches, and opens the new panel in the old tab's position before closing the old one (see [Moved files](#moved-files)); `handleFileDeleted` closes panels for the path and everything under it. Draft operations go through the drafts routes and are not in the undo history. Tree UI behavior is in [PROJECT_EXPLORER.md](PROJECT_EXPLORER.md) and [FILES_TREE.md](FILES_TREE.md).
 
 ## Drafts
 
