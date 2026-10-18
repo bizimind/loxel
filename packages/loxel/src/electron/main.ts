@@ -587,6 +587,20 @@ function cleanupUpdateBackup(): void {
 // Replace Electron's default menu to control which accelerators Electron intercepts.
 // Cmd+W is left out so the renderer's keybinding system handles it (close tab, not window).
 
+/** Zoom level step of Electron's zoomIn/zoomOut roles; one level is a factor of 1.2. */
+const ZOOM_STEP = 0.5;
+/** Chromium's zoom range, 25%..500%, as zoom levels. */
+const ZOOM_LEVEL_MIN = Math.log(0.25) / Math.log(1.2);
+const ZOOM_LEVEL_MAX = Math.log(5) / Math.log(1.2);
+
+/** Zoom the focused window's page by `delta` levels, or reset it when `delta` is null. */
+function setAppZoom(delta: number | null): void {
+  const contents = BrowserWindow.getFocusedWindow()?.webContents;
+  if (!contents) return;
+  const next = delta === null ? 0 : contents.getZoomLevel() + delta;
+  contents.setZoomLevel(Math.min(ZOOM_LEVEL_MAX, Math.max(ZOOM_LEVEL_MIN, next)));
+}
+
 function buildAppMenu(): void {
   const isMac = process.platform === "darwin";
 
@@ -637,9 +651,19 @@ function buildAppMenu(): void {
         ...(IS_DEV ? [{ role: "reload" as const }, { role: "forceReload" as const }] : []),
         { role: "toggleDevTools" },
         { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
+        // Not the zoom roles: those act on the focused webContents, which is a browser panel's
+        // <webview> whenever one has keyboard focus, so Cmd+/- would zoom that page instead of
+        // the app. Always zoom the focused window's own page.
+        { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: () => setAppZoom(null) },
+        { label: "Zoom In", accelerator: "CmdOrCtrl+Plus", click: () => setAppZoom(ZOOM_STEP) },
+        // Cmd+= is the unshifted key of Cmd+Plus; a hidden duplicate makes it work too.
+        {
+          label: "Zoom In",
+          accelerator: "CmdOrCtrl+=",
+          visible: false,
+          click: () => setAppZoom(ZOOM_STEP),
+        },
+        { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: () => setAppZoom(-ZOOM_STEP) },
         { type: "separator" },
         { role: "togglefullscreen" },
       ],
