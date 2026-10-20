@@ -247,7 +247,7 @@ Type checking uses the official TypeScript 7 native compiler (`@typescript/nativ
 
 ## CI & Releases
 
-**CI**: Every push runs change detection to find affected packages (direct changes + transitive dependents via workspace dependency graph). Only affected packages run `test`, `build`, and `typecheck` in parallel matrix jobs. Root config changes trigger targeted checks: `tsconfig*.json` → typecheck all, `.oxlintrc.jsonc`/`.oxfmtrc.jsonc` → lint all, root `package.json`, `pnpm-lock.yaml` or `.bun-version` → everything. Lint/format runs only when code or lint config changed. Automated code review via Claude runs on PRs (`claude-code-review.yml`); PRs from forks are not auto-reviewed because secret-bearing workflows are skipped for fork pull requests.
+**CI**: Every push runs change detection to find affected packages (direct changes + transitive dependents via workspace dependency graph). Only affected packages run `test`, `build`, and `typecheck` in parallel matrix jobs. Root config changes trigger targeted checks: `tsconfig*.json` → typecheck all, `.oxlintrc.jsonc`/`.oxfmtrc.jsonc` → lint all, root `package.json`, `pnpm-lock.yaml`, `.bun-version` or `.github/workflows/ci.yml` → everything. Lint/format runs only when code or lint config changed. Automated code review via Claude runs on PRs (`claude-code-review.yml`); PRs from forks are not auto-reviewed because secret-bearing workflows are skipped for fork pull requests.
 
 **Auto-releases**: `wt`, `code-analysis`, and `loxel` release automatically when changes under their package directory are merged to main (`release-<pkg>.yml`; `loxel` also supports `workflow_dispatch` for releases driven by root-level changes):
 
