@@ -169,25 +169,60 @@ export async function createDrawing(split?: SplitPosition): Promise<void> {
   }
 }
 
-export function createBrowser(url?: string, split?: SplitPosition): void {
-  const cApi = getCenterApi();
-  if (!cApi) return;
-
+function addBrowserPanel(
+  cApi: DockviewApi,
+  url: string,
+  options: Pick<AddPanelOptions, "position" | "inactive">,
+): string {
   const panelId = `browser-${crypto.randomUUID()}`;
-  const title = nextPanelTitle(cApi, "Browser");
-  const targetUrl = url || "about:blank";
-
   cApi.addPanel({
     id: panelId,
     component: "browser",
     tabComponent: "browserTab",
-    title,
-    params: { url: targetUrl },
-    position: panelPosition(cApi, split),
+    title: nextPanelTitle(cApi, "Browser"),
+    params: { url },
     // Keep the <webview> attached while hidden or moved: re-attaching it reloads the page.
     renderer: "always",
+    ...options,
   });
   uiLog.info("Panel created", { panelType: "browser", panelId });
+  return panelId;
+}
+
+export function createBrowser(url?: string, split?: SplitPosition): void {
+  const cApi = getCenterApi();
+  if (!cApi) return;
+  addBrowserPanel(cApi, url || "about:blank", { position: panelPosition(cApi, split) });
+}
+
+export interface OpenBrowserTabNextToOptions {
+  /** The browser panel the link was opened from; the new tab joins its group. */
+  sourcePanelId: string;
+  /**
+   * A tab opened earlier from the source. The new tab goes after it while it is still after the
+   * source in the same group, so tabs opened in a row keep their click order.
+   */
+  previousPanelId?: string;
+  /** Activate the new tab, or leave the source active (and focused). */
+  activate: boolean;
+}
+
+/** Open `url` in a new browser tab right after a browser panel. Returns the new panel's id. */
+export function openBrowserTabNextTo(
+  url: string,
+  { sourcePanelId, previousPanelId, activate }: OpenBrowserTabNextToOptions,
+): string | undefined {
+  const cApi = getCenterApi();
+  const source = cApi?.getPanel(sourcePanelId);
+  if (!cApi || !source) return undefined;
+
+  const { panels } = source.group;
+  const sourceIndex = panels.indexOf(source);
+  const previousIndex = panels.findIndex((p) => p.id === previousPanelId);
+  return addBrowserPanel(cApi, url, {
+    position: { referenceGroup: source.group, index: Math.max(sourceIndex, previousIndex) + 1 },
+    inactive: !activate,
+  });
 }
 
 export function createAgent(split?: SplitPosition): void {

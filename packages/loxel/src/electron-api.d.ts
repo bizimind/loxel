@@ -19,6 +19,13 @@ interface Window {
      * Since v0.1.199.
      */
     onWebviewFocused?: (callback: () => void) => () => void;
+    /**
+     * A page in one of this window's webviews (identified by its webContents id) asked to open
+     * `url` in a new tab or window; `background` for ⌘-click and middle-click. Since v0.1.219.
+     */
+    onOpenInNewBrowserTab?: (
+      callback: (webContentsId: number, url: string, background: boolean) => void,
+    ) => () => void;
     /** Current page zoom factor (Cmd+/Cmd-), read synchronously from `webFrame`. */
     getZoomFactor?: () => number;
   };
