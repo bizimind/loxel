@@ -99,6 +99,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 10
+          cache: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -137,6 +138,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 10
+          cache: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -248,6 +250,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 10
+          cache: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
