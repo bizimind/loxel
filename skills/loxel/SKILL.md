@@ -28,9 +28,11 @@ This skill covers what an agent can do from a Loxel terminal. It does not cover 
 ## The `loxel` CLI
 
 ```
-loxel <file | folder | url>
-loxel terminal [--cwd <dir>] [--title <name>] [--] [command...]
+loxel [layout flags] <file | folder | url>
+loxel terminal [--cwd <dir>] [--title <name>] [layout flags] [--] [command...]
 loxel                      # launch or focus Loxel
+
+layout flags: [--split left|right|up|down | --replace] [--group <tab>]
 ```
 
 ```sh
@@ -41,9 +43,10 @@ loxel https://github.com/org/repo/pull/42
 loxel terminal                      # new terminal tab in the current directory
 loxel terminal --title tests -- bun test --watch
 loxel terminal 'cd web && pnpm dev' # one argument = a shell command line, used as is
+loxel --split right src/app.ts      # open beside the active tab instead of as a tab in its group
 ```
 
-There is no `--help`: `loxel --help` is taken as a path and fails with `File not found`. On success the CLI prints nothing (at most `loxel: waiting for a Loxel window...` while Loxel starts) and exits 0. Errors it can detect print `loxel: <message>` to stderr and exit 1. Some requests are accepted and then refused inside Loxel, which shows the user a message while the CLI still exits 0. That happens, for example, with a folder that belongs to a project but to none of its worktrees, such as a bare repo's root.
+There is no `--help`: `loxel --help` fails with `unknown option --help` and prints the usage. On success the CLI prints nothing (at most `loxel: waiting for a Loxel window...` while Loxel starts) and exits 0. Errors it can detect print `loxel: <message>` to stderr and exit 1. Some requests are accepted and then refused inside Loxel, which shows the user a message while the CLI still exits 0. That happens, for example, with a folder that belongs to a project but to none of its worktrees, such as a bare repo's root.
 
 If `command -v loxel` finds nothing, the CLI isn't installed for this shell. Tell the user, and fall back to the clickable paths and URLs described in [Keep the user oriented](#keep-the-user-oriented).
 
@@ -79,6 +82,26 @@ loxel terminal --cwd ~/code/app/.worktrees/fix/flaky-test --title claude -- clau
 ```
 
 Create worktrees the way the project already does. If it uses `wt`, `wt add <name>` creates `.worktrees/<name>` and runs the repo's setup hook, which a bare `git worktree add` skips.
+
+### Layout flags
+
+By default a file, URL or terminal opens as a new tab in the group of the user's active tab. The layout flags put it somewhere else:
+
+- `--split left|right|up|down` opens it in a new split on that side of the active tab.
+- `--replace` puts it in the active tab's place and closes that tab. Not combinable with `--split`.
+- `--group <tab>` uses another tab instead of the active one: a file open in a tab (a path, relative to your current directory) or a tab's title as shown on its tab, such as a terminal you named with `--title`. With `--split` the split goes beside that tab, and with `--replace` that tab is replaced. If no open tab matches, the panel opens next to the active tab, Loxel shows the user a message, and the CLI still exits 0.
+
+A file that is already open moves to the requested spot rather than opening twice. Folders take no layout flags. For a file or URL the flags may go before or after it; for `loxel terminal` they go before the command. The user's active tab may not be your terminal, so prefer `--group` with a title you chose when the panel should land next to something specific.
+
+```sh
+# A dev server below the active tab, then its tests beside it
+loxel terminal --title dev --split down -- pnpm dev
+loxel terminal --group dev --split right --title tests -- pnpm test --watch
+# Show the page in the group of the file under review
+loxel --group src/app.ts http://localhost:5173
+```
+
+Use `--replace` sparingly: it closes the user's tab, and a terminal's shell with it.
 
 ## Keep the user oriented
 

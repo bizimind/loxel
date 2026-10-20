@@ -27,6 +27,8 @@ import type { DiffInfo } from "@/api/diff-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
 import type { LogCategory, LogLevel } from "@/api/log-entry-model";
 import { LOG_CATEGORIES, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
+import type { PanelPlacement } from "@/api/panel-placement-model";
+import { parsePanelPlacement } from "@/api/panel-placement-model";
 import type {
   BrowseEntry,
   DetectPathResult,
@@ -2482,11 +2484,31 @@ async function handleExternalFolderRemove(req: Request, ctx: RouteContext): Prom
 // Open file, folder or URL (CLI and Finder integration)
 // ---------------------------------------------------------------------------
 
+/**
+ * Canonicalize the path of a placement's `group` tab like opened files' paths, so it matches the
+ * tab's `filePath`; a path where nothing exists is dropped and the tab is matched by title only.
+ */
+async function canonicalPlacement(
+  placement: PanelPlacement | undefined,
+): Promise<PanelPlacement | undefined> {
+  if (!placement?.group?.path) return placement;
+  const { path: rawPath, ...group } = placement.group;
+  const path = await canonicalPath(rawPath);
+  return { ...placement, group: { ...group, ...(path ? { path } : {}) } };
+}
+
 // POST /api/open — open a file, folder, URL or terminal in the appropriate panel (triggered by the
 // `loxel` CLI and by files and folders macOS hands to the app)
 async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
   const windowId = typeof body.windowId === "string" ? body.windowId : null;
+  let placement: PanelPlacement | undefined;
+  try {
+    placement = await canonicalPlacement(parsePanelPlacement(body.placement));
+  } catch (err) {
+    return error(err instanceof Error ? err.message : "Invalid placement", 400);
+  }
+  const placed = placement ? { placement } : {};
 
   // Terminal mode: a new terminal panel in the window in use, its shell started in `cwd`, with an
   // optional command typed into it. The command stays on the server until the panel attaches, so
@@ -2512,7 +2534,7 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     const terminalId = crypto.randomUUID();
     const sent = ctx.sendToActiveWindow(windowId, {
       type: "open_terminal",
-      data: { terminalId, cwd, ...(title ? { title } : {}) },
+      data: { terminalId, cwd, ...(title ? { title } : {}), ...placed },
     });
     if (!sent) return error("No Loxel window is open", 503);
     // Registered only once a window has the request: the attach arrives later over the socket.
@@ -2531,7 +2553,11 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       return error("No project found for worktree", 404);
     }
 
-    ctx.broadcastToSubscribers(wtPath, { type: "open_url", wtPath, data: { url: body.url } });
+    ctx.broadcastToSubscribers(wtPath, {
+      type: "open_url",
+      wtPath,
+      data: { url: body.url, ...placed },
+    });
     return json({ ok: true });
   }
 
@@ -2542,6 +2568,9 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   if (!stats) return error("File not found", 404);
   // Pipes and devices would hang or flood the editor's read
   if (!stats.isFile() && !stats.isDirectory()) return error("Not a file or folder", 400);
+  if (placement && stats.isDirectory()) {
+    return error("A folder opens in the file tree, not in a panel; it takes no placement", 400);
+  }
 
   // Files and folders go to the window in use — from a loxel terminal, that terminal's window;
   // otherwise the focused one — which opens them in their worktree or its Others section.
@@ -2550,7 +2579,7 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     windowId,
     stats.isDirectory()
       ? { type: "open_folder", data: { path } }
-      : { type: "open_file", data: { filePath: path } },
+      : { type: "open_file", data: { filePath: path, ...placed } },
   );
   return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
 }

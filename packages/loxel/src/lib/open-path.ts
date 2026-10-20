@@ -1,4 +1,5 @@
 import * as api from "@/api/client";
+import type { PanelPlacement } from "@/api/panel-placement-model";
 import type { OpenTerminalPanel } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
@@ -68,9 +69,9 @@ export async function openFolder(rawPath: string): Promise<void> {
 /**
  * Open a file sent from outside the window (`loxel <file>`, Finder). A file inside a worktree opens
  * in that worktree, switching to it if needed; any other file opens in the active worktree's
- * Others section.
+ * Others section. `placement` is resolved in that worktree's layout once it is mounted.
  */
-export async function openFile(path: string): Promise<void> {
+export async function openFile(path: string, placement?: PanelPlacement): Promise<void> {
   await whenProjectsLoaded();
   const { projects } = useProjectStore.getState();
   const { activeWorktreePath, byProject } = useWorktreeStore.getState();
@@ -81,7 +82,7 @@ export async function openFile(path: string): Promise<void> {
     return;
   }
 
-  await openInWorktree(target, { kind: "file", path });
+  await openInWorktree(target, { kind: "file", path, ...(placement ? { placement } : {}) });
 }
 
 /**
@@ -134,7 +135,7 @@ async function openInWorktree(target: string, open: PendingOpen): Promise<void> 
  * panel creators.
  */
 export function dispatchPendingOpen(open: PendingOpen): void {
-  if (open.kind === "file") dispatchOpenFile(open.path);
+  if (open.kind === "file") dispatchOpenFile(open.path, undefined, open.placement);
   else dispatchLoxelEvent("loxel-create-terminal", open.terminal);
 }
 

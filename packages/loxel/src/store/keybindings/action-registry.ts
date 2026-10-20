@@ -3,6 +3,8 @@
  * Used by the keybinding system, future command palette, and toolbar buttons.
  */
 
+import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
+import type { SplitDirection } from "@/api/panel-placement-model";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
 
@@ -86,10 +88,6 @@ export type ActionId =
   | "tree.open"
   | "tree.rename"
   | "app.settings";
-
-/** Directions a panel can be split toward. */
-export const SPLIT_DIRECTIONS = ["right", "left", "up", "down"] as const;
-export type SplitDirection = (typeof SPLIT_DIRECTIONS)[number];
 
 /**
  * Center panel types that have "split as <type>" actions. `type` matches `CenterPanelDef.type`

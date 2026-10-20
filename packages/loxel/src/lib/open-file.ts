@@ -1,3 +1,5 @@
+import type { PanelPlacement } from "@/api/panel-placement-model";
+
 import { dispatchLoxelEvent } from "./loxel-events";
 import { isMediaFile } from "./media-extensions";
 
@@ -31,7 +33,11 @@ export function filePanelType(filePath: string): FilePanelType {
 }
 
 /** Dispatch the appropriate panel-open event based on file type. */
-export function dispatchOpenFile(filePath: string, location?: FileLocation): void {
+export function dispatchOpenFile(
+  filePath: string,
+  location?: FileLocation,
+  placement?: PanelPlacement,
+): void {
   const type = filePanelType(filePath);
   switch (type) {
     case "editor":
@@ -39,19 +45,21 @@ export function dispatchOpenFile(filePath: string, location?: FileLocation): voi
         filePath,
         line: location?.line,
         column: location?.column,
+        placement,
       });
       break;
     case "excalidraw":
-      dispatchLoxelEvent("loxel-open-drawing-editor", { filePath });
+      dispatchLoxelEvent("loxel-open-drawing-editor", { filePath, placement });
       break;
     case "media":
-      dispatchLoxelEvent("loxel-open-media-viewer", { filePath });
+      dispatchLoxelEvent("loxel-open-media-viewer", { filePath, placement });
       break;
     case "codeEditor":
       dispatchLoxelEvent("loxel-open-code-editor", {
         filePath,
         line: location?.line,
         column: location?.column,
+        placement,
       });
       break;
     default: {

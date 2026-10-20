@@ -88,7 +88,10 @@ And it can open more terminals, optionally running a command in them. The new ta
 ```bash
 loxel terminal                                   # a shell in the current directory
 loxel terminal --cwd ../other-worktree -- claude  # start an agent in another worktree
+loxel terminal --split right -- pnpm dev          # in a new split beside the active tab
 ```
+
+The same `--split`, `--replace` and `--group` layout flags work for files and URLs too.
 
 Because the terminal already has `LOXEL_PORT` set, the CLI connects to the running Loxel immediately.
 

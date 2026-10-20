@@ -1,3 +1,5 @@
+import type { PanelPlacement } from "./api/panel-placement-model";
+
 /**
  * How long an open request waits for a Loxel window to connect — long enough for a cold start,
  * where the app, its server and the first window's renderer all start up.
@@ -16,12 +18,14 @@ export interface OpenTerminalRequest {
 
 /**
  * Body of `POST /api/open`: a file or folder or a new terminal (optionally for a specific window),
- * or a URL for the windows showing a worktree.
+ * or a URL for the windows showing a worktree. `placement` positions the new panel; folders, which
+ * open in the file tree, take none.
  */
-export type OpenRequest =
+export type OpenRequest = (
   | { filePath: string; windowId?: string }
   | { url: string; wtPath: string }
-  | { terminal: OpenTerminalRequest; windowId?: string };
+  | { terminal: OpenTerminalRequest; windowId?: string }
+) & { placement?: PanelPlacement };
 
 interface RequestOpenOptions {
   /** Called once when no window has connected yet and the request starts waiting for one. */

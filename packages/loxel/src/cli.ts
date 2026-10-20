@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { resolve } from "node:path";
 
+import { parseOpenArgs, parseTerminalArgs } from "./cli-args";
 import { requestOpen } from "./open-request";
-import { parseTerminalArgs } from "./terminal-args";
 import { isHttpUrl } from "./url-utils";
 
 const PROD_PORT = 7433;
@@ -60,10 +60,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  const rawArg = args[0]!;
-  const isUrl = isHttpUrl(rawArg);
-  // `loxel terminal ...` opens a terminal panel; parsed first so bad flags fail before any launch.
-  const terminal = rawArg === "terminal" ? parseTerminalArgs(args.slice(1), process.cwd()) : null;
+  // `loxel terminal ...` opens a terminal panel, anything else a file, folder or URL. Parsed first
+  // so bad flags fail before any launch.
+  const parsed =
+    args[0] === "terminal"
+      ? parseTerminalArgs(args.slice(1), process.cwd())
+      : parseOpenArgs(args, process.cwd());
+  const url = "target" in parsed && isHttpUrl(parsed.target) ? parsed.target : null;
 
   // Check env vars (inside loxel terminal)
   const isInsideLoxel = process.env.LOXEL === "1";
@@ -74,7 +77,7 @@ async function main(): Promise<void> {
   // URLs open in the windows showing the CWD's worktree. Inside a loxel terminal, fall back to
   // LOXEL_WORKTREE when the CWD is outside any git repo.
   let urlWtPath: string | null = null;
-  if (isUrl) {
+  if (url) {
     try {
       urlWtPath = await detectWorktree(process.cwd());
     } catch (err) {
@@ -95,8 +98,8 @@ async function main(): Promise<void> {
   }
   const serverUrl = `http://127.0.0.1:${port}`;
 
-  if (urlWtPath) {
-    await requestOpen(serverUrl, { url: rawArg, wtPath: urlWtPath });
+  if (url && urlWtPath) {
+    await requestOpen(serverUrl, { url, wtPath: urlWtPath, placement: parsed.placement });
     return;
   }
 
@@ -106,7 +109,9 @@ async function main(): Promise<void> {
   const windowId = isInsideLoxel && envWindowId ? { windowId: envWindowId } : {};
   await requestOpen(
     serverUrl,
-    terminal ? { terminal, ...windowId } : { filePath: resolve(rawArg), ...windowId },
+    "target" in parsed
+      ? { filePath: resolve(parsed.target), placement: parsed.placement, ...windowId }
+      : { ...parsed, ...windowId },
     { onWaiting: () => process.stderr.write("loxel: waiting for a Loxel window...\n") },
   );
 }

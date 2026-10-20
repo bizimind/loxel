@@ -5,6 +5,7 @@ import type { OpenTerminalRequest } from "@/open-request";
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
 import type { ServerNotification } from "./notification-model";
+import type { PanelPlacement } from "./panel-placement-model";
 import type { DirEntry } from "./project-files-model";
 import type { UpdateState } from "./update-model";
 
@@ -73,9 +74,9 @@ export type WsMessage =
   | { type: "detached_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
-  | { type: "open_url"; wtPath: string; data: { url: string } }
+  | { type: "open_url"; wtPath: string; data: { url: string; placement?: PanelPlacement } }
   // Window-scoped (sent to the window the user is working in)
-  | { type: "open_file"; data: { filePath: string } }
+  | { type: "open_file"; data: { filePath: string; placement?: PanelPlacement } }
   | { type: "open_folder"; data: { path: string } }
   | { type: "open_terminal"; data: OpenTerminalPanel }
   // Project-scoped (sent to all subscribers under project)
@@ -187,7 +188,10 @@ export interface TerminalState {
  * minted `terminalId` and holds the command to type into the shell, if any, until the panel
  * attaches; the renderer only places the panel and starts the shell in `cwd`.
  */
-export type OpenTerminalPanel = Omit<OpenTerminalRequest, "command"> & { terminalId: string };
+export type OpenTerminalPanel = Omit<OpenTerminalRequest, "command"> & {
+  terminalId: string;
+  placement?: PanelPlacement;
+};
 
 /** Client-to-server WebSocket message types (JSON text frames) */
 export type WsClientMessage =

@@ -58,8 +58,10 @@ Draft folder names are the first 12 hex characters of the SHA-256 of the project
 The `loxel` CLI is introduced in [Terminals](/docs/terminals#the-loxel-cli-inside-a-terminal), which also shows how to [teach your coding agent to use it](/docs/terminals#teach-your-agent-about-loxel). Full reference:
 
 ```
-loxel [file-path | folder-path | url]
-loxel terminal [--cwd <dir>] [--title <name>] [--] [command...]
+loxel [layout flags] <file-path | folder-path | url>
+loxel terminal [--cwd <dir>] [--title <name>] [layout flags] [--] [command...]
+
+layout flags: [--split left|right|up|down | --replace] [--group <tab>]
 ```
 
 | Invocation                              | Behavior                                                  |
@@ -70,6 +72,8 @@ loxel terminal [--cwd <dir>] [--title <name>] [--] [command...]
 | `loxel https://...`                     | Open a URL in Loxel's browser panel                       |
 | `loxel terminal`                        | Open a terminal panel in the current directory            |
 | `loxel terminal -- claude "Fix the CI"` | Open a terminal and run a command in it (see below)       |
+| `loxel --split right src/app.ts`        | Open a file in a new split beside the active tab          |
+| `loxel terminal --group server`         | Open a terminal in the same group as the `server` tab     |
 
 **Finding Loxel:** inside a Loxel terminal, `loxel` connects through `LOXEL_PORT`. Elsewhere it looks for a running Loxel on port 7433 (prod), then 7434 (dev). If no server is found, Loxel launches and the CLI waits up to 15 seconds for it to become ready.
 
@@ -79,11 +83,26 @@ loxel terminal [--cwd <dir>] [--title <name>] [--] [command...]
 
 **Terminals:** `loxel terminal` opens a new terminal panel in the same window as a file would: the window of the Loxel terminal it runs in, or else the most recently focused window. The shell starts in the current directory, or in `--cwd <dir>`. A directory inside one of your worktrees opens the panel in that worktree, switching to it if needed; any other directory gets a panel in the window's active worktree. `--title <name>` names the tab. Everything after the flags (or after `--`) is a command typed into the shell once it starts, exactly as if you had entered it: your login shell, aliases and history all apply, and the shell stays open after the command exits. A single argument is a shell command line (`loxel terminal 'cd src && make'`); several arguments are passed as one command with each argument quoted where needed, so `loxel terminal -- claude "Fix the failing tests"` types `claude 'Fix the failing tests'` and an alias for `claude` still applies. Put `--` before commands that have flags of their own. The CLI returns as soon as the request reaches a Loxel window; it does not wait for the command. The command is typed before your shell finishes starting, so a startup script that reads from the terminal would consume it. Since `terminal` is a subcommand, open a file or folder of that name as `loxel ./terminal`.
 
+**Layout flags:** by default a file, URL or terminal opens as a new tab in the group of the active tab. Layout flags choose another spot, in the layout of the worktree the panel opens in:
+
+- `--split left|right|up|down` opens the panel in a new split on that side of the active tab, like the split shortcuts in [Panel Layout](/docs/panel-layout#rearranging-panels).
+- `--replace` puts the panel in the active tab's place and closes that tab. It can't be combined with `--split`.
+- `--group <tab>` opens the panel in the group holding another tab instead of the active one: a file open in a tab (`--group src/app.ts`, relative to the current directory) or a tab's title as shown on the tab (`--group "Terminal 2"`, or a name you gave with `--title`). If several tabs have that title, the active one wins, then one that is visible in its group. With `--split` the new split goes beside that tab, and with `--replace` that tab is the one replaced. If no open tab matches, the panel opens next to the active tab and Loxel shows a message.
+
+If the file is already open, its tab moves to the requested spot instead of opening a second copy. Without layout flags, an open file's tab is just focused where it is. Folders are revealed in the file tree and take no layout flags. For `loxel <path>` the flags can go before or after the path, and a path that starts with `-` goes after `--`. For `loxel terminal` they go before the command.
+
 A typical use is starting an agent in a fresh worktree right after creating it:
 
 ```bash
 wt add feat/retry-uploads
 loxel terminal --cwd .worktrees/feat/retry-uploads --title claude -- claude "Add retries to the upload client"
+```
+
+Or keeping a dev server and its tests side by side:
+
+```bash
+loxel terminal --title dev --split down -- pnpm dev
+loxel terminal --group dev --split right -- pnpm test --watch
 ```
 
 ---

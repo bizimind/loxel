@@ -9,7 +9,7 @@ import type { WsMessage } from "@/api/ws-protocol";
 import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
 
-describe("POST /api/open terminal requests", () => {
+describe("POST /api/open terminals and placement", () => {
   let root: string;
   let ctx: RouteContext;
   let sent: Array<{ windowId: string | null; msg: WsMessage }>;
@@ -119,5 +119,73 @@ describe("POST /api/open terminal requests", () => {
 
     expect(res.status).toBe(503);
     expect(commands).toEqual([]);
+  });
+
+  test("forwards a terminal's placement, canonicalizing the group tab's path", async () => {
+    const res = await open({
+      terminal: { cwd: root },
+      placement: { split: "right", group: { name: "file.txt", path: `${root}/./file.txt` } },
+    });
+
+    expect(res.status).toBe(200);
+    expect(sentTerminal().placement).toEqual({
+      split: "right",
+      group: { name: "file.txt", path: join(root, "file.txt") },
+    });
+  });
+
+  test("drops a group tab's path where nothing exists, keeping its name", async () => {
+    await open({
+      terminal: { cwd: root },
+      placement: { replace: true, group: { name: "server", path: join(root, "server") } },
+    });
+
+    expect(sentTerminal().placement).toEqual({ replace: true, group: { name: "server" } });
+  });
+
+  test("forwards a file's placement and refuses one for a folder", async () => {
+    const res = await open({ filePath: join(root, "file.txt"), placement: { split: "down" } });
+
+    expect(res.status).toBe(200);
+    expect(sent[0]!.msg).toEqual({
+      type: "open_file",
+      data: { filePath: join(root, "file.txt"), placement: { split: "down" } },
+    });
+    expect((await open({ filePath: root, placement: { replace: true } })).status).toBe(400);
+    expect(sent).toHaveLength(1);
+  });
+
+  test("forwards a URL's placement to the worktree's windows", async () => {
+    const broadcasts: WsMessage[] = [];
+    ctx.broadcastToSubscribers = (_wtPath, msg) => broadcasts.push(msg);
+    ctx.findProjectForPath = () => ({}) as never;
+
+    const res = await open({
+      url: "https://example.com",
+      wtPath: root,
+      placement: { split: "up" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(broadcasts).toEqual([
+      {
+        type: "open_url",
+        wtPath: root,
+        data: { url: "https://example.com", placement: { split: "up" } },
+      },
+    ]);
+  });
+
+  test("rejects malformed placements", async () => {
+    const terminal = { cwd: root };
+    expect((await open({ terminal, placement: "right" })).status).toBe(400);
+    expect((await open({ terminal, placement: { split: "middle" } })).status).toBe(400);
+    expect((await open({ terminal, placement: { split: "up", replace: true } })).status).toBe(400);
+    expect((await open({ terminal, placement: { replace: "yes" } })).status).toBe(400);
+    expect((await open({ terminal, placement: { group: { name: "" } } })).status).toBe(400);
+    expect((await open({ terminal, placement: { group: { name: "x", path: 1 } } })).status).toBe(
+      400,
+    );
+    expect(sent).toEqual([]);
   });
 });

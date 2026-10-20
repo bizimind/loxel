@@ -5,13 +5,20 @@
  * Zustand stores directly. They are module-level (not React hooks) because
  * they must run outside the React render cycle (event handlers, store actions).
  */
-import type { AddPanelOptions, DockviewApi, IDockviewPanel } from "dockview-react";
+import type {
+  AddPanelOptions,
+  AddPanelPositionOptions,
+  DockviewApi,
+  IDockviewPanel,
+  PanelOptions,
+} from "dockview-react";
 
 import * as api from "@/api/client";
-import type { SplitPosition } from "@/components/dockview/default-layout";
+import type { PanelPlacement, PlacementTab, SplitDirection } from "@/api/panel-placement-model";
 import { nextPanelTitle } from "@/components/dockview/default-layout";
 import { renameEditorCacheKey, setEditorContent } from "@/components/editor/MarkdownEditor";
 import { renameDrawingCacheKey } from "@/components/excalidraw-editor/ExcalidrawEditor";
+import { showToast } from "@/components/ui/toast";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { frontendLog } from "@/lib/frontend-logger";
 import { filePanelType } from "@/lib/open-file";
@@ -44,19 +51,123 @@ let creatingEditor = false;
 let creatingDrawing = false;
 let creatingCodeEditor = false;
 
-// -- Helpers --
+// -- Placement --
 
-/** Use the explicit split position, or fall back to "within" the active/first panel. */
-function panelPosition(api: DockviewApi, split?: SplitPosition) {
-  if (split) return split;
-  const ref = api.activePanel ?? api.panels[0];
-  return ref ? { referencePanel: ref.id, direction: "within" as const } : undefined;
+/** `addPanel` direction for each split direction. */
+const ADD_DIRECTION = {
+  right: "right",
+  left: "left",
+  up: "above",
+  down: "below",
+} as const satisfies Record<SplitDirection, string>;
+
+/** `moveTo` position for each split direction. */
+const MOVE_POSITION = {
+  right: "right",
+  left: "left",
+  up: "top",
+  down: "bottom",
+} as const satisfies Record<SplitDirection, string>;
+
+/**
+ * The open tab a {@link PlacementTab} names: the one showing its file, else one with its title.
+ * Among several tabs with that title, the active tab wins, then one visible in its group.
+ */
+function findPlacementTab(api: DockviewApi, tab: PlacementTab): IDockviewPanel | undefined {
+  const byPath = tab.path ? api.panels.find((p) => getPanelFilePath(p.params) === tab.path) : null;
+  if (byPath) return byPath;
+  const titled = api.panels.filter((p) => p.title === tab.name);
+  return (
+    titled.find((p) => p === api.activePanel) ??
+    titled.find((p) => p.group.activePanel === p) ??
+    titled[0]
+  );
+}
+
+/**
+ * The tab a placement is relative to: the tab its `group` names, else the active (or first) tab.
+ * A `group` naming no open tab falls back to the active tab, with a toast saying so.
+ */
+function placementReference(
+  api: DockviewApi,
+  placement: PanelPlacement | undefined,
+): IDockviewPanel | undefined {
+  if (placement?.group) {
+    const tab = findPlacementTab(api, placement.group);
+    if (tab) return tab;
+    showToast(
+      `No open tab matches "${placement.group.name}"; placed by the active tab instead`,
+      "info",
+    );
+  }
+  return api.activePanel ?? api.panels[0];
+}
+
+/**
+ * Where to add a panel relative to `ref`: a tab in its group by default, a new group beside it for
+ * `split`, or right after it for `replace` (the caller then closes it).
+ */
+function placedPosition(
+  ref: IDockviewPanel,
+  placement: PanelPlacement | undefined,
+): AddPanelPositionOptions {
+  if (placement?.split) {
+    return { referencePanel: ref.id, direction: ADD_DIRECTION[placement.split] };
+  }
+  if (placement?.replace) {
+    return { referenceGroup: ref.group, index: ref.group.panels.indexOf(ref) + 1 };
+  }
+  return { referencePanel: ref.id, direction: "within" };
+}
+
+/**
+ * Add a panel where `placement` asks, closing the tab it replaces. With no tab open at all the
+ * panel simply opens.
+ */
+function addPlacedPanel(
+  dv: DockviewApi,
+  placement: PanelPlacement | undefined,
+  options: PanelOptions & Pick<AddPanelOptions, "renderer">,
+): IDockviewPanel {
+  const ref = placementReference(dv, placement);
+  const panel = dv.addPanel({ ...options, position: ref && placedPosition(ref, placement) });
+  // Added before closing, so a group holding only the replaced tab isn't removed in between.
+  if (ref && placement?.replace) ref.api.close();
+  return panel;
+}
+
+/**
+ * Move an open tab where `placement` asks, as {@link addPlacedPanel} would add it (`loxel` naming
+ * a file whose tab is already open), and activate it. A tab placed relative to itself only moves
+ * for a split, off a group it shares with other tabs (like the `panel.move.new*` actions).
+ */
+function movePlacedPanel(dv: DockviewApi, panel: IDockviewPanel, placement: PanelPlacement): void {
+  const ref = placementReference(dv, placement);
+  if (ref === panel) {
+    if (placement.split && panel.group.panels.length > 1) {
+      panel.api.moveTo({ group: panel.group, position: MOVE_POSITION[placement.split] });
+    }
+  } else if (ref) {
+    if (placement.split) {
+      panel.api.moveTo({ group: ref.group, position: MOVE_POSITION[placement.split] });
+    } else if (placement.replace) {
+      panel.api.moveTo({
+        group: ref.group,
+        position: "center",
+        index: ref.group.panels.indexOf(ref),
+      });
+      ref.api.close();
+    } else if (panel.group !== ref.group) {
+      panel.api.moveTo({ group: ref.group, position: "center" });
+    }
+  }
+  activatePanel(dv, panel);
 }
 
 // -- Panel creators --
 
 export interface CreateTerminalOptions {
-  split?: SplitPosition;
+  placement?: PanelPlacement;
   /** Session ID to bind to; minted here when absent. The server names it for `loxel terminal`. */
   terminalId?: string;
   /** Directory the shell starts in; the active worktree when absent. */
@@ -64,7 +175,7 @@ export interface CreateTerminalOptions {
   title?: string;
 }
 
-export function createTerminal({ split, cwd, ...options }: CreateTerminalOptions = {}): void {
+export function createTerminal({ placement, cwd, ...options }: CreateTerminalOptions = {}): void {
   const cApi = getCenterApi();
   if (!cApi) return;
 
@@ -76,20 +187,19 @@ export function createTerminal({ split, cwd, ...options }: CreateTerminalOptions
   uiLog.info("Panel created", { panelType: "terminal", panelId, terminalId, cwd });
 
   const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-  cApi.addPanel({
+  addPlacedPanel(cApi, placement, {
     id: panelId,
     component: "terminal",
     tabComponent: "terminalTab",
     title,
     params: { terminalId, worktreePath, ...(cwd && cwd !== worktreePath ? { cwd } : {}) },
-    position: panelPosition(cApi, split),
   });
 }
 
 export async function createEditor(options?: {
   content?: string;
   title?: string;
-  split?: SplitPosition;
+  placement?: PanelPlacement;
 }): Promise<void> {
   const dv = getCenterApi();
   if (!dv || creatingEditor) return;
@@ -110,13 +220,12 @@ export async function createEditor(options?: {
       setEditorContent(filePath, options.content);
     }
 
-    dv.addPanel({
+    addPlacedPanel(dv, options?.placement, {
       id: panelId,
       component: "editor",
       tabComponent: "markdownEditorTab",
       title,
       params: { filePath, worktreePath: wt },
-      position: panelPosition(dv, options?.split),
     });
     uiLog.info("Panel created", { panelType: "editor", panelId, filePath });
 
@@ -128,7 +237,7 @@ export async function createEditor(options?: {
   }
 }
 
-export async function createDrawing(split?: SplitPosition): Promise<void> {
+export async function createDrawing(placement?: PanelPlacement): Promise<void> {
   const dv = getCenterApi();
   if (!dv || creatingDrawing) return;
   creatingDrawing = true;
@@ -151,13 +260,12 @@ export async function createDrawing(split?: SplitPosition): Promise<void> {
     });
     const panelId = `drawing-${filePath}`;
 
-    dv.addPanel({
+    addPlacedPanel(dv, placement, {
       id: panelId,
       component: "excalidraw",
       tabComponent: "excalidrawEditorTab",
       title: name,
       params: { filePath, worktreePath: wt },
-      position: panelPosition(dv, split),
     });
     uiLog.info("Panel created", { panelType: "excalidraw", panelId, filePath });
 
@@ -169,7 +277,7 @@ export async function createDrawing(split?: SplitPosition): Promise<void> {
   }
 }
 
-export function createBrowser(url?: string, split?: SplitPosition): void {
+export function createBrowser(url?: string, placement?: PanelPlacement): void {
   const cApi = getCenterApi();
   if (!cApi) return;
 
@@ -177,20 +285,19 @@ export function createBrowser(url?: string, split?: SplitPosition): void {
   const title = nextPanelTitle(cApi, "Browser");
   const targetUrl = url || "about:blank";
 
-  cApi.addPanel({
+  addPlacedPanel(cApi, placement, {
     id: panelId,
     component: "browser",
     tabComponent: "browserTab",
     title,
     params: { url: targetUrl },
-    position: panelPosition(cApi, split),
     // Keep the <webview> attached while hidden or moved: re-attaching it reloads the page.
     renderer: "always",
   });
   uiLog.info("Panel created", { panelType: "browser", panelId });
 }
 
-export function createAgent(split?: SplitPosition): void {
+export function createAgent(placement?: PanelPlacement): void {
   const cApi = getCenterApi();
   if (!cApi) return;
 
@@ -199,23 +306,18 @@ export function createAgent(split?: SplitPosition): void {
   const title = nextPanelTitle(cApi, "Agent");
 
   const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-  cApi.addPanel({
+  addPlacedPanel(cApi, placement, {
     id: panelId,
     component: "codingAgent",
     tabComponent: "codingAgentTab",
     title,
     params: { sessionId, worktreePath },
-    position: panelPosition(cApi, split),
   });
   uiLog.info("Panel created", { panelType: "agent", panelId, sessionId });
 }
 
 /** Open a panel for a forked coding-agent session. Deduplicates — focuses existing if found. */
-export function openForkedAgent(
-  forkedSessionId: string,
-  forkPointMessageId?: string,
-  split?: SplitPosition,
-): void {
+export function openForkedAgent(forkedSessionId: string, forkPointMessageId?: string): void {
   const cApi = getCenterApi();
   if (!cApi) return;
 
@@ -238,13 +340,12 @@ export function openForkedAgent(
   const title = nextPanelTitle(cApi, "Agent");
 
   const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-  cApi.addPanel({
+  addPlacedPanel(cApi, undefined, {
     id: panelId,
     component: "codingAgent",
     tabComponent: "codingAgentTab",
     title,
     params: { sessionId, worktreePath, forkedSessionId, forkPointMessageId },
-    position: panelPosition(cApi, split),
   });
   uiLog.info("Panel created (fork)", { panelType: "agent", panelId, sessionId, forkedSessionId });
 }
@@ -261,23 +362,23 @@ export function openAgentDevtools(sessionId: string): void {
   }
 
   const agentPanel = dv.getPanel(`agent-${sessionId}`);
-  const position = agentPanel
-    ? { referencePanel: agentPanel.id, direction: "right" as const }
-    : panelPosition(dv);
-
-  dv.addPanel({
+  const options = {
     id: panelId,
     component: "agentDevTools",
     tabComponent: "agentDevToolsTab",
     title: "DevTools",
     params: { sessionId },
-    position,
-  });
+  };
+  if (agentPanel) {
+    dv.addPanel({ ...options, position: { referencePanel: agentPanel.id, direction: "right" } });
+  } else {
+    addPlacedPanel(dv, undefined, options);
+  }
 }
 
 export async function createCodeEditor(options?: {
   ext?: string;
-  split?: SplitPosition;
+  placement?: PanelPlacement;
 }): Promise<void> {
   const dv = getCenterApi();
   if (!dv || creatingCodeEditor) return;
@@ -293,13 +394,12 @@ export async function createCodeEditor(options?: {
     });
     const panelId = `codeeditor-${filePath}`;
 
-    dv.addPanel({
+    addPlacedPanel(dv, options?.placement, {
       id: panelId,
       component: "codeEditor",
       tabComponent: "codeEditorTab",
       title: name,
       params: { filePath, worktreePath: wt },
-      position: panelPosition(dv, options?.split),
     });
     uiLog.info("Panel created", { panelType: "codeEditor", panelId, filePath });
 
@@ -313,8 +413,16 @@ export async function createCodeEditor(options?: {
 
 // -- File-backed panel opener --
 
-/** Where to add a new file-backed panel; defaults to an active tab after the active panel. */
-type FileBackedPlacement = Required<Pick<AddPanelOptions, "position" | "inactive">>;
+/** An exact slot for a new file-backed panel, e.g. a moved file's tab taking its old tab's place. */
+type FileBackedSlot = Required<Pick<AddPanelOptions, "position" | "inactive">>;
+
+interface OpenFileBackedOptions {
+  params?: { line?: number; column?: number; movedFrom?: string };
+  /** Where a new tab goes, overriding `placement`. */
+  slot?: FileBackedSlot;
+  /** Where the tab goes; an already open tab is moved there. Default: a tab beside the active one. */
+  placement?: PanelPlacement;
+}
 
 /**
  * Open or focus a file-backed center panel, deduplicating by path. Returns the panel, or
@@ -323,8 +431,7 @@ type FileBackedPlacement = Required<Pick<AddPanelOptions, "position" | "inactive
 export function openFileBacked(
   type: FilePanelType,
   filePath: string,
-  extra?: { line?: number; column?: number; movedFrom?: string },
-  placement?: FileBackedPlacement,
+  { params, slot, placement }: OpenFileBackedOptions = {},
 ): IDockviewPanel | undefined {
   const cApi = getCenterApi();
   if (!cApi) return undefined;
@@ -333,24 +440,21 @@ export function openFileBacked(
   const panelId = `${def.idPrefix}${filePath}`;
   const existing = cApi.getPanel(panelId);
   if (existing) {
-    activatePanel(cApi, existing);
-    if (extra?.line) {
-      existing.api.updateParameters({ line: extra.line, column: extra.column });
+    if (placement) movePlacedPanel(cApi, existing, placement);
+    else activatePanel(cApi, existing);
+    if (params?.line) {
+      existing.api.updateParameters({ line: params.line, column: params.column });
     }
     return existing;
   }
-  const filename = getDisplayFilename(filePath);
-  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-  const ref = cApi.activePanel ?? cApi.panels[0];
-  return cApi.addPanel({
+  const options = {
     id: panelId,
     component: def.component,
     tabComponent: def.tabComponent,
-    title: filename,
-    params: { filePath, worktreePath, ...extra },
-    position: ref ? { referencePanel: ref.id, direction: "within" } : undefined,
-    ...placement,
-  });
+    title: getDisplayFilename(filePath),
+    params: { filePath, worktreePath: useWorktreeStore.getState().activeWorktreePath, ...params },
+  };
+  return slot ? cApi.addPanel({ ...options, ...slot }) : addPlacedPanel(cApi, placement, options);
 }
 
 // -- File lifecycle handlers --
@@ -494,15 +598,13 @@ function replaceMovedPanel(
   // isn't removed from the layout in between.
   const { group } = oldPanel;
   const wasVisible = group.activePanel === oldPanel;
-  const newPanel = openFileBacked(
-    filePanelType(newPath),
-    newPath,
-    announce ? { movedFrom: oldPath } : undefined,
-    {
+  const newPanel = openFileBacked(filePanelType(newPath), newPath, {
+    params: announce ? { movedFrom: oldPath } : undefined,
+    slot: {
       position: { referenceGroup: group, index: group.panels.indexOf(oldPanel) + 1 },
       inactive: true,
     },
-  );
+  });
   if (newPanel && wasVisible) {
     if (dv.activeGroup === group) {
       activatePanel(dv, newPanel);

@@ -2,8 +2,11 @@
  * Keybinding schema: binding templates, display labels, and validation.
  */
 
-import type { ActionId, SplitDirection, SplitPanelType } from "./action-registry";
-import { ACTIONS, ACTION_IDS, SPLIT_DIRECTIONS, SPLIT_PANEL_TYPES } from "./action-registry";
+import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
+import type { SplitDirection } from "@/api/panel-placement-model";
+
+import type { ActionId, SplitPanelType } from "./action-registry";
+import { ACTIONS, ACTION_IDS, SPLIT_PANEL_TYPES } from "./action-registry";
 import type { KeyBinding } from "./key-combo";
 import { bindingsOverlap, normalizeKeyBinding } from "./key-combo";
 
