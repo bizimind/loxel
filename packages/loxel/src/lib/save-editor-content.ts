@@ -76,16 +76,20 @@ function stashContent(nonce: string, content: string): void {
  * Write editor content with a fresh nonce. Resolves to whether the server accepted the write;
  * completion of the save is still the nonce echo. Callers that keep the content elsewhere on
  * failure (e.g. a move carrying edits) use the result; others can ignore it.
+ *
+ * `editorKey` names the editor-state entry that tracks the save; it is the file path except for
+ * editors that are not the file's own tab (see `useEditorStateStore`).
  */
 export async function saveEditorContent(
   filePath: string,
   content: string,
   worktreePath?: string | null,
   options?: SaveOptions,
+  editorKey: string = filePath,
 ): Promise<boolean> {
   const nonce = crypto.randomUUID();
   const wtKey = worktreePath ?? "";
-  useEditorStateStore.getState().markSaving(filePath, nonce);
+  useEditorStateStore.getState().markSaving(editorKey, nonce);
   if (wtKey) incrementPending(wtKey);
   try {
     const result = await api.writeFileContent({
@@ -105,12 +109,12 @@ export async function saveEditorContent(
     // (matched by nonce in handleDiskChange). Safety timeout ensures we don't
     // stay stuck if the echo is lost (watcher miss, WS disconnect).
     setTimeout(() => {
-      const entry = useEditorStateStore.getState().files.get(filePath);
+      const entry = useEditorStateStore.getState().files.get(editorKey);
       if (entry && entry.pendingNonces.has(nonce)) {
         frontendLog
           .child("files")
           .warn("Save echo timeout — nonce not confirmed, resetting to dirty", { filePath });
-        useEditorStateStore.getState().handleSaveError(filePath, nonce);
+        useEditorStateStore.getState().handleSaveError(editorKey, nonce);
       }
     }, 10_000);
     return true;
@@ -118,7 +122,7 @@ export async function saveEditorContent(
     frontendLog
       .child("files")
       .error("Failed to save file", { filePath, error: err instanceof Error ? err : undefined });
-    useEditorStateStore.getState().handleSaveError(filePath, nonce);
+    useEditorStateStore.getState().handleSaveError(editorKey, nonce);
     return false;
   } finally {
     if (wtKey) decrementPending(wtKey);

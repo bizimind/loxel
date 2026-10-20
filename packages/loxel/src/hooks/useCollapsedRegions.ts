@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type { DiffHunk } from "@/api/diff-model";
 import type { CollapsibleRegion, LineRange } from "@/components/diff/unchanged-regions";
-import { buildCollapsibleRegions, computeHiddenRanges } from "@/components/diff/unchanged-regions";
+import {
+  buildCollapsibleRegions,
+  carryExpandedRegions,
+  computeHiddenRanges,
+} from "@/components/diff/unchanged-regions";
 import { toggleSet } from "@/lib/set-utils";
 
 interface UseCollapsedRegionsResult {
@@ -11,30 +15,54 @@ interface UseCollapsedRegionsResult {
   oldHiddenRanges: LineRange[];
   newHiddenRanges: LineRange[];
   toggleRegion: (index: number) => void;
-  expandAll: () => void;
-  collapseAll: () => void;
+}
+
+interface UseCollapsedRegionsOptions {
+  /**
+   * Keep expanded regions expanded when the diff is recomputed (see `carryExpandedRegions`),
+   * for views whose content is edited in place. By default every region collapses again when
+   * the hunks change, e.g. on moving to another file.
+   */
+  keepExpandedOnChange?: boolean;
+}
+
+interface Expansion {
+  hunks: DiffHunk[];
+  regions: CollapsibleRegion[];
+  expanded: Set<number>;
 }
 
 export function useCollapsedRegions(
   hunks: DiffHunk[],
   oldLineCount: number,
   newLineCount: number,
+  { keepExpandedOnChange = false }: UseCollapsedRegionsOptions = {},
 ): UseCollapsedRegionsResult {
-  const [expandedSet, setExpandedSet] = useState<Set<number>>(() => new Set());
-
-  // Reset expanded set when hunks change (e.g., navigating to a different file)
-  const prevHunksRef = useRef(hunks);
-  useEffect(() => {
-    if (prevHunksRef.current !== hunks) {
-      prevHunksRef.current = hunks;
-      setExpandedSet(new Set());
-    }
-  }, [hunks]);
-
   const collapsibleRegions = useMemo(
     () => buildCollapsibleRegions(hunks, oldLineCount, newLineCount),
     [hunks, oldLineCount, newLineCount],
   );
+
+  const [expansion, setExpansion] = useState<Expansion>(() => ({
+    hunks,
+    regions: collapsibleRegions,
+    expanded: new Set(),
+  }));
+
+  // Follow the regions during render rather than in an effect, so the hidden ranges never pair
+  // new regions with indices meant for old ones, not even for one frame.
+  let current = expansion;
+  if (expansion.regions !== collapsibleRegions) {
+    let expanded = expansion.expanded;
+    if (keepExpandedOnChange) {
+      expanded = carryExpandedRegions(expansion.regions, expansion.expanded, collapsibleRegions);
+    } else if (expansion.hunks !== hunks) {
+      expanded = new Set();
+    }
+    current = { hunks, regions: collapsibleRegions, expanded };
+    setExpansion(current);
+  }
+  const expandedSet = current.expanded;
 
   const { old: oldHiddenRanges, new: newHiddenRanges } = useMemo(
     () => computeHiddenRanges(collapsibleRegions, expandedSet),
@@ -42,28 +70,8 @@ export function useCollapsedRegions(
   );
 
   const toggleRegion = useCallback((index: number) => {
-    setExpandedSet((prev) => toggleSet(prev, index));
+    setExpansion((prev) => ({ ...prev, expanded: toggleSet(prev.expanded, index) }));
   }, []);
 
-  const expandAll = useCallback(() => {
-    setExpandedSet((prev) => {
-      const next = new Set(prev);
-      for (const r of collapsibleRegions) next.add(r.index);
-      return next;
-    });
-  }, [collapsibleRegions]);
-
-  const collapseAll = useCallback(() => {
-    setExpandedSet(new Set());
-  }, []);
-
-  return {
-    collapsibleRegions,
-    expandedSet,
-    oldHiddenRanges,
-    newHiddenRanges,
-    toggleRegion,
-    expandAll,
-    collapseAll,
-  };
+  return { collapsibleRegions, expandedSet, oldHiddenRanges, newHiddenRanges, toggleRegion };
 }

@@ -17,6 +17,7 @@ import {
   handleFileDeleted,
   handleFileMoved,
   openAgentDevtools,
+  openCompareFiles,
   openDiff,
   openLocalDb,
   openFileBacked,
@@ -48,6 +49,9 @@ export function useLoxelEventListeners(): void {
       onLoxelEvent("loxel-open-drawing-editor", (d) => openFileBacked("excalidraw", d.filePath)),
       onLoxelEvent("loxel-open-media-viewer", (d) => openFileBacked("media", d.filePath)),
       onLoxelEvent("loxel-open-diff", () => openDiff()),
+      onLoxelEvent("loxel-compare-files", (d) => {
+        if ("oldPath" in d) openCompareFiles(d.oldPath, d.newPath);
+      }),
       onLoxelEvent("loxel-open-localdb", () => openLocalDb()),
       onLoxelEvent("loxel-file-moved", (d) => void handleFileMoved(d.oldPath, d.newPath)),
       onLoxelEvent("loxel-file-deleted", (d) => handleFileDeleted(d.filePath)),

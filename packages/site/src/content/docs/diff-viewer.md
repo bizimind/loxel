@@ -1,10 +1,10 @@
 ---
 title: Diff Viewer
-description: Split and unified modes, synchronized scrolling, gutter connectors, and intra-line highlights.
+description: Split and unified modes, synchronized scrolling, gutter connectors, intra-line highlights, and comparing any two files.
 order: 9
 ---
 
-The diff viewer is where you inspect changes — whether that's your working tree, a single commit, or a range between two refs. The standout behavior is synchronized scrolling that keeps context lines aligned across both panels even when the two sides have unequal line counts.
+The diff viewer is where you inspect changes — whether that's your working tree, a single commit, a range between two refs, or two files you pick. The standout behavior is synchronized scrolling that keeps context lines aligned across both panels even when the two sides have unequal line counts.
 
 ---
 
@@ -58,19 +58,36 @@ The diff viewer can compare:
 - Working tree vs any commit
 - Commit vs commit
 - Branch range
+- Any two files (see [Comparing two files](#comparing-two-files))
 
 To open a diff, select one or more commits in the commit graph, then double-click a file in the Changes panel (or right-click it and choose **Open Diff**). See [Git](/docs/git) for how the commit graph and Changes panel work.
 
 ---
 
+## Comparing two files
+
+To compare two files, click the first one in Project Files, then right-click the second and choose **Compare Files**. The file you clicked first opens on the left, the one you right-clicked on the right. Any two text files can be compared, including files in Others folders and drafts.
+
+The comparison opens in its own tab with the same split and unified views, synchronized scrolling, and highlights as any other diff. You can open as many comparisons as you like, alongside the diff of your git changes.
+
+- **Edit both sides in place.** In split view, type in either file. Changes save automatically like in an editor tab, and **Cmd+S** saves right away. The unified view is read-only.
+- **Live updates.** The comparison updates as you type and whenever either file changes on disk, for example when an agent edits it. Expanded unchanged regions stay expanded while you edit.
+- **Same file in a tab.** If a compared file is also open in an editor tab, edits in one show up in the other once saved.
+- **Conflicts and deleted files.** If a file changes on disk while you have unsaved edits to it, a banner above the comparison names the file and lets you accept the disk version or keep yours. A comparison stays on the paths it was opened with: if a compared file is deleted, renamed or moved, a banner offers to re-create it.
+
+Comparisons have no previous/next file navigation and no review comments.
+
+---
+
 ## Navigation
 
-Move between files with the previous/next file buttons in the toolbar. They step through the files in the order the Changes panel lists them. Diff navigation has no keyboard shortcuts.
+In a diff of git changes, move between files with the previous/next file buttons in the toolbar. They step through the files in the order the Changes panel lists them. Diff navigation has no keyboard shortcuts.
 
 ---
 
 ## See also
 
 - [Git](/docs/git) — the commit graph and Changes panel that open diffs in the viewer
+- [Editor](/docs/editor) — the file tree, where comparisons start, and how autosave and conflicts work
 - [Code Review](/docs/code-review) — anchoring comments to lines in a diff
 - [Guide: Reviewing Agent Code](/docs/guide-reviewing-agent-code) — walking a diff and leaving intent-based comments

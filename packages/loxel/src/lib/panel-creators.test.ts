@@ -30,7 +30,7 @@ mock.module("@/api/client", () => ({
   },
 }));
 
-const { handleFileMoved, openBrowserTab } = await import("./panel-creators");
+const { handleFileDeleted, handleFileMoved, openBrowserTab } = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { useEditorStateStore } = await import("@/store/editor-state");
 
@@ -342,5 +342,31 @@ describe("openBrowserTab", () => {
     openBrowserTab("https://example.com/one", { sourcePanelId: a.id, activate: true });
 
     expect(api.groups[0]!.activePanel?.params).toEqual({ url: "https://example.com/one" });
+  });
+});
+
+describe("compare panel sides of a deleted or moved file", () => {
+  test("are marked deleted, while the file's own tab is closed", () => {
+    setup();
+    const store = useEditorStateStore.getState();
+    store.openFile("/repo/a.ts");
+    store.openFile("compare-1:old", "/repo/a.ts");
+    store.openFile("compare-1:new", "/repo/c.ts");
+
+    handleFileDeleted("/repo/a.ts");
+
+    const { files } = useEditorStateStore.getState();
+    expect(files.has("/repo/a.ts")).toBe(false);
+    expect(files.get("compare-1:old")?.deleted).toBe(true);
+    expect(files.get("compare-1:new")?.deleted).toBe(false);
+  });
+
+  test("are marked deleted when their file moves, even with no tab open on it", async () => {
+    setup();
+    useEditorStateStore.getState().openFile("compare-1:old", "/repo/dir/x.ts");
+
+    expect(await handleFileMoved("/repo/dir/x.ts", "/repo/y.ts")).toBe(false);
+
+    expect(useEditorStateStore.getState().files.get("compare-1:old")?.deleted).toBe(true);
   });
 });

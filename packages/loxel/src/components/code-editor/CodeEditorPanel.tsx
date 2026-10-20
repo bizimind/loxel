@@ -11,7 +11,11 @@ import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
-import { type MergeCallbacks, useDiskSyncedContent } from "@/hooks/use-disk-synced-content";
+import {
+  type MergeCallbacks,
+  useDiskSyncedContent,
+  useFormatOnSave,
+} from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { computeLineEdits } from "@/lib/compute-line-edits";
 import { removeDollarSchema, setDollarSchema } from "@/lib/json-schema-registry";
@@ -209,14 +213,7 @@ export function CodeEditorPanel({
   });
 
   // Keep save option refs in sync with formatting settings.
-  const formattingSettings = useSettingsStore((s) => s.editor.formatting);
-  saveOptionsRef.current = formattingSettings.enabled
-    ? { format: true, formattingSettings }
-    : undefined;
-  autoSaveOptionsRef.current =
-    formattingSettings.enabled && formattingSettings.formatOnAutoSave
-      ? { format: true, formattingSettings }
-      : undefined;
+  useFormatOnSave({ saveOptionsRef, autoSaveOptionsRef });
 
   const panelWorktreePath = usePanelWorktreePath();
   const fileAssociations = useSettingsStore(selectEffectiveFileAssociations);

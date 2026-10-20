@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
 import { onWorktreeSavesDrained } from "@/lib/save-editor-content";
-import { useEditorStateStore } from "@/store/editor-state";
+import { openEditorPaths, useEditorStateStore } from "@/store/editor-state";
 import { useWorktreeStore } from "@/store/worktrees";
 
 /**
@@ -28,7 +28,7 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
       const wt = useWorktreeStore.getState().activeWorktreePath;
       if (wt) {
         wsClient.subscribeWorktree(wt);
-        const externalPaths = [...useEditorStateStore.getState().files.keys()].filter(
+        const externalPaths = openEditorPaths(useEditorStateStore.getState().files).filter(
           (p) => p.startsWith("/") && !p.startsWith(wt + "/"),
         );
         if (externalPaths.length > 0) {

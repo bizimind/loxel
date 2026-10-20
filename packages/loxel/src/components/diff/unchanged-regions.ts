@@ -159,6 +159,32 @@ function trimGap(
   };
 }
 
+/**
+ * Carry expanded regions over a re-diff of the same pair of files: a new region stays expanded
+ * when it overlaps a previously expanded one on either side. An edit shifts the lines of one side
+ * only, so the other side still lines up with the region the user expanded. Returns the indices
+ * of the expanded regions in `nextRegions`.
+ */
+export function carryExpandedRegions(
+  prevRegions: CollapsibleRegion[],
+  prevExpanded: Set<number>,
+  nextRegions: CollapsibleRegion[],
+): Set<number> {
+  const expanded = prevRegions.filter((r) => prevExpanded.has(r.index));
+  const overlaps = (aStart: number, aEnd: number, bStart: number, bEnd: number) =>
+    aStart <= aEnd && bStart <= bEnd && aStart <= bEnd && bStart <= aEnd;
+  const result = new Set<number>();
+  for (const next of nextRegions) {
+    const keep = expanded.some(
+      (prev) =>
+        overlaps(prev.oldStart, prev.oldEnd, next.oldStart, next.oldEnd) ||
+        overlaps(prev.newStart, prev.newEnd, next.newStart, next.newEnd),
+    );
+    if (keep) result.add(next.index);
+  }
+  return result;
+}
+
 /** Monaco IRange shape (avoid importing monaco in pure computation module) */
 export interface LineRange {
   startLineNumber: number;

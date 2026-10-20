@@ -24,19 +24,21 @@ import { isWorkingTreeDiffKey, queryKeys, workingTreeFileContentKey } from "./qu
 const log = frontendLog.child("files");
 
 /**
- * Apply a `file_content_changed` event to a file open in an editor: clean editors refresh their
- * query (or take the stashed content of their own write), dirty ones go through the state machine.
+ * Apply a `file_content_changed` event to an open editor (`editorKey`, see `useEditorStateStore`):
+ * clean editors refresh their query (or take the stashed content of their own write), dirty ones
+ * go through the state machine.
  */
 export function refreshOpenFile(
   projectPath: string | null,
   wtPath: string,
-  path: string,
+  editorKey: string,
   nonces: string[],
 ): void {
   const editorStore = useEditorStateStore.getState();
-  const entry = editorStore.files.get(path);
+  const entry = editorStore.files.get(editorKey);
   // A moved file's tab is being replaced; the old path no longer concerns it.
   if (!entry || entry.movedTo) return;
+  const path = entry.filePath;
 
   const queryKey = queryKeys.fileContent(projectPath, path, undefined, wtPath);
   // Content from the file-write response (matched by nonce) saves an HTTP round-trip.
@@ -50,7 +52,7 @@ export function refreshOpenFile(
   // flag: a clean editor's refetch alone may not (identical content keeps the same query data).
   if (entry.state === "clean" && !entry.deleted) {
     for (const n of nonces) {
-      if (entry.pendingNonces.has(n)) editorStore.clearPendingNonce(path, n);
+      if (entry.pendingNonces.has(n)) editorStore.clearPendingNonce(editorKey, n);
     }
     if (stashedContent !== undefined) {
       // Duplicate FS event from our own write: update the cache instead of refetching.
@@ -68,12 +70,12 @@ export function refreshOpenFile(
     // machine (which short-circuits) but don't put the stale value in the query cache.
     const matchedNonces = nonces.filter((n) => entry.pendingNonces.has(n));
     const superseded = matchedNonces.length > 0 && entry.pendingNonces.size > matchedNonces.length;
-    editorStore.handleDiskChange(path, nonces, stashedContent);
+    editorStore.handleDiskChange(editorKey, nonces, stashedContent);
     if (!superseded) queryClient.setQueryData(queryKey, { content: stashedContent });
     return;
   }
 
-  void fetchIntoOpenFile(projectPath, wtPath, path, nonces);
+  void fetchIntoOpenFile(projectPath, wtPath, editorKey, path, nonces);
 }
 
 /**
@@ -84,6 +86,7 @@ export function refreshOpenFile(
 async function fetchIntoOpenFile(
   projectPath: string | null,
   wtPath: string,
+  editorKey: string,
   path: string,
   nonces: string[],
 ): Promise<void> {
@@ -91,11 +94,11 @@ async function fetchIntoOpenFile(
   const queryKey = queryKeys.fileContent(projectPath, path, undefined, wtPath);
   try {
     const data = await api.getFileContentByPath(path, wtPath);
-    editorStore.handleDiskChange(path, nonces, data.content);
+    editorStore.handleDiskChange(editorKey, nonces, data.content);
     await applyFetchedContent(queryKey, data);
   } catch (error: unknown) {
     if (api.isFileMissingError(error)) {
-      editorStore.setDeleted(path, true);
+      editorStore.setDeleted(editorKey, true);
       return;
     }
     log.error("Failed to refresh editor after external file change", {
@@ -108,27 +111,29 @@ async function fetchIntoOpenFile(
 }
 
 /**
- * Re-check whether an open file still exists after its parent directory changed. Marks it
- * deleted on a confirmed 404; if it was deleted and is back, feeds the content to the state
+ * Re-check whether an open editor's file still exists after its parent directory changed. Marks
+ * it deleted on a confirmed 404; if it was deleted and is back, feeds the content to the state
  * machine like an external restore. A file that exists and was not deleted is left alone.
  */
 export async function checkOpenFileExists(
   projectPath: string | null,
   wtPath: string,
-  path: string,
+  editorKey: string,
 ): Promise<void> {
-  if (useEditorStateStore.getState().files.get(path)?.movedTo) return;
+  const initial = useEditorStateStore.getState().files.get(editorKey);
+  if (!initial || initial.movedTo) return;
+  const path = initial.filePath;
   try {
     const data = await api.getFileContentByPath(path, wtPath);
     // Read the entry after the fetch: another request (e.g. the editor's own refetch) may have
     // marked it deleted, or a move may have started, while this one was in flight.
-    const entry = useEditorStateStore.getState().files.get(path);
+    const entry = useEditorStateStore.getState().files.get(editorKey);
     if (!entry?.deleted || entry.movedTo) return;
-    useEditorStateStore.getState().handleDiskChange(path, [], data.content);
+    useEditorStateStore.getState().handleDiskChange(editorKey, [], data.content);
     await applyFetchedContent(queryKeys.fileContent(projectPath, path, undefined, wtPath), data);
   } catch (error: unknown) {
     if (api.isFileMissingError(error)) {
-      useEditorStateStore.getState().setDeleted(path, true);
+      useEditorStateStore.getState().setDeleted(editorKey, true);
       return;
     }
     log.error("Failed to check an open file after its directory changed", {
@@ -221,15 +226,14 @@ export function useWsBridge(): void {
             queryClient.invalidateQueries({ queryKey: diffContentKey, exact: true });
           }
 
-          const openPaths = useEditorStateStore.getState().files.keys();
-          for (const openPath of openPaths) {
-            if (openPath === changedPath) {
-              refreshOpenFile(projectPath, message.wtPath, openPath, nonces);
-            } else if (openPath.startsWith(changedPath + "/")) {
+          for (const [editorKey, entry] of useEditorStateStore.getState().files) {
+            if (entry.filePath === changedPath) {
+              refreshOpenFile(projectPath, message.wtPath, editorKey, nonces);
+            } else if (entry.filePath.startsWith(changedPath + "/")) {
               // A removed or re-created directory is reported as one event for the directory,
               // not for the files inside it. Only their existence can have changed (a modified
               // file reports itself), so just re-check that.
-              void checkOpenFileExists(projectPath, message.wtPath, openPath);
+              void checkOpenFileExists(projectPath, message.wtPath, editorKey);
             }
           }
           break;
@@ -273,11 +277,12 @@ export function useWsBridge(): void {
 
           // A broad query invalidation refreshes clean editors. Dirty/saving editors
           // need the same conflict-aware state-machine path as a normal file event.
-          for (const [path, entry] of editorStore.files) {
+          for (const [editorKey, entry] of editorStore.files) {
             if (entry.state === "clean") continue;
+            const path = entry.filePath;
             const queryKey = queryKeys.fileContent(projectPath, path, undefined, message.wtPath);
             if (!queryClient.getQueryCache().find({ queryKey, exact: true })) continue;
-            void fetchIntoOpenFile(projectPath, message.wtPath, path, []);
+            void fetchIntoOpenFile(projectPath, message.wtPath, editorKey, path, []);
           }
           break;
         }

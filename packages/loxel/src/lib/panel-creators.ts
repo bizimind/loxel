@@ -16,6 +16,7 @@ import { getDisplayFilename } from "@/lib/detached-path";
 import { frontendLog } from "@/lib/frontend-logger";
 import { filePanelType } from "@/lib/open-file";
 import type { FilePanelType } from "@/lib/open-file";
+import { isWithin } from "@/lib/project-file-helpers";
 import { saveEditorContent } from "@/lib/save-editor-content";
 import { threeWayMerge } from "@/lib/three-way-merge";
 import { queryKeys } from "@/queries/query-keys";
@@ -432,6 +433,7 @@ export async function handleFileMoved(
 ): Promise<boolean> {
   const dv = getCenterApi();
   if (!dv || movesInProgress.has(oldPath)) return false;
+  markOtherViewsDeleted(oldPath);
 
   const oldPanel = dv.panels.find((p) => getPanelFilePath(p.params) === oldPath);
   if (!oldPanel) return false;
@@ -556,10 +558,23 @@ function replaceMovedPanel(
   return newPanel !== undefined;
 }
 
+/**
+ * Editors of a file other than its own tab (compare panel sides) stay on a path that was deleted
+ * or moved away. Mark them deleted right away, before their content query notices, so a pending
+ * autosave cannot re-create the file.
+ */
+function markOtherViewsDeleted(path: string): void {
+  const store = useEditorStateStore.getState();
+  for (const [key, entry] of store.files) {
+    if (key !== entry.filePath && isWithin(entry.filePath, path)) store.setDeleted(key, true);
+  }
+}
+
 /** Handle file-deleted events: close any open panel for the deleted file/directory. */
 export function handleFileDeleted(filePath: string): void {
   const dv = getCenterApi();
   if (!dv) return;
+  markOtherViewsDeleted(filePath);
 
   for (const panel of dv.panels) {
     const panelPath = getPanelFilePath(panel.params);
@@ -589,6 +604,24 @@ export function openDiff(): void {
     title: "Diff",
     position: ref ? { referencePanel: ref.id, direction: "within" } : undefined,
   });
+}
+
+/** Open a panel comparing two files; every comparison gets its own panel. */
+export function openCompareFiles(oldPath: string, newPath: string): void {
+  const cApi = getCenterApi();
+  if (!cApi) return;
+
+  const panelId = `compare-${crypto.randomUUID()}`;
+  const worktreePath = useWorktreeStore.getState().activeWorktreePath;
+  cApi.addPanel({
+    id: panelId,
+    component: "compare",
+    tabComponent: "compareTab",
+    title: `${getDisplayFilename(oldPath)} ↔ ${getDisplayFilename(newPath)}`,
+    params: { oldPath, newPath, worktreePath },
+    position: panelPosition(cApi),
+  });
+  uiLog.info("Panel created", { panelType: "compare", panelId, oldPath, newPath });
 }
 
 /** Open or focus the singleton LocalDb panel. */

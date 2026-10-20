@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  ArrowLeftRightIcon,
   BotIcon,
   BugPlayIcon,
   DatabaseIcon,
@@ -280,6 +281,20 @@ export const CENTER_PANELS = [
     titlePrefix: "Diff",
     kind: "state-view" as const,
     singleton: true,
+  },
+  {
+    type: "compare",
+    idPrefix: "compare-",
+    component: "compare",
+    tabComponent: "compareTab",
+    icon: ArrowLeftRightIcon,
+    quickstartLabel: null,
+    actionId: null,
+    createEvent: "loxel-compare-files",
+    openEvent: null,
+    titlePrefix: "Compare",
+    kind: "file-editor" as const,
+    singleton: false,
   },
   {
     type: "localDb",

@@ -6,6 +6,8 @@ import { threeWayMerge } from "../lib/three-way-merge";
 export type EditorFileState = "clean" | "dirty" | "saving" | "diverged";
 
 export interface EditorFileEntry {
+  /** Absolute path of the file this editor shows; several entries can share one. */
+  filePath: string;
   state: EditorFileState;
   /** The file no longer exists on disk (deleted externally after it was opened, or missing on
    *  load). Autosave is suspended until content arrives again — from an external restore or
@@ -49,10 +51,17 @@ export interface PendingEdit {
   options?: SaveOptions;
 }
 
+/**
+ * One entry per open editor, keyed by its editor key: the file path for a file's own tab (so a
+ * path has at most one tab), or a key of the editor's choosing for other views of the file, such
+ * as a side of a compare panel. Editors of the same file reconcile with disk independently; a
+ * save by one reaches the others as an external change. All actions below take the editor key.
+ */
 interface EditorStateStore {
   files: Map<string, EditorFileEntry>;
 
-  openFile: (filePath: string) => void;
+  /** Register an editor; `filePath` defaults to the key. Idempotent. */
+  openFile: (key: string, filePath?: string) => void;
   closeFile: (filePath: string) => void;
   markDirty: (filePath: string) => void;
   markSaving: (filePath: string, nonce: string) => void;
@@ -80,8 +89,9 @@ interface EditorStateStore {
   unregisterEditorCallbacks: (filePath: string) => void;
 }
 
-function defaultEntry(): EditorFileEntry {
+function defaultEntry(filePath: string): EditorFileEntry {
   return {
+    filePath,
     state: "clean",
     deleted: false,
     movedTo: null,
@@ -98,11 +108,11 @@ function defaultEntry(): EditorFileEntry {
 export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
   files: new Map(),
 
-  openFile: (filePath) => {
+  openFile: (key, filePath = key) => {
     set((s) => {
-      if (s.files.has(filePath)) return s;
+      if (s.files.has(key)) return s;
       const files = new Map(s.files);
-      files.set(filePath, defaultEntry());
+      files.set(key, defaultEntry(filePath));
       return { files };
     });
   },
@@ -467,6 +477,11 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
     });
   },
 }));
+
+/** Distinct paths of every open editor. */
+export function openEditorPaths(files: Map<string, EditorFileEntry>): string[] {
+  return [...new Set([...files.values()].map((entry) => entry.filePath))];
+}
 
 interface AutoMergeOptions {
   /** When true, conflicting hunks keep editor content (ours) over disk content (theirs). */

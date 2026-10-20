@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { useEditorStateStore } from "./editor-state";
+import { openEditorPaths, useEditorStateStore } from "./editor-state";
 
 const FILE = "test.md";
 
@@ -20,6 +20,20 @@ describe("editor state machine", () => {
     expect(entry).toBeDefined();
     expect(entry!.state).toBe("clean");
     expect(entry!.pendingNonces.size).toBe(0);
+  });
+
+  test("several editors of one file get independent entries", () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(FILE);
+    store.openFile("compare-1:old", FILE);
+    store.markDirty("compare-1:old");
+
+    const { files } = useEditorStateStore.getState();
+    expect(files.get("compare-1:old")?.filePath).toBe(FILE);
+    expect(files.get("compare-1:old")?.state).toBe("dirty");
+    expect(getEntry()?.filePath).toBe(FILE);
+    expect(getEntry()?.state).toBe("clean");
+    expect(openEditorPaths(files)).toEqual([FILE]);
   });
 
   test("markDirty transitions clean → dirty", () => {
