@@ -31,7 +31,7 @@ Loxel is built around these needs.
 - **Git** — commit graph, changes panel, branches, cherry-pick, revert, reset and discard changes from context menus and inline forms. There is no staging or commit UI. See [Git](../site/src/content/docs/git.md).
 - **Editor and file explorer** — Monaco with Quick Open, find in files, command palette, autosave, format on save with auto-detected project formatters, and conflict detection when files change on disk. Folders and files outside every project open in the file tree's Others section. See [Editor](../site/src/content/docs/editor.md).
 - **Language intelligence** — TypeScript 7 (`tsc --lsp`) per worktree plus lazily started servers for other languages, proxied to Monaco over WebSockets. See [TypeScript Intelligence](../site/src/content/docs/typescript-intelligence.md); to add a language, follow the [add-language-server skill](../../.agents/skills/add-language-server/SKILL.md).
-- **Browser panels** — web pages in `<webview>` tabs, with find in page and Touch ID passkeys on macOS.
+- **Browser panels** — web pages in `<webview>` tabs, with find in page, page dialogs (`alert`/`confirm`/`prompt`) shown in the panel, and Touch ID passkeys on macOS.
 - **macOS integration** — open files and folders from Finder or with `loxel <path>`, and Reveal in Finder / Open In from context menus.
 
 ## Architecture

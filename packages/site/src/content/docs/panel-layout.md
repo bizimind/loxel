@@ -75,6 +75,8 @@ The status bar runs across the bottom edge of the window and is always visible. 
 
 A browser panel (`Cmd+Shift+B`) is a full web view with back, forward, reload, an address bar, and DevTools. `Cmd+F` finds text in the page. All browser panels share one persistent session, so cookies and logins carry across panels and restarts. In the signed macOS app, sites can create and use passkeys with Touch ID. Open a URL in a browser panel with `loxel <url>` from a terminal, or by `Cmd`-clicking a link in terminal output.
 
+When a page calls `alert()`, `confirm()`, or `prompt()`, the dialog opens over that page and names the site that asked. Only that browser panel waits for your answer; the rest of Loxel stays usable. `Enter` confirms and `Esc` cancels. Starting from a page's second dialog, you can check **Don't allow this page to show more dialogs** to silence it until it reloads or navigates. Reloading or navigating also dismisses any dialog that is open.
+
 ---
 
 ## Rearranging panels

@@ -59,6 +59,11 @@ import {
   SET_DOCK_BADGE,
   WINDOW_FOCUS_CHANGE,
 } from "./ipc-channels";
+import {
+  configureWebviewDialogs,
+  installJavaScriptDialogs,
+  trackWebviewDialogs,
+} from "./javascript-dialogs";
 import { startMainProcessMonitor } from "./main-perf-monitor";
 import { configurePasskeys, installAccountChooser } from "./webauthn";
 import { forwardWebviewKeystrokes, installWebviewKeystrokeForwarding } from "./webview-keystrokes";
@@ -703,6 +708,7 @@ app.on("web-contents-created", (_, contents) => {
     }
   });
   forwardWebviewKeystrokes(contents);
+  trackWebviewDialogs(contents);
 
   // Redirect window.open() from webview contents to the system browser
   // (or browser panel tab when Cmd is held).
@@ -718,13 +724,14 @@ app.on("web-contents-created", (_, contents) => {
     return { action: "deny" };
   });
 
-  // Strip dangerous preferences from any dynamically-created webview.
+  // Strip dangerous preferences from any dynamically-created webview, then load Loxel's own
+  // sandboxed preload (which also runs in subframes, without Node.js).
   contents.on("will-attach-webview", (_, webPreferences) => {
     delete webPreferences.preload;
     webPreferences.nodeIntegration = false;
     webPreferences.nodeIntegrationInWorker = false;
-    webPreferences.nodeIntegrationInSubFrames = false;
     webPreferences.contextIsolation = true;
+    configureWebviewDialogs(webPreferences);
   });
 });
 
@@ -797,6 +804,7 @@ ipcMain.handle(OPEN_FOLDER_DIALOG, async (event) => {
 });
 
 installWebviewKeystrokeForwarding();
+installJavaScriptDialogs();
 
 // macOS: show notification count on dock icon
 ipcMain.on(SET_DOCK_BADGE, (_event, count: unknown) => {

@@ -81,14 +81,16 @@ export default defineConfig(({ mode }) => {
                 build: { outDir: path.join(import.meta.dirname, "dist-electron/main") },
                 plugins: [
                   {
-                    // Keep preload.cjs byte-for-byte CJS for sandboxed Electron renderers;
+                    // Keep the preloads byte-for-byte CJS for sandboxed Electron renderers;
                     // this type:module package defaults Electron builds to ESM.
                     name: "copy-preload",
                     closeBundle() {
-                      const src = path.join(import.meta.dirname, "src/electron/preload.cjs");
-                      const dest = path.join(import.meta.dirname, "dist-electron/main/preload.cjs");
-                      mkdirSync(path.dirname(dest), { recursive: true });
-                      copyFileSync(src, dest);
+                      const outDir = path.join(import.meta.dirname, "dist-electron/main");
+                      mkdirSync(outDir, { recursive: true });
+                      for (const file of ["preload.cjs", "webview-preload.cjs"]) {
+                        const src = path.join(import.meta.dirname, "src/electron", file);
+                        copyFileSync(src, path.join(outDir, file));
+                      }
                     },
                   },
                 ],

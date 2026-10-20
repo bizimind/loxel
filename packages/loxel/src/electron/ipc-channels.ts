@@ -15,3 +15,19 @@ export const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
  * for that, so this is the renderer's cue to recompute which keystrokes to intercept.
  */
 export const WEBVIEW_FOCUSED = "keybindings:webview-focused";
+/**
+ * Webview preload → main, synchronous: a page called `alert()` / `confirm()` / `prompt()`. The
+ * page stays blocked until main sets the return value. See `javascript-dialogs.ts`.
+ */
+export const JAVASCRIPT_DIALOG_RUN = "javascript-dialog:run";
+/**
+ * Renderer → main: this document shows page dialogs. Pages of a window whose renderer never sent
+ * it (one that predates dialogs) get no dialog instead of blocking on one that is never shown.
+ */
+export const JAVASCRIPT_DIALOG_LISTEN = "javascript-dialog:listen";
+/** Main → renderer: show a page's dialog in the browser panel hosting that webview. */
+export const JAVASCRIPT_DIALOG_OPEN = "javascript-dialog:open";
+/** Renderer → main: the user answered a dialog. */
+export const JAVASCRIPT_DIALOG_RESPOND = "javascript-dialog:respond";
+/** Main → renderer: a dialog was withdrawn because its page navigated or went away. */
+export const JAVASCRIPT_DIALOG_CLOSED = "javascript-dialog:closed";

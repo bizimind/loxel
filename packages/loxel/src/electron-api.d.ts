@@ -21,6 +21,16 @@ interface Window {
     onWebviewFocused?: (callback: () => void) => () => void;
     /** Current page zoom factor (Cmd+/Cmd-), read synchronously from `webFrame`. */
     getZoomFactor?: () => number;
+    /**
+     * A browser panel page called `alert()` / `confirm()` / `prompt()` (payload:
+     * `JavaScriptDialogRequest`), or a shown one was withdrawn (`JavaScriptDialogClosed`).
+     */
+    onJavaScriptDialog?: (
+      onOpen: (request: unknown) => void,
+      onClosed: (closed: unknown) => void,
+    ) => () => void;
+    /** Answer a dialog from `onJavaScriptDialog` (payload: `JavaScriptDialogResponse`). */
+    respondToJavaScriptDialog?: (response: unknown) => void;
   };
   loxelWindow?: {
     /** Stable per-BrowserWindow ID assigned by Electron main; null in non-Electron contexts. */
