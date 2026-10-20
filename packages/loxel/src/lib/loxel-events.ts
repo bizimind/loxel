@@ -4,14 +4,11 @@
  * Provides type-safe dispatch and listener helpers to replace
  * raw `new CustomEvent()` and `as CustomEvent<T>` casts.
  */
-import type { PanelPlacement } from "@/api/panel-placement-model";
+import type { PanelOpenOptions, PanelPlacement } from "@/api/panel-placement-model";
 import type { CreateTerminalOptions } from "@/lib/panel-creators";
 
 /** A file to open in its panel; `placement` moves an already open tab there too. */
-interface OpenFileDetail {
-  filePath: string;
-  placement?: PanelPlacement;
-}
+type OpenFileDetail = { filePath: string } & PanelOpenOptions;
 
 /** Detail shapes for all loxel custom events. */
 export interface LoxelEventMap {
@@ -19,7 +16,7 @@ export interface LoxelEventMap {
   "loxel-create-terminal": CreateTerminalOptions;
   "loxel-create-editor": { placement?: PanelPlacement };
   "loxel-create-drawing": { placement?: PanelPlacement };
-  "loxel-create-browser": { url?: string; placement?: PanelPlacement };
+  "loxel-create-browser": { url?: string } & PanelOpenOptions;
   "loxel-create-code-editor": { ext?: string; placement?: PanelPlacement };
   "loxel-create-editor-with-content": { content: string; title: string };
   "loxel-open-agent-devtools": { sessionId: string };

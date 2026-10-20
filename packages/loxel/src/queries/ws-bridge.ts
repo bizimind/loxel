@@ -301,7 +301,10 @@ export function useWsBridge(): void {
         }
 
         case "open_file":
-          void openFile(message.data.filePath, message.data.placement);
+          void openFile(message.data.filePath, {
+            placement: message.data.placement,
+            focus: message.data.focus,
+          });
           break;
 
         case "open_folder":

@@ -92,6 +92,16 @@ export interface RouteContext {
    * else the most recently focused window. Returns false when no window is connected.
    */
   sendToActiveWindow: (windowId: string | null, msg: WsMessage) => boolean;
+  /**
+   * Send to every window subscribed to `wtPath`; the one the user is working in among them
+   * (`windowId`'s, else the most recently focused) gets `primary` instead.
+   */
+  sendToWorktreeWindows: (
+    wtPath: string,
+    windowId: string | null,
+    msg: WsMessage,
+    primary: WsMessage,
+  ) => void;
   /** Why a folder cannot be opened in an Others section, or null when it can. */
   externalFolderConflict: (folder: string) => string | null;
   getProject: (cwd: string) => ProjectState | undefined;
@@ -2508,7 +2518,12 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   } catch (err) {
     return error(err instanceof Error ? err.message : "Invalid placement", 400);
   }
-  const placed = placement ? { placement } : {};
+  if (body.focus !== undefined && typeof body.focus !== "boolean") {
+    return error("focus must be a boolean", 400);
+  }
+  // Opening without focus leaves the window's worktree and active tab alone.
+  const unfocused = body.focus === false ? { focus: false } : {};
+  const placed = { ...(placement ? { placement } : {}), ...unfocused };
 
   // Terminal mode: a new terminal panel in the window in use, its shell started in `cwd`, with an
   // optional command typed into it. The command stays on the server until the panel attaches, so
@@ -2553,11 +2568,15 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       return error("No project found for worktree", 404);
     }
 
-    ctx.broadcastToSubscribers(wtPath, {
-      type: "open_url",
+    // Every window showing the worktree gets the page, but only the one in use applies the
+    // placement: a `--replace` must not close tabs in windows the user did not target.
+    const data = { url: body.url, ...unfocused };
+    ctx.sendToWorktreeWindows(
       wtPath,
-      data: { url: body.url, ...placed },
-    });
+      windowId,
+      { type: "open_url", wtPath, data },
+      { type: "open_url", wtPath, data: { ...data, ...placed } },
+    );
     return json({ ok: true });
   }
 
@@ -2568,20 +2587,28 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   if (!stats) return error("File not found", 404);
   // Pipes and devices would hang or flood the editor's read
   if (!stats.isFile() && !stats.isDirectory()) return error("Not a file or folder", 400);
-  if (placement && stats.isDirectory()) {
-    return error("A folder opens in the file tree, not in a panel; it takes no placement", 400);
-  }
-
   // Files and folders go to the window in use — from a loxel terminal, that terminal's window;
   // otherwise the focused one — which opens them in their worktree or its Others section.
   const path = (await canonicalPath(absolutePath)) ?? absolutePath;
-  const sent = ctx.sendToActiveWindow(
-    windowId,
-    stats.isDirectory()
-      ? { type: "open_folder", data: { path } }
-      : { type: "open_file", data: { filePath: path, ...placed } },
+  if (!stats.isDirectory()) {
+    const sent = ctx.sendToActiveWindow(windowId, {
+      type: "open_file",
+      data: { filePath: path, ...placed },
+    });
+    return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
+  }
+
+  // A folder is revealed in the file tree, which takes focus, and is never placed as a panel.
+  if (body.focus === false) {
+    return json({ ok: true, warning: "A folder is only revealed with focus; pass --focus" });
+  }
+  const sent = ctx.sendToActiveWindow(windowId, { type: "open_folder", data: { path } });
+  if (!sent) return error("No Loxel window is open", 503);
+  return json(
+    placement
+      ? { ok: true, warning: "Layout flags do not apply to a folder; it opens in the file tree" }
+      : { ok: true },
   );
-  return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
 }
 
 // ---------------------------------------------------------------------------

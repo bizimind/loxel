@@ -1,13 +1,13 @@
 /**
- * Arguments of the `loxel` CLI: `loxel <target>` and `loxel terminal`, both with the layout flags
- * that place the new panel. Shared by the CLI and its tests; the requests themselves are in
- * open-request.ts.
+ * Arguments of the `loxel` CLI: `loxel <target>` and `loxel terminal`, both with the open flags:
+ * the layout flags that place the new panel, and whether it takes focus. Shared by the CLI and its
+ * tests; the requests themselves are in open-request.ts.
  */
 import { resolve } from "node:path";
 
 import { shellQuote } from "@bizimind/wt/lib";
 
-import type { PanelPlacement } from "./api/panel-placement-model";
+import type { PanelOpenOptions, PanelPlacement } from "./api/panel-placement-model";
 import { SPLIT_DIRECTIONS, isSplitDirection } from "./api/panel-placement-model";
 import type { OpenTerminalRequest } from "./open-request";
 
@@ -20,11 +20,12 @@ const SAFE_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
 
 const quoteArg = (arg: string): string => (SAFE_WORD.test(arg) ? arg : shellQuote(arg));
 
-const LAYOUT_FLAGS = "[--split left|right|up|down | --replace] [--group <tab>]";
+const OPEN_FLAGS =
+  "[--split left|right|up|down | --replace] [--group <tab>] [--focus | --no-focus]";
 
-const TERMINAL_SYNOPSIS = `loxel terminal [--cwd <dir>] [--title <name>] ${LAYOUT_FLAGS} [--] [command...]`;
+const TERMINAL_SYNOPSIS = `loxel terminal [--cwd <dir>] [--title <name>] ${OPEN_FLAGS} [--] [command...]`;
 
-export const OPEN_USAGE = `usage: loxel ${LAYOUT_FLAGS} <file | folder | url>\n       ${TERMINAL_SYNOPSIS}`;
+export const OPEN_USAGE = `usage: loxel ${OPEN_FLAGS} <file | folder | url>\n       ${TERMINAL_SYNOPSIS}`;
 
 export const TERMINAL_USAGE = `usage: ${TERMINAL_SYNOPSIS}`;
 
@@ -84,15 +85,21 @@ function scanArgs(
 }
 
 /**
- * Collects the layout flags. `--group` keeps the name as typed (a tab title) and also resolves it
+ * Collects the open flags. `--group` keeps the name as typed (a tab title) and also resolves it
  * against `baseDir` (the path of a file open in a tab); the server drops the path if nothing
- * exists there.
+ * exists there. Focus is left unset unless a flag names it: its default depends on the caller.
  */
-function placementFlags(baseDir: string, usage: string) {
+function openFlags(baseDir: string, usage: string) {
   const placement: PanelPlacement = {};
+  const focus = new Set<boolean>();
   return {
     read(flag: Flag): boolean {
       switch (flag.name) {
+        case "--focus":
+        case "--no-focus":
+          flag.noValue();
+          focus.add(flag.name === "--focus");
+          return true;
         case "--split": {
           const direction = flag.value();
           if (!isSplitDirection(direction)) {
@@ -115,29 +122,33 @@ function placementFlags(baseDir: string, usage: string) {
           return false;
       }
     },
-    /** The placement, or undefined when no layout flag was given. */
-    result(): PanelPlacement | undefined {
+    /** The flags given: a placement if any layout flag was, and focus if a focus flag was. */
+    result(): PanelOpenOptions {
       if (placement.split && placement.replace) {
         throw usageError("--split and --replace cannot be combined", usage);
       }
-      return Object.keys(placement).length > 0 ? placement : undefined;
+      if (focus.size > 1) throw usageError("--focus and --no-focus cannot be combined", usage);
+      const [focused] = focus;
+      return {
+        ...(Object.keys(placement).length > 0 ? { placement } : {}),
+        ...(focused === undefined ? {} : { focus: focused }),
+      };
     },
   };
 }
 
-/** What `loxel <target>` opens: a file, folder or URL as typed, and where its panel goes. */
-export interface OpenArgs {
+/** What `loxel <target>` opens: a file, folder or URL as typed, and how. */
+export interface OpenArgs extends PanelOpenOptions {
   target: string;
-  placement?: PanelPlacement;
 }
 
 /**
- * Parse the arguments of `loxel <target>`: exactly one file, folder or URL, with layout flags
+ * Parse the arguments of `loxel <target>`: exactly one file, folder or URL, with open flags
  * before or after it. A target that starts with a dash goes after `--`.
  */
 export function parseOpenArgs(args: string[], baseDir: string): OpenArgs {
-  const layout = placementFlags(baseDir, OPEN_USAGE);
-  const positional = scanArgs(args, OPEN_USAGE, false, (flag) => layout.read(flag));
+  const flags = openFlags(baseDir, OPEN_USAGE);
+  const positional = scanArgs(args, OPEN_USAGE, false, (flag) => flags.read(flag));
   if (positional.length !== 1) {
     throw usageError(
       positional.length === 0
@@ -146,14 +157,12 @@ export function parseOpenArgs(args: string[], baseDir: string): OpenArgs {
       OPEN_USAGE,
     );
   }
-  const placement = layout.result();
-  return { target: positional[0]!, ...(placement ? { placement } : {}) };
+  return { target: positional[0]!, ...flags.result() };
 }
 
-/** What `loxel terminal` opens, and where its panel goes. */
-export interface TerminalArgs {
+/** What `loxel terminal` opens, and how. */
+export interface TerminalArgs extends PanelOpenOptions {
   terminal: OpenTerminalRequest;
-  placement?: PanelPlacement;
 }
 
 /**
@@ -167,7 +176,7 @@ export interface TerminalArgs {
 export function parseTerminalArgs(args: string[], baseDir: string): TerminalArgs {
   let cwd = baseDir;
   let title: string | undefined;
-  const layout = placementFlags(baseDir, TERMINAL_USAGE);
+  const flags = openFlags(baseDir, TERMINAL_USAGE);
 
   const commandArgs = scanArgs(args, TERMINAL_USAGE, true, (flag) => {
     switch (flag.name) {
@@ -178,7 +187,7 @@ export function parseTerminalArgs(args: string[], baseDir: string): TerminalArgs
         title = flag.value();
         return true;
       default:
-        return layout.read(flag);
+        return flags.read(flag);
     }
   });
 
@@ -189,9 +198,8 @@ export function parseTerminalArgs(args: string[], baseDir: string): TerminalArgs
         ? commandArgs[0]
         : commandArgs.map(quoteArg).join(" ");
 
-  const placement = layout.result();
   return {
     terminal: { cwd, ...(command ? { command } : {}), ...(title ? { title } : {}) },
-    ...(placement ? { placement } : {}),
+    ...flags.result(),
   };
 }

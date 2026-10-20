@@ -91,7 +91,7 @@ loxel terminal --cwd ../other-worktree -- claude  # start an agent in another wo
 loxel terminal --split right -- pnpm dev          # in a new split beside the active tab
 ```
 
-The same `--split`, `--replace` and `--group` layout flags work for files and URLs too.
+The same `--split`, `--replace` and `--group` layout flags work for files and URLs too. When a coding agent runs `loxel`, it opens things in the background instead: no worktree switch and no stolen cursor, unless the agent passes `--focus` (see [Focus](/docs/reference-env-files-cli-settings#loxel-cli)).
 
 Because the terminal already has `LOXEL_PORT` set, the CLI connects to the running Loxel immediately.
 

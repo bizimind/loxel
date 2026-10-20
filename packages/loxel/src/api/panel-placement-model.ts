@@ -34,6 +34,17 @@ export interface PanelPlacement {
   group?: PlacementTab;
 }
 
+/**
+ * How a panel is opened from outside the window (`loxel`): where it goes, and whether it takes
+ * focus. With `focus: false` the window stays on its worktree and active tab: the panel is added
+ * in the background, and one for another worktree waits until the user switches there. Absent
+ * `focus` means true.
+ */
+export interface PanelOpenOptions {
+  placement?: PanelPlacement;
+  focus?: boolean;
+}
+
 /** Validate a placement from a request body; absent is undefined. Throws on a malformed one. */
 export function parsePanelPlacement(value: unknown): PanelPlacement | undefined {
   if (value === undefined) return undefined;

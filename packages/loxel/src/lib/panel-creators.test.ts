@@ -421,4 +421,68 @@ describe("placement", () => {
     expect(ids(api.getPanel(a.id)!.group.panels)).toEqual([a.id]);
     expect(api.activePanel?.id).toBe(a.id);
   });
+
+  test("without focus a new panel opens in the background, leaving the active tab and group", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    createTerminal({ terminalId: "t", focus: false });
+    expect(ids(a.group.panels)).toEqual([a.id, "codeeditor-/repo/b.ts", "terminal-t"]);
+    expect(api.activePanel?.id).toBe(a.id);
+
+    createTerminal({ terminalId: "u", focus: false, placement: { group: { name: "c.ts" } } });
+    expect(ids(c.group.panels)).toEqual([c.id, "terminal-u"]);
+    expect(c.group.activePanel?.id).toBe(c.id);
+    expect(api.activePanel?.id).toBe(a.id);
+  });
+
+  test("without focus a split shows the panel in its new group but keeps the active group", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+
+    createTerminal({ terminalId: "t", focus: false, placement: { split: "down" } });
+
+    const terminal = api.getPanel("terminal-t")!;
+    expect(terminal.group.activePanel).toBe(terminal);
+    expect(api.activeGroup).toBe(a.group);
+    expect(api.activePanel?.id).toBe(a.id);
+  });
+
+  test("without focus an open file's tab is neither activated nor, unplaced, moved", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    openFileBacked("codeEditor", "/repo/b.ts", { focus: false });
+    expect(api.activePanel?.id).toBe(a.id);
+    expect(a.group.activePanel?.id).toBe(a.id);
+
+    openFileBacked("codeEditor", "/repo/c.ts", {
+      focus: false,
+      placement: { group: { name: "a.ts" } },
+    });
+    expect(ids(a.group.panels)).toContain(c.id);
+    expect(api.activeGroup).toBe(a.group);
+  });
+
+  test("without focus a replace in another group keeps the active tab", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    createTerminal({
+      terminalId: "t",
+      focus: false,
+      placement: { replace: true, group: { name: "c.ts" } },
+    });
+
+    expect(api.getPanel(c.id)).toBeUndefined();
+    expect(api.activeGroup).toBe(a.group);
+    expect(api.activePanel?.id).toBe(a.id);
+
+    openFileBacked("codeEditor", "/repo/b.ts", {
+      focus: false,
+      placement: { replace: true, group: { name: "Terminal" } },
+    });
+    expect(api.getPanel("terminal-t")).toBeUndefined();
+    expect(api.activePanel?.id).toBe(a.id);
+  });
 });

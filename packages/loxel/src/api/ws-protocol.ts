@@ -5,7 +5,7 @@ import type { OpenTerminalRequest } from "@/open-request";
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
 import type { ServerNotification } from "./notification-model";
-import type { PanelPlacement } from "./panel-placement-model";
+import type { PanelOpenOptions } from "./panel-placement-model";
 import type { DirEntry } from "./project-files-model";
 import type { UpdateState } from "./update-model";
 
@@ -74,9 +74,9 @@ export type WsMessage =
   | { type: "detached_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
-  | { type: "open_url"; wtPath: string; data: { url: string; placement?: PanelPlacement } }
+  | { type: "open_url"; wtPath: string; data: { url: string } & PanelOpenOptions }
   // Window-scoped (sent to the window the user is working in)
-  | { type: "open_file"; data: { filePath: string; placement?: PanelPlacement } }
+  | { type: "open_file"; data: { filePath: string } & PanelOpenOptions }
   | { type: "open_folder"; data: { path: string } }
   | { type: "open_terminal"; data: OpenTerminalPanel }
   // Project-scoped (sent to all subscribers under project)
@@ -190,8 +190,19 @@ export interface TerminalState {
  */
 export type OpenTerminalPanel = Omit<OpenTerminalRequest, "command"> & {
   terminalId: string;
-  placement?: PanelPlacement;
-};
+} & PanelOpenOptions;
+
+/** A terminal session and where its shell starts, as the panel sends it when attaching. */
+export interface TerminalSpawnTarget {
+  id: string;
+  /** Directory the shell starts in. */
+  cwd: string;
+  /** The panel's worktree, exposed to the shell as `LOXEL_WORKTREE`; defaults to `cwd`. */
+  worktreePath?: string;
+  scrollbackLines?: number;
+  /** The panel's window, exposed to the shell as `LOXEL_WINDOW_ID`. */
+  windowId?: string;
+}
 
 /** Client-to-server WebSocket message types (JSON text frames) */
 export type WsClientMessage =
@@ -199,27 +210,28 @@ export type WsClientMessage =
   | { type: "unsubscribe_worktree"; worktreePath: string }
   | { type: "subscribe_logs" }
   | { type: "unsubscribe_logs" }
-  | {
+  | ({
       /**
        * Bind a mounted xterm to a terminal session, spawning the shell if the session does not
-       * exist. `cwd`, `worktreePath`, `windowId` and the env apply only when spawning; `cols`,
-       * `rows` and `scrollbackLines` are applied on every attach. `sinceEpoch`/`sinceOffset`
-       * identify the session and stream offset the client's xterm is already current to (a
-       * reconnect with a live xterm); omit them for a fresh xterm.
+       * exist. The {@link TerminalSpawnTarget} fields apply only when spawning, except
+       * `scrollbackLines`, which is applied on every attach like `cols` and `rows`.
+       * `sinceEpoch`/`sinceOffset` identify the session and stream offset the client's xterm is
+       * already current to (a reconnect with a live xterm); omit them for a fresh xterm.
        */
       type: "terminal_attach";
-      id: string;
       cols: number;
       rows: number;
-      /** Directory the shell starts in. */
-      cwd: string;
-      /** The panel's worktree, exposed to the shell as `LOXEL_WORKTREE`; defaults to `cwd`. */
-      worktreePath?: string;
-      scrollbackLines?: number;
-      windowId?: string;
       sinceEpoch?: string;
       sinceOffset?: number;
-    }
+    } & TerminalSpawnTarget)
+  | ({
+      /**
+       * Spawn a terminal session's shell with no xterm attached, unless it is already running:
+       * for a panel opened without focus (`loxel terminal --no-focus`), which may not mount for a
+       * while. The first `terminal_attach` binds the panel to it.
+       */
+      type: "terminal_spawn";
+    } & TerminalSpawnTarget)
   /** Stop streaming output to this client; the session keeps running. Sent on unmount. */
   | { type: "terminal_detach"; id: string }
   | { type: "terminal_resize"; id: string; cols: number; rows: number }

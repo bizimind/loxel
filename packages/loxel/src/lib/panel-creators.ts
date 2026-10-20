@@ -14,7 +14,12 @@ import type {
 } from "dockview-react";
 
 import * as api from "@/api/client";
-import type { PanelPlacement, PlacementTab, SplitDirection } from "@/api/panel-placement-model";
+import type {
+  PanelOpenOptions,
+  PanelPlacement,
+  PlacementTab,
+  SplitDirection,
+} from "@/api/panel-placement-model";
 import { nextPanelTitle } from "@/components/dockview/default-layout";
 import { renameEditorCacheKey, setEditorContent } from "@/components/editor/MarkdownEditor";
 import { renameDrawingCacheKey } from "@/components/excalidraw-editor/ExcalidrawEditor";
@@ -104,6 +109,32 @@ function placementReference(
 }
 
 /**
+ * Run a layout change opened without focus, handing DOM focus back if the change dropped it: a
+ * split can re-parent the focused group's element, and moving a focused element blurs it.
+ */
+function keepingDomFocus<T>(focus: boolean, change: () => T): T {
+  const focused = focus ? null : document.activeElement;
+  const result = change();
+  if (focused instanceof HTMLElement && focused.isConnected && document.activeElement !== focused) {
+    focused.focus({ preventScroll: true });
+  }
+  return result;
+}
+
+/**
+ * Close the tab a placed panel replaced. Closing an active tab activates its group, so without
+ * `focus` the previously active tab is activated again (unless it was the replaced tab, whose
+ * replacement then shows in its place).
+ */
+function closeReplaced(dv: DockviewApi, replaced: IDockviewPanel, focus: boolean): void {
+  const active = dv.activePanel;
+  replaced.api.close();
+  if (!focus && active && active !== replaced && dv.activePanel !== active) {
+    activatePanel(dv, active);
+  }
+}
+
+/**
  * Where to add a panel relative to `ref`: a tab in its group by default, a new group beside it for
  * `split`, or right after it for `replace` (the caller then closes it).
  */
@@ -122,52 +153,76 @@ function placedPosition(
 
 /**
  * Add a panel where `placement` asks, closing the tab it replaces. With no tab open at all the
- * panel simply opens.
+ * panel simply opens. Without `focus` it is added without activating it or its group.
  */
 function addPlacedPanel(
   dv: DockviewApi,
   placement: PanelPlacement | undefined,
   options: PanelOptions & Pick<AddPanelOptions, "renderer">,
+  focus = true,
 ): IDockviewPanel {
   const ref = placementReference(dv, placement);
-  const panel = dv.addPanel({ ...options, position: ref && placedPosition(ref, placement) });
-  // Added before closing, so a group holding only the replaced tab isn't removed in between.
-  if (ref && placement?.replace) ref.api.close();
-  return panel;
+  return keepingDomFocus(focus, () => {
+    const panel = dv.addPanel({
+      ...options,
+      position: ref && placedPosition(ref, placement),
+      inactive: !focus,
+    });
+    // Added before closing, so a group holding only the replaced tab isn't removed in between.
+    if (ref && placement?.replace) closeReplaced(dv, ref, focus);
+    return panel;
+  });
 }
 
 /**
  * Move an open tab where `placement` asks, as {@link addPlacedPanel} would add it (`loxel` naming
- * a file whose tab is already open), and activate it. A tab placed relative to itself only moves
- * for a split, off a group it shares with other tabs (like the `panel.move.new*` actions).
+ * a file whose tab is already open), and activate it unless opened without `focus`. A tab placed
+ * relative to itself only moves for a split, off a group it shares with other tabs (like the
+ * `panel.move.new*` actions).
  */
-function movePlacedPanel(dv: DockviewApi, panel: IDockviewPanel, placement: PanelPlacement): void {
+function movePlacedPanel(
+  dv: DockviewApi,
+  panel: IDockviewPanel,
+  placement: PanelPlacement,
+  focus: boolean,
+): void {
   const ref = placementReference(dv, placement);
-  if (ref === panel) {
-    if (placement.split && panel.group.panels.length > 1) {
-      panel.api.moveTo({ group: panel.group, position: MOVE_POSITION[placement.split] });
+  const skipSetActive = !focus;
+  keepingDomFocus(focus, () => {
+    if (ref === panel) {
+      if (placement.split && panel.group.panels.length > 1) {
+        panel.api.moveTo({
+          group: panel.group,
+          position: MOVE_POSITION[placement.split],
+          skipSetActive,
+        });
+      }
+    } else if (ref) {
+      if (placement.split) {
+        panel.api.moveTo({
+          group: ref.group,
+          position: MOVE_POSITION[placement.split],
+          skipSetActive,
+        });
+      } else if (placement.replace) {
+        panel.api.moveTo({
+          group: ref.group,
+          position: "center",
+          index: ref.group.panels.indexOf(ref),
+          skipSetActive,
+        });
+        closeReplaced(dv, ref, focus);
+      } else if (panel.group !== ref.group) {
+        panel.api.moveTo({ group: ref.group, position: "center", skipSetActive });
+      }
     }
-  } else if (ref) {
-    if (placement.split) {
-      panel.api.moveTo({ group: ref.group, position: MOVE_POSITION[placement.split] });
-    } else if (placement.replace) {
-      panel.api.moveTo({
-        group: ref.group,
-        position: "center",
-        index: ref.group.panels.indexOf(ref),
-      });
-      ref.api.close();
-    } else if (panel.group !== ref.group) {
-      panel.api.moveTo({ group: ref.group, position: "center" });
-    }
-  }
-  activatePanel(dv, panel);
+  });
+  if (focus) activatePanel(dv, panel);
 }
 
 // -- Panel creators --
 
-export interface CreateTerminalOptions {
-  placement?: PanelPlacement;
+export interface CreateTerminalOptions extends PanelOpenOptions {
   /** Session ID to bind to; minted here when absent. The server names it for `loxel terminal`. */
   terminalId?: string;
   /** Directory the shell starts in; the active worktree when absent. */
@@ -175,7 +230,12 @@ export interface CreateTerminalOptions {
   title?: string;
 }
 
-export function createTerminal({ placement, cwd, ...options }: CreateTerminalOptions = {}): void {
+export function createTerminal({
+  placement,
+  focus,
+  cwd,
+  ...options
+}: CreateTerminalOptions = {}): void {
   const cApi = getCenterApi();
   if (!cApi) return;
 
@@ -187,13 +247,18 @@ export function createTerminal({ placement, cwd, ...options }: CreateTerminalOpt
   uiLog.info("Panel created", { panelType: "terminal", panelId, terminalId, cwd });
 
   const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-  addPlacedPanel(cApi, placement, {
-    id: panelId,
-    component: "terminal",
-    tabComponent: "terminalTab",
-    title,
-    params: { terminalId, worktreePath, ...(cwd && cwd !== worktreePath ? { cwd } : {}) },
-  });
+  addPlacedPanel(
+    cApi,
+    placement,
+    {
+      id: panelId,
+      component: "terminal",
+      tabComponent: "terminalTab",
+      title,
+      params: { terminalId, worktreePath, ...(cwd && cwd !== worktreePath ? { cwd } : {}) },
+    },
+    focus,
+  );
 }
 
 export async function createEditor(options?: {
@@ -277,7 +342,7 @@ export async function createDrawing(placement?: PanelPlacement): Promise<void> {
   }
 }
 
-export function createBrowser(url?: string, placement?: PanelPlacement): void {
+export function createBrowser(url?: string, { placement, focus }: PanelOpenOptions = {}): void {
   const cApi = getCenterApi();
   if (!cApi) return;
 
@@ -285,15 +350,20 @@ export function createBrowser(url?: string, placement?: PanelPlacement): void {
   const title = nextPanelTitle(cApi, "Browser");
   const targetUrl = url || "about:blank";
 
-  addPlacedPanel(cApi, placement, {
-    id: panelId,
-    component: "browser",
-    tabComponent: "browserTab",
-    title,
-    params: { url: targetUrl },
-    // Keep the <webview> attached while hidden or moved: re-attaching it reloads the page.
-    renderer: "always",
-  });
+  addPlacedPanel(
+    cApi,
+    placement,
+    {
+      id: panelId,
+      component: "browser",
+      tabComponent: "browserTab",
+      title,
+      params: { url: targetUrl },
+      // Keep the <webview> attached while hidden or moved: re-attaching it reloads the page.
+      renderer: "always",
+    },
+    focus,
+  );
   uiLog.info("Panel created", { panelType: "browser", panelId });
 }
 
@@ -416,12 +486,10 @@ export async function createCodeEditor(options?: {
 /** An exact slot for a new file-backed panel, e.g. a moved file's tab taking its old tab's place. */
 type FileBackedSlot = Required<Pick<AddPanelOptions, "position" | "inactive">>;
 
-interface OpenFileBackedOptions {
+interface OpenFileBackedOptions extends PanelOpenOptions {
   params?: { line?: number; column?: number; movedFrom?: string };
   /** Where a new tab goes, overriding `placement`. */
   slot?: FileBackedSlot;
-  /** Where the tab goes; an already open tab is moved there. Default: a tab beside the active one. */
-  placement?: PanelPlacement;
 }
 
 /**
@@ -431,7 +499,7 @@ interface OpenFileBackedOptions {
 export function openFileBacked(
   type: FilePanelType,
   filePath: string,
-  { params, slot, placement }: OpenFileBackedOptions = {},
+  { params, slot, placement, focus = true }: OpenFileBackedOptions = {},
 ): IDockviewPanel | undefined {
   const cApi = getCenterApi();
   if (!cApi) return undefined;
@@ -440,8 +508,8 @@ export function openFileBacked(
   const panelId = `${def.idPrefix}${filePath}`;
   const existing = cApi.getPanel(panelId);
   if (existing) {
-    if (placement) movePlacedPanel(cApi, existing, placement);
-    else activatePanel(cApi, existing);
+    if (placement) movePlacedPanel(cApi, existing, placement, focus);
+    else if (focus) activatePanel(cApi, existing);
     if (params?.line) {
       existing.api.updateParameters({ line: params.line, column: params.column });
     }
@@ -454,7 +522,9 @@ export function openFileBacked(
     title: getDisplayFilename(filePath),
     params: { filePath, worktreePath: useWorktreeStore.getState().activeWorktreePath, ...params },
   };
-  return slot ? cApi.addPanel({ ...options, ...slot }) : addPlacedPanel(cApi, placement, options);
+  return slot
+    ? cApi.addPanel({ ...options, ...slot })
+    : addPlacedPanel(cApi, placement, options, focus);
 }
 
 // -- File lifecycle handlers --

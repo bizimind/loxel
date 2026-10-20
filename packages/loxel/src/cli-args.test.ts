@@ -125,6 +125,30 @@ describe("parseOpenArgs", () => {
     expect(() => parseOpenArgs(["--help"], BASE)).toThrow("unknown option --help\nusage: loxel");
   });
 
+  test("focus is unset unless a flag names it", () => {
+    expect(parseOpenArgs(["a.ts"], BASE).focus).toBeUndefined();
+    expect(parseOpenArgs(["a.ts", "--focus"], BASE)).toEqual({ target: "a.ts", focus: true });
+    expect(parseOpenArgs(["--no-focus", "--split=up", "a.ts"], BASE)).toEqual({
+      target: "a.ts",
+      placement: { split: "up" },
+      focus: false,
+    });
+    expect(parseTerminalArgs(["--no-focus", "--", "make"], BASE)).toEqual({
+      terminal: { cwd: BASE, command: "make" },
+      focus: false,
+    });
+  });
+
+  test("rejects conflicting or valued focus flags", () => {
+    expect(() => parseOpenArgs(["--focus", "--no-focus", "a.ts"], BASE)).toThrow(
+      "--focus and --no-focus cannot be combined",
+    );
+    expect(() => parseTerminalArgs(["--no-focus", "--focus"], BASE)).toThrow(
+      "--focus and --no-focus cannot be combined",
+    );
+    expect(() => parseOpenArgs(["--focus=yes", "a.ts"], BASE)).toThrow("--focus takes no value");
+  });
+
   test("needs exactly one target", () => {
     expect(() => parseOpenArgs(["--replace"], BASE)).toThrow("missing file, folder or URL");
     expect(() => parseOpenArgs(["a.ts", "b.ts"], BASE)).toThrow(

@@ -15,7 +15,7 @@ import { wsClient } from "@/api/client";
 import type { TerminalState } from "@/api/ws-protocol";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { FindBar } from "@/components/ui/find-bar";
-import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
 import { frontendLog } from "@/lib/frontend-logger";
 import { WINDOW_ID } from "@/lib/window-id";
@@ -437,7 +437,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       terminal.open(container);
       if (panelApi.isVisible) webglRenderer.attach();
       // Activation focus before open() is a no-op (xterm has no textarea yet), so re-apply it.
-      if (panelApi.isActive && panelApi.isGroupActive) terminal.focus();
+      if (isActivatedPanel(panelApi)) terminal.focus();
       rafId = requestAnimationFrame(() => {
         fitAddon.fit();
         if (spawnTargetRef.current) {

@@ -31,7 +31,7 @@ export function useLoxelEventListeners(): void {
       onLoxelEvent("loxel-create-terminal", (d) => createTerminal(d ?? {})),
       onLoxelEvent("loxel-create-editor", (d) => createEditor({ placement: d?.placement })),
       onLoxelEvent("loxel-create-drawing", (d) => createDrawing(d?.placement)),
-      onLoxelEvent("loxel-create-browser", (d) => createBrowser(d?.url, d?.placement)),
+      onLoxelEvent("loxel-create-browser", (d) => createBrowser(d?.url, d ?? {})),
       onLoxelEvent("loxel-create-code-editor", (d) =>
         createCodeEditor({ ext: d?.ext, placement: d?.placement }),
       ),
@@ -43,19 +43,21 @@ export function useLoxelEventListeners(): void {
         openFileBacked("codeEditor", d.filePath, {
           params: { line: d.line, column: d.column },
           placement: d.placement,
+          focus: d.focus,
         }),
       ),
       onLoxelEvent("loxel-open-markdown-editor", (d) =>
         openFileBacked("editor", d.filePath, {
           params: { line: d.line, column: d.column },
           placement: d.placement,
+          focus: d.focus,
         }),
       ),
       onLoxelEvent("loxel-open-drawing-editor", (d) =>
-        openFileBacked("excalidraw", d.filePath, { placement: d.placement }),
+        openFileBacked("excalidraw", d.filePath, { placement: d.placement, focus: d.focus }),
       ),
       onLoxelEvent("loxel-open-media-viewer", (d) =>
-        openFileBacked("media", d.filePath, { placement: d.placement }),
+        openFileBacked("media", d.filePath, { placement: d.placement, focus: d.focus }),
       ),
       onLoxelEvent("loxel-open-diff", () => openDiff()),
       onLoxelEvent("loxel-open-localdb", () => openLocalDb()),
