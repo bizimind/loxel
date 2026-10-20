@@ -11,8 +11,11 @@ export interface ComputedFileDiff {
 
 /** Unchanged lines kept around each change, as in `git diff` */
 const CONTEXT_LINES = 3;
-/** Past this, Monaco returns a coarser (still valid) diff instead of an optimal one */
-const MAX_COMPUTATION_MS = 1000;
+/**
+ * Past this, Monaco returns a coarser (still valid) diff instead of an optimal one. Kept short
+ * because the diff runs on the main thread after every typing pause.
+ */
+const MAX_COMPUTATION_MS = 250;
 
 const computer = new DefaultLinesDiffComputer();
 

@@ -607,7 +607,7 @@ export function openDiff(): void {
 }
 
 /** Open a panel comparing two files; every comparison gets its own panel. */
-export function openCompareFiles(oldPath: string, newPath: string): void {
+export function openCompareFiles(oldPath: string, newPath: string, split?: SplitPosition): void {
   const cApi = getCenterApi();
   if (!cApi) return;
 
@@ -619,9 +619,24 @@ export function openCompareFiles(oldPath: string, newPath: string): void {
     tabComponent: "compareTab",
     title: `${getDisplayFilename(oldPath)} ↔ ${getDisplayFilename(newPath)}`,
     params: { oldPath, newPath, worktreePath },
-    position: panelPosition(cApi),
+    position: panelPosition(cApi, split),
   });
   uiLog.info("Panel created", { panelType: "compare", panelId, oldPath, newPath });
+}
+
+/**
+ * Split or new-tab actions on a compare panel carry no paths: open the same comparison again
+ * next to the panel the split starts from (the active one by default).
+ */
+export function duplicateComparison(split?: SplitPosition): void {
+  const cApi = getCenterApi();
+  if (!cApi) return;
+  const source = split ? cApi.getPanel(split.referencePanel) : cApi.activePanel;
+  const params: unknown = source?.params;
+  if (typeof params !== "object" || params === null) return;
+  const { oldPath, newPath } = params as Record<string, unknown>;
+  if (typeof oldPath !== "string" || typeof newPath !== "string") return;
+  openCompareFiles(oldPath, newPath, split);
 }
 
 /** Open or focus the singleton LocalDb panel. */

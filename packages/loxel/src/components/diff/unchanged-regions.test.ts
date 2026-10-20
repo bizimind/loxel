@@ -32,6 +32,23 @@ describe("carryExpandedRegions", () => {
     expect(carried).toEqual(new Set([last.index]));
   });
 
+  it("matches only on the side that did not shift when told which one that is", () => {
+    // One change at line 150 of 300: R0 above it, R1 below it.
+    const lines = numbered(300);
+    const changed = lines.map((l, i) => (i === 149 ? "changed" : l));
+    const before = regionsFor(lines, changed);
+    expect(before).toHaveLength(2);
+
+    // Deleting new lines 10-109 shifts R1's new range onto R0's old new range.
+    const shortened = [...changed.slice(0, 9), ...changed.slice(109)];
+    const after = regionsFor(lines, shortened);
+    const r1 = after.at(-1)!;
+
+    expect(carryExpandedRegions(before, new Set([0]), after).has(r1.index)).toBe(true);
+    const oldOnly = carryExpandedRegions(before, new Set([0]), after, { old: true, new: false });
+    expect(oldOnly.has(r1.index)).toBe(false);
+  });
+
   it("collapses nothing that was expanded and expands nothing that was collapsed", () => {
     const regions = regionsFor(base, edited);
     expect(carryExpandedRegions(regions, new Set(), regions)).toEqual(new Set());

@@ -50,7 +50,7 @@ Drop rules are enforced in `setupOuterDockview` (`onWillShowOverlay`): no edge d
 | `media`         | `media-<filePath>`          | `filePath`, `worktreePath`                   | Reuse by path                                                |
 | `agentDevTools` | `agentdevtools-<sessionId>` | `sessionId`                                  | Reuse by session; opens to the right of its agent tab        |
 | `diff`          | `diff`                      | none                                         | Singleton                                                    |
-| `compare`       | `compare-<uuid>`            | `oldPath`, `newPath`, `worktreePath`         | Always new                                                   |
+| `compare`       | `compare-<uuid>`            | `oldPath`, `newPath`, `worktreePath`         | Always new; a split duplicates the comparison                |
 | `localDb`       | `localdb-main`              | none                                         | Singleton                                                    |
 
 File-backed ids embed the absolute path, so a file has at most one editor tab per worktree layout; compare panels can show it again (see [EDITOR.md](EDITOR.md#several-editors-of-one-file)). Reuse always goes through `activatePanel()`, never `panel.api.setActive()` (see [KEYBINDINGS.md](KEYBINDINGS.md#focus-navigation) and the browser note in [ELECTRON.md](ELECTRON.md#browser-panels)).

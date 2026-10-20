@@ -1,5 +1,4 @@
 import type { editor as monacoEditor } from "monaco-editor";
-import * as monaco from "monaco-editor";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -8,6 +7,7 @@ import {
   useFormatOnSave,
 } from "@/hooks/use-disk-synced-content";
 import { computeLineEdits } from "@/lib/compute-line-edits";
+import { addSaveAction } from "@/lib/monaco-save-action";
 import { toMonacoLanguage } from "@/lib/monaco-theme";
 import { resolveLanguage } from "@/lib/resolve-language";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -140,7 +140,7 @@ export function useCompareSide(filePath: string, editorKey: string): CompareSide
       editor.onDidDispose(() => {
         if (editorRef.current === editor) editorRef.current = null;
       });
-      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveNow());
+      addSaveAction(editor, () => void saveNow());
     },
     [saveNow],
   );

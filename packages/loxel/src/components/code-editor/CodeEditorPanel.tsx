@@ -20,6 +20,7 @@ import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { computeLineEdits } from "@/lib/compute-line-edits";
 import { removeDollarSchema, setDollarSchema } from "@/lib/json-schema-registry";
 import { validateStrictJson } from "@/lib/json-strict-validator";
+import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
 import { resolveLanguage } from "@/lib/resolve-language";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
@@ -456,7 +457,7 @@ export function CodeEditorPanel({
     // Cmd+W is handled by the global keybinding system (useKeybindings).
     // saveOptionsRef is kept in sync with formatting settings above,
     // so save() automatically includes format options for both Cmd+S and auto-save.
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveNow());
+    addSaveAction(editor, () => void saveNow());
 
     // Navigate to initial line:column if provided (e.g. from search results).
     // Only navigate now if diskContent was available at mount (React Query cache hit).

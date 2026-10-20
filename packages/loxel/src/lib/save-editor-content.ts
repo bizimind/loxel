@@ -53,22 +53,27 @@ export interface SaveOptions {
 }
 
 /**
- * Content returned by the file-write response, keyed by nonce.
+ * Content returned by the file-write response, keyed by nonce, with the editor that saved it.
  * When the WS echo arrives, the client can use this instead of fetching.
  * Entries auto-expire after 2 seconds to handle duplicate FS events
  * (the same nonce may appear in multiple file_content_changed messages).
  */
-const savedContentByNonce = new Map<string, string>();
+const savedContentByNonce = new Map<string, { content: string; editorKey: string }>();
 
 const STASH_EXPIRY_MS = 2_000;
 
-/** Retrieve stashed content for a nonce (kept alive for duplicate FS events). */
-export function consumeSavedContent(nonce: string): string | undefined {
-  return savedContentByNonce.get(nonce);
+/**
+ * Retrieve stashed content for a nonce saved by `editorKey` (kept alive for duplicate FS events).
+ * Other editors of the same file get nothing: the content may already be outdated by a later save
+ * of the saving editor, which only that editor can tell, so they read the file instead.
+ */
+export function consumeSavedContent(nonce: string, editorKey: string): string | undefined {
+  const saved = savedContentByNonce.get(nonce);
+  return saved?.editorKey === editorKey ? saved.content : undefined;
 }
 
-function stashContent(nonce: string, content: string): void {
-  savedContentByNonce.set(nonce, content);
+function stashContent(nonce: string, content: string, editorKey: string): void {
+  savedContentByNonce.set(nonce, { content, editorKey });
   setTimeout(() => savedContentByNonce.delete(nonce), STASH_EXPIRY_MS);
 }
 
@@ -103,7 +108,7 @@ export async function saveEditorContent(
     // Stash the written content (may be formatted) so the WS echo handler
     // can use it directly instead of fetching via HTTP.
     if (result.content !== undefined) {
-      stashContent(nonce, result.content);
+      stashContent(nonce, result.content, editorKey);
     }
     // State transition is handled by the WebSocket file_content_changed echo
     // (matched by nonce in handleDiskChange). Safety timeout ensures we don't

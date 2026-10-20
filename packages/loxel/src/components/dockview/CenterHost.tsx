@@ -97,20 +97,17 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
         }
       }
 
-      // Notify server when an external file panel is closed so watchers can be cleaned up.
-      // Only send for files outside the worktree to avoid unnecessary messages.
-      const rawParams: unknown = event.params;
-      const filePath =
-        rawParams !== undefined &&
-        rawParams !== null &&
-        typeof rawParams === "object" &&
-        "filePath" in rawParams &&
-        typeof (rawParams as { filePath?: unknown }).filePath === "string"
-          ? (rawParams as { filePath: string }).filePath
-          : undefined;
+      // Notify server when the last panel showing an external file closes, so its watcher can
+      // be cleaned up. Only files outside the worktree are sent; a file still shown by another
+      // panel (an editor tab and a compare panel can show the same one) stays watched.
       const worktreePath = useWorktreeStore.getState().activeWorktreePath;
-      if (filePath && worktreePath && !filePath.startsWith(worktreePath + "/")) {
-        wsClient.send({ type: "close_external_file", worktreePath, filePath });
+      if (worktreePath) {
+        const others = api.panels.filter((p) => p.id !== event.id);
+        const stillShown = new Set(others.flatMap((p) => panelFilePaths(p.params)));
+        for (const filePath of panelFilePaths(event.params)) {
+          if (filePath.startsWith(worktreePath + "/") || stillShown.has(filePath)) continue;
+          wsClient.send({ type: "close_external_file", worktreePath, filePath });
+        }
       }
     });
 
@@ -157,4 +154,11 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
       />
     </div>
   );
+}
+
+/** Files a center panel shows, from its params: `filePath` for editors, both sides for a comparison. */
+function panelFilePaths(params: unknown): string[] {
+  if (typeof params !== "object" || params === null) return [];
+  const { filePath, oldPath, newPath } = params as Record<string, unknown>;
+  return [filePath, oldPath, newPath].filter((p): p is string => typeof p === "string");
 }

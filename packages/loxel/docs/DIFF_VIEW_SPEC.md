@@ -13,7 +13,7 @@ Two panels feed them:
 
 An editable side's [EditorPanel.tsx](../src/components/diff/EditorPanel.tsx) starts from the side's text, reports every content change through `onContentChange`, and stops following its `content` prop after mount: its owner applies disk content and merges to the mounted editor as line edits, and keeps the text when no editor is mounted (unified mode), so edits survive switching views. Each `EditorPanel` disposes its model on unmount, so model URIs must be unique among mounted panels.
 
-`useCollapsedRegions` collapses every region again when the hunks change, which suits moving between files. With `keepExpandedOnChange` (compare panels) it instead carries expanded regions over with `carryExpandedRegions` ([unchanged-regions.ts](../src/components/diff/unchanged-regions.ts)): a new region stays expanded when it overlaps a previously expanded one on either side, since an edit shifts the lines of one side only. Both modes follow the regions during render, so hidden ranges never pair new regions with old indices.
+`useCollapsedRegions` collapses every region again when the hunks change, which suits moving between files. With `keepExpandedOnChange` (compare panels) it instead carries expanded regions over with `carryExpandedRegions` ([unchanged-regions.ts](../src/components/diff/unchanged-regions.ts)): a new region stays expanded when it overlaps a previously expanded one on a side whose line count did not change (either side when both or neither changed), since an edit shifts the lines of one side only. Both modes follow the regions during render, so hidden ranges never pair new regions with old indices.
 
 ## Synchronized Scrolling Behavior (JetBrains-Style)
 

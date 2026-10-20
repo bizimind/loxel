@@ -44,7 +44,7 @@ export function refreshOpenFile(
   // Content from the file-write response (matched by nonce) saves an HTTP round-trip.
   let stashedContent: string | undefined;
   for (const n of nonces) {
-    stashedContent = consumeSavedContent(n);
+    stashedContent = consumeSavedContent(n, editorKey);
     if (stashedContent !== undefined) break;
   }
 

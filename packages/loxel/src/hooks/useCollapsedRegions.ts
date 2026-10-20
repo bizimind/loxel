@@ -29,6 +29,8 @@ interface UseCollapsedRegionsOptions {
 interface Expansion {
   hunks: DiffHunk[];
   regions: CollapsibleRegion[];
+  oldLineCount: number;
+  newLineCount: number;
   expanded: Set<number>;
 }
 
@@ -46,6 +48,8 @@ export function useCollapsedRegions(
   const [expansion, setExpansion] = useState<Expansion>(() => ({
     hunks,
     regions: collapsibleRegions,
+    oldLineCount,
+    newLineCount,
     expanded: new Set(),
   }));
 
@@ -55,11 +59,21 @@ export function useCollapsedRegions(
   if (expansion.regions !== collapsibleRegions) {
     let expanded = expansion.expanded;
     if (keepExpandedOnChange) {
-      expanded = carryExpandedRegions(expansion.regions, expansion.expanded, collapsibleRegions);
+      // A side whose line count changed was edited and its lines shifted; match on the other.
+      const oldStable = expansion.oldLineCount === oldLineCount;
+      const newStable = expansion.newLineCount === newLineCount;
+      const stableSides =
+        oldStable !== newStable ? { old: oldStable, new: newStable } : { old: true, new: true };
+      expanded = carryExpandedRegions(
+        expansion.regions,
+        expansion.expanded,
+        collapsibleRegions,
+        stableSides,
+      );
     } else if (expansion.hunks !== hunks) {
       expanded = new Set();
     }
-    current = { hunks, regions: collapsibleRegions, expanded };
+    current = { hunks, regions: collapsibleRegions, oldLineCount, newLineCount, expanded };
     setExpansion(current);
   }
   const expandedSet = current.expanded;
