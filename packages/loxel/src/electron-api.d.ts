@@ -21,6 +21,11 @@ interface Window {
     onWebviewFocused?: (callback: () => void) => () => void;
     /** Current page zoom factor (Cmd+/Cmd-), read synchronously from `webFrame`. */
     getZoomFactor?: () => number;
+    /**
+     * Copy the image at window point (x, y) of one of this window's webviews to the clipboard;
+     * the point is in the coordinates of the webview's `context-menu` event.
+     */
+    copyWebviewImage?: (webContentsId: number, x: number, y: number) => void;
   };
   loxelWindow?: {
     /** Stable per-BrowserWindow ID assigned by Electron main; null in non-Electron contexts. */

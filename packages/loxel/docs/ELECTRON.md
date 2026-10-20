@@ -6,7 +6,7 @@ How the Electron shell fits around the Bun server and React renderer, and the co
 
 - **One shared server per mode.** On launch, Electron reuses a Loxel server already listening on the mode's port (7433 prod, 7434 dev) and otherwise spawns one: the compiled `loxel-server` binary in production, `bun run src/server/index.ts` with `LOXEL_DEV=1` in dev. Every window connects to that server, identifies itself with its window ID, and talks to it over REST and WebSocket. The server shuts itself down after an idle period with no connected clients. Discovery, ownership, idle shutdown and state scopes are detailed in [SHARED_SERVER.md](SHARED_SERVER.md).
 - **Windows load the server's URL** (`http://127.0.0.1:<port>`), or the Vite dev server's URL under `pnpm run dev:app` (Vite proxies `/api` and `/ws` to the dev server).
-- **Electron IPC is only for native integrations** (dock badge, folder dialog, window focus, opening links in a browser panel, keystrokes inside webviews). Channel names live in `src/electron/ipc-channels.ts`, and the renderer-facing API (`window.electronAPI`) is typed in `src/electron-api.d.ts`. Everything else goes through the server.
+- **Electron IPC is only for native integrations** (dock badge, folder dialog, window focus, opening links in a browser panel, keystrokes inside webviews, copying images from webviews). Channel names live in `src/electron/ipc-channels.ts`, and the renderer-facing API (`window.electronAPI`) is typed in `src/electron-api.d.ts`. Everything else goes through the server.
 
 ## What ships where
 
@@ -22,6 +22,7 @@ Consequences:
 Browser panels host a `<webview>` per tab.
 
 - **No reloads.** Re-attaching a `<webview>` to the DOM reloads its page, so browser panels are created with dockview's `renderer: "always"` and activation of an already-active tab goes through `activatePanel()` (`src/store/layout-actions.ts`). Switching worktrees still rebuilds the layout and reloads them.
+- **Context menu.** The renderer draws the page's right-click menu with the app's own `ContextMenu` from the webview's `context-menu` event (`src/components/browser/BrowserContextMenu.tsx`). The event's `x`/`y` are window coordinates in device-independent pixels, not relative to the webview, so the menu is placed at them divided by the app zoom factor; `copyImageAt` and `inspectElement` take them unchanged. `<webview>` has no `copyImageAt`, so Copy Image asks the main process to call it on the webview's webContents (`src/electron/webview-copy-image.ts`), which only accepts webviews the sending window hosts.
 - **Shortcuts** keep working while a page has focus through keystroke forwarding from the main process; see [KEYBINDINGS.md](KEYBINDINGS.md#shortcuts-inside-browser-panels).
 - **Passkeys** use the macOS Touch ID platform authenticator (`src/electron/webauthn.ts`). This needs a restricted entitlement that only provisioned Developer ID builds carry, so dev runs and unprovisioned local builds have no passkeys; see [RELEASE_SIGNING.md](RELEASE_SIGNING.md).
 

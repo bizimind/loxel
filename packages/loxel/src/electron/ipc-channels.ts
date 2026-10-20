@@ -15,3 +15,8 @@ export const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
  * for that, so this is the renderer's cue to recompute which keystrokes to intercept.
  */
 export const WEBVIEW_FOCUSED = "keybindings:webview-focused";
+/**
+ * Renderer → main: copy the image at a point of one of its webviews to the clipboard (the browser
+ * panel's context menu). `<webview>` has no `copyImageAt`; only its webContents does.
+ */
+export const COPY_WEBVIEW_IMAGE = "browser:copy-image-at";

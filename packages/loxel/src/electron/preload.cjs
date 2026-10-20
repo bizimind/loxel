@@ -9,6 +9,7 @@ const OPEN_FOLDER_DIALOG = "dialog:open-folder";
 const SET_KEYSTROKE_INTERCEPTION = "keybindings:set-interception";
 const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
 const WEBVIEW_FOCUSED = "keybindings:webview-focused";
+const COPY_WEBVIEW_IMAGE = "browser:copy-image-at";
 
 // Per-window identity assigned by main when this BrowserWindow was created.
 // Stable across renderer reloads (Cmd+R) — different per BrowserWindow.
@@ -47,4 +48,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(WEBVIEW_FOCUSED, handler);
   },
   getZoomFactor: () => webFrame.getZoomFactor(),
+  copyWebviewImage: (webContentsId, x, y) =>
+    ipcRenderer.send(COPY_WEBVIEW_IMAGE, webContentsId, x, y),
 });

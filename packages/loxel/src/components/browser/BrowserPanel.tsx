@@ -1,4 +1,14 @@
 import type { DockviewPanelApi } from "dockview-react";
+import type {
+  DidFailLoadEvent,
+  DidNavigateEvent,
+  DidNavigateInPageEvent,
+  ContextMenuEvent,
+  FoundInPageEvent,
+  PageFaviconUpdatedEvent,
+  PageTitleUpdatedEvent,
+  WebviewTag,
+} from "electron";
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
@@ -18,79 +28,10 @@ import { usePanelFind } from "@/hooks/usePanelFind";
 import { cn } from "@/lib/utils";
 import { reattachActiveContent } from "@/store/layout-actions";
 
+import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserContextMenu";
+import { webSearchUrl } from "./web-search";
+
 const isElectron = navigator.userAgent.includes("Electron");
-
-/** Electron webview event payloads (not in standard DOM typings). */
-interface WebviewNavigateEvent extends Event {
-  url: string;
-}
-interface WebviewTitleEvent extends Event {
-  title: string;
-}
-interface WebviewFailLoadEvent extends Event {
-  errorCode: number;
-  errorDescription: string;
-  validatedURL: string;
-}
-interface WebviewFaviconEvent extends Event {
-  favicons: string[];
-}
-interface WebviewFoundInPageEvent extends Event {
-  result: {
-    requestId: number;
-    /** 1-based position of the active match. */
-    activeMatchOrdinal: number;
-    matches: number;
-  };
-}
-/** Typed subset of Electron's webview API (not in React/DOM typings). */
-interface ElectronWebView extends HTMLElement {
-  loadURL(url: string): void;
-  goBack(): void;
-  goForward(): void;
-  reload(): void;
-  stop(): void;
-  canGoBack(): boolean;
-  canGoForward(): boolean;
-  openDevTools(): void;
-  closeDevTools(): void;
-  isDevToolsOpened(): boolean;
-  /** `findNext: true` starts a new find session (new query); false steps to the next match. */
-  findInPage(text: string, options?: { forward?: boolean; findNext?: boolean }): number;
-  stopFindInPage(action: "clearSelection" | "keepSelection" | "activateSelection"): void;
-
-  addEventListener(
-    type: "did-navigate" | "did-navigate-in-page",
-    listener: (event: WebviewNavigateEvent) => void,
-  ): void;
-  addEventListener(type: "page-title-updated", listener: (event: WebviewTitleEvent) => void): void;
-  addEventListener(type: "did-fail-load", listener: (event: WebviewFailLoadEvent) => void): void;
-  addEventListener(
-    type: "page-favicon-updated",
-    listener: (event: WebviewFaviconEvent) => void,
-  ): void;
-  addEventListener(type: "found-in-page", listener: (event: WebviewFoundInPageEvent) => void): void;
-  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
-
-  removeEventListener(
-    type: "did-navigate" | "did-navigate-in-page",
-    listener: (event: WebviewNavigateEvent) => void,
-  ): void;
-  removeEventListener(
-    type: "page-title-updated",
-    listener: (event: WebviewTitleEvent) => void,
-  ): void;
-  removeEventListener(type: "did-fail-load", listener: (event: WebviewFailLoadEvent) => void): void;
-  removeEventListener(
-    type: "page-favicon-updated",
-    listener: (event: WebviewFaviconEvent) => void,
-  ): void;
-  removeEventListener(
-    type: "found-in-page",
-    listener: (event: WebviewFoundInPageEvent) => void,
-  ): void;
-  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void;
-}
 
 export interface BrowserPanelParams {
   url: string;
@@ -103,7 +44,7 @@ interface BrowserPanelProps {
 }
 
 export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
-  const webviewRef = useRef<ElectronWebView | null>(null);
+  const webviewRef = useRef<WebviewTag | null>(null);
   const readyRef = useRef(false);
   const [currentUrl, setCurrentUrl] = useState(initialUrl);
   const [inputUrl, setInputUrl] = useState(initialUrl);
@@ -112,6 +53,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   const [canGoForward, setCanGoForward] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<BrowserContextMenuState | null>(null);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -169,7 +111,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       if (!readyRef.current) {
         readyRef.current = true;
         if (initialUrl && initialUrl !== "about:blank") {
-          webview.loadURL(initialUrl);
+          loadUrl(webview, initialUrl);
         }
       }
     };
@@ -191,30 +133,33 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       updateNavState();
     };
 
-    const onDidNavigate = (event: WebviewNavigateEvent) => {
+    const onDidNavigate = (event: DidNavigateEvent | DidNavigateInPageEvent) => {
       if (event.type === "did-navigate") {
         // A new page drops the matches and the find session.
         setFindMatches(null);
         findSessionStaleRef.current = true;
       }
-      setCurrentUrl(event.url);
-      setInputUrl(event.url);
-      panelApi.updateParameters({ url: event.url, faviconUrl: undefined });
+      // The page's own URL, not `event.url`: that is a subframe's for in-page navigations in
+      // frames, and drops the `view-source:` prefix of a source view.
+      const url = webview.getURL();
+      setCurrentUrl(url);
+      setInputUrl(url);
+      panelApi.updateParameters({ url, faviconUrl: undefined });
       updateNavState();
     };
 
-    const onTitleUpdate = (event: WebviewTitleEvent) => {
+    const onTitleUpdate = (event: PageTitleUpdatedEvent) => {
       panelApi.setTitle(event.title);
     };
 
-    const onFaviconUpdate = (event: WebviewFaviconEvent) => {
+    const onFaviconUpdate = (event: PageFaviconUpdatedEvent) => {
       const favicon = event.favicons[0];
       if (favicon) {
         panelApi.updateParameters({ faviconUrl: favicon });
       }
     };
 
-    const onFailLoad = (event: WebviewFailLoadEvent) => {
+    const onFailLoad = (event: DidFailLoadEvent) => {
       // errorCode -3 is ERR_ABORTED (user stopped navigation) — not a real error
       if (event.errorCode === -3) return;
       setLoadError(
@@ -223,10 +168,20 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       setIsLoading(false);
     };
 
-    const onFoundInPage = ({ result }: WebviewFoundInPageEvent) => {
+    const onFoundInPage = ({ result }: FoundInPageEvent) => {
       // Ignore results of a superseded search (the query changed since).
       if (result.requestId !== findRequestRef.current) return;
       setFindMatches({ active: result.activeMatchOrdinal, total: result.matches });
+    };
+
+    const onContextMenu = ({ params }: ContextMenuEvent) => {
+      setContextMenu({
+        open: true,
+        webview,
+        params,
+        canGoBack: webview.canGoBack(),
+        canGoForward: webview.canGoForward(),
+      });
     };
 
     const onDevToolsOpened = () => setDevToolsOpen(true);
@@ -240,6 +195,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     webview.addEventListener("page-favicon-updated", onFaviconUpdate);
     webview.addEventListener("did-fail-load", onFailLoad);
     webview.addEventListener("found-in-page", onFoundInPage);
+    webview.addEventListener("context-menu", onContextMenu);
     webview.addEventListener("devtools-opened", onDevToolsOpened);
     webview.addEventListener("devtools-closed", onDevToolsClosed);
 
@@ -254,6 +210,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       webview.removeEventListener("page-favicon-updated", onFaviconUpdate);
       webview.removeEventListener("did-fail-load", onFailLoad);
       webview.removeEventListener("found-in-page", onFoundInPage);
+      webview.removeEventListener("context-menu", onContextMenu);
       webview.removeEventListener("devtools-opened", onDevToolsOpened);
       webview.removeEventListener("devtools-closed", onDevToolsClosed);
     };
@@ -264,20 +221,21 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     if (!webview || !readyRef.current) return;
 
     let normalized = url.trim();
-    if (!/^https?:\/\//i.test(normalized)) {
+    // A web URL, or the source view of one (View Page Source puts those in the address bar).
+    if (!/^(view-source:)?https?:\/\//i.test(normalized)) {
       // If it looks like a domain (contains a dot), prepend https://
       // Otherwise treat it as a search query
       if (/^[^\s]+\.[^\s]+/.test(normalized)) {
         normalized = `https://${normalized}`;
       } else {
-        normalized = `https://www.google.com/search?q=${encodeURIComponent(normalized)}`;
+        normalized = webSearchUrl(normalized);
       }
     }
 
     setInputUrl(normalized);
     setCurrentUrl(normalized);
     setLoadError(null);
-    webview.loadURL(normalized);
+    loadUrl(webview, normalized);
   }, []);
 
   const goBack = useCallback(() => {
@@ -401,8 +359,20 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
         />
         {findBarProps && <FindBar label="Find in page" {...findBarProps} />}
       </div>
+      {contextMenu && (
+        <BrowserContextMenu
+          menu={contextMenu}
+          panelId={panelApi.id}
+          onOpenChange={(open) => setContextMenu((menu) => menu && { ...menu, open })}
+        />
+      )}
     </div>
   );
+}
+
+/** Load a URL, leaving failures to the `did-fail-load` event, which reports them in the panel. */
+function loadUrl(webview: WebviewTag, url: string): void {
+  webview.loadURL(url).catch(() => {});
 }
 
 function NavButton({
