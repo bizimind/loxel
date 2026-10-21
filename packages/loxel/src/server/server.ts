@@ -11,6 +11,7 @@ import type { DirEntry } from "@/api/project-files-model";
 import type {
   AgentEventPayload,
   FileMoveSource,
+  TerminalSpawnTarget,
   WsClientMessage,
   WsMessage,
 } from "@/api/ws-protocol";
@@ -66,6 +67,7 @@ import type {
 import { resolveLoginShellEnv } from "./shell-env";
 import { recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
+import type { TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
 import type { TerminalSink } from "./terminal-session";
 import { isNotificationSequenceEnabled } from "./terminal-settings";
@@ -206,6 +208,30 @@ function broadcastAll(message: WsMessage) {
   }
 }
 
+/**
+ * Where a terminal's shell starts and the `LOXEL_*` variables it gets, from a `terminal_attach` or
+ * `terminal_spawn` request. Applied only when the session is spawned.
+ */
+function terminalSpawnTarget(
+  msg: TerminalSpawnTarget,
+): Pick<TerminalSpawnOptions, "cwd" | "worktreePath" | "envOverrides"> {
+  const envOverrides: Record<string, string> = {
+    LOXEL: "1",
+    LOXEL_PORT: String(config.port),
+    LOXEL_WORKTREE: msg.worktreePath ?? msg.cwd,
+  };
+  if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
+
+  // A persisted cwd (`loxel terminal --cwd`) may be gone by the time the panel respawns, e.g.
+  // after a server restart; start in the worktree then rather than failing the attach.
+  let cwd = msg.cwd;
+  if (msg.worktreePath && msg.worktreePath !== cwd && !existsSync(cwd)) {
+    log.warn("Terminal cwd is gone, starting in the worktree", { terminalId: msg.id, cwd });
+    cwd = msg.worktreePath;
+  }
+  return { cwd, worktreePath: msg.worktreePath, envOverrides };
+}
+
 function sendTo(ws: ServerWebSocket<WsData>, message: WsMessage) {
   ws.send(JSON.stringify(message));
 }
@@ -226,6 +252,26 @@ function sendToActiveWindow(windowId: string | null, message: WsMessage): boolea
   const targets = named.length > 0 ? named : fallback ? [fallback] : [];
   for (const ws of targets) sendTo(ws, message);
   return targets.length > 0;
+}
+
+/**
+ * Send `message` to every window subscribed to `wtPath`, except the one the user is working in
+ * among them, which gets `primary`: the window `windowId` names, else the most recently focused
+ * one, else any of them.
+ */
+function sendToWorktreeWindows(
+  wtPath: string,
+  windowId: string | null,
+  message: WsMessage,
+  primary: WsMessage,
+): void {
+  const subscribers = [...(wtResources.get(wtPath)?.subscribers ?? [])];
+  const named = windowId
+    ? subscribers.find((ws) => clients.get(ws)?.windowId === windowId)
+    : undefined;
+  const focused = subscribers.find((ws) => ws === lastFocusedClient);
+  const inUse = named ?? focused ?? subscribers[0];
+  for (const ws of subscribers) sendTo(ws, ws === inUse ? primary : message);
 }
 
 /** Why a folder cannot be opened in an Others section, given the registered projects. */
@@ -800,28 +846,11 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       clientState.terminals.add(msg.id);
       terminalOwners.set(msg.id, ws);
 
-      const envOverrides: Record<string, string> = {
-        LOXEL: "1",
-        LOXEL_PORT: String(config.port),
-        LOXEL_WORKTREE: msg.worktreePath ?? msg.cwd,
-      };
-      if (msg.windowId) envOverrides.LOXEL_WINDOW_ID = msg.windowId;
-
-      // A persisted cwd (`loxel terminal --cwd`) may be gone by the time the panel respawns, e.g.
-      // after a server restart; start in the worktree then rather than failing the attach.
-      let cwd = msg.cwd;
-      if (msg.worktreePath && msg.worktreePath !== cwd && !existsSync(cwd)) {
-        log.warn("Terminal cwd is gone, starting in the worktree", { terminalId: msg.id, cwd });
-        cwd = msg.worktreePath;
-      }
-
       terminalManager
         .attach(msg.id, createTerminalSink(ws, msg.id), {
+          ...terminalSpawnTarget(msg),
           cols: msg.cols,
           rows: msg.rows,
-          cwd,
-          worktreePath: msg.worktreePath,
-          envOverrides,
           scrollbackLines: msg.scrollbackLines,
           sinceEpoch: msg.sinceEpoch,
           sinceOffset: msg.sinceOffset,
@@ -834,6 +863,21 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
         });
       break;
     }
+
+    case "terminal_spawn":
+      try {
+        terminalManager.ensureSpawned(msg.id, {
+          ...terminalSpawnTarget(msg),
+          // The panel's first attach resizes the PTY to its xterm.
+          cols: 80,
+          rows: 24,
+          scrollbackLines: msg.scrollbackLines,
+        });
+      } catch (err) {
+        log.error("Failed to spawn terminal", { terminalId: msg.id, error: err });
+        sendTo(ws, { type: "error", message: "Failed to start terminal" });
+      }
+      break;
 
     case "terminal_detach":
       if (terminalOwners.get(msg.id) === ws) {
@@ -1081,6 +1125,7 @@ const routeContext: RouteContext = {
   broadcastToProject,
   broadcastAll,
   sendToActiveWindow,
+  sendToWorktreeWindows,
   externalFolderConflict: externalFolderConflictFor,
   getProject: (cwd: string) => projects.get(cwd),
   findProjectForPath,

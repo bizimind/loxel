@@ -385,7 +385,9 @@ export class AgentManager {
       workspaceRoot: options.workspaceRoot,
       models: options.sessionOptions?.models,
       logger: log.with({ sessionId: id.slice(0, 8) }),
-      env: buildSpawnEnv(),
+      // Marks the agent's commands as an agent's (the cross-agent `AI_AGENT` convention), so tools
+      // such as the `loxel` CLI can tell them from the user's.
+      env: { ...buildSpawnEnv(), AI_AGENT: "loxel" },
       mode: options.sessionOptions?.mode,
       profile: options.sessionOptions?.profile,
       declaredTools: options.sessionOptions?.declaredTools,

@@ -68,6 +68,7 @@ describe("project conversion preflight", () => {
       broadcastToProject: () => {},
       broadcastAll: () => {},
       sendToActiveWindow: () => false,
+      sendToWorktreeWindows: () => {},
       externalFolderConflict: () => null,
       getProject: () => undefined,
       findProjectForPath: () => undefined,

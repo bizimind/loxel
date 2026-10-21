@@ -83,12 +83,15 @@ It also accepts URLs:
 loxel https://example.com
 ```
 
-And it can open more terminals, optionally running a command in them. The new tab opens in the worktree that contains the directory, switching to it if needed, and the command is typed into your shell as if you had entered it, so the shell stays open when it finishes:
+And it can open more terminals, optionally running a command in them. The new tab opens in the worktree that contains the directory, switching to it if needed (when you run it; see below for agents), and the command is typed into your shell as if you had entered it, so the shell stays open when it finishes:
 
 ```bash
 loxel terminal                                   # a shell in the current directory
 loxel terminal --cwd ../other-worktree -- claude  # start an agent in another worktree
+loxel terminal --split right -- pnpm dev          # in a new split beside the active tab
 ```
+
+The same `--split`, `--replace` and `--group` layout flags work for files and URLs too. When a coding agent runs `loxel`, it opens things in the background instead: no worktree switch and no stolen cursor, unless the agent passes `--focus` (see [Focus](/docs/reference-env-files-cli-settings#loxel-cli)).
 
 Because the terminal already has `LOXEL_PORT` set, the CLI connects to the running Loxel immediately.
 
