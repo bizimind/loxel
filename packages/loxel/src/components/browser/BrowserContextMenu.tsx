@@ -53,11 +53,21 @@ const SEARCH_LABEL_MAX_LENGTH = 30;
 /** Longest selection searched for, keeping the search URL well within URL length limits. */
 const SEARCH_QUERY_MAX_LENGTH = 500;
 
+/**
+ * The first `max` code points of `text`. Slicing UTF-16 units could split a surrogate pair (an
+ * emoji), and `encodeURIComponent` throws on the lone half.
+ */
+function firstCodePoints(text: string, max: number): string {
+  // A code point is at most two UTF-16 units, so this prefix holds at least `max` of them.
+  return Array.from(text.slice(0, max * 2))
+    .slice(0, max)
+    .join("");
+}
+
 function quoteSelection(text: string): string {
   const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > SEARCH_LABEL_MAX_LENGTH
-    ? `${oneLine.slice(0, SEARCH_LABEL_MAX_LENGTH)}…`
-    : oneLine;
+  const quoted = firstCodePoints(oneLine, SEARCH_LABEL_MAX_LENGTH);
+  return quoted.length < oneLine.length ? `${quoted}…` : oneLine;
 }
 
 /**
@@ -68,7 +78,7 @@ export function BrowserContextMenu({ menu, panelId, onOpenChange }: BrowserConte
   const { webview, params } = menu;
   const { linkURL, srcURL, selectionText, isEditable, editFlags } = params;
   const isImage = params.mediaType === "image" && srcURL !== "";
-  const searchQuery = selectionText.trim().slice(0, SEARCH_QUERY_MAX_LENGTH);
+  const searchQuery = firstCodePoints(selectionText.trim(), SEARCH_QUERY_MAX_LENGTH);
   const searchText = quoteSelection(searchQuery);
   const copyImage = window.electronAPI?.copyWebviewImage;
 

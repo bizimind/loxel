@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { WebviewTag } from "electron";
 
 import type { BrowserContextMenuState } from "./BrowserContextMenu";
+import { webSearchUrl } from "./web-search";
 
 const openBrowserTab = mock((_url: string, _options: object) => {});
 mock.module("@/lib/panel-creators", () => ({ openBrowserTab }));
@@ -231,6 +232,15 @@ describe("BrowserContextMenu", () => {
       "https://www.google.com/search?q=a%20selection%20that%20is%20long%20enough%20to%20be%20cut%20off",
       { sourcePanelId: "browser-1", activate: true },
     );
+  });
+
+  test("searches for a long selection without splitting an emoji", () => {
+    renderMenu({ selectionText: `${"a".repeat(499)}😀${"b".repeat(2000)}` });
+
+    fireEvent.click(screen.getByText(/^Search the Web/));
+
+    const [url] = openBrowserTab.mock.calls[0]!;
+    expect(url).toBe(webSearchUrl(`${"a".repeat(499)}😀`));
   });
 
   test("shows editing actions in an editable field", () => {
