@@ -52,7 +52,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  useProjectStore.setState({ projects: [], expandedProjectIds: [], autoExpandedProjectIds: [] });
+  useProjectStore.setState({
+    projects: [],
+    homeDir: null,
+    expandedProjectIds: [],
+    autoExpandedProjectIds: [],
+  });
   useWorktreeStore.getState().reset();
 });
 
@@ -88,6 +93,14 @@ describe("Sidebar regular-repository worktrees", () => {
     render(<Sidebar />);
 
     expect(useProjectStore.getState().expandedProjectIds).toEqual([]);
+  });
+
+  test("shows a project path under home as ~/ and keeps the full path in its tooltip", () => {
+    const homeProject = { ...project, path: "/home/me/git/app", worktrees: [] };
+    useProjectStore.setState({ projects: [homeProject], homeDir: "/home/me" });
+    render(<Sidebar />);
+
+    expect(screen.getByText("~/git/app").getAttribute("title")).toBe("/home/me/git/app");
   });
 
   test("switches from a linked worktree back to the regular repository root", async () => {

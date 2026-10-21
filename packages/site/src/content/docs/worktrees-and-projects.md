@@ -69,7 +69,7 @@ This lets you see at a glance which worktrees have pending work — without swit
 
 ## The worktree sidebar
 
-The worktree sidebar lists your projects and their worktrees. Drag worktrees to reorder them. Right-click a worktree to copy its name, branch name, or absolute path, hide or show it, or remove it; on macOS the menu also has **Reveal in Finder** and **Open In** (installed terminals and editors). Hidden worktrees are left out of the collapsed rail and of the `Ctrl+Alt+1`–`0` numbering, and are dimmed in the expanded list. Removing a worktree asks for confirmation, offers to delete its branch, and warns when uncommitted or untracked files would be lost.
+The worktree sidebar lists your projects and their worktrees, with paths in your home folder shown as `~/…` (hover for the full path). Drag worktrees to reorder them. Right-click a worktree to copy its name, branch name, or absolute path, hide or show it, or remove it; on macOS the menu also has **Reveal in Finder** and **Open In** (installed terminals and editors). Hidden worktrees are left out of the collapsed rail and of the `Ctrl+Alt+1`–`0` numbering, and are dimmed in the expanded list. Removing a worktree asks for confirmation, offers to delete its branch, and warns when uncommitted or untracked files would be lost.
 
 ---
 

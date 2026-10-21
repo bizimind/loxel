@@ -13,7 +13,7 @@ Related internal docs: [ARCHITECTURE.md](ARCHITECTURE.md) for the process overvi
 
 ## Project model
 
-[project-model.ts](../src/api/project-model.ts) defines `ProjectSchema` (`id`, `path`, `name`, `addedAt`, `isBare`) and `EnrichedProject`, which `GET /api/projects` returns with inline `worktrees` and `worktreesDir` (null when the server has not initialized the project). It also holds the Add Project wizard request/response types.
+[project-model.ts](../src/api/project-model.ts) defines `ProjectSchema` (`id`, `path`, `name`, `addedAt`, `isBare`) and `EnrichedProject`, which `GET /api/projects` returns with inline `worktrees` and `worktreesDir` (null when the server has not initialized the project), alongside the server's `homeDir` (`ProjectsResponse`). It also holds the Add Project wizard request/response types.
 
 [project-store.ts](../src/server/project-store.ts) persists projects in `<stateDir>/projects.db` (see [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md#server-state-directory) for the state directory and the one-time `projects.json` migration):
 
@@ -25,7 +25,7 @@ Related internal docs: [ARCHITECTURE.md](ARCHITECTURE.md) for the process overvi
 
 Derived per-repo state is keyed by a hash of the git root (`hash12` in [config.ts](../src/server/config.ts)): the local database at `localdb/<hash>/localdb.db`, and drafts at `detached/<projectHash>/<worktreeHash>/`. Review comments are in `comments/<hash>.db` ([review-db.ts](../src/server/review-db.ts)). Moving a repo on disk therefore orphans these.
 
-[projects.ts](../src/store/projects.ts) is the renderer's project store. `fetchProjects` loads enriched projects and hands them to the worktree store (`applyEnrichedProjects`); `whenProjectsLoaded()` resolves after the first fetch settles (even on failure) so open requests that arrive during launch can wait for it. `deriveProject(wtPath, projects)` finds the owning project by explicit worktree membership first, then by boundary-aware prefix (`path + "/"`), longest path winning. Removing or deleting the active project switches to the first remaining project (its root if regular, its first worktree if bare) or resets the worktree store. The store also persists sidebar width/expanded state and per-project expansion through server storage.
+[projects.ts](../src/store/projects.ts) is the renderer's project store. `fetchProjects` loads enriched projects and hands them to the worktree store (`applyEnrichedProjects`), and keeps `homeDir` so the sidebar can show paths under home as `~/…` (`abbreviateHomePath` in [home-path.ts](../src/lib/home-path.ts)); `whenProjectsLoaded()` resolves after the first fetch settles (even on failure) so open requests that arrive during launch can wait for it. `deriveProject(wtPath, projects)` finds the owning project by explicit worktree membership first, then by boundary-aware prefix (`path + "/"`), longest path winning. Removing or deleting the active project switches to the first remaining project (its root if regular, its first worktree if bare) or resets the worktree store. The store also persists sidebar width/expanded state and per-project expansion through server storage.
 
 ## Server-side project lifecycle
 
