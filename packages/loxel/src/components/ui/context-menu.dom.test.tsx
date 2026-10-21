@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 
 import {
@@ -64,6 +64,64 @@ describe("ContextMenu", () => {
     expect(await screen.findByText("Nested")).toBeTruthy();
     expect(screen.getByTestId("state").textContent).toBe("open");
     expect(screen.getByText("First")).toBeTruthy();
+  });
+
+  test("closes when focus moves into a webview", async () => {
+    render(<Harness />);
+    await screen.findByRole("menu");
+    const webview = document.createElement("webview");
+    webview.tabIndex = -1;
+    document.body.append(webview);
+
+    try {
+      // A click in the page: this window blurs and the webview becomes the active element.
+      webview.focus();
+      fireEvent.blur(window);
+
+      await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("closed"));
+      expect(document.activeElement).toBe(webview);
+    } finally {
+      webview.remove();
+    }
+  });
+
+  test("closes when the main process reports a webview took focus", async () => {
+    let notifyWebviewFocused = () => {};
+    const off = mock(() => {});
+    window.electronAPI = {
+      onOpenInBrowserTab: () => () => {},
+      setDockBadge: () => {},
+      onWindowFocusChange: () => () => {},
+      openFolderDialog: async () => null,
+      onWebviewFocused: (callback) => {
+        notifyWebviewFocused = callback;
+        return off;
+      },
+    };
+
+    try {
+      render(<Harness />);
+      await screen.findByRole("menu");
+
+      // Clicking into a page from another app: this window has no focus to lose, so no blur.
+      act(() => notifyWebviewFocused());
+
+      await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("closed"));
+      expect(off).toHaveBeenCalled();
+    } finally {
+      delete window.electronAPI;
+    }
+  });
+
+  test("stays open when the window blurs for another reason", async () => {
+    render(<Harness />);
+    await screen.findByRole("menu");
+
+    // Switching apps blurs the window without moving focus out of the menu.
+    fireEvent.blur(window);
+    await Bun.sleep(20);
+
+    expect(screen.getByTestId("state").textContent).toBe("open");
   });
 
   test("returns focus to the element that was focused when it opened", async () => {
