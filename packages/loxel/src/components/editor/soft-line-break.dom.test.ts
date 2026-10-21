@@ -252,6 +252,45 @@ describe("documents that would not reload as shown", () => {
 });
 
 describe("existing line breaks", () => {
+  for (const [kind, source] of [
+    ["hard", "line one\\\nline two\n"],
+    ["soft", "line one\nline two\n"],
+  ] as const) {
+    test(`Shift+Enter after an existing ${kind} break adds a break instead of splitting`, async () => {
+      const crepe = await mount(source);
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        // Caret at the start of "line two", right after the existing break.
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 10)));
+      });
+      pressShiftEnter(crepe);
+      expect(docString(crepe)).toBe('doc(paragraph("line one", hardbreak, hardbreak, "line two"))');
+    });
+  }
+
+  test("Shift+Enter after a break in a setext heading does nothing", async () => {
+    const crepe = await mount("setext\nheading\n===\n");
+    placeCaretAfter(crepe, "setext");
+    crepe.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const { from } = view.state.selection;
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from + 1)));
+    });
+    pressShiftEnter(crepe);
+    expect(docString(crepe)).toBe('doc(heading("setext", hardbreak, "heading"))');
+  });
+
+  test("whitespace typed at the start of a line after a hard break is kept", async () => {
+    const crepe = await mount("a\\\nb\n");
+    crepe.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      view.dispatch(view.state.tr.insertText("   ", 3));
+    });
+    const { saved, reloaded } = saveAndReload(crepe);
+    expect(saved).toBe("a\\\n&#x20;  b\n");
+    expect(reloaded).toBe(saved);
+  });
+
   test("keep their form in an edited block and leave untouched blocks byte-identical", async () => {
     const source = "* bullet\n\nhard\\\nbreak and soft\nbreak  \nspaces\n";
     const crepe = await mount(source);

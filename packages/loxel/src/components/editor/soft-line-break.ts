@@ -24,6 +24,30 @@ import type { Nodes, Parents, Text } from "mdast";
  * Soft breaks are also rendered as `<br>` rather than Milkdown's default space, so a newline in
  * the file reads as a line break in the editor, as in Obsidian or GitHub comments.
  */
+/**
+ * Position of the break the last Shift+Enter inserted, mapped through transactions appended to that
+ * one and cleared by any other edit or selection change. A break already in the document is not a
+ * "first press", so a press next to it inserts another break rather than splitting the paragraph.
+ */
+const lastInsertedKey = new PluginKey<number | null>("LOXEL_SOFT_BREAK_LAST_INSERTED");
+
+const lastInsertedPlugin = $prose(
+  () =>
+    new Plugin<number | null>({
+      key: lastInsertedKey,
+      state: {
+        init: () => null,
+        apply: (tr, value) => {
+          const inserted: unknown = tr.getMeta(lastInsertedKey);
+          if (typeof inserted === "number") return inserted;
+          if (value === null) return null;
+          if (tr.getMeta("appendedTransaction")) return tr.mapping.map(value);
+          return tr.docChanged || tr.selectionSet ? null : value;
+        },
+      },
+    }),
+);
+
 function insertSoftBreak(ctx: Ctx): Command {
   return (state, dispatch) => {
     const { selection } = state;
@@ -31,12 +55,13 @@ function insertSoftBreak(ctx: Ctx): Command {
     const hardbreak = hardbreakSchema.type(ctx);
     const { $from, $to } = selection;
 
-    // A second press right after a break splits the paragraph there (in a list item, into two
-    // paragraphs of that item).
-    if (selection.empty && $from.nodeBefore?.type === hardbreak) {
-      const tr = state.tr.delete($from.pos - 1, $from.pos);
-      if (!canSplit(tr.doc, $from.pos - 1)) return false;
-      dispatch?.(tr.split($from.pos - 1).scrollIntoView());
+    // A second press right after the break the first one inserted splits the paragraph there (in a
+    // list item, into two paragraphs of that item). The "hardbreak" meta applies Milkdown's filter.
+    const lastInserted = lastInsertedKey.getState(state);
+    if (selection.empty && lastInserted === $from.pos - 1 && $from.nodeBefore?.type === hardbreak) {
+      const tr = state.tr.setMeta("hardbreak", true).delete(lastInserted, $from.pos);
+      if (!canSplit(tr.doc, lastInserted)) return false;
+      dispatch?.(tr.split(lastInserted).scrollIntoView());
       return true;
     }
 
@@ -56,6 +81,7 @@ function insertSoftBreak(ctx: Ctx): Command {
     // headings) and mark clearing.
     const tr = state.tr
       .setMeta("hardbreak", true)
+      .setMeta(lastInsertedKey, from)
       .replaceWith(from, to, hardbreak.create({ isInline: true }));
     dispatch?.(tr.setSelection(TextSelection.create(tr.doc, from + 1)).scrollIntoView());
     return true;
@@ -85,10 +111,12 @@ const clearBreakMarksPlugin = $prose((ctx) => {
       const tr = newState.tr;
       if (first?.getMeta("hardbreak") && step instanceof ReplaceStep) {
         const node = newState.doc.nodeAt(step.from);
-        if (node?.type === hardbreak) tr.setNodeMarkup(step.from, undefined, node.attrs, []);
+        if (node?.type === hardbreak && node.marks.length > 0)
+          tr.setNodeMarkup(step.from, undefined, node.attrs, []);
       } else if (step instanceof AddMarkStep) {
         newState.doc.nodesBetween(step.from, step.to, (node, pos) => {
-          if (node.type === hardbreak) tr.setNodeMarkup(pos, undefined, node.attrs, []);
+          if (node.type === hardbreak && node.marks.length > 0)
+            tr.setNodeMarkup(pos, undefined, node.attrs, []);
         });
       }
       return tr.docChanged ? tr : undefined;
@@ -111,8 +139,8 @@ function isBlank(node: Nodes): boolean {
 
 /**
  * Prepare a text node for remark-stringify so line breaks reload to the same document. Whitespace
- * next to a line break does not render, and remark would write trailing spaces as-is (two reload
- * as a hard break), so it is dropped. A soft break that would leave an empty line, which reads
+ * before a soft break does not render, and remark would write it as-is (two spaces reload as a hard
+ * break), so it is dropped. A soft break that would leave an empty line, which reads
  * back as a paragraph boundary, takes the hard form. Returns the text value to serialize, or the
  * final output for a soft break.
  */
@@ -133,10 +161,9 @@ function prepareText(node: Text, parent: Parents | undefined): { output: string 
     return { output: next?.type === "html" ? "" : "\\\n" };
   }
 
-  let { value } = node;
-  if (isLineBreak(siblings[index - 1])) value = value.replace(/^[\t ]+/, "");
-  if (isSoftBreak(siblings[index + 1])) value = value.replace(/[\t ]+$/, "");
-  return value;
+  // Leading whitespace after a break is not trimmed: the parser already strips it from the source,
+  // so any left is content (typed or an encoded `&#x20;`) that remark keeps as `&#x20;`.
+  return isSoftBreak(siblings[index + 1]) ? node.value.replace(/[\t ]+$/, "") : node.value;
 }
 
 /** Install soft line breaks on a Milkdown editor before `create()`. */
@@ -173,5 +200,5 @@ export function installSoftLineBreaks(editor: Editor): void {
   });
   // Removing a plugin before create() is synchronous: it only drops it from the editor's store.
   void editor.remove(hardbreakClearMarkPlugin);
-  editor.use([softBreakKeymap, clearBreakMarksPlugin].flat());
+  editor.use([softBreakKeymap, lastInsertedPlugin, clearBreakMarksPlugin].flat());
 }
