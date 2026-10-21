@@ -178,24 +178,19 @@ function respondToDialog(event: IpcMainEvent, value: unknown): void {
   dismissDialogs(dialog.guestId);
 }
 
-interface NavigationDetails {
-  isMainFrame: boolean;
-  isSameDocument: boolean;
-}
-
 /** A window renderer subscribed to dialogs; valid until its document is replaced. */
 function listen(event: IpcMainEvent): void {
   const host = event.sender;
   if (listeningHosts.has(host.id)) return;
   listeningHosts.add(host.id);
+  // On commit, not on start: the window cancels navigations it starts (external links are
+  // opened in the system browser from will-navigate), and those keep the document. A new
+  // document subscribes again. did-navigate fires only for main-frame cross-document commits.
   const forget = () => {
     listeningHosts.delete(host.id);
-    host.off("did-start-navigation", onNavigation);
+    host.off("did-navigate", forget);
   };
-  const onNavigation = ({ isMainFrame, isSameDocument }: NavigationDetails) => {
-    if (isMainFrame && !isSameDocument) forget();
-  };
-  host.on("did-start-navigation", onNavigation);
+  host.on("did-navigate", forget);
   host.once("destroyed", () => listeningHosts.delete(host.id));
 }
 

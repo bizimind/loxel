@@ -249,10 +249,18 @@ describe("page dialogs", () => {
     run(guest, { type: "confirm" });
     expect(old.requests()).toHaveLength(1);
 
-    // A reloaded window renderer must subscribe again.
+    // A navigation the window starts and cancels (an external link) keeps its document.
     old.emit("did-start-navigation", mainFrameNavigation);
+    run(guest, { type: "confirm" });
+    expect(old.requests()).toHaveLength(2);
+
+    // A reloaded window renderer must subscribe again.
+    old.emit("did-navigate");
     expect(run(guest, { type: "prompt" }).returnValue).toBeNull();
-    expect(old.requests()).toHaveLength(1);
+    expect(old.requests()).toHaveLength(2);
+    old.listen();
+    run(guest, { type: "confirm" });
+    expect(old.requests()).toHaveLength(3);
   });
 });
 
