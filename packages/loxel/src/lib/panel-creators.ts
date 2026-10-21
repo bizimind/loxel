@@ -109,29 +109,24 @@ function placementReference(
 }
 
 /**
- * Run a layout change opened without focus, handing DOM focus back if the change dropped it: a
- * split can re-parent the focused group's element, and moving a focused element blurs it.
+ * Run a layout change opened without focus, leaving the user where they were. The active tab is
+ * activated again if the change activated another: closing an active tab activates its group, and
+ * dockview ignores `skipSetActive` for moves into a new split. DOM focus is handed back if the
+ * change dropped it: a split can re-parent the focused group's element, which blurs it. A change
+ * that closed the active tab (a replace of it) leaves its replacement showing.
  */
-function keepingDomFocus<T>(focus: boolean, change: () => T): T {
-  const focused = focus ? null : document.activeElement;
+function keepingUserFocus<T>(dv: DockviewApi, focus: boolean, change: () => T): T {
+  if (focus) return change();
+  const active = dv.activePanel;
+  const focused = document.activeElement;
   const result = change();
+  if (active && dv.activePanel !== active && dv.getPanel(active.id) === active) {
+    activatePanel(dv, active);
+  }
   if (focused instanceof HTMLElement && focused.isConnected && document.activeElement !== focused) {
     focused.focus({ preventScroll: true });
   }
   return result;
-}
-
-/**
- * Close the tab a placed panel replaced. Closing an active tab activates its group, so without
- * `focus` the previously active tab is activated again (unless it was the replaced tab, whose
- * replacement then shows in its place).
- */
-function closeReplaced(dv: DockviewApi, replaced: IDockviewPanel, focus: boolean): void {
-  const active = dv.activePanel;
-  replaced.api.close();
-  if (!focus && active && active !== replaced && dv.activePanel !== active) {
-    activatePanel(dv, active);
-  }
 }
 
 /**
@@ -162,14 +157,14 @@ function addPlacedPanel(
   focus = true,
 ): IDockviewPanel {
   const ref = placementReference(dv, placement);
-  return keepingDomFocus(focus, () => {
+  return keepingUserFocus(dv, focus, () => {
     const panel = dv.addPanel({
       ...options,
       position: ref && placedPosition(ref, placement),
       inactive: !focus,
     });
     // Added before closing, so a group holding only the replaced tab isn't removed in between.
-    if (ref && placement?.replace) closeReplaced(dv, ref, focus);
+    if (ref && placement?.replace) ref.api.close();
     return panel;
   });
 }
@@ -188,7 +183,7 @@ function movePlacedPanel(
 ): void {
   const ref = placementReference(dv, placement);
   const skipSetActive = !focus;
-  keepingDomFocus(focus, () => {
+  keepingUserFocus(dv, focus, () => {
     if (ref === panel) {
       if (placement.split && panel.group.panels.length > 1) {
         panel.api.moveTo({
@@ -211,7 +206,7 @@ function movePlacedPanel(
           index: ref.group.panels.indexOf(ref),
           skipSetActive,
         });
-        closeReplaced(dv, ref, focus);
+        ref.api.close();
       } else if (panel.group !== ref.group) {
         panel.api.moveTo({ group: ref.group, position: "center", skipSetActive });
       }

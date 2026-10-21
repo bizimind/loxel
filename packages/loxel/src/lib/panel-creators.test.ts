@@ -486,6 +486,26 @@ describe("placement", () => {
     expect(api.getPanel("terminal-t")).toBeUndefined();
     expect(api.activePanel?.id).toBe(a.id);
   });
+
+  test("without focus an open tab split off elsewhere keeps the active tab and group", () => {
+    const { api, a, c } = setup();
+    c.api.setActive();
+
+    openFileBacked("codeEditor", "/repo/b.ts", { focus: false, placement: { split: "right" } });
+
+    const b = api.getPanel("codeeditor-/repo/b.ts")!;
+    expect(ids(b.group.panels)).toEqual([b.id]);
+    expect(b.group.activePanel).toBe(b);
+    expect(api.activePanel).toBe(c);
+    expect(api.activeGroup).toBe(c.group);
+
+    openFileBacked("codeEditor", "/repo/a.ts", {
+      focus: false,
+      placement: { split: "down", group: { name: "c.ts" } },
+    });
+    expect(api.getPanel(a.id)!.group).not.toBe(c.group);
+    expect(api.activePanel).toBe(c);
+  });
 });
 
 describe("openBrowserTab", () => {
