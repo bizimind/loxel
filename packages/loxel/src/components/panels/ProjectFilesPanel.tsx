@@ -150,8 +150,9 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   const focusedFilePath = useCallback((): string | null => {
     const selected = getCurrentWorktreeUI().getState().selectedProjectFile;
     if (!selected) return null;
-    const rows = scrollRef.current?.querySelectorAll<HTMLElement>(`button[${TREE_PATH_ATTR}]`);
-    const row = [...(rows ?? [])].find((r) => r.getAttribute(TREE_PATH_ATTR) === selected);
+    const row = scrollRef.current?.querySelector<HTMLElement>(
+      `button[${TREE_PATH_ATTR}="${CSS.escape(selected)}"]`,
+    );
     return row && !row.hasAttribute("data-tree-dir") ? selected : null;
   }, []);
   const captureCompareCandidate = useCallback(

@@ -60,7 +60,7 @@ export interface PendingEdit {
 interface EditorStateStore {
   files: Map<string, EditorFileEntry>;
 
-  /** Register an editor; `key` defaults to the key. Idempotent. */
+  /** Register an editor; `filePath` defaults to the key. Idempotent. */
   openFile: (key: string, filePath?: string) => void;
   closeFile: (key: string) => void;
   markDirty: (key: string) => void;
