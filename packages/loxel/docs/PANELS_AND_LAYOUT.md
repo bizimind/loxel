@@ -56,7 +56,7 @@ File-backed ids embed the absolute path, so a file is open at most once per work
 
 ## Creating and opening panels
 
-Creation is decoupled through typed window events. [loxel-events.ts](../src/lib/loxel-events.ts) defines `LoxelEventMap` plus `dispatchLoxelEvent` / `onLoxelEvent`; [useLoxelEventListeners.ts](../src/hooks/useLoxelEventListeners.ts) (mounted once in `App`) maps each `loxel-create-*` / `loxel-open-*` event to a function in [panel-creators.ts](../src/lib/panel-creators.ts). Event producers include the action handler (`panel.new.*` via `getCreateEventForAction`, `panel.split.*` with a `placement` detail), the watermark quickstart, file openers and panel UIs. [StatusBar.tsx](../src/components/panels/StatusBar.tsx) and the browser tab's Duplicate item call the creators directly; Electron's "open in browser tab" IPC calls `createBrowser`.
+Creation is decoupled through typed window events. [loxel-events.ts](../src/lib/loxel-events.ts) defines `LoxelEventMap` plus `dispatchLoxelEvent` / `onLoxelEvent`; [useLoxelEventListeners.ts](../src/hooks/useLoxelEventListeners.ts) (mounted once in `App`) maps each `loxel-create-*` / `loxel-open-*` event to a function in [panel-creators.ts](../src/lib/panel-creators.ts). Event producers include the action handler (`panel.new.*` via `getCreateEventForAction`, `panel.split.*` with a `placement` detail), the watermark quickstart, file openers and panel UIs. [StatusBar.tsx](../src/components/panels/StatusBar.tsx) and the browser tab's Duplicate item call the creators directly, as does the browser page's context menu through `openBrowserTab` (a new tab right after the source tab, in the background unless asked to activate); Electron's "open in browser tab" IPC calls `createBrowser`.
 
 `panel-creators.ts` functions are module-level (they run from events and store actions, outside React) and operate on `getCenterApi()`:
 
@@ -89,6 +89,7 @@ Title source differs by kind. File-backed tabs ([editor-tab.tsx](../src/componen
 - [usePanelActive.ts](../src/hooks/usePanelActive.ts): whether the panel is its group's active tab (defaults to `true` when given no API).
 - [usePanelActivationFocus.ts](../src/hooks/usePanelActivationFocus.ts): calls the panel's focus function when the panel is both active in its group and in the active group (dockview's `setActive` does not move DOM focus), including after moves, and registers it in [panel-focus.ts](../src/lib/panel-focus.ts) so keyboard navigation can re-focus an already-active panel. Used by the code, markdown and drawing editors, terminal, browser and agent panels; `ProjectFilesPanel` registers with `registerPanelFocus` directly.
 - [useZoomFactor.ts](../src/hooks/useZoomFactor.ts): Electron page zoom factor, used by [TopBar.tsx](../src/components/panels/TopBar.tsx) to keep the traffic-light inset fixed.
+- [useWindowFullScreen.ts](../src/hooks/useWindowFullScreen.ts): whether the window is in macOS native fullscreen (main forwards `enter-full-screen` / `leave-full-screen`; the initial state is a sync IPC read). [TopBar.tsx](../src/components/panels/TopBar.tsx) drops the traffic-light inset while fullscreen, since macOS hides the traffic lights there.
 
 Spatial navigation, focus targets and find are covered in [KEYBINDINGS.md](KEYBINDINGS.md).
 

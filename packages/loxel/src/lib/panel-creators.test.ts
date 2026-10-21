@@ -35,7 +35,8 @@ mock.module("@/api/client", () => ({
   },
 }));
 
-const { createTerminal, handleFileMoved, openFileBacked } = await import("./panel-creators");
+const { createTerminal, handleFileMoved, openBrowserTab, openFileBacked } =
+  await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { useEditorStateStore } = await import("@/store/editor-state");
 
@@ -484,5 +485,44 @@ describe("placement", () => {
     });
     expect(api.getPanel("terminal-t")).toBeUndefined();
     expect(api.activePanel?.id).toBe(a.id);
+  });
+});
+
+describe("openBrowserTab", () => {
+  test("opens a background tab right after the source tab", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+
+    openBrowserTab("https://example.com/one", { sourcePanelId: a.id });
+
+    const ids = tabIds(api, 0);
+    expect(ids).toHaveLength(3);
+    expect(ids[0]).toBe(a.id);
+    expect(api.getPanel(ids[1]!)?.params).toEqual({ url: "https://example.com/one" });
+    expect(ids[2]).toBe("codeeditor-/repo/b.ts");
+    expect(api.groups[0]!.activePanel?.id).toBe(a.id);
+  });
+
+  test("keeps tabs opened one after another in order", () => {
+    const { api, a } = setup();
+
+    openBrowserTab("https://example.com/one", { sourcePanelId: a.id });
+    openBrowserTab("https://example.com/two", { sourcePanelId: a.id });
+
+    const urls = api.groups[0]!.panels.map((p) => (p.params as { url?: string }).url);
+    expect(urls).toEqual([
+      undefined,
+      "https://example.com/one",
+      "https://example.com/two",
+      undefined,
+    ]);
+  });
+
+  test("focuses the new tab when asked to", () => {
+    const { api, a } = setup();
+
+    openBrowserTab("https://example.com/one", { sourcePanelId: a.id, activate: true });
+
+    expect(api.groups[0]!.activePanel?.params).toEqual({ url: "https://example.com/one" });
   });
 });

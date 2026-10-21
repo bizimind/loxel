@@ -342,29 +342,68 @@ export async function createDrawing(placement?: PanelPlacement): Promise<void> {
   }
 }
 
+/** A new browser panel showing `url`, for `addPanel`. */
+function browserPanelOptions(
+  cApi: DockviewApi,
+  url: string,
+): PanelOptions & Pick<AddPanelOptions, "renderer"> {
+  return {
+    id: `browser-${crypto.randomUUID()}`,
+    component: "browser",
+    tabComponent: "browserTab",
+    title: nextPanelTitle(cApi, "Browser"),
+    params: { url },
+    // Keep the <webview> attached while hidden or moved: re-attaching it reloads the page.
+    renderer: "always",
+  };
+}
+
 export function createBrowser(url?: string, { placement, focus }: PanelOpenOptions = {}): void {
   const cApi = getCenterApi();
   if (!cApi) return;
+  const options = browserPanelOptions(cApi, url || "about:blank");
+  addPlacedPanel(cApi, placement, options, focus);
+  uiLog.info("Panel created", { panelType: "browser", panelId: options.id });
+}
 
-  const panelId = `browser-${crypto.randomUUID()}`;
-  const title = nextPanelTitle(cApi, "Browser");
-  const targetUrl = url || "about:blank";
+export interface OpenBrowserTabOptions {
+  /** The browser panel the URL came from: the new tab opens right after it, in its group. */
+  sourcePanelId: string;
+  /** Focus the new tab. By default it opens in the background, like a browser's new-tab links. */
+  activate?: boolean;
+}
 
-  addPlacedPanel(
-    cApi,
-    placement,
-    {
-      id: panelId,
-      component: "browser",
-      tabComponent: "browserTab",
-      title,
-      params: { url: targetUrl },
-      // Keep the <webview> attached while hidden or moved: re-attaching it reloads the page.
-      renderer: "always",
-    },
-    focus,
-  );
-  uiLog.info("Panel created", { panelType: "browser", panelId });
+/** The tab most recently opened from each browser panel, so repeated opens keep their order. */
+const lastTabOpenedFrom = new Map<string, string>();
+
+/** Open a URL in a new browser tab next to the browser panel it came from. */
+export function openBrowserTab(
+  url: string,
+  { sourcePanelId, activate = false }: OpenBrowserTabOptions,
+): void {
+  const cApi = getCenterApi();
+  if (!cApi) return;
+  const source = cApi.getPanel(sourcePanelId);
+  if (!source) {
+    createBrowser(url);
+    return;
+  }
+
+  // Go after the tab last opened from the source if it is still to the source's right, so links
+  // opened one after another line up in the order they were opened.
+  const tabs = source.group.panels;
+  const sourceIndex = tabs.indexOf(source);
+  const lastOpenedIndex = tabs.findIndex((p) => p.id === lastTabOpenedFrom.get(sourcePanelId));
+  const index = Math.max(sourceIndex, lastOpenedIndex) + 1;
+
+  const options = browserPanelOptions(cApi, url);
+  cApi.addPanel({
+    ...options,
+    position: { referenceGroup: source.group, direction: "within", index },
+    inactive: !activate,
+  });
+  uiLog.info("Panel created", { panelType: "browser", panelId: options.id });
+  lastTabOpenedFrom.set(sourcePanelId, options.id);
 }
 
 export function createAgent(placement?: PanelPlacement): void {

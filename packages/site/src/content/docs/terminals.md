@@ -83,7 +83,7 @@ It also accepts URLs:
 loxel https://example.com
 ```
 
-And it can open more terminals, optionally running a command in them. The new tab opens in the worktree that contains the directory, switching to it if needed, and the command is typed into your shell as if you had entered it, so the shell stays open when it finishes:
+And it can open more terminals, optionally running a command in them. The new tab opens in the worktree that contains the directory, switching to it if needed (when you run it; see below for agents), and the command is typed into your shell as if you had entered it, so the shell stays open when it finishes:
 
 ```bash
 loxel terminal                                   # a shell in the current directory
