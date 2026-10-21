@@ -61,6 +61,11 @@ import {
   WINDOW_FOCUS_CHANGE,
   WINDOW_FULL_SCREEN_CHANGE,
 } from "./ipc-channels";
+import {
+  configureWebviewDialogs,
+  installJavaScriptDialogs,
+  trackWebviewDialogs,
+} from "./javascript-dialogs";
 import { startMainProcessMonitor } from "./main-perf-monitor";
 import { configurePasskeys, installAccountChooser } from "./webauthn";
 import { installWebviewCopyImage } from "./webview-copy-image";
@@ -713,6 +718,7 @@ app.on("web-contents-created", (_, contents) => {
     }
   });
   forwardWebviewKeystrokes(contents);
+  trackWebviewDialogs(contents);
 
   if (contents.getType() === "webview") {
     // New tabs and windows a browser panel's page opens become browser tabs next to it.
@@ -733,13 +739,14 @@ app.on("web-contents-created", (_, contents) => {
     });
   }
 
-  // Strip dangerous preferences from any dynamically-created webview.
+  // Strip dangerous preferences from any dynamically-created webview, then load Loxel's own
+  // sandboxed preload (which also runs in subframes, without Node.js).
   contents.on("will-attach-webview", (_, webPreferences) => {
     delete webPreferences.preload;
     webPreferences.nodeIntegration = false;
     webPreferences.nodeIntegrationInWorker = false;
-    webPreferences.nodeIntegrationInSubFrames = false;
     webPreferences.contextIsolation = true;
+    configureWebviewDialogs(webPreferences);
   });
 });
 
@@ -813,6 +820,7 @@ ipcMain.handle(OPEN_FOLDER_DIALOG, async (event) => {
 
 installWebviewKeystrokeForwarding();
 installWebviewCopyImage();
+installJavaScriptDialogs();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
 ipcMain.on(GET_WINDOW_FULL_SCREEN, (event) => {

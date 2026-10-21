@@ -30,6 +30,8 @@ import { cn } from "@/lib/utils";
 import { reattachActiveContent } from "@/store/layout-actions";
 
 import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserContextMenu";
+import { JavaScriptDialog } from "./JavaScriptDialog";
+import { useJavaScriptDialogs } from "./useJavaScriptDialogs";
 import { webSearchUrl } from "./web-search";
 
 const isElectron = navigator.userAgent.includes("Electron");
@@ -66,6 +68,16 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<BrowserContextMenuState | null>(null);
+  const [webContentsId, setWebContentsId] = useState<number | null>(null);
+
+  // The page's alert() / confirm() / prompt(), shown over the page one at a time.
+  // Navigating from the toolbar first dismisses them: the navigation would wait for the page.
+  const {
+    dialog,
+    answer: answerDialog,
+    dismissAll: dismissDialogs,
+  } = useJavaScriptDialogs(webContentsId);
+  const dialogFocusRef = useRef<HTMLElement | null>(null);
 
   // Find in page (⌘F) with Chromium's native search: highlights, scrolling and match counts.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -110,7 +122,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     useCallback(() => {
       const webview = webviewRef.current;
       if (!webview || rootRef.current?.contains(document.activeElement)) return;
-      webview.focus();
+      (dialogFocusRef.current ?? webview).focus();
     }, []),
   );
 
@@ -131,6 +143,8 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     if (!webview) return;
 
     const onDomReady = () => {
+      // Every dom-ready: a webview re-attached to the DOM gets a new guest.
+      setWebContentsId(webview.getWebContentsId());
       if (!readyRef.current) {
         readyRef.current = true;
         if (initialUrl && initialUrl !== "about:blank") {
@@ -239,39 +253,49 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     };
   }, [panelApi]);
 
-  const navigate = useCallback((url: string) => {
-    const webview = webviewRef.current;
-    if (!webview || !readyRef.current) return;
+  const navigate = useCallback(
+    (url: string) => {
+      const webview = webviewRef.current;
+      if (!webview || !readyRef.current) return;
 
-    let normalized = url.trim();
-    // A web URL, or the source view of one (View Page Source puts those in the address bar).
-    if (!/^(view-source:)?https?:\/\//i.test(normalized)) {
-      // If it looks like a domain (contains a dot), prepend https://
-      // Otherwise treat it as a search query
-      if (/^[^\s]+\.[^\s]+/.test(normalized)) {
-        normalized = `https://${normalized}`;
-      } else {
-        normalized = webSearchUrl(normalized);
+      let normalized = url.trim();
+      // A web URL, or the source view of one (View Page Source puts those in the address bar).
+      if (!/^(view-source:)?https?:\/\//i.test(normalized)) {
+        // If it looks like a domain (contains a dot), prepend https://
+        // Otherwise treat it as a search query
+        if (/^[^\s]+\.[^\s]+/.test(normalized)) {
+          normalized = `https://${normalized}`;
+        } else {
+          normalized = webSearchUrl(normalized);
+        }
       }
-    }
 
-    setInputUrl(normalized);
-    setCurrentUrl(normalized);
-    setLoadError(null);
-    loadUrl(webview, normalized);
-  }, []);
+      setInputUrl(normalized);
+      setCurrentUrl(normalized);
+      setLoadError(null);
+      dismissDialogs();
+      loadUrl(webview, normalized);
+    },
+    [dismissDialogs],
+  );
 
   const goBack = useCallback(() => {
-    if (readyRef.current) webviewRef.current?.goBack();
-  }, []);
+    if (!readyRef.current) return;
+    dismissDialogs();
+    webviewRef.current?.goBack();
+  }, [dismissDialogs]);
 
   const goForward = useCallback(() => {
-    if (readyRef.current) webviewRef.current?.goForward();
-  }, []);
+    if (!readyRef.current) return;
+    dismissDialogs();
+    webviewRef.current?.goForward();
+  }, [dismissDialogs]);
 
   const reload = useCallback(() => {
-    if (readyRef.current) webviewRef.current?.reload();
-  }, []);
+    if (!readyRef.current) return;
+    dismissDialogs();
+    webviewRef.current?.reload();
+  }, [dismissDialogs]);
 
   const stopLoading = useCallback(() => {
     if (readyRef.current) webviewRef.current?.stop();
@@ -286,6 +310,9 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       wv.openDevTools();
     }
   }, []);
+
+  // A closed dialog returns focus to the page, as browsers do; the next queued one then takes it.
+  const returnFocusToPage = useCallback(() => webviewRef.current?.focus(), []);
 
   const handleUrlKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -382,6 +409,16 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
           style={{ display: "flex" }}
         />
         {findBarProps && <FindBar label="Find in page" {...findBarProps} />}
+        {dialog && (
+          <JavaScriptDialog
+            key={dialog.id}
+            request={dialog}
+            focusScopeRef={rootRef}
+            focusRef={dialogFocusRef}
+            onAnswer={answerDialog}
+            onReturnFocus={returnFocusToPage}
+          />
+        )}
       </div>
       {contextMenu && (
         <BrowserContextMenu
