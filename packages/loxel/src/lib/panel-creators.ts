@@ -35,7 +35,7 @@ import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
 import { useEditorStateStore } from "@/store/editor-state";
-import { activatePanel } from "@/store/layout-actions";
+import { activatePanel, reattachActiveContent } from "@/store/layout-actions";
 import { getCenterPanelDefByType } from "@/store/panel-config";
 import { getCenterApi } from "@/store/tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
@@ -164,6 +164,8 @@ function addPlacedPanel(
       position: ref && placedPosition(ref, placement),
       inactive: !focus,
     });
+    // A background `renderer: "always"` tab (a browser) detaches the group's shown content.
+    if (!focus) reattachActiveContent(panel.group);
     // Added before closing, so a group holding only the replaced tab isn't removed in between.
     if (ref && placement?.replace) ref.api.close();
     return panel;

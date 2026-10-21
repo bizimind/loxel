@@ -36,6 +36,7 @@ mock.module("@/api/client", () => ({
 }));
 
 const {
+  createBrowser,
   createTerminal,
   duplicateComparison,
   handleFileDeleted,
@@ -492,6 +493,18 @@ describe("placement", () => {
     });
     expect(api.getPanel("terminal-t")).toBeUndefined();
     expect(api.activePanel?.id).toBe(a.id);
+  });
+
+  test("without focus a browser tab added behind the active tab leaves its content shown", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+    const content = a.view.content.element;
+    expect(content.isConnected).toBe(true);
+
+    createBrowser("https://example.com", { focus: false });
+
+    expect(api.activePanel).toBe(a);
+    expect(content.isConnected).toBe(true);
   });
 
   test("without focus an open tab split off elsewhere keeps the active tab and group", () => {
