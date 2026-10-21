@@ -21,6 +21,7 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 | New browser                        | `Cmd+Shift+B`                                                |
 | New tab of the active panel's type | `Cmd+\` then `Enter`                                         |
 | Close panel                        | `Cmd+W`                                                      |
+| Rename the active tab              | `Cmd+Shift+R`                                                |
 | Next / previous tab                | `Cmd+Shift+]` / `Cmd+Shift+[`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Focus panel 1–9                    | `Cmd+1` – `Cmd+9`                                            |
 

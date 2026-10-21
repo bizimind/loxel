@@ -1,7 +1,11 @@
-import { afterEach, describe, expect, jest, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import type { DockviewPanelApi } from "dockview-react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { DockviewApi, DockviewPanelApi } from "dockview-react";
+
+import { registerPanelFocus } from "@/lib/panel-focus";
+import { canRenameActiveTab, renameActiveTab } from "@/lib/tab-rename";
+import { setCenterApi } from "@/store/tools-bar";
 
 import { Tab, usePanelTitle } from "./tab";
 
@@ -46,6 +50,7 @@ function openContextMenu() {
 
 const getAnimationsDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "getAnimations");
 afterEach(() => {
+  setCenterApi(null);
   if (getAnimationsDescriptor) {
     Object.defineProperty(Element.prototype, "getAnimations", getAnimationsDescriptor);
   } else {
@@ -138,6 +143,93 @@ describe("Tab rename", () => {
     fireEvent.change(input, { target: { value: "plan.md" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onRename).toHaveBeenCalledWith("plan.md");
+  });
+});
+
+describe("Rename Tab action", () => {
+  const focusPanel = jest.fn(() => true);
+  let unregisterFocus = () => {};
+  beforeEach(() => {
+    focusPanel.mockClear();
+    unregisterFocus = registerPanelFocus("panel-1", focusPanel);
+  });
+  afterEach(() => unregisterFocus());
+
+  /** A center dockview whose active panel is the rendered tab's (`panel-1`). */
+  function activateTabPanel() {
+    const panel = {
+      id: "panel-1",
+      group: { activePanel: null as unknown, api: { isMaximized: () => false, setActive() {} } },
+      view: { content: { element: document.createElement("div") } },
+    };
+    panel.group.activePanel = panel;
+    setCenterApi({
+      activePanel: panel,
+      getPanel: (id: string) => (id === panel.id ? panel : undefined),
+      hasMaximizedGroup: () => false,
+    } as unknown as DockviewApi);
+  }
+
+  test("edits the active tab's title inline, and Enter returns focus to the panel", async () => {
+    const onRename = jest.fn();
+    renderTab({ onRename });
+    activateTabPanel();
+
+    expect(canRenameActiveTab()).toBe(true);
+    act(() => renameActiveTab());
+    const input = screen.getByRole("textbox");
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.change(input, { target: { value: "plan.md" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onRename).toHaveBeenCalledWith("plan.md");
+    await waitFor(() => expect(focusPanel).toHaveBeenCalledTimes(1));
+  });
+
+  test("is disabled when the active tab is not renameable", () => {
+    renderTab();
+    activateTabPanel();
+    expect(canRenameActiveTab()).toBe(false);
+  });
+
+  test("Escape cancels and returns focus to the panel", async () => {
+    const onRename = jest.fn();
+    renderTab({ onRename });
+    activateTabPanel();
+
+    act(() => renameActiveTab());
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+
+    expect(onRename).not.toHaveBeenCalled();
+    await waitFor(() => expect(focusPanel).toHaveBeenCalledTimes(1));
+  });
+
+  test("leaves focus alone when the rename ends on blur", async () => {
+    renderTab({ onRename: jest.fn() });
+    activateTabPanel();
+
+    act(() => renameActiveTab());
+    await Bun.sleep(10);
+    fireEvent.blur(screen.getByRole("textbox"));
+    await Bun.sleep(100);
+
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(focusPanel).not.toHaveBeenCalled();
+  });
+
+  test("cancels when the input can't take focus (behind a modal dialog)", async () => {
+    const onRename = jest.fn();
+    renderTab({ onRename });
+    activateTabPanel();
+    const focus = jest.spyOn(HTMLInputElement.prototype, "focus").mockImplementation(() => {});
+
+    try {
+      act(() => renameActiveTab());
+      await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    } finally {
+      focus.mockRestore();
+    }
+    expect(onRename).not.toHaveBeenCalled();
   });
 });
 

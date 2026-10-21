@@ -96,6 +96,8 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "panel.newTab": [`${SPLIT_LEADER} Enter`],
   "panel.open.localdb": [],
   "panel.close": ["Cmd+W"],
+  // Monaco's Refactor is ⌃⇧R on macOS, so ⌘⇧R is free in the editor.
+  "panel.rename": ["Cmd+Shift+R"],
   ...SPLIT_CHORDS,
   "panel.next": ["Cmd+Shift+BracketRight", "Ctrl+Tab"],
   "panel.prev": ["Cmd+Shift+BracketLeft", "Ctrl+Shift+Tab"],

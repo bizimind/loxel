@@ -180,6 +180,13 @@ export function focusActiveCenterPanel(): void {
   if (api && panel) focusCenterPanel(api, panel);
 }
 
+/** Activate and focus the center panel `panelId` (e.g. after renaming its tab). */
+export function focusCenterPanelById(panelId: string): void {
+  const api = getCenterApi();
+  const panel = api?.getPanel(panelId);
+  if (api && panel) focusCenterPanel(api, panel);
+}
+
 // ---------------------------------------------------------------------------
 // Tool bars
 // ---------------------------------------------------------------------------

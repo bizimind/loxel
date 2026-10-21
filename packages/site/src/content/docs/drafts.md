@@ -28,7 +28,7 @@ Both autosave on the same schedule as the code editor.
 | New markdown draft     | `Cmd+N` or `Cmd+Shift+M` |
 | New Excalidraw drawing | `Cmd+Shift+D`            |
 
-New drafts get the first free name: "Note 1.md", "Note 2.md", and so on for markdown, "Drawing 1.excalidraw" for drawings. Rename them via `F2` or `Shift+F6` in the file tree, or by double-clicking the editor tab.
+New drafts get the first free name: "Note 1.md", "Note 2.md", and so on for markdown, "Drawing 1.excalidraw" for drawings. Rename them via `F2` or `Shift+F6` in the file tree, or by double-clicking the editor tab (or `Cmd+Shift+R` while it is the active tab).
 
 ---
 
