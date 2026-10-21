@@ -225,7 +225,9 @@ describe("Rename Tab action", () => {
 
     try {
       act(() => renameActiveTab());
-      await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+      // A boolean, not the element: printing a failed match (the input and its fiber) blocks the
+      // event loop for seconds on a loaded runner, delaying the cancel past waitFor's timeout.
+      await waitFor(() => expect(screen.queryByRole("textbox") === null).toBe(true));
     } finally {
       focus.mockRestore();
     }
