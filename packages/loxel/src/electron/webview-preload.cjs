@@ -28,7 +28,8 @@ contextBridge.executeInMainWorld({
       leaving = false;
     });
 
-    // `${value}` converts like the DOMString arguments (throws for symbols); omitted → "".
+    // `${value}` converts like a DOMString argument (throws for symbols); an optional argument
+    // omitted or undefined takes its default, "".
     const text = (value) => (value === undefined ? "" : `${value}`);
     const run = (type, message, defaultValue) => {
       const call = { type, message: text(message), defaultValue: text(defaultValue) };
@@ -36,7 +37,9 @@ contextBridge.executeInMainWorld({
     };
 
     window.alert = function alert(...args) {
-      run("alert", args[0], undefined);
+      // Two overloads, not an optional argument: alert() shows "" but alert(undefined) shows
+      // "undefined". confirm() and prompt() take optional arguments, where undefined means "".
+      run("alert", args.length === 0 ? "" : `${args[0]}`, undefined);
     };
     window.confirm = function confirm(...args) {
       return run("confirm", args[0], undefined) === true;

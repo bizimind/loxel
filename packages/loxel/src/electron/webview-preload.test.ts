@@ -52,18 +52,22 @@ describe("webview preload", () => {
     const { page, runDialog } = stubPage(() => null);
     page.alert();
     page.alert(null);
+    page.alert(undefined);
+    page.confirm(undefined);
     page.confirm({});
     page.prompt("Name?", undefined);
     page.prompt(42, 7);
     expect(runDialog.mock.calls.map(([call]) => call)).toEqual([
       { type: "alert", message: "", defaultValue: "" },
       { type: "alert", message: "null", defaultValue: "" },
+      { type: "alert", message: "undefined", defaultValue: "" },
+      { type: "confirm", message: "", defaultValue: "" },
       { type: "confirm", message: "[object Object]", defaultValue: "" },
       { type: "prompt", message: "Name?", defaultValue: "" },
       { type: "prompt", message: "42", defaultValue: "7" },
     ]);
     expect(() => page.alert(Symbol("no"))).toThrow(TypeError);
-    expect(runDialog).toHaveBeenCalledTimes(5);
+    expect(runDialog).toHaveBeenCalledTimes(7);
   });
 
   test("returns what browsers return", () => {
