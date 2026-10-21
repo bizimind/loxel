@@ -6,7 +6,7 @@ How file-backed panels load, edit, save and reconcile files with disk, and how t
 
 A file opens in one of four center panel types, chosen by extension in `filePanelType()` ([open-file.ts](../src/lib/open-file.ts)): `.md` opens the markdown editor, `.excalidraw` the drawing editor, media extensions ([media-extensions.ts](../src/lib/media-extensions.ts)) the media viewer, and everything else the code editor. `dispatchOpenFile()` turns that into a `loxel-open-*` event, and `openFileBacked()` ([panel-creators.ts](../src/lib/panel-creators.ts)) creates or focuses the panel.
 
-The absolute file path is the identity of an open file everywhere: the panel id (`${idPrefix}${filePath}`, so a center layout holds at most one panel per path and type), the key in the editor state store, the key of every content cache, and the React Query `fileContent` key. Relative paths only appear in legacy routes and in search/Quick Open payloads relative to the worktree.
+The absolute file path is the identity of an open file everywhere: the panel id (`${idPrefix}${filePath}`, so a center layout holds at most one panel per path and type), the key of its tab's entry in the editor state store (other editors of the file, compare panel sides, have keys of their own; see [Several editors of one file](#several-editors-of-one-file)), the key of every content cache, and the React Query `fileContent` key. Relative paths only appear in legacy routes and in search/Quick Open payloads relative to the worktree.
 
 Where to look:
 
@@ -15,19 +15,20 @@ Where to look:
 
 ## Disk-synced content
 
-Every file-backed editor (code, markdown, drawing) is built on [use-disk-synced-content.ts](../src/hooks/use-disk-synced-content.ts). The editor supplies `deserialize`, an optional module-level content cache, optional merge callbacks, and populates `getSerializedContentRef` with a function returning its current serialized text. The hook owns the rest:
+Every file-backed editor (code, markdown, drawing, and each side of a compare panel) is built on [use-disk-synced-content.ts](../src/hooks/use-disk-synced-content.ts). The editor supplies `deserialize`, an optional module-level content cache, optional merge callbacks, and populates `getSerializedContentRef` with a function returning its current serialized text. The hook owns the rest:
 
 - **Loading.** A React Query fetch of `GET /api/file-content?path=<abs>&wt=<panel worktree>` with `refetchOnMount: "always"`, so a remounted editor picks up changes made while its worktree was unsubscribed.
 - **Autosave.** `handleChange()` marks the file dirty and arms two timers: a 250 ms idle debounce (`AUTOSAVE_DEBOUNCE_MS`) and a 5 s cap (`AUTOSAVE_MAX_WAIT_MS`) so continuous typing still saves. `saveNow()` (explicit save) clears both. A pending autosave is flushed on unmount and when the panel's `filePath` changes.
-- **Format on save.** Editors set `saveOptionsRef` (explicit saves) and `autoSaveOptionsRef` (autosaves, only when `formatOnAutoSave` is on) from the formatting settings. The server formats only files in the worktree's own tree; Others folders, drafts and external files are written as-is. Formatter detection and backends are covered in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md).
+- **Format on save.** Editors call `useFormatOnSave`, which sets `saveOptionsRef` (explicit saves) and `autoSaveOptionsRef` (autosaves, only when `formatOnAutoSave` is on) from the formatting settings. The server formats only files in the worktree's own tree; Others folders, drafts and external files are written as-is. Formatter detection and backends are covered in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md).
 - **Programmatic guard.** `isProgrammaticRef` is set by the editor around imperative content updates so its change listener does not report them as user edits.
 
 ### Editor file state
 
-[editor-state.ts](../src/store/editor-state.ts) is a Zustand store with one `EditorFileEntry` per open path (`openFile` is idempotent; `closeFile` drops the entry):
+[editor-state.ts](../src/store/editor-state.ts) is a Zustand store with one `EditorFileEntry` per open editor, keyed by editor key: the file path for a file's own tab, `<panel id>:old` or `:new` for a compare panel side (`openFile(key, filePath?)` is idempotent; `closeFile` drops the entry). Every action takes the editor key:
 
 | Field                                     | Purpose                                                                           |
 | ----------------------------------------- | --------------------------------------------------------------------------------- |
+| `filePath`                                | the file the editor shows; equal to the key for a file's own tab                  |
 | `state`                                   | `clean`, `dirty`, `saving` or `diverged`                                          |
 | `deleted`                                 | the file is missing on disk; orthogonal to `state`, see below                     |
 | `movedTo` / `takePendingEdit`             | rename/move bookkeeping on the old entry, see "Moved files"                       |
@@ -45,6 +46,12 @@ Every file-backed editor (code, markdown, drawing) is built on [use-disk-synced-
 - **`clean`:** the store does nothing; the editor's own disk-content effect replaces its content (see each editor below). These effects read the state live from the store rather than from render-time values, because a keystroke between commit and effect can flip it to dirty.
 
 [three-way-merge.ts](../src/lib/three-way-merge.ts) diffs base→ours and base→theirs with `diffArrays` and fails on overlapping, non-identical hunks unless `preferOurs` is set, in which case the conflicting "theirs" hunks are dropped.
+
+### Several editors of one file
+
+A file can be open in its tab and in any number of compare panel sides ([use-compare-side.ts](../src/components/compare/use-compare-side.ts)) at once. Each is an independent editor with its own entry, Monaco model, autosave timers and nonces, passed to `useDiskSyncedContent` as `editorKey`. `saveEditorContent` takes the editor key, so a save's echo is matched to the editor that made it, and the bridge runs `file_content_changed` through every entry whose `filePath` matches: to the other editors the save is an ordinary external change, which a clean editor reloads and a dirty one merges (or shows as a conflict). They share the React Query `fileContent` query, which is keyed by path.
+
+Only a file's own tab is moved or closed by `handleFileMoved` and `handleFileDeleted` ([panel-creators.ts](../src/lib/panel-creators.ts)). Both first mark the path's other editors `deleted`, before their queries notice, so a pending autosave cannot re-create the old path; the compare side stays open on it with the deleted banner. Code that needs the set of open files (re-registering external files on reconnect, closing an Others folder) reads `filePath` from the entries (`openEditorPaths`), not the keys.
 
 ### Save path and write nonces
 
@@ -93,7 +100,7 @@ For a move with source `external`, `handleFileMoved` opens the new tab with a `m
 [CodeEditorPanel.tsx](../src/components/code-editor/CodeEditorPanel.tsx) creates one Monaco editor per panel on mount and reuses or creates the model for the file's URI:
 
 - `file://<abs path>` for languages whose language server needs real disk paths (`yaml`, `json`, `dockerfile`, `dockerbake`, `terraform`, `astro`, `xml`).
-- `loxel://HEAD/<abs path>` for everything else. These are the live, editable models; the diff view's read-only models use `loxel://<ref>/<path>#<side>` ([diff/EditorPanel.tsx](../src/components/diff/EditorPanel.tsx), see [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md)).
+- `loxel://HEAD/<abs path>` for everything else. These are the live models of editor tabs; the diff views' models use `loxel://<ref>/<path>#<side>` for git diffs and `loxel://compare/<abs path>#<panel id>-<side>` for compare panels (see [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md#components-and-data-sources)).
 
 The model is disposed with the panel, so undo history does not outlive the tab. Go-to-definition targets with the `loxel` scheme are routed to `dispatchOpenFile` by `registerEditorOpener` in [monaco-env.ts](../src/lib/monaco-env.ts); the editor sets every `gotoLocation` mode to `"goto"` because Monaco's peek widget resolves models through a path that ignores the opener. The same file lazily connects expensive language servers by counting live models (`file://` and `loxel://HEAD` only); LSP wiring is in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md).
 
@@ -206,7 +213,7 @@ Both open results through `dispatchOpenFile` with a line and column; the markdow
 
 ## Invariants
 
-- One open file is one absolute path: one panel per path and type in a layout, one editor-state entry, one cache key. Paths from the server and the client must be normalized the same way (`resolve`, `canonicalPath`).
+- One open file is one absolute path: one panel per path and type in a layout, one cache key, and one editor-state entry per editor showing it, the tab's keyed by the path. Paths from the server and the client must be normalized the same way (`resolve`, `canonicalPath`).
 - Editor writes go only through `saveEditorContent`, which always sends a fresh nonce (`/api/file-write` requires one). A write without a nonce is seen as an external change by every editor, including the one that made it.
 - Completion of a save is the nonce echo, not the HTTP response. Do not mark files clean elsewhere.
 - An unmounting editor flushes only to its own path or its entry's `movedTo`; never to a path a delete or move handler already closed.

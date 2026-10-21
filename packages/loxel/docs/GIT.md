@@ -102,11 +102,11 @@ The file the diff viewer shows is `selectedDiffFile` in [worktree-ui.ts](../src/
 
 ### Highlighting
 
-[DiffViewerPanel.tsx](../src/components/diff-viewer/DiffViewerPanel.tsx) renders the true side-by-side view ([SideBySideDiffView.tsx](../src/components/diff/SideBySideDiffView.tsx)) as two Monaco editors over full file contents when in split mode with a commit or worktree context, so highlighting there is Monaco's (see [EDITOR.md](EDITOR.md)). Otherwise it renders hunks only, highlighted with Shiki by [useSyntaxHighlight](../src/hooks/useSyntaxHighlight.ts) through `highlightCode` in [highlighter.ts](../src/lib/highlighter.ts), using `github-dark` or `github-light` according to `darkMode`.
+[DiffViewerPanel.tsx](../src/components/diff-viewer/DiffViewerPanel.tsx) renders the true side-by-side view ([GitSideBySideDiffView.tsx](../src/components/diff-viewer/GitSideBySideDiffView.tsx) over [SideBySideDiffView.tsx](../src/components/diff/SideBySideDiffView.tsx)) as two Monaco editors over full file contents when in split mode with a commit or worktree context, so highlighting there is Monaco's (see [EDITOR.md](EDITOR.md)). Otherwise it renders hunks only ([HunkBasedDiffView.tsx](../src/components/diff-viewer/HunkBasedDiffView.tsx)), highlighted with Shiki by [useSyntaxHighlight](../src/hooks/useSyntaxHighlight.ts) through `highlightCode` in [highlighter.ts](../src/lib/highlighter.ts), using `github-dark` or `github-light` according to `darkMode`.
 
 ### Collapsed regions
 
-[useCollapsedRegions](../src/hooks/useCollapsedRegions.ts) holds the expanded set of unchanged regions for one file in the side-by-side view, computed by `buildCollapsibleRegions`/`computeHiddenRanges` in [unchanged-regions.ts](../src/components/diff/unchanged-regions.ts), and resets it when the hunks array changes identity. Rendering and scroll alignment are in [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md).
+[useCollapsedRegions](../src/hooks/useCollapsedRegions.ts) holds the expanded set of unchanged regions for one file in the side-by-side view, computed by `buildCollapsibleRegions`/`computeHiddenRanges` in [unchanged-regions.ts](../src/components/diff/unchanged-regions.ts), and resets it when the hunks array changes identity (compare panels keep expanded regions instead). Rendering and scroll alignment are in [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md).
 
 ## Commit graph
 

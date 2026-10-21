@@ -35,6 +35,7 @@ import {
   type MergeCallbacks,
   AUTOSAVE_DEBOUNCE_MS,
   useDiskSyncedContent,
+  useFormatOnSave,
 } from "@/hooks/use-disk-synced-content";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { frontendLog } from "@/lib/frontend-logger";
@@ -51,7 +52,6 @@ import { rawLineToProsePosition } from "@/lib/prosemirror-position";
 import { createMinimalReplaceTransaction } from "@/lib/prosemirror-replace";
 import { threeWayMerge } from "@/lib/three-way-merge";
 import { useEditorStateStore } from "@/store/editor-state";
-import { useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
 
 import "@/styles/milkdown-theme.css";
@@ -326,14 +326,7 @@ export function MarkdownEditor({
   });
 
   // Keep save option refs in sync with formatting settings.
-  const formattingSettings = useSettingsStore((s) => s.editor.formatting);
-  saveOptionsRef.current = formattingSettings.enabled
-    ? { format: true, formattingSettings }
-    : undefined;
-  autoSaveOptionsRef.current =
-    formattingSettings.enabled && formattingSettings.formatOnAutoSave
-      ? { format: true, formattingSettings }
-      : undefined;
+  useFormatOnSave({ saveOptionsRef, autoSaveOptionsRef });
 
   // Frontmatter state — kept as React state so FrontmatterEditor re-renders on change.
   // The ref mirrors the state for synchronous reads inside Crepe callbacks.

@@ -38,12 +38,25 @@ mock.module("@/api/client", () => ({
 }));
 
 mock.module("@/components/menus/ProjectFileMenu", () => ({
-  ProjectFileMenu: ({ filePath, relativePath }: { filePath: string; relativePath?: string }) => (
+  ProjectFileMenu: ({
+    filePath,
+    relativePath,
+    compareWith,
+    onCompare,
+  }: {
+    filePath: string;
+    relativePath?: string;
+    compareWith?: string;
+    onCompare?: () => void;
+  }) => (
     <div
       data-testid="project-file-menu"
       data-file-path={filePath}
       data-relative-path={relativePath}
-    />
+      data-compare-with={compareWith}
+    >
+      {onCompare && <button onClick={onCompare}>Compare Files</button>}
+    </div>
   ),
 }));
 
@@ -256,6 +269,44 @@ describe("ProjectFilesPanel", () => {
     const menu = screen.getByTestId("project-file-menu");
     expect(menu).toHaveAttribute("data-file-path", "/repo/src");
     expect(menu).toHaveAttribute("data-relative-path", "src");
+  });
+
+  test("right-clicking a file offers to compare it with the focused file", async () => {
+    entriesByDir
+      .get("/repo")!
+      .push({ name: "notes.ts", path: "/repo/notes.ts", isDir: false, status: "normal" });
+    renderPanel(queryClient);
+    const notes = await screen.findByRole("button", { name: /notes\.ts/ });
+    const readme = screen.getByRole("button", { name: /README\.md/ });
+
+    fireEvent.click(notes);
+    // A right-click focuses the clicked row on mouse down, before the context menu opens.
+    fireEvent.mouseDown(readme, { button: 2 });
+    readme.focus();
+    fireEvent.contextMenu(readme);
+
+    const menu = screen.getByTestId("project-file-menu");
+    expect(menu).toHaveAttribute("data-compare-with", "/repo/notes.ts");
+    fireEvent.click(screen.getByText("Compare Files"));
+    expect(dispatchedEvents.get("loxel-compare-files")).toEqual([
+      { oldPath: "/repo/notes.ts", newPath: "/repo/README.md" },
+    ]);
+  });
+
+  test("does not offer Compare Files for the focused file itself or a folder", async () => {
+    renderPanel(queryClient);
+    const readme = await screen.findByRole("button", { name: /README\.md/ });
+    const src = screen.getByRole("button", { name: /src/ });
+
+    fireEvent.click(readme);
+    fireEvent.mouseDown(readme, { button: 2 });
+    fireEvent.contextMenu(readme);
+    expect(screen.queryByText("Compare Files")).toBeNull();
+
+    fireEvent.mouseDown(src, { button: 2 });
+    fireEvent.contextMenu(src);
+    expect(screen.getByTestId("project-file-menu")).toHaveAttribute("data-file-path", "/repo/src");
+    expect(screen.queryByText("Compare Files")).toBeNull();
   });
 
   test("root dir-changed events reload rendered root children", async () => {

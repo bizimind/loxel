@@ -1,6 +1,19 @@
 # Side-by-Side Diff View Specification
 
-How the side-by-side diff view keeps its two panels aligned while scrolling, highlights intra-line changes, and draws the gutter between the panels.
+How the diff views are put together for git diffs and file comparisons, and how the side-by-side view keeps its two panels aligned while scrolling, highlights intra-line changes, and draws the gutter between the panels.
+
+## Components and Data Sources
+
+The views are independent of where their content comes from. [SideBySideDiffView.tsx](../src/components/diff/SideBySideDiffView.tsx) takes the hunks plus, for each side (`DiffSide`), the full lines, a label, the Monaco language and model URI, optional diagnostics and an optional `editable` handle, and renders the two editors, line numbers, gutter and collapsed regions described below. [HunkBasedDiffView.tsx](../src/components/diff-viewer/HunkBasedDiffView.tsx) renders the same hunks unified or as a split table; it reads hidden gap lines through a `loadContextLines` callback and resets expanded gaps when that callback changes identity. [DiffToolbar.tsx](../src/components/diff-viewer/DiffToolbar.tsx) (file navigation when a diff has several files, and the split/unified toggle, a global setting) and [FileDiffHeader.tsx](../src/components/diff-viewer/FileDiffHeader.tsx) are shared as well.
+
+Two panels feed them:
+
+- **Git diffs.** [DiffViewerPanel.tsx](../src/components/diff-viewer/DiffViewerPanel.tsx), one per worktree, shows the diff source selected in the Changes panel and graph, with hunks from the server ([GIT.md](GIT.md)). In split mode with a commit or worktree context, [GitSideBySideDiffView.tsx](../src/components/diff-viewer/GitSideBySideDiffView.tsx) loads both versions from git or the working tree, fetches TypeScript diagnostics, and turns on review comments (`comments`, see [CODE_REVIEW.md](CODE_REVIEW.md)); without comments the view never touches the comment store. Its read-only models use `loxel://<ref or HEAD>/<repo-relative path>#<old|new>`. Gap lines come from `GET /api/file-lines` at the diff's commit.
+- **File comparisons.** [CompareFilesPanel.tsx](../src/components/compare/CompareFilesPanel.tsx), any number per worktree (`compare-<uuid>`), compares two files by absolute path. `computeFileDiff` ([compute-file-diff.ts](../src/components/diff/compute-file-diff.ts)) diffs them on the client with the `DefaultLinesDiffComputer` Monaco bundles and emits git-style hunks with three lines of context, so change regions, scroll alignment, collapsing and the unified view work unchanged. Lines are split the way a Monaco model splits them (`splitLines`), so line numbers match the editors. Both sides are editable; each is a `useCompareSide` ([use-compare-side.ts](../src/components/compare/use-compare-side.ts)) holding the side's live text, synced with disk like an editor tab ([EDITOR.md](EDITOR.md#several-editors-of-one-file)). The diff is recomputed 100 ms after either text stops changing, from an edit or from disk, and expanded regions survive the recomputation (below). Models use `loxel://compare/<abs path>#<panel id>-<old|new>`, outside `loxel://HEAD`, so they never count as an editor tab's live model. Gap lines in the unified view come from the new side's text, which the unified view only reads.
+
+An editable side's [EditorPanel.tsx](../src/components/diff/EditorPanel.tsx) starts from the side's text, reports every content change through `onContentChange`, and stops following its `content` prop after mount: its owner applies disk content and merges to the mounted editor as line edits, and keeps the text when no editor is mounted (unified mode), so edits survive switching views. Each `EditorPanel` disposes its model on unmount, so model URIs must be unique among mounted panels.
+
+`useCollapsedRegions` collapses every region again when the hunks change, which suits moving between files. With `keepExpandedOnChange` (compare panels) it instead carries expanded regions over with `carryExpandedRegions` ([unchanged-regions.ts](../src/components/diff/unchanged-regions.ts)): a new region stays expanded when it overlaps a previously expanded one on a side whose line count did not change (either side when both or neither changed), since an edit shifts the lines of one side only. Both modes follow the regions during render, so hidden ranges never pair new regions with old indices.
 
 ## Synchronized Scrolling Behavior (JetBrains-Style)
 
@@ -363,7 +376,9 @@ for each change section (in top-to-bottom order):
 
 4. **Symmetry**: The algorithm is symmetric - scrolling left vs right just swaps which side is source/follower
 
-5. **Source side must be the panel under the pointer**: The mapping is not a bijection (the follower can be paused or clamped, and collapsed regions can leave one side with no scroll range at all), so translating from the wrong side produces jumps. Overlays that intercept wheel events outside the panel containers (such as the collapse indicator in `DiffGutter`) call `scrollBy` from `useMonacoSyncScroll` with the side under the pointer, never a fixed side.
+5. **Editors scrolling themselves**: Monaco scrolls an editor to reveal the caret when typing in an editable side or moving with the keyboard. `useMonacoSyncScroll` treats a scroll of the focused editor that it did not make itself as the user scrolling that side, and positions the other side from it.
+
+6. **Source side must be the panel under the pointer**: The mapping is not a bijection (the follower can be paused or clamped, and collapsed regions can leave one side with no scroll range at all), so translating from the wrong side produces jumps. Overlays that intercept wheel events outside the panel containers (such as the collapse indicator in `DiffGutter`) call `scrollBy` from `useMonacoSyncScroll` with the side under the pointer, never a fixed side.
 
 ### Key Files
 

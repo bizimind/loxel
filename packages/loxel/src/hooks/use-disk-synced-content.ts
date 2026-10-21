@@ -19,6 +19,7 @@ import { type SaveOptions, saveEditorContent } from "@/lib/save-editor-content";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
 import { type EditorFileState, useEditorStateStore } from "@/store/editor-state";
+import { useSettingsStore } from "@/store/settings-store";
 
 export const AUTOSAVE_DEBOUNCE_MS = 250;
 export const AUTOSAVE_MAX_WAIT_MS = 5_000;
@@ -38,6 +39,12 @@ export interface MergeCallbacks {
 
 export interface UseDiskSyncedContentOptions<T> {
   filePath: string;
+  /**
+   * Editor-state key for this editor. Defaults to `filePath`, which is right for a file's own tab;
+   * other views of a file (a compare panel side) pass a key of their own so they get their own
+   * state entry.
+   */
+  editorKey?: string;
   /** Parse raw file content string into typed content T. */
   deserialize: (raw: string) => T;
   /** External content cache (Map<cacheKey, T>). null = no cache (e.g. CodeEditor). */
@@ -94,6 +101,7 @@ export function useDiskSyncedContent<T>(
   options: UseDiskSyncedContentOptions<T>,
 ): DiskSyncedContent<T> {
   const { filePath, deserialize, contentCache, mergeCallbacks } = options;
+  const editorKey = options.editorKey ?? filePath;
 
   // --- Scope ---
   const { activeProjectPath } = useQueryScope();
@@ -106,6 +114,7 @@ export function useDiskSyncedContent<T>(
   // Declared before the scope-change flush so the flush can read old values,
   // then updated to current values afterward.
   const filePathRef = useRef(filePath);
+  const editorKeyRef = useRef(editorKey);
   const cacheKeyRef = useRef(cacheKey);
   const worktreePathRef = useRef(panelWorktreePath);
   const deserializeRef = useRef(deserialize);
@@ -127,28 +136,35 @@ export function useDiskSyncedContent<T>(
       autosaveCapTimerRef.current = null;
     }
     const fn = getSerializedContentRef.current;
-    if (fn && !isFileDeleted(filePathRef.current)) {
+    if (fn && !isFileDeleted(editorKeyRef.current)) {
       const content = fn();
       if (content !== null) {
-        saveEditorContent(filePathRef.current, content, worktreePathRef.current);
+        saveEditorContent(
+          filePathRef.current,
+          content,
+          worktreePathRef.current,
+          undefined,
+          editorKeyRef.current,
+        );
       }
     }
   }
 
   // Now update refs to current values
   filePathRef.current = filePath;
+  editorKeyRef.current = editorKey;
   cacheKeyRef.current = cacheKey;
   worktreePathRef.current = panelWorktreePath;
   deserializeRef.current = deserialize;
   contentCacheRef.current = contentCache;
 
   // --- Editor state ---
-  const editorFileState = useEditorStateStore((s) => s.files.get(filePath)?.state ?? "clean");
-  const isDeleted = useEditorStateStore((s) => s.files.get(filePath)?.deleted ?? false);
+  const editorFileState = useEditorStateStore((s) => s.files.get(editorKey)?.state ?? "clean");
+  const isDeleted = useEditorStateStore((s) => s.files.get(editorKey)?.deleted ?? false);
 
   // --- File registration ---
   useEffect(() => {
-    useEditorStateStore.getState().openFile(filePath);
+    useEditorStateStore.getState().openFile(editorKey, filePath);
     return () => {
       // Flush pending save before closing — handles unmount.
       // On scope change, the render-phase flush above already clears the timer,
@@ -161,26 +177,34 @@ export function useDiskSyncedContent<T>(
           autosaveCapTimerRef.current = null;
         }
         const fn = getSerializedContentRef.current;
-        const target = flushTarget(filePath);
+        const target = flushTarget(editorKey);
         if (fn && target) {
           const content = fn();
           if (content !== null) {
-            saveEditorContent(target, content, worktreePathRef.current, saveOptionsRef.current);
+            // A moved file's flush goes to its new path, whose tab is keyed by that path.
+            const key = target === filePath ? editorKey : target;
+            saveEditorContent(
+              target,
+              content,
+              worktreePathRef.current,
+              saveOptionsRef.current,
+              key,
+            );
           }
         }
       }
-      useEditorStateStore.getState().closeFile(filePath);
+      useEditorStateStore.getState().closeFile(editorKey);
       contentCache?.delete(cacheKey);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, cacheKey]);
+  }, [filePath, editorKey, cacheKey]);
 
   // --- Unsaved edits, taken over by a move ---
   useEffect(() => {
     const take = () => {
       // Decided by state, not only by a pending timer: an editor can be dirty with no timer
       // (edits made while the file was missing never armed a save that wrote anything).
-      const state = useEditorStateStore.getState().files.get(filePath)?.state;
+      const state = useEditorStateStore.getState().files.get(editorKey)?.state;
       const unsaved = autosaveTimerRef.current !== null || state === "dirty" || state === "saving";
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       if (autosaveCapTimerRef.current) clearTimeout(autosaveCapTimerRef.current);
@@ -190,17 +214,17 @@ export function useDiskSyncedContent<T>(
       const content = getSerializedContentRef.current?.() ?? null;
       return content === null ? null : { content, options: saveOptionsRef.current };
     };
-    useEditorStateStore.getState().registerPendingEdit(filePath, take);
-    return () => useEditorStateStore.getState().registerPendingEdit(filePath, null);
-  }, [filePath]);
+    useEditorStateStore.getState().registerPendingEdit(editorKey, take);
+    return () => useEditorStateStore.getState().registerPendingEdit(editorKey, null);
+  }, [editorKey]);
 
   // --- Merge callbacks registration ---
   useEffect(() => {
     if (!mergeCallbacks) return;
     const { getContent, applyContent } = mergeCallbacks;
-    useEditorStateStore.getState().registerEditorCallbacks(filePath, getContent, applyContent);
-    return () => useEditorStateStore.getState().unregisterEditorCallbacks(filePath);
-  }, [filePath, mergeCallbacks]);
+    useEditorStateStore.getState().registerEditorCallbacks(editorKey, getContent, applyContent);
+    return () => useEditorStateStore.getState().unregisterEditorCallbacks(editorKey);
+  }, [editorKey, mergeCallbacks]);
 
   // --- Query ---
   const { data, dataUpdatedAt, isError, error } = useQuery({
@@ -228,16 +252,16 @@ export function useDiskSyncedContent<T>(
   // the same `data` object (structural sharing) and would otherwise change nothing here.
   const isMissingOnDisk = isError && api.isFileMissingError(error);
   useEffect(() => {
-    if (isMissingOnDisk) useEditorStateStore.getState().setDeleted(filePath, true);
-    else if (dataUpdatedAt > 0) useEditorStateStore.getState().setDeleted(filePath, false);
-  }, [isMissingOnDisk, dataUpdatedAt, filePath]);
+    if (isMissingOnDisk) useEditorStateStore.getState().setDeleted(editorKey, true);
+    else if (dataUpdatedAt > 0) useEditorStateStore.getState().setDeleted(editorKey, false);
+  }, [isMissingOnDisk, dataUpdatedAt, editorKey]);
 
   // --- Set base content when data is available and state is clean ---
   useEffect(() => {
     if (data && editorFileState === "clean") {
-      useEditorStateStore.getState().setBaseContent(filePath, data.content);
+      useEditorStateStore.getState().setBaseContent(editorKey, data.content);
     }
-  }, [data, filePath, editorFileState]);
+  }, [data, editorKey, editorFileState]);
 
   // --- Content derivation ---
   const diskContent = useMemo<T | null>(() => {
@@ -257,7 +281,7 @@ export function useDiskSyncedContent<T>(
   const save = useCallback(async () => {
     // Never re-create a deleted file implicitly (only an explicit, confirmed save may), and
     // never write to the old path of a file that is being moved.
-    if (isFileDeleted(filePathRef.current) || isFileMoving(filePathRef.current)) return;
+    if (isFileDeleted(editorKeyRef.current) || isFileMoving(editorKeyRef.current)) return;
     const fn = getSerializedContentRef.current;
     if (!fn) return;
     const content = fn();
@@ -267,6 +291,7 @@ export function useDiskSyncedContent<T>(
       content,
       worktreePathRef.current,
       autoSaveOptionsRef.current,
+      editorKeyRef.current,
     );
   }, []);
 
@@ -292,21 +317,23 @@ export function useDiskSyncedContent<T>(
       content,
       worktreePathRef.current,
       saveOptionsRef.current,
+      editorKeyRef.current,
     );
   }, []);
 
   const saveNow = useCallback(async () => {
     const path = filePathRef.current;
-    if (isFileDeleted(path)) {
+    const key = editorKeyRef.current;
+    if (isFileDeleted(key)) {
       const confirmed = await requestConfirmation({
         title: "Re-create deleted file?",
         description: `"${getDisplayFilename(path)}" was removed from disk. Saving will create it again with the editor's current content.`,
         confirmLabel: "Re-create",
       });
-      if (!confirmed || path !== filePathRef.current) return;
+      if (!confirmed || key !== editorKeyRef.current) return;
       // The file may have come back while the dialog was open. If that restore conflicted with
       // the editor, let the conflict banner decide instead of overwriting the restored content.
-      const entry = useEditorStateStore.getState().files.get(path);
+      const entry = useEditorStateStore.getState().files.get(key);
       if (!entry?.deleted && entry?.state === "diverged") return;
     }
     await writeNow();
@@ -320,18 +347,18 @@ export function useDiskSyncedContent<T>(
     const wasDeleted = wasDeletedRef.current;
     wasDeletedRef.current = isDeleted;
     if (!wasDeleted || isDeleted) return;
-    if (useEditorStateStore.getState().files.get(filePath)?.state !== "dirty") return;
+    if (useEditorStateStore.getState().files.get(editorKey)?.state !== "dirty") return;
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(() => {
       autosaveTimerRef.current = null;
       save();
     }, AUTOSAVE_DEBOUNCE_MS);
-  }, [isDeleted, filePath, save]);
+  }, [isDeleted, editorKey, save]);
 
   // --- Conflict resolution ---
   const handleAcceptDisk = useCallback((): T | null => {
     const store = useEditorStateStore.getState();
-    const entry = store.files.get(filePath);
+    const entry = store.files.get(editorKey);
     if (!entry?.diskContent) return null;
     let parsed: T | null = null;
     try {
@@ -340,23 +367,23 @@ export function useDiskSyncedContent<T>(
     } catch {
       // Parse failed — still accept state-wise
     }
-    store.acceptDiskVersion(filePath);
+    store.acceptDiskVersion(editorKey);
     return parsed;
-  }, [filePath, cacheKey]);
+  }, [editorKey, cacheKey]);
 
   const handleKeepMine = useCallback(() => {
-    useEditorStateStore.getState().keepMyChanges(filePath);
+    useEditorStateStore.getState().keepMyChanges(editorKey);
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     if (autosaveCapTimerRef.current) clearTimeout(autosaveCapTimerRef.current);
     autosaveCapTimerRef.current = null;
     autosaveTimerRef.current = setTimeout(() => save(), AUTOSAVE_DEBOUNCE_MS);
-  }, [filePath, save]);
+  }, [editorKey, save]);
 
   // --- Change handler (capped debounce: 250ms idle / 5s max wait) ---
   const handleChange = useCallback(
     (value: T) => {
       contentCacheRef.current?.set(cacheKeyRef.current, value);
-      useEditorStateStore.getState().markDirty(filePathRef.current);
+      useEditorStateStore.getState().markDirty(editorKeyRef.current);
       // Reset the idle debounce on every keystroke
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = setTimeout(() => {
@@ -413,21 +440,39 @@ export function useDiskSyncedContent<T>(
   };
 }
 
-function isFileDeleted(filePath: string): boolean {
-  return useEditorStateStore.getState().files.get(filePath)?.deleted ?? false;
+/**
+ * Keep an editor's save options in sync with the formatting settings: explicit saves format when
+ * formatting is on, autosaves only when format-on-autosave is on too.
+ */
+export function useFormatOnSave({
+  saveOptionsRef,
+  autoSaveOptionsRef,
+}: Pick<DiskSyncedContent<unknown>, "saveOptionsRef" | "autoSaveOptionsRef">): void {
+  const formattingSettings = useSettingsStore((s) => s.editor.formatting);
+  saveOptionsRef.current = formattingSettings.enabled
+    ? { format: true, formattingSettings }
+    : undefined;
+  autoSaveOptionsRef.current =
+    formattingSettings.enabled && formattingSettings.formatOnAutoSave
+      ? { format: true, formattingSettings }
+      : undefined;
 }
 
-function isFileMoving(filePath: string): boolean {
-  return Boolean(useEditorStateStore.getState().files.get(filePath)?.movedTo);
+function isFileDeleted(editorKey: string): boolean {
+  return useEditorStateStore.getState().files.get(editorKey)?.deleted ?? false;
+}
+
+function isFileMoving(editorKey: string): boolean {
+  return Boolean(useEditorStateStore.getState().files.get(editorKey)?.movedTo);
 }
 
 /**
  * Where an unmounting editor writes its pending edit: the new path of a moved file, nothing for
  * a deleted file or one whose entry a delete or move handler already closed, else the file.
  */
-function flushTarget(filePath: string): string | null {
-  const entry = useEditorStateStore.getState().files.get(filePath);
+function flushTarget(editorKey: string): string | null {
+  const entry = useEditorStateStore.getState().files.get(editorKey);
   if (!entry) return null;
   if (entry.movedTo) return entry.movedTo;
-  return entry.deleted ? null : filePath;
+  return entry.deleted ? null : entry.filePath;
 }

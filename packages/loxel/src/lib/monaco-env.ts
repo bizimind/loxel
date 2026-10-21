@@ -163,14 +163,13 @@ function createLazyLspConnector(opts: {
   const isMatch = (model: monaco.editor.ITextModel): boolean => {
     if (!opts.languageIds.includes(model.getLanguageId())) return false;
     if (!activeWt) return false;
-    const path = model.uri.path;
-    if (isWithin(path, activeWt)) return true;
-    // Files outside every project (the Others section) are served by the active worktree's LSP.
-    // Live editors use file:// or loxel://HEAD (see CodeEditorPanel); diff and history models
-    // use other loxel authorities and are not counted.
-    const { scheme, authority } = model.uri;
+    // Live editors use file:// or loxel://HEAD (see CodeEditorPanel); diff, compare and history
+    // models use other loxel authorities and are not counted.
+    const { scheme, authority, path } = model.uri;
     const isLiveEditor = scheme === "file" || (scheme === "loxel" && authority === "HEAD");
     if (!isLiveEditor) return false;
+    if (isWithin(path, activeWt)) return true;
+    // Files outside every project (the Others section) are served by the active worktree's LSP.
     return !deriveProject(path, useProjectStore.getState().projects);
   };
 

@@ -137,6 +137,8 @@ Row-level drop handlers always stop drag auto-scroll. The scroll container handl
 
 Focus inside the Project Explorer updates `selectedProjectFile` and closes any open project file context menu.
 
+The context menu of a file offers **Compare Files** when another file is selected: the selected file becomes the left side and the clicked file the right side, dispatched as `loxel-compare-files`. The selection is read when the right mouse button goes down, before the click focuses the clicked row (a menu opened without a mouse reads it at that time). Folders and media files are not offered.
+
 Focus and selection are not the active/opened visual state. Clicking a row focuses it. The focused row (by click or keyboard) has a stronger tint and an outline than the light hover tint (see [FILES_TREE.md](FILES_TREE.md#focus-selection-and-active-rows)). The stronger active background is only applied to the file path currently opened in the active center editor panel.
 
 Project Explorer owns panel-level keyboard shortcuts and passes `disableBuiltinKeyNav` to `FilesTree`. It still resolves tree keyboard input through the shared keybinding store, so these keys are remappable in Settings.

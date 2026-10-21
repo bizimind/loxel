@@ -42,6 +42,10 @@ interface UseMonacoSyncScrollResult {
  * paused or clamped), so the source must always be the panel the user is actually
  * scrolling. Overlays outside the containers must report the side under the pointer
  * via `scrollBy` rather than forwarding to a fixed side.
+ *
+ * An editor can also scroll itself: Monaco reveals the caret when it moves off screen
+ * (typing in an editable side, keyboard navigation). Such scrolls of the focused editor are
+ * treated as the user scrolling that side, and the other side follows.
  */
 export function useMonacoSyncScroll(
   options: UseMonacoSyncScrollOptions,
@@ -71,6 +75,42 @@ export function useMonacoSyncScroll(
     }
   }, []);
 
+  // Set while this hook moves the editors, so their scroll events are not taken for the
+  // editor scrolling itself.
+  const syncingRef = useRef(false);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
+  /** Position both editors for `source` at `sourceScroll`, then notify subscribers. */
+  const alignTo = useCallback(
+    (source: ScrollSide, sourceScroll: number) => {
+      const leftEditor = leftEditorRef.current;
+      const rightEditor = rightEditorRef.current;
+      if (!leftEditor || !rightEditor) return;
+      const viewportHeight =
+        (source === "left" ? leftContainerRef : rightContainerRef).current?.clientHeight ?? 0;
+      if (viewportHeight === 0) return;
+
+      const { leftScroll, rightScroll } = translateScrollPosition(
+        source,
+        sourceScroll,
+        optionsRef.current.alignmentSections,
+        optionsRef.current.lineHeight,
+        viewportHeight,
+      );
+      syncingRef.current = true;
+      try {
+        leftEditor.setScrollTop(leftScroll);
+        rightEditor.setScrollTop(rightScroll);
+      } finally {
+        syncingRef.current = false;
+      }
+      // Read back clamped values — Monaco clamps internally but translateScrollPosition doesn't
+      notifySubscribers(leftEditor.getScrollTop(), rightEditor.getScrollTop());
+    },
+    [notifySubscribers],
+  );
+
   // Core scroll logic — drives both editors from a delta on the source side
   const scrollBy = useCallback<ScrollBy>(
     (source, deltaX, deltaY) => {
@@ -79,39 +119,26 @@ export function useMonacoSyncScroll(
       if (!leftEditor || !rightEditor) return;
 
       const sourceEditor = source === "left" ? leftEditor : rightEditor;
-      const viewportHeight =
-        (source === "left" ? leftContainerRef : rightContainerRef).current?.clientHeight ?? 0;
-
-      if (viewportHeight === 0) return;
 
       // Vertical scrolling — alignment-based
       if (deltaY !== 0) {
-        const currentScrollTop = sourceEditor.getScrollTop();
-        const newSourceScroll = Math.max(0, currentScrollTop + deltaY);
-
-        const { leftScroll, rightScroll } = translateScrollPosition(
-          source,
-          newSourceScroll,
-          options.alignmentSections,
-          options.lineHeight,
-          viewportHeight,
-        );
-
-        leftEditor.setScrollTop(leftScroll);
-        rightEditor.setScrollTop(rightScroll);
-        // Read back clamped values — Monaco clamps internally but translateScrollPosition doesn't
-        notifySubscribers(leftEditor.getScrollTop(), rightEditor.getScrollTop());
+        alignTo(source, Math.max(0, sourceEditor.getScrollTop() + deltaY));
       }
 
       // Horizontal scrolling — mirror deltaX to both editors
       if (deltaX !== 0) {
         const sourceScrollLeft = sourceEditor.getScrollLeft();
         const newScrollLeft = Math.max(0, sourceScrollLeft + deltaX);
-        leftEditor.setScrollLeft(newScrollLeft);
-        rightEditor.setScrollLeft(newScrollLeft);
+        syncingRef.current = true;
+        try {
+          leftEditor.setScrollLeft(newScrollLeft);
+          rightEditor.setScrollLeft(newScrollLeft);
+        } finally {
+          syncingRef.current = false;
+        }
       }
     },
-    [options.alignmentSections, options.lineHeight, notifySubscribers],
+    [alignTo],
   );
 
   // Wheel event handler — intercepts wheel on container, drives both editors
@@ -148,13 +175,40 @@ export function useMonacoSyncScroll(
     notifySubscribers(leftScroll, rightScroll);
   }, [notifySubscribers]);
 
-  const onLeftEditorMount = useCallback((ed: IStandaloneCodeEditor) => {
-    leftEditorRef.current = ed;
-  }, []);
+  const followSelfScroll = useCallback(
+    (ed: IStandaloneCodeEditor, source: ScrollSide) => {
+      ed.onDidScrollChange((e) => {
+        if (syncingRef.current || !ed.hasTextFocus()) return;
+        if (e.scrollTopChanged) alignTo(source, e.scrollTop);
+        if (e.scrollLeftChanged) {
+          const other = source === "left" ? rightEditorRef.current : leftEditorRef.current;
+          syncingRef.current = true;
+          try {
+            other?.setScrollLeft(e.scrollLeft);
+          } finally {
+            syncingRef.current = false;
+          }
+        }
+      });
+    },
+    [alignTo],
+  );
 
-  const onRightEditorMount = useCallback((ed: IStandaloneCodeEditor) => {
-    rightEditorRef.current = ed;
-  }, []);
+  const onLeftEditorMount = useCallback(
+    (ed: IStandaloneCodeEditor) => {
+      leftEditorRef.current = ed;
+      followSelfScroll(ed, "left");
+    },
+    [followSelfScroll],
+  );
+
+  const onRightEditorMount = useCallback(
+    (ed: IStandaloneCodeEditor) => {
+      rightEditorRef.current = ed;
+      followSelfScroll(ed, "right");
+    },
+    [followSelfScroll],
+  );
 
   return {
     onLeftEditorMount,

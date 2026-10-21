@@ -66,3 +66,30 @@ describe("refreshOpenFile", () => {
     expect(useEditorStateStore.getState().files.get(PATH)?.deleted).toBe(false);
   });
 });
+
+describe("refreshOpenFile with several editors of one file", () => {
+  test("runs each editor's own state machine, matching nonces per editor", async () => {
+    const store = useEditorStateStore.getState();
+    store.openFile(PATH);
+    store.openFile("compare-1:new", PATH);
+    store.setBaseContent(PATH, "base");
+    // The compare side saved; its echo is its own and an external change for the tab.
+    store.markSaving("compare-1:new", "nonce-1");
+    store.markDirty(PATH);
+
+    refreshOpenFile("/repo", "/repo", "compare-1:new", ["nonce-1"]);
+    resolveFetch({ content: "saved by compare" });
+    await Bun.sleep(0);
+    refreshOpenFile("/repo", "/repo", PATH, ["nonce-1"]);
+    resolveFetch({ content: "saved by compare" });
+    await Bun.sleep(0);
+
+    const { files } = useEditorStateStore.getState();
+    const compareSide = files.get("compare-1:new");
+    expect(compareSide?.pendingNonces.size).toBe(0);
+    expect(compareSide?.state).toBe("clean");
+    // The tab has no editor callbacks registered here, so it cannot merge and diverges.
+    expect(files.get(PATH)?.state).toBe("diverged");
+    expect(files.get(PATH)?.diskContent).toBe("saved by compare");
+  });
+});

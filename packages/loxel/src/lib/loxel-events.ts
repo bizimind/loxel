@@ -25,6 +25,8 @@ export interface LoxelEventMap {
   "loxel-open-drawing-editor": OpenFileDetail;
   "loxel-open-media-viewer": OpenFileDetail;
   "loxel-open-diff": undefined;
+  /** Splitting a compare panel sends no paths: the comparison it starts from is duplicated. */
+  "loxel-compare-files": { oldPath: string; newPath: string } | { placement?: PanelPlacement };
   "loxel-open-localdb": undefined;
   "loxel-file-moved": { oldPath: string; newPath: string };
   "loxel-file-deleted": { filePath: string };

@@ -126,6 +126,8 @@ Clicking an entry focuses it, so keyboard navigation continues from there.
 
 **Context menu:** right-click a file or folder for New File, New Directory, Rename, Cut, Copy, Paste, Delete, Copy Name, Copy Relative Path, and Copy Absolute Path; on macOS also **Reveal in Finder** and **Open In** (the apps macOS offers for a file; installed terminals and editors for a folder). A modified file or folder also gets **Git Restore**.
 
+**Compare Files:** click a file, then right-click another file and choose **Compare Files** to open both in a diff, the first file on the left. Both sides stay editable. See [Comparing two files](/docs/diff-viewer#comparing-two-files).
+
 **Reveal the active file:** press `Cmd+Alt+E` to show the active editor's file in the tree. To do this automatically whenever you switch tabs, turn on auto-reveal in **Settings > General**.
 
 ### Other folders
