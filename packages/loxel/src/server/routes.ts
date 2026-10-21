@@ -32,6 +32,7 @@ import { parsePanelPlacement } from "@/api/panel-placement-model";
 import type {
   BrowseEntry,
   DetectPathResult,
+  ProjectsResponse,
   ScanSuggestionsResult,
   WorkspaceSetup,
 } from "@/api/project-model";
@@ -2014,7 +2015,8 @@ async function handleGetProjects(_req: Request, ctx: RouteContext): Promise<Resp
       return { ...p, isBare: project.isBare, worktreesDir: project.worktreesDir, worktrees };
     }),
   );
-  return json({ projects: enriched });
+  const response: ProjectsResponse = { projects: enriched, homeDir: homedir() };
+  return json(response);
 }
 
 // POST /api/projects — add a new project and initialize its server state

@@ -21,9 +21,9 @@ import type {
   ConvertProjectRequest,
   CreateProjectRequest,
   DetectPathResult,
-  EnrichedProject,
   InitProjectRequest,
   Project,
+  ProjectsResponse,
   ScanSuggestionsResult,
 } from "./project-model";
 import type {
@@ -512,7 +512,7 @@ export async function unstageHunk(wt: string, patch: string) {
 // --- Project API ---
 
 export async function getProjects() {
-  return fetchJson<{ projects: EnrichedProject[] }>("/projects");
+  return fetchJson<ProjectsResponse>("/projects");
 }
 
 export async function addProject(path: string, name?: string) {

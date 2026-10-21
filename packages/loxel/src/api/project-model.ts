@@ -22,6 +22,13 @@ export interface EnrichedProject extends Project {
   worktreesDir: string | null;
 }
 
+/** Response of GET /api/projects. */
+export interface ProjectsResponse {
+  projects: EnrichedProject[];
+  /** The server user's home directory, for shortening displayed paths to `~/…`. */
+  homeDir: string;
+}
+
 export interface BrowseEntry {
   name: string;
   path: string;

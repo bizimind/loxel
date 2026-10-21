@@ -55,6 +55,7 @@ import { FileTypeIcon } from "@/lib/file-icons";
 import { handleSidebarEntryKeyDown } from "@/lib/focus-navigation";
 import { focusAreaProps, sidebarEntryProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
+import { abbreviateHomePath } from "@/lib/home-path";
 import { cn } from "@/lib/utils";
 import { hasWorktreeNotification, usePanelNotificationStore } from "@/store/panel-notifications";
 import {
@@ -241,15 +242,16 @@ function worktreeName(wt: WorktreeEntry): string {
   return wt.wtName ?? wt.branch ?? wt.path.split("/").pop() ?? "worktree";
 }
 
-function worktreeSubtitle(wt: WorktreeEntry): string {
+function worktreeSubtitle(wt: WorktreeEntry, homeDir: string | null): string {
   if (wt.createdAt) return dayjs(wt.createdAt).fromNow();
-  return wt.path;
+  return abbreviateHomePath(wt.path, homeDir);
 }
 
 // ── Main Sidebar ────────────────────────────────────────────────────────
 
 export function Sidebar() {
   const projects = useProjectStore((s) => s.projects);
+  const homeDir = useProjectStore((s) => s.homeDir);
   const sidebarExpanded = useProjectStore((s) => s.sidebarExpanded);
   const sidebarWidth = useProjectStore((s) => s.sidebarWidth);
   const setSidebarWidth = useProjectStore((s) => s.setSidebarWidth);
@@ -489,8 +491,11 @@ export function Sidebar() {
                         <div className="text-foreground truncate text-xs font-medium">
                           {project.name}
                         </div>
-                        <div className="text-muted-foreground truncate text-[10px]">
-                          {project.path}
+                        <div
+                          className="text-muted-foreground truncate text-[10px]"
+                          title={project.path}
+                        >
+                          {abbreviateHomePath(project.path, homeDir)}
                         </div>
                       </>
                     )}
@@ -1087,7 +1092,8 @@ function WorktreeItem({
   const hasNotification = usePanelNotificationStore((s) => hasWorktreeNotification(s, wt.path));
 
   const name = worktreeName(wt);
-  const subtitle = worktreeSubtitle(wt);
+  const homeDir = useProjectStore((s) => s.homeDir);
+  const subtitle = worktreeSubtitle(wt, homeDir);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition: transition ?? undefined,
