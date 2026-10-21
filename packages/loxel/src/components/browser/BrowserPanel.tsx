@@ -25,6 +25,7 @@ import { FindBar } from "@/components/ui/find-bar";
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
+import { openBrowserTab } from "@/lib/panel-creators";
 import { cn } from "@/lib/utils";
 import { reattachActiveContent } from "@/store/layout-actions";
 
@@ -32,6 +33,17 @@ import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserConte
 import { webSearchUrl } from "./web-search";
 
 const isElectron = navigator.userAgent.includes("Electron");
+
+/**
+ * Let pages ask for new tabs and windows (⌘-click, middle-click, `target="_blank"`,
+ * `window.open`), which the main process turns into browser tabs. Only with a preload that
+ * delivers those requests: an older main process opens them in the system browser instead.
+ * Passed as a string: React drops `true` for attributes it does not know, though @types/react
+ * types this one as a boolean.
+ */
+const popupAttributes: Record<string, string> = window.electronAPI?.onOpenInNewBrowserTab
+  ? { allowpopups: "" }
+  : {};
 
 export interface BrowserPanelParams {
   url: string;
@@ -100,6 +112,17 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       if (!webview || rootRef.current?.contains(document.activeElement)) return;
       webview.focus();
     }, []),
+  );
+
+  // Links the page opens in a new tab or window (⌘-click, middle-click, target="_blank", window.open).
+  useEffect(
+    () =>
+      window.electronAPI?.onOpenInNewBrowserTab?.((webContentsId, url, background) => {
+        const webview = webviewRef.current;
+        if (!webview || !readyRef.current || webContentsId !== webview.getWebContentsId()) return;
+        openBrowserTab(url, { sourcePanelId: panelApi.id, activate: !background });
+      }),
+    [panelApi],
   );
 
   // Attach webview event listeners
@@ -354,6 +377,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
           ref={webviewRef as React.Ref<HTMLElement>}
           src="about:blank"
           partition={BROWSER_PARTITION}
+          {...popupAttributes}
           className="flex-1"
           style={{ display: "flex" }}
         />

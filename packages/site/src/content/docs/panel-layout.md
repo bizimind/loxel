@@ -75,6 +75,12 @@ The status bar runs across the bottom edge of the window and is always visible. 
 
 A browser panel (`Cmd+Shift+B`) is a full web view with back, forward, reload, an address bar, and DevTools. `Cmd+F` finds text in the page.
 
+A plain click on a link opens it in the same tab. Links you open in a new tab or window become browser tabs right after the current one, in the same group:
+
+- **`Cmd`-click or middle-click** opens the link in a background tab and keeps you on the current page, so you can hold `Cmd` and click several links in a row. The new tabs keep the order you clicked them in.
+- **`Cmd+Shift`-click** opens the link in a new tab and switches to it.
+- **Links that open a new window** (`target="_blank"`, or a page opening a window when you click something) open in a new tab and switch to it. Windows a page tries to open without you clicking or typing are blocked, and each click opens at most one tab.
+
 Right-click in a page for a context menu that matches what you clicked:
 
 - **Link** — open it in a new tab (next to the current one, in the background), open it in your default browser, or copy its address.

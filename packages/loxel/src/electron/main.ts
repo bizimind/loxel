@@ -65,6 +65,7 @@ import { startMainProcessMonitor } from "./main-perf-monitor";
 import { configurePasskeys, installAccountChooser } from "./webauthn";
 import { installWebviewCopyImage } from "./webview-copy-image";
 import { forwardWebviewKeystrokes, installWebviewKeystrokeForwarding } from "./webview-keystrokes";
+import { openWebviewWindowsAsTabs } from "./webview-new-tabs";
 
 /** Send a URL to the focused window's renderer to open in a browser panel tab. */
 function openInBrowserTab(url: string): void {
@@ -713,19 +714,24 @@ app.on("web-contents-created", (_, contents) => {
   });
   forwardWebviewKeystrokes(contents);
 
-  // Redirect window.open() from webview contents to the system browser
-  // (or browser panel tab when Cmd is held).
-  // Each webview gets its own webContents, so mainWindow's handler doesn't cover them.
-  contents.setWindowOpenHandler(({ url }) => {
-    if (!isLocal(url) && isHttpUrl(url)) {
-      if (metaKeyHeld) {
-        openInBrowserTab(url);
-      } else {
-        shell.openExternal(url);
+  if (contents.getType() === "webview") {
+    // New tabs and windows a browser panel's page opens become browser tabs next to it.
+    // Each webview gets its own webContents, so mainWindow's handler doesn't cover them.
+    openWebviewWindowsAsTabs(contents);
+  } else {
+    // Never let other web contents create windows: open their links in the system browser
+    // (or a browser panel tab when Cmd is held). createWindow replaces this for app windows.
+    contents.setWindowOpenHandler(({ url }) => {
+      if (!isLocal(url) && isHttpUrl(url)) {
+        if (metaKeyHeld) {
+          openInBrowserTab(url);
+        } else {
+          shell.openExternal(url);
+        }
       }
-    }
-    return { action: "deny" };
-  });
+      return { action: "deny" };
+    });
+  }
 
   // Strip dangerous preferences from any dynamically-created webview.
   contents.on("will-attach-webview", (_, webPreferences) => {
