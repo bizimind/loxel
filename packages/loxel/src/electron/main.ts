@@ -63,6 +63,7 @@ import {
 } from "./ipc-channels";
 import { startMainProcessMonitor } from "./main-perf-monitor";
 import { configurePasskeys, installAccountChooser } from "./webauthn";
+import { installWebviewCopyImage } from "./webview-copy-image";
 import { forwardWebviewKeystrokes, installWebviewKeystrokeForwarding } from "./webview-keystrokes";
 
 /** Send a URL to the focused window's renderer to open in a browser panel tab. */
@@ -805,6 +806,7 @@ ipcMain.handle(OPEN_FOLDER_DIALOG, async (event) => {
 });
 
 installWebviewKeystrokeForwarding();
+installWebviewCopyImage();
 
 // Sync so the first render is right: a window can open straight into a fullscreen space.
 ipcMain.on(GET_WINDOW_FULL_SCREEN, (event) => {
