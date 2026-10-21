@@ -5,6 +5,7 @@ import * as api from "@/api/client";
 import type { UpdateState } from "@/api/update-model";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useWindowFocused } from "@/hooks/useWindowFocused";
+import { useWindowFullScreen } from "@/hooks/useWindowFullScreen";
 import { useZoomFactor } from "@/hooks/useZoomFactor";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/queries/query-keys";
@@ -48,7 +49,11 @@ const LOGO_SIZE_PX = 16;
 export function TopBar() {
   const isScreenshot = import.meta.env.VITE_SCREENSHOT === "1";
   const windowFocused = useWindowFocused();
+  const fullScreen = useWindowFullScreen();
   const zoom = useZoomFactor();
+  // macOS hides the traffic lights in native fullscreen (they only appear in the slide-down
+  // title bar), so the inset would be an empty gap. Screenshot mode always draws them.
+  const trafficLightsInset = isScreenshot || (isElectron && !fullScreen);
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const activeProject = useProjectStore((s) => deriveProject(activeWorktreePath, s.projects));
   const activeWorktree = useWorktreeStore((s) => {
@@ -70,7 +75,7 @@ export function TopBar() {
       style={{
         // Grows with zoom-in so the text fits, but never shrinks below the traffic lights.
         height: `max(2rem, ${BAR_MIN_HEIGHT_PX / zoom}px)`,
-        ...((isElectron || isScreenshot) && { paddingLeft: TRAFFIC_LIGHTS_INSET_PX / zoom }),
+        ...(trafficLightsInset && { paddingLeft: TRAFFIC_LIGHTS_INSET_PX / zoom }),
         ...(isElectron && { WebkitAppRegion: "drag" }),
       }}
     >

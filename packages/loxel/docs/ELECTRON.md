@@ -6,7 +6,7 @@ How the Electron shell fits around the Bun server and React renderer, and the co
 
 - **One shared server per mode.** On launch, Electron reuses a Loxel server already listening on the mode's port (7433 prod, 7434 dev) and otherwise spawns one: the compiled `loxel-server` binary in production, `bun run src/server/index.ts` with `LOXEL_DEV=1` in dev. Every window connects to that server, identifies itself with its window ID, and talks to it over REST and WebSocket. The server shuts itself down after an idle period with no connected clients. Discovery, ownership, idle shutdown and state scopes are detailed in [SHARED_SERVER.md](SHARED_SERVER.md).
 - **Windows load the server's URL** (`http://127.0.0.1:<port>`), or the Vite dev server's URL under `pnpm run dev:app` (Vite proxies `/api` and `/ws` to the dev server).
-- **Electron IPC is only for native integrations** (dock badge, folder dialog, window focus, opening links in a browser panel, keystrokes inside webviews, copying images from webviews). Channel names live in `src/electron/ipc-channels.ts`, and the renderer-facing API (`window.electronAPI`) is typed in `src/electron-api.d.ts`. Everything else goes through the server.
+- **Electron IPC is only for native integrations** (dock badge, folder dialog, window focus and fullscreen state, opening links in a browser panel, keystrokes inside webviews, copying images from webviews). Channel names live in `src/electron/ipc-channels.ts`, and the renderer-facing API (`window.electronAPI`) is typed in `src/electron-api.d.ts`. Everything else goes through the server.
 
 ## What ships where
 

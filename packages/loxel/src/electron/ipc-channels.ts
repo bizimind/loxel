@@ -2,6 +2,10 @@
 export const OPEN_IN_BROWSER_TAB = "open-in-browser-tab";
 export const SET_DOCK_BADGE = "set-dock-badge";
 export const WINDOW_FOCUS_CHANGE = "window:focus-change";
+/** Main → renderer: the window entered (`true`) or left (`false`) macOS native fullscreen. */
+export const WINDOW_FULL_SCREEN_CHANGE = "window:full-screen-change";
+/** Renderer → main (sync): whether the sender's window is fullscreen right now. */
+export const GET_WINDOW_FULL_SCREEN = "window:get-full-screen";
 export const OPEN_FOLDER_DIALOG = "dialog:open-folder";
 /**
  * Renderer → main: which keystrokes to intercept in its webviews — the first keystrokes of its

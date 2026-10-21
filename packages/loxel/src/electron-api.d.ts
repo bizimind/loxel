@@ -21,6 +21,10 @@ interface Window {
     onWebviewFocused?: (callback: () => void) => () => void;
     /** Current page zoom factor (Cmd+/Cmd-), read synchronously from `webFrame`. */
     getZoomFactor?: () => number;
+    /** Whether this window is in macOS native fullscreen, read synchronously. Since v0.1.219. */
+    isFullScreen?: () => boolean;
+    /** The window entered or left macOS native fullscreen. Since v0.1.219. */
+    onWindowFullScreenChange?: (callback: (fullScreen: boolean) => void) => () => void;
     /**
      * Copy the image at window point (x, y) of one of this window's webviews to the clipboard;
      * the point is in the coordinates of the webview's `context-menu` event.
