@@ -30,7 +30,7 @@ mock.module("@/api/client", () => ({
   },
 }));
 
-const { handleFileMoved, openBrowserTabNextTo } = await import("./panel-creators");
+const { handleFileMoved, openBrowserTab } = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { useEditorStateStore } = await import("@/store/editor-state");
 
@@ -306,74 +306,41 @@ describe("handleFileMoved", () => {
   });
 });
 
-describe("openBrowserTabNextTo", () => {
-  const url = "https://example.com/";
-
-  function openNextTo(options: Parameters<typeof openBrowserTabNextTo>[1]): string {
-    const id = openBrowserTabNextTo(url, options);
-    if (!id) throw new Error("no tab opened");
-    return id;
-  }
-
-  test("opens a background tab right after the source and keeps the source active", () => {
-    const { api, a, b } = setup();
+describe("openBrowserTab", () => {
+  test("opens a background tab right after the source tab", () => {
+    const { api, a } = setup();
     a.api.setActive();
 
-    const id = openNextTo({ sourcePanelId: a.id, activate: false });
+    openBrowserTab("https://example.com/one", { sourcePanelId: a.id });
 
-    expect(tabIds(api, 0)).toEqual([a.id, id, b.id]);
-    expect(api.getPanel(id)?.params?.url).toBe(url);
-    expect(api.activePanel?.id).toBe(a.id);
+    const ids = tabIds(api, 0);
+    expect(ids).toHaveLength(3);
+    expect(ids[0]).toBe(a.id);
+    expect(api.getPanel(ids[1]!)?.params).toEqual({ url: "https://example.com/one" });
+    expect(ids[2]).toBe("codeeditor-/repo/b.ts");
+    expect(api.groups[0]!.activePanel?.id).toBe(a.id);
   });
 
-  test("keeps click order for tabs opened in a row", () => {
-    const { api, a, b } = setup();
-    a.api.setActive();
+  test("keeps tabs opened one after another in order", () => {
+    const { api, a } = setup();
 
-    const first = openNextTo({ sourcePanelId: a.id, activate: false });
-    const second = openNextTo({ sourcePanelId: a.id, previousPanelId: first, activate: false });
+    openBrowserTab("https://example.com/one", { sourcePanelId: a.id });
+    openBrowserTab("https://example.com/two", { sourcePanelId: a.id });
 
-    expect(tabIds(api, 0)).toEqual([a.id, first, second, b.id]);
-    expect(api.activePanel?.id).toBe(a.id);
-  });
-
-  test("goes right after the source when the previous tab moved before it", () => {
-    const { api, b } = setup();
-    b.api.setActive();
-
-    const id = openNextTo({
-      sourcePanelId: b.id,
-      previousPanelId: "codeeditor-/repo/a.ts",
-      activate: false,
-    });
-
-    expect(tabIds(api, 0)).toEqual(["codeeditor-/repo/a.ts", b.id, id]);
-  });
-
-  test("goes right after the source when the previous tab is in another group", () => {
-    const { api, a, b, c } = setup();
-
-    const id = openNextTo({ sourcePanelId: a.id, previousPanelId: c.id, activate: false });
-
-    expect(tabIds(api, 0)).toEqual([a.id, id, b.id]);
-  });
-
-  test("activates a foreground tab", () => {
-    const { api, a, b } = setup();
-    a.api.setActive();
-
-    const id = openNextTo({ sourcePanelId: a.id, activate: true });
-
-    expect(tabIds(api, 0)).toEqual([a.id, id, b.id]);
-    expect(api.activePanel?.id).toBe(id);
-  });
-
-  test("opens nothing when the source panel is gone", () => {
-    const { api } = setup();
-
-    expect(openBrowserTabNextTo(url, { sourcePanelId: "browser-gone", activate: false })).toBe(
+    const urls = api.groups[0]!.panels.map((p) => (p.params as { url?: string }).url);
+    expect(urls).toEqual([
       undefined,
-    );
-    expect(api.panels).toHaveLength(3);
+      "https://example.com/one",
+      "https://example.com/two",
+      undefined,
+    ]);
+  });
+
+  test("focuses the new tab when asked to", () => {
+    const { api, a } = setup();
+
+    openBrowserTab("https://example.com/one", { sourcePanelId: a.id, activate: true });
+
+    expect(api.groups[0]!.activePanel?.params).toEqual({ url: "https://example.com/one" });
   });
 });

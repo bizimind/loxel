@@ -195,34 +195,41 @@ export function createBrowser(url?: string, split?: SplitPosition): void {
   addBrowserPanel(cApi, url || "about:blank", { position: panelPosition(cApi, split) });
 }
 
-export interface OpenBrowserTabNextToOptions {
-  /** The browser panel the link was opened from; the new tab joins its group. */
+export interface OpenBrowserTabOptions {
+  /** The browser panel the URL came from: the new tab opens right after it, in its group. */
   sourcePanelId: string;
-  /**
-   * A tab opened earlier from the source. The new tab goes after it while it is still after the
-   * source in the same group, so tabs opened in a row keep their click order.
-   */
-  previousPanelId?: string;
-  /** Activate the new tab, or leave the source active (and focused). */
-  activate: boolean;
+  /** Focus the new tab. By default it opens in the background, like a browser's new-tab links. */
+  activate?: boolean;
 }
 
-/** Open `url` in a new browser tab right after a browser panel. Returns the new panel's id. */
-export function openBrowserTabNextTo(
-  url: string,
-  { sourcePanelId, previousPanelId, activate }: OpenBrowserTabNextToOptions,
-): string | undefined {
-  const cApi = getCenterApi();
-  const source = cApi?.getPanel(sourcePanelId);
-  if (!cApi || !source) return undefined;
+/** The tab most recently opened from each browser panel, so repeated opens keep their order. */
+const lastTabOpenedFrom = new Map<string, string>();
 
-  const { panels } = source.group;
-  const sourceIndex = panels.indexOf(source);
-  const previousIndex = panels.findIndex((p) => p.id === previousPanelId);
-  return addBrowserPanel(cApi, url, {
-    position: { referenceGroup: source.group, index: Math.max(sourceIndex, previousIndex) + 1 },
+/** Open a URL in a new browser tab next to the browser panel it came from. */
+export function openBrowserTab(
+  url: string,
+  { sourcePanelId, activate = false }: OpenBrowserTabOptions,
+): void {
+  const cApi = getCenterApi();
+  if (!cApi) return;
+  const source = cApi.getPanel(sourcePanelId);
+  if (!source) {
+    createBrowser(url);
+    return;
+  }
+
+  // Go after the tab last opened from the source if it is still to the source's right, so links
+  // opened one after another line up in the order they were opened.
+  const tabs = source.group.panels;
+  const sourceIndex = tabs.indexOf(source);
+  const lastOpenedIndex = tabs.findIndex((p) => p.id === lastTabOpenedFrom.get(sourcePanelId));
+  const index = Math.max(sourceIndex, lastOpenedIndex) + 1;
+
+  const panelId = addBrowserPanel(cApi, url, {
+    position: { referenceGroup: source.group, direction: "within", index },
     inactive: !activate,
   });
+  lastTabOpenedFrom.set(sourcePanelId, panelId);
 }
 
 export function createAgent(split?: SplitPosition): void {

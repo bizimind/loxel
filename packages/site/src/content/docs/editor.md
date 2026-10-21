@@ -63,7 +63,7 @@ When a project has both Prettier and oxfmt, Prettier wins for the languages it s
 
 ## Markdown files
 
-Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `:::localdb` blocks render as [database widgets](/docs/introduction#planning-and-visibility); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
+Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `Shift+Enter` starts a new line within a paragraph and saves it as a plain line break, and line breaks already in the file show as new lines; pressing it twice starts a new paragraph. GitHub and most markdown renderers display a plain line break as a space. A trailing `\` or two trailing spaces keep the break visible everywhere, and Loxel keeps such breaks (writing them as `\` when you edit their paragraph). An empty line inside a paragraph can only be written as a `\` line, so Loxel saves it that way. `:::localdb` blocks render as [database widgets](/docs/introduction#planning-and-visibility); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
 
 ---
 

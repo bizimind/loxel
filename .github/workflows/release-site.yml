@@ -21,7 +21,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    timeout-minutes: 2
+    # Healthy runs take 67-87s; slow installs and the pnpm cache save after a lockfile change need headroom.
+    timeout-minutes: 4
     steps:
       - uses: actions/checkout@v7
 
@@ -32,6 +33,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 10
+          cache: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
