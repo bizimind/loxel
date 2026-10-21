@@ -6,6 +6,8 @@ import { threeWayMerge } from "../lib/three-way-merge";
 export type EditorFileState = "clean" | "dirty" | "saving" | "diverged";
 
 export interface EditorFileEntry {
+  /** Absolute path of the file this editor shows; several entries can share one. */
+  filePath: string;
   state: EditorFileState;
   /** The file no longer exists on disk (deleted externally after it was opened, or missing on
    *  load). Autosave is suspended until content arrives again — from an external restore or
@@ -49,39 +51,47 @@ export interface PendingEdit {
   options?: SaveOptions;
 }
 
+/**
+ * One entry per open editor, keyed by its editor key: the file path for a file's own tab (so a
+ * path has at most one tab), or a key of the editor's choosing for other views of the file, such
+ * as a side of a compare panel. Editors of the same file reconcile with disk independently; a
+ * save by one reaches the others as an external change. All actions below take the editor key.
+ */
 interface EditorStateStore {
   files: Map<string, EditorFileEntry>;
 
-  openFile: (filePath: string) => void;
-  closeFile: (filePath: string) => void;
-  markDirty: (filePath: string) => void;
-  markSaving: (filePath: string, nonce: string) => void;
-  handleSaveError: (filePath: string, nonce: string) => void;
+  /** Register an editor; `filePath` defaults to the key. Idempotent. */
+  openFile: (key: string, filePath?: string) => void;
+  closeFile: (key: string) => void;
+  markDirty: (key: string) => void;
+  markSaving: (key: string, nonce: string) => void;
+  handleSaveError: (key: string, nonce: string) => void;
   /** Core state machine: handle an external disk change notification. */
-  handleDiskChange: (filePath: string, nonces: string[], diskContent: string) => void;
-  acceptDiskVersion: (filePath: string) => void;
-  keepMyChanges: (filePath: string) => void;
-  clearPendingNonce: (filePath: string, nonce: string) => void;
+  handleDiskChange: (key: string, nonces: string[], diskContent: string) => void;
+  acceptDiskVersion: (key: string) => void;
+  keepMyChanges: (key: string) => void;
+  clearPendingNonce: (key: string, nonce: string) => void;
   /** Record whether the file exists on disk. `handleDiskChange` clears the flag itself. */
-  setDeleted: (filePath: string, deleted: boolean) => void;
+  setDeleted: (key: string, deleted: boolean) => void;
   /** Mark an open file as moving to `newPath`, or clear it (null) if the move is abandoned. */
-  setMovedTo: (filePath: string, newPath: string | null) => void;
+  setMovedTo: (key: string, newPath: string | null) => void;
   /** Register (or clear, with null) the editor's `takePendingEdit`. */
-  registerPendingEdit: (filePath: string, take: (() => PendingEdit | null) | null) => void;
+  registerPendingEdit: (key: string, take: (() => PendingEdit | null) | null) => void;
   /** Set the merge base content (called when state reaches clean). */
-  setBaseContent: (filePath: string, content: string) => void;
+  setBaseContent: (key: string, content: string) => void;
   /** Register editor callbacks for 3-way auto-merge. */
   registerEditorCallbacks: (
-    filePath: string,
+    key: string,
     getContent: () => string | null,
     applyContent: (merged: string, programmatic: boolean) => string | null,
   ) => void;
   /** Unregister editor callbacks (on unmount). */
-  unregisterEditorCallbacks: (filePath: string) => void;
+  unregisterEditorCallbacks: (key: string) => void;
 }
 
-function defaultEntry(): EditorFileEntry {
+function defaultEntry(filePath: string): EditorFileEntry {
   return {
+    filePath,
     state: "clean",
     deleted: false,
     movedTo: null,
@@ -98,56 +108,56 @@ function defaultEntry(): EditorFileEntry {
 export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
   files: new Map(),
 
-  openFile: (filePath) => {
+  openFile: (key, filePath = key) => {
     set((s) => {
-      if (s.files.has(filePath)) return s;
+      if (s.files.has(key)) return s;
       const files = new Map(s.files);
-      files.set(filePath, defaultEntry());
+      files.set(key, defaultEntry(filePath));
       return { files };
     });
   },
 
-  closeFile: (filePath) => {
+  closeFile: (key) => {
     set((s) => {
-      if (!s.files.has(filePath)) return s;
+      if (!s.files.has(key)) return s;
       const files = new Map(s.files);
-      files.delete(filePath);
+      files.delete(key);
       return { files };
     });
   },
 
-  markDirty: (filePath) => {
+  markDirty: (key) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry) return s;
       // Valid from any state — user typed
       if (entry.state === "dirty") return s;
       const files = new Map(s.files);
-      files.set(filePath, { ...entry, state: "dirty" });
+      files.set(key, { ...entry, state: "dirty" });
       return { files };
     });
   },
 
-  markSaving: (filePath, nonce) => {
+  markSaving: (key, nonce) => {
     // Snapshot editor content before entering set() (impure read)
-    const currentEntry = get().files.get(filePath);
+    const currentEntry = get().files.get(key);
     const snapshot = currentEntry?.getEditorContent?.() ?? currentEntry?.baseContent ?? null;
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry) return s;
       const files = new Map(s.files);
       const pendingNonces = new Set(entry.pendingNonces);
       pendingNonces.add(nonce);
       const savedSnapshots = new Map(entry.savedSnapshots);
       if (snapshot !== null) savedSnapshots.set(nonce, snapshot);
-      files.set(filePath, { ...entry, state: "saving", pendingNonces, savedSnapshots });
+      files.set(key, { ...entry, state: "saving", pendingNonces, savedSnapshots });
       return { files };
     });
   },
 
-  handleSaveError: (filePath, nonce) => {
+  handleSaveError: (key, nonce) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry) return s;
       const files = new Map(s.files);
       const pendingNonces = new Set(entry.pendingNonces);
@@ -155,15 +165,15 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
       const savedSnapshots = new Map(entry.savedSnapshots);
       savedSnapshots.delete(nonce);
       const nextState = pendingNonces.size > 0 ? "saving" : "dirty";
-      files.set(filePath, { ...entry, state: nextState, pendingNonces, savedSnapshots });
+      files.set(key, { ...entry, state: nextState, pendingNonces, savedSnapshots });
       return { files };
     });
   },
 
-  handleDiskChange: (filePath, nonces, diskContent) => {
+  handleDiskChange: (key, nonces, diskContent) => {
     // Disk content arriving means the file exists (again).
-    get().setDeleted(filePath, false);
-    const entry = get().files.get(filePath);
+    get().setDeleted(key, false);
+    const entry = get().files.get(key);
     if (!entry) return;
     const matchedNonces = nonces.filter((n) => entry.pendingNonces.has(n));
     const isOwnEcho = matchedNonces.length > 0;
@@ -175,7 +185,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
     const superseded = isOwnEcho && entry.pendingNonces.size > matchedNonces.length;
     if (superseded) {
       set((s) => {
-        const e = s.files.get(filePath);
+        const e = s.files.get(key);
         if (!e) return s;
         const files = new Map(s.files);
         const pending = new Set(e.pendingNonces);
@@ -184,7 +194,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
           pending.delete(n);
           snapshots.delete(n);
         }
-        files.set(filePath, { ...e, pendingNonces: pending, savedSnapshots: snapshots });
+        files.set(key, { ...e, pendingNonces: pending, savedSnapshots: snapshots });
         return { files };
       });
       return;
@@ -210,7 +220,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
           if (
             editorContent &&
             editorContent !== diskContent &&
-            !tryAutoMerge(entry, diskContent, filePath, set, {
+            !tryAutoMerge(entry, diskContent, key, set, {
               preferOurs: true,
               matchedNonces,
               mergeBase: snapshotBase,
@@ -219,7 +229,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
             // Fallback: just transition to clean (merge shouldn't fail with preferOurs,
             // but be defensive)
             set((s) => {
-              const e = s.files.get(filePath);
+              const e = s.files.get(key);
               if (!e || e.state !== "saving") return s;
               const files = new Map(s.files);
               const pending = new Set(e.pendingNonces);
@@ -229,7 +239,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
                 snapshots.delete(n);
               }
               const nextState = pending.size === 0 ? "clean" : "saving";
-              files.set(filePath, {
+              files.set(key, {
                 ...e,
                 state: nextState,
                 pendingNonces: pending,
@@ -242,7 +252,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
           } else if (!editorContent || editorContent === diskContent) {
             // Normal own echo — content matches, just transition to clean
             set((s) => {
-              const e = s.files.get(filePath);
+              const e = s.files.get(key);
               if (!e || e.state !== "saving") return s;
               const files = new Map(s.files);
               const pending = new Set(e.pendingNonces);
@@ -252,7 +262,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
                 snapshots.delete(n);
               }
               const nextState = pending.size === 0 ? "clean" : "saving";
-              files.set(filePath, {
+              files.set(key, {
                 ...e,
                 state: nextState,
                 pendingNonces: pending,
@@ -263,12 +273,12 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
               return { files };
             });
           }
-        } else if (!tryAutoMerge(entry, diskContent, filePath, set)) {
+        } else if (!tryAutoMerge(entry, diskContent, key, set)) {
           set((s) => {
-            const e = s.files.get(filePath);
+            const e = s.files.get(key);
             if (!e) return s;
             const files = new Map(s.files);
-            files.set(filePath, { ...e, state: "diverged", diskContent });
+            files.set(key, { ...e, state: "diverged", diskContent });
             return { files };
           });
         }
@@ -282,7 +292,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
           if (
             dirtyEditorContent &&
             dirtyEditorContent !== diskContent &&
-            !tryAutoMerge(entry, diskContent, filePath, set, {
+            !tryAutoMerge(entry, diskContent, key, set, {
               preferOurs: true,
               matchedNonces,
               mergeBase: snapshotBase,
@@ -290,7 +300,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
           ) {
             // Fallback: just update base and clear nonces
             set((s) => {
-              const e = s.files.get(filePath);
+              const e = s.files.get(key);
               if (!e) return s;
               const files = new Map(s.files);
               const pending = new Set(e.pendingNonces);
@@ -299,7 +309,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
                 pending.delete(n);
                 snapshots.delete(n);
               }
-              files.set(filePath, {
+              files.set(key, {
                 ...e,
                 baseContent: diskContent,
                 pendingNonces: pending,
@@ -310,7 +320,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
           } else if (!dirtyEditorContent || dirtyEditorContent === diskContent) {
             // Content matches or editor unavailable — just update base and clear nonces
             set((s) => {
-              const e = s.files.get(filePath);
+              const e = s.files.get(key);
               if (!e) return s;
               const files = new Map(s.files);
               const pending = new Set(e.pendingNonces);
@@ -319,7 +329,7 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
                 pending.delete(n);
                 snapshots.delete(n);
               }
-              files.set(filePath, {
+              files.set(key, {
                 ...e,
                 baseContent: diskContent,
                 pendingNonces: pending,
@@ -328,12 +338,12 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
               return { files };
             });
           }
-        } else if (!tryAutoMerge(entry, diskContent, filePath, set)) {
+        } else if (!tryAutoMerge(entry, diskContent, key, set)) {
           set((s) => {
-            const e = s.files.get(filePath);
+            const e = s.files.get(key);
             if (!e) return s;
             const files = new Map(s.files);
-            files.set(filePath, { ...e, state: "diverged", diskContent });
+            files.set(key, { ...e, state: "diverged", diskContent });
             return { files };
           });
         }
@@ -342,10 +352,10 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
       case "diverged":
         // Update disk content to latest version
         set((s) => {
-          const e = s.files.get(filePath);
+          const e = s.files.get(key);
           if (!e) return s;
           const files = new Map(s.files);
-          files.set(filePath, { ...e, diskContent });
+          files.set(key, { ...e, diskContent });
           return { files };
         });
         break;
@@ -356,12 +366,12 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
     }
   },
 
-  acceptDiskVersion: (filePath) => {
+  acceptDiskVersion: (key) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry) return s;
       const files = new Map(s.files);
-      files.set(filePath, {
+      files.set(key, {
         ...entry,
         state: "clean",
         pendingNonces: new Set(),
@@ -373,13 +383,13 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
     });
   },
 
-  keepMyChanges: (filePath) => {
+  keepMyChanges: (key) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry) return s;
       const files = new Map(s.files);
       // Advance baseContent to diskContent so next merge has correct ancestor
-      files.set(filePath, {
+      files.set(key, {
         ...entry,
         state: "dirty",
         baseContent: entry.diskContent ?? entry.baseContent,
@@ -389,84 +399,85 @@ export const useEditorStateStore = create<EditorStateStore>()((set, get) => ({
     });
   },
 
-  clearPendingNonce: (filePath, nonce) => {
+  clearPendingNonce: (key, nonce) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry || !entry.pendingNonces.has(nonce)) return s;
       const files = new Map(s.files);
       const pendingNonces = new Set(entry.pendingNonces);
       pendingNonces.delete(nonce);
       const savedSnapshots = new Map(entry.savedSnapshots);
       savedSnapshots.delete(nonce);
-      files.set(filePath, { ...entry, pendingNonces, savedSnapshots });
+      files.set(key, { ...entry, pendingNonces, savedSnapshots });
       return { files };
     });
   },
 
-  setDeleted: (filePath, deleted) => {
+  setDeleted: (key, deleted) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry || entry.deleted === deleted) return s;
       const files = new Map(s.files);
-      files.set(filePath, { ...entry, deleted });
+      files.set(key, { ...entry, deleted });
       return { files };
     });
   },
 
-  setMovedTo: (filePath, newPath) => {
+  setMovedTo: (key, newPath) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry || entry.movedTo === newPath) return s;
       const files = new Map(s.files);
-      files.set(filePath, { ...entry, movedTo: newPath });
+      files.set(key, { ...entry, movedTo: newPath });
       return { files };
     });
   },
 
-  registerPendingEdit: (filePath, take) => {
+  registerPendingEdit: (key, take) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry || entry.takePendingEdit === take) return s;
       const files = new Map(s.files);
-      files.set(filePath, { ...entry, takePendingEdit: take });
+      files.set(key, { ...entry, takePendingEdit: take });
       return { files };
     });
   },
 
-  setBaseContent: (filePath, content) => {
+  setBaseContent: (key, content) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry) return s;
       const files = new Map(s.files);
-      files.set(filePath, { ...entry, baseContent: content });
+      files.set(key, { ...entry, baseContent: content });
       return { files };
     });
   },
 
-  registerEditorCallbacks: (filePath, getContent, applyContent) => {
+  registerEditorCallbacks: (key, getContent, applyContent) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry) return s;
       const files = new Map(s.files);
-      files.set(filePath, {
-        ...entry,
-        getEditorContent: getContent,
-        applyMergedContent: applyContent,
-      });
+      files.set(key, { ...entry, getEditorContent: getContent, applyMergedContent: applyContent });
       return { files };
     });
   },
 
-  unregisterEditorCallbacks: (filePath) => {
+  unregisterEditorCallbacks: (key) => {
     set((s) => {
-      const entry = s.files.get(filePath);
+      const entry = s.files.get(key);
       if (!entry) return s;
       const files = new Map(s.files);
-      files.set(filePath, { ...entry, getEditorContent: null, applyMergedContent: null });
+      files.set(key, { ...entry, getEditorContent: null, applyMergedContent: null });
       return { files };
     });
   },
 }));
+
+/** Distinct paths of every open editor. */
+export function openEditorPaths(files: Map<string, EditorFileEntry>): string[] {
+  return [...new Set([...files.values()].map((entry) => entry.filePath))];
+}
 
 interface AutoMergeOptions {
   /** When true, conflicting hunks keep editor content (ours) over disk content (theirs). */
@@ -489,7 +500,7 @@ interface AutoMergeOptions {
 function tryAutoMerge(
   entry: EditorFileEntry,
   diskContent: string,
-  filePath: string,
+  key: string,
   setFn: (
     fn: (s: {
       files: Map<string, EditorFileEntry>;
@@ -525,7 +536,7 @@ function tryAutoMerge(
   if (newBase === null) return false;
 
   setFn((s) => {
-    const e = s.files.get(filePath);
+    const e = s.files.get(key);
     if (!e) return s;
     const files = new Map(s.files);
 
@@ -554,7 +565,7 @@ function tryAutoMerge(
       nextState = e.state;
     }
 
-    files.set(filePath, {
+    files.set(key, {
       ...e,
       state: nextState,
       pendingNonces,

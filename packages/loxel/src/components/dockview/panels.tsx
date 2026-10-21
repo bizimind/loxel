@@ -19,6 +19,7 @@ import { BrowserPanel, type BrowserPanelParams } from "@/components/browser/Brow
 import { CodeEditorPanel } from "@/components/code-editor/CodeEditorPanel";
 import { CodingAgentPanel } from "@/components/coding-agent/CodingAgentPanel";
 import { ForkTreePanel } from "@/components/coding-agent/ForkTreePanel";
+import { CompareFilesPanel } from "@/components/compare/CompareFilesPanel";
 import { DiffViewerPanel } from "@/components/diff-viewer/DiffViewerPanel";
 import { MarkdownEditorPanelComponent } from "@/components/editor/MarkdownEditorPanel";
 import { ExcalidrawEditor } from "@/components/excalidraw-editor/ExcalidrawEditor";
@@ -40,6 +41,7 @@ import { BrowserTab } from "./browser-tab";
 import { CenterHostComponent } from "./CenterHost";
 import { CodeEditorTab } from "./code-editor-tab";
 import { CodingAgentTab } from "./coding-agent-tab";
+import { CompareTab } from "./compare-tab";
 import { DiffTab } from "./diff-tab";
 import { ExcalidrawEditorTab } from "./excalidraw-editor-tab";
 import { LocalDbTab } from "./localdb-tab";
@@ -104,6 +106,21 @@ function GraphPanelComponent(_props: IDockviewPanelProps) {
 
 function DiffViewerComponent(_props: IDockviewPanelProps) {
   return <DiffViewerPanel />;
+}
+
+/** Two files compared side by side, both editable. */
+function CompareFilesPanelComponent(
+  props: IDockviewPanelProps<{ oldPath: string; newPath: string; worktreePath?: string }>,
+) {
+  return (
+    <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
+      <CompareFilesPanel
+        panelId={props.api.id}
+        oldPath={props.params.oldPath}
+        newPath={props.params.newPath}
+      />
+    </PanelContext.Provider>
+  );
 }
 
 /** Terminal panel in the center group. `cwd` is set only when the shell starts outside the worktree. */
@@ -315,6 +332,7 @@ export const outerComponents = wrapPanelComponents(
 export const centerComponents = wrapPanelComponents(
   {
     diff: DiffViewerComponent,
+    compare: CompareFilesPanelComponent,
     terminal: TerminalPanelComponent,
     editor: MarkdownEditorPanelComponent,
     excalidraw: ExcalidrawPanelComponent,
@@ -334,6 +352,7 @@ export const centerTabComponents = {
   browserTab: BrowserTab,
   codeEditorTab: CodeEditorTab,
   codingAgentTab: CodingAgentTab,
+  compareTab: CompareTab,
   diffTab: DiffTab,
   markdownEditorTab: MarkdownEditorTab,
   excalidrawEditorTab: ExcalidrawEditorTab,

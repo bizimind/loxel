@@ -1,19 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
-import type { editor } from "monaco-editor";
+import type { Uri, editor } from "monaco-editor";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
-import type { FileDiff } from "@/api/diff-model";
-import { fileDiffPath } from "@/api/diff-model";
+import type { DiffHunk } from "@/api/diff-model";
+import type { PlacedThread } from "@/api/review-model";
 import { AddCommentButton } from "@/components/comments/AddCommentButton";
 import { CommentComposer } from "@/components/comments/CommentComposer";
 import { useCollapsedRegions } from "@/hooks/useCollapsedRegions";
 import { useMonacoSyncScroll } from "@/hooks/useMonacoSyncScroll";
-import { detectLanguage } from "@/lib/highlighter";
-import { toMonacoLanguage } from "@/lib/monaco-theme";
-import { queryKeys } from "@/queries/query-keys";
-import { useQueryScope } from "@/queries/use-scope";
 import { useCommentStore } from "@/store/comments";
 import { useUIStore } from "@/store/ui";
 import { useReviewStore } from "@/store/worktree-reviews";
@@ -28,22 +23,62 @@ import { VIEW_ZONE_HEIGHT, adjustAlignmentSections } from "./unchanged-regions";
 
 const LINE_HEIGHT = 22; // px per line — must match Monaco editor lineHeight
 
-interface SideBySideDiffViewProps {
-  file: FileDiff;
-  oldRef: string | undefined;
-  newRef: string | undefined;
-  /** Worktree path for reading working tree files (uncommitted changes) */
-  worktreePath?: string;
+type IStandaloneCodeEditor = editor.IStandaloneCodeEditor;
+
+/**
+ * An editable side. Its editor starts from `content` (the side's live text, which keeps its line
+ * endings, unlike `lines`) and reports every change; the owner then updates the editor itself
+ * through `onEditorMount`.
+ */
+export interface EditableDiffSide {
+  content: string;
+  onContentChange: (value: string) => void;
 }
 
+/** One side of a side-by-side diff */
+export interface DiffSide {
+  /** Full content of the side, one entry per line */
+  lines: string[];
+  /** The side's file: repo-relative in git diffs (where comments anchor), absolute otherwise */
+  filePath: string;
+  /** Monaco language id */
+  language: string;
+  /** URI of the side's Monaco model; must be unique among mounted diff views */
+  modelUri: Uri;
+  /** Shown in the header above the side */
+  label: ReactNode;
+  diagnostics?: TypeScriptDiagnostic[];
+  /** Makes the side editable in place */
+  editable?: EditableDiffSide;
+  /** Receives the side's editor once it is created */
+  onEditorMount?: (editor: IStandaloneCodeEditor) => void;
+}
+
+interface SideBySideDiffViewProps {
+  hunks: DiffHunk[];
+  oldSide: DiffSide;
+  newSide: DiffSide;
+  isLoading?: boolean;
+  /** Review comments on the diff's lines; only git diffs have them. */
+  comments?: boolean;
+  /** Keep expanded unchanged regions expanded when the hunks are recomputed (edited content). */
+  keepExpandedOnChange?: boolean;
+}
+
+/**
+ * Two Monaco editors side by side with change highlights, synchronized scrolling, collapsible
+ * unchanged regions and the connector gutter between them. Content comes from the caller, so the
+ * same view renders git diffs and comparisons of arbitrary files.
+ */
 export function SideBySideDiffView({
-  file,
-  oldRef,
-  newRef,
-  worktreePath,
+  hunks,
+  oldSide,
+  newSide,
+  isLoading = false,
+  comments = false,
+  keepExpandedOnChange = false,
 }: SideBySideDiffViewProps) {
   const darkMode = useUIStore((s) => s.darkMode);
-  const { activeProjectPath, activeWorktreePath } = useQueryScope();
 
   // Review state
   const activeReviewId = useReviewStore((s) => s.activeReviewId);
@@ -55,71 +90,13 @@ export function SideBySideDiffView({
   const getThreadsForFile = useCommentStore((s) => s.getThreadsForFile);
   const placedThreadsByFile = useCommentStore((s) => s.placedThreadsByFile);
 
-  // Fetch full file content for both versions
-  const filePath = fileDiffPath(file);
-  const oldPath = file.oldPath || file.newPath;
-
-  const { data: oldFile, isLoading: loadingOld } = useQuery({
-    queryKey: queryKeys.fileContent(activeProjectPath, oldPath, oldRef, worktreePath),
-    queryFn: () =>
-      oldRef
-        ? api.getFileContent({ path: oldPath, ref: oldRef, wt: activeWorktreePath ?? undefined })
-        : Promise.resolve({ lines: [] }),
-    enabled: file.status !== "added",
-  });
-
-  const { data: newFile, isLoading: loadingNew } = useQuery({
-    queryKey: queryKeys.fileContent(activeProjectPath, filePath, newRef, worktreePath),
-    queryFn: () => {
-      // When viewing uncommitted changes, read new side from disk
-      if (worktreePath && !newRef) {
-        return api.getFileContent({ path: filePath, worktree: worktreePath });
-      }
-      return newRef
-        ? api.getFileContent({ path: filePath, ref: newRef, wt: activeWorktreePath ?? undefined })
-        : Promise.resolve({ lines: [] });
-    },
-    enabled: file.status !== "deleted",
-  });
-
-  const isLoading = loadingOld || loadingNew;
-  const oldLines = oldFile?.lines ?? [];
-  const newLines = newFile?.lines ?? [];
-
-  // Fetch TypeScript diagnostics for both refs
-  const { data: oldDiagData } = useQuery({
-    queryKey: queryKeys.diagnostics(activeProjectPath, oldRef, undefined),
-    queryFn: () =>
-      oldRef && activeWorktreePath
-        ? api.getDiagnostics(activeWorktreePath, oldRef)
-        : Promise.resolve({ diagnostics: [] }),
-    enabled: !!oldRef && !!activeWorktreePath,
-  });
-  const { data: newDiagData } = useQuery({
-    queryKey: queryKeys.diagnostics(activeProjectPath, newRef, worktreePath),
-    queryFn: () => {
-      if (!activeWorktreePath) return Promise.resolve({ diagnostics: [] });
-      if (worktreePath && !newRef)
-        return api.getDiagnostics(activeWorktreePath, undefined, worktreePath);
-      if (newRef) return api.getDiagnostics(activeWorktreePath, newRef);
-      return Promise.resolve({ diagnostics: [] });
-    },
-    enabled: !!newRef || !!worktreePath,
-  });
-
-  // Filter diagnostics to this file
-  const oldDiagnostics = useMemo<TypeScriptDiagnostic[]>(() => {
-    if (!oldDiagData?.diagnostics) return [];
-    return oldDiagData.diagnostics.filter((d) => d.file === oldPath);
-  }, [oldDiagData, oldPath]);
-
-  const newDiagnostics = useMemo<TypeScriptDiagnostic[]>(() => {
-    if (!newDiagData?.diagnostics) return [];
-    return newDiagData.diagnostics.filter((d) => d.file === filePath);
-  }, [newDiagData, filePath]);
+  const filePath = newSide.filePath;
+  const oldPath = oldSide.filePath;
+  const oldLines = oldSide.lines;
+  const newLines = newSide.lines;
 
   // Build change regions from hunks (for rendering highlights)
-  const changeRegions = useMemo(() => buildChangeRegions(file.hunks), [file.hunks]);
+  const changeRegions = useMemo(() => buildChangeRegions(hunks), [hunks]);
 
   // Intra-line changes within modification blocks (inline red/green over the blue lines)
   const inlineChanges = useMemo(
@@ -129,13 +106,13 @@ export function SideBySideDiffView({
 
   // Build scroll alignment sections (for smart synchronized scrolling)
   const rawAlignmentSections = useMemo(
-    () => buildScrollAlignment(file.hunks, oldLines.length, newLines.length),
-    [file.hunks, oldLines.length, newLines.length],
+    () => buildScrollAlignment(hunks, oldLines.length, newLines.length),
+    [hunks, oldLines.length, newLines.length],
   );
 
   // Collapsible unchanged regions
   const { collapsibleRegions, expandedSet, oldHiddenRanges, newHiddenRanges, toggleRegion } =
-    useCollapsedRegions(file.hunks, oldLines.length, newLines.length);
+    useCollapsedRegions(hunks, oldLines.length, newLines.length, { keepExpandedOnChange });
 
   // Adjust alignment sections to account for hidden lines
   const alignmentSections = useMemo(
@@ -170,9 +147,6 @@ export function SideBySideDiffView({
     [collapsibleRegions, expandedSet, toggleRegion],
   );
 
-  // Detect language for Monaco
-  const language = useMemo(() => toMonacoLanguage(detectLanguage(filePath)), [filePath]);
-
   // Join lines into content strings for Monaco
   const oldContent = useMemo(() => oldLines.join("\n"), [oldLines]);
   const newContent = useMemo(() => newLines.join("\n"), [newLines]);
@@ -196,20 +170,26 @@ export function SideBySideDiffView({
     rightContainerRef,
   } = useMonacoSyncScroll({ alignmentSections, lineHeight: LINE_HEIGHT });
 
-  // Compose left editor mount: scroll sync + store instance
+  // Compose editor mounts: scroll sync + store instance + the caller's callback
+  const onOldSideMountRef = useRef(oldSide.onEditorMount);
+  onOldSideMountRef.current = oldSide.onEditorMount;
+  const onNewSideMountRef = useRef(newSide.onEditorMount);
+  onNewSideMountRef.current = newSide.onEditorMount;
+
   const onLeftEditorMount = useCallback(
-    (ed: editor.IStandaloneCodeEditor) => {
+    (ed: IStandaloneCodeEditor) => {
       onLeftEditorMountScroll(ed);
       setLeftEditor(ed);
+      onOldSideMountRef.current?.(ed);
     },
     [onLeftEditorMountScroll],
   );
 
-  // Compose right editor mount: scroll sync + store instance
   const onRightEditorMount = useCallback(
-    (ed: editor.IStandaloneCodeEditor) => {
+    (ed: IStandaloneCodeEditor) => {
       onRightEditorMountScroll(ed);
       setRightEditor(ed);
+      onNewSideMountRef.current?.(ed);
     },
     [onRightEditorMountScroll],
   );
@@ -224,7 +204,8 @@ export function SideBySideDiffView({
   } | null>(null);
 
   // Get placed threads for the current file from store (server already did relocation)
-  const commentThreads = useMemo(() => {
+  const commentThreads = useMemo<PlacedThread[]>(() => {
+    if (!comments) return [];
     const threads = [...getThreadsForFile(filePath)];
     // For renamed files, also look under the old path
     if (oldPath !== filePath) {
@@ -236,7 +217,7 @@ export function SideBySideDiffView({
     }
     return threads;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, oldPath, placedThreadsByFile]);
+  }, [comments, filePath, oldPath, placedThreadsByFile]);
 
   // Handle drag selection on left line numbers — live highlight update
   const onLeftLineSelectionChange = useCallback(
@@ -336,27 +317,18 @@ export function SideBySideDiffView({
 
   // Clear pending anchor when file changes
   useEffect(() => {
+    if (!comments) return;
     setPendingAnchor(null);
     setActiveThread(null);
-  }, [filePath, oldPath, setPendingAnchor, setActiveThread]);
+  }, [comments, filePath, oldPath, setPendingAnchor, setActiveThread]);
 
   return (
     <div className="bg-editor-surface flex h-full flex-col">
-      {/* Header with commit hashes */}
       <div className="border-border bg-muted/20 flex shrink-0 border-b text-[10px]">
-        <div className="border-border flex-1 border-r px-2 py-1">
-          <span className="text-foreground ml-1">{worktreePath ? "HEAD" : "Parent"}</span>
-          <span className="text-muted-foreground font-mono"> ({oldRef?.slice(0, 7) ?? "..."})</span>
+        <div className="border-border min-w-0 flex-1 truncate border-r px-2 py-1">
+          {oldSide.label}
         </div>
-        <div className="flex-1 px-2 py-1">
-          <span className="text-foreground ml-1">{worktreePath ? "Working Tree" : "Current"}</span>
-          {!worktreePath && (
-            <span className="text-muted-foreground font-mono">
-              {" "}
-              ({newRef?.slice(0, 7) ?? "..."})
-            </span>
-          )}
-        </div>
+        <div className="min-w-0 flex-1 truncate px-2 py-1">{newSide.label}</div>
       </div>
 
       {/* Side-by-side panels with gutter overlay */}
@@ -371,26 +343,26 @@ export function SideBySideDiffView({
             <div ref={leftContainerRef} className="relative flex flex-1 overflow-hidden">
               <div className="flex-1 overflow-hidden">
                 <EditorPanel
-                  content={oldContent}
-                  language={language}
-                  filePath={oldPath}
-                  gitRef={oldRef}
+                  content={oldSide.editable?.content ?? oldContent}
+                  language={oldSide.language}
+                  modelUri={oldSide.modelUri}
                   side="old"
+                  onContentChange={oldSide.editable?.onContentChange}
                   changeRegions={changeRegions.old}
                   inlineChanges={inlineChanges.old}
                   darkMode={darkMode}
-                  diagnostics={oldDiagnostics}
+                  diagnostics={oldSide.diagnostics}
                   hiddenRanges={oldHiddenRanges}
                   viewZones={oldViewZones}
                   commentThreads={commentThreads}
                   selectionHighlightLines={leftSelection}
-                  onSelectionChange={onLeftSelectionChange}
+                  onSelectionChange={comments ? onLeftSelectionChange : undefined}
                   onEditorMount={onLeftEditorMount}
                 />
               </div>
 
               {/* Floating "Add Comment" button for left (old) side — at right edge near line numbers */}
-              {!pendingAnchor && (
+              {comments && !pendingAnchor && (
                 <AddCommentButton
                   editorInstance={leftEditor}
                   selection={leftSelection}
@@ -402,7 +374,7 @@ export function SideBySideDiffView({
               )}
 
               {/* Comment composer for creating new threads (shown on left side) */}
-              {pendingAnchor && pendingAnchor.side === "old" && activeReviewId && (
+              {comments && pendingAnchor?.side === "old" && activeReviewId && (
                 <CommentComposer
                   editorInstance={leftEditor}
                   subscribeToScroll={subscribeToScroll}
@@ -425,8 +397,8 @@ export function SideBySideDiffView({
                 hiddenRanges={oldHiddenRanges}
                 selectionHighlightLines={leftSelection}
                 commentThreads={commentThreads}
-                onSelectionChange={onLeftLineSelectionChange}
-                onLineSelect={onLeftLineSelect}
+                onSelectionChange={comments ? onLeftLineSelectionChange : undefined}
+                onLineSelect={comments ? onLeftLineSelect : undefined}
                 overlayPortalRef={leftOverlayRef}
               />
             </div>
@@ -474,32 +446,32 @@ export function SideBySideDiffView({
                 hiddenRanges={newHiddenRanges}
                 selectionHighlightLines={rightSelection}
                 commentThreads={commentThreads}
-                onSelectionChange={onRightLineSelectionChange}
-                onLineSelect={onRightLineSelect}
+                onSelectionChange={comments ? onRightLineSelectionChange : undefined}
+                onLineSelect={comments ? onRightLineSelect : undefined}
                 overlayPortalRef={rightOverlayRef}
               />
               <div className="flex-1 overflow-hidden">
                 <EditorPanel
-                  content={newContent}
-                  language={language}
-                  filePath={filePath}
-                  gitRef={newRef}
+                  content={newSide.editable?.content ?? newContent}
+                  language={newSide.language}
+                  modelUri={newSide.modelUri}
                   side="new"
+                  onContentChange={newSide.editable?.onContentChange}
                   changeRegions={changeRegions.new}
                   inlineChanges={inlineChanges.new}
                   darkMode={darkMode}
-                  diagnostics={newDiagnostics}
+                  diagnostics={newSide.diagnostics}
                   hiddenRanges={newHiddenRanges}
                   viewZones={newViewZones}
                   commentThreads={commentThreads}
                   selectionHighlightLines={rightSelection}
-                  onSelectionChange={onRightSelectionChange}
+                  onSelectionChange={comments ? onRightSelectionChange : undefined}
                   onEditorMount={onRightEditorMount}
                 />
               </div>
 
               {/* Floating "Add Comment" button on caret/selection */}
-              {!pendingAnchor && (
+              {comments && !pendingAnchor && (
                 <AddCommentButton
                   editorInstance={rightEditor}
                   selection={rightSelection}
@@ -511,7 +483,7 @@ export function SideBySideDiffView({
               )}
 
               {/* Comment composer for creating new threads (shown on right side) */}
-              {pendingAnchor && pendingAnchor.side === "new" && activeReviewId && (
+              {comments && pendingAnchor?.side === "new" && activeReviewId && (
                 <CommentComposer
                   editorInstance={rightEditor}
                   subscribeToScroll={subscribeToScroll}

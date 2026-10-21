@@ -30,7 +30,13 @@ mock.module("@/api/client", () => ({
   },
 }));
 
-const { handleFileMoved, openBrowserTab } = await import("./panel-creators");
+const {
+  duplicateComparison,
+  handleFileDeleted,
+  handleFileMoved,
+  openBrowserTab,
+  openCompareFiles,
+} = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { useEditorStateStore } = await import("@/store/editor-state");
 
@@ -342,5 +348,53 @@ describe("openBrowserTab", () => {
     openBrowserTab("https://example.com/one", { sourcePanelId: a.id, activate: true });
 
     expect(api.groups[0]!.activePanel?.params).toEqual({ url: "https://example.com/one" });
+  });
+});
+
+describe("compare panel sides of a deleted or moved file", () => {
+  test("are marked deleted, while the file's own tab is closed", () => {
+    setup();
+    const store = useEditorStateStore.getState();
+    store.openFile("/repo/a.ts");
+    store.openFile("compare-1:old", "/repo/a.ts");
+    store.openFile("compare-1:new", "/repo/c.ts");
+
+    handleFileDeleted("/repo/a.ts");
+
+    const { files } = useEditorStateStore.getState();
+    expect(files.has("/repo/a.ts")).toBe(false);
+    expect(files.get("compare-1:old")?.deleted).toBe(true);
+    expect(files.get("compare-1:new")?.deleted).toBe(false);
+  });
+
+  test("are marked deleted when their file moves, even with no tab open on it", async () => {
+    setup();
+    useEditorStateStore.getState().openFile("compare-1:old", "/repo/dir/x.ts");
+
+    expect(await handleFileMoved("/repo/dir/x.ts", "/repo/y.ts")).toBe(false);
+
+    expect(useEditorStateStore.getState().files.get("compare-1:old")?.deleted).toBe(true);
+  });
+});
+
+describe("compare panels", () => {
+  test("every comparison opens its own panel, and a split duplicates the one it starts from", () => {
+    const { api } = setup();
+    openCompareFiles("/repo/a.ts", "/repo/b.ts");
+    openCompareFiles("/repo/a.ts", "/repo/b.ts");
+    const compares = () => api.panels.filter((p) => p.id.startsWith("compare-"));
+    expect(compares()).toHaveLength(2);
+
+    const source = compares()[0]!;
+    duplicateComparison({ referencePanel: source.id, direction: "right" });
+
+    expect(compares()).toHaveLength(3);
+    expect(compares()[2]!.params).toMatchObject({ oldPath: "/repo/a.ts", newPath: "/repo/b.ts" });
+  });
+
+  test("a split from a panel that is not a comparison opens nothing", () => {
+    const { api, a } = setup();
+    duplicateComparison({ referencePanel: a.id, direction: "right" });
+    expect(api.panels.some((p) => p.id.startsWith("compare-"))).toBe(false);
   });
 });

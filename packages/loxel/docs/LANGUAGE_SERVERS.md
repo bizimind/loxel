@@ -79,7 +79,7 @@ Packaging and signing of these extra binaries is covered in [ELECTRON.md](ELECTR
 
 ## URI schemes
 
-[CodeEditorPanel.tsx](../src/components/code-editor/CodeEditorPanel.tsx) picks the model URI per Monaco language. `useFileScheme` (yaml, json, dockerfile, dockerbake, terraform, astro, xml) gives `file://<abs path>`, which those servers need for schema matching and workspace indexing. Every other language gets `loxel://HEAD/<abs path>`. Diff views ([diff/EditorPanel.tsx](../src/components/diff/EditorPanel.tsx)) use `loxel://<ref or HEAD>/<repo-relative path>#<side>`.
+[CodeEditorPanel.tsx](../src/components/code-editor/CodeEditorPanel.tsx) picks the model URI per Monaco language. `useFileScheme` (yaml, json, dockerfile, dockerbake, terraform, astro, xml) gives `file://<abs path>`, which those servers need for schema matching and workspace indexing. Every other language gets `loxel://HEAD/<abs path>`. Git diff views ([GitSideBySideDiffView.tsx](../src/components/diff-viewer/GitSideBySideDiffView.tsx)) use `loxel://<ref or HEAD>/<repo-relative path>#<side>`, and compare panels ([CompareFilesPanel.tsx](../src/components/compare/CompareFilesPanel.tsx)) `loxel://compare/<abs path>#<panel id>-<side>`; both render through [diff/EditorPanel.tsx](../src/components/diff/EditorPanel.tsx).
 
 Only the TypeScript manager translates: client-to-server it replaces `loxel://head/` (case-insensitive) with `file:///`; server-to-client it replaces every `file:///` with `loxel://HEAD/`. No other manager rewrites URIs. Besides the TS translation, the `loxel:` scheme is what the editor opener and the lazy connector's live-editor check key on.
 
@@ -130,7 +130,7 @@ Each rule has a `BackendMode` from [formatter-backends.ts](../src/server/formatt
 
 - Server bridge and managers: [stdio-lsp-manager.ts](../src/server/stdio-lsp-manager.ts), `src/server/*-lsp-manager.ts`, routes in [server.ts](../src/server/server.ts) (`worktreeLspTypes`, `websocket` handlers).
 - Client wiring: [monaco-env.ts](../src/lib/monaco-env.ts), [lsp-client.ts](../src/lib/lsp-client.ts), [monaco-lsp-client](../../monaco-lsp-client/README.md).
-- URI choice and markers: [CodeEditorPanel.tsx](../src/components/code-editor/CodeEditorPanel.tsx), [diff/EditorPanel.tsx](../src/components/diff/EditorPanel.tsx).
+- URI choice and markers: [CodeEditorPanel.tsx](../src/components/code-editor/CodeEditorPanel.tsx), [GitSideBySideDiffView.tsx](../src/components/diff-viewer/GitSideBySideDiffView.tsx), [CompareFilesPanel.tsx](../src/components/compare/CompareFilesPanel.tsx), [diff/EditorPanel.tsx](../src/components/diff/EditorPanel.tsx).
 - Diagnostics: [diagnostics.ts](../src/server/diagnostics.ts), [worktree-utils.ts](../src/server/worktree-utils.ts).
 - Formatting: [format-service.ts](../src/server/format-service.ts) and its backends, [formatting-model.ts](../src/lib/formatting-model.ts).
 - Schemas: [schema-service.ts](../src/server/schema-service.ts), [schema-sync.ts](../src/lib/schema-sync.ts), [json-schema-registry.ts](../src/lib/json-schema-registry.ts).

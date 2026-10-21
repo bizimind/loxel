@@ -30,12 +30,19 @@ export interface ViewZoneDescriptor {
 }
 
 interface EditorPanelProps {
+  /** Text of the side; for an editable side only the text the editor starts with. */
   content: string;
   language: string;
-  filePath?: string;
-  gitRef?: string;
-  /** Disambiguate URI when left/right panels show the same file+ref. */
-  side?: "old" | "new";
+  /** URI of the Monaco model; unique per mounted panel, since the model is disposed with it. */
+  modelUri: monaco.Uri;
+  /** Which side of the diff this panel shows; picks the inline highlight colors. */
+  side: "old" | "new";
+  /**
+   * Makes the panel editable. It then reports every content change (user edits and edits its
+   * owner applies through the mounted editor alike) and stops following `content` after mount:
+   * the owner keeps the editor in sync with disk itself.
+   */
+  onContentChange?: (value: string) => void;
   changeRegions: ChangeRegion[];
   /** Intra-line changes within modification blocks, in this side's line numbers */
   inlineChanges?: InlineRange[];
@@ -55,9 +62,9 @@ interface EditorPanelProps {
 export function EditorPanel({
   content,
   language,
-  filePath,
-  gitRef,
+  modelUri,
   side,
+  onContentChange,
   changeRegions,
   inlineChanges,
   darkMode,
@@ -79,17 +86,16 @@ export function EditorPanel({
   // Keep callback refs stable for event handlers
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
+  const onContentChangeRef = useRef(onContentChange);
+  onContentChangeRef.current = onContentChange;
+  const isEditable = onContentChange !== undefined;
 
   // Mount editor once
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // Create model with a loxel:// URI so the HoverProvider can extract ref + file path.
-    // Include side in the fragment to disambiguate when both panels show the same file+ref.
-    const authority = gitRef ?? "HEAD";
-    const path = filePath ?? "untitled";
-    const uri = monaco.Uri.from({ scheme: "loxel", authority, path: `/${path}`, fragment: side });
+    const uri = modelUri;
     let model = monaco.editor.getModel(uri);
     if (model) {
       if (model.getValue() !== content) model.setValue(content);
@@ -101,8 +107,8 @@ export function EditorPanel({
     const editor = monaco.editor.create(container, {
       model,
       theme: getMonacoThemeName(darkMode),
-      readOnly: true,
-      domReadOnly: true,
+      readOnly: !isEditable,
+      domReadOnly: !isEditable,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       renderLineHighlight: "none",
@@ -130,7 +136,7 @@ export function EditorPanel({
       buildMonacoDecorations(changeRegions),
     );
     inlineDecorationsRef.current = editor.createDecorationsCollection(
-      buildInlineDecorations(inlineChanges ?? [], side ?? "new"),
+      buildInlineDecorations(inlineChanges ?? [], side),
     );
     commentDecorationsRef.current = editor.createDecorationsCollection([]);
     selectionHighlightRef.current = editor.createDecorationsCollection([]);
@@ -152,6 +158,10 @@ export function EditorPanel({
       }
     });
 
+    editor.onDidChangeModelContent(() => {
+      onContentChangeRef.current?.(editor.getModel()?.getValue() ?? "");
+    });
+
     onEditorMount(editor);
 
     return () => {
@@ -168,15 +178,15 @@ export function EditorPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update content
+  // Update content (read-only sides; an editable side's owner updates its editor itself)
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor) return;
+    if (!editor || isEditable) return;
     const model = editor.getModel();
     if (model && model.getValue() !== content) {
       model.setValue(content);
     }
-  }, [content]);
+  }, [content, isEditable]);
 
   // Update language
   useEffect(() => {
@@ -203,13 +213,13 @@ export function EditorPanel({
   // Update inline (intra-line) change decorations
   useEffect(() => {
     if (inlineDecorationsRef.current) {
-      inlineDecorationsRef.current.set(buildInlineDecorations(inlineChanges ?? [], side ?? "new"));
+      inlineDecorationsRef.current.set(buildInlineDecorations(inlineChanges ?? [], side));
     }
   }, [inlineChanges, side]);
 
   // Update comment decorations
   useEffect(() => {
-    if (commentDecorationsRef.current && side) {
+    if (commentDecorationsRef.current) {
       commentDecorationsRef.current.set(buildCommentDecorations(commentThreads ?? [], side));
     }
   }, [commentThreads, side]);
