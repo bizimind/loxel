@@ -1,5 +1,10 @@
 /** Shared IPC channel names between main process and preload. */
 export const OPEN_IN_BROWSER_TAB = "open-in-browser-tab";
+/**
+ * Main → renderer: a page in one of its webviews asked to open a link in a new tab or window.
+ * Args: the webview's webContents id, the URL, and whether to open it in the background.
+ */
+export const OPEN_IN_NEW_BROWSER_TAB = "browser:open-in-new-tab";
 export const SET_DOCK_BADGE = "set-dock-badge";
 export const WINDOW_FOCUS_CHANGE = "window:focus-change";
 /** Main → renderer: the window entered (`true`) or left (`false`) macOS native fullscreen. */

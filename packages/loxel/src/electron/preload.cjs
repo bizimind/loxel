@@ -3,6 +3,7 @@
 const { contextBridge, ipcRenderer, webFrame } = require("electron");
 
 const OPEN_IN_BROWSER_TAB = "open-in-browser-tab";
+const OPEN_IN_NEW_BROWSER_TAB = "browser:open-in-new-tab";
 const SET_DOCK_BADGE = "set-dock-badge";
 const WINDOW_FOCUS_CHANGE = "window:focus-change";
 const WINDOW_FULL_SCREEN_CHANGE = "window:full-screen-change";
@@ -29,6 +30,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const handler = (_event, url) => callback(url);
     ipcRenderer.on(OPEN_IN_BROWSER_TAB, handler);
     return () => ipcRenderer.removeListener(OPEN_IN_BROWSER_TAB, handler);
+  },
+  onOpenInNewBrowserTab: (callback) => {
+    const handler = (_event, webContentsId, url, background) =>
+      callback(webContentsId, url, background);
+    ipcRenderer.on(OPEN_IN_NEW_BROWSER_TAB, handler);
+    return () => ipcRenderer.removeListener(OPEN_IN_NEW_BROWSER_TAB, handler);
   },
   setDockBadge: (count) => ipcRenderer.send(SET_DOCK_BADGE, count),
   onWindowFocusChange: (callback) => {
