@@ -26,6 +26,11 @@ interface Window {
     /** The window entered or left macOS native fullscreen. Since v0.1.219. */
     onWindowFullScreenChange?: (callback: (fullScreen: boolean) => void) => () => void;
     /**
+     * Copy the image at window point (x, y) of one of this window's webviews to the clipboard;
+     * the point is in the coordinates of the webview's `context-menu` event.
+     */
+    copyWebviewImage?: (webContentsId: number, x: number, y: number) => void;
+    /**
      * A browser panel page called `alert()` / `confirm()` / `prompt()` (payload:
      * `JavaScriptDialogRequest`), or a shown one was withdrawn (`JavaScriptDialogClosed`).
      */

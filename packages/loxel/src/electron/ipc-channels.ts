@@ -20,6 +20,11 @@ export const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
  */
 export const WEBVIEW_FOCUSED = "keybindings:webview-focused";
 /**
+ * Renderer → main: copy the image at a point of one of its webviews to the clipboard (the browser
+ * panel's context menu). `<webview>` has no `copyImageAt`; only its webContents does.
+ */
+export const COPY_WEBVIEW_IMAGE = "browser:copy-image-at";
+/**
  * Webview preload → main, synchronous: a page called `alert()` / `confirm()` / `prompt()`. The
  * page stays blocked until main sets the return value. See `javascript-dialogs.ts`.
  */

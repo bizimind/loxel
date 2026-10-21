@@ -11,6 +11,7 @@ const OPEN_FOLDER_DIALOG = "dialog:open-folder";
 const SET_KEYSTROKE_INTERCEPTION = "keybindings:set-interception";
 const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
 const WEBVIEW_FOCUSED = "keybindings:webview-focused";
+const COPY_WEBVIEW_IMAGE = "browser:copy-image-at";
 const JAVASCRIPT_DIALOG_LISTEN = "javascript-dialog:listen";
 const JAVASCRIPT_DIALOG_OPEN = "javascript-dialog:open";
 const JAVASCRIPT_DIALOG_RESPOND = "javascript-dialog:respond";
@@ -59,6 +60,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(WEBVIEW_FOCUSED, handler);
   },
   getZoomFactor: () => webFrame.getZoomFactor(),
+  copyWebviewImage: (webContentsId, x, y) =>
+    ipcRenderer.send(COPY_WEBVIEW_IMAGE, webContentsId, x, y),
   onJavaScriptDialog: (onOpen, onClosed) => {
     const openHandler = (_event, request) => onOpen(request);
     const closedHandler = (_event, closed) => onClosed(closed);

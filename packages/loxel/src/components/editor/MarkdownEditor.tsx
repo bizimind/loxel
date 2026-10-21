@@ -30,6 +30,7 @@ import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
+import { installSoftLineBreaks } from "@/components/editor/soft-line-break";
 import {
   type MergeCallbacks,
   AUTOSAVE_DEBOUNCE_MS,
@@ -428,6 +429,8 @@ export function MarkdownEditor({
     for (const plugin of localDbDirectivePlugins) {
       crepe.editor.use(plugin);
     }
+
+    installSoftLineBreaks(crepe.editor);
 
     // Align remark-stringify output with oxfmt/Prettier markdown defaults.
     crepe.editor.config((ctx) => {
