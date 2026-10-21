@@ -186,12 +186,14 @@ function listen(event: IpcMainEvent): void {
   // On commit, not on start: the window cancels navigations it starts (external links are
   // opened in the system browser from will-navigate), and those keep the document. A new
   // document subscribes again. did-navigate fires only for main-frame cross-document commits.
+  // A reload keeps the webContents, so both listeners go with the subscription.
   const forget = () => {
     listeningHosts.delete(host.id);
     host.off("did-navigate", forget);
+    host.off("destroyed", forget);
   };
   host.on("did-navigate", forget);
-  host.once("destroyed", () => listeningHosts.delete(host.id));
+  host.once("destroyed", forget);
 }
 
 export function installJavaScriptDialogs(): void {

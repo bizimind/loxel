@@ -45,8 +45,9 @@ function fakeEmitter() {
       );
     },
     emit: (name: string, ...args: unknown[]) => {
-      for (const fn of listeners.get(name) ?? []) fn(...args);
+      for (const fn of [...(listeners.get(name) ?? [])]) fn(...args);
     },
+    listenerCount: (name: string) => listeners.get(name)?.length ?? 0,
   };
 }
 
@@ -75,7 +76,7 @@ function fakeHost({ listening = true } = {}) {
     sent
       .filter((m) => m.channel === JAVASCRIPT_DIALOG_OPEN)
       .map((m) => javaScriptDialogRequestSchema.parse(m.payload));
-  return { host, sent, requests, listen, emit: emitter.emit };
+  return { host, sent, requests, listen, emit: emitter.emit, listenerCount: emitter.listenerCount };
 }
 
 /** A webview guest hosted by `host`, with its lifecycle events triggerable. */
@@ -261,6 +262,12 @@ describe("page dialogs", () => {
     old.listen();
     run(guest, { type: "confirm" });
     expect(old.requests()).toHaveLength(3);
+    // Each document's subscription removes its listeners when it ends.
+    expect(old.listenerCount("did-navigate")).toBe(1);
+    expect(old.listenerCount("destroyed")).toBe(1);
+    old.emit("destroyed");
+    expect(old.listenerCount("did-navigate")).toBe(0);
+    expect(old.listenerCount("destroyed")).toBe(0);
   });
 });
 
