@@ -23,7 +23,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { FindBar } from "@/components/ui/find-bar";
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
-import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
 import { openBrowserTab } from "@/lib/panel-creators";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,11 @@ const popupAttributes: Record<string, string> = window.electronAPI?.onOpenInNewB
   ? { allowpopups: "" }
   : {};
 
+/** Whether `url` is the empty page a new browser panel opens on. */
+function isBlankPage(url: string): boolean {
+  return !url || url === "about:blank";
+}
+
 export interface BrowserPanelParams {
   url: string;
   faviconUrl?: string;
@@ -69,6 +74,12 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<BrowserContextMenuState | null>(null);
   const [webContentsId, setWebContentsId] = useState<number | null>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
+  // The page shown or loading, for the activation focus, which runs outside render.
+  const currentUrlRef = useRef(currentUrl);
+  useEffect(() => {
+    currentUrlRef.current = currentUrl;
+  }, [currentUrl]);
 
   // The page's alert() / confirm() / prompt(), shown over the page one at a time.
   // Navigating from the toolbar first dismisses them: the navigation would wait for the page.
@@ -115,15 +126,27 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     reattachActiveContent(panelApi.group);
   }, [panelApi]);
 
-  // Hand keyboard focus to the page when the panel is activated (e.g. directional focus).
+  // Hand keyboard focus to the page when the panel is activated (e.g. directional focus), or to
+  // the address bar while the panel shows no page yet, so a new blank tab is ready for a URL.
   // Skip when focus is already inside the panel so clicking the URL bar keeps its focus.
   usePanelActivationFocus(
     panelApi,
     useCallback(() => {
       const webview = webviewRef.current;
       if (!webview || rootRef.current?.contains(document.activeElement)) return;
-      (dialogFocusRef.current ?? webview).focus();
-    }, []),
+      const page = isBlankPage(currentUrlRef.current) ? urlInputRef.current : webview;
+      const target = dialogFocusRef.current ?? page;
+      if (!target) return;
+      target.focus();
+      // A tab switched to is unhidden a frame later (dockview's overlay for "always"-rendered
+      // panels), and its hidden elements can't take focus until then. The webview can.
+      if (document.activeElement === target) return;
+      requestAnimationFrame(() => {
+        if (isActivatedPanel(panelApi) && !rootRef.current?.contains(document.activeElement)) {
+          target.focus();
+        }
+      });
+    }, [panelApi]),
   );
 
   // Links the page opens in a new tab or window (⌘-click, middle-click, target="_blank", window.open).
@@ -147,7 +170,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       setWebContentsId(webview.getWebContentsId());
       if (!readyRef.current) {
         readyRef.current = true;
-        if (initialUrl && initialUrl !== "about:blank") {
+        if (!isBlankPage(initialUrl)) {
           loadUrl(webview, initialUrl);
         }
       }
@@ -171,6 +194,9 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     };
 
     const onDidNavigate = (event: DidNavigateEvent | DidNavigateInPageEvent) => {
+      // Before the first dom-ready this is the placeholder `src="about:blank"`, not the panel's
+      // page: it would make a panel opened on a URL count as blank until that page commits.
+      if (!readyRef.current) return;
       if (event.type === "did-navigate") {
         // A new page drops the matches and the find session.
         setFindMatches(null);
@@ -372,6 +398,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             <GlobeIcon className="text-muted-foreground size-3 shrink-0" />
           )}
           <input
+            ref={urlInputRef}
             type="text"
             value={inputUrl}
             onChange={(e) => setInputUrl(e.target.value)}

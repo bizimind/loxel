@@ -73,7 +73,7 @@ The status bar runs across the bottom edge of the window and is always visible. 
 
 ## Browser panels
 
-A browser panel (`Cmd+Shift+B`) is a full web view with back, forward, reload, an address bar, and DevTools. `Cmd+F` finds text in the page.
+A browser panel (`Cmd+Shift+B`) is a full web view with back, forward, reload, an address bar, and DevTools. A new blank panel starts with the cursor in the address bar, so you can type a URL or a search right away. `Cmd+F` finds text in the page.
 
 A plain click on a link opens it in the same tab. Links you open in a new tab or window become browser tabs right after the current one, in the same group:
 
