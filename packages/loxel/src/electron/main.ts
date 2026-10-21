@@ -663,7 +663,13 @@ function buildAppMenu(): void {
     {
       label: "View",
       submenu: [
-        ...(IS_DEV ? [{ role: "reload" as const }, { role: "forceReload" as const }] : []),
+        // Force Reload's ⇧⌘R is Rename Tab in the renderer; keep the item but not its key.
+        ...(IS_DEV
+          ? [
+              { role: "reload" as const },
+              { role: "forceReload" as const, registerAccelerator: false },
+            ]
+          : []),
         { role: "toggleDevTools" },
         { type: "separator" },
         // Not the zoom roles: those act on the focused webContents, which is a browser panel's

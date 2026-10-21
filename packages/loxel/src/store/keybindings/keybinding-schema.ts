@@ -96,7 +96,8 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "panel.newTab": [`${SPLIT_LEADER} Enter`],
   "panel.open.localdb": [],
   "panel.close": ["Cmd+W"],
-  // Monaco's Refactor is ⌃⇧R on macOS, so ⌘⇧R is free in the editor.
+  // Free in Monaco (its Refactor is ⌃⇧R on macOS); dev builds' Force Reload menu item doesn't
+  // register the key (electron/main.ts).
   "panel.rename": ["Cmd+Shift+R"],
   ...SPLIT_CHORDS,
   "panel.next": ["Cmd+Shift+BracketRight", "Ctrl+Tab"],

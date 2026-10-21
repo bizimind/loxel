@@ -5,6 +5,7 @@
  * active center tab into inline rename from the keyboard or the command palette.
  */
 
+import { isFocusInCenter } from "@/lib/focus-targets";
 import { getCenterApi } from "@/store/tools-bar";
 
 const handlers = new Map<string, () => void>();
@@ -17,22 +18,25 @@ export function registerTabRename(panelId: string, startRename: () => void): () 
   };
 }
 
-function activeCenterPanelId(): string | undefined {
-  return getCenterApi()?.activePanel?.id;
-}
-
 /**
- * Whether the center's active tab can be renamed. Changes here don't re-send the webview keystroke
- * interception: a focused browser panel is the active tab, which is never renameable, so a stale
- * set can only leave the key with the page.
+ * Whether the center's active tab can be renamed from where focus is. Focus in another center
+ * group belongs to that group's panel even though it isn't the active one: a browser page takes
+ * focus without activating its group, and the key must stay with the page.
  */
 export function canRenameActiveTab(): boolean {
-  const panelId = activeCenterPanelId();
-  return panelId !== undefined && handlers.has(panelId);
+  const panel = getCenterApi()?.activePanel;
+  if (!panel || !handlers.has(panel.id)) return false;
+  const focused = document.activeElement;
+  const isFocusInOtherGroup =
+    focused instanceof HTMLElement &&
+    focused !== document.body &&
+    isFocusInCenter() &&
+    !panel.group.element.contains(focused);
+  return !isFocusInOtherGroup;
 }
 
 /** Put the center's active tab into inline rename, when it is renameable. */
 export function renameActiveTab(): void {
-  const panelId = activeCenterPanelId();
+  const panelId = getCenterApi()?.activePanel?.id;
   if (panelId !== undefined) handlers.get(panelId)?.();
 }

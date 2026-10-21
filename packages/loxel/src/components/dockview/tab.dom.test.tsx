@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { DockviewApi, DockviewPanelApi } from "dockview-react";
 
+import { FOCUS_AREA_ATTR } from "@/lib/focus-targets";
 import { registerPanelFocus } from "@/lib/panel-focus";
 import { canRenameActiveTab, renameActiveTab } from "@/lib/tab-rename";
 import { setCenterApi } from "@/store/tools-bar";
@@ -155,19 +156,24 @@ describe("Rename Tab action", () => {
   });
   afterEach(() => unregisterFocus());
 
-  /** A center dockview whose active panel is the rendered tab's (`panel-1`). */
-  function activateTabPanel() {
+  /**
+   * A center dockview whose active panel is `panelId` (by default the rendered tab's, `panel-1`).
+   * Returns the active group's element.
+   */
+  function activateTabPanel(panelId = "panel-1"): HTMLElement {
+    const group = {
+      activePanel: null as unknown,
+      element: document.createElement("div"),
+      api: { isMaximized: () => false, setActive() {} },
+    };
     const panel = {
-      id: "panel-1",
-      group: { activePanel: null as unknown, api: { isMaximized: () => false, setActive() {} } },
+      id: panelId,
+      group,
       view: { content: { element: document.createElement("div") } },
     };
-    panel.group.activePanel = panel;
-    setCenterApi({
-      activePanel: panel,
-      getPanel: (id: string) => (id === panel.id ? panel : undefined),
-      hasMaximizedGroup: () => false,
-    } as unknown as DockviewApi);
+    group.activePanel = panel;
+    setCenterApi({ activePanel: panel, hasMaximizedGroup: () => false } as unknown as DockviewApi);
+    return group.element;
   }
 
   test("edits the active tab's title inline, and Enter returns focus to the panel", async () => {
@@ -190,6 +196,45 @@ describe("Rename Tab action", () => {
     renderTab();
     activateTabPanel();
     expect(canRenameActiveTab()).toBe(false);
+  });
+
+  test("is disabled while focus is in another center group (e.g. a browser page)", () => {
+    renderTab({ onRename: jest.fn() });
+    const activeGroup = activateTabPanel();
+    const center = document.createElement("div");
+    center.setAttribute(FOCUS_AREA_ATTR, "center");
+    const otherGroup = document.createElement("button");
+    center.append(activeGroup, otherGroup);
+    const inActiveGroup = document.createElement("button");
+    activeGroup.append(inActiveGroup);
+    document.body.append(center);
+
+    try {
+      otherGroup.focus();
+      expect(canRenameActiveTab()).toBe(false);
+      inActiveGroup.focus();
+      expect(canRenameActiveTab()).toBe(true);
+    } finally {
+      center.remove();
+    }
+  });
+
+  test("renaming a background tab returns focus to the active panel, not the tab's", async () => {
+    const focusActivePanel = jest.fn(() => true);
+    const unregister = registerPanelFocus("panel-2", focusActivePanel);
+    renderTab({ onRename: jest.fn() });
+    activateTabPanel("panel-2");
+
+    try {
+      openContextMenu();
+      fireEvent.click(await screen.findByText("Rename"));
+      fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+
+      await waitFor(() => expect(focusActivePanel).toHaveBeenCalledTimes(1));
+      expect(focusPanel).not.toHaveBeenCalled();
+    } finally {
+      unregister();
+    }
   });
 
   test("Escape cancels and returns focus to the panel", async () => {
