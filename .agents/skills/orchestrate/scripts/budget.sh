@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Report how much Claude subscription budget is left for agents and CI reviews, as JSON.
+#
+#   budget.sh                  snapshot now
+#   budget.sh --alarm          poll every 5 min, print once the mode changes (e.g. watch -> throttle)
+#   budget.sh --until-reset    sleep until the window that is holding work resets, then snapshot
+#
+# Local agents and the CI reviewer share the subscription. `reviewSlots` is how many more review
+# runs (pushes to PRs) fit before the hold line, counting the ones already in flight.
+# Background modes exit non-zero after repeated endpoint failures (e.g. an expired login) instead of
+# looping silently, so the orchestrator always gets a notification.
+set -euo pipefail
+
+# Hold lines: stop starting work here so the orchestrator keeps a reserve to recover after reset.
+hold_5h=90
+hold_7d=95
+here="$(cd "$(dirname "$0")" && pwd)"
+
+fetch_usage() {
+  # The OAuth token goes to curl on stdin, never on the command line.
+  local creds
+  if command -v security >/dev/null; then
+    creds="$(security find-generic-password -s "Claude Code-credentials" -w)"
+  else
+    creds="$(cat "$HOME/.claude/.credentials.json")"
+  fi
+  jq -r '"Authorization: Bearer " + .claudeAiOauth.accessToken' <<<"$creds" |
+    curl -sf --max-time 15 -H @- -H "anthropic-beta: oauth-2025-04-20" -H "User-Agent: claude-code" \
+      https://api.anthropic.com/api/oauth/usage
+}
+
+snapshot() {
+  local usage reviews in_flight
+  usage="$(fetch_usage)" || { echo "budget.sh: usage endpoint failed (an expired login is refreshed by any claude session)" >&2; return 1; }
+  reviews="$("$here/review-cost.sh" --stats)"
+  in_flight="$(gh run list --workflow claude-code-review.yml --limit 30 --json status \
+    --jq 'map(select(.status != "completed")) | length' 2>/dev/null || echo 0)"
+  jq -n --argjson u "$usage" --argjson r "$reviews" --argjson inFlight "$in_flight" \
+    --argjson hold5 "$hold_5h" --argjson hold7 "$hold_7d" '
+    def epoch: if type == "string" then sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601 else null end;
+    # A window that has not started yet (nothing used since the last reset) has no reset time.
+    def window: {pct: (.utilization // 0), resetsAt: .resets_at,
+      minutesToReset: ((.resets_at | epoch) as $e | if $e then (($e - now) / 60 | floor | [., 0] | max) else null end)};
+    # Measured per-review cost when the cache has enough runs, else the Oct 2026 measurements.
+    (if $r.runs >= 5 and $r.fiveHour.median != null and $r.sevenDay.median != null
+     then {h5: $r.fiveHour.median, h5p95: $r.fiveHour.p95, d7: $r.sevenDay.median, d7p95: $r.sevenDay.p95, source: "measured"}
+     else {h5: 14, h5p95: 25, d7: 2, d7p95: 3, source: "defaults"} end) as $cost
+    | (($u.five_hour // {}) | window) as $h5
+    | (($u.seven_day // {}) | window) as $d7
+    # In-flight reviews get a full median on top of what they already spent: deliberately conservative.
+    | ($h5.pct + $inFlight * $cost.h5) as $projected
+    # Weekly pace: points used beyond an even spread over the 7 days.
+    | (if $d7.minutesToReset then ($d7.pct - (100 * (1 - $d7.minutesToReset / (7 * 24 * 60))) | round) else 0 end) as $aheadOfPace
+    # Reviews that fit at median cost, keeping one p95 overrun of margin below each hold line.
+    | ([(($hold5 - $projected - ($cost.h5p95 - $cost.h5)) / ([$cost.h5, 1] | max) | floor),
+        (($hold7 - $d7.pct - ($cost.d7p95 - $cost.d7)) / ([$cost.d7, 1] | max) | floor)]
+       | min | [., 0] | max) as $slots
+    | (if $h5.pct >= $hold5 or $d7.pct >= $hold7 then "hold"
+       elif $projected >= 70 or $d7.pct >= 85 then "throttle"
+       elif $projected >= 50 or $aheadOfPace > 15 then "watch"
+       else "free" end) as $mode
+    | {
+        mode: $mode,
+        fiveHour: $h5,
+        sevenDay: ($d7 + {aheadOfPace: $aheadOfPace}),
+        # Other active limits, e.g. a per-model weekly allowance.
+        otherLimits: [$u.limits[]? | select(.kind != "session" and .kind != "weekly_all")
+                      | {kind, group, pct: .percent, resetsAt: .resets_at}],
+        reviewsInFlight: $inFlight,
+        reviewCost: $cost,
+        reviewSlots: (if $mode == "hold" then 0 else $slots end),
+        advice: (if $mode == "hold" then "No new pushes or workers. Let running workers reach a commit point and stop, then run budget.sh --until-reset in the background."
+                 elif $slots == 0 then "No review slots: wait for in-flight reviews to finish, or for the 5h reset if none are running."
+                 else {
+                   free: "Work freely; check again at milestones.",
+                   watch: "Check before each push batch; prefer finishing PRs over starting new ones.",
+                   throttle: "Admit at most reviewSlots pushes; run workers one or two at a time; keep budget.sh --alarm running."
+                 }[$mode] end)
+      }'
+}
+
+# Retry a snapshot up to 3 times, a minute apart.
+snapshot_retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    snapshot && return 0
+    (( attempt < 3 )) && sleep 60
+  done
+  return 1
+}
+
+case "${1:-}" in
+  "")
+    snapshot
+    ;;
+  --alarm)
+    start_mode="$(snapshot_retry | jq -r .mode)"
+    while true; do
+      sleep 300
+      state="$(snapshot_retry)" || exit 1
+      if [[ "$(jq -r .mode <<<"$state")" != "$start_mode" ]]; then
+        echo "$state"
+        exit 0
+      fi
+    done
+    ;;
+  --until-reset)
+    state="$(snapshot_retry)" || exit 1
+    minutes="$(jq -r --argjson hold7 "$hold_7d" \
+      'if .sevenDay.pct >= $hold7 then .sevenDay.minutesToReset else .fiveHour.minutesToReset end // 0' <<<"$state")"
+    sleep $(( (minutes + 2) * 60 ))
+    # After a long sleep the stored login may have expired; the woken session refreshes it.
+    snapshot_retry || echo '{"reset": true, "note": "window reset; usage endpoint unavailable, run budget.sh again"}'
+    ;;
+  *)
+    echo "usage: budget.sh [--alarm | --until-reset]" >&2
+    exit 2
+    ;;
+esac
