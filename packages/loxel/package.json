@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/loxel",
-  "version": "0.1.220",
+  "version": "0.1.222",
   "description": "IDE for the agentic coding era",
   "homepage": "https://github.com/bizimind/loxel",
   "author": {
@@ -118,7 +118,7 @@
     "remark-stringify": "^11.0.0",
     "tailwindcss": "^4.3.3",
     "typescript": "npm:@typescript/typescript6@6.0.2",
-    "vite": "^8.3.1",
+    "vite": "^8.3.4",
     "vite-plugin-electron": "^1.1.2",
     "yaml-language-server": "^1.24.0"
   }
