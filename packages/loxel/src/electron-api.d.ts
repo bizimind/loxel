@@ -21,6 +21,10 @@ interface Window {
     onWebviewFocused?: (callback: () => void) => () => void;
     /** Current page zoom factor (Cmd+/Cmd-), read synchronously from `webFrame`. */
     getZoomFactor?: () => number;
+    /** Whether this window is in macOS native fullscreen, read synchronously. Since v0.1.219. */
+    isFullScreen?: () => boolean;
+    /** The window entered or left macOS native fullscreen. Since v0.1.219. */
+    onWindowFullScreenChange?: (callback: (fullScreen: boolean) => void) => () => void;
     /**
      * A browser panel page called `alert()` / `confirm()` / `prompt()` (payload:
      * `JavaScriptDialogRequest`), or a shown one was withdrawn (`JavaScriptDialogClosed`).

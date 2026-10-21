@@ -54,10 +54,12 @@ import { requestOpen } from "../open-request";
 import { isHttpUrl } from "../url-utils";
 import { BROWSER_PARTITION } from "./browser-partition";
 import {
+  GET_WINDOW_FULL_SCREEN,
   OPEN_FOLDER_DIALOG,
   OPEN_IN_BROWSER_TAB,
   SET_DOCK_BADGE,
   WINDOW_FOCUS_CHANGE,
+  WINDOW_FULL_SCREEN_CHANGE,
 } from "./ipc-channels";
 import {
   configureWebviewDialogs,
@@ -338,6 +340,12 @@ async function createWindow(): Promise<BrowserWindow> {
   });
   win.on("focus", () => {
     win.webContents.send(WINDOW_FOCUS_CHANGE, true);
+  });
+  win.on("enter-full-screen", () => {
+    win.webContents.send(WINDOW_FULL_SCREEN_CHANGE, true);
+  });
+  win.on("leave-full-screen", () => {
+    win.webContents.send(WINDOW_FULL_SCREEN_CHANGE, false);
   });
 
   const loadUrl = process.env.VITE_DEV_SERVER_URL ?? SERVER_URL;
@@ -805,6 +813,11 @@ ipcMain.handle(OPEN_FOLDER_DIALOG, async (event) => {
 
 installWebviewKeystrokeForwarding();
 installJavaScriptDialogs();
+
+// Sync so the first render is right: a window can open straight into a fullscreen space.
+ipcMain.on(GET_WINDOW_FULL_SCREEN, (event) => {
+  event.returnValue = BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false;
+});
 
 // macOS: show notification count on dock icon
 ipcMain.on(SET_DOCK_BADGE, (_event, count: unknown) => {

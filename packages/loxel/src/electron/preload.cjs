@@ -5,6 +5,8 @@ const { contextBridge, ipcRenderer, webFrame } = require("electron");
 const OPEN_IN_BROWSER_TAB = "open-in-browser-tab";
 const SET_DOCK_BADGE = "set-dock-badge";
 const WINDOW_FOCUS_CHANGE = "window:focus-change";
+const WINDOW_FULL_SCREEN_CHANGE = "window:full-screen-change";
+const GET_WINDOW_FULL_SCREEN = "window:get-full-screen";
 const OPEN_FOLDER_DIALOG = "dialog:open-folder";
 const SET_KEYSTROKE_INTERCEPTION = "keybindings:set-interception";
 const WEBVIEW_KEYSTROKE = "keybindings:webview-keystroke";
@@ -36,6 +38,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const handler = (_event, focused) => callback(focused);
     ipcRenderer.on(WINDOW_FOCUS_CHANGE, handler);
     return () => ipcRenderer.removeListener(WINDOW_FOCUS_CHANGE, handler);
+  },
+  isFullScreen: () => ipcRenderer.sendSync(GET_WINDOW_FULL_SCREEN),
+  onWindowFullScreenChange: (callback) => {
+    const handler = (_event, fullScreen) => callback(fullScreen);
+    ipcRenderer.on(WINDOW_FULL_SCREEN_CHANGE, handler);
+    return () => ipcRenderer.removeListener(WINDOW_FULL_SCREEN_CHANGE, handler);
   },
   openFolderDialog: () => ipcRenderer.invoke(OPEN_FOLDER_DIALOG),
   setKeystrokeInterception: (interception) =>
