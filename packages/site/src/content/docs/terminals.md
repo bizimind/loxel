@@ -12,7 +12,7 @@ Loxel's integrated terminals are full PTY sessions. Open as many as you need, ru
 
 Press `Cmd+T` (or `` Ctrl+Shift+` ``) to open a new terminal tab. There is no limit on the number of terminals. Like any panel, terminals can be docked, split, or moved anywhere in your layout.
 
-To rename a terminal, double-click its tab title, or right-click the tab and choose **Rename**. The name is saved with the layout.
+To rename a terminal, double-click its tab title, right-click the tab and choose **Rename**, or press `Cmd+Shift+R` while it is the active tab. The name is saved with the layout.
 
 ---
 

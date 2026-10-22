@@ -46,7 +46,7 @@ The center area is the main content area. Every editor and interactive view open
 - **Browser** — web pages, see [Browser panels](#browser-panels)
 - **Media viewer** — images, SVGs, and videos
 
-Double-click a terminal or file tab's title, or right-click the tab and choose **Rename**, to rename it; renaming a file tab renames the file. The tab menu also copies a file's name or path, closes other tabs, and on macOS offers **Reveal in Finder** and **Open In**.
+Double-click a terminal or file tab's title, right-click the tab and choose **Rename**, or press `Cmd+Shift+R` (**Rename Tab** in the command palette) to rename the active tab; renaming a file tab renames the file. Press `Enter` to apply the new name or `Esc` to cancel, and focus returns to the panel you were working in. The tab menu also copies a file's name or path, closes other tabs, and on macOS offers **Reveal in Finder** and **Open In**.
 
 ### Right sidebar
 
