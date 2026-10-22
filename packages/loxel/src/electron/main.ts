@@ -663,11 +663,15 @@ function buildAppMenu(): void {
     {
       label: "View",
       submenu: [
-        // Force Reload's ⇧⌘R is Rename Tab in the renderer; keep the item but not its key.
+        // Not the forceReload role: its ⇧⌘R is Rename Tab in the renderer, and macOS menus take
+        // their keys before the page (`registerAccelerator: false` is ignored there).
         ...(IS_DEV
           ? [
               { role: "reload" as const },
-              { role: "forceReload" as const, registerAccelerator: false },
+              {
+                label: "Force Reload",
+                click: () => BrowserWindow.getFocusedWindow()?.webContents.reloadIgnoringCache(),
+              },
             ]
           : []),
         { role: "toggleDevTools" },
