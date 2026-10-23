@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 import { resolve } from "node:path";
 
+import { parseOpenArgs, parseTerminalArgs } from "./cli-args";
+import { isCodingAgent } from "./coding-agent-env";
 import { requestOpen } from "./open-request";
-import { parseTerminalArgs } from "./terminal-args";
 import { isHttpUrl } from "./url-utils";
 
 const PROD_PORT = 7433;
@@ -47,8 +48,10 @@ async function waitForServer(port: number, timeoutMs = 15_000): Promise<void> {
   throw new Error(`Loxel server did not start within ${timeoutMs / 1000}s`);
 }
 
-function launchLoxel(): void {
-  Bun.spawn(["open", "-a", "Loxel"], { stdout: "ignore", stderr: "ignore" });
+/** Launch Loxel, or bring it to the front if it is running; `-g` launches it in the background. */
+function launchLoxel({ background = false } = {}): void {
+  const args = background ? ["open", "-g", "-a", "Loxel"] : ["open", "-a", "Loxel"];
+  Bun.spawn(args, { stdout: "ignore", stderr: "ignore" });
 }
 
 async function main(): Promise<void> {
@@ -60,10 +63,16 @@ async function main(): Promise<void> {
     return;
   }
 
-  const rawArg = args[0]!;
-  const isUrl = isHttpUrl(rawArg);
-  // `loxel terminal ...` opens a terminal panel; parsed first so bad flags fail before any launch.
-  const terminal = rawArg === "terminal" ? parseTerminalArgs(args.slice(1), process.cwd()) : null;
+  // `loxel terminal ...` opens a terminal panel, anything else a file, folder or URL. Parsed first
+  // so bad flags fail before any launch.
+  const parsed =
+    args[0] === "terminal"
+      ? parseTerminalArgs(args.slice(1), process.cwd())
+      : parseOpenArgs(args, process.cwd());
+  const url = "target" in parsed && isHttpUrl(parsed.target) ? parsed.target : null;
+  // Focus follows the caller unless a flag says otherwise: a coding agent's opens must not pull
+  // the user away from what they are looking at, while a user's own opens show what they asked for.
+  const focus = parsed.focus ?? !isCodingAgent(process.env);
 
   // Check env vars (inside loxel terminal)
   const isInsideLoxel = process.env.LOXEL === "1";
@@ -74,7 +83,7 @@ async function main(): Promise<void> {
   // URLs open in the windows showing the CWD's worktree. Inside a loxel terminal, fall back to
   // LOXEL_WORKTREE when the CWD is outside any git repo.
   let urlWtPath: string | null = null;
-  if (isUrl) {
+  if (url) {
     try {
       urlWtPath = await detectWorktree(process.cwd());
     } catch (err) {
@@ -89,26 +98,29 @@ async function main(): Promise<void> {
     port = envPort;
   } else {
     const detectedPort = await detectPort();
-    launchLoxel(); // focus if running, launch if not
+    // Bring Loxel to the front, or launch it; without focus, only launch it, in the background.
+    if (focus || !detectedPort) launchLoxel({ background: !focus });
     port = detectedPort ?? PROD_PORT;
     if (!detectedPort) await waitForServer(port);
   }
   const serverUrl = `http://127.0.0.1:${port}`;
 
-  if (urlWtPath) {
-    await requestOpen(serverUrl, { url: rawArg, wtPath: urlWtPath });
-    return;
-  }
-
-  // Files, folders and terminals need no worktree: the window in use opens them in their worktree,
-  // or in its Others section (a terminal: in the active worktree) — from a loxel terminal, that
-  // terminal's window; otherwise the focused one.
+  // The window in use: from a loxel terminal, that terminal's window; otherwise the focused one.
+  // Files, folders and terminals need no worktree: that window opens them in their worktree, or
+  // in its Others section (a terminal: in the active worktree). A URL goes to every window
+  // showing its worktree, and the one in use among them applies the placement.
   const windowId = isInsideLoxel && envWindowId ? { windowId: envWindowId } : {};
-  await requestOpen(
+  const opened = { placement: parsed.placement, focus, ...windowId };
+  const { warning } = await requestOpen(
     serverUrl,
-    terminal ? { terminal, ...windowId } : { filePath: resolve(rawArg), ...windowId },
+    url && urlWtPath
+      ? { url, wtPath: urlWtPath, ...opened }
+      : "target" in parsed
+        ? { filePath: resolve(parsed.target), ...opened }
+        : { terminal: parsed.terminal, ...opened },
     { onWaiting: () => process.stderr.write("loxel: waiting for a Loxel window...\n") },
   );
+  if (warning) process.stderr.write(`loxel: warning: ${warning}\n`);
 }
 
 main().catch((err: unknown) => {

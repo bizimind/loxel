@@ -53,6 +53,7 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       broadcastToProject: () => {},
       broadcastAll: () => {},
       sendToActiveWindow: () => false,
+      sendToWorktreeWindows: () => {},
       externalFolderConflict: () => null,
       getProject: (cwd) => (cwd === repo ? project : undefined),
       findProjectForPath: () => undefined,

@@ -4,26 +4,29 @@
  * Provides type-safe dispatch and listener helpers to replace
  * raw `new CustomEvent()` and `as CustomEvent<T>` casts.
  */
-import type { SplitPosition } from "@/components/dockview/default-layout";
+import type { PanelOpenOptions, PanelPlacement } from "@/api/panel-placement-model";
 import type { CreateTerminalOptions } from "@/lib/panel-creators";
+
+/** A file to open in its panel; `placement` moves an already open tab there too. */
+type OpenFileDetail = { filePath: string } & PanelOpenOptions;
 
 /** Detail shapes for all loxel custom events. */
 export interface LoxelEventMap {
-  "loxel-create-agent": { split?: SplitPosition };
+  "loxel-create-agent": { placement?: PanelPlacement };
   "loxel-create-terminal": CreateTerminalOptions;
-  "loxel-create-editor": { split?: SplitPosition };
-  "loxel-create-drawing": { split?: SplitPosition };
-  "loxel-create-browser": { url?: string; split?: SplitPosition };
-  "loxel-create-code-editor": { ext?: string; split?: SplitPosition };
+  "loxel-create-editor": { placement?: PanelPlacement };
+  "loxel-create-drawing": { placement?: PanelPlacement };
+  "loxel-create-browser": { url?: string } & PanelOpenOptions;
+  "loxel-create-code-editor": { ext?: string; placement?: PanelPlacement };
   "loxel-create-editor-with-content": { content: string; title: string };
   "loxel-open-agent-devtools": { sessionId: string };
-  "loxel-open-code-editor": { filePath: string; line?: number; column?: number };
-  "loxel-open-markdown-editor": { filePath: string; line?: number; column?: number };
-  "loxel-open-drawing-editor": { filePath: string };
-  "loxel-open-media-viewer": { filePath: string };
+  "loxel-open-code-editor": OpenFileDetail & { line?: number; column?: number };
+  "loxel-open-markdown-editor": OpenFileDetail & { line?: number; column?: number };
+  "loxel-open-drawing-editor": OpenFileDetail;
+  "loxel-open-media-viewer": OpenFileDetail;
   "loxel-open-diff": undefined;
   /** Splitting a compare panel sends no paths: the comparison it starts from is duplicated. */
-  "loxel-compare-files": { oldPath: string; newPath: string } | { split?: SplitPosition };
+  "loxel-compare-files": { oldPath: string; newPath: string } | { placement?: PanelPlacement };
   "loxel-open-localdb": undefined;
   "loxel-file-moved": { oldPath: string; newPath: string };
   "loxel-file-deleted": { filePath: string };

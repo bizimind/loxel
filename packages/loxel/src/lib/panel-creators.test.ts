@@ -11,6 +11,11 @@ mock.module("@/components/excalidraw-editor/ExcalidrawEditor", () => ({
   renameDrawingCacheKey: () => {},
 }));
 
+let toasts: string[] = [];
+mock.module("@/components/ui/toast", () => ({
+  showToast: (message: string) => toasts.push(message),
+}));
+
 // The moved file's content on disk, and the writes the move makes.
 let diskContent: Record<string, string> = {};
 let writes: Array<{ path: string; content: string }> = [];
@@ -31,11 +36,14 @@ mock.module("@/api/client", () => ({
 }));
 
 const {
+  createBrowser,
+  createTerminal,
   duplicateComparison,
   handleFileDeleted,
   handleFileMoved,
   openBrowserTab,
   openCompareFiles,
+  openFileBacked,
 } = await import("./panel-creators");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { useEditorStateStore } = await import("@/store/editor-state");
@@ -78,6 +86,7 @@ afterEach(() => {
   diskContent = {};
   writes = [];
   failWrites = false;
+  toasts = [];
 });
 
 describe("handleFileMoved", () => {
@@ -312,6 +321,213 @@ describe("handleFileMoved", () => {
   });
 });
 
+describe("placement", () => {
+  const ids = (panels: { id: string }[]) => panels.map((p) => p.id);
+
+  test("a new panel opens as a tab in the active tab's group by default", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+
+    createTerminal({ terminalId: "t" });
+
+    expect(ids(a.group.panels)).toEqual([a.id, "codeeditor-/repo/b.ts", "terminal-t"]);
+    expect(api.activePanel?.id).toBe("terminal-t");
+  });
+
+  test("split opens a new group beside the active tab", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+
+    createTerminal({ terminalId: "t", placement: { split: "down" } });
+
+    const terminal = api.getPanel("terminal-t")!;
+    expect(api.groups).toHaveLength(3);
+    expect(ids(terminal.group.panels)).toEqual(["terminal-t"]);
+    expect(ids(a.group.panels)).toEqual([a.id, "codeeditor-/repo/b.ts"]);
+  });
+
+  test("group names a tab by title or by file path", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    createTerminal({ terminalId: "t1", placement: { group: { name: "c.ts" } } });
+    createTerminal({
+      terminalId: "t2",
+      placement: { group: { name: "missing", path: "/repo/c.ts" } },
+    });
+
+    expect(ids(c.group.panels)).toEqual([c.id, "terminal-t1", "terminal-t2"]);
+    expect(api.activePanel?.id).toBe("terminal-t2");
+    expect(toasts).toEqual([]);
+  });
+
+  test("a group naming no open tab falls back to the active tab, with a toast", () => {
+    const { a } = setup();
+    a.api.setActive();
+
+    createTerminal({ terminalId: "t", placement: { group: { name: "nope" } } });
+
+    expect(ids(a.group.panels)).toContain("terminal-t");
+    expect(toasts).toEqual([`No open tab matches "nope"; placed by the active tab instead`]);
+  });
+
+  test("replace takes the reference tab's place and closes it", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    createTerminal({ terminalId: "t", placement: { replace: true } });
+    expect(ids(api.groups[0]!.panels)).toEqual(["terminal-t", "codeeditor-/repo/b.ts"]);
+
+    createTerminal({ terminalId: "u", placement: { replace: true, group: { name: "c.ts" } } });
+    expect(api.getPanel(c.id)).toBeUndefined();
+    expect(ids(api.groups[1]!.panels)).toEqual(["terminal-u"]);
+  });
+
+  test("an open file's tab is moved where the placement asks", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    openFileBacked("codeEditor", "/repo/c.ts", { placement: { group: { name: "a.ts" } } });
+
+    expect(api.groups).toHaveLength(1);
+    expect(ids(a.group.panels)).toEqual([a.id, "codeeditor-/repo/b.ts", c.id]);
+    expect(api.activePanel?.id).toBe(c.id);
+  });
+
+  test("an open file's tab splits off or replaces the reference tab", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    openFileBacked("codeEditor", "/repo/b.ts", { placement: { split: "right" } });
+    const b = api.getPanel("codeeditor-/repo/b.ts")!;
+    expect(api.groups).toHaveLength(3);
+    expect(ids(b.group.panels)).toEqual([b.id]);
+    expect(ids(a.group.panels)).toEqual([a.id]);
+
+    openFileBacked("codeEditor", "/repo/b.ts", {
+      placement: { replace: true, group: { name: "c.ts" } },
+    });
+    expect(api.getPanel(c.id)).toBeUndefined();
+    expect(ids(api.getPanel(b.id)!.group.panels)).toEqual([b.id]);
+    expect(api.activePanel?.id).toBe(b.id);
+  });
+
+  test("a tab placed relative to itself stays put unless split off its group", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    openFileBacked("codeEditor", "/repo/a.ts", { placement: { replace: true } });
+    expect(ids(a.group.panels)).toEqual([a.id, "codeeditor-/repo/b.ts"]);
+    expect(api.activePanel?.id).toBe(a.id);
+
+    c.api.setActive();
+    openFileBacked("codeEditor", "/repo/c.ts", { placement: { split: "down" } });
+    expect(api.groups).toHaveLength(2);
+    expect(ids(api.getPanel(c.id)!.group.panels)).toEqual([c.id]);
+
+    openFileBacked("codeEditor", "/repo/a.ts", { placement: { split: "up" } });
+    expect(api.groups).toHaveLength(3);
+    expect(ids(api.getPanel(a.id)!.group.panels)).toEqual([a.id]);
+    expect(api.activePanel?.id).toBe(a.id);
+  });
+
+  test("without focus a new panel opens in the background, leaving the active tab and group", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    createTerminal({ terminalId: "t", focus: false });
+    expect(ids(a.group.panels)).toEqual([a.id, "codeeditor-/repo/b.ts", "terminal-t"]);
+    expect(api.activePanel?.id).toBe(a.id);
+
+    createTerminal({ terminalId: "u", focus: false, placement: { group: { name: "c.ts" } } });
+    expect(ids(c.group.panels)).toEqual([c.id, "terminal-u"]);
+    expect(c.group.activePanel?.id).toBe(c.id);
+    expect(api.activePanel?.id).toBe(a.id);
+  });
+
+  test("without focus a split shows the panel in its new group but keeps the active group", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+
+    createTerminal({ terminalId: "t", focus: false, placement: { split: "down" } });
+
+    const terminal = api.getPanel("terminal-t")!;
+    expect(terminal.group.activePanel).toBe(terminal);
+    expect(api.activeGroup).toBe(a.group);
+    expect(api.activePanel?.id).toBe(a.id);
+  });
+
+  test("without focus an open file's tab is neither activated nor, unplaced, moved", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    openFileBacked("codeEditor", "/repo/b.ts", { focus: false });
+    expect(api.activePanel?.id).toBe(a.id);
+    expect(a.group.activePanel?.id).toBe(a.id);
+
+    openFileBacked("codeEditor", "/repo/c.ts", {
+      focus: false,
+      placement: { group: { name: "a.ts" } },
+    });
+    expect(ids(a.group.panels)).toContain(c.id);
+    expect(api.activeGroup).toBe(a.group);
+  });
+
+  test("without focus a replace in another group keeps the active tab", () => {
+    const { api, a, c } = setup();
+    a.api.setActive();
+
+    createTerminal({
+      terminalId: "t",
+      focus: false,
+      placement: { replace: true, group: { name: "c.ts" } },
+    });
+
+    expect(api.getPanel(c.id)).toBeUndefined();
+    expect(api.activeGroup).toBe(a.group);
+    expect(api.activePanel?.id).toBe(a.id);
+
+    openFileBacked("codeEditor", "/repo/b.ts", {
+      focus: false,
+      placement: { replace: true, group: { name: "Terminal" } },
+    });
+    expect(api.getPanel("terminal-t")).toBeUndefined();
+    expect(api.activePanel?.id).toBe(a.id);
+  });
+
+  test("without focus a browser tab added behind the active tab leaves its content shown", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+    const content = a.view.content.element;
+    expect(content.isConnected).toBe(true);
+
+    createBrowser("https://example.com", { focus: false });
+
+    expect(api.activePanel).toBe(a);
+    expect(content.isConnected).toBe(true);
+  });
+
+  test("without focus an open tab split off elsewhere keeps the active tab and group", () => {
+    const { api, a, c } = setup();
+    c.api.setActive();
+
+    openFileBacked("codeEditor", "/repo/b.ts", { focus: false, placement: { split: "right" } });
+
+    const b = api.getPanel("codeeditor-/repo/b.ts")!;
+    expect(ids(b.group.panels)).toEqual([b.id]);
+    expect(b.group.activePanel).toBe(b);
+    expect(api.activePanel).toBe(c);
+    expect(api.activeGroup).toBe(c.group);
+
+    openFileBacked("codeEditor", "/repo/a.ts", {
+      focus: false,
+      placement: { split: "down", group: { name: "c.ts" } },
+    });
+    expect(api.getPanel(a.id)!.group).not.toBe(c.group);
+    expect(api.activePanel).toBe(c);
+  });
+});
+
 describe("openBrowserTab", () => {
   test("opens a background tab right after the source tab", () => {
     const { api, a } = setup();
@@ -386,7 +602,8 @@ describe("compare panels", () => {
     expect(compares()).toHaveLength(2);
 
     const source = compares()[0]!;
-    duplicateComparison({ referencePanel: source.id, direction: "right" });
+    source.api.setActive();
+    duplicateComparison({ split: "right" });
 
     expect(compares()).toHaveLength(3);
     expect(compares()[2]!.params).toMatchObject({ oldPath: "/repo/a.ts", newPath: "/repo/b.ts" });
@@ -394,7 +611,8 @@ describe("compare panels", () => {
 
   test("a split from a panel that is not a comparison opens nothing", () => {
     const { api, a } = setup();
-    duplicateComparison({ referencePanel: a.id, direction: "right" });
+    a.api.setActive();
+    duplicateComparison({ split: "right" });
     expect(api.panels.some((p) => p.id.startsWith("compare-"))).toBe(false);
   });
 });

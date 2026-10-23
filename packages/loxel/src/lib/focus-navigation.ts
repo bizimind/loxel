@@ -173,7 +173,7 @@ function enterCenter(from: CenterEdge): boolean {
   return true;
 }
 
-/** Return keyboard focus to the center's active panel (e.g. Escape from a tool bar). */
+/** Return keyboard focus to the center's active panel (e.g. Escape from a tool bar or a tab rename). */
 export function focusActiveCenterPanel(): void {
   const api = getCenterApi();
   const panel = api?.activePanel;

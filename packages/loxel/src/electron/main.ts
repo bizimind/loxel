@@ -663,7 +663,17 @@ function buildAppMenu(): void {
     {
       label: "View",
       submenu: [
-        ...(IS_DEV ? [{ role: "reload" as const }, { role: "forceReload" as const }] : []),
+        // Not the forceReload role: its ⇧⌘R is Rename Tab in the renderer, and macOS menus take
+        // their keys before the page (`registerAccelerator: false` is ignored there).
+        ...(IS_DEV
+          ? [
+              { role: "reload" as const },
+              {
+                label: "Force Reload",
+                click: () => BrowserWindow.getFocusedWindow()?.webContents.reloadIgnoringCache(),
+              },
+            ]
+          : []),
         { role: "toggleDevTools" },
         { type: "separator" },
         // Not the zoom roles: those act on the focused webContents, which is a browser panel's

@@ -2,8 +2,11 @@
  * Keybinding schema: binding templates, display labels, and validation.
  */
 
-import type { ActionId, SplitDirection, SplitPanelType } from "./action-registry";
-import { ACTIONS, ACTION_IDS, SPLIT_DIRECTIONS, SPLIT_PANEL_TYPES } from "./action-registry";
+import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
+import type { SplitDirection } from "@/api/panel-placement-model";
+
+import type { ActionId, SplitPanelType } from "./action-registry";
+import { ACTIONS, ACTION_IDS, SPLIT_PANEL_TYPES } from "./action-registry";
 import type { KeyBinding } from "./key-combo";
 import { bindingsOverlap, normalizeKeyBinding } from "./key-combo";
 
@@ -93,6 +96,9 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "panel.newTab": [`${SPLIT_LEADER} Enter`],
   "panel.open.localdb": [],
   "panel.close": ["Cmd+W"],
+  // Free in Monaco (its Refactor is ⌃⇧R on macOS); dev builds' Force Reload menu item has no key
+  // (electron/main.ts).
+  "panel.rename": ["Cmd+Shift+R"],
   ...SPLIT_CHORDS,
   "panel.next": ["Cmd+Shift+BracketRight", "Ctrl+Tab"],
   "panel.prev": ["Cmd+Shift+BracketLeft", "Ctrl+Shift+Tab"],

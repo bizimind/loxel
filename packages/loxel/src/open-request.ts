@@ -1,3 +1,5 @@
+import type { PanelOpenOptions } from "./api/panel-placement-model";
+
 /**
  * How long an open request waits for a Loxel window to connect — long enough for a cold start,
  * where the app, its server and the first window's renderer all start up.
@@ -15,13 +17,20 @@ export interface OpenTerminalRequest {
 }
 
 /**
- * Body of `POST /api/open`: a file or folder or a new terminal (optionally for a specific window),
- * or a URL for the windows showing a worktree.
+ * Body of `POST /api/open`: a file or folder or a new terminal for the window in use (`windowId`'s,
+ * else the focused one), or a URL for the windows showing a worktree (`windowId`'s gets the
+ * placement). A folder, revealed in the file tree, ignores `placement` and needs focus.
  */
-export type OpenRequest =
-  | { filePath: string; windowId?: string }
+export type OpenRequest = (
+  | { filePath: string }
   | { url: string; wtPath: string }
-  | { terminal: OpenTerminalRequest; windowId?: string };
+  | { terminal: OpenTerminalRequest }
+) & { windowId?: string } & PanelOpenOptions;
+
+/** Reply to `POST /api/open`: `warning` notes part of the request that was ignored. */
+export interface OpenResult {
+  warning?: string;
+}
 
 interface RequestOpenOptions {
   /** Called once when no window has connected yet and the request starts waiting for one. */
@@ -30,15 +39,15 @@ interface RequestOpenOptions {
 }
 
 /**
- * Ask the Loxel server at `serverUrl` to open a file, folder or URL. Files and folders are sent to
- * a window, so a 503 means none has connected yet — Loxel is still launching — and the request is
- * retried for a while instead of failing.
+ * Ask the Loxel server at `serverUrl` to open a file, folder, URL or terminal. Files, folders and
+ * terminals are sent to a window, so a 503 means none has connected yet — Loxel is still
+ * launching — and the request is retried for a while instead of failing.
  */
 export async function requestOpen(
   serverUrl: string,
   request: OpenRequest,
   { onWaiting, windowWaitMs = WINDOW_WAIT_MS }: RequestOpenOptions = {},
-): Promise<void> {
+): Promise<OpenResult> {
   const post = () =>
     fetch(`${serverUrl}/api/open`, {
       method: "POST",
@@ -57,9 +66,13 @@ export async function requestOpen(
       res = await post();
     }
   }
-  if (res.ok) return;
-
   const data: unknown = await res.json().catch(() => null);
+  if (res.ok) {
+    const warning =
+      typeof data === "object" && data !== null && "warning" in data ? data.warning : undefined;
+    return typeof warning === "string" ? { warning } : {};
+  }
+
   const message =
     typeof data === "object" && data !== null && "error" in data && typeof data.error === "string"
       ? data.error

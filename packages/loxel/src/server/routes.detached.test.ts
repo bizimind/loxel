@@ -33,6 +33,7 @@ describe("detached file project destinations", () => {
       broadcastToProject: () => {},
       broadcastAll: () => {},
       sendToActiveWindow: () => false,
+      sendToWorktreeWindows: () => {},
       externalFolderConflict: () => null,
       getProject: () => undefined,
       findProjectForPath: () => undefined,

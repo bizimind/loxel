@@ -2,6 +2,7 @@
  * Per-worktree UI state (selections, search, panel layout).
  * Each worktree gets its own store instance via the worktree store factory.
  */
+import type { PanelOpenOptions } from "@/api/panel-placement-model";
 import type { OpenTerminalPanel } from "@/api/ws-protocol";
 
 import { createWorktreeStore } from "./worktree-store";
@@ -43,7 +44,7 @@ export interface PendingReveal {
 
 /** A panel waiting for its worktree's editor area to mount: a file for an editor, or a terminal. */
 export type PendingOpen =
-  | { kind: "file"; path: string }
+  | ({ kind: "file"; path: string } & PanelOpenOptions)
   | { kind: "terminal"; terminal: OpenTerminalPanel };
 
 interface WorktreeUIState {

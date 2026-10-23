@@ -306,7 +306,10 @@ export function useWsBridge(): void {
         }
 
         case "open_file":
-          void openFile(message.data.filePath);
+          void openFile(message.data.filePath, {
+            placement: message.data.placement,
+            focus: message.data.focus,
+          });
           break;
 
         case "open_folder":
@@ -318,9 +321,7 @@ export function useWsBridge(): void {
           break;
 
         case "open_url":
-          window.dispatchEvent(
-            new CustomEvent("loxel-create-browser", { detail: { url: message.data.url } }),
-          );
+          dispatchLoxelEvent("loxel-create-browser", message.data);
           break;
 
         // --- Project-scoped events (carry projectPath) ---

@@ -4,10 +4,11 @@
 #   pr-state.sh <pr>                  snapshot now
 #   pr-state.sh <pr> --wait [min]     poll every 30s until the round is over, then snapshot
 #
-# A round is over when any check fails, the PR conflicts with main, or the Claude Code Review run
-# for the PR head has completed and no check is pending. --wait gives up after [min] minutes
-# (default 70, above the review job's 56 minute timeout) and prints the snapshot anyway, so a
-# background run always exits and notifies. Transient gh errors during --wait are retried.
+# A round is over when the Claude Code Review run for the PR head has completed and no check is
+# pending, or the PR conflicts with main. It does not end early on a failed check: fixing CI while
+# the review runs would start a second review. --wait gives up after [min] minutes (default 70,
+# above the review job's 56 minute timeout) and prints the snapshot anyway, so a background run
+# always exits and notifies. Transient gh errors during --wait are retried.
 set -euo pipefail
 
 pr="${1:?usage: pr-state.sh <pr> [--wait [minutes]]}"
@@ -33,6 +34,8 @@ owner="${repo%/*}"
 name="${repo#*/}"
 
 pr_json="$(gh pr view "$pr" --json number,url,state,isDraft,headRefName,headRefOid,mergeable,mergeStateStatus)"
+# gh accepts a URL or branch too; the REST and GraphQL calls below need the number.
+pr="$(jq -r .number <<<"$pr_json")"
 head="$(jq -r .headRefOid <<<"$pr_json")"
 branch="$(jq -r .headRefName <<<"$pr_json")"
 
@@ -58,7 +61,8 @@ threads_json="$(gh api graphql \
          author: .comments.nodes[0].author.login, createdAt: .comments.nodes[0].createdAt,
          url: .comments.nodes[0].url, body: (.comments.nodes[0].body | .[0:300])}]')"
 
-# gh pr checks exits non-zero while checks fail or are pending, with valid JSON on stdout.
+# With --json, gh pr checks exits 0 even when checks fail or are pending; its one non-zero case is
+# "no checks reported", which prints nothing on stdout — hence the || true and the array guard below.
 checks_err="$(mktemp)"
 trap 'rm -f "$checks_err"' EXIT
 checks_json="$(gh pr checks "$pr" --json name,workflow,bucket,state,link 2>"$checks_err" || true)"
@@ -71,6 +75,8 @@ local_head=""
 local_relation=""
 if [[ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$branch" ]]; then
   local_head="$(git rev-parse HEAD)"
+  # The PR head may have been pushed from elsewhere (e.g. a committed suggestion); fetch it to compare.
+  git fetch -q origin "$branch" 2>/dev/null || true
   if [[ "$local_head" == "$head" ]]; then
     local_relation="same"
   elif git merge-base --is-ancestor "$head" "$local_head" 2>/dev/null; then
@@ -105,8 +111,10 @@ jq -n \
        elif $localRelation == "diverged" then "local branch and PR head diverged: if you force-pushed and GitHub missed it, push an empty commit; otherwise ask the user"
        else empty end),
       (if $pr.isDraft then "PR is a draft: the review does not run until it is marked ready" else empty end),
-      (if $run == null then empty
-       elif $reviewDone and $run.conclusion == "skipped" and ($pr.isDraft | not) then "review was skipped for this PR (bot or fork PR): not covered by babysit-pr"
+      (if $pr.isDraft then empty
+       elif $run == null and ($pending | length) == 0 then "no review run for this PR (bot PR or the workflow never ran): not covered by babysit-pr"
+       elif $run == null then empty
+       elif $reviewDone and $run.conclusion == "skipped" then "review was skipped for this PR (bot or fork PR): not covered by babysit-pr"
        elif $reviewDone and $run.conclusion != "success" and $run.conclusion != "skipped" then "review run \($run.conclusion): rerun it \($run.url)"
        elif $reviewDone and $clean == null then "review of head reported findings: push fixes for a new review, or stop if every finding was declined"
        else empty end),
@@ -121,10 +129,11 @@ jq -n \
       failedChecks: $failed,
       pendingChecks: ($pending | map("\(.workflow) / \(.name)")),
       blockers: $blockers,
-      roundOver: ($pr.state != "OPEN" or ($failed | length) > 0 or $pr.mergeable == "CONFLICTING"
+      roundOver: ($pr.state != "OPEN" or $pr.mergeable == "CONFLICTING"
         or $pr.isDraft or ($reviewDone and ($pending | length) == 0 and ($mergeUnknown | not))),
       verdict: (
         if $pr.state != "OPEN" then ($pr.state | ascii_downcase)
+        elif $pr.isDraft or any($blockers[]; contains("not covered")) then "unsupported"
         elif ($blockers | length) > 0 then "needs-work"
         elif $clean != null and ($pending | length) == 0 and ($pr.mergeStateStatus == "CLEAN" or $pr.mergeStateStatus == "HAS_HOOKS") then "ready"
         else "waiting" end)
