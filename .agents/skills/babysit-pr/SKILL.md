@@ -8,7 +8,7 @@ Get PR $ARGUMENTS to ready-to-merge: the Claude Code Review of the head commit s
 
 ## Loop
 
-1. `.agents/skills/babysit-pr/scripts/pr-state.sh <pr>` prints the verdict and blockers. Stop when it says `ready`, `merged` or `closed`.
+1. `.agents/skills/babysit-pr/scripts/pr-state.sh <pr>` prints the verdict and blockers. Stop when it says `ready`, `merged`, `closed` or `unsupported` (draft, bot PRs).
 2. Fix every blocker, then push once. Each push starts a ~20 minute review.
 3. Run `pr-state.sh <pr> --wait` in the background and end your turn. It exits when the round is over, and its notification starts the next round.
 

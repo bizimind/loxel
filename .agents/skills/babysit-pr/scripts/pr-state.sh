@@ -133,6 +133,7 @@ jq -n \
         or $pr.isDraft or ($reviewDone and ($pending | length) == 0 and ($mergeUnknown | not))),
       verdict: (
         if $pr.state != "OPEN" then ($pr.state | ascii_downcase)
+        elif $pr.isDraft or any($blockers[]; contains("not covered")) then "unsupported"
         elif ($blockers | length) > 0 then "needs-work"
         elif $clean != null and ($pending | length) == 0 and ($pr.mergeStateStatus == "CLEAN" or $pr.mergeStateStatus == "HAS_HOOKS") then "ready"
         else "waiting" end)
