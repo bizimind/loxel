@@ -39,6 +39,8 @@ owner="${repo%/*}"
 name="${repo#*/}"
 
 pr_json="$(gh pr view "$pr" --json number,url,state,isDraft,headRefName,headRefOid,mergeable,mergeStateStatus)"
+# gh accepts a URL or branch too; the REST and GraphQL calls below need the number.
+pr="$(jq -r .number <<<"$pr_json")"
 head="$(jq -r .headRefOid <<<"$pr_json")"
 branch="$(jq -r .headRefName <<<"$pr_json")"
 
@@ -77,6 +79,8 @@ local_head=""
 local_relation=""
 if [[ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$branch" ]]; then
   local_head="$(git rev-parse HEAD)"
+  # The PR head may have been pushed from elsewhere (e.g. a committed suggestion); fetch it to compare.
+  git fetch -q origin "$branch" 2>/dev/null || true
   if [[ "$local_head" == "$head" ]]; then
     local_relation="same"
   elif git merge-base --is-ancestor "$head" "$local_head" 2>/dev/null; then
@@ -111,8 +115,8 @@ jq -n \
        elif $localRelation == "diverged" then "local branch and PR head diverged: if you force-pushed and GitHub missed it, push an empty commit; otherwise ask the user"
        else empty end),
       (if $pr.isDraft then "PR is a draft: the review does not run until it is marked ready" else empty end),
-      (if $run == null then empty
-       elif $reviewDone and $run.conclusion == "skipped" and ($pr.isDraft | not) then "review was skipped for this PR (bot or fork PR): not covered by babysit-pr"
+      (if $run == null or $pr.isDraft then empty
+       elif $reviewDone and $run.conclusion == "skipped" then "review was skipped for this PR (bot or fork PR): not covered by babysit-pr"
        elif $reviewDone and $run.conclusion != "success" and $run.conclusion != "skipped" then "review run \($run.conclusion): rerun it \($run.url)"
        elif $reviewDone and $clean == null then "review of head reported findings: push fixes for a new review, or stop if every finding was declined"
        else empty end),
