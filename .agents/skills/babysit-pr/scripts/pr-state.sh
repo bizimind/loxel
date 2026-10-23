@@ -4,8 +4,9 @@
 #   pr-state.sh <pr>                  snapshot now
 #   pr-state.sh <pr> --wait [min]     poll every 30s until the round is over, then snapshot
 #
-# A round is over when any check fails, the PR conflicts with main, or the Claude Code Review run
-# for the PR head has completed and no check is pending. --wait gives up after [min] minutes
+# A round is over when a check newly fails, the PR conflicts with main, or the Claude Code Review
+# run for the PR head has completed and no check is pending. Failures already present when the wait
+# starts (e.g. a Vulnerability Check waiting on a separate fix PR) do not end it. --wait gives up after [min] minutes
 # (default 70, above the review job's 56 minute timeout) and prints the snapshot anyway, so a
 # background run always exits and notifies. Transient gh errors during --wait are retried.
 set -euo pipefail
@@ -14,9 +15,14 @@ pr="${1:?usage: pr-state.sh <pr> [--wait [minutes]]}"
 
 if [[ "${2:-}" == "--wait" ]]; then
   deadline=$(( $(date +%s) + ${3:-70} * 60 ))
+  # Failed checks are identified by their job link, so a rerun that fails again counts as new.
+  known_failures="$("$0" "$pr" | jq -c '[.failedChecks[].link]' || echo '[]')"
   while true; do
     # Snapshot in a child process so its errexit applies; a failed snapshot is retried.
-    if state="$("$0" "$pr")" && { [[ "$(jq -r .roundOver <<<"$state")" == "true" ]] || (( $(date +%s) >= deadline )); }; then
+    if state="$("$0" "$pr")" && {
+      jq -e --argjson known "$known_failures" '.roundOver or ([.failedChecks[].link] - $known | length > 0)' <<<"$state" >/dev/null ||
+        (( $(date +%s) >= deadline ))
+    }; then
       echo "$state"
       exit 0
     fi
@@ -121,7 +127,7 @@ jq -n \
       failedChecks: $failed,
       pendingChecks: ($pending | map("\(.workflow) / \(.name)")),
       blockers: $blockers,
-      roundOver: ($pr.state != "OPEN" or ($failed | length) > 0 or $pr.mergeable == "CONFLICTING"
+      roundOver: ($pr.state != "OPEN" or $pr.mergeable == "CONFLICTING"
         or $pr.isDraft or ($reviewDone and ($pending | length) == 0 and ($mergeUnknown | not))),
       verdict: (
         if $pr.state != "OPEN" then ($pr.state | ascii_downcase)
