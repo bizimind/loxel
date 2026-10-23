@@ -26,7 +26,7 @@ The user may talk to agents directly, so check with an agent before assuming its
   - report to you with SendMessage when the PR is opened, ready or blocked;
   - hold pushes when you say so.
 - Find each agent with `ListAgents` and message it once, so it knows who to report to.
-- Track every agent in a registry file under `/tmp/orchestrate/`: worktree, PR, phase, depends-on, last state.
+- Track every agent in a registry file under `/tmp/orchestrate/`: worktree, PR, phase, depends-on, last state. Keep one agent per PR.
 
 Scripts are in `.agents/skills/orchestrate/scripts/`.
 
