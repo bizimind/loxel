@@ -4,25 +4,20 @@
 #   pr-state.sh <pr>                  snapshot now
 #   pr-state.sh <pr> --wait [min]     poll every 30s until the round is over, then snapshot
 #
-# A round is over when a check newly fails, the PR conflicts with main, or the Claude Code Review
-# run for the PR head has completed and no check is pending. Failures already present when the wait
-# starts (e.g. a Vulnerability Check waiting on a separate fix PR) do not end it. --wait gives up after [min] minutes
-# (default 70, above the review job's 56 minute timeout) and prints the snapshot anyway, so a
-# background run always exits and notifies. Transient gh errors during --wait are retried.
+# A round is over when the Claude Code Review run for the PR head has completed and no check is
+# pending, or the PR conflicts with main. It does not end early on a failed check: fixing CI while
+# the review runs would start a second review. --wait gives up after [min] minutes (default 70,
+# above the review job's 56 minute timeout) and prints the snapshot anyway, so a background run
+# always exits and notifies. Transient gh errors during --wait are retried.
 set -euo pipefail
 
 pr="${1:?usage: pr-state.sh <pr> [--wait [minutes]]}"
 
 if [[ "${2:-}" == "--wait" ]]; then
   deadline=$(( $(date +%s) + ${3:-70} * 60 ))
-  # Failed checks are identified by their job link, so a rerun that fails again counts as new.
-  known_failures="$("$0" "$pr" | jq -c '[.failedChecks[].link]' || echo '[]')"
   while true; do
     # Snapshot in a child process so its errexit applies; a failed snapshot is retried.
-    if state="$("$0" "$pr")" && {
-      jq -e --argjson known "$known_failures" '.roundOver or ([.failedChecks[].link] - $known | length > 0)' <<<"$state" >/dev/null ||
-        (( $(date +%s) >= deadline ))
-    }; then
+    if state="$("$0" "$pr")" && { [[ "$(jq -r .roundOver <<<"$state")" == "true" ]] || (( $(date +%s) >= deadline )); }; then
       echo "$state"
       exit 0
     fi
@@ -66,7 +61,8 @@ threads_json="$(gh api graphql \
          author: .comments.nodes[0].author.login, createdAt: .comments.nodes[0].createdAt,
          url: .comments.nodes[0].url, body: (.comments.nodes[0].body | .[0:300])}]')"
 
-# gh pr checks exits non-zero while checks fail or are pending, with valid JSON on stdout.
+# With --json, gh pr checks exits 0 even when checks fail or are pending; its one non-zero case is
+# "no checks reported", which prints nothing on stdout — hence the || true and the array guard below.
 checks_err="$(mktemp)"
 trap 'rm -f "$checks_err"' EXIT
 checks_json="$(gh pr checks "$pr" --json name,workflow,bucket,state,link 2>"$checks_err" || true)"
@@ -115,7 +111,9 @@ jq -n \
        elif $localRelation == "diverged" then "local branch and PR head diverged: if you force-pushed and GitHub missed it, push an empty commit; otherwise ask the user"
        else empty end),
       (if $pr.isDraft then "PR is a draft: the review does not run until it is marked ready" else empty end),
-      (if $run == null or $pr.isDraft then empty
+      (if $pr.isDraft then empty
+       elif $run == null and ($pending | length) == 0 then "no review run for this PR (bot PR or the workflow never ran): not covered by babysit-pr"
+       elif $run == null then empty
        elif $reviewDone and $run.conclusion == "skipped" then "review was skipped for this PR (bot or fork PR): not covered by babysit-pr"
        elif $reviewDone and $run.conclusion != "success" and $run.conclusion != "skipped" then "review run \($run.conclusion): rerun it \($run.url)"
        elif $reviewDone and $clean == null then "review of head reported findings: push fixes for a new review, or stop if every finding was declined"
