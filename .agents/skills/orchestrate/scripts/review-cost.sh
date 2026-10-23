@@ -4,10 +4,10 @@
 #   review-cost.sh [runs]    cache up to [runs] recent completed reviews (default 30), print stats
 #   review-cost.sh --stats   print stats from the cache only (fast, no log downloads)
 #
-# Review logs expire after a few days, so each run's numbers are cached once in $cache. Deltas are
-# percentage points of the 5h and 7d windows between a run's first and last rate-limit snapshot.
-# Local sessions on the same subscription move those windows too, so deltas are upper bounds;
-# "solo" stats use only runs that no other review run overlapped.
+# Review logs expire after a few days, so each run's first and last rate-limit snapshot is cached
+# once in $cache. A run's own snapshots also count every review running alongside it, so runs whose
+# time spans overlap are grouped and each group's usage is split across its runs. Local sessions on
+# the same subscription still move the windows, so the result is an upper bound.
 set -euo pipefail
 
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/loxel-orchestrate/review-runs.jsonl"
@@ -18,16 +18,22 @@ stats() {
   jq -s '
     def pct(p): sort | if length == 0 then null else .[((length - 1) * p | floor)] end;
     def summary: {median: pct(0.5), p95: pct(0.95)};
-    # A run without a final result (cost) did not finish, so its delta is partial.
-    (map(select((.skip | not) and .costUsd != null)) | sort_by(.createdAt) | .[-40:]) as $runs
-    | ($runs | map(select(.solo))) as $solo
+    def share(w): if (map(w.reset) | unique | length) == 1
+      then ((map(w.end) | max) - (map(w.start) | min)) / length * 10 | round / 10 else null end;
+    (map(select(.v == 2 and (.skip | not) and .costUsd != null and .h5 != null))
+     | sort_by(.createdAt) | .[-40:]) as $runs
+    | (reduce $runs[] as $r ([];
+        if length > 0 and $r.createdAt < .[-1].end and $r.h5.reset == .[-1].runs[0].h5.reset
+        then .[-1].runs += [$r] | .[-1].end = ([.[-1].end, $r.updatedAt] | max)
+        else . + [{runs: [$r], end: $r.updatedAt}] end)) as $groups
+    # One entry per run, holding its share of its group.
+    | [$groups[] | .runs | {h5: share(.h5), d7: share(.d7)} as $s | range(length) | $s] as $shares
     | {
         runs: ($runs | length),
-        soloRuns: ($solo | length),
-        fiveHour: (($runs | map(.h5Delta | select(. != null)) | summary)
-          + {soloMedian: ($solo | map(.h5Delta | select(. != null)) | pct(0.5))}),
-        sevenDay: ($runs | map(.d7Delta | select(. != null)) | summary),
-        costUsd: ($runs | map(.costUsd | select(. != null)) | summary),
+        groups: ($groups | length),
+        fiveHour: ($shares | map(.h5 | select(. != null)) | summary),
+        sevenDay: ($shares | map(.d7 | select(. != null)) | summary),
+        costUsd: ($runs | map(.costUsd) | summary),
         minutes: ($runs | map(.minutes | select(. != null)) | summary)
       }' "$cache"
 }
@@ -37,19 +43,19 @@ if [[ "${1:-}" == "--stats" ]]; then
   exit 0
 fi
 
+count="${1:-30}"
+[[ "$count" =~ ^[0-9]+$ ]] || { echo "usage: review-cost.sh [runs] | --stats" >&2; exit 2; }
+
 repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 runs_json="$(gh run list --workflow claude-code-review.yml --limit 100 \
   --json databaseId,status,conclusion,createdAt,updatedAt)"
 
-count="${1:-30}"
-[[ "$count" =~ ^[0-9]+$ ]] || { echo "usage: review-cost.sh [runs] | --stats" >&2; exit 2; }
-
 # Only successful runs: a cancelled or failed review stopped partway and would understate the cost.
 for id in $(jq -r --argjson n "$count" \
   '[.[] | select(.status == "completed" and .conclusion == "success")][:$n][] | .databaseId' <<<"$runs_json"); do
-  grep -q "\"run\":$id," "$cache" && continue
+  grep -q "\"run\":$id,\"v\":2" "$cache" && continue
   # Runs without usable data are cached as skipped so they are not downloaded again.
-  skip() { echo "{\"run\":$id,\"skip\":true}" >>"$cache"; }
+  skip() { echo "{\"run\":$id,\"v\":2,\"skip\":true}" >>"$cache"; }
   job="$(gh api "repos/$repo/actions/runs/$id/jobs" --jq '.jobs[0].id')" || { skip; continue; }
   # Expired logs return HTTP 410. Log events are pretty-printed JSON blocks behind a timestamp prefix:
   # join each block onto one line and keep only what parses.
@@ -63,17 +69,16 @@ for id in $(jq -r --argjson n "$count" \
   fi
   jq -cs --argjson id "$id" --argjson runs "$runs_json" '
     ($runs | map(select(.databaseId == $id)) | first) as $run
-    | ($runs | any(.databaseId != $id and .conclusion != "skipped"
-        and .createdAt < $run.updatedAt and .updatedAt > $run.createdAt)) as $overlapped
     | (map(select(.type == "rate_limit_event") | .rate_limit_info.unifiedWindows)) as $w
     | (map(select(.type == "result")) | last) as $result
-    # A window that reset mid-run, or that the logs do not report, has no meaningful delta.
-    | def delta(k): try (if $w[0][k].resetsAt == $w[-1][k].resetsAt
-        then (($w[-1][k].utilization - $w[0][k].utilization) * 100 | round) else null end) catch null;
-    {run: $id, createdAt: $run.createdAt, solo: ($overlapped | not),
-       h5Delta: delta("five_hour"), d7Delta: delta("seven_day"),
-       costUsd: ($result.total_cost_usd // null),
-       minutes: (if $result.duration_ms then ($result.duration_ms / 60000 | round) else null end)}
+    # Utilization in percent at the first and last snapshot; null if the window reset mid-run.
+    | def snap(k): try (if $w[0][k].resetsAt == $w[-1][k].resetsAt
+        then {start: ($w[0][k].utilization * 100 | round), end: ($w[-1][k].utilization * 100 | round),
+              reset: $w[-1][k].resetsAt} else null end) catch null;
+    {run: $id, v: 2, createdAt: $run.createdAt, updatedAt: $run.updatedAt,
+     h5: snap("five_hour"), d7: snap("seven_day"),
+     costUsd: ($result.total_cost_usd // null),
+     minutes: (if $result.duration_ms then ($result.duration_ms / 60000 | round) else null end)}
     ' <<<"$events" >>"$cache"
 done
 

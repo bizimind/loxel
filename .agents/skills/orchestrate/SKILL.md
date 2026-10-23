@@ -47,7 +47,7 @@ Only use background commands. Each returns within an hour; run it again if nothi
 
 ## Budget
 
-Agents and CI reviews share one subscription. Each push starts a review that costs about 14% of the 5-hour window and fails unrecoverably at the limit. Run `review-cost.sh` once, then run `budget.sh` before starting agents or releasing pushes, and follow its `mode` and `advice`. After a reset, check on the agents and nudge the ones that stopped, a few at a time.
+Agents and CI reviews share one subscription. Each push starts a review that costs about 6% of the 5-hour window (so roughly 15 reviews fit in one) and fails unrecoverably at the limit. Run `review-cost.sh` once, then run `budget.sh` before starting agents or releasing pushes, and follow its `mode` and `advice`. After a reset, check on the agents and nudge the ones that stopped, a few at a time.
 
 ## Reporting
 

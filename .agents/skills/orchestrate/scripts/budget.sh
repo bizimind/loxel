@@ -47,7 +47,7 @@ snapshot() {
     # Measured per-review cost when the cache has enough runs, else the Oct 2026 measurements.
     (if $r.runs >= 5 and $r.fiveHour.median != null and $r.sevenDay.median != null
      then {h5: $r.fiveHour.median, h5p95: $r.fiveHour.p95, d7: $r.sevenDay.median, d7p95: $r.sevenDay.p95, source: "measured"}
-     else {h5: 14, h5p95: 25, d7: 2, d7p95: 3, source: "defaults"} end) as $cost
+     else {h5: 6, h5p95: 14, d7: 1, d7p95: 2, source: "defaults"} end) as $cost
     | (($u.five_hour // {}) | window) as $h5
     | (($u.seven_day // {}) | window) as $d7
     # In-flight reviews get a full median on top of what they already spent: deliberately conservative.
