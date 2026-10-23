@@ -37,7 +37,7 @@ import {
   useDiskSyncedContent,
   useFormatOnSave,
 } from "@/hooks/use-disk-synced-content";
-import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { frontendLog } from "@/lib/frontend-logger";
 import { mergeFrontmatter, splitFrontmatter } from "@/lib/frontmatter";
 import {
@@ -495,7 +495,7 @@ export function MarkdownEditor({
                 if (!cancelled) scrollCursorNearTop(view);
               });
             }
-            view.focus();
+            if (isActivatedPanel(panelApi)) view.focus();
           } else {
             const savedPos = editorSelectionCache.get(effectCacheKey);
             if (savedPos !== undefined) {
@@ -507,7 +507,7 @@ export function MarkdownEditor({
               // New editor — place cursor at end
               const end = doc.content.size;
               view.dispatch(view.state.tr.setSelection(Selection.near(doc.resolve(end))));
-              view.focus();
+              if (isActivatedPanel(panelApi)) view.focus();
             }
           }
 
@@ -676,7 +676,7 @@ export function MarkdownEditor({
         const pos = Math.min(targetPos, doc.content.size);
         view.dispatch(view.state.tr.setSelection(Selection.near(doc.resolve(pos))));
         scrollCursorNearTop(view);
-        view.focus();
+        if (isActivatedPanel(panelApi)) view.focus();
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

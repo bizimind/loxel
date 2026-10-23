@@ -62,6 +62,7 @@ describe("GET /api/stores/settings", () => {
     broadcastToProject: () => {},
     broadcastAll: () => {},
     sendToActiveWindow: () => false,
+    sendToWorktreeWindows: () => {},
     externalFolderConflict: () => null,
     getProject: () => undefined,
     findProjectForPath: () => undefined,

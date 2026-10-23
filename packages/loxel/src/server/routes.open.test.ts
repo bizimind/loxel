@@ -9,7 +9,7 @@ import type { WsMessage } from "@/api/ws-protocol";
 import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
 
-describe("POST /api/open terminal requests", () => {
+describe("POST /api/open terminals and placement", () => {
   let root: string;
   let ctx: RouteContext;
   let sent: Array<{ windowId: string | null; msg: WsMessage }>;
@@ -30,6 +30,7 @@ describe("POST /api/open terminal requests", () => {
         sent.push({ windowId, msg });
         return windowConnected;
       },
+      sendToWorktreeWindows: () => {},
       externalFolderConflict: () => null,
       getProject: () => undefined,
       findProjectForPath: () => undefined,
@@ -119,5 +120,115 @@ describe("POST /api/open terminal requests", () => {
 
     expect(res.status).toBe(503);
     expect(commands).toEqual([]);
+  });
+
+  test("forwards a terminal's placement, canonicalizing the group tab's path", async () => {
+    const res = await open({
+      terminal: { cwd: root },
+      placement: { split: "right", group: { name: "file.txt", path: `${root}/./file.txt` } },
+    });
+
+    expect(res.status).toBe(200);
+    expect(sentTerminal().placement).toEqual({
+      split: "right",
+      group: { name: "file.txt", path: join(root, "file.txt") },
+    });
+  });
+
+  test("drops a group tab's path where nothing exists, keeping its name", async () => {
+    await open({
+      terminal: { cwd: root },
+      placement: { replace: true, group: { name: "server", path: join(root, "server") } },
+    });
+
+    expect(sentTerminal().placement).toEqual({ replace: true, group: { name: "server" } });
+  });
+
+  test("forwards a file's placement and focus", async () => {
+    const res = await open({
+      filePath: join(root, "file.txt"),
+      placement: { split: "down" },
+      focus: false,
+    });
+
+    expect(res.status).toBe(200);
+    expect(sent[0]!.msg).toEqual({
+      type: "open_file",
+      data: { filePath: join(root, "file.txt"), placement: { split: "down" }, focus: false },
+    });
+  });
+
+  test("opens a folder without its placement, with a warning", async () => {
+    const res = await open({ filePath: root, placement: { replace: true }, focus: true });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      warning: "Layout flags do not apply to a folder; it opens in the file tree",
+    });
+    expect(sent.map((s) => s.msg)).toEqual([{ type: "open_folder", data: { path: root } }]);
+  });
+
+  test("opens no folder without focus, with a warning", async () => {
+    const res = await open({ filePath: root, focus: false });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      warning: "A folder is only revealed with focus; pass --focus",
+    });
+    expect(sent).toEqual([]);
+  });
+
+  test("sends a URL to the worktree's windows, with the placement only for the one in use", async () => {
+    const calls: Array<{ windowId: string | null; msg: WsMessage; primary: WsMessage }> = [];
+    ctx.sendToWorktreeWindows = (_wtPath, windowId, msg, primary) =>
+      calls.push({ windowId, msg, primary });
+    ctx.findProjectForPath = () => ({}) as never;
+
+    const res = await open({
+      url: "https://example.com",
+      wtPath: root,
+      windowId: "w1",
+      placement: { replace: true },
+      focus: false,
+    });
+
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([
+      {
+        windowId: "w1",
+        msg: { type: "open_url", wtPath: root, data: { url: "https://example.com", focus: false } },
+        primary: {
+          type: "open_url",
+          wtPath: root,
+          data: { url: "https://example.com", placement: { replace: true }, focus: false },
+        },
+      },
+    ]);
+  });
+
+  test("forwards a terminal's focus only when it is off", async () => {
+    await open({ terminal: { cwd: root }, focus: true });
+    await open({ terminal: { cwd: root }, focus: false });
+
+    expect(sent.map((s) => s.msg.type === "open_terminal" && s.msg.data.focus)).toEqual([
+      undefined,
+      false,
+    ]);
+    expect((await open({ terminal: { cwd: root }, focus: "no" })).status).toBe(400);
+  });
+
+  test("rejects malformed placements", async () => {
+    const terminal = { cwd: root };
+    expect((await open({ terminal, placement: "right" })).status).toBe(400);
+    expect((await open({ terminal, placement: { split: "middle" } })).status).toBe(400);
+    expect((await open({ terminal, placement: { split: "up", replace: true } })).status).toBe(400);
+    expect((await open({ terminal, placement: { replace: "yes" } })).status).toBe(400);
+    expect((await open({ terminal, placement: { group: { name: "" } } })).status).toBe(400);
+    expect((await open({ terminal, placement: { group: { name: "x", path: 1 } } })).status).toBe(
+      400,
+    );
+    expect(sent).toEqual([]);
   });
 });

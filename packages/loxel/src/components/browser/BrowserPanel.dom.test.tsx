@@ -7,6 +7,7 @@ import type {
   JavaScriptDialogClosed,
   JavaScriptDialogRequest,
 } from "@/electron/javascript-dialog-protocol";
+import { focusRegisteredPanel } from "@/lib/panel-focus";
 
 // BrowserPanel renders its webview only in Electron (read once, at import).
 Object.defineProperty(navigator, "userAgent", {
@@ -68,11 +69,11 @@ function show(fields: Partial<JavaScriptDialogRequest>): JavaScriptDialogRequest
 }
 
 /** Render the panel, focus its page, and fire the webview's first dom-ready. */
-function renderPanel({ ready = true } = {}) {
+function renderPanel({ ready = true, url = "about:blank" } = {}) {
   render(
     <>
       <button type="button">Elsewhere</button>
-      <BrowserPanel url="about:blank" panelApi={panelApi} />
+      <BrowserPanel url={url} panelApi={panelApi} />
     </>,
   );
   const webview = document.querySelector<HTMLElement>("webview")!;
@@ -81,7 +82,7 @@ function renderPanel({ ready = true } = {}) {
   const reload = mock(() => respondToJavaScriptDialog.mock.calls.length);
   Object.assign(webview, {
     getWebContentsId: () => guest.id,
-    loadURL: () => {},
+    loadURL: async () => {},
     reload,
     canGoBack: () => false,
     canGoForward: () => false,
@@ -230,5 +231,80 @@ describe("page dialogs in a browser panel", () => {
     renderPanel();
     show({ webContentsId: WEB_CONTENTS_ID + 1, message: "not mine" });
     expect(screen.queryByText("not mine")).toBeNull();
+  });
+});
+
+describe("focus when a browser panel is activated", () => {
+  /** Activate the panel while focus is outside it, as when it opens or is switched to. */
+  function activate() {
+    screen.getByRole("button", { name: "Elsewhere" }).focus();
+    act(() => void focusRegisteredPanel(panelApi.id));
+  }
+
+  test("a blank panel focuses its address bar, ready for a URL", () => {
+    renderPanel();
+    activate();
+    expect(document.activeElement).toBe(screen.getByRole("textbox"));
+  });
+
+  test("a panel opened on a URL focuses the page", () => {
+    const { webview } = renderPanel({ url: "https://example.com" });
+    activate();
+    expect(document.activeElement).toBe(webview);
+  });
+
+  test("a blank panel focuses the page once it navigates", () => {
+    const { webview } = renderPanel();
+    const address = screen.getByRole("textbox");
+    fireEvent.change(address, { target: { value: "example.com" } });
+    fireEvent.keyDown(address, { key: "Enter" });
+    activate();
+    expect(document.activeElement).toBe(webview);
+  });
+
+  test("a blank tab switched to focuses its address bar once it is shown", async () => {
+    renderPanel();
+    const address = screen.getByRole("textbox") as HTMLInputElement;
+    // Still hidden by dockview, which shows the tab a frame later.
+    address.disabled = true;
+    Object.assign(panelApi, { isActive: true, isGroupActive: true });
+    try {
+      activate();
+      expect(document.activeElement).not.toBe(address);
+      address.disabled = false;
+      await act(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => resolve());
+          }),
+      );
+      expect(document.activeElement).toBe(address);
+    } finally {
+      Object.assign(panelApi, { isActive: false, isGroupActive: false });
+    }
+  });
+
+  test("a panel opened on a URL focuses the page while that page loads", () => {
+    const { webview, fireReady } = renderPanel({ ready: false, url: "https://example.com" });
+    // The webview's placeholder page commits before its first dom-ready.
+    Object.assign(webview, { getURL: () => "about:blank" });
+    act(() => void webview.dispatchEvent(new Event("did-navigate")));
+    fireReady();
+    activate();
+    expect(document.activeElement).toBe(webview);
+    expect(screen.getByRole("textbox")).toHaveValue("https://example.com");
+  });
+
+  test("a pending page dialog takes focus before the address bar", () => {
+    renderPanel();
+    show({ type: "confirm" });
+    activate();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "OK" }));
+  });
+
+  test("keeps focus inside the panel where it is", () => {
+    const { webview } = renderPanel();
+    act(() => void focusRegisteredPanel(panelApi.id));
+    expect(document.activeElement).toBe(webview);
   });
 });

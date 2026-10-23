@@ -100,6 +100,42 @@ describe("TerminalManager initial commands", () => {
     expect(manager.get(plain)?.worktreePath).toBe("/tmp");
   });
 
+  test("a shell spawned with no client runs its command, and a later attach binds to it", async () => {
+    process.env.SHELL = "/bin/sh";
+    const manager = createManager();
+    const id = crypto.randomUUID();
+    manager.setInitialCommand(id, "echo hello-from-$((40+2))");
+
+    manager.ensureSpawned(id, attachOptions);
+    const session = manager.get(id);
+    manager.ensureSpawned(id, attachOptions);
+    expect(manager.get(id)).toBe(session);
+    expect(session?.attached).toBe(false);
+
+    const sink = createRecordingSink();
+    await manager.attach(id, sink.sink, attachOptions);
+    const shown = () => sink.states.map((s) => s.snapshot ?? "").join("") + sink.outputText();
+    await until(() => shown().includes("hello-from-42"));
+    expect(manager.get(id)).toBe(session);
+  });
+
+  test("shells don't inherit a coding agent's variables from the server", async () => {
+    process.env.SHELL = "/bin/sh";
+    const originalMarker = process.env.CLAUDECODE;
+    process.env.CLAUDECODE = "1";
+    try {
+      const manager = createManager();
+      const id = crypto.randomUUID();
+      manager.setInitialCommand(id, "echo agent-marker-[${CLAUDECODE-unset}]");
+      const sink = createRecordingSink();
+      await manager.attach(id, sink.sink, attachOptions);
+      await until(() => sink.outputText().includes("agent-marker-[unset]"));
+    } finally {
+      if (originalMarker === undefined) delete process.env.CLAUDECODE;
+      else process.env.CLAUDECODE = originalMarker;
+    }
+  });
+
   test("a command can be cleared before the panel attaches", async () => {
     process.env.SHELL = "/bin/sh";
     const manager = createManager();

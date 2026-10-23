@@ -3,6 +3,7 @@
  * tracks orphaned sessions, and owns the shell environment. See docs/TERMINALS.md.
  */
 import type { NotificationSequence } from "@/api/ws-protocol";
+import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 
 import { logger } from "./logger";
@@ -16,7 +17,7 @@ const textEncoder = new TextEncoder();
 /** How long a command registered for a terminal waits for its panel to attach before it is dropped. */
 const INITIAL_COMMAND_TTL_MS = 60_000;
 
-export interface TerminalAttachOptions {
+export interface TerminalSpawnOptions {
   cols: number;
   rows: number;
   /** Applied only when the session is spawned. */
@@ -26,6 +27,9 @@ export interface TerminalAttachOptions {
   /** Applied only when the session is spawned. */
   envOverrides?: Record<string, string>;
   scrollbackLines?: number;
+}
+
+export interface TerminalAttachOptions extends TerminalSpawnOptions {
   /** Session epoch and stream offset the client is already current to; see `terminal_attach`. */
   sinceEpoch?: string;
   sinceOffset?: number;
@@ -42,6 +46,9 @@ export interface TerminalManagerHooks {
 function buildTerminalEnv(): Record<string, string | undefined> {
   const env = buildSpawnEnv();
   if (!env.TERM) env.TERM = "xterm-256color";
+  // A server started from an agent's session (e.g. a dev server) must not mark the user's shells
+  // as an agent's, or their own `loxel` commands would open without focus.
+  for (const name of CODING_AGENT_ENV_VARS) delete env[name];
   return env;
 }
 
@@ -103,7 +110,15 @@ export class TerminalManager {
     return session.attach(sink, { epoch: options.sinceEpoch, offset: options.sinceOffset });
   }
 
-  private spawn(id: string, options: TerminalAttachOptions): TerminalSession {
+  /**
+   * Spawn the shell of terminal `id` with no client attached, unless it is already running. For a
+   * panel that may not mount for a while (`loxel terminal --no-focus`); its first attach binds it.
+   */
+  ensureSpawned(id: string, options: TerminalSpawnOptions): void {
+    if (!this.sessions.has(id)) this.spawn(id, options);
+  }
+
+  private spawn(id: string, options: TerminalSpawnOptions): TerminalSession {
     const shell = process.env.SHELL || "/bin/bash";
     const { cols, rows, cwd, worktreePath } = options;
     log.info(`Spawning terminal ${id.slice(0, 8)} with ${shell} (${cols}x${rows}) in ${cwd}`);

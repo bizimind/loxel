@@ -3,8 +3,11 @@
  * Used by the keybinding system, future command palette, and toolbar buttons.
  */
 
+import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
+import type { SplitDirection } from "@/api/panel-placement-model";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
+import { canRenameActiveTab } from "@/lib/tab-rename";
 
 /**
  * All action IDs in the application. Adding an action here automatically
@@ -19,6 +22,7 @@ export type ActionId =
   | "panel.open.localdb"
   | "panel.close"
   | "panel.newTab"
+  | "panel.rename"
   | `panel.split.${SplitDirection}`
   | `panel.split.${SplitPanelType}.${SplitDirection}`
   | "panel.next"
@@ -87,10 +91,6 @@ export type ActionId =
   | "tree.rename"
   | "app.settings";
 
-/** Directions a panel can be split toward. */
-export const SPLIT_DIRECTIONS = ["right", "left", "up", "down"] as const;
-export type SplitDirection = (typeof SPLIT_DIRECTIONS)[number];
-
 /**
  * Center panel types that have "split as <type>" actions. `type` matches `CenterPanelDef.type`
  * in panel-config.ts (checked by keybinding-validation.test.ts).
@@ -147,6 +147,10 @@ export const ACTIONS: readonly ActionDef[] = [
 
   // New tab of the active panel's type, in its group
   { id: "panel.newTab", label: "New Tab (Same Type)", category: "panel" },
+
+  // Inline rename of the active center tab; when that tab isn't renameable the key reaches the
+  // focused widget.
+  { id: "panel.rename", label: "Rename Tab", category: "panel", isEnabled: canRenameActiveTab },
 
   // Split — new panel of the active panel's type, or of a specific type
   ...SPLIT_DIRECTIONS.map((dir): ActionDef => ({

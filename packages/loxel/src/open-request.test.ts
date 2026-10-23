@@ -44,6 +44,12 @@ describe("requestOpen", () => {
     expect(bodies).toEqual([{ terminal: { cwd: "/tmp", command: "ls" }, windowId: "w1" }]);
   });
 
+  test("returns the server's warning", async () => {
+    serve([{ status: 200, body: { ok: true, warning: "ignored" } }]);
+
+    expect(await requestOpen(SERVER, { filePath: "/tmp" })).toEqual({ warning: "ignored" });
+  });
+
   test("waits for a window to connect", async () => {
     const { bodies } = serve([NO_WINDOW, NO_WINDOW, { status: 200, body: { ok: true } }]);
     let waits = 0;

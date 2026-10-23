@@ -5,7 +5,9 @@ import { OpenInMenuItems, isOpenInSupported } from "@/components/menus/OpenInMen
 import { InlineRenameInput } from "@/components/tree";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { copyToClipboard } from "@/lib/clipboard";
+import { focusActiveCenterPanel } from "@/lib/focus-navigation";
 import { relativeTo } from "@/lib/project-file-helpers";
+import { registerTabRename } from "@/lib/tab-rename";
 import { cn } from "@/lib/utils";
 
 import { TabCloseButton } from "./tab-close-button";
@@ -65,8 +67,9 @@ interface TabProps {
   /** Optional extra context menu items rendered above the standard close actions. */
   contextMenuItems?: React.ReactNode;
   /**
-   * Makes the tab renameable: a "Rename" context menu item and double-clicking the title edit
-   * the title inline, and this is called with the new, changed, non-empty name.
+   * Makes the tab renameable: a "Rename" context menu item, double-clicking the title and the
+   * Rename Tab action edit the title inline, and this is called with the new, changed, non-empty
+   * name. Enter or Escape returns focus to the active panel.
    */
   onRename?: (newName: string) => void;
   /** When renaming, initially select only the part before the extension (file names). */
@@ -132,6 +135,12 @@ export function Tab({
 
   const handleCancelRename = useCallback(() => setIsRenaming(false), []);
 
+  const isRenameable = onRename !== undefined;
+  useEffect(() => {
+    if (!isRenameable) return;
+    return registerTabRename(api.id, () => setIsRenaming(true));
+  }, [api.id, isRenameable]);
+
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setCtxPosition({ x: e.clientX, y: e.clientY });
@@ -165,6 +174,9 @@ export function Tab({
               className="field-sizing-content max-w-64 min-w-16 flex-none"
               onFinish={handleFinishRename}
               onCancel={handleCancelRename}
+              // The active panel, not this tab's: a background tab renamed from its context menu
+              // must not be brought to the front.
+              onKeyboardExit={focusActiveCenterPanel}
             />
           ) : (
             <span

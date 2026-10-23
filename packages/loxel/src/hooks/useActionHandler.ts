@@ -5,7 +5,7 @@
 import type { IDockviewPanel } from "dockview-react";
 import { useCallback } from "react";
 
-import type { SplitPosition } from "@/components/dockview/default-layout";
+import type { PanelPlacement, SplitDirection } from "@/api/panel-placement-model";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import {
   moveFocus,
@@ -16,9 +16,10 @@ import {
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
+import { renameActiveTab } from "@/lib/tab-rename";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
-import type { ActionId, SplitDirection, SplitPanelType } from "@/store/keybindings/action-registry";
+import type { ActionId, SplitPanelType } from "@/store/keybindings/action-registry";
 import type { MoveDirection } from "@/store/layout-actions";
 import { activatePanel, findAdjacentCenterGroup } from "@/store/layout-actions";
 import {
@@ -40,13 +41,6 @@ function isSplitAction(actionId: ActionId): actionId is SplitActionId {
   return actionId.startsWith("panel.split.");
 }
 
-const SPLIT_POSITION_DIRECTION = {
-  right: "right",
-  left: "left",
-  up: "above",
-  down: "below",
-} as const satisfies Record<SplitDirection, SplitPosition["direction"]>;
-
 /**
  * Open a new panel next to the active one, toward `direction` — or as a tab in its group when
  * `direction` is null: of `type` when given, otherwise of the active panel's type (singletons
@@ -61,11 +55,8 @@ function splitActivePanel(direction: SplitDirection | null, type: SplitPanelType
 
   const detail: Record<string, unknown> = {};
   if (active && direction) {
-    const split: SplitPosition = {
-      referencePanel: active.id,
-      direction: SPLIT_POSITION_DIRECTION[direction],
-    };
-    detail.split = split;
+    const placement: PanelPlacement = { split: direction };
+    detail.placement = placement;
   }
   // For code editors, extract extension from the active editor's file path
   if (!type && active && def.type === "codeEditor") {
@@ -148,6 +139,10 @@ export function useActionHandler(): (actionId: ActionId) => void {
         if (active) active.api.close();
         break;
       }
+
+      case "panel.rename":
+        renameActiveTab();
+        break;
 
       // -- Panel navigation --
       case "panel.next":

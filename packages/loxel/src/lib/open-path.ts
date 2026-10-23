@@ -1,9 +1,12 @@
 import * as api from "@/api/client";
+import { wsClient } from "@/api/client";
+import type { PanelOpenOptions } from "@/api/panel-placement-model";
 import type { OpenTerminalPanel } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
 import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
+import { useSettingsStore } from "@/store/settings-store";
 import { getCenterApiWorktree, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
 import type { PendingOpen } from "@/store/worktree-ui";
 import { getCurrentWorktreeUI, getWorktreeUI } from "@/store/worktree-ui";
@@ -13,6 +16,7 @@ import { frontendLog } from "./frontend-logger";
 import { dispatchLoxelEvent } from "./loxel-events";
 import type { FileLocation } from "./open-file";
 import { dispatchOpenFile } from "./open-file";
+import { WINDOW_ID } from "./window-id";
 
 const log = frontendLog.child("files");
 
@@ -68,9 +72,9 @@ export async function openFolder(rawPath: string): Promise<void> {
 /**
  * Open a file sent from outside the window (`loxel <file>`, Finder). A file inside a worktree opens
  * in that worktree, switching to it if needed; any other file opens in the active worktree's
- * Others section.
+ * Others section. `placement` is resolved in that worktree's layout once it is mounted.
  */
-export async function openFile(path: string): Promise<void> {
+export async function openFile(path: string, options: PanelOpenOptions = {}): Promise<void> {
   await whenProjectsLoaded();
   const { projects } = useProjectStore.getState();
   const { activeWorktreePath, byProject } = useWorktreeStore.getState();
@@ -81,7 +85,7 @@ export async function openFile(path: string): Promise<void> {
     return;
   }
 
-  await openInWorktree(target, { kind: "file", path });
+  await openInWorktree(target, { kind: "file", path, ...options });
 }
 
 /**
@@ -109,12 +113,25 @@ export async function openTerminal(terminal: OpenTerminalPanel): Promise<void> {
     showToast("Open a project before opening terminals");
     return;
   }
+  // Without focus the panel may not mount for a while (a background tab, or a worktree the user is
+  // not on), but its command must run now, so the shell is started without it.
+  if (terminal.focus === false) {
+    wsClient.send({
+      type: "terminal_spawn",
+      id: terminal.terminalId,
+      cwd: terminal.cwd,
+      worktreePath: target,
+      scrollbackLines: useSettingsStore.getState().terminal.scrollbackLines,
+      windowId: WINDOW_ID,
+    });
+  }
   await openInWorktree(target, { kind: "terminal", terminal });
 }
 
 /**
  * Open now if the target's editor area is mounted; otherwise — while a worktree switch swaps it
  * in, or before it first mounts — queue the panel for it, behind anything already waiting there.
+ * An open with focus switches to the target worktree; one without waits for the user to go there.
  */
 async function openInWorktree(target: string, open: PendingOpen): Promise<void> {
   const { activeWorktreePath, switchWorktree } = useWorktreeStore.getState();
@@ -125,7 +142,8 @@ async function openInWorktree(target: string, open: PendingOpen): Promise<void> 
     return;
   }
   ui.queueOpen(open);
-  if (target !== activeWorktreePath) await switchWorktree(target);
+  const focus = (open.kind === "file" ? open.focus : open.terminal.focus) !== false;
+  if (focus && target !== activeWorktreePath) await switchWorktree(target);
 }
 
 /**
@@ -134,7 +152,7 @@ async function openInWorktree(target: string, open: PendingOpen): Promise<void> 
  * panel creators.
  */
 export function dispatchPendingOpen(open: PendingOpen): void {
-  if (open.kind === "file") dispatchOpenFile(open.path);
+  if (open.kind === "file") dispatchOpenFile(open.path, undefined, open);
   else dispatchLoxelEvent("loxel-create-terminal", open.terminal);
 }
 
