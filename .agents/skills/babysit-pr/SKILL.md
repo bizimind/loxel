@@ -19,4 +19,5 @@ Get PR $ARGUMENTS to ready-to-merge: the Claude Code Review of the head commit s
 - Unrelated or flaky failures: rerun once, then `/quick-pr` a fix or comment on the existing issue.
 - A review run that failed or was cancelled (often a usage limit): `gh run rerun <id> --failed`.
 - Conflicts: `git merge origin/main`. Rebase only if the user asks.
-  When ready, record the decisions you made along the way in the PR body, and give the user a short summary: what was fixed, reworked, deferred (with issue links) and skipped.
+
+When ready, record the decisions you made along the way in the PR body, and give the user a short summary: what was fixed, reworked, deferred (with issue links) and skipped.
