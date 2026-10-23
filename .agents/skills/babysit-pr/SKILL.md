@@ -14,11 +14,9 @@ Get PR $ARGUMENTS to ready-to-merge: the Claude Code Review of the head commit s
 
 ## Rules
 
-- Review threads: use `/fix-pr-comments`. Findings are suggestions: no new flags, options or features to satisfy one, and file out-of-scope ones as issues.
+- Review threads: use `/fix-pr-comments`, which decides what to fix, rework, defer or skip without stopping to ask. Never leave a bug or security issue that this PR introduced.
 - Vulnerability Check failures get their own PR via `/quick-pr`. Once it merges, merge main into this PR.
 - Unrelated or flaky failures: rerun once, then `/quick-pr` a fix or comment on the existing issue.
 - A review run that failed or was cancelled (often a usage limit): `gh run rerun <id> --failed`.
 - Conflicts: `git merge origin/main`. Rebase only if the user asks.
-- Stop and ask when the reviewer repeats a finding you declined, after ~5 rounds without converging, or when every finding in a round is wrong.
-
-When ready, add any decisions made along the way to the PR body and report what was fixed, declined and deferred.
+  When ready, record the decisions you made along the way in the PR body, and give the user a short summary: what was fixed, reworked, deferred (with issue links) and skipped.
