@@ -52,14 +52,15 @@ snapshot() {
     | (($u.seven_day // {}) | window) as $d7
     # In-flight reviews get a full median on top of what they already spent: deliberately conservative.
     | ($h5.pct + $inFlight * $cost.h5) as $projected
+    | ($d7.pct + $inFlight * $cost.d7) as $projected7
     # Weekly pace: points used beyond an even spread over the 7 days.
     | (if $d7.minutesToReset then ($d7.pct - (100 * (1 - $d7.minutesToReset / (7 * 24 * 60))) | round) else 0 end) as $aheadOfPace
     # Reviews that fit at median cost, keeping one p95 overrun of margin below each hold line.
     | ([(($hold5 - $projected - ($cost.h5p95 - $cost.h5)) / ([$cost.h5, 1] | max) | floor),
-        (($hold7 - $d7.pct - ($cost.d7p95 - $cost.d7)) / ([$cost.d7, 1] | max) | floor)]
+        (($hold7 - $projected7 - ($cost.d7p95 - $cost.d7)) / ([$cost.d7, 1] | max) | floor)]
        | min | [., 0] | max) as $slots
     | (if $h5.pct >= $hold5 or $d7.pct >= $hold7 then "hold"
-       elif $projected >= 70 or $d7.pct >= 85 then "throttle"
+       elif $projected >= 70 or $projected7 >= 85 then "throttle"
        elif $projected >= 50 or $aheadOfPace > 15 then "watch"
        else "free" end) as $mode
     | {
