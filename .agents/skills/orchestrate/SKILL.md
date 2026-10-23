@@ -22,8 +22,7 @@ The user may talk to agents directly, so check with an agent before assuming its
 
 ## Agents
 
-- Start each agent with `/quick-pr`, and add three instructions to its prompt:
-  - run `/babysit-pr` after opening the PR;
+- Start each agent with `/quick-pr`; its prompt already has the agent babysit its own PR. Add two instructions:
   - report to you with SendMessage when the PR is opened, ready or blocked;
   - hold pushes when you say so.
 - Find each agent with `ListAgents` and message it once, so it knows who to report to.
@@ -44,6 +43,7 @@ Only use background commands. Each returns within an hour; run it again if nothi
 - When two PRs touch the same files, give one ownership and merge the less entangled one first.
 - When two PRs hit the same problem, make one fix PR; the others merge main after it lands.
 - Relay what one agent finds to the others that need it, with SendMessage.
+- For a quick status sweep, run `.agents/skills/babysit-pr/scripts/pr-state.sh <pr>` on each agent's PR. It is read-only, unlike `/babysit-pr` itself, which would act on PRs the agents own. Look for agents stuck on the same blocker or going many review rounds without converging.
 
 ## Budget
 
