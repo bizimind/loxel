@@ -18,7 +18,8 @@ stats() {
   jq -s '
     def pct(p): sort | if length == 0 then null else .[((length - 1) * p | floor)] end;
     def summary: {median: pct(0.5), p95: pct(0.95)};
-    (map(select(.skip | not)) | sort_by(.createdAt) | .[-40:]) as $runs
+    # A run without a final result (cost) did not finish, so its delta is partial.
+    (map(select((.skip | not) and .costUsd != null)) | sort_by(.createdAt) | .[-40:]) as $runs
     | ($runs | map(select(.solo))) as $solo
     | {
         runs: ($runs | length),
@@ -40,8 +41,12 @@ repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 runs_json="$(gh run list --workflow claude-code-review.yml --limit 100 \
   --json databaseId,status,conclusion,createdAt,updatedAt)"
 
-for id in $(jq -r --argjson n "${1:-30}" \
-  '[.[] | select(.status == "completed" and .conclusion != "skipped")][:$n][] | .databaseId' <<<"$runs_json"); do
+count="${1:-30}"
+[[ "$count" =~ ^[0-9]+$ ]] || { echo "usage: review-cost.sh [runs] | --stats" >&2; exit 2; }
+
+# Only successful runs: a cancelled or failed review stopped partway and would understate the cost.
+for id in $(jq -r --argjson n "$count" \
+  '[.[] | select(.status == "completed" and .conclusion == "success")][:$n][] | .databaseId' <<<"$runs_json"); do
   grep -q "\"run\":$id," "$cache" && continue
   # Runs without usable data are cached as skipped so they are not downloaded again.
   skip() { echo "{\"run\":$id,\"skip\":true}" >>"$cache"; }

@@ -93,13 +93,16 @@ snapshot_retry() {
   return 1
 }
 
+# Background modes stop by this wall-clock deadline, leaving room for the final snapshot.
+deadline=$(( $(date +%s) + 55 * 60 ))
+
 case "${1:-}" in
   "")
     snapshot
     ;;
   --alarm)
     start_mode="$(snapshot_retry | jq -r .mode)"
-    for _ in 1 2 3 4 5 6 7 8 9 10 11; do
+    while (( $(date +%s) + 300 < deadline )); do
       sleep 300
       state="$(snapshot_retry)" || exit 1
       if [[ "$(jq -r .mode <<<"$state")" != "$start_mode" ]]; then
@@ -113,7 +116,8 @@ case "${1:-}" in
     state="$(snapshot_retry)" || exit 1
     minutes="$(jq -r --argjson hold7 "$hold_7d" \
       'if .sevenDay.pct >= $hold7 then .sevenDay.minutesToReset else .fiveHour.minutesToReset end // 0' <<<"$state")"
-    sleep $(( (minutes < 58 ? minutes + 2 : 60) * 60 ))
+    target=$(( $(date +%s) + (minutes + 2) * 60 ))
+    sleep $(( (target < deadline ? target : deadline) - $(date +%s) ))
     # After a long sleep the stored login may have expired; the woken session refreshes it.
     snapshot_retry || echo '{"reset": true, "note": "window reset; usage endpoint unavailable, run budget.sh again"}'
     ;;
