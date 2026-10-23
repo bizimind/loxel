@@ -1,6 +1,7 @@
 ---
 name: orchestrate
-description: Team lead for a big topic, epic or set of issues: splits it into PRs, dispatches each to its own agent, keeps them in sync, paces the budget, and talks to the user. Use when asked to orchestrate, run a sprint, or fan work out to agents.
+description: Team lead for a big topic, epic or set of issues: splits it into PRs, dispatches each to its own agent, keeps them in sync, paces the budget, and talks to the user.
+disable-model-invocation: true
 argument-hint: "[what to orchestrate]"
 ---
 
