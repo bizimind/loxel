@@ -5,6 +5,9 @@
 #   budget.sh --alarm          poll every 5 min, print once the mode changes (e.g. watch -> throttle)
 #   budget.sh --until-reset    sleep until the window that is holding work resets, then snapshot
 #
+# Both background modes return within an hour (background commands get killed after longer), printing
+# the current snapshot; if it still says hold, run them again.
+#
 # Local agents and the CI reviewer share the subscription. `reviewSlots` is how many more review
 # runs (pushes to PRs) fit before the hold line, counting the ones already in flight.
 # Background modes exit non-zero after repeated endpoint failures (e.g. an expired login) instead of
@@ -95,7 +98,7 @@ case "${1:-}" in
     ;;
   --alarm)
     start_mode="$(snapshot_retry | jq -r .mode)"
-    while true; do
+    for _ in 1 2 3 4 5 6 7 8 9 10 11; do
       sleep 300
       state="$(snapshot_retry)" || exit 1
       if [[ "$(jq -r .mode <<<"$state")" != "$start_mode" ]]; then
@@ -103,12 +106,13 @@ case "${1:-}" in
         exit 0
       fi
     done
+    echo "$state"
     ;;
   --until-reset)
     state="$(snapshot_retry)" || exit 1
     minutes="$(jq -r --argjson hold7 "$hold_7d" \
       'if .sevenDay.pct >= $hold7 then .sevenDay.minutesToReset else .fiveHour.minutesToReset end // 0' <<<"$state")"
-    sleep $(( (minutes + 2) * 60 ))
+    sleep $(( (minutes < 58 ? minutes + 2 : 60) * 60 ))
     # After a long sleep the stored login may have expired; the woken session refreshes it.
     snapshot_retry || echo '{"reset": true, "note": "window reset; usage endpoint unavailable, run budget.sh again"}'
     ;;

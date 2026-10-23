@@ -62,9 +62,9 @@ for id in $(jq -r --argjson n "${1:-30}" \
         and .createdAt < $run.updatedAt and .updatedAt > $run.createdAt)) as $overlapped
     | (map(select(.type == "rate_limit_event") | .rate_limit_info.unifiedWindows)) as $w
     | (map(select(.type == "result")) | last) as $result
-    # A window that reset mid-run has no meaningful delta.
-    | def delta(k): if $w[0][k].resetsAt == $w[-1][k].resetsAt
-        then (($w[-1][k].utilization - $w[0][k].utilization) * 100 | round) else null end;
+    # A window that reset mid-run, or that the logs do not report, has no meaningful delta.
+    | def delta(k): try (if $w[0][k].resetsAt == $w[-1][k].resetsAt
+        then (($w[-1][k].utilization - $w[0][k].utilization) * 100 | round) else null end) catch null;
     {run: $id, createdAt: $run.createdAt, solo: ($overlapped | not),
        h5Delta: delta("five_hour"), d7Delta: delta("seven_day"),
        costUsd: ($result.total_cost_usd // null),
