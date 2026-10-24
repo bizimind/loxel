@@ -6,15 +6,15 @@
 #
 # A round is over when the Claude Code Review run for the PR head has completed and no check is
 # pending, or the PR conflicts with main. It does not end early on a failed check: fixing CI while
-# the review runs would start a second review. --wait gives up after [min] minutes (default 70,
-# above the review job's 56 minute timeout) and prints the snapshot anyway, so a background run
-# always exits and notifies. Transient gh errors during --wait are retried.
+# the review runs would start a second review. --wait gives up after [min] minutes (default 55, since
+# background commands are killed after an hour) and prints the snapshot anyway, so a background run
+# always exits and notifies; run it again if the round is not over. Transient gh errors during --wait are retried.
 set -euo pipefail
 
 pr="${1:?usage: pr-state.sh <pr> [--wait [minutes]]}"
 
 if [[ "${2:-}" == "--wait" ]]; then
-  deadline=$(( $(date +%s) + ${3:-70} * 60 ))
+  deadline=$(( $(date +%s) + ${3:-55} * 60 ))
   while true; do
     # Snapshot in a child process so its errexit applies; a failed snapshot is retried.
     if state="$("$0" "$pr")" && { [[ "$(jq -r .roundOver <<<"$state")" == "true" ]] || (( $(date +%s) >= deadline )); }; then
@@ -73,7 +73,8 @@ fi
 
 local_head=""
 local_relation=""
-if [[ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$branch" ]]; then
+# PR_STATE_REMOTE_ONLY skips comparing with this checkout (pr-events.sh reports the PR, not local work).
+if [[ -z "${PR_STATE_REMOTE_ONLY:-}" && "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$branch" ]]; then
   local_head="$(git rev-parse HEAD)"
   # The PR head may have been pushed from elsewhere (e.g. a committed suggestion); fetch it to compare.
   git fetch -q origin "$branch" 2>/dev/null || true
