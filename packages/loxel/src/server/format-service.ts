@@ -10,6 +10,7 @@ import { PrettierLibBackend } from "./prettier-lib-backend";
 import {
   detectPythonFormatter,
   findVenvBin,
+  forgetVenvTracking,
   PYTHON_FORMAT_EXTENSIONS,
   type PythonFormatter,
 } from "./python-formatter";
@@ -241,9 +242,10 @@ export class FormatService {
     return formatters.map((f) => ({ command: f.command, extensions: [...f.extensions] }));
   }
 
-  /** Invalidate the auto-detection cache and destroy backends for a worktree. */
+  /** Invalidate the auto-detection and venv caches and destroy backends for a worktree. */
   invalidateCache(worktreePath: string): void {
     this.cacheByWorktree.delete(worktreePath);
+    forgetVenvTracking(worktreePath);
     const prefix = worktreePath + "\0";
     for (const [key, backend] of this.backends) {
       if (key.startsWith(prefix)) {
@@ -378,7 +380,7 @@ export class FormatService {
     if (worktreePath) {
       env.PATH = prependPath(env.PATH, join(worktreePath, "node_modules", ".bin"));
       const venvBin = PYTHON_FORMAT_EXTENSIONS.includes(ext)
-        ? findVenvBin(fileDir(filePath, worktreePath), worktreePath)
+        ? await findVenvBin(fileDir(filePath, worktreePath), worktreePath)
         : undefined;
       if (venvBin) env.PATH = prependPath(env.PATH, venvBin);
     }

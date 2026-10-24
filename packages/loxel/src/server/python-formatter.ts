@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import { $ } from "bun";
+
 export const PYTHON_FORMAT_EXTENSIONS: readonly string[] = ["py", "pyi"];
 
 export interface PythonFormatter {
@@ -53,16 +55,51 @@ export function detectPythonFormatter(startDir: string, wtRoot: string): PythonF
 /**
  * `bin` of the nearest virtual environment (`.venv` or `venv` holding a `pyvenv.cfg`) from
  * `startDir` up to `wtRoot`, so formatters pinned in the project's dev dependencies win over
- * global installs. Deliberately minimal; to be unified with the server's Python environment
- * resolver.
+ * global installs. Venvs with files tracked by git are skipped: a cloned repo that commits
+ * `.venv/bin/ruff` would otherwise run its own code on every save. Deliberately minimal; to be
+ * unified with the server's Python environment resolver.
  */
-export function findVenvBin(startDir: string, wtRoot: string): string | undefined {
+export async function findVenvBin(startDir: string, wtRoot: string): Promise<string | undefined> {
   for (const dir of dirsUpToRoot(startDir, wtRoot)) {
     for (const name of VENV_DIR_NAMES) {
-      if (existsSync(join(dir, name, "pyvenv.cfg"))) return join(dir, name, "bin");
+      const venv = join(dir, name);
+      if (!existsSync(join(venv, "pyvenv.cfg"))) continue;
+      if (await isTrackedByGit(venv, wtRoot)) continue;
+      return join(venv, "bin");
     }
   }
   return undefined;
+}
+
+/**
+ * Whether git tracks any file in each venv directory seen, kept until the worktree's formatter
+ * state is invalidated (`forgetVenvTracking`): a venv's tracked status rarely changes, and saves
+ * should not spawn git each time.
+ */
+const venvTracked = new Map<string, Promise<boolean>>();
+
+function isTrackedByGit(venv: string, wtRoot: string): Promise<boolean> {
+  let tracked = venvTracked.get(venv);
+  if (!tracked) {
+    // Outside a git repo `ls-files` fails, and nothing can be tracked.
+    tracked = $`git -C ${wtRoot} ls-files -- ${venv}`
+      .quiet()
+      .text()
+      .then(
+        (out) => out.trim().length > 0,
+        () => false,
+      );
+    venvTracked.set(venv, tracked);
+  }
+  return tracked;
+}
+
+/** Drop cached venv tracking state for venvs inside `wtRoot`. */
+export function forgetVenvTracking(wtRoot: string): void {
+  const prefix = resolve(wtRoot) + sep;
+  for (const venv of venvTracked.keys()) {
+    if (venv.startsWith(prefix)) venvTracked.delete(venv);
+  }
 }
 
 /** `startDir` and its ancestors up to `wtRoot` (inclusive); just `wtRoot` when outside it. */

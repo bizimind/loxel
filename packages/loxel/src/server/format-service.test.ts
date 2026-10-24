@@ -3,6 +3,8 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { $ } from "bun";
+
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
 
 import { FormatService } from "./format-service";
@@ -242,9 +244,26 @@ describe("FormatService Python detection", () => {
   test("only uses venvs from the file's directory up to the worktree root", async () => {
     const wt = await makeWorktree({ "repo/pkg/app.py": "" });
     await makeFakeVenv(join(wt, ".venv"), "ruff");
-    expect(findVenvBin(join(wt, "repo/pkg"), join(wt, "repo"))).toBeUndefined();
+    expect(await findVenvBin(join(wt, "repo/pkg"), join(wt, "repo"))).toBeUndefined();
     await makeFakeVenv(join(wt, "repo/venv"), "ruff");
-    expect(findVenvBin(join(wt, "repo/pkg"), join(wt, "repo"))).toBe(join(wt, "repo/venv/bin"));
+    expect(await findVenvBin(join(wt, "repo/pkg"), join(wt, "repo"))).toBe(
+      join(wt, "repo/venv/bin"),
+    );
+  });
+
+  test("skips venvs with files tracked by git", async () => {
+    const wt = await makeWorktree({ "pkg/app.py": "" });
+    await $`git init -q ${wt}`.quiet();
+    await makeFakeVenv(join(wt, ".venv"), "ruff");
+    await makeFakeVenv(join(wt, "pkg/.venv"), "ruff");
+    await $`git -C ${wt} add -- pkg/.venv/bin/ruff`.quiet();
+    // The tracked subproject venv is skipped in favor of the untracked one above it.
+    expect(await findVenvBin(join(wt, "pkg"), wt)).toBe(join(wt, ".venv/bin"));
+    // Tracking state is cached until the worktree is invalidated.
+    await $`git -C ${wt} add -- .venv/pyvenv.cfg`.quiet();
+    expect(await findVenvBin(join(wt, "pkg"), wt)).toBe(join(wt, ".venv/bin"));
+    new FormatService().invalidateCache(wt);
+    expect(await findVenvBin(join(wt, "pkg"), wt)).toBeUndefined();
   });
 
   test("accepts worktree-relative file paths", async () => {
