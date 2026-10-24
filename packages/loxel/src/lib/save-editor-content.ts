@@ -1,4 +1,5 @@
 import * as api from "@/api/client";
+import { showToast } from "@/components/ui/toast";
 import type { FormattingSettings } from "@/lib/formatting-model";
 import { frontendLog } from "@/lib/frontend-logger";
 import { useEditorStateStore } from "@/store/editor-state";
@@ -72,6 +73,18 @@ export function consumeSavedContent(nonce: string, editorKey: string): string | 
   return saved?.editorKey === editorKey ? saved.content : undefined;
 }
 
+/**
+ * Format notices already shown this session. A missing formatter would otherwise toast on every
+ * save (and autosave) until the user installs it.
+ */
+const shownFormatNotices = new Set<string>();
+
+function showFormatNotice(notice: string): void {
+  if (shownFormatNotices.has(notice)) return;
+  shownFormatNotices.add(notice);
+  showToast(notice, "info");
+}
+
 function stashContent(nonce: string, content: string, editorKey: string): void {
   savedContentByNonce.set(nonce, { content, editorKey });
   setTimeout(() => savedContentByNonce.delete(nonce), STASH_EXPIRY_MS);
@@ -110,6 +123,7 @@ export async function saveEditorContent(
     if (result.content !== undefined) {
       stashContent(nonce, result.content, editorKey);
     }
+    if (result.formatNotice) showFormatNotice(result.formatNotice);
     // State transition is handled by the WebSocket file_content_changed echo
     // (matched by nonce in handleDiskChange). Safety timeout ensures we don't
     // stay stuck if the echo is lost (watcher miss, WS disconnect).

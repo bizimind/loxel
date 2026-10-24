@@ -34,7 +34,7 @@ These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quic
 
 ## Navigation
 
-`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. There is no inline peek; definitions always open as a full tab.
+`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. There is no inline peek; definitions always open as a full tab.
 
 ---
 
