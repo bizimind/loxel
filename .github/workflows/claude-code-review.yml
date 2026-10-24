@@ -47,6 +47,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_PRIVATE_SECRET_ACCESS_KEY }}
           AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
           AWS_DEFAULT_REGION: auto
+          # Reads the PR's comments to skip a head that already has its review summary.
+          GH_TOKEN: ${{ github.token }}
         run: .github/scripts/claude-review/session.sh prepare
 
       - name: Run Claude Code Review
