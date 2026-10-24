@@ -1,6 +1,6 @@
 ---
 name: local-code-review
-description: Code review a pull request from a local session and post the findings to the PR.
+description: Code review a pull request from a local session and report the findings.
 ---
 
 Provide a code review for the given pull request.
@@ -8,7 +8,7 @@ Provide a code review for the given pull request.
 ## Rules
 
 - This is a review-only task. You may edit files locally to test hypotheses (e.g., check if a fix compiles, write and run temp tests to verify a suspicion), but never commit or push changes.
-- You have internet access for reading, exploring, and research (e.g., checking library docs, fetching API references) and for posting review comments to the PR — but never write to external services, create issues, or post anywhere other than the PR under review.
+- You have internet access for reading, exploring, and research (e.g., checking library docs, fetching API references), but never write to external services or create issues.
 - Always launch agents with `run_in_background: false` (foreground). Background agents waste turns polling for completion.
 - We only want HIGH SIGNAL issues. False positives erode trust and waste reviewer time — when in doubt, don't flag it.
 
@@ -56,46 +56,7 @@ Provide a code review for the given pull request.
 
 5. Filter out any issues that were not validated in step 4. This step will give us our list of high signal issues for our review.
 
-6. Output a summary of the review findings in your response:
-   - If issues were found, list each issue with a brief description.
-
-   - If no issues were found, state: "No issues found. Checked for bugs and CLAUDE.md compliance."
-
-   If NO issues were found, post a summary comment using `gh pr comment` and stop.
-
-   If issues were found, continue to step 7.
-
-7. Create a list of all comments that you plan on leaving. This is only for you to make sure you are comfortable with the comments. Do not post this list anywhere. List the comments already on the PR and drop the findings that are already posted: a resumed or interrupted review may have posted some.
-
-8. Post inline comments for each issue using `gh api`. Set `commit_id` to the commit you reviewed. Use this exact syntax:
-
-   ```bash
-   gh api repos/{owner}/{repo}/pulls/{pr_number}/comments \
-     -f body='comment text' \
-     -f commit_id='full_sha' \
-     -f path='relative/file/path' \
-     -F line=42 \
-     -f side='RIGHT'
-   ```
-
-   For multi-line comments, add `-F start_line=38` to mark the range start.
-
-   For each comment:
-   - Provide a brief description of the issue
-
-   - For small, self-contained fixes, include a committable suggestion block:
-
-     ````
-     ```suggestion
-     replacement code here
-     ```
-     ````
-
-   - For larger fixes (6+ lines, structural changes, or changes spanning multiple locations), describe the issue and suggested fix without a suggestion block
-
-   - Never post a committable suggestion UNLESS committing the suggestion fixes the issue entirely. If follow up steps are required, do not leave a committable suggestion.
-
-   **IMPORTANT: Only post ONE comment per unique issue. Do not post duplicate comments.**
+6. Report the findings in your response. For each issue give the file and line, a brief description, why it was flagged (e.g. "bug", or the CLAUDE.md rule it breaks, quoted), and a suggested fix. If no issues were found, state: "No issues found. Checked for bugs and CLAUDE.md compliance."
 
 Use this list when evaluating issues in Steps 3 and 4 (these are false positives, do NOT flag):
 
@@ -113,33 +74,8 @@ Use this list when evaluating issues in Steps 3 and 4 (these are false positives
 
 Notes:
 
-- Use gh CLI to interact with GitHub (e.g., fetch pull requests, create comments). Do not use web fetch.
+- Use gh CLI to read the pull request. Do not use web fetch.
 
 - Review the PR's current head commit.
 
 - Create a todo list before starting.
-
-- You must cite and link each issue in inline comments (e.g., if referring to a CLAUDE.md, include a link to it).
-
-- If no issues are found, post a comment with the following format:
-
----
-
-## Code review
-
-No issues found. Checked for bugs and CLAUDE.md compliance.
-
-Reviewed commit: <full sha of the commit you reviewed>
-
----
-
-- When linking to code in inline comments, follow the following format precisely, otherwise the Markdown preview won't render correctly: [https://github.com/\<owner>/\<repo>/blob/\<full-commit-hash>/\<file-path>#L10-L15](https://github.com/anthropics/claude-code/blob/c21d3c10bc8e898b7ac1a2d745bdc9bc4e423afe/package.json#L10-L15)
-  - Requires full git sha. Commands like `https://github.com/owner/repo/blob/$(git rev-parse HEAD)/foo/bar` will not work, since your comment will be directly rendered in Markdown.
-
-  - Repo name must match the repo you're code reviewing
-
-  - `#` sign after the file name
-
-  - Line range format is L\[start]-L\[end]
-
-  - Provide at least 1 line of context before and after, centered on the line you are commenting about (eg. if you are commenting about lines 5-6, you should link to `L4-7`)
