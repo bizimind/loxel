@@ -36,8 +36,9 @@ snapshot() {
   local usage reviews in_flight
   usage="$(fetch_usage)" || { echo "budget.sh: usage endpoint failed (an expired login is refreshed by any claude session)" >&2; return 1; }
   reviews="$("$here/review-cost.sh" --stats)"
+  # A failed lookup fails the snapshot: reporting 0 reviews in flight would over-admit pushes.
   in_flight="$(gh run list --workflow claude-code-review.yml --limit 30 --json status \
-    --jq 'map(select(.status != "completed")) | length' 2>/dev/null || echo 0)"
+    --jq 'map(select(.status != "completed")) | length')" || { echo "budget.sh: could not list review runs" >&2; return 1; }
   jq -n --argjson u "$usage" --argjson r "$reviews" --argjson inFlight "$in_flight" \
     --argjson hold5 "$hold_5h" --argjson hold7 "$hold_7d" '
     def epoch: if type == "string" then sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601 else null end;
@@ -117,9 +118,19 @@ case "${1:-}" in
     minutes="$(jq -r --argjson hold7 "$hold_7d" \
       'if .sevenDay.pct >= $hold7 then .sevenDay.minutesToReset else .fiveHour.minutesToReset end // 0' <<<"$state")"
     target=$(( $(date +%s) + (minutes + 2) * 60 ))
-    sleep $(( (target < deadline ? target : deadline) - $(date +%s) ))
+    if (( target > deadline )); then
+      # The reset is past this command's deadline: wake anyway and say so, so it gets run again.
+      sleep $(( deadline - $(date +%s) ))
+      { snapshot_retry || echo '{}'; } | jq '. + {reset: false, note: "the window has not reset yet; run --until-reset again"}'
+      exit 0
+    fi
+    sleep $(( target - $(date +%s) ))
     # After a long sleep the stored login may have expired; the woken session refreshes it.
-    snapshot_retry || echo '{"reset": true, "note": "window reset; usage endpoint unavailable, run budget.sh again"}'
+    if state="$(snapshot_retry)"; then
+      jq '. + {reset: true}' <<<"$state"
+    else
+      echo '{"reset": true, "note": "window reset; usage endpoint unavailable, run budget.sh again"}'
+    fi
     ;;
   *)
     echo "usage: budget.sh [--alarm | --until-reset]" >&2

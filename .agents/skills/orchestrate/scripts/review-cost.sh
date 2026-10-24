@@ -18,7 +18,7 @@ stats() {
   jq -s '
     def pct(p): sort | if length == 0 then null else .[((length - 1) * p | floor)] end;
     def summary: {median: pct(0.5), p95: pct(0.95)};
-    def share(w): if (map(w.reset) | unique | length) == 1
+    def share(w): if all(w != null) and (map(w.reset) | unique | length) == 1
       then ((map(w.end) | max) - (map(w.start) | min)) / length * 10 | round / 10 else null end;
     (map(select(.v == 2 and (.skip | not) and .costUsd != null and .h5 != null))
      | sort_by(.createdAt) | .[-40:]) as $runs
@@ -43,6 +43,8 @@ if [[ "${1:-}" == "--stats" ]]; then
   exit 0
 fi
 
+trap 'rm -f "$cache.log" "$cache.err"' EXIT
+
 count="${1:-30}"
 [[ "$count" =~ ^[0-9]+$ ]] || { echo "usage: review-cost.sh [runs] | --stats" >&2; exit 2; }
 
@@ -54,15 +56,20 @@ runs_json="$(gh run list --workflow claude-code-review.yml --limit 100 \
 for id in $(jq -r --argjson n "$count" \
   '[.[] | select(.status == "completed" and .conclusion == "success")][:$n][] | .databaseId' <<<"$runs_json"); do
   grep -q "\"run\":$id,\"v\":2" "$cache" && continue
-  # Runs without usable data are cached as skipped so they are not downloaded again.
+  # Runs without usable data (no job, expired logs, too few events) are cached as skipped so they
+  # are not downloaded again. Any other gh failure is transient: leave the run for the next call.
   skip() { echo "{\"run\":$id,\"v\":2,\"skip\":true}" >>"$cache"; }
-  job="$(gh api "repos/$repo/actions/runs/$id/jobs" --jq '.jobs[0].id')" || { skip; continue; }
-  # Expired logs return HTTP 410. Log events are pretty-printed JSON blocks behind a timestamp prefix:
-  # join each block onto one line and keep only what parses.
-  events="$(gh api --allow-escape-sequences "repos/$repo/actions/jobs/$job/logs" 2>/dev/null |
-    sed -E 's/^.?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z ?//' |
+  job="$(gh api "repos/$repo/actions/runs/$id/jobs" --jq '.jobs[0].id // empty')" || continue
+  [[ -n "$job" ]] || { skip; continue; }
+  if ! gh api --allow-escape-sequences "repos/$repo/actions/jobs/$job/logs" >"$cache.log" 2>"$cache.err"; then
+    grep -q 'HTTP 410' "$cache.err" && skip
+    continue
+  fi
+  # Log events are pretty-printed JSON blocks behind a timestamp prefix: join each block onto one
+  # line and keep only what parses.
+  events="$(sed -E 's/^.?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z ?//' "$cache.log" |
     awk '/^\{$/ { b = 1; s = "" } b { s = s $0 " " } /^\}$/ { if (b) print s; b = 0 }' |
-    jq -cR 'fromjson? | select(.type == "rate_limit_event" or .type == "result")')" || { skip; continue; }
+    jq -cR 'fromjson? | select(.type == "rate_limit_event" or .type == "result")')"
   if [[ "$(jq -s 'map(select(.type == "rate_limit_event")) | length' <<<"$events")" -lt 2 ]]; then
     skip
     continue

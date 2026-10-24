@@ -76,10 +76,14 @@ while true; do
       relation="$(gh api "repos/$repo/compare/$prev_head...$head" --jq '"\(.status) \(.ahead_by)"' 2>/dev/null || echo "unknown 0")"
     fi
     # Mergeability is recomputed after every push and main merge; while GitHub reports UNKNOWN,
-    # keep the last known values so the watch does not report a flap.
-    state="$(jq --slurpfile l "$last" 'if .pr.mergeable == "UNKNOWN" or .pr.mergeStateStatus == "UNKNOWN" then
-      .pr.mergeable = $l[0].state.pr.mergeable | .pr.mergeStateStatus = $l[0].state.pr.mergeStateStatus
-      | .verdict = $l[0].state.verdict | .roundOver = $l[0].state.roundOver else . end' <<<"$state")"
+    # keep the last known merge state so the watch does not report a flap. The round's verdict
+    # carries over only for the same head: a new head starts a new round.
+    state="$(jq --slurpfile l "$last" '$l[0].state as $o
+      | if .pr.mergeable == "UNKNOWN" or .pr.mergeStateStatus == "UNKNOWN" then
+          .pr.mergeable = $o.pr.mergeable | .pr.mergeStateStatus = $o.pr.mergeStateStatus
+          | if .pr.head == $o.pr.head then .verdict = $o.verdict | .roundOver = $o.roundOver
+            else .verdict = "waiting" | .roundOver = false end
+        else . end' <<<"$state")"
 
     jq -rn --slurpfile l "$last" --argjson n "$state" --argjson a "$act" --arg relation "$relation" '
       $l[0] as $last | $last.state as $o | ($relation | split(" ")) as $r
