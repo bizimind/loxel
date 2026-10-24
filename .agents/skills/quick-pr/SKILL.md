@@ -5,7 +5,7 @@ description: Kick off a PR in a fresh git worktree and hand it to a detached Cla
 
 # quick-pr
 
-Delegate a PR to an independent Claude session: create a worktree with `wt`, write the task prompt to a file, open a Loxel terminal in the worktree, and start `claude` there with the prompt piped in. This session only sets things up; the spawned session does the work and opens the PR.
+Delegate a PR to an independent Claude session: create a worktree with `wt`, write the task prompt to a file, open a Loxel terminal in the worktree, and start `claude` there with the prompt piped in. This session only sets things up; the spawned session does the work, opens the PR and babysits it.
 
 ## 1. Pick the worktree name
 
@@ -46,10 +46,10 @@ Context from the conversation:
 
 Start by exploring: read the relevant docs and code, find where the title comes from and how worktree renames are observed, and validate the repro before changing anything.
 
-You are in worktree `fix/terminal-title-after-rename`, already created from latest origin/main. Do not create another worktree. Follow the repo workflow in CLAUDE.md through to opening the PR, then run `loxel <pr-url>` so the PR page opens in Loxel for the user.
+You are in worktree `fix/terminal-title-after-rename`, already created from latest origin/main. Do not create another worktree. Follow the repo workflow in CLAUDE.md through to opening the PR. Right after creating it, run `loxel --split right <pr-url>` once so the PR page opens in Loxel beside the active tab. Then run `/babysit-pr <pr-number>` to bring the PR to ready-to-merge, and do not reopen the page during its rounds.
 ```
 
-The prompt is the whole handoff, the new session has none of this conversation. Include: the task in one line, every concrete detail the user gave (repro steps, constraints, decisions already made), an explicit nudge to explore and validate first, and the closing paragraph above naming the worktree, the expected deliverable, and the final `loxel <pr-url>` call. State facts, not guesses: pass on file names or root causes only when the user gave them or you verified them, otherwise leave the investigation to the new session, which has the task as its sole focus and will explore it better than you. Leave out the repo conventions the target repo's CLAUDE.md already covers.
+The prompt is the whole handoff, the new session has none of this conversation. Include: the task in one line, every concrete detail the user gave (repro steps, constraints, decisions already made), an explicit nudge to explore and validate first, and the closing paragraph above naming the worktree, the expected deliverable, the one-time `loxel --split right <pr-url>` call and the `/babysit-pr` step. Drop the `/babysit-pr` step when the target repo has no such skill or the user wants to stop at the opened PR. State facts, not guesses: pass on file names or root causes only when the user gave them or you verified them, otherwise leave the investigation to the new session, which has the task as its sole focus and will explore it better than you. Leave out the repo conventions the target repo's CLAUDE.md already covers.
 
 ## 4. Open the terminal and start claude
 
@@ -73,4 +73,4 @@ The Loxel server spawns the terminal shell from its own environment, so nothing 
 
 ## Not covered
 
-Reviewing, merging or babysitting the resulting PR; creating worktrees for anything other than a Claude-driven PR; starting `claude` outside a Loxel terminal.
+Reviewing or merging the resulting PR (the spawned session babysits it; this session does not); creating worktrees for anything other than a Claude-driven PR; starting `claude` outside a Loxel terminal.
