@@ -101,7 +101,7 @@ describe("Others folders routes", () => {
       shutdown: () => {},
       resolveSchema: async () => ({}),
       updateYamlSchemas: () => {},
-      formatContent: async () => null,
+      formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       setTerminalCommand: () => {},
     };
