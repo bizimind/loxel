@@ -99,10 +99,10 @@ For a move with source `external`, `handleFileMoved` opens the new tab with a `m
 
 [CodeEditorPanel.tsx](../src/components/code-editor/CodeEditorPanel.tsx) creates one Monaco editor per panel on mount and reuses or creates the model for the file's URI:
 
-- `file://<abs path>` for languages whose language server needs real disk paths (`yaml`, `json`, `dockerfile`, `dockerbake`, `terraform`, `astro`, `xml`).
+- `file://<abs path>` for languages whose language server needs real disk paths (`yaml`, `json`, `dockerfile`, `dockerbake`, `terraform`, `astro`, `xml`, `python`).
 - `loxel://HEAD/<abs path>` for everything else. These are the live models of editor tabs; the diff views' models use `loxel://<ref>/<path>#<side>` for git diffs and `loxel://compare/<abs path>#<panel id>-<side>` for compare panels (see [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md#components-and-data-sources)).
 
-The model is disposed with the panel, so undo history does not outlive the tab. Go-to-definition targets with the `loxel` scheme are routed to `dispatchOpenFile` by `registerEditorOpener` in [monaco-env.ts](../src/lib/monaco-env.ts); the editor sets every `gotoLocation` mode to `"goto"` because Monaco's peek widget resolves models through a path that ignores the opener. The same file lazily connects expensive language servers by counting live models (`file://` and `loxel://HEAD` only); LSP wiring is in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md).
+The model is disposed with the panel, so undo history does not outlive the tab. Go-to-definition targets and document or hover links with the `loxel` or `file` scheme in another model are routed to `dispatchOpenFile` by `registerEditorOpener` in [monaco-env.ts](../src/lib/monaco-env.ts); the editor sets every `gotoLocation` mode to `"goto"` because Monaco's peek widget resolves models through a path that ignores the opener. The same file lazily connects expensive language servers by counting live models (`file://` and `loxel://HEAD` only); LSP wiring is in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md).
 
 Content flow: user edits call `handleChange(model.getValue())`. Clean-state disk updates use `model.setValue()` under `isProgrammaticRef`. Merges and "accept disk" use [compute-line-edits.ts](../src/lib/compute-line-edits.ts), which turns a line diff into minimal `ISingleEditOperation`s applied with `pushEditOperations`, so Monaco maps the caret through the change instead of resetting it.
 
