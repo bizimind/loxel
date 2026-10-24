@@ -4,6 +4,13 @@ on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
 
+# One review per PR at a time. A push during a review queues the next run (a newer push replaces
+# the queued one) instead of cancelling: the running review is told about the new head by its hook,
+# and the queued run resumes the same session, or skips if that head was already reviewed.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   claude-review:
     # Fork PRs get no repository secrets on pull_request, so the review would fail with an empty token.
@@ -19,20 +26,59 @@ jobs:
       pull-requests: write
       issues: read
       id-token: write
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
+
+      # The storage credentials are only given to these two steps, never to the Claude process.
+      - name: Prepare review session
+        id: session
+        env:
+          # Private R2 bucket for review sessions; storage is skipped while its secrets are unset.
+          STORE: ${{ secrets.R2_PRIVATE_ACCESS_KEY_ID && secrets.CLOUDFLARE_ACCOUNT_ID && format('s3://loxel-ci-private/review-sessions/pr-{0}', github.event.pull_request.number) || '' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_PRIVATE_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_PRIVATE_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          AWS_DEFAULT_REGION: auto
+        run: .github/scripts/claude-review/session.sh prepare
 
       - name: Run Claude Code Review
         id: claude-review
+        if: steps.session.outputs.mode != 'skip'
         uses: anthropics/claude-code-action@v1.0.248
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: >-
             --model claude-opus-5[1m]
             --allowedTools 'Read,Edit,Write,Bash,Grep,Glob,WebFetch,WebSearch,Agent,SendMessage,TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate,TaskOutput,Skill'
-          show_full_output: true
-          prompt: "/code-review Code review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+            ${{ steps.session.outputs.claude_args }}
+          # The full transcript would land in public logs; the save step summarizes the run instead.
+          # Never re-run this workflow with debug logging: that forces the full transcript on.
+          show_full_output: false
+          settings: >-
+            {"hooks": {
+              "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "bash ${{ runner.temp }}/review-hook.sh"}]}],
+              "Stop": [{"hooks": [{"type": "command", "command": "bash ${{ runner.temp }}/review-hook.sh"}]}]
+            }}
+          prompt: ${{ steps.session.outputs.prompt }}
+
+      - name: Save review session
+        if: always() && steps.session.outputs.mode != '' && steps.session.outputs.mode != 'skip'
+        env:
+          STORE: ${{ secrets.R2_PRIVATE_ACCESS_KEY_ID && secrets.CLOUDFLARE_ACCOUNT_ID && format('s3://loxel-ci-private/review-sessions/pr-{0}', github.event.pull_request.number) || '' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_PRIVATE_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_PRIVATE_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          AWS_DEFAULT_REGION: auto
+          MODE: ${{ steps.session.outputs.mode }}
+          SESSION_ID: ${{ steps.session.outputs.session_id }}
+          OUTCOME: ${{ steps.claude-review.outcome }}
+          EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
+        run: .github/scripts/claude-review/session.sh save
