@@ -124,7 +124,6 @@ const LANG_MAP: Record<string, string> = {
   svelte: "html",
   vue: "html",
   dotenv: "ini",
-  toml: "ini",
 };
 
 /**

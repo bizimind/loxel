@@ -272,7 +272,7 @@ export function CodeEditorPanel({
       model = monaco.editor.createModel(content, language, uri);
     }
 
-    const resolved = resolveIndentation(editorSettings, filePath);
+    const resolved = resolveIndentation(editorSettings, filePath, resolvedLangRef.current);
     model.updateOptions({ tabSize: resolved.tabSize, insertSpaces: resolved.insertSpaces });
 
     const editor = monaco.editor.create(container, {
@@ -557,10 +557,10 @@ export function CodeEditorPanel({
     if (!editor) return;
     const model = editor.getModel();
     if (!model) return;
-    const { tabSize, insertSpaces } = resolveIndentation(editorSettings, filePath);
+    const { tabSize, insertSpaces } = resolveIndentation(editorSettings, filePath, resolvedLang);
     editor.updateOptions({ tabSize, insertSpaces, detectIndentation: false });
     model.updateOptions({ tabSize, insertSpaces });
-  }, [editorSettings, filePath]);
+  }, [editorSettings, filePath, resolvedLang]);
 
   // Apply TypeScript diagnostics as Monaco markers
   useEffect(() => {

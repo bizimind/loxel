@@ -91,12 +91,21 @@ const FILE_NAME_MAP: Record<string, string> = {
   ".nvmrc": "nodejs_dark.svg",
   ".node-version": "nodejs_dark.svg",
   ".npmrc": "npm_dark.svg",
+  "pyproject.toml": "python.svg",
+  Pipfile: "python.svg",
+  ".python-version": "python.svg",
   "go.mod": "goMod_dark.svg",
   "go.sum": "goSum_dark.svg",
   "go.work": "goWork_dark.svg",
   "Directory.Build.props": "projectProperties_dark.svg",
   "vercel.json": "vercel.svg",
 };
+
+/** Filename patterns no exact name can express (checked after exact names) */
+const FILE_NAME_PATTERNS: [RegExp, string][] = [
+  [/^requirements.*\.(?:txt|in)$/i, "python.svg"],
+  [/^constraints.*\.txt$/i, "python.svg"],
+];
 
 /** Compound extensions (checked before simple ext) */
 const COMPOUND_EXT_MAP: Record<string, string> = {
@@ -273,6 +282,14 @@ const FOLDER_NAME_MAP: Record<string, string> = {
   __tests__: "folderTest_dark.svg",
   __fixtures__: "folderTest_dark.svg",
   __snapshots__: "folderTest_dark.svg",
+  // Python virtualenvs and tool caches (PyCharm marks these excluded)
+  ".venv": "folderExcluded_dark.svg",
+  venv: "folderExcluded_dark.svg",
+  __pycache__: "folderExcluded_dark.svg",
+  ".mypy_cache": "folderExcluded_dark.svg",
+  ".pytest_cache": "folderExcluded_dark.svg",
+  ".ruff_cache": "folderExcluded_dark.svg",
+  ".tox": "folderExcluded_dark.svg",
 };
 
 const DEFAULT_FILE_ICON = "text_dark.svg";
@@ -288,7 +305,11 @@ export function getFileIconPath(filename: string): string {
   const byName = FILE_NAME_MAP[filename];
   if (byName) return `./icons/${byName}`;
 
-  // 2. Compound extension match (e.g. "foo.test.ts")
+  // 2. Filename pattern match (e.g. "requirements-dev.txt")
+  const byPattern = FILE_NAME_PATTERNS.find(([pattern]) => pattern.test(filename));
+  if (byPattern) return `./icons/${byPattern[1]}`;
+
+  // 3. Compound extension match (e.g. "foo.test.ts")
   const lower = filename.toLowerCase();
   for (const compoundExt of COMPOUND_KEYS) {
     if (lower.endsWith(`.${compoundExt}`)) {
@@ -296,7 +317,7 @@ export function getFileIconPath(filename: string): string {
     }
   }
 
-  // 3. Simple extension match
+  // 4. Simple extension match
   const dotIdx = lower.lastIndexOf(".");
   if (dotIdx !== -1) {
     const ext = lower.slice(dotIdx + 1);
@@ -304,7 +325,7 @@ export function getFileIconPath(filename: string): string {
     if (byExt) return `./icons/${byExt}`;
   }
 
-  // 4. Fallback
+  // 5. Fallback
   return `./icons/${DEFAULT_FILE_ICON}`;
 }
 

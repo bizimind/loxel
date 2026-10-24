@@ -1,6 +1,6 @@
 ---
 title: Editor
-description: Quick Open, Find in Files, autosave, formatter auto-detection, conflict handling, and deleted or moved files.
+description: Quick Open, Find in Files, autosave, formatter auto-detection, indentation, Python files, conflict handling, and deleted or moved files.
 order: 10
 ---
 
@@ -58,6 +58,20 @@ Supported formatters:
 | `deno`         | `deno.json`                                                | JS and TS files                                      |
 
 When a project has both Prettier and oxfmt, Prettier wins for the languages it supports. The formatters found in the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+
+---
+
+## Indentation
+
+Files indent with 2 spaces by default. Python and Rust use 4 spaces and Go uses tabs, matching their formatters. In **Settings > Editor**, **Default Indentation** changes the default, and **Per-Extension Overrides** set the indentation for a file extension, taking precedence over both.
+
+---
+
+## Python files
+
+Python source (`.py`), stub (`.pyi`), and `.pyw` files get highlighting and Python language features. Typing `"""` or `'''` adds the closing quotes, typing the closing quotes steps over them, and pressing Enter after `return`, `pass`, `break`, `continue`, or `raise` dedents the next line.
+
+Project files are recognized too: `pyproject.toml`, `uv.lock`, `poetry.lock`, and `Pipfile` are highlighted as TOML, `Pipfile.lock` as JSON, and `requirements*.txt`, `requirements*.in`, `requirements/*.txt`, and `constraints*.txt` as pip requirements. In the file tree, `.venv`, `venv`, `__pycache__`, and Python tool cache folders show a distinct folder icon. To treat other files as a given language, add a glob in **Settings > File Associations**.
 
 ---
 
