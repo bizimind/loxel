@@ -133,6 +133,49 @@ describe("resolvePythonEnv", () => {
     });
   });
 
+  test("skips an interpreter tracked by a nested repository or submodule", async () => {
+    const { wt, bin } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    await makeVenv(join(wt, ".venv"));
+    // `.venv` is its own repository (as a submodule checkout is) that commits the interpreter.
+    Bun.spawnSync(["git", "-C", join(wt, ".venv"), "init", "-q"]);
+    Bun.spawnSync(["git", "-C", join(wt, ".venv"), "add", "bin/python"]);
+    const system = await writeExecutable(join(bin, "python3"));
+
+    expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
+  });
+
+  test("skips an interpreter git cannot vouch for inside a repository", async () => {
+    const { wt, bin } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    await makeVenv(join(wt, ".venv"));
+    await writeFile(join(wt, ".venv", ".git"), "gitdir: /nonexistent\n");
+    const system = await writeExecutable(join(bin, "python3"));
+
+    expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
+  });
+
+  test("skips a tracked interpreter on PATH", async () => {
+    const { wt, bin } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    const tracked = await writeExecutable(join(wt, "bin", "python3"));
+    Bun.spawnSync(["git", "-C", wt, "add", "bin/python3"]);
+    const python = await writeExecutable(join(bin, "python"));
+
+    const env = await resolvePythonEnv(wt, { env: { PATH: `${join(wt, "bin")}:${bin}` } });
+    expect(env?.pythonPath).not.toBe(tracked);
+    expect(env?.pythonPath).toBe(python);
+  });
+
+  test("uses an ignored virtual environment in a repository", async () => {
+    const { wt } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    await writeFile(join(wt, ".gitignore"), ".venv/\n");
+    const python = await makeVenv(join(wt, ".venv"));
+
+    expect((await resolvePythonEnv(wt, { env: { PATH: "" } }))?.pythonPath).toBe(python);
+  });
+
   test("finds Pixi's default environment", async () => {
     const { wt } = await makeRoot();
     const python = await writeExecutable(join(wt, ".pixi", "envs", "default", "bin", "python"));
@@ -197,15 +240,6 @@ describe("resolvePythonEnv", () => {
     const system = await writeExecutable(join(bin, "python3"));
 
     expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
-  });
-
-  test("skips a PATH interpreter the repository tracks", async () => {
-    const { wt } = await makeRoot();
-    await writeExecutable(join(wt, "bin", "python3"));
-    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
-    Bun.spawnSync(["git", "-C", wt, "add", "bin"]);
-
-    expect(await resolvePythonEnv(wt, { env: { PATH: join(wt, "bin") } })).toBeNull();
   });
 
   test("uses the override chosen for the worktree unless told not to", async () => {

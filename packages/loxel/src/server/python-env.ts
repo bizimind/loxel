@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
+import { readdirSync, statSync, watch, type FSWatcher } from "node:fs";
 import { access, constants, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -36,6 +36,8 @@ const POETRY_TIMEOUT_MS = 10_000;
 const WATCH_DEBOUNCE_MS = 1000;
 
 const IS_WINDOWS = process.platform === "win32";
+/** `runGit` exit code when git could not be started (missing binary, unusable directory). */
+const GIT_SPAWN_FAILED = -1;
 
 /** A live {@link watchPythonEnv} watch. */
 export interface PythonEnvWatch {
@@ -60,7 +62,7 @@ export interface ResolvePythonEnvOptions {
  * Find the Python interpreter for a worktree, in order: the chosen override, `VIRTUAL_ENV` when
  * it lies inside the worktree, a `.venv` / `venv` / `env` virtual environment at the worktree
  * root, Pixi's default environment, Poetry's environment (only with a `poetry.lock` and `poetry`
- * on PATH), then `python3` / `python` on the login-shell PATH. A candidate counts only when its
+ * on PATH), then `python3` / `python` on the login-shell PATH. Any candidate counts only when its
  * interpreter exists, is executable, and is not a file the repository tracks. Never throws;
  * returns null when nothing is found.
  */
@@ -325,15 +327,15 @@ async function systemPython(
   wtPath: string,
   env: Record<string, string | undefined>,
 ): Promise<PythonEnv | null> {
+  // PATH can include a directory of the worktree itself (direnv's `PATH_add bin`).
   const PATH = env.PATH ?? "";
-  const system = Bun.which("python3", { PATH }) ?? Bun.which("python", { PATH });
-  if (!system) return null;
-  // PATH can include a repository directory (direnv's `PATH_add bin`).
-  if (await isShippedByRepo(wtPath, system)) {
-    log.warn("Ignoring a Python interpreter tracked by git", { wtPath, pythonPath: system });
-    return null;
+  for (const name of ["python3", "python"]) {
+    const system = Bun.which(name, { PATH });
+    if (system && !(await isShippedByRepo(wtPath, system))) {
+      return { source: "system", pythonPath: system, envPath: null };
+    }
   }
-  return { source: "system", pythonPath: system, envPath: null };
+  return null;
 }
 
 /**
@@ -399,33 +401,43 @@ async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<bool
 }
 
 /**
- * Whether git tracks `filePath`, asked of the innermost repository holding it below the worktree:
- * the worktree's own index lists a submodule only as a gitlink, so it reports the files committed
- * inside one as untracked.
+ * Asks the innermost repository containing `filePath`, since a submodule or nested repository
+ * tracks its own files and the worktree's index does not list them. Inside a git worktree, any
+ * answer other than a clear "untracked" counts as tracked (fail closed).
  */
 async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
-  const repo = isInside(filePath, wtPath) ? innermostRepo(wtPath, filePath) : wtPath;
-  try {
-    const proc = Bun.spawn(["git", "-C", repo, "ls-files", "--error-unmatch", "--", filePath], {
-      env: readOnlyGitEnv(),
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    // Non-zero for untracked files, paths outside the repository, and non-repositories.
-    return (await proc.exited) === 0;
-  } catch {
-    return false;
-  }
+  const realWtPath = await realpath(wtPath);
+  if (!isInside(filePath, wtPath) && !isInside(filePath, realWtPath)) return false;
+  const worktreeRepo = await runGit(wtPath, ["rev-parse", "--show-toplevel"]);
+  if (worktreeRepo.exitCode === GIT_SPAWN_FAILED) return true;
+  // Not a repository at all, so nothing in it can be committed.
+  if (worktreeRepo.exitCode !== 0) return false;
+
+  const innermost = await runGit(path.dirname(filePath), ["rev-parse", "--show-toplevel"]);
+  if (innermost.exitCode !== 0) return true;
+  const listed = await runGit(innermost.stdout.trim(), [
+    "ls-files",
+    "--error-unmatch",
+    "--",
+    filePath,
+  ]);
+  // `--error-unmatch` exits 1 for an untracked path; anything else is tracked or an error.
+  return listed.exitCode !== 1;
 }
 
-/** The deepest directory between `filePath` and the worktree root that is a repository of its own. */
-function innermostRepo(wtPath: string, filePath: string): string {
-  for (let dir = path.dirname(filePath); dir !== wtPath && isInside(dir, wtPath);) {
-    if (existsSync(path.join(dir, ".git"))) return dir;
-    dir = path.dirname(dir);
+async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string }> {
+  try {
+    const proc = Bun.spawn(["git", "-C", cwd, ...args], {
+      env: readOnlyGitEnv(),
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return { exitCode, stdout };
+  } catch {
+    return { exitCode: GIT_SPAWN_FAILED, stdout: "" };
   }
-  return wtPath;
 }
 
 /** The environment directory an interpreter belongs to, if it is a venv or conda environment. */

@@ -1,5 +1,7 @@
 import type { ServerWebSocket, Subprocess } from "bun";
 
+import { TS_SOURCE_EXTENSIONS } from "@/lib/typescript-files";
+
 import {
   type BaseLspSession,
   type LspPosition,
@@ -10,7 +12,38 @@ import {
 } from "./stdio-lsp-manager";
 import { resolveTypeScriptBinary } from "./typescript-path";
 
-const TS_EXTENSIONS = /\.(ts|tsx|js|jsx|mts|mjs|cts|cjs|json|jsonc)$/i;
+const TS_EXTENSIONS = new RegExp(
+  `\\.(?:${[...TS_SOURCE_EXTENSIONS, "json", "jsonc"].join("|")})$`,
+  "i",
+);
+
+/**
+ * JSON paths: their live editor models use `file://` URIs (CodeEditorPanel's `useFileScheme`),
+ * unlike TS/JS models, which use `loxel://HEAD/`.
+ */
+const JSON_PATH = /\.jsonc?$/i;
+
+/**
+ * Translate a client→server JSON-RPC body: `loxel://HEAD/<abs path>` (TS/JS editor models) →
+ * `file:///<abs path>`. Case-insensitive because Monaco's `Uri.toString()` lowercases the
+ * authority. `file://` URIs (JSON editor models) pass through.
+ */
+export function toServerUris(body: string): string {
+  return body.replace(/loxel:\/\/head\//gi, "file:///");
+}
+
+/**
+ * Translate a server→client JSON-RPC body: `file:///<abs path>` → `loxel://HEAD/<abs path>`, the
+ * URI of a TS/JS editor model (and the authority casing CodeEditorPanel uses), so diagnostics,
+ * references and edits land on the open models. JSON files keep `file://`, which is what their
+ * editor models use.
+ */
+export function toClientUris(body: string): string {
+  // The path runs until the end of the JSON string, a markdown link or the URI's query/fragment.
+  return body.replace(/file:\/\/\/([^\s"'\\#?()<>[\]`]*)/g, (uri: string, uriPath: string) =>
+    JSON_PATH.test(uriPath) ? uri : `loxel://HEAD/${uriPath}`,
+  );
+}
 
 interface PendingRequest {
   method: string;
@@ -149,11 +182,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
       // Not JSON — forward verbatim.
     }
 
-    // Translate loxel://HEAD/... → file:///... so TypeScript sees real file paths.
-    // Case-insensitive because Monaco may preserve or normalize the authority
-    // component depending on URI construction path.
-    const translated = outgoing.replace(/loxel:\/\/head\//gi, "file:///");
-    this.writeToStdin(session, translated);
+    this.writeToStdin(session, toServerUris(outgoing));
   }
 
   protected override handleServerFrame(session: TsLspSession, body: string): void {
@@ -165,10 +194,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
     // An empty string means the interceptor consumed the message.
     if (intercepted === "") return;
 
-    // Translate file:///... → loxel://HEAD/... for the client. Matches the
-    // authority casing CodeEditorPanel uses when constructing model URIs.
-    const translated = intercepted.replaceAll("file:///", "loxel://HEAD/");
-    session.ws.send(translated);
+    session.ws.send(toClientUris(intercepted));
   }
 
   // ---------------------------------------------------------------------------

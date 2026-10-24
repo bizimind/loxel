@@ -237,7 +237,9 @@ export async function writeFileContent(options: {
   format?: boolean;
   formattingSettings?: FormattingSettings;
 }) {
-  return fetchJson<{ success: boolean; content?: string }>("/file-write", {
+  // `formatNotice`: why a save requested with `format` went out unformatted, when the user can
+  // act on it (formatter not installed, timed out).
+  return fetchJson<{ success: boolean; content?: string; formatNotice?: string }>("/file-write", {
     method: "POST",
     body: JSON.stringify(options),
   });

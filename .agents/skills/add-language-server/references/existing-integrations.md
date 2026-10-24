@@ -18,7 +18,7 @@ Quick reference for per-LSP quirks. Consult when the new integration needs behav
 
 The most complex manager. Unique behaviors not found in other LSPs:
 
-- Bidirectional URI translation (`loxel://HEAD/` <-> `file:///`)
+- Bidirectional URI translation (`loxel://HEAD/` <-> `file:///`; JSON files keep `file://`)
 - LanguageId fixup: `tsx` -> `typescriptreact`, `jsx` -> `javascriptreact`
 - Server-side filtering of non-TS files via `shouldDropForNonTsUri()`
 - Inline `workspace/configuration` response (TypeScript blocks until answered)
