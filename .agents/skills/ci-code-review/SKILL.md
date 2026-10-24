@@ -65,13 +65,16 @@ Provide a code review for the given pull request.
 
    - If no issues were found, state: "No issues found. Checked for bugs and CLAUDE.md compliance."
 
-   If NO issues were found: if the watch reported a move you have not taken in yet, take it in first (step 1). Then post a summary comment using `gh pr comment`, stop the watch with TaskStop, and stop.
+   If no issues were found:
+   1. Make sure you handled every head move the watch reported (step 1), so the review covers the head you are about to post on.
+   2. Post the summary comment with `gh pr comment` (format in Notes).
+   3. Stop the watch with TaskStop and end the review.
 
    If issues were found, continue to step 8.
 
 8. Create a list of all comments that you plan on leaving. This is only for you to make sure you are comfortable with the comments. Do not post this list anywhere. List the comments already on the PR and drop the findings that are already posted: a resumed or interrupted review may have posted some.
 
-9. Post inline comments for each issue using `gh api`. First, if the watch reported a move you have not taken in yet, take it in (step 1) and re-check each finding against the new head. Set `commit_id` to the commit you reviewed. Use this exact syntax:
+9. Post inline comments for each issue using `gh api`. Before posting, make sure you handled every head move the watch reported (step 1), so each finding is checked against the head you post on, and set `commit_id` to that head. Use this exact syntax:
 
    ```bash
    gh api repos/{owner}/{repo}/pulls/{pr_number}/comments \
@@ -101,7 +104,7 @@ Provide a code review for the given pull request.
 
    **IMPORTANT: Only post ONE comment per unique issue. Do not post duplicate comments.**
 
-   When all comments are posted, stop the watch with TaskStop.
+   When all comments are posted, stop the watch with TaskStop and end the review.
 
 Use this list when evaluating issues in Steps 4 and 5 (these are false positives, do NOT flag):
 
