@@ -26,6 +26,8 @@ export interface PythonEnvWatch {
   close(): void;
   /** True when a change was seen whose debounced `onChange` has not fired yet. */
   readonly hasPendingChange: boolean;
+  /** Report a change seen elsewhere, through the same debounce. */
+  nudge(): void;
 }
 
 export interface ResolvePythonEnvOptions {
@@ -133,6 +135,7 @@ export function watchPythonEnv(
     get hasPendingChange() {
       return timer !== null;
     },
+    nudge: schedule,
   };
 }
 
@@ -150,6 +153,14 @@ function watchTargets(wtPath: string, current: PythonEnv | null): Map<string, Se
     else if (names) names.add(name);
     else targets.set(dir, new Set([name]));
   };
+  // The interpreter can land in a `bin` that already exists (conda/pixi create it early), which
+  // the filtered watch on the environment directory never reports.
+  const addInterpreterDirs = (envPath: string) => {
+    for (const name of interpreterDirNames()) {
+      const dir = path.join(envPath, name);
+      if (isDirectory(dir)) add(dir, null);
+    }
+  };
 
   for (const candidate of [...VENV_DIR_NAMES, PIXI_ENV_DIR]) {
     let dir = wtPath;
@@ -166,6 +177,7 @@ function watchTargets(wtPath: string, current: PythonEnv | null): Map<string, Se
       continue;
     }
     for (const name of [...interpreterDirNames(), "pyvenv.cfg", "conda-meta"]) add(dir, name);
+    addInterpreterDirs(dir);
   }
   add(wtPath, POETRY_LOCK);
 
@@ -173,6 +185,7 @@ function watchTargets(wtPath: string, current: PythonEnv | null): Map<string, Se
     // Also covers environments outside the worktree (Poetry's cache, VIRTUAL_ENV, the override).
     add(path.dirname(current.envPath), path.basename(current.envPath));
     for (const name of [...interpreterDirNames(), "pyvenv.cfg"]) add(current.envPath, name);
+    addInterpreterDirs(current.envPath);
     for (const dir of sitePackagesDirs(current.envPath)) add(dir, null);
   }
   return targets;

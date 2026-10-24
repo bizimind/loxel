@@ -220,6 +220,17 @@ describe("watchPythonEnv", () => {
     expect(changes).toBe(1);
   });
 
+  test("reports an interpreter landing in an environment's existing bin", async () => {
+    const { wt } = await makeRoot();
+    // Conda and Pixi create the prefix and its bin before the interpreter.
+    await mkdir(join(wt, ".pixi", "envs", "default", "bin"), { recursive: true });
+
+    const changes = await changesWithin(wt, () =>
+      writeExecutable(join(wt, ".pixi", "envs", "default", "bin", "python")).then(() => {}),
+    );
+    expect(changes).toBe(1);
+  });
+
   test("ignores unrelated files at the worktree root", async () => {
     const { wt } = await makeRoot();
     expect(await changesWithin(wt, () => writeFile(join(wt, "main.py"), "print(1)\n"))).toBe(0);

@@ -105,8 +105,8 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
    * Re-resolve the interpreter, then watch for the next change. Pyright pulls configuration once
    * at startup, so a change after that is announced (`notify`) and Pyright asks again; that also
    * makes it re-resolve imports after packages are installed into the same environment. The old
-   * watch stays armed until the new one is, and a change it saw in between triggers another
-   * round, so nothing written during resolution is lost.
+   * watch stays armed until the new one is, and a change it saw in between is handed to the new
+   * watch's debounce, so nothing written during resolution is lost.
    */
   private refreshEnvironment(session: PythonLspSession, notify = false): void {
     const resolution = resolvePythonEnv(session.wtPath);
@@ -119,11 +119,13 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
         pythonPath: env?.pythonPath ?? null,
       });
       const previous = session.envWatch;
-      session.envWatch = this.watchEnvironment(session, env);
-      const missedChange = previous?.hasPendingChange ?? false;
+      const next = this.watchEnvironment(session, env);
+      session.envWatch = next;
+      // Hand a change the old watch saw during resolution to the new one's debounce, so a write
+      // burst still coalesces into one more round instead of re-resolving back to back.
+      if (previous?.hasPendingChange) next.nudge();
       previous?.close();
       if (notify && session.initialized) this.notifyConfigurationChanged(session);
-      if (missedChange) this.refreshEnvironment(session, true);
     });
   }
 
