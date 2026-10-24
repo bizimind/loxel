@@ -38,7 +38,7 @@ Loxel autosaves 250ms after you stop typing, with a maximum 5s wait. You never h
 
 Press `Cmd+S` to save immediately. Explicit save is the trigger for format on save — by default, the formatter runs only on `Cmd+S`, not on autosave. If you want the formatter to also run on autosave, enable **Also format on auto-save** in Settings > Editor.
 
-> **Note:** Format on save is per-language. If no formatter is detected for the current file type, `Cmd+S` saves without formatting. If a detected formatter isn't installed or takes longer than 5 seconds, the file is saved unformatted and Loxel tells you once per session.
+> **Note:** Format on save is per-language. If no formatter is detected for the current file type, `Cmd+S` saves without formatting. If a detected formatter isn't installed, can't start, or takes longer than 5 seconds, the file is saved unformatted and Loxel tells you once per session.
 
 ---
 
@@ -60,7 +60,7 @@ Supported formatters:
 
 When a project has both Prettier and oxfmt, Prettier wins for the languages it supports.
 
-Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Black wins when a project configures both black and ruff, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's `.venv` or `venv` when they're installed there, so the version pinned in your dev dependencies is the one used, and files your ruff config excludes are left as they are. The formatters found in the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's `.venv` or `venv` when they're installed there, so the version pinned in your dev dependencies is the one used, and files your ruff config excludes are left as they are. The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
 
 ---
 

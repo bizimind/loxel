@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-export const PYTHON_FORMAT_EXTENSIONS = ["py", "pyi"];
+export const PYTHON_FORMAT_EXTENSIONS: readonly string[] = ["py", "pyi"];
 
 export interface PythonFormatter {
   command: "ruff" | "black";
@@ -23,34 +23,31 @@ const RUFF_CONFIG_FILES = [".ruff.toml", "ruff.toml"];
 const VENV_DIR_NAMES = [".venv", "venv"];
 
 /**
- * Pick the Python formatter for files under `startDir`, walking up to `wtRoot`. The nearest
- * directory with formatter config decides; ruff and black then resolve their own nested config
- * from `--stdin-filename`. Without config anywhere, a ruff or black dependency declared in a
- * `pyproject.toml` on the way up opts the project in. A bare `pyproject.toml` formats nothing,
- * like prettier and oxfmt need a config or dependency: formatting a project with a tool it never
- * chose would rewrite every file it saves.
+ * Pick the Python formatter for files under `startDir`, walking up to `wtRoot`; ruff and black
+ * then resolve their own nested config from `--stdin-filename`.
  *
- * Black wins over ruff unless ruff's formatter is configured explicitly: a `[tool.ruff]` table
- * or ruff dependency often exists for the linter alone, while black's only job is formatting.
+ * A ruff config or dependency often exists for the linter alone, while black's only job is
+ * formatting. So the nearest directory with a formatting signal decides: a ruff config with a
+ * `format` table selects ruff, a `[tool.black]` table or black dependency selects black. A ruff
+ * config without `format`, or a ruff dependency, selects ruff only when no such signal exists up
+ * to the root. A bare `pyproject.toml` formats nothing, like prettier and oxfmt need a config or
+ * dependency: formatting a project with a tool it never chose would rewrite every file it saves.
  *
  * Not cached: a save costs a few `existsSync` calls per directory level plus parsing the
  * `pyproject.toml` files on the way, negligible next to spawning the formatter.
  */
 export function detectPythonFormatter(startDir: string, wtRoot: string): PythonFormatter | null {
-  const declared = new Set<string>();
+  let ruffWithoutFormat = false;
   for (const dir of dirsUpToRoot(startDir, wtRoot)) {
-    const ruffConfig = readRuffConfig(dir);
     const pyproject = readToml(join(dir, "pyproject.toml"));
-    const tool = pyproject ? recordAt(pyproject, "tool") : undefined;
-    const hasBlack = recordAt(tool, "black") !== undefined;
-    const ruff = ruffConfig ?? recordAt(tool, "ruff");
-    if (hasBlack && recordAt(ruff, "format") === undefined) return BLACK;
-    if (ruff) return RUFF;
-    if (pyproject) for (const name of declaredDependencies(pyproject)) declared.add(name);
+    const tool = recordAt(pyproject, "tool");
+    const ruff = readRuffConfig(dir) ?? recordAt(tool, "ruff");
+    const declared = pyproject ? declaredDependencies(pyproject) : [];
+    if (recordAt(ruff, "format")) return RUFF;
+    if (recordAt(tool, "black") || declared.includes("black")) return BLACK;
+    if (ruff || declared.includes("ruff")) ruffWithoutFormat = true;
   }
-  if (declared.has("black")) return BLACK;
-  if (declared.has("ruff")) return RUFF;
-  return null;
+  return ruffWithoutFormat ? RUFF : null;
 }
 
 /**
@@ -73,7 +70,8 @@ function dirsUpToRoot(startDir: string, wtRoot: string): string[] {
   const root = resolve(wtRoot);
   let dir = resolve(root, startDir);
   const rel = relative(root, dir);
-  if (rel.startsWith("..") || isAbsolute(rel)) return [root];
+  // Lexical check: callers pass the file path in the same form as the worktree path.
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return [root];
   const dirs = [dir];
   while (dir !== root) {
     dir = dirname(dir);
@@ -104,7 +102,7 @@ function readToml(path: string): Record<string, unknown> | undefined {
 
 /**
  * Normalized names of the packages a `pyproject.toml` depends on: PEP 621 dependencies and
- * extras, PEP 735 dependency groups, and the uv, Poetry and PDM dev-dependency tables.
+ * extras, PEP 735 dependency groups, uv, Poetry and PDM dev dependencies, and Hatch environments.
  */
 function declaredDependencies(pyproject: Record<string, unknown>): string[] {
   const project = recordAt(pyproject, "project");
@@ -116,6 +114,9 @@ function declaredDependencies(pyproject: Record<string, unknown>): string[] {
     ...Object.values(recordAt(pyproject, "dependency-groups") ?? {}),
     recordAt(tool, "uv")?.["dev-dependencies"],
     ...Object.values(recordAt(recordAt(tool, "pdm"), "dev-dependencies") ?? {}),
+    ...Object.values(recordAt(recordAt(tool, "hatch"), "envs") ?? {}).flatMap((env) =>
+      isRecord(env) ? [env.dependencies, env["extra-dependencies"]] : [],
+    ),
   ].flatMap((list) => (Array.isArray(list) ? list : []));
   const poetryTables = [
     recordAt(poetry, "dependencies"),

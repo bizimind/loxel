@@ -437,11 +437,13 @@ export class FormatService {
         filePath,
         error: err instanceof Error ? err.message : String(err),
       });
-      // Bun.spawn throws ENOENT when the executable is not on PATH.
-      const notFound = err instanceof Error && "code" in err && err.code === "ENOENT";
-      return notFound
-        ? { content: null, notice: `Format on save skipped: "${command}" is not installed.` }
-        : UNFORMATTED;
+      // Bun.spawn throws ENOENT both when the executable is not on PATH and when it is found but
+      // its interpreter is gone (e.g. a venv whose Python was upgraded away).
+      if (!(err instanceof Error && "code" in err && err.code === "ENOENT")) return UNFORMATTED;
+      const notice = Bun.which(command, { PATH: env.PATH ?? "" })
+        ? `Format on save skipped: "${command}" could not be started; its interpreter may be missing.`
+        : `Format on save skipped: "${command}" is not installed.`;
+      return { content: null, notice };
     }
   }
 }

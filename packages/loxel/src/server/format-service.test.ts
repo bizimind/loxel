@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
 
 import { FormatService } from "./format-service";
+import { findVenvBin } from "./python-formatter";
 
 let root: string | undefined;
 
@@ -147,6 +148,19 @@ describe("FormatService Python detection", () => {
       files: { "pyproject.toml": "[project.optional-dependencies]\ndev = ['ruff', 'black==24.1']" },
       expected: ["black"],
     },
+    {
+      name: "a black dependency next to a linter-only [tool.ruff]",
+      files: {
+        "pyproject.toml":
+          "[dependency-groups]\ndev = ['black>=24', 'ruff']\n[tool.ruff]\nline-length = 100",
+      },
+      expected: ["black"],
+    },
+    {
+      name: "ruff in a Hatch environment",
+      files: { "pyproject.toml": "[tool.hatch.envs.lint]\ndependencies = ['ruff']" },
+      expected: ["ruff"],
+    },
     { name: "unparsable pyproject.toml", files: { "pyproject.toml": "[tool.ruff" }, expected: [] },
   ];
 
@@ -203,6 +217,36 @@ describe("FormatService Python detection", () => {
     expect(await service.format("x=1\n", web, wt, AUTO_DETECT)).toEqual({ content: null });
   });
 
+  test("the nearest formatting signal wins; linter-only ruff signals lose to black anywhere", async () => {
+    const wt = await makeWorktree({
+      "pyproject.toml": "[tool.ruff.format]\nquote-style = 'single'",
+      "legacy/pyproject.toml": "[tool.black]",
+      "lib/pyproject.toml": "[dependency-groups]\ndev = ['black']",
+      "lib/sub/pyproject.toml": "[dependency-groups]\ndev = ['ruff']\n[tool.ruff.lint]",
+      "..hidden/pyproject.toml": "[tool.black]",
+    });
+    await makeFakeVenv(join(wt, ".venv"), "ruff");
+    await makeFakeVenv(join(wt, ".venv"), "black");
+    const service = new FormatService();
+    const formattedBy = async (file: string) => {
+      const result = await service.format("x=1\n", join(wt, file), wt, AUTO_DETECT);
+      return result.content?.split(" ")[0];
+    };
+    expect(await formattedBy("app.py")).toBe("ruff");
+    expect(await formattedBy("legacy/app.py")).toBe("black");
+    expect(await formattedBy("lib/sub/app.py")).toBe("black");
+    // A directory whose name merely starts with ".." is still inside the worktree.
+    expect(await formattedBy("..hidden/app.py")).toBe("black");
+  });
+
+  test("only uses venvs from the file's directory up to the worktree root", async () => {
+    const wt = await makeWorktree({ "repo/pkg/app.py": "" });
+    await makeFakeVenv(join(wt, ".venv"), "ruff");
+    expect(findVenvBin(join(wt, "repo/pkg"), join(wt, "repo"))).toBeUndefined();
+    await makeFakeVenv(join(wt, "repo/venv"), "ruff");
+    expect(findVenvBin(join(wt, "repo/pkg"), join(wt, "repo"))).toBe(join(wt, "repo/venv/bin"));
+  });
+
   test("accepts worktree-relative file paths", async () => {
     const wt = await makeWorktree({ "pkg/ruff.toml": "" });
     await makeFakeVenv(join(wt, "pkg/.venv"), "ruff");
@@ -222,6 +266,18 @@ describe("FormatService failure notices", () => {
     expect(result).toEqual({
       content: null,
       notice: 'Format on save skipped: "loxel-missing-formatter" is not installed.',
+    });
+  });
+
+  test("reports a formatter that is found but cannot start", async () => {
+    const wt = await makeWorktree({ "ruff.toml": "" });
+    await makeFakeVenv(join(wt, ".venv"), "ruff");
+    await writeFile(join(wt, ".venv/bin/ruff"), "#!/nonexistent/python3\n");
+    const result = await new FormatService().format("x=1\n", join(wt, "a.py"), wt, AUTO_DETECT);
+    expect(result).toEqual({
+      content: null,
+      notice:
+        'Format on save skipped: "ruff" could not be started; its interpreter may be missing.',
     });
   });
 
