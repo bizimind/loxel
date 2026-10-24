@@ -27,22 +27,26 @@ prepare() {
   session="$(jq -r '.sessionId // ""' "$state_file")"
   last="$(jq -r '.lastSha // ""' "$state_file")"
 
-  # Skip only when the PR already has the review's summary comment for this head: a run can succeed
-  # without posting anything, so the stored state alone is not proof of a review.
-  if gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
-    --jq ".[] | select(.user.login == \"claude[bot]\" and (.body | contains(\"Reviewed commit: $HEAD_SHA\")))" |
-    grep -q .; then
+  # The PR's summary comments are the record of finished reviews: a run can succeed without posting
+  # anything, so the stored state alone proves nothing.
+  local summaries
+  summaries="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+    --jq '.[] | select(.user.login == "claude[bot]") | .body' | grep -o 'Reviewed commit: [0-9a-f]*' || true)"
+
+  if grep -qx "Reviewed commit: $HEAD_SHA" <<<"$summaries"; then
     mode=skip
-  # Resuming is opt-in (#651): a resumed session can emit a stale result right after start, which
-  # ends the action's run before the review posts anything.
-  elif [[ "${REVIEW_RESUME:-}" == 1 && -n "$session" ]] && fetch session.tgz "$RUNNER_TEMP/session.tgz" \
+  # Resume only a session whose last run posted its summary. A run that ended early (e.g. stopped
+  # while background work was pending) leaves a transcript whose resume ends at once with a 0-turn
+  # result, before the review posts anything.
+  elif [[ -n "$session" && -n "$last" ]] && grep -qx "Reviewed commit: $last" <<<"$summaries" \
+    && fetch session.tgz "$RUNNER_TEMP/session.tgz" \
     && mkdir -p "$projects" && tar -xzf "$RUNNER_TEMP/session.tgz" -C "$projects" \
     && [[ -f "$projects/$session.jsonl" ]]; then
     # Restored files keep old mtimes; keep Claude Code's cleanup from treating them as stale.
     find "$projects" -exec touch {} +
     mode=resume
   else
-    # No usable transcript (none stored, corrupt, or from a run that died early): start over.
+    # No usable transcript (none stored, corrupt, or from a run that did not finish): start over.
     mode=new
     session="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen | tr "[:upper:]" "[:lower:]")"
   fi
