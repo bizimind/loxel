@@ -14,7 +14,8 @@ const cache = new Map<string, Promise<string | null>>();
 
 /**
  * The version of a Python interpreter (`3.12.13`), from `<python> --version`, or null when it
- * cannot be read. Cached until the interpreter file changes (an upgrade or a recreated venv).
+ * cannot be read. Cached until the interpreter file changes (an upgrade or a recreated venv);
+ * failures are not cached.
  * Only pass interpreters the resolver accepted: this executes the file. CPython prints the
  * version before reading any configuration or importing `site`, so no project code runs.
  */
@@ -30,6 +31,10 @@ export async function pythonVersion(pythonPath: string): Promise<string | null> 
   if (!version) {
     version = readVersion(pythonPath);
     cache.set(key, version);
+    // A failed read (a timeout while the OS scans a fresh binary) is retried next time.
+    void version.then((read) => {
+      if (read === null) cache.delete(key);
+    });
   }
   return version;
 }

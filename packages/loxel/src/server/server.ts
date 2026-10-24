@@ -773,6 +773,7 @@ const yamlLspManager = new YamlLspManager({});
 const tsLspManager = new TsLspManager();
 const dockerLspManager = new DockerLspManager();
 const terraformLspManager = new TerraformLspManager();
+// The status bar's interpreter follows environments created or removed on disk.
 const pythonLspManager = new PythonLspManager((wtPath) =>
   broadcastToSubscribers(wtPath, { type: "python_env_changed", wtPath }),
 );

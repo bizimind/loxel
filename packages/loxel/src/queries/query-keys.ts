@@ -36,6 +36,8 @@ export const queryKeys = {
     ["externalFiles", projectPath, wtPath] as const,
   pythonEnv: (projectPath: string | null, wtPath: string | null) =>
     ["pythonEnv", projectPath, wtPath] as const,
+  /** Prefix key for every worktree's Python interpreter. */
+  pythonEnvAll: () => ["pythonEnv"] as const,
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
   openInApps: (path: string) => ["openInApps", path] as const,

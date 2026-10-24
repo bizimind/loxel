@@ -1,4 +1,4 @@
-import { readdirSync, statSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
 import { access, constants, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -95,45 +95,55 @@ export async function resolvePythonEnv(
     const poetry = await poetryEnv(wtPath, env);
     if (poetry) return poetry;
 
-    return systemPython(env);
+    return await systemPython(wtPath, env);
   } catch (err) {
     log.warn("Python environment resolution failed", { wtPath, error: err });
     return null;
   }
 }
 
+/** The interpreters the user can choose from for a worktree; see {@link listPythonEnvs}. */
+export interface PythonEnvChoices {
+  candidates: PythonEnv[];
+  /** What automatic detection picks; also the first candidate. */
+  automatic: PythonEnv | null;
+}
+
 /**
  * Every interpreter the user can choose for a worktree, without duplicates: the one automatic
  * detection picks first, then `.venv` / `venv` / `env` and Pixi environments at the root and in
  * Python project directories below it (those holding a `pyproject.toml`, `requirements.txt`, ...),
- * Poetry's environment, and `python3` on the login-shell PATH. Never throws.
+ * Poetry's environment, `python3` on the login-shell PATH, and last the chosen override when it
+ * is none of those. Never throws.
  */
 export async function listPythonEnvs(
   worktreePath: string,
   options: Pick<ResolvePythonEnvOptions, "env"> = {},
-): Promise<PythonEnv[]> {
+): Promise<PythonEnvChoices> {
   const env = options.env ?? buildSpawnEnv();
   const wtPath = path.resolve(worktreePath);
   try {
+    const overridePath = getPythonOverride(wtPath);
     const projectDirs = [wtPath, ...(await pythonProjectDirs(wtPath))];
-    const found = await Promise.all([
+    const [automatic, ...found] = await Promise.all([
       resolvePythonEnv(wtPath, { overridePath: null, env }),
       ...projectDirs.flatMap((dir) => [
         ...VENV_DIR_NAMES.map((name) => venvAt(wtPath, path.join(dir, name))),
         ...pixiEnvDirs(dir).map((envPath) => envAt(wtPath, envPath, "pixi")),
       ]),
       poetryEnv(wtPath, env),
-      systemPython(env),
+      systemPython(wtPath, env),
+      overridePath ? interpreterAt(wtPath, overridePath, "override") : null,
     ]);
     const byPath = new Map<string, PythonEnv>();
-    for (const candidate of found) {
+    for (const candidate of [automatic, ...found]) {
       if (candidate && !byPath.has(candidate.pythonPath))
         byPath.set(candidate.pythonPath, candidate);
     }
-    return [...byPath.values()];
+    return { candidates: [...byPath.values()], automatic: automatic ?? null };
   } catch (err) {
     log.warn("Listing Python environments failed", { wtPath, error: err });
-    return [];
+    return { candidates: [], automatic: null };
   }
 }
 
@@ -264,6 +274,10 @@ function watchTargets(wtPath: string, current: PythonEnv | null): Map<string, Se
     for (const name of [...interpreterDirNames(), "pyvenv.cfg"]) add(current.envPath, name);
     addInterpreterDirs(current.envPath);
     for (const dir of sitePackagesDirs(current.envPath)) add(dir, null);
+  } else if (current) {
+    // An interpreter outside any environment (a chosen `/opt/homebrew/bin/python3.12`): notice it
+    // being removed, so detection takes over.
+    add(path.dirname(current.pythonPath), path.basename(current.pythonPath));
   }
   return targets;
 }
@@ -297,7 +311,9 @@ async function interpreterAt(
   pythonPath: string,
   source: PythonEnvSource,
 ): Promise<PythonEnv | null> {
-  if (!(await isExecutable(pythonPath))) return null;
+  // A relative path would be checked against the server's directory but tracked-checked in the
+  // worktree; overrides are stored absolute, so anything else is not one Loxel wrote.
+  if (!path.isAbsolute(pythonPath) || !(await isExecutable(pythonPath))) return null;
   if (await isShippedByRepo(wtPath, pythonPath)) {
     log.warn("Ignoring a Python interpreter tracked by git", { wtPath, pythonPath });
     return null;
@@ -305,10 +321,19 @@ async function interpreterAt(
   return { source, pythonPath, envPath: await envPrefixOf(pythonPath) };
 }
 
-function systemPython(env: Record<string, string | undefined>): PythonEnv | null {
+async function systemPython(
+  wtPath: string,
+  env: Record<string, string | undefined>,
+): Promise<PythonEnv | null> {
   const PATH = env.PATH ?? "";
   const system = Bun.which("python3", { PATH }) ?? Bun.which("python", { PATH });
-  return system ? { source: "system", pythonPath: system, envPath: null } : null;
+  if (!system) return null;
+  // PATH can include a repository directory (direnv's `PATH_add bin`).
+  if (await isShippedByRepo(wtPath, system)) {
+    log.warn("Ignoring a Python interpreter tracked by git", { wtPath, pythonPath: system });
+    return null;
+  }
+  return { source: "system", pythonPath: system, envPath: null };
 }
 
 /**
@@ -362,9 +387,10 @@ function pixiEnvDirs(projectDir: string): string[] {
 }
 
 /**
- * Whether the interpreter (or what its symlinks resolve to) is a file git tracks in the worktree.
- * Real environments are never committed, and Pyright executes the interpreter, so a committed
- * `.venv/bin/python` would otherwise run repository code as soon as a Python file is opened.
+ * Whether the interpreter (or what its symlinks resolve to) is a file git tracks in the worktree,
+ * including in a submodule or nested repository inside it. Real environments are never committed,
+ * and Loxel and Pyright execute the interpreter, so a committed `.venv/bin/python` would otherwise
+ * run repository code as soon as a Python file is opened.
  */
 async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<boolean> {
   const candidates = [pythonPath, await realpath(pythonPath)];
@@ -372,9 +398,15 @@ async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<bool
   return tracked.some(Boolean);
 }
 
+/**
+ * Whether git tracks `filePath`, asked of the innermost repository holding it below the worktree:
+ * the worktree's own index lists a submodule only as a gitlink, so it reports the files committed
+ * inside one as untracked.
+ */
 async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
+  const repo = isInside(filePath, wtPath) ? innermostRepo(wtPath, filePath) : wtPath;
   try {
-    const proc = Bun.spawn(["git", "-C", wtPath, "ls-files", "--error-unmatch", "--", filePath], {
+    const proc = Bun.spawn(["git", "-C", repo, "ls-files", "--error-unmatch", "--", filePath], {
       env: readOnlyGitEnv(),
       stdin: "ignore",
       stdout: "ignore",
@@ -385,6 +417,15 @@ async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean
   } catch {
     return false;
   }
+}
+
+/** The deepest directory between `filePath` and the worktree root that is a repository of its own. */
+function innermostRepo(wtPath: string, filePath: string): string {
+  for (let dir = path.dirname(filePath); dir !== wtPath && isInside(dir, wtPath);) {
+    if (existsSync(path.join(dir, ".git"))) return dir;
+    dir = path.dirname(dir);
+  }
+  return wtPath;
 }
 
 /** The environment directory an interpreter belongs to, if it is a venv or conda environment. */

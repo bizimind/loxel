@@ -182,6 +182,32 @@ describe("resolvePythonEnv", () => {
     expect(env?.pythonPath).toBe(system);
   });
 
+  test("skips an interpreter committed inside a submodule", async () => {
+    const { wt, outside, bin } = await makeRoot();
+    const git = (cwd: string, ...args: string[]) =>
+      Bun.spawnSync(["git", "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
+    // A repository whose `.venv` is itself committed, used as the worktree's `.venv` submodule.
+    await makeVenv(outside);
+    git(outside, "init", "-q");
+    git(outside, "add", ".");
+    git(outside, "commit", "-qm", "venv");
+    git(wt, "init", "-q");
+    git(wt, "-c", "protocol.file.allow=always", "submodule", "add", "-q", outside, ".venv");
+    expect(await Bun.file(join(wt, ".venv", "bin", "python")).exists()).toBe(true);
+    const system = await writeExecutable(join(bin, "python3"));
+
+    expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
+  });
+
+  test("skips a PATH interpreter the repository tracks", async () => {
+    const { wt } = await makeRoot();
+    await writeExecutable(join(wt, "bin", "python3"));
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    Bun.spawnSync(["git", "-C", wt, "add", "bin"]);
+
+    expect(await resolvePythonEnv(wt, { env: { PATH: join(wt, "bin") } })).toBeNull();
+  });
+
   test("uses the override chosen for the worktree unless told not to", async () => {
     const { wt } = await makeRoot();
     const venvPython = await makeVenv(join(wt, ".venv"));
@@ -312,9 +338,22 @@ describe("listPythonEnvs", () => {
     const pixi = await writeExecutable(join(wt, ".pixi", "envs", "test", "bin", "python"));
     const system = await writeExecutable(join(bin, "python3"));
 
-    const envs = await listPythonEnvs(wt, { env: { PATH: bin } });
-    expect(envs.map((e) => e.pythonPath)).toEqual([rootVenv, pixi, nested, system]);
-    expect(envs.map((e) => e.source)).toEqual(["venv", "pixi", "venv", "system"]);
+    const { candidates, automatic } = await listPythonEnvs(wt, { env: { PATH: bin } });
+    expect(candidates.map((e) => e.pythonPath)).toEqual([rootVenv, pixi, nested, system]);
+    expect(candidates.map((e) => e.source)).toEqual(["venv", "pixi", "venv", "system"]);
+    expect(automatic?.pythonPath).toBe(rootVenv);
+
+    // A chosen interpreter found nowhere else is listed last.
+    const picked = await makeVenv(join(root!, "picked"));
+    setPythonOverride(wt, picked);
+    const withOverride = await listPythonEnvs(wt, { env: { PATH: bin } });
+    expect(withOverride.candidates.at(-1)).toEqual({
+      source: "override",
+      pythonPath: picked,
+      envPath: join(root!, "picked"),
+    });
+    expect(withOverride.automatic?.pythonPath).toBe(rootVenv);
+    setPythonOverride(wt, null);
   });
 
   test("leaves out environments the repository tracks", async () => {
@@ -326,7 +365,10 @@ describe("listPythonEnvs", () => {
     git("init", "-q");
     git("add", "lib");
 
-    expect(await listPythonEnvs(wt, { env: { PATH: "" } })).toEqual([]);
+    expect(await listPythonEnvs(wt, { env: { PATH: "" } })).toEqual({
+      candidates: [],
+      automatic: null,
+    });
   });
 });
 

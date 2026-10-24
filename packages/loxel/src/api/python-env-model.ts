@@ -28,6 +28,8 @@ export interface PythonEnvCandidatesResponse {
   candidates: PythonInterpreter[];
   /** Interpreter automatic detection would choose; one of the candidates. */
   automaticPath: string | null;
+  /** As in {@link PythonEnvResponse}; a usable override is one of the candidates. */
+  overridePath: string | null;
 }
 
 /** `POST /api/python-env/override` body; a null `pythonPath` returns the worktree to automatic detection. */

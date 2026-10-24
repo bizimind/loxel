@@ -66,14 +66,9 @@ export async function selectPythonInterpreter(): Promise<void> {
   if (!wtPath) return;
 
   const { homeDir } = useProjectStore.getState();
-  const state = Promise.all([api.getPythonEnvCandidates(wtPath), api.getPythonEnv(wtPath)]);
-  const items = state.then(([{ candidates, automaticPath }, { env, overridePath }]) => {
+  const state = api.getPythonEnvCandidates(wtPath);
+  const items = state.then(({ candidates, automaticPath, overridePath }) => {
     const automatic = candidates.find((c) => c.pythonPath === automaticPath);
-    const choices = [...candidates];
-    // An entered interpreter is not among the discovered ones; list it so it shows as current.
-    if (env?.source === "override" && !choices.some((c) => c.pythonPath === env.pythonPath)) {
-      choices.unshift(env);
-    }
     const list: QuickPickItem[] = [
       { id: ENTER_PATH_ID, label: "Enter interpreter path…" },
       {
@@ -82,7 +77,7 @@ export async function selectPythonInterpreter(): Promise<void> {
         description: automatic ? pythonInterpreterLabel(automatic, wtPath) : "No interpreter found",
         current: overridePath === null,
       },
-      ...choices.map((c) => ({
+      ...candidates.map((c) => ({
         id: c.pythonPath,
         label: pythonInterpreterLabel(c, wtPath),
         description: displayPythonPath(c.pythonPath, wtPath, homeDir),
@@ -97,7 +92,7 @@ export async function selectPythonInterpreter(): Promise<void> {
 
   let pythonPath: string | null = picked === AUTOMATIC_ID ? null : picked;
   if (picked === ENTER_PATH_ID) {
-    const [, { overridePath }] = await state;
+    const { overridePath } = await state;
     pythonPath = await requestTextInput({
       placeholder: "Path to a Python interpreter or environment directory",
       value: overridePath ?? "",

@@ -1005,13 +1005,11 @@ async function handlePythonEnv(req: Request, ctx: RouteContext): Promise<Respons
 async function handlePythonEnvCandidates(req: Request, ctx: RouteContext): Promise<Response> {
   const wtPath = await resolvePythonWorktree(req, ctx);
   if (wtPath instanceof Response) return wtPath;
-  const [envs, automatic] = await Promise.all([
-    listPythonEnvs(wtPath),
-    resolvePythonEnv(wtPath, { overridePath: null }),
-  ]);
+  const { candidates, automatic } = await listPythonEnvs(wtPath);
   const response: PythonEnvCandidatesResponse = {
-    candidates: await Promise.all(envs.map(withVersion)),
+    candidates: await Promise.all(candidates.map(withVersion)),
     automaticPath: automatic?.pythonPath ?? null,
+    overridePath: getPythonOverride(wtPath),
   };
   return json(response);
 }
@@ -1033,6 +1031,10 @@ async function handlePythonOverride(req: Request, ctx: RouteContext): Promise<Re
       chosen = await normalizePythonOverride(wtPath, pythonPath);
     } catch (err) {
       return error(err instanceof Error ? err.message : "Invalid Python interpreter", 400);
+    }
+    // Language servers and terminals will run it, so take only what answers like a Python.
+    if (!(await pythonVersion(chosen))) {
+      return error(`${chosen} did not report a Python version; is it a Python interpreter?`, 400);
     }
   }
   setPythonOverride(wtPath, chosen);

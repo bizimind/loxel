@@ -13,8 +13,7 @@ import {
   type QuickPickItem,
   useCommandPaletteStore,
 } from "@/store/command-palette";
-import type { ActionId } from "@/store/keybindings/action-registry";
-import { ACTION_IDS, ACTIONS } from "@/store/keybindings/action-registry";
+import { ACTIONS, isActionId } from "@/store/keybindings/action-registry";
 import type { KeyBinding } from "@/store/keybindings/key-combo";
 import {
   getBindingsForAction,
@@ -136,12 +135,18 @@ export function CommandPaletteModal() {
     if (!dialog) return;
     if (isOpen && !dialog.open) {
       dialog.showModal();
-      requestAnimationFrame(() => inputRef.current?.focus());
     } else if (!isOpen && dialog.open) {
       closingRef.current = true;
       dialog.close();
     }
   }, [isOpen]);
+
+  // Focus the input on open, and again when a request replaces another without the dialog closing
+  // in between (the input after a pick), which unmounts the focused row.
+  const modeKind = mode.kind;
+  useEffect(() => {
+    if (isOpen) requestAnimationFrame(() => inputRef.current?.focus());
+  }, [isOpen, modeKind]);
 
   const kbState = useKeybindingStore();
 
@@ -158,11 +163,11 @@ export function CommandPaletteModal() {
         store.submit(key);
         return;
       }
-      if (!ACTION_IDS.has(key as ActionId)) return;
+      if (!isActionId(key)) return;
       close();
       // Defer dispatch so the dialog closes before the action runs
       // (avoids focus conflicts when actions open other dialogs)
-      requestAnimationFrame(() => dispatch(key as ActionId));
+      requestAnimationFrame(() => dispatch(key));
     },
     [close, dispatch],
   );

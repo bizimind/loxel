@@ -317,3 +317,7 @@ export function getActionsByCategory(category: ActionCategory): ActionDef[] {
 
 /** All action IDs as a set, for fast membership checks. */
 export const ACTION_IDS = new Set<ActionId>(ACTIONS.map((a) => a.id));
+
+export function isActionId(id: string): id is ActionId {
+  return (ACTION_IDS as ReadonlySet<string>).has(id);
+}

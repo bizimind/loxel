@@ -19,7 +19,9 @@ export function getPythonOverride(wtPath: string): string | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed === "object" && parsed !== null && "pythonPath" in parsed) {
-      return typeof parsed.pythonPath === "string" ? parsed.pythonPath : null;
+      const { pythonPath } = parsed;
+      // Written only by the override route, which stores absolute paths.
+      return typeof pythonPath === "string" && path.isAbsolute(pythonPath) ? pythonPath : null;
     }
   } catch (err) {
     log.warn("Ignoring an unreadable Python interpreter override", { wtPath, error: err });
