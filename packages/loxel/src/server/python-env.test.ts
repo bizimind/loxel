@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { resolvePythonEnv, watchPythonEnv } from "./python-env";
+import { pathOutsideWorktree, resolvePythonEnv, watchPythonEnv } from "./python-env";
 
 let root: string | undefined;
 
@@ -148,13 +148,26 @@ describe("resolvePythonEnv", () => {
   test("skips a tracked interpreter on PATH", async () => {
     const { wt, bin } = await makeRoot();
     Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
-    const tracked = await writeExecutable(join(wt, "bin", "python3"));
+    await writeExecutable(join(wt, "bin", "python3"));
     Bun.spawnSync(["git", "-C", wt, "add", "bin/python3"]);
-    const python = await writeExecutable(join(bin, "python"));
+    // Only `python3` further along PATH: the same name must still be found there.
+    const python3 = await writeExecutable(join(bin, "python3"));
 
     const env = await resolvePythonEnv(wt, { env: { PATH: `${join(wt, "bin")}:${bin}` } });
-    expect(env?.pythonPath).not.toBe(tracked);
-    expect(env?.pythonPath).toBe(python);
+    expect(env?.pythonPath).toBe(python3);
+  });
+
+  test("uses a .venv symlinked to an environment outside the worktree", async () => {
+    const { wt, outside } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    // Like a feature worktree sharing the main checkout's environment.
+    Bun.spawnSync(["git", "-C", outside, "init", "-q"]);
+    const shared = join(outside, ".venv");
+    await makeVenv(shared);
+    await symlink(shared, join(wt, ".venv"));
+
+    const env = await resolvePythonEnv(wt, { env: { PATH: "" } });
+    expect(env?.pythonPath).toBe(join(wt, ".venv", "bin", "python"));
   });
 
   test("uses an ignored virtual environment in a repository", async () => {
@@ -224,6 +237,14 @@ describe("resolvePythonEnv", () => {
 
     const python3 = await writeExecutable(join(bin, "python3"));
     expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(python3);
+  });
+});
+
+describe("pathOutsideWorktree", () => {
+  test("drops the worktree's own directories and keeps the rest in order", () => {
+    expect(pathOutsideWorktree("/wt/bin:/usr/bin:/wt:/wt-other/bin:bin:/opt/bin", "/wt")).toBe(
+      "/usr/bin:/wt-other/bin:/opt/bin",
+    );
   });
 });
 

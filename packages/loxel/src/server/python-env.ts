@@ -85,9 +85,12 @@ export async function resolvePythonEnv(
     // PATH can include a directory of the worktree itself (direnv's `PATH_add bin`).
     const PATH = env.PATH ?? "";
     for (const name of ["python3", "python"]) {
-      const system = Bun.which(name, { PATH });
-      if (system && !(await isShippedByRepo(wtPath, system))) {
-        return { source: "system", pythonPath: system, envPath: null };
+      // Entry by entry, so a tracked hit early on PATH does not hide a real interpreter later.
+      for (const dir of PATH.split(path.delimiter)) {
+        const system = dir ? Bun.which(name, { PATH: dir }) : null;
+        if (system && !(await isShippedByRepo(wtPath, system))) {
+          return { source: "system", pythonPath: system, envPath: null };
+        }
       }
     }
     return null;
@@ -231,24 +234,28 @@ async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<bool
 
 /**
  * Asks the innermost repository containing `filePath`, since a submodule or nested repository
- * tracks its own files and the worktree's index does not list them. Inside a git worktree, any
- * answer other than a clear "untracked" counts as tracked (fail closed).
+ * tracks its own files and the worktree's index does not list them. Git is asked about the
+ * physical path (parent directory resolved, the file itself kept, so a committed symlink still
+ * counts), and only while that path is physically inside the worktree: an environment the
+ * worktree merely links to, such as another worktree's `.venv`, is not the repository's content.
+ * Inside a git worktree, any answer other than a clear "untracked" counts as tracked (fail closed).
  */
 async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
   const realWtPath = await realpath(wtPath);
-  if (!isInside(filePath, wtPath) && !isInside(filePath, realWtPath)) return false;
-  const worktreeRepo = await runGit(wtPath, ["rev-parse", "--show-toplevel"]);
+  const physical = path.join(await realpath(path.dirname(filePath)), path.basename(filePath));
+  if (!isInside(physical, realWtPath)) return false;
+  const worktreeRepo = await runGit(realWtPath, ["rev-parse", "--show-toplevel"]);
   if (worktreeRepo.exitCode === GIT_SPAWN_FAILED) return true;
   // Not a repository at all, so nothing in it can be committed.
   if (worktreeRepo.exitCode !== 0) return false;
 
-  const innermost = await runGit(path.dirname(filePath), ["rev-parse", "--show-toplevel"]);
+  const innermost = await runGit(path.dirname(physical), ["rev-parse", "--show-toplevel"]);
   if (innermost.exitCode !== 0) return true;
   const listed = await runGit(innermost.stdout.trim(), [
     "ls-files",
     "--error-unmatch",
     "--",
-    filePath,
+    physical,
   ]);
   // `--error-unmatch` exits 1 for an untracked path; anything else is tracked or an error.
   return listed.exitCode !== 1;
@@ -339,6 +346,17 @@ async function isExecutable(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * `PATH` without the worktree's own directories, for processes that look up `python` themselves
+ * (Pyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
+ */
+export function pathOutsideWorktree(PATH: string, wtPath: string): string {
+  const root = path.resolve(wtPath);
+  return PATH.split(path.delimiter)
+    .filter((dir) => dir && !isInside(path.resolve(root, dir), root))
+    .join(path.delimiter);
 }
 
 function isInside(child: string, parent: string): boolean {
