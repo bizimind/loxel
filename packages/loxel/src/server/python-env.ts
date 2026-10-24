@@ -21,6 +21,8 @@ const POETRY_TIMEOUT_MS = 10_000;
 const WATCH_DEBOUNCE_MS = 1000;
 
 const IS_WINDOWS = process.platform === "win32";
+/** `runGit` exit code when git could not be started (missing binary, unusable directory). */
+const GIT_SPAWN_FAILED = -1;
 
 /** A live {@link watchPythonEnv} watch. */
 export interface PythonEnvWatch {
@@ -210,9 +212,10 @@ async function envAt(
 }
 
 /**
- * Whether the interpreter (or what its symlinks resolve to) is a file git tracks in the worktree.
- * Real environments are never committed, and Pyright executes the interpreter, so a committed
- * `.venv/bin/python` would otherwise run repository code as soon as a Python file is opened.
+ * Whether the interpreter (or what its symlinks resolve to) is a file git tracks in the worktree,
+ * including in a submodule or nested repository inside it. Real environments are never committed,
+ * and Pyright executes the interpreter, so a committed `.venv/bin/python` would otherwise run
+ * repository code as soon as a Python file is opened.
  */
 async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<boolean> {
   const candidates = [pythonPath, await realpath(pythonPath)];
@@ -220,18 +223,43 @@ async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<bool
   return tracked.some(Boolean);
 }
 
+/**
+ * Asks the innermost repository containing `filePath`, since a submodule or nested repository
+ * tracks its own files and the worktree's index does not list them. Inside a git worktree, any
+ * answer other than a clear "untracked" counts as tracked (fail closed).
+ */
 async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
+  const realWtPath = await realpath(wtPath);
+  if (!isInside(filePath, wtPath) && !isInside(filePath, realWtPath)) return false;
+  const worktreeRepo = await runGit(wtPath, ["rev-parse", "--show-toplevel"]);
+  if (worktreeRepo.exitCode === GIT_SPAWN_FAILED) return true;
+  // Not a repository at all, so nothing in it can be committed.
+  if (worktreeRepo.exitCode !== 0) return false;
+
+  const innermost = await runGit(path.dirname(filePath), ["rev-parse", "--show-toplevel"]);
+  if (innermost.exitCode !== 0) return true;
+  const listed = await runGit(innermost.stdout.trim(), [
+    "ls-files",
+    "--error-unmatch",
+    "--",
+    filePath,
+  ]);
+  // `--error-unmatch` exits 1 for an untracked path; anything else is tracked or an error.
+  return listed.exitCode !== 1;
+}
+
+async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string }> {
   try {
-    const proc = Bun.spawn(["git", "-C", wtPath, "ls-files", "--error-unmatch", "--", filePath], {
+    const proc = Bun.spawn(["git", "-C", cwd, ...args], {
       env: readOnlyGitEnv(),
       stdin: "ignore",
-      stdout: "ignore",
+      stdout: "pipe",
       stderr: "ignore",
     });
-    // Non-zero for untracked files, paths outside the repository, and non-repositories.
-    return (await proc.exited) === 0;
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return { exitCode, stdout };
   } catch {
-    return false;
+    return { exitCode: GIT_SPAWN_FAILED, stdout: "" };
   }
 }
 
