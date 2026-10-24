@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/code-analysis",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Live code visualization CLI — treemaps, graphs, and more",
   "bin": {
     "code-analysis": "./src/cli.ts"
@@ -20,7 +20,7 @@
     "@bizimind/cli-common": "workspace:*",
     "commander": "^15.0.0",
     "dependency-cruiser": "^18.5.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
