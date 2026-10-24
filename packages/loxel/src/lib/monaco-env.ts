@@ -272,10 +272,16 @@ initSchemaSync();
 // WebSocket at /ws/ts-lsp via packages/monaco-lsp-client. No providers are
 // registered here — doing so would compete with the LSP-backed providers.
 
-// Handle cross-file navigation from "go to definition" — opens target in a new editor tab.
+// Handle cross-file navigation from "go to definition" and document/hover links — opens the
+// target in a new editor tab. Servers answer with editor model URIs (file:// or loxel://HEAD, see
+// CodeEditorPanel) or file:// URIs of files outside every project (stdlib, installed packages),
+// which open as external files.
 monaco.editor.registerEditorOpener({
-  openCodeEditor(_source, resource, selectionOrPosition) {
-    if (resource.scheme !== "loxel") return false;
+  openCodeEditor(source, resource, selectionOrPosition) {
+    if (resource.scheme !== "loxel" && resource.scheme !== "file") return false;
+    // A target in the source's own model is revealed in place by Monaco; this also covers
+    // models that are not files on disk, such as the frontmatter editor's.
+    if (source.getModel()?.uri.toString() === resource.toString()) return false;
 
     const filePath = resource.path;
     let line = 1;
