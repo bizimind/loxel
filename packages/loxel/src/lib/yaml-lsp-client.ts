@@ -1,5 +1,7 @@
 import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client";
 
+import { isLiveEditorModel } from "./live-editor-model";
+
 let connected = false;
 
 /**
@@ -18,7 +20,7 @@ export function connectYamlLsp(): void {
     (transport) => {
       // TODO: consider returning the client instead of relying on self-registration in the constructor
       // eslint-disable-next-line no-new
-      new MonacoLspClient(transport, { languageId: "yaml" });
+      new MonacoLspClient(transport, { languageId: "yaml", modelFilter: isLiveEditorModel });
     },
     () => {
       connected = false;

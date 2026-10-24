@@ -190,6 +190,7 @@ class LspSemanticTokensProvider implements monaco.languages.DocumentSemanticToke
     lastResultId: string | null,
     token: monaco.CancellationToken,
   ): Promise<monaco.languages.SemanticTokens | monaco.languages.SemanticTokensEdits | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, model.getPositionAt(0));
 
     // Two-phase invalidation after format/large edits: first call clears

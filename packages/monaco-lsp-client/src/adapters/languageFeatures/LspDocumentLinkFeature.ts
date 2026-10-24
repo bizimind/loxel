@@ -44,6 +44,7 @@ class LspDocumentLinkProvider implements monaco.languages.LinkProvider {
     model: monaco.editor.ITextModel,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.ILinksList | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, new monaco.Position(1, 1));
 
     const result = await this._client.server.textDocumentDocumentLink({

@@ -28,7 +28,7 @@ The active worktree gets its own TypeScript language server process. Switching w
 | Document symbols | Symbol outline for the current file          |
 | Folding ranges   | Collapse functions, blocks, and regions      |
 
-These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quick fixes); the code editor has no right-click menu.
+These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quick fixes); the code editor has no right-click menu. They work in editor tabs; the [diff viewer](/docs/diff-viewer) shows code without them.
 
 ---
 
