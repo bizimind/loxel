@@ -24,6 +24,7 @@ import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
 import { resolveLanguage } from "@/lib/resolve-language";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
+import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
 import { useEditorStateStore } from "@/store/editor-state";
 import {
@@ -226,11 +227,12 @@ export function CodeEditorPanel({
   resolvedLangRef.current = resolvedLang;
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
 
-  // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one)
+  // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one),
+  // only for files tsc can report on.
   const { data: diagData } = useQuery({
     queryKey: queryKeys.diagnostics(null, undefined, panelWorktreePath ?? undefined),
     queryFn: () => api.getDiagnostics(panelWorktreePath!),
-    enabled: !!panelWorktreePath,
+    enabled: !!panelWorktreePath && hasTypeScriptDiagnostics(filePath),
   });
 
   // Filter diagnostics to this file (d.file is relative, filePath is absolute)
@@ -251,8 +253,9 @@ export function CodeEditorPanel({
     const content = diskContent ?? "";
 
     // Files served by an LSP that cares about real disk paths use file://
-    // URIs (YAML/JSON for schemas, Dockerfile/Terraform for workspace indexing).
-    // Other files use loxel://HEAD/<path> so the existing TS HoverProvider works.
+    // URIs (YAML/JSON for schemas, Dockerfile/Terraform for workspace indexing,
+    // Python for import resolution and cross-file references). Other files use
+    // loxel://HEAD/<path>, which the TypeScript server bridge translates.
     const useFileScheme =
       language === "yaml" ||
       language === "json" ||
@@ -260,7 +263,8 @@ export function CodeEditorPanel({
       language === "dockerbake" ||
       language === "terraform" ||
       language === "astro" ||
-      language === "xml";
+      language === "xml" ||
+      language === "python";
     const uri = useFileScheme
       ? monaco.Uri.from({ scheme: "file", path: filePath })
       : monaco.Uri.from({ scheme: "loxel", authority: "HEAD", path: filePath });
