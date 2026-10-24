@@ -1,11 +1,19 @@
 import * as monaco from "monaco-editor";
 
+import { frontendLog } from "./frontend-logger";
+
+const log = frontendLog.child("ui");
+
+/** Languages whose configuration auto-closes `"""` / `'''` (TOML's is set in `monaco-env.ts`). */
+const TRIPLE_QUOTE_LANGUAGES = new Set(["python", "toml"]);
+
 /**
- * Enter after a block-ending statement dedents the next line. Lines that continue onto the
- * next one (ending in an open bracket, a comma or a backslash) are excluded.
+ * Enter after a block-ending statement dedents the next line. Lines whose code (before any
+ * comment) continues onto the next one are excluded: ending in an open bracket, a comma, a
+ * backslash, a binary operator, a colon or an opening triple quote.
  */
 export const PYTHON_DEDENT_AFTER =
-  /^\s+(?:pass|break|continue|raise|return)\b(?!.*[([{,\\]\s*(?:#.*)?$).*$/;
+  /^\s+(?:pass|break|continue|raise|return)\b(?![^#]*(?:[([{,\\+\-*/%&|^<>=.@:]|"""|''')\s*(?:#.*)?$).*$/;
 
 /** Monaco's built-in Python configuration extended with docstring and dedent behavior. */
 export function extendPythonConfiguration(
@@ -52,9 +60,12 @@ function overtypeTripleQuotes(editor: monaco.editor.ICodeEditor): void {
   editor.onKeyDown((e) => {
     const quote = e.browserEvent.key;
     if (quote !== '"' && quote !== "'") return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (editor.getOption(monaco.editor.EditorOption.readOnly)) return;
     const model = editor.getModel();
     const selections = editor.getSelections();
-    if (model?.getLanguageId() !== "python" || selections?.length !== 1) return;
+    if (!model || !TRIPLE_QUOTE_LANGUAGES.has(model.getLanguageId())) return;
+    if (selections?.length !== 1) return;
     const [selection] = selections;
     if (!selection?.isEmpty()) return;
     const { lineNumber, column } = selection.getPosition();
@@ -80,8 +91,8 @@ export function registerPythonLanguageConfiguration(): void {
           monaco.languages.setLanguageConfiguration("python", extendPythonConfiguration(conf));
         }, 0);
       })
-      .catch((err: unknown) => {
-        console.warn("[python-language-config] Failed to load Monaco's Python definition:", err);
+      .catch((error: unknown) => {
+        log.warn("Failed to load Monaco's Python language definition", { error });
       });
   });
 }

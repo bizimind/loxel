@@ -54,6 +54,7 @@ describe("pip-requirements tokenizer", () => {
           "--index-url https://pypi.org/simple",
           "pkg @ https://example.com/pkg.whl#sha256=abc",
           "-e ./local",
+          "-i https://mirror.example/simple",
           "django==5.0",
         ].join("\n"),
       ),
@@ -67,6 +68,7 @@ describe("pip-requirements tokenizer", () => {
         "https://example.com/pkg.whl#sha256=abc:string",
       ],
       ["-e:keyword", "./local:string"],
+      ["-i:keyword", "https://mirror.example/simple:string"],
       ["django:entity.name.type", "==:keyword.operator", "5.0:constant.numeric"],
     ]);
   });

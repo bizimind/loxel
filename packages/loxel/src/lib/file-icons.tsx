@@ -101,10 +101,10 @@ const FILE_NAME_MAP: Record<string, string> = {
   "vercel.json": "vercel.svg",
 };
 
-/** Filename patterns no exact name can express (checked after exact names) */
+/** Filename patterns no exact name can express (checked after exact names); case-sensitive like the matching file-association globs */
 const FILE_NAME_PATTERNS: [RegExp, string][] = [
-  [/^requirements.*\.(?:txt|in)$/i, "python.svg"],
-  [/^constraints.*\.txt$/i, "python.svg"],
+  [/^requirements.*\.(?:txt|in)$/, "python.svg"],
+  [/^constraints.*\.txt$/, "python.svg"],
 ];
 
 /** Compound extensions (checked before simple ext) */

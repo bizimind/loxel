@@ -29,6 +29,11 @@ describe("resolveLanguage for Python projects", () => {
     expect(resolve(path)).toBe(language);
   });
 
+  test("matches directory globs under dot directories", () => {
+    expect(resolve("/home/me/repo/.worktrees/fix/x/requirements/dev.txt")).toBe("pip-requirements");
+    expect(resolve("/repo/.vscode/settings.json")).toBe("jsonc");
+  });
+
   test("leaves other text files alone", () => {
     expect(resolve("/repo/notes.txt")).toBeNull();
   });

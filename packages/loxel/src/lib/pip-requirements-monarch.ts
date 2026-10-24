@@ -15,8 +15,8 @@ const PIP_REQUIREMENTS_MONARCH: monaco.languages.IMonarchLanguage = {
   tokenizer: {
     root: [
       [/^\s*#.*$/, "comment"],
-      // Options: -r/-c/-e take a path or URL; --flag[=value] covers --index-url, --hash, etc.
-      [/^\s*(?:-[rce]|--[a-z][\w-]*)=?/, "keyword", "@option"],
+      // Options: short (-r, -c, -e, -i, -f) and long (--index-url, --hash=...), with a value.
+      [/^\s*(?:-[a-zA-Z]|--[a-z][\w-]*)=?/, "keyword", "@option"],
       // Bare URLs and local paths are requirements too.
       [/^\s*(?:[a-z][\w+.-]*:\/\/|\.{0,2}\/)[^\s;]*/, "string", "@url"],
       [/^\s*[A-Za-z0-9][\w.-]*/, "entity.name.type", "@requirement"],

@@ -19,6 +19,8 @@ describe("PYTHON_DEDENT_AFTER", () => {
     "    continue",
     "    raise",
     "    raise ValueError('bad')",
+    "    return x  # see a, b,",
+    "    return -1",
   ])("dedents after %p", (line) => {
     expect(PYTHON_DEDENT_AFTER.test(line)).toBe(true);
   });
@@ -32,6 +34,9 @@ describe("PYTHON_DEDENT_AFTER", () => {
     "    return [",
     "    return a, \\",
     "    raise ValueError(  # explain",
+    "    return (a +",
+    "    return a and \\",
+    '    return """',
   ])("does not dedent after %p", (line) => {
     expect(PYTHON_DEDENT_AFTER.test(line)).toBe(false);
   });
@@ -74,6 +79,7 @@ describe("Python editing in Monaco", () => {
 
   beforeAll(async () => {
     registerPythonLanguageConfiguration();
+    monaco.languages.register({ id: "toml" }); // registered by monaco-env.ts in the app
     container = document.createElement("div");
     document.body.append(container);
     const model = monaco.editor.createModel("", "python");
@@ -143,6 +149,33 @@ describe("Python editing in Monaco", () => {
     }
     expect(model.getValue()).toBe(`x = '''Doc.'''`);
     expect(editor.getPosition()?.column).toBe(15);
+  });
+
+  test("ignores quote keys with modifiers", () => {
+    const model = editor.getModel()!;
+    typeAtEnd(`x = """a"""`, "");
+    editor.setPosition({ lineNumber: 1, column: 10 });
+    const input = container.querySelector("textarea")!;
+    const keydown = new KeyboardEvent("keydown", { key: '"', metaKey: true, cancelable: true });
+    input.dispatchEvent(keydown);
+    expect(keydown.defaultPrevented).toBe(false);
+    expect(model.getValue()).toBe(`x = """a"""`);
+  });
+
+  test("steps over triple quotes in TOML too", () => {
+    const model = editor.getModel()!;
+    monaco.editor.setModelLanguage(model, "toml");
+    try {
+      typeAtEnd(`x = """a"""`, "");
+      editor.setPosition({ lineNumber: 1, column: 10 });
+      const input = container.querySelector("textarea")!;
+      const keydown = new KeyboardEvent("keydown", { key: '"', cancelable: true });
+      input.dispatchEvent(keydown);
+      expect(keydown.defaultPrevented).toBe(true);
+      expect(editor.getPosition()?.column).toBe(11);
+    } finally {
+      monaco.editor.setModelLanguage(model, "python");
+    }
   });
 
   test("does not auto-close triple quotes in comments", () => {
