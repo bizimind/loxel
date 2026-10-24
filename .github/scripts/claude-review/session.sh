@@ -10,7 +10,8 @@
 # summary comments, not from this state.
 #
 # Env: PR, HEAD_SHA, GITHUB_REPOSITORY, GITHUB_WORKSPACE, RUNNER_TEMP, GITHUB_OUTPUT,
-# GITHUB_STEP_SUMMARY, STORE (optional); for save also MODE, SESSION_ID, OUTCOME, EXECUTION_FILE.
+# GITHUB_STEP_SUMMARY, GH_TOKEN, STORE (optional); for save also MODE, SESSION_ID, OUTCOME,
+# EXECUTION_FILE.
 set -euo pipefail
 
 # Claude Code keeps transcripts under a directory named after the working directory.
@@ -114,6 +115,22 @@ save() {
     [[ -n "$total" ]] || echo "- Claude did not finish a review in this run; see the review step's log."
     [[ -n "${STORE:-}" ]] || echo "- Session storage is not configured: the next run starts a new session."
   } >>"$GITHUB_STEP_SUMMARY"
+
+  # Claude finished but posted no summary for its commit: the review did not happen (for example
+  # its turn ended early). Fail the step so the check is red and the review gets rerun.
+  if [[ "$OUTCOME" == success && -n "$total" ]]; then
+    local summaries
+    if ! summaries="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+      --jq '.[] | select(.user.login == "claude[bot]") | .body')"; then
+      echo "- Could not read the PR's comments to confirm the review summary was posted." >>"$GITHUB_STEP_SUMMARY"
+      return 0
+    fi
+    if ! grep -q "Reviewed commit: $target" <<<"$summaries"; then
+      echo "- No review summary was posted for \`${target:0:7}\`: the review ended without reviewing." >>"$GITHUB_STEP_SUMMARY"
+      echo "::error::Claude finished without posting the review summary for $target; rerun the review."
+      return 1
+    fi
+  fi
 }
 
 case "${1:-}" in

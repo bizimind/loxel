@@ -9,7 +9,7 @@ Provide a code review for the given pull request.
 
 - This is a review-only task. You may edit files locally to test hypotheses (e.g., check if a fix compiles, write and run temp tests to verify a suspicion), but never commit or push changes.
 - You have internet access for reading, exploring, and research (e.g., checking library docs, fetching API references) and for posting review comments to the PR — but never write to external services, create issues, or post anywhere other than the PR under review.
-- Always launch agents with `run_in_background: false` (foreground). The CI run ends as soon as you end a turn, so background agents would be cut off before they report.
+- Always launch agents with `run_in_background: false` (foreground; the default is background). To run several in parallel, launch them as multiple Agent calls in one message. The CI run ends as soon as your turn ends, killing anything still running, so never end your turn before the summary comment is posted, and never end it to wait for a notification.
 - We only want HIGH SIGNAL issues. False positives erode trust and waste reviewer time — when in doubt, don't flag it.
 
 ## Steps
@@ -17,6 +17,8 @@ Provide a code review for the given pull request.
 1. The PR can change while you review. Start a Monitor watch on `bash .agents/skills/ci-code-review/scripts/pr-head-events.sh <pr>` (timeout_ms 600000) and keep it armed until you finish, re-arming it every time it ends. Each event says the PR head moved and whether commits were added or history was rewritten. For every event, check out the new head (`git fetch --depth=1 origin <sha> && git checkout --detach <sha>`), read what changed (`git diff <old> <new>`; changes merged in from main count too, since they can overlap with or duplicate what the PR does), and judge how it affects the review. Watch events arrive between your tool calls, so a move that lands while subagents run reaches you when they return. Your options range from carrying on as you were, through re-running the parts the change affects or starting extra subagents for the new or changed parts, to setting aside results that no longer apply and redoing that work.
 
    How you react is your call. The bar is that the review you post covers the whole PR at the head you post against, as thoroughly as a fresh review would, without redoing work the change does not affect.
+
+   Right before posting, also compare the PR head (`gh pr view <pr> --json headRefOid -q .headRefOid`) with your checkout (`git rev-parse HEAD`): the watch may be between re-arms, or its latest event not delivered yet. Handle a mismatch like an event, and repeat the check until they match.
 
 2. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
    - The root CLAUDE.md file, if it exists (in this repo it is a symlink to `AGENTS.md`; cite `AGENTS.md` in links)
@@ -66,7 +68,7 @@ Provide a code review for the given pull request.
    - If no issues were found, state: "No issues found. Checked for bugs and CLAUDE.md compliance."
 
    If no issues were found:
-   1. Make sure you handled every head move the watch reported (step 1), so the review covers the head you are about to post on.
+   1. Make sure you handled every head move (step 1, including the check right before posting), so the review covers the head you are about to post on.
    2. Post the summary comment with `gh pr comment` (format in Notes).
    3. Stop the watch with TaskStop and end the review.
 
@@ -74,7 +76,7 @@ Provide a code review for the given pull request.
 
 8. Create a list of all comments that you plan on leaving. This is only for you to make sure you are comfortable with the comments. Do not post this list anywhere. List the comments already on the PR and drop the findings that are already posted: a resumed or interrupted review may have posted some.
 
-9. Post inline comments for each issue using `gh api`. Before posting, make sure you handled every head move the watch reported (step 1), so each finding is checked against the head you post on, and set `commit_id` to that head. Use this exact syntax:
+9. Post inline comments for each issue using `gh api`. Before posting, make sure you handled every head move (step 1, including the check right before posting), so each finding is checked against the head you post on, and set `commit_id` to that head. Use this exact syntax:
 
    ```bash
    gh api repos/{owner}/{repo}/pulls/{pr_number}/comments \

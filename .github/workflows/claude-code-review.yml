@@ -74,6 +74,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_PRIVATE_SECRET_ACCESS_KEY }}
           AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
           AWS_DEFAULT_REGION: auto
+          # Reads the PR's comments to confirm the review posted its summary.
+          GH_TOKEN: ${{ github.token }}
           MODE: ${{ steps.session.outputs.mode }}
           SESSION_ID: ${{ steps.session.outputs.session_id }}
           OUTCOME: ${{ steps.claude-review.outcome }}
