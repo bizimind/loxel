@@ -1,5 +1,7 @@
 import type { ServerWebSocket, Subprocess } from "bun";
 
+import { TS_SOURCE_EXTENSIONS } from "@/lib/typescript-files";
+
 import {
   type BaseLspSession,
   type LspPosition,
@@ -10,7 +12,10 @@ import {
 } from "./stdio-lsp-manager";
 import { resolveTypeScriptBinary } from "./typescript-path";
 
-const TS_EXTENSIONS = /\.(ts|tsx|js|jsx|mts|mjs|cts|cjs|json|jsonc)$/i;
+const TS_EXTENSIONS = new RegExp(
+  `\\.(?:${[...TS_SOURCE_EXTENSIONS, "json", "jsonc"].join("|")})$`,
+  "i",
+);
 
 interface PendingRequest {
   method: string;

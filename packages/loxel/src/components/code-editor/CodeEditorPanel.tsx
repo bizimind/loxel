@@ -24,6 +24,7 @@ import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
 import { resolveLanguage } from "@/lib/resolve-language";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
+import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
 import { useEditorStateStore } from "@/store/editor-state";
 import {
@@ -226,11 +227,12 @@ export function CodeEditorPanel({
   resolvedLangRef.current = resolvedLang;
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
 
-  // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one)
+  // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one),
+  // only for files tsc can report on.
   const { data: diagData } = useQuery({
     queryKey: queryKeys.diagnostics(null, undefined, panelWorktreePath ?? undefined),
     queryFn: () => api.getDiagnostics(panelWorktreePath!),
-    enabled: !!panelWorktreePath,
+    enabled: !!panelWorktreePath && hasTypeScriptDiagnostics(filePath),
   });
 
   // Filter diagnostics to this file (d.file is relative, filePath is absolute)
