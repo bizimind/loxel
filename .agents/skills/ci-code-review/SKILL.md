@@ -104,7 +104,7 @@ Provide a code review for the given pull request.
 
    **IMPORTANT: Only post ONE comment per unique issue. Do not post duplicate comments.**
 
-   When all comments are posted, stop the watch with TaskStop and end the review.
+   When all comments are posted, post the short findings summary with `gh pr comment` (format in Notes), then stop the watch with TaskStop and end the review.
 
 Use this list when evaluating issues in Steps 4 and 5 (these are false positives, do NOT flag):
 
@@ -130,13 +130,29 @@ Notes:
 
 - You must cite and link each issue in inline comments (e.g., if referring to a CLAUDE.md, include a link to it).
 
-- If no issues are found, post a comment with the following format:
+- Every review ends with one short summary comment. Keep it short: the inline comments carry the details, so never repeat them in the summary.
+
+  If no issues are found, use this format:
 
 ---
 
 ## Code review
 
 No issues found. Checked for bugs and CLAUDE.md compliance.
+
+Reviewed commit: <full sha of the commit you reviewed>
+
+---
+
+If issues were found, use this format, with at most one short line per issue:
+
+---
+
+## Code review
+
+Found <N> issue(s), commented inline:
+
+- <file>: <a few words naming the issue>
 
 Reviewed commit: <full sha of the commit you reviewed>
 
