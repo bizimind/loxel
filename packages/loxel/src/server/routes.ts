@@ -36,6 +36,7 @@ import type {
   ScanSuggestionsResult,
   WorkspaceSetup,
 } from "@/api/project-model";
+import type { PythonEnvResponse } from "@/api/python-env-model";
 import type { SearchMatch } from "@/api/search-model";
 import type { WsMessage } from "@/api/ws-protocol";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
@@ -57,6 +58,7 @@ import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
 import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
 import * as projectStore from "./project-store";
+import { resolvePythonEnv } from "./python-env";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
@@ -950,6 +952,14 @@ function handleDetectedFormatters(req: Request, ctx: RouteContext): Response {
   if (!wtPath) return error("Missing wt parameter", 400);
   const formatters = ctx.getDetectedFormatters(wtPath);
   return json({ formatters });
+}
+
+// GET /api/python-env?wt= — The Python interpreter Loxel uses for a worktree
+async function handlePythonEnv(req: Request, ctx: RouteContext): Promise<Response> {
+  const resolved = resolveWorktreeFromReq(req, ctx);
+  if (resolved instanceof Response) return resolved;
+  const response: PythonEnvResponse = { env: await resolvePythonEnv(resolved.wtPath) };
+  return json(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -3003,6 +3013,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/version": handleGetVersion,
     "/api/update/status": handleGetUpdateStatus,
     "/api/detected-formatters": handleDetectedFormatters,
+    "/api/python-env": handlePythonEnv,
   },
   POST: {
     "/api/log": handleLogIngest,

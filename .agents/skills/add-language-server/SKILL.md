@@ -60,6 +60,8 @@ Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped
 - **`spawnArgs()`** — Override if the server doesn't use `["--stdio"]`.
 - **`getInitializationOptions(session)`** — For config the server reads at startup (SDK paths, indexing settings).
 - **`onClientInitialized(session)`** — For push-based config via `workspace/didChangeConfiguration` after handshake (Docker's compose settings, YAML's schemas).
+- **`workspaceConfiguration(session, section)`** — For servers that pull config with `workspace/configuration` (Pyright). Defining it advertises the capability and answers the requests server-side; call `notifyConfigurationChanged(session)` to make the server pull again.
+- **`onSessionClosed(session)`** — Release per-session resources (watchers); must be idempotent.
 - **`handleServerFrame(session, body)` / `handleClientData(session, data)`** — For intercepting/transforming messages. Only TypeScript and Docker use these.
 
 ## Layer 3: Server Registration
