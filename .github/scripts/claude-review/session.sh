@@ -85,9 +85,14 @@ save() {
   if [[ -f "${EXECUTION_FILE:-}" ]]; then
     total="$(jq -r '[.[] | select(.type == "result")] | last | .total_cost_usd // empty' "$EXECUTION_FILE")"
   fi
-  # Only a finished review counts as reviewed; an interrupted one is resumed by the next run.
+  # Only a finished review counts as reviewed; an interrupted one is resumed by the next run. The
+  # action can also succeed without running Claude (it skips PRs that change this workflow), so a
+  # successful step is not enough: the execution file must hold a result that is not an error.
   reviewed="$(jq -r '.reviewedSha // ""' "$state_file")"
-  [[ "$OUTCOME" == success ]] && reviewed="$target"
+  if [[ "$OUTCOME" == success && -f "${EXECUTION_FILE:-}" ]] &&
+    jq -e '[.[] | select(.type == "result")] | last | .is_error == false' "$EXECUTION_FILE" >/dev/null; then
+    reviewed="$target"
+  fi
 
   jq -n --arg session "$SESSION_ID" --arg last "$target" --arg reviewed "$reviewed" \
     --argjson cost "${total:-null}" \
@@ -104,7 +109,7 @@ save() {
   {
     echo "### Claude Code Review"
     echo "- Session: $MODE (\`$SESSION_ID\`), outcome: $OUTCOME"
-    echo "- Reviewed: \`${target:0:7}\`"
+    echo "- Commit: \`${target:0:7}\`"
     if [[ -n "$total" ]]; then
       jq -r --arg prev "$prev" '[.[] | select(.type == "result")] | last
         | "- Reported cost: $\(.total_cost_usd * 100 | round / 100)"
@@ -112,6 +117,7 @@ save() {
           + ", \(.num_turns) turns, \(.duration_ms / 60000 | round) min"' \
         "$EXECUTION_FILE"
     fi
+    [[ -n "$total" ]] || echo "- Claude did not finish a review in this run; see the review step's log."
     [[ -n "${STORE:-}" ]] || echo "- Session storage is not configured: the next run starts a new session."
   } >>"$GITHUB_STEP_SUMMARY"
 }
