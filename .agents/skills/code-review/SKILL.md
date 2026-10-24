@@ -13,10 +13,7 @@ Provide a code review for the given pull request.
 
 ## Steps
 
-1. In CI (`GITHUB_ACTIONS` is set), the PR can change while you review. Start a Monitor watch on `bash .agents/skills/code-review/scripts/pr-head-events.sh <pr>` (timeout_ms 600000) and keep it armed until you finish, re-arming it every time it ends. Each event says the PR head moved and whether commits were added or history was rewritten. For every event, check out the new head (`git fetch --depth=1 origin <sha> && git checkout --detach <sha>`), read what changed (`git diff <old> <new>`), and decide how much of the review it affects:
-   - Nothing the review covers, such as a merge from main that touches none of the PR's files: carry on.
-   - Some of the code under review: tell the affected subagents what changed with SendMessage, or start extra subagents for the changed parts.
-   - Much of it, such as rewritten history or a different approach: stop the subagents whose work no longer applies with TaskStop and start new ones.
+1. In CI (`GITHUB_ACTIONS` is set), the PR can change while you review. Start a Monitor watch on `bash .agents/skills/code-review/scripts/pr-head-events.sh <pr>` (timeout_ms 600000) and keep it armed until you finish, re-arming it every time it ends. Each event says the PR head moved and whether commits were added or history was rewritten. For every event, check out the new head (`git fetch --depth=1 origin <sha> && git checkout --detach <sha>`), read what changed (`git diff <old> <new>`; changes merged in from main count too, since they can overlap with or duplicate what the PR does), and judge how it affects the review. Your options range from carrying on as you were, through telling the affected subagents what changed (SendMessage) or starting extra subagents for the new or changed parts, to stopping subagents whose work no longer applies (TaskStop) and starting new ones.
 
    How you react is your call. The bar is that the review you post covers the whole PR at the head you post against, as thoroughly as a fresh review would, without redoing work the change does not affect. Outside CI, skip this step.
 
