@@ -6,7 +6,8 @@
 #
 # Sessions live in private storage ($STORE, an s3:// prefix on R2). Without it every run starts a
 # new session and nothing is stored. state.json holds the session id, the last commit the session
-# worked on, the last commit it finished reviewing, and the cost the last run reported.
+# worked on, and the cost the last run reported. Whether a head was reviewed is read from the PR's
+# summary comments, not from this state.
 #
 # Env: PR, HEAD_SHA, GITHUB_REPOSITORY, GITHUB_WORKSPACE, RUNNER_TEMP, GITHUB_OUTPUT,
 # GITHUB_STEP_SUMMARY, STORE (optional); for save also MODE, SESSION_ID, OUTCOME, EXECUTION_FILE.
@@ -22,15 +23,19 @@ store() { [[ -z "${STORE:-}" ]] || aws s3 cp --quiet "$1" "$STORE/$2"; }
 prepare() {
   : "${HEAD_SHA:?}" "${PR:?}"
   fetch state.json "$state_file" || echo '{}' >"$state_file"
-  local session last reviewed mode prompt
+  local session last mode prompt
   session="$(jq -r '.sessionId // ""' "$state_file")"
   last="$(jq -r '.lastSha // ""' "$state_file")"
-  reviewed="$(jq -r '.reviewedSha // ""' "$state_file")"
 
-
-  if [[ "$reviewed" == "$HEAD_SHA" ]]; then
+  # Skip only when the PR already has the review's summary comment for this head: a run can succeed
+  # without posting anything, so the stored state alone is not proof of a review.
+  if gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+    --jq ".[] | select(.user.login == \"claude[bot]\" and (.body | contains(\"Reviewed commit: $HEAD_SHA\")))" |
+    grep -q .; then
     mode=skip
-  elif [[ -n "$session" ]] && fetch session.tgz "$RUNNER_TEMP/session.tgz" \
+  # Resuming is opt-in (#651): a resumed session can emit a stale result right after start, which
+  # ends the action's run before the review posts anything.
+  elif [[ "${REVIEW_RESUME:-}" == 1 && -n "$session" ]] && fetch session.tgz "$RUNNER_TEMP/session.tgz" \
     && mkdir -p "$projects" && tar -xzf "$RUNNER_TEMP/session.tgz" -C "$projects" \
     && [[ -f "$projects/$session.jsonl" ]]; then
     # Restored files keep old mtimes; keep Claude Code's cleanup from treating them as stale.
@@ -68,7 +73,7 @@ prepare() {
 
 save() {
   : "${MODE:?}" "${SESSION_ID:?}" "${OUTCOME:?}"
-  local target total prev reviewed
+  local target total prev
   # The reviewer checks out each new head it takes in, so the checkout is the commit it reviewed.
   target="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
   [[ -f "$state_file" ]] || echo '{}' >"$state_file"
@@ -80,18 +85,8 @@ save() {
   if [[ -f "${EXECUTION_FILE:-}" ]]; then
     total="$(jq -r '[.[] | select(.type == "result")] | last | .total_cost_usd // empty' "$EXECUTION_FILE")"
   fi
-  # Only a finished review counts as reviewed; an interrupted one is resumed by the next run. The
-  # action can also succeed without running Claude (it skips PRs that change this workflow), so a
-  # successful step is not enough: the execution file must hold a result that is not an error.
-  reviewed="$(jq -r '.reviewedSha // ""' "$state_file")"
-  if [[ "$OUTCOME" == success && -f "${EXECUTION_FILE:-}" ]] &&
-    jq -e '[.[] | select(.type == "result")] | last | .is_error == false' "$EXECUTION_FILE" >/dev/null; then
-    reviewed="$target"
-  fi
-
-  jq -n --arg session "$SESSION_ID" --arg last "$target" --arg reviewed "$reviewed" \
-    --argjson cost "${total:-null}" \
-    '{sessionId: $session, lastSha: $last, reviewedSha: $reviewed, reportedCostUsd: $cost}' >"$state_file"
+  jq -n --arg session "$SESSION_ID" --arg last "$target" --argjson cost "${total:-null}" \
+    '{sessionId: $session, lastSha: $last, reportedCostUsd: $cost}' >"$state_file"
 
   if [[ -f "$projects/$SESSION_ID.jsonl" ]]; then
     local members=("$SESSION_ID.jsonl")
