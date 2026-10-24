@@ -74,10 +74,13 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
           if (resolved.edit) {
             const edit = toMonacoWorkspaceEdit(resolved.edit, this._client);
             if (edit.rejectReason) {
-              // Monaco still runs the command of an action whose resolve failed;
-              // drop it so the action is refused whole, not half applied.
+              // Monaco's resolveCodeAction has no rejection surface (unlike rename), and a
+              // throw becomes an uncaught error while Monaco still runs the command. Leave
+              // the action with neither edit nor command so it is refused whole.
+              console.warn(`[MonacoLspClient] code action refused: ${edit.rejectReason}`);
+              codeAction.edit = undefined;
               codeAction.command = undefined;
-              throw new Error(edit.rejectReason);
+              return codeAction;
             }
             codeAction.edit = edit;
           }
