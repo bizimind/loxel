@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 
@@ -7,12 +7,31 @@ import type { BackendMode, FormatterBackend } from "./formatter-backends";
 import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
 import { PrettierLibBackend } from "./prettier-lib-backend";
+import {
+  detectPythonFormatter,
+  findVenvBin,
+  PYTHON_FORMAT_EXTENSIONS,
+  type PythonFormatter,
+} from "./python-formatter";
 import { buildSpawnEnv } from "./shell-env";
 
 const log = logger.child("format");
 
 const MAX_FORMAT_SIZE = 1_024 * 1_024; // 1 MB
 const FORMAT_TIMEOUT_MS = 5_000;
+
+/**
+ * Outcome of `FormatService.format()`. `content` is null when the file is saved unformatted;
+ * `notice` then explains failures the user can fix (formatter not installed, timed out). Other
+ * failures, typically a syntax error in the buffer that the language server already flags, only
+ * go to the server log, since they would otherwise repeat on every save.
+ */
+export interface FormatResult {
+  content: string | null;
+  notice?: string;
+}
+
+const UNFORMATTED: FormatResult = { content: null };
 
 // ---------------------------------------------------------------------------
 // Auto-detection rules
@@ -141,16 +160,6 @@ const DETECTION_RULES: {
     formatter: { command: "rustfmt", args: "", extensions: ["rs"], backendMode: "command" },
   },
   {
-    files: ["pyproject.toml"],
-    check: (wtRoot) => existsSync(join(wtRoot, "pyproject.toml")),
-    formatter: {
-      command: "ruff",
-      args: "format --stdin-filename {file}",
-      extensions: ["py"],
-      backendMode: "command",
-    },
-  },
-  {
     files: [".clang-format"],
     check: (wtRoot) => existsSync(join(wtRoot, ".clang-format")),
     formatter: {
@@ -183,19 +192,19 @@ export class FormatService {
 
   /**
    * Format file content using the resolved formatter.
-   * Returns the formatted content, or `null` if no formatter matched or formatting failed.
+   * Returns null `content` if no formatter matched or formatting failed.
    */
   async format(
     content: string,
     filePath: string,
     worktreePath: string | undefined,
     settings: FormattingSettings,
-  ): Promise<string | null> {
-    if (!settings.enabled) return null;
-    if (content.length > MAX_FORMAT_SIZE) return null;
+  ): Promise<FormatResult> {
+    if (!settings.enabled) return UNFORMATTED;
+    if (content.length > MAX_FORMAT_SIZE) return UNFORMATTED;
 
     const ext = extractExtension(filePath);
-    if (!ext) return null;
+    if (!ext) return UNFORMATTED;
 
     // 1. Check manual overrides first
     const override = findMatchingOverride(settings.overrides, ext);
@@ -205,29 +214,31 @@ export class FormatService {
     }
 
     // 2. Auto-detect from project config
-    if (settings.autoDetect && worktreePath) {
-      const detected = this.detectFormatters(worktreePath);
-      for (const fmt of detected) {
-        if (fmt.extensions.has(ext)) {
-          log.info("Formatting with auto-detected formatter", { command: fmt.command, filePath });
-          if (fmt.backendMode !== "command") {
-            return this.formatWithBackend(fmt, content, filePath, worktreePath);
-          }
-          return this.runFormatter(fmt.command, fmt.args, content, filePath, worktreePath);
-        }
-      }
+    const fmt =
+      settings.autoDetect && worktreePath
+        ? this.findDetectedFormatter(ext, filePath, worktreePath)
+        : undefined;
+    if (!fmt || !worktreePath) {
+      log.debug("No formatter found", { filePath, ext });
+      return UNFORMATTED;
     }
-
-    log.debug("No formatter found", { filePath, ext });
-    return null;
+    log.info("Formatting with auto-detected formatter", { command: fmt.command, filePath });
+    if (fmt.backendMode !== "command") {
+      return this.formatWithBackend(fmt, content, filePath, worktreePath);
+    }
+    return this.runFormatter(fmt.command, fmt.args, content, filePath, worktreePath);
   }
 
-  /** Return detected formatters for a worktree (for settings UI). */
+  /**
+   * Return detected formatters for a worktree (for settings UI). The Python formatter is listed
+   * as detected for the worktree root; subprojects may resolve to a different one.
+   */
   getDetectedFormatters(worktreePath: string): { command: string; extensions: string[] }[] {
-    return this.detectFormatters(worktreePath).map((f) => ({
-      command: f.command,
-      extensions: [...f.extensions],
-    }));
+    const python = detectPythonFormatter(worktreePath, worktreePath);
+    const formatters = python
+      ? [...this.detectFormatters(worktreePath), toDetectedPythonFormatter(python)]
+      : this.detectFormatters(worktreePath);
+    return formatters.map((f) => ({ command: f.command, extensions: [...f.extensions] }));
   }
 
   /** Invalidate the auto-detection cache and destroy backends for a worktree. */
@@ -254,12 +265,28 @@ export class FormatService {
   // Private
   // -------------------------------------------------------------------------
 
+  /**
+   * The auto-detected formatter for a file. Python formatters are resolved per file from the
+   * nearest config (see `detectPythonFormatter`); the others from the worktree root's config.
+   */
+  private findDetectedFormatter(
+    ext: string,
+    filePath: string,
+    worktreePath: string,
+  ): DetectedFormatter | undefined {
+    if (!PYTHON_FORMAT_EXTENSIONS.includes(ext)) {
+      return this.detectFormatters(worktreePath).find((f) => f.extensions.has(ext));
+    }
+    const python = detectPythonFormatter(fileDir(filePath, worktreePath), worktreePath);
+    return python ? toDetectedPythonFormatter(python) : undefined;
+  }
+
   private async formatWithBackend(
     fmt: DetectedFormatter,
     content: string,
     filePath: string,
     worktreePath: string,
-  ): Promise<string | null> {
+  ): Promise<FormatResult> {
     const key = `${worktreePath}\0${fmt.command}`;
     let backend = this.backends.get(key);
 
@@ -277,7 +304,7 @@ export class FormatService {
     }
 
     const result = await backend.format(content, filePath);
-    if (result !== null) return result;
+    if (result !== null) return { content: result };
 
     // Backend failed — destroy and fall back to command mode for this request
     log.warn("Daemon formatter failed, falling back to command mode", { command: fmt.command });
@@ -336,7 +363,7 @@ export class FormatService {
     content: string,
     filePath: string,
     worktreePath: string | undefined,
-  ): Promise<string | null> {
+  ): Promise<FormatResult> {
     const ext = extractExtension(filePath) ?? "";
     // Split template args first, then substitute placeholders in each element.
     // This prevents file paths with spaces from being split across arguments.
@@ -346,10 +373,14 @@ export class FormatService {
     ].filter(Boolean);
 
     const env = buildSpawnEnv();
-    // Prepend node_modules/.bin for project-local formatters
+    // Prepend node_modules/.bin, and for Python files the project venv's bin, so project-local
+    // formatters win over global installs.
     if (worktreePath) {
-      const localBin = join(worktreePath, "node_modules", ".bin");
-      env.PATH = env.PATH ? `${localBin}:${env.PATH}` : localBin;
+      env.PATH = prependPath(env.PATH, join(worktreePath, "node_modules", ".bin"));
+      const venvBin = PYTHON_FORMAT_EXTENSIONS.includes(ext)
+        ? findVenvBin(fileDir(filePath, worktreePath), worktreePath)
+        : undefined;
+      if (venvBin) env.PATH = prependPath(env.PATH, venvBin);
     }
 
     try {
@@ -376,7 +407,10 @@ export class FormatService {
       if (exitCode === "timeout") {
         proc.kill();
         log.warn("Formatter timed out", { command, filePath });
-        return null;
+        return {
+          content: null,
+          notice: `Format on save skipped: "${command}" timed out after ${FORMAT_TIMEOUT_MS / 1_000}s.`,
+        };
       }
 
       if (exitCode !== 0) {
@@ -387,23 +421,27 @@ export class FormatService {
           exitCode,
           stderr: stderr.slice(0, 500),
         });
-        return null;
+        return UNFORMATTED;
       }
 
       const formatted = await new Response(proc.stdout).text();
       if (!formatted) {
         log.warn("Formatter produced empty output", { command, filePath });
-        return null;
+        return UNFORMATTED;
       }
 
-      return formatted;
+      return { content: formatted };
     } catch (err) {
       log.warn("Formatter failed to execute", {
         command,
         filePath,
         error: err instanceof Error ? err.message : String(err),
       });
-      return null;
+      // Bun.spawn throws ENOENT when the executable is not on PATH.
+      const notFound = err instanceof Error && "code" in err && err.code === "ENOENT";
+      return notFound
+        ? { content: null, notice: `Format on save skipped: "${command}" is not installed.` }
+        : UNFORMATTED;
     }
   }
 }
@@ -418,6 +456,19 @@ function extractExtension(filePath: string): string | null {
   const dotIdx = basename.lastIndexOf(".");
   if (dotIdx <= 0) return null;
   return basename.slice(dotIdx + 1).toLowerCase();
+}
+
+/** Directory of `filePath`, which is absolute or relative to the worktree. */
+function fileDir(filePath: string, worktreePath: string): string {
+  return dirname(resolve(worktreePath, filePath));
+}
+
+function prependPath(path: string | undefined, dir: string): string {
+  return path ? `${dir}:${path}` : dir;
+}
+
+function toDetectedPythonFormatter(python: PythonFormatter): DetectedFormatter {
+  return { ...python, extensions: new Set(PYTHON_FORMAT_EXTENSIONS), backendMode: "command" };
 }
 
 function findMatchingOverride(
