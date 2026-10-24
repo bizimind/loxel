@@ -25,9 +25,9 @@
     "fmt:check": "pnpm -w run fmt:check"
   },
   "dependencies": {
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/bun": "1.4.2"
+    "@types/bun": "1.4.3"
   }
 }
