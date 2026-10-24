@@ -42,7 +42,7 @@ prepare() {
     session="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen | tr "[:upper:]" "[:lower:]")"
   fi
 
-  local review="/code-review Code review $GITHUB_REPOSITORY/pull/$PR at commit $HEAD_SHA"
+  local review="/ci-code-review Code review $GITHUB_REPOSITORY/pull/$PR at commit $HEAD_SHA"
   if [[ "$mode" == resume ]]; then
     # With a shallow clone the earlier commit has to be fetched before it can be diffed.
     if [[ -n "$last" ]] && git fetch --quiet --depth=1 origin "$last" 2>/dev/null; then

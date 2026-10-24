@@ -1,5 +1,6 @@
 ---
-description: Code review a pull request
+name: ci-code-review
+description: Code review a pull request in CI, following new commits pushed while the review runs. Used by the Claude Code Review workflow.
 ---
 
 Provide a code review for the given pull request.
@@ -8,14 +9,14 @@ Provide a code review for the given pull request.
 
 - This is a review-only task. You may edit files locally to test hypotheses (e.g., check if a fix compiles, write and run temp tests to verify a suspicion), but never commit or push changes.
 - You have internet access for reading, exploring, and research (e.g., checking library docs, fetching API references) and for posting review comments to the PR — but never write to external services, create issues, or post anywhere other than the PR under review.
-- Launch agents in the foreground (`run_in_background: false`), except while the step 1 watch is running: then launch them in the background so you can react to head moves, and wait for their completion notifications instead of polling them.
+- Launch agents in the background, so you can react to head moves while they run. Wait for their completion notifications instead of polling them.
 - We only want HIGH SIGNAL issues. False positives erode trust and waste reviewer time — when in doubt, don't flag it.
 
 ## Steps
 
-1. In CI (`GITHUB_ACTIONS` is set), the PR can change while you review. Start a Monitor watch on `bash .agents/skills/code-review/scripts/pr-head-events.sh <pr>` (timeout_ms 600000) and keep it armed until you finish, re-arming it every time it ends. Each event says the PR head moved and whether commits were added or history was rewritten. For every event, check out the new head (`git fetch --depth=1 origin <sha> && git checkout --detach <sha>`), read what changed (`git diff <old> <new>`; changes merged in from main count too, since they can overlap with or duplicate what the PR does), and judge how it affects the review. Your options range from carrying on as you were, through telling the affected subagents what changed (SendMessage) or starting extra subagents for the new or changed parts, to stopping subagents whose work no longer applies (TaskStop) and starting new ones.
+1. The PR can change while you review. Start a Monitor watch on `bash .agents/skills/ci-code-review/scripts/pr-head-events.sh <pr>` (timeout_ms 600000) and keep it armed until you finish, re-arming it every time it ends. Each event says the PR head moved and whether commits were added or history was rewritten. For every event, check out the new head (`git fetch --depth=1 origin <sha> && git checkout --detach <sha>`), read what changed (`git diff <old> <new>`; changes merged in from main count too, since they can overlap with or duplicate what the PR does), and judge how it affects the review. Your options range from carrying on as you were, through telling the affected subagents what changed (SendMessage) or starting extra subagents for the new or changed parts, to stopping subagents whose work no longer applies (TaskStop) and starting new ones.
 
-   How you react is your call. The bar is that the review you post covers the whole PR at the head you post against, as thoroughly as a fresh review would, without redoing work the change does not affect. Outside CI, skip this step.
+   How you react is your call. The bar is that the review you post covers the whole PR at the head you post against, as thoroughly as a fresh review would, without redoing work the change does not affect.
 
 2. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
    - The root CLAUDE.md file, if it exists (in this repo it is a symlink to `AGENTS.md`; cite `AGENTS.md` in links)
@@ -64,7 +65,7 @@ Provide a code review for the given pull request.
 
    - If no issues were found, state: "No issues found. Checked for bugs and CLAUDE.md compliance."
 
-   If NO issues were found: if the watch reported a move you have not taken in yet, take it in first (step 1). Then post a summary comment using `gh pr comment`, stop the watch with TaskStop if you started one, and stop.
+   If NO issues were found: if the watch reported a move you have not taken in yet, take it in first (step 1). Then post a summary comment using `gh pr comment`, stop the watch with TaskStop, and stop.
 
    If issues were found, continue to step 8.
 
@@ -100,7 +101,7 @@ Provide a code review for the given pull request.
 
    **IMPORTANT: Only post ONE comment per unique issue. Do not post duplicate comments.**
 
-   When all comments are posted, stop the watch with TaskStop if you started one.
+   When all comments are posted, stop the watch with TaskStop.
 
 Use this list when evaluating issues in Steps 4 and 5 (these are false positives, do NOT flag):
 
