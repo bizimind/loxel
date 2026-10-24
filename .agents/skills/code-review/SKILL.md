@@ -114,7 +114,7 @@ Notes:
 
 - Use gh CLI to interact with GitHub (e.g., fetch pull requests, create comments). Do not use web fetch.
 
-- Review and post against the commit named in the prompt. A hook may tell you mid-review that the PR head moved; then follow its instructions and use the new commit.
+- Review and post against the commit named in the prompt. If the prompt has you watch for head moves and the PR head moves mid-review, follow its instructions and use the new commit.
 
 - Before posting, list the comments already on the PR and skip findings that are already posted: a resumed or interrupted review may have posted some.
 
