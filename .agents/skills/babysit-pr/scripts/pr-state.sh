@@ -6,15 +6,15 @@
 #
 # A round is over when the Claude Code Review run for the PR head has completed and no check is
 # pending, or the PR conflicts with main. It does not end early on a failed check: fixing CI while
-# the review runs would start a second review. --wait gives up after [min] minutes (default 70,
-# above the review job's 56 minute timeout) and prints the snapshot anyway, so a background run
-# always exits and notifies. Transient gh errors during --wait are retried.
+# the review runs would start a second review. --wait gives up after [min] minutes (default 55, since
+# background commands are killed after an hour) and prints the snapshot anyway, so a background run
+# always exits and notifies; run it again if the round is not over. Transient gh errors during --wait are retried.
 set -euo pipefail
 
 pr="${1:?usage: pr-state.sh <pr> [--wait [minutes]]}"
 
 if [[ "${2:-}" == "--wait" ]]; then
-  deadline=$(( $(date +%s) + ${3:-70} * 60 ))
+  deadline=$(( $(date +%s) + ${3:-55} * 60 ))
   while true; do
     # Snapshot in a child process so its errexit applies; a failed snapshot is retried.
     if state="$("$0" "$pr")" && { [[ "$(jq -r .roundOver <<<"$state")" == "true" ]] || (( $(date +%s) >= deadline )); }; then
@@ -39,13 +39,14 @@ pr="$(jq -r .number <<<"$pr_json")"
 head="$(jq -r .headRefOid <<<"$pr_json")"
 branch="$(jq -r .headRefName <<<"$pr_json")"
 
-# Review runs on the branch, newest first. The workflow has no concurrency group, so a slower run
-# for an older commit can still be running, and posting, after a newer push.
+# Review runs on the branch, newest first. Runs queue per PR, and a review can take in commits
+# pushed while it runs, so the run for the head may be a quick skip of an already reviewed head.
 runs_json="$(gh run list --workflow claude-code-review.yml --branch "$branch" --limit 20 \
   --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
 
 clean_comments_json="$(gh api --paginate "repos/$repo/issues/$pr/comments" \
-  --jq '.[] | select(.user.login == "claude[bot]" and (.body | contains("No issues found"))) | {created_at, url: .html_url}' |
+  --jq '.[] | select(.user.login == "claude[bot]" and (.body | contains("No issues found")))
+    | {created_at, url: .html_url, reviewed: ([.body | capture("Reviewed commit: (?<s>[0-9a-f]{40})")][0].s // null)}' |
   jq -s .)"
 
 # last: 100 because unresolved threads are usually the newest.
@@ -73,7 +74,8 @@ fi
 
 local_head=""
 local_relation=""
-if [[ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$branch" ]]; then
+# PR_STATE_REMOTE_ONLY skips comparing with this checkout (pr-events.sh reports the PR, not local work).
+if [[ -z "${PR_STATE_REMOTE_ONLY:-}" && "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$branch" ]]; then
   local_head="$(git rev-parse HEAD)"
   # The PR head may have been pushed from elsewhere (e.g. a committed suggestion); fetch it to compare.
   git fetch -q origin "$branch" 2>/dev/null || true
@@ -94,10 +96,12 @@ jq -n \
   --arg localHead "$local_head" --arg localRelation "$local_relation" '
   ($runs | map(select(.headSha == $pr.headRefOid)) | first) as $run
   | ($run != null and $run.status == "completed") as $reviewDone
-  # A clean comment belongs to the first run that completed after it was posted. It counts only
-  # when that run is the head run, so an older run finishing late cannot clear the new head.
-  | (if $reviewDone and $run.conclusion == "success" then
-      [$cleans[] | select(.created_at >= $run.createdAt) as $c
+  # A clean comment names the commit it reviewed. Older comments without one belong to the first
+  # run that completed after they were posted, and count only when that run is the head run.
+  | ([$cleans[] | select(.reviewed == $pr.headRefOid)] | last) as $cleanForHead
+  | (if $reviewDone and $cleanForHead != null then $cleanForHead
+     elif $reviewDone and $run.conclusion == "success" then
+      [$cleans[] | select(.reviewed == null and .created_at >= $run.createdAt) as $c
         | ($runs | map(select(.status == "completed" and .updatedAt >= $c.created_at))
            | min_by(.updatedAt)) as $owner
         | select($owner.databaseId == $run.databaseId) | $c] | last
