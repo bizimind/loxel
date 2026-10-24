@@ -3,6 +3,7 @@ import { access, constants, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import type { PythonEnv, PythonEnvSource } from "@/api/python-env-model";
+import { isDirectory } from "@/fs-utils";
 
 import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
@@ -309,12 +310,4 @@ async function isExecutable(filePath: string): Promise<boolean> {
 function isInside(child: string, parent: string): boolean {
   const relative = path.relative(parent, child);
   return !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..";
-}
-
-function isDirectory(dirPath: string): boolean {
-  try {
-    return statSync(dirPath).isDirectory();
-  } catch {
-    return false;
-  }
 }
