@@ -73,7 +73,8 @@ fi
 
 local_head=""
 local_relation=""
-if [[ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$branch" ]]; then
+# PR_STATE_REMOTE_ONLY skips comparing with this checkout (pr-events.sh reports the PR, not local work).
+if [[ -z "${PR_STATE_REMOTE_ONLY:-}" && "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$branch" ]]; then
   local_head="$(git rev-parse HEAD)"
   # The PR head may have been pushed from elsewhere (e.g. a committed suggestion); fetch it to compare.
   git fetch -q origin "$branch" 2>/dev/null || true

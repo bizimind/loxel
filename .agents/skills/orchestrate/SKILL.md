@@ -32,11 +32,10 @@ Scripts are in `.agents/skills/orchestrate/scripts/`.
 
 ## Waiting
 
-Only use background commands. Each returns within an hour; run it again if nothing changed:
+Never sleep or poll in the foreground:
 
-- `.agents/skills/babysit-pr/scripts/pr-state.sh <pr> --wait`
-- `budget.sh --alarm`
-- `budget.sh --until-reset`
+- Watch each agent's PR with a Monitor watch on `.agents/skills/babysit-pr/scripts/pr-events.sh <pr>` (timeout_ms 1800000), re-armed every time it expires; without Monitor, use `pr-state.sh <pr> --wait` in the background.
+- `budget.sh --alarm` and `budget.sh --until-reset` run as background commands; each returns within an hour, so run it again if nothing changed.
 
 ## Coordination
 
