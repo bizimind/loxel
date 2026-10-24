@@ -39,13 +39,14 @@ pr="$(jq -r .number <<<"$pr_json")"
 head="$(jq -r .headRefOid <<<"$pr_json")"
 branch="$(jq -r .headRefName <<<"$pr_json")"
 
-# Review runs on the branch, newest first. The workflow has no concurrency group, so a slower run
-# for an older commit can still be running, and posting, after a newer push.
+# Review runs on the branch, newest first. Runs queue per PR, and a review can take in commits
+# pushed while it runs, so the run for the head may be a quick skip of an already reviewed head.
 runs_json="$(gh run list --workflow claude-code-review.yml --branch "$branch" --limit 20 \
   --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
 
 clean_comments_json="$(gh api --paginate "repos/$repo/issues/$pr/comments" \
-  --jq '.[] | select(.user.login == "claude[bot]" and (.body | contains("No issues found"))) | {created_at, url: .html_url}' |
+  --jq '.[] | select(.user.login == "claude[bot]" and (.body | contains("No issues found")))
+    | {created_at, url: .html_url, reviewed: ([.body | capture("Reviewed commit: (?<s>[0-9a-f]{40})")][0].s // null)}' |
   jq -s .)"
 
 # last: 100 because unresolved threads are usually the newest.
@@ -94,10 +95,12 @@ jq -n \
   --arg localHead "$local_head" --arg localRelation "$local_relation" '
   ($runs | map(select(.headSha == $pr.headRefOid)) | first) as $run
   | ($run != null and $run.status == "completed") as $reviewDone
-  # A clean comment belongs to the first run that completed after it was posted. It counts only
-  # when that run is the head run, so an older run finishing late cannot clear the new head.
-  | (if $reviewDone and $run.conclusion == "success" then
-      [$cleans[] | select(.created_at >= $run.createdAt) as $c
+  # A clean comment names the commit it reviewed. Older comments without one belong to the first
+  # run that completed after they were posted, and count only when that run is the head run.
+  | ([$cleans[] | select(.reviewed == $pr.headRefOid)] | last) as $cleanForHead
+  | (if $reviewDone and $cleanForHead != null then $cleanForHead
+     elif $reviewDone and $run.conclusion == "success" then
+      [$cleans[] | select(.reviewed == null and .created_at >= $run.createdAt) as $c
         | ($runs | map(select(.status == "completed" and .updatedAt >= $c.created_at))
            | min_by(.updatedAt)) as $owner
         | select($owner.databaseId == $run.databaseId) | $c] | last
