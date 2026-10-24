@@ -44,7 +44,7 @@ export interface ResolvePythonEnvOptions {
  * Find the Python interpreter for a worktree, in order: the explicit override, `VIRTUAL_ENV` when
  * it lies inside the worktree, a `.venv` / `venv` / `env` virtual environment at the worktree
  * root, Pixi's default environment, Poetry's environment (only with a `poetry.lock` and `poetry`
- * on PATH), then `python3` / `python` on the login-shell PATH. A candidate counts only when its
+ * on PATH), then `python3` / `python` on the login-shell PATH. Any candidate counts only when its
  * interpreter exists, is executable, and is not a file the repository tracks. Never throws;
  * returns null when nothing is found.
  */
@@ -82,9 +82,15 @@ export async function resolvePythonEnv(
     const poetry = await poetryEnv(wtPath, env);
     if (poetry) return poetry;
 
+    // PATH can include a directory of the worktree itself (direnv's `PATH_add bin`).
     const PATH = env.PATH ?? "";
-    const system = Bun.which("python3", { PATH }) ?? Bun.which("python", { PATH });
-    return system ? { source: "system", pythonPath: system, envPath: null } : null;
+    for (const name of ["python3", "python"]) {
+      const system = Bun.which(name, { PATH });
+      if (system && !(await isShippedByRepo(wtPath, system))) {
+        return { source: "system", pythonPath: system, envPath: null };
+      }
+    }
+    return null;
   } catch (err) {
     log.warn("Python environment resolution failed", { wtPath, error: err });
     return null;

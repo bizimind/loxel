@@ -145,6 +145,18 @@ describe("resolvePythonEnv", () => {
     expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
   });
 
+  test("skips a tracked interpreter on PATH", async () => {
+    const { wt, bin } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    const tracked = await writeExecutable(join(wt, "bin", "python3"));
+    Bun.spawnSync(["git", "-C", wt, "add", "bin/python3"]);
+    const python = await writeExecutable(join(bin, "python"));
+
+    const env = await resolvePythonEnv(wt, { env: { PATH: `${join(wt, "bin")}:${bin}` } });
+    expect(env?.pythonPath).not.toBe(tracked);
+    expect(env?.pythonPath).toBe(python);
+  });
+
   test("uses an ignored virtual environment in a repository", async () => {
     const { wt } = await makeRoot();
     Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
