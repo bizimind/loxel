@@ -13,14 +13,16 @@ Provide a code review for the given pull request.
 
 ## Steps
 
-1. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
+1. In CI (`GITHUB_ACTIONS` is set), the PR can move while you review. Start a Monitor watch on `bash .agents/skills/code-review/scripts/pr-head-events.sh <pr>` (timeout_ms 600000) and re-arm it each time it ends, until you finish. Whenever it reports a move, check out the new head (`git fetch --depth=1 origin <sha> && git checkout --detach <sha>`) and carry on from there: the remaining steps review and validate against the new head, with what the move changed reviewed as part of the whole PR. Outside CI, skip this step.
+
+2. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
    - The root CLAUDE.md file, if it exists (in this repo it is a symlink to `AGENTS.md`; cite `AGENTS.md` in links)
 
    - Any CLAUDE.md or AGENTS.md files in directories containing files modified by the pull request
 
-2. Launch a sonnet agent to view the pull request and return a summary of the changes
+3. Launch a sonnet agent to view the pull request and return a summary of the changes
 
-3. Launch 4 agents in parallel to independently review the changes. Each agent should return the list of issues, where each issue includes a description and the reason it was flagged (e.g. "CLAUDE.md adherence", "bug"). The agents should do the following:
+4. Launch 4 agents in parallel to independently review the changes. Each agent should return the list of issues, where each issue includes a description and the reason it was flagged (e.g. "CLAUDE.md adherence", "bug"). The agents should do the following:
 
    Agents 1 + 2: CLAUDE.md compliance sonnet agents
    Audit changes for CLAUDE.md compliance in parallel. Note: When evaluating CLAUDE.md compliance for a file, you should only consider CLAUDE.md files that share a file path with the file or parents.
@@ -51,22 +53,22 @@ Provide a code review for the given pull request.
 
    In addition to the above, each subagent should be told the PR title and description. This will help provide context regarding the author's intent.
 
-4. For each issue found in the previous step by agents 3 and 4, launch parallel subagents to validate the issue. These subagents should get the PR title and description along with a description of the issue. The agent's job is to review the issue to validate that the stated issue is truly an issue with high confidence. For example, if an issue such as "variable is not defined" was flagged, the subagent's job would be to validate that is actually true in the code. Another example would be CLAUDE.md issues. The agent should validate that the CLAUDE.md rule that was violated is scoped for this file and is actually violated. Use Opus subagents for bugs and logic issues, and sonnet agents for CLAUDE.md violations.
+5. For each issue found in the previous step by agents 3 and 4, launch parallel subagents to validate the issue. These subagents should get the PR title and description along with a description of the issue. The agent's job is to review the issue to validate that the stated issue is truly an issue with high confidence. For example, if an issue such as "variable is not defined" was flagged, the subagent's job would be to validate that is actually true in the code. Another example would be CLAUDE.md issues. The agent should validate that the CLAUDE.md rule that was violated is scoped for this file and is actually violated. Use Opus subagents for bugs and logic issues, and sonnet agents for CLAUDE.md violations.
 
-5. Filter out any issues that were not validated in step 4. This step will give us our list of high signal issues for our review.
+6. Filter out any issues that were not validated in step 5. This step will give us our list of high signal issues for our review.
 
-6. Output a summary of the review findings in your response:
+7. Output a summary of the review findings in your response:
    - If issues were found, list each issue with a brief description.
 
    - If no issues were found, state: "No issues found. Checked for bugs and CLAUDE.md compliance."
 
-   If NO issues were found, post a summary comment using `gh pr comment` and stop.
+   If NO issues were found: if the watch reported a move you have not taken in yet, take it in first (step 1). Then post a summary comment using `gh pr comment`, stop the watch with TaskStop if you started one, and stop.
 
-   If issues were found, continue to step 7.
+   If issues were found, continue to step 8.
 
-7. Create a list of all comments that you plan on leaving. This is only for you to make sure you are comfortable with the comments. Do not post this list anywhere.
+8. Create a list of all comments that you plan on leaving. This is only for you to make sure you are comfortable with the comments. Do not post this list anywhere. List the comments already on the PR and drop the findings that are already posted: a resumed or interrupted review may have posted some.
 
-8. Post inline comments for each issue using `gh api`. Use this exact syntax:
+9. Post inline comments for each issue using `gh api`. First, if the watch reported a move you have not taken in yet, take it in (step 1) and re-check each finding against the new head. Set `commit_id` to the commit you reviewed. Use this exact syntax:
 
    ```bash
    gh api repos/{owner}/{repo}/pulls/{pr_number}/comments \
@@ -96,7 +98,9 @@ Provide a code review for the given pull request.
 
    **IMPORTANT: Only post ONE comment per unique issue. Do not post duplicate comments.**
 
-Use this list when evaluating issues in Steps 3 and 4 (these are false positives, do NOT flag):
+   When all comments are posted, stop the watch with TaskStop if you started one.
+
+Use this list when evaluating issues in Steps 4 and 5 (these are false positives, do NOT flag):
 
 - Pre-existing issues
 
@@ -114,11 +118,7 @@ Notes:
 
 - Use gh CLI to interact with GitHub (e.g., fetch pull requests, create comments). Do not use web fetch.
 
-- Review and post against the commit named in the prompt.
-
-- In CI (`GITHUB_ACTIONS` is set), the PR can move while you review. Keep a Monitor watch on `bash .agents/skills/code-review/scripts/pr-head-events.sh <pr>` (timeout_ms 600000) and re-arm it each time it ends. When it reports a move, check out the new head (`git fetch --depth=1 origin <sha> && git checkout --detach <sha>`), re-check your findings against it, review what changed as part of the whole PR, and post against the new commit. Stop the watch with TaskStop before you finish.
-
-- Before posting, list the comments already on the PR and skip findings that are already posted: a resumed or interrupted review may have posted some.
+- Review the commit named in the prompt, or the newer head the watch moved you to.
 
 - Create a todo list before starting.
 
