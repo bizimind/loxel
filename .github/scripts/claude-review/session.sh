@@ -27,10 +27,6 @@ prepare() {
   last="$(jq -r '.lastSha // ""' "$state_file")"
   reviewed="$(jq -r '.reviewedSha // ""' "$state_file")"
 
-  # The reviewer's Monitor watch reports head moves after this one. It runs from outside the
-  # working tree, which the reviewer checks out at newer commits.
-  echo "$HEAD_SHA" >"$RUNNER_TEMP/review-head"
-  cp "$(dirname "$0")/pr-events.sh" "$RUNNER_TEMP/pr-events.sh"
 
   if [[ "$reviewed" == "$HEAD_SHA" ]]; then
     mode=skip
@@ -47,7 +43,6 @@ prepare() {
   fi
 
   local review="/code-review Code review $GITHUB_REPOSITORY/pull/$PR at commit $HEAD_SHA"
-  local watch="While you review, keep a Monitor watch on \`bash $RUNNER_TEMP/pr-events.sh\` (timeout_ms 600000) and re-arm it each time it ends. When it reports that the PR head moved, check out the new head (git fetch --depth=1 origin <sha> && git checkout --detach <sha>), re-check your findings against it, review what changed as part of the whole PR, and post against the new commit. Stop the watch with TaskStop before you finish."
   if [[ "$mode" == resume ]]; then
     # With a shallow clone the earlier commit has to be fetched before it can be diffed.
     if [[ -n "$last" ]] && git fetch --quiet --depth=1 origin "$last" 2>/dev/null; then
@@ -56,9 +51,8 @@ prepare() {
       prompt="$review. You reviewed this PR before, but it changed since (the earlier commit is no longer reachable, e.g. after a force-push), and the working tree is now at $HEAD_SHA. Review the whole PR as one unit again: reuse what still applies from your earlier research and findings, and do not repeat comments already posted on the PR."
     fi
   else
-    prompt="$review."
+    prompt="$review"
   fi
-  prompt="$prompt $watch"
 
   local args="--session-id $session"
   [[ "$mode" == resume ]] && args="--resume $session"
