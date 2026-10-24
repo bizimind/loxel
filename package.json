@@ -13,12 +13,12 @@
     "typecheck": "pnpm -r --parallel run typecheck"
   },
   "devDependencies": {
-    "@types/bun": "1.4.2",
-    "@types/node": "^24.19.0",
+    "@types/bun": "1.4.3",
+    "@types/node": "^24.19.2",
     "@typescript/native": "npm:typescript@7.0.2",
     "oxfmt": "^0.71.0",
-    "oxlint": "1.86.0",
-    "oxlint-tsgolint": "^7.0.2003",
+    "oxlint": "1.88.0",
+    "oxlint-tsgolint": "^7.0.2004",
     "typescript": "npm:@typescript/typescript6@6.0.2"
   }
 }
