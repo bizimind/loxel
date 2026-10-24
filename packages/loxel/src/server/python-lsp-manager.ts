@@ -2,7 +2,7 @@ import type { ServerWebSocket, Subprocess } from "bun";
 
 import type { PythonEnv } from "@/api/python-env-model";
 
-import { resolvePythonEnv, watchPythonEnv } from "./python-env";
+import { type PythonEnvWatch, resolvePythonEnv, watchPythonEnv } from "./python-env";
 import {
   type SpawnOptions,
   StdioLspManager,
@@ -10,20 +10,10 @@ import {
   type WtLspSession,
 } from "./stdio-lsp-manager";
 
-/**
- * Pyright's `python.analysis` settings. These match Pyright's defaults but are pinned here because
- * sending an `analysis` section at all resets `autoSearchPaths` to false unless it is set.
- */
-const PYRIGHT_ANALYSIS_SETTINGS = {
-  autoSearchPaths: true,
-  diagnosticMode: "openFilesOnly",
-  useLibraryCodeForTypes: true,
-};
-
 interface PythonLspSession extends WtLspSession {
   /** Latest resolution of the worktree's interpreter; replaced whenever the environment changes. */
   pythonEnv: Promise<PythonEnv | null>;
-  stopWatchingEnv: (() => void) | null;
+  envWatch: PythonEnvWatch | null;
   /** Set once the client's `initialized` reached the server, after which config may be pushed. */
   initialized: boolean;
 }
@@ -77,9 +67,11 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
       pythonEnv: Promise.resolve(null),
-      stopWatchingEnv: null,
+      envWatch: null,
       initialized: false,
     };
+    // Watch the layout before the first resolution so nothing created meanwhile is missed.
+    session.envWatch = this.watchEnvironment(session, null);
     this.refreshEnvironment(session);
     return session;
   }
@@ -93,8 +85,8 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
   }
 
   protected override onSessionClosed(session: PythonLspSession): void {
-    session.stopWatchingEnv?.();
-    session.stopWatchingEnv = null;
+    session.envWatch?.close();
+    session.envWatch = null;
   }
 
   protected override async workspaceConfiguration(
@@ -102,16 +94,19 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
     section: string | undefined,
   ): Promise<unknown> {
     if (section !== "python") return null;
+    // Only the interpreter: Pyright's own defaults (open-files-only diagnostics, auto search
+    // paths, library types) are what Loxel wants, and sending any `analysis` section would reset
+    // `autoSearchPaths` unless it is repeated.
     const env = await session.pythonEnv;
-    return { ...(env && { pythonPath: env.pythonPath }), analysis: PYRIGHT_ANALYSIS_SETTINGS };
+    return env ? { pythonPath: env.pythonPath } : null;
   }
 
   /**
    * Re-resolve the interpreter, then watch for the next change. Pyright pulls configuration once
    * at startup, so a change after that is announced (`notify`) and Pyright asks again; that also
-   * makes it re-resolve imports after packages are installed into the same environment. The
-   * announcement waits until the new watch is armed, so whatever Pyright's re-pull misses still
-   * triggers another round.
+   * makes it re-resolve imports after packages are installed into the same environment. The old
+   * watch stays armed until the new one is, and a change it saw in between triggers another
+   * round, so nothing written during resolution is lost.
    */
   private refreshEnvironment(session: PythonLspSession, notify = false): void {
     const resolution = resolvePythonEnv(session.wtPath);
@@ -123,11 +118,18 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
         source: env?.source ?? null,
         pythonPath: env?.pythonPath ?? null,
       });
-      session.stopWatchingEnv?.();
-      session.stopWatchingEnv = watchPythonEnv(session.wtPath, env, () => {
-        if (this.isSessionLive(session)) this.refreshEnvironment(session, true);
-      });
+      const previous = session.envWatch;
+      session.envWatch = this.watchEnvironment(session, env);
+      const missedChange = previous?.hasPendingChange ?? false;
+      previous?.close();
       if (notify && session.initialized) this.notifyConfigurationChanged(session);
+      if (missedChange) this.refreshEnvironment(session, true);
+    });
+  }
+
+  private watchEnvironment(session: PythonLspSession, env: PythonEnv | null): PythonEnvWatch {
+    return watchPythonEnv(session.wtPath, env, () => {
+      if (this.isSessionLive(session)) this.refreshEnvironment(session, true);
     });
   }
 }

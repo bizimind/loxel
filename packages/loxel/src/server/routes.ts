@@ -958,7 +958,14 @@ function handleDetectedFormatters(req: Request, ctx: RouteContext): Response {
 async function handlePythonEnv(req: Request, ctx: RouteContext): Promise<Response> {
   const resolved = resolveWorktreeFromReq(req, ctx);
   if (resolved instanceof Response) return resolved;
-  const response: PythonEnvResponse = { env: await resolvePythonEnv(resolved.wtPath) };
+  // Resolution may run `poetry` in the directory, so only a real worktree of the project is accepted.
+  const wtPath = resolve(resolved.wtPath);
+  try {
+    await git.validateWorktreePath(wtPath, resolved.cwd);
+  } catch {
+    return error("Not a worktree of this project", 400);
+  }
+  const response: PythonEnvResponse = { env: await resolvePythonEnv(wtPath) };
   return json(response);
 }
 

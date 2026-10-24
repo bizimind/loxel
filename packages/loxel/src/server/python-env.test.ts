@@ -108,6 +108,21 @@ describe("resolvePythonEnv", () => {
     expect(env).toEqual({ source: "system", pythonPath: system, envPath: null });
   });
 
+  test("skips an interpreter the repository tracks", async () => {
+    const { wt, bin } = await makeRoot();
+    await makeVenv(join(wt, ".venv"));
+    const git = (...args: string[]) => Bun.spawnSync(["git", "-C", wt, ...args]);
+    git("init", "-q");
+    git("add", ".venv");
+    const system = await writeExecutable(join(bin, "python3"));
+
+    expect(await resolvePythonEnv(wt, { env: { PATH: bin } })).toEqual({
+      source: "system",
+      pythonPath: system,
+      envPath: null,
+    });
+  });
+
   test("finds Pixi's default environment", async () => {
     const { wt } = await makeRoot();
     const python = await writeExecutable(join(wt, ".pixi", "envs", "default", "bin", "python"));
@@ -141,6 +156,22 @@ describe("resolvePythonEnv", () => {
     });
   });
 
+  test("hides an activated environment from Poetry", async () => {
+    const { wt, outside, bin } = await makeRoot();
+    const active = join(outside, "active");
+    await makeVenv(active);
+    // Like Poetry, report the activated environment when there is one.
+    await writeExecutable(
+      join(bin, "poetry"),
+      `#!/bin/sh\n[ -n "$VIRTUAL_ENV" ] || exit 1\necho "$VIRTUAL_ENV"\n`,
+    );
+    await writeFile(join(wt, "poetry.lock"), "");
+    const system = await writeExecutable(join(bin, "python3"));
+
+    const env = await resolvePythonEnv(wt, { env: { PATH: bin, VIRTUAL_ENV: active } });
+    expect(env?.pythonPath).toBe(system);
+  });
+
   test("falls back to python3, then python, on PATH, and to null", async () => {
     const { wt, bin } = await makeRoot();
     expect(await resolvePythonEnv(wt, { env: { PATH: bin } })).toBeNull();
@@ -157,10 +188,10 @@ describe("watchPythonEnv", () => {
   async function changesWithin(
     wt: string,
     act: () => Promise<void>,
-    timeoutMs = 3000,
+    timeoutMs = 1800,
   ): Promise<number> {
     let changes = 0;
-    const stop = watchPythonEnv(wt, await resolvePythonEnv(wt, { env: { PATH: "" } }), () => {
+    const watch = watchPythonEnv(wt, await resolvePythonEnv(wt, { env: { PATH: "" } }), () => {
       changes++;
     });
     try {
@@ -170,7 +201,7 @@ describe("watchPythonEnv", () => {
       await Bun.sleep(timeoutMs);
       return changes;
     } finally {
-      stop();
+      watch.close();
     }
   }
 

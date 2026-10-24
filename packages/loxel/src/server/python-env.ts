@@ -1,10 +1,10 @@
 import { readdirSync, statSync, watch, type FSWatcher } from "node:fs";
-import { access, constants } from "node:fs/promises";
+import { access, constants, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import type { PythonEnv, PythonEnvSource } from "@/api/python-env-model";
-import { isWithin } from "@/lib/project-file-helpers";
 
+import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
 
@@ -21,6 +21,13 @@ const WATCH_DEBOUNCE_MS = 1000;
 
 const IS_WINDOWS = process.platform === "win32";
 
+/** A live {@link watchPythonEnv} watch. */
+export interface PythonEnvWatch {
+  close(): void;
+  /** True when a change was seen whose debounced `onChange` has not fired yet. */
+  readonly hasPendingChange: boolean;
+}
+
 export interface ResolvePythonEnvOptions {
   /** Interpreter chosen explicitly for this worktree; wins whenever it is executable. */
   overridePath?: string | null;
@@ -33,13 +40,15 @@ export interface ResolvePythonEnvOptions {
  * it lies inside the worktree, a `.venv` / `venv` / `env` virtual environment at the worktree
  * root, Pixi's default environment, Poetry's environment (only with a `poetry.lock` and `poetry`
  * on PATH), then `python3` / `python` on the login-shell PATH. A candidate counts only when its
- * interpreter exists and is executable. Never throws; returns null when nothing is found.
+ * interpreter exists, is executable, and is not a file the repository tracks. Never throws;
+ * returns null when nothing is found.
  */
 export async function resolvePythonEnv(
-  wtPath: string,
+  worktreePath: string,
   options: ResolvePythonEnvOptions = {},
 ): Promise<PythonEnv | null> {
   const env = options.env ?? buildSpawnEnv();
+  const wtPath = path.resolve(worktreePath);
   try {
     if (options.overridePath && (await isExecutable(options.overridePath))) {
       return {
@@ -50,19 +59,19 @@ export async function resolvePythonEnv(
     }
 
     const virtualEnv = env.VIRTUAL_ENV ? path.resolve(env.VIRTUAL_ENV) : null;
-    if (virtualEnv && isWithin(virtualEnv, wtPath)) {
-      const found = await envAt(virtualEnv, "virtual-env");
+    if (virtualEnv && isInside(virtualEnv, wtPath)) {
+      const found = await envAt(wtPath, virtualEnv, "virtual-env");
       if (found) return found;
     }
 
     for (const name of VENV_DIR_NAMES) {
       const dir = path.join(wtPath, name);
       if (!(await Bun.file(path.join(dir, "pyvenv.cfg")).exists())) continue;
-      const found = await envAt(dir, "venv");
+      const found = await envAt(wtPath, dir, "venv");
       if (found) return found;
     }
 
-    const pixi = await envAt(path.join(wtPath, PIXI_ENV_DIR), "pixi");
+    const pixi = await envAt(wtPath, path.join(wtPath, PIXI_ENV_DIR), "pixi");
     if (pixi) return pixi;
 
     const poetry = await poetryEnv(wtPath, env);
@@ -80,22 +89,27 @@ export async function resolvePythonEnv(
 /**
  * Call `onChange` (debounced) when the worktree's Python environment may have changed: a
  * candidate environment appearing, disappearing or being populated, `poetry.lock` changing, or
- * packages being installed into `current`'s site-packages. Watches are non-recursive and fixed
- * to the layout seen now, so callers re-resolve and re-watch on every change. Returns a disposer.
+ * `current` being recreated or receiving packages. Watches are non-recursive and fixed to the
+ * layout seen now, so callers re-resolve and re-watch on every change; to not lose a change made
+ * while re-resolving, keep the old watch until the new one is armed and check its
+ * `hasPendingChange` before closing it.
  */
 export function watchPythonEnv(
-  wtPath: string,
+  worktreePath: string,
   current: PythonEnv | null,
   onChange: () => void,
-): () => void {
+): PythonEnvWatch {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const schedule = () => {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(onChange, WATCH_DEBOUNCE_MS);
+    timer = setTimeout(() => {
+      timer = null;
+      onChange();
+    }, WATCH_DEBOUNCE_MS);
   };
 
   const watchers: FSWatcher[] = [];
-  for (const [dir, names] of watchTargets(wtPath, current)) {
+  for (const [dir, names] of watchTargets(path.resolve(worktreePath), current)) {
     try {
       const watcher = watch(dir, (_event, filename) => {
         // A null filename means the platform could not say what changed; treat it as relevant.
@@ -110,9 +124,15 @@ export function watchPythonEnv(
     }
   }
 
-  return () => {
-    if (timer) clearTimeout(timer);
-    for (const watcher of watchers) watcher.close();
+  return {
+    close() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      for (const watcher of watchers) watcher.close();
+    },
+    get hasPendingChange() {
+      return timer !== null;
+    },
   };
 }
 
@@ -150,17 +170,55 @@ function watchTargets(wtPath: string, current: PythonEnv | null): Map<string, Se
   add(wtPath, POETRY_LOCK);
 
   if (current?.envPath) {
+    // Also covers environments outside the worktree (Poetry's cache, VIRTUAL_ENV, the override).
+    add(path.dirname(current.envPath), path.basename(current.envPath));
+    for (const name of [...interpreterDirNames(), "pyvenv.cfg"]) add(current.envPath, name);
     for (const dir of sitePackagesDirs(current.envPath)) add(dir, null);
   }
   return targets;
 }
 
-async function envAt(envPath: string, source: PythonEnvSource): Promise<PythonEnv | null> {
+async function envAt(
+  wtPath: string,
+  envPath: string,
+  source: PythonEnvSource,
+): Promise<PythonEnv | null> {
   for (const relative of interpreterRelativePaths()) {
     const pythonPath = path.join(envPath, relative);
-    if (await isExecutable(pythonPath)) return { source, pythonPath, envPath };
+    if (!(await isExecutable(pythonPath))) continue;
+    if (await isShippedByRepo(wtPath, pythonPath)) {
+      log.warn("Ignoring a Python interpreter tracked by git", { wtPath, pythonPath });
+      return null;
+    }
+    return { source, pythonPath, envPath };
   }
   return null;
+}
+
+/**
+ * Whether the interpreter (or what its symlinks resolve to) is a file git tracks in the worktree.
+ * Real environments are never committed, and Pyright executes the interpreter, so a committed
+ * `.venv/bin/python` would otherwise run repository code as soon as a Python file is opened.
+ */
+async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<boolean> {
+  const candidates = [pythonPath, await realpath(pythonPath)];
+  const tracked = await Promise.all(candidates.map((file) => isTrackedByGit(wtPath, file)));
+  return tracked.some(Boolean);
+}
+
+async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
+  try {
+    const proc = Bun.spawn(["git", "-C", wtPath, "ls-files", "--error-unmatch", "--", filePath], {
+      env: readOnlyGitEnv(),
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    // Non-zero for untracked files, paths outside the repository, and non-repositories.
+    return (await proc.exited) === 0;
+  } catch {
+    return false;
+  }
 }
 
 /** The environment directory an interpreter belongs to, if it is a venv or conda environment. */
@@ -181,19 +239,27 @@ async function poetryEnv(
   const poetry = Bun.which("poetry", { PATH: env.PATH ?? "" });
   if (!poetry) return null;
 
-  const proc = Bun.spawn([poetry, "env", "info", "--path"], {
-    cwd: wtPath,
-    env,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "ignore",
-    timeout: POETRY_TIMEOUT_MS,
-  });
-  const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-  // Exits non-zero when the project has no environment yet.
-  const envPath = stdout.trim();
-  if (exitCode !== 0 || !envPath) return null;
-  return envAt(envPath, "poetry");
+  // Poetry reports an activated environment as the project's own, so hide the one Loxel was
+  // launched with.
+  const { VIRTUAL_ENV: _venv, CONDA_PREFIX: _conda, ...poetryEnvVars } = env;
+  try {
+    const proc = Bun.spawn([poetry, "env", "info", "--path"], {
+      cwd: wtPath,
+      env: poetryEnvVars,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      timeout: POETRY_TIMEOUT_MS,
+    });
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    // Exits non-zero when the project has no environment yet.
+    const envPath = stdout.trim();
+    if (exitCode !== 0 || !envPath) return null;
+    return await envAt(wtPath, envPath, "poetry");
+  } catch (err) {
+    log.debug("poetry env info failed", { wtPath, error: err });
+    return null;
+  }
 }
 
 function interpreterRelativePaths(): string[] {
@@ -225,6 +291,11 @@ async function isExecutable(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function isInside(child: string, parent: string): boolean {
+  const relative = path.relative(parent, child);
+  return !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..";
 }
 
 function isDirectory(dirPath: string): boolean {
