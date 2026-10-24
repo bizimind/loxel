@@ -9,6 +9,7 @@ import { fileDiffPath } from "@/api/diff-model";
 import { SideBySideDiffView } from "@/components/diff/SideBySideDiffView";
 import { detectLanguage } from "@/lib/highlighter";
 import { toMonacoLanguage } from "@/lib/monaco-theme";
+import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
 
@@ -72,14 +73,14 @@ export function GitSideBySideDiffView({
   const oldLines = oldFile?.lines ?? EMPTY_LINES;
   const newLines = newFile?.lines ?? EMPTY_LINES;
 
-  // Fetch TypeScript diagnostics for both refs
+  // Fetch TypeScript diagnostics for both refs, only for files tsc can report on
   const { data: oldDiagData } = useQuery({
     queryKey: queryKeys.diagnostics(activeProjectPath, oldRef, undefined),
     queryFn: () =>
       oldRef && activeWorktreePath
         ? api.getDiagnostics(activeWorktreePath, oldRef)
         : Promise.resolve({ diagnostics: [] }),
-    enabled: !!oldRef && !!activeWorktreePath,
+    enabled: !!oldRef && !!activeWorktreePath && hasTypeScriptDiagnostics(oldPath),
   });
   const { data: newDiagData } = useQuery({
     queryKey: queryKeys.diagnostics(activeProjectPath, newRef, worktreePath),
@@ -90,7 +91,7 @@ export function GitSideBySideDiffView({
       if (newRef) return api.getDiagnostics(activeWorktreePath, newRef);
       return Promise.resolve({ diagnostics: [] });
     },
-    enabled: !!newRef || !!worktreePath,
+    enabled: (!!newRef || !!worktreePath) && hasTypeScriptDiagnostics(filePath),
   });
 
   // Filter diagnostics to this file

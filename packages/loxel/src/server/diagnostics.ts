@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 
 import { $ } from "bun";
@@ -13,6 +13,7 @@ import { INTERNAL_WORKTREE_PREFIX, REF_PATTERN, symlinkNodeModules } from "./wor
 const log = logger.child("ts-lsp");
 
 const TSC_TIMEOUT_MS = 30_000;
+const TSCONFIG_FILE = "tsconfig.json";
 
 // In-memory cache keyed by commit hash (immutable — never needs invalidation)
 const cache = new Map<string, TypeScriptDiagnostic[]>();
@@ -28,8 +29,11 @@ export async function getDiagnostics(
   ref: string | undefined,
 ): Promise<TypeScriptDiagnostic[]> {
   stress.track("diagnostics", { ref: ref ?? "__working_tree__" });
+  // Only a root tsconfig makes a project to check. Without one `tsc` prints its help text (or
+  // falls back to a tsconfig in some ancestor directory, which is not this worktree's project).
   // Working tree: run directly, no cache
   if (!ref) {
+    if (!existsSync(join(cwd, TSCONFIG_FILE))) return [];
     return runTypeScriptInDir(cwd, cwd);
   }
 
@@ -54,6 +58,15 @@ export async function getDiagnostics(
 }
 
 async function runDiagnosticsInWorktree(cwd: string, ref: string): Promise<TypeScriptDiagnostic[]> {
+  // Check the ref's tree before paying for a temp worktree checkout. `ls-tree` prints nothing
+  // for a missing path and throws for an unknown ref, so a ref that isn't fetched yet isn't cached.
+  const tsconfig =
+    await $`git -C ${cwd} ls-tree --full-tree --name-only ${ref} -- ${TSCONFIG_FILE}`.text();
+  if (!tsconfig.trim()) {
+    cache.set(ref, []);
+    return [];
+  }
+
   const parentDir = (await $`mktemp -d`.text()).trim();
   const tmpDir = join(parentDir, `${INTERNAL_WORKTREE_PREFIX}diag-${ref.slice(0, 8)}`);
 
