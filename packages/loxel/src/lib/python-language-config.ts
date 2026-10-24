@@ -32,6 +32,9 @@ export function extendPythonConfiguration(
       ...(builtin.onEnterRules ?? []),
       {
         beforeText: PYTHON_DEDENT_AFTER,
+        // Only at end of line: Monaco matches `beforeText` up to the cursor, so without this an
+        // Enter mid-statement would outdent the rest of the line.
+        afterText: /^\s*$/,
         action: { indentAction: monaco.languages.IndentAction.Outdent },
       },
     ],

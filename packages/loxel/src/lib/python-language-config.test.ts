@@ -42,9 +42,11 @@ describe("PYTHON_DEDENT_AFTER", () => {
   });
 });
 
-/** `|` marks the cursor. */
+/** A single `|` marks the cursor. */
 function insideTripleQuote(marked: string, quote: string): boolean {
-  return isInsideTripleQuote(marked.replace("|", ""), marked.indexOf("|") + 1, quote);
+  const cursor = marked.indexOf("|");
+  const line = marked.slice(0, cursor) + marked.slice(cursor + 1);
+  return isInsideTripleQuote(line, cursor + 1, quote);
 }
 
 describe("isInsideTripleQuote", () => {
@@ -125,6 +127,14 @@ describe("Python editing in Monaco", () => {
 
   test("dedents after return", () => {
     expect(typeAtEnd("def f():\n    return 1", "\n")).toBe("def f():\n    return 1\n");
+  });
+
+  test("keeps the indent when Enter splits a return statement", () => {
+    const model = editor.getModel()!;
+    typeAtEnd("def f():\n    return some(a, b) + other(c)", "");
+    editor.setPosition({ lineNumber: 2, column: 23 }); // before `+`
+    editor.trigger("keyboard", "type", { text: "\n" });
+    expect(model.getLineContent(3)).toBe("    + other(c)");
   });
 
   test("auto-closes triple-quoted docstrings", () => {
