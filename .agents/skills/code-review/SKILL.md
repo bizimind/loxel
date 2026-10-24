@@ -8,12 +8,17 @@ Provide a code review for the given pull request.
 
 - This is a review-only task. You may edit files locally to test hypotheses (e.g., check if a fix compiles, write and run temp tests to verify a suspicion), but never commit or push changes.
 - You have internet access for reading, exploring, and research (e.g., checking library docs, fetching API references) and for posting review comments to the PR — but never write to external services, create issues, or post anywhere other than the PR under review.
-- Always launch agents with `run_in_background: false` (foreground). Background agents waste turns polling for completion.
+- Launch agents in the foreground (`run_in_background: false`), except while the step 1 watch is running: then launch them in the background so you can react to head moves, and wait for their completion notifications instead of polling them.
 - We only want HIGH SIGNAL issues. False positives erode trust and waste reviewer time — when in doubt, don't flag it.
 
 ## Steps
 
-1. In CI (`GITHUB_ACTIONS` is set), the PR can move while you review. Start a Monitor watch on `bash .agents/skills/code-review/scripts/pr-head-events.sh <pr>` (timeout_ms 600000) and re-arm it each time it ends, until you finish. Whenever it reports a move, check out the new head (`git fetch --depth=1 origin <sha> && git checkout --detach <sha>`) and carry on from there: the remaining steps review and validate against the new head, with what the move changed reviewed as part of the whole PR. Outside CI, skip this step.
+1. In CI (`GITHUB_ACTIONS` is set), the PR can change while you review. Start a Monitor watch on `bash .agents/skills/code-review/scripts/pr-head-events.sh <pr>` (timeout_ms 600000) and keep it armed until you finish, re-arming it every time it ends. Each event says the PR head moved and whether commits were added or history was rewritten. For every event, check out the new head (`git fetch --depth=1 origin <sha> && git checkout --detach <sha>`), read what changed (`git diff <old> <new>`), and decide how much of the review it affects:
+   - Nothing the review covers, such as a merge from main that touches none of the PR's files: carry on.
+   - Some of the code under review: tell the affected subagents what changed with SendMessage, or start extra subagents for the changed parts.
+   - Much of it, such as rewritten history or a different approach: stop the subagents whose work no longer applies with TaskStop and start new ones.
+
+   How you react is your call. The bar is that the review you post covers the whole PR at the head you post against, as thoroughly as a fresh review would, without redoing work the change does not affect. Outside CI, skip this step.
 
 2. Launch a haiku agent to return a list of file paths (not their contents) for all relevant CLAUDE.md files including:
    - The root CLAUDE.md file, if it exists (in this repo it is a symlink to `AGENTS.md`; cite `AGENTS.md` in links)
