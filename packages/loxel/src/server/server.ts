@@ -42,6 +42,7 @@ import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
 import { PythonLspManager } from "./python-lsp-manager";
+import { onPythonOverrideChange } from "./python-override-store";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
@@ -772,7 +773,15 @@ const yamlLspManager = new YamlLspManager({});
 const tsLspManager = new TsLspManager();
 const dockerLspManager = new DockerLspManager();
 const terraformLspManager = new TerraformLspManager();
-const pythonLspManager = new PythonLspManager();
+const pythonLspManager = new PythonLspManager((wtPath) =>
+  broadcastToSubscribers(wtPath, { type: "python_env_changed", wtPath }),
+);
+// A chosen interpreter reaches the language server (and, through the resolver, everything else
+// that resolves the worktree's Python) without a restart.
+onPythonOverrideChange((wtPath) => {
+  pythonLspManager.refreshWorktreeEnvironment(wtPath);
+  broadcastToSubscribers(wtPath, { type: "python_env_changed", wtPath });
+});
 const astroLspManager = new AstroLspManager();
 const xmlLspManager = new XmlLspManager();
 

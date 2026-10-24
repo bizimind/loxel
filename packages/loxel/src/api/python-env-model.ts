@@ -10,7 +10,28 @@ export interface PythonEnv {
   envPath: string | null;
 }
 
+/** A {@link PythonEnv} with the interpreter's version, as shown in the UI. */
+export interface PythonInterpreter extends PythonEnv {
+  /** Version reported by `python --version`, e.g. `3.12.13`; null when it could not be read. */
+  version: string | null;
+}
+
 /** `GET /api/python-env?wt=` response; `env` is null when no interpreter was found. */
 export interface PythonEnvResponse {
-  env: PythonEnv | null;
+  env: PythonInterpreter | null;
+  /** Interpreter chosen for the worktree, even when it is not usable and detection took over. */
+  overridePath: string | null;
+}
+
+/** `GET /api/python-env/candidates?wt=` response: interpreters the user can pick for a worktree. */
+export interface PythonEnvCandidatesResponse {
+  candidates: PythonInterpreter[];
+  /** Interpreter automatic detection would choose; one of the candidates. */
+  automaticPath: string | null;
+}
+
+/** `POST /api/python-env/override` body; a null `pythonPath` returns the worktree to automatic detection. */
+export interface PythonOverrideRequest {
+  worktreePath: string;
+  pythonPath: string | null;
 }

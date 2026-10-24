@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { ServerWebSocket, Subprocess } from "bun";
 
 import type { PythonEnv } from "@/api/python-env-model";
@@ -31,8 +33,17 @@ interface PythonLspSession extends WtLspSession {
  * inside Pyright.
  */
 export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspContext> {
-  constructor() {
+  /** @param onEnvironmentResolved Called after each re-resolution of a session's interpreter. */
+  constructor(private readonly onEnvironmentResolved: (wtPath: string) => void = () => {}) {
     super("python-lsp");
+  }
+
+  /** Re-resolve the interpreter of the worktree's sessions, e.g. after its override changed. */
+  refreshWorktreeEnvironment(wtPath: string): void {
+    const target = path.resolve(wtPath);
+    for (const session of this.sessions.values()) {
+      if (path.resolve(session.wtPath) === target) this.refreshEnvironment(session, true);
+    }
   }
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
@@ -126,6 +137,7 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       if (previous?.hasPendingChange) next.nudge();
       previous?.close();
       if (notify && session.initialized) this.notifyConfigurationChanged(session);
+      this.onEnvironmentResolved(session.wtPath);
     });
   }
 

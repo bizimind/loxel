@@ -34,6 +34,8 @@ export const queryKeys = {
     ["detachedFiles", projectPath, wtPath] as const,
   externalFiles: (projectPath: string | null, wtPath: string | null) =>
     ["externalFiles", projectPath, wtPath] as const,
+  pythonEnv: (projectPath: string | null, wtPath: string | null) =>
+    ["pythonEnv", projectPath, wtPath] as const,
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
   openInApps: (path: string) => ["openInApps", path] as const,

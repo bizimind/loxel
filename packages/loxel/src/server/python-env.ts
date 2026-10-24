@@ -1,5 +1,6 @@
 import { readdirSync, statSync, watch, type FSWatcher } from "node:fs";
 import { access, constants, realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 
 import type { PythonEnv, PythonEnvSource } from "@/api/python-env-model";
@@ -7,14 +8,28 @@ import { isDirectory } from "@/fs-utils";
 
 import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
+import { getPythonOverride } from "./python-override-store";
 import { buildSpawnEnv } from "./shell-env";
 
 const log = logger.child("server");
 
 /** Virtual environment directories looked for at the worktree root (uv, uv workspaces, PDM, `python -m venv`). */
 const VENV_DIR_NAMES = [".venv", "venv", "env"] as const;
-/** Pixi's default environment, relative to the worktree root. */
-const PIXI_ENV_DIR = ".pixi/envs/default";
+/** Pixi's environments, and its default one, relative to a project directory. */
+const PIXI_ENVS_DIR = ".pixi/envs";
+const PIXI_ENV_DIR = `${PIXI_ENVS_DIR}/default`;
+/** Files marking a Python project directory, where {@link listPythonEnvs} looks for environments. */
+const PROJECT_MARKERS = [
+  "pyproject.toml",
+  "setup.py",
+  "setup.cfg",
+  "requirements.txt",
+  "Pipfile",
+  "pixi.toml",
+];
+/** How deep below the worktree root, and how many, project directories are searched. */
+const MAX_PROJECT_DEPTH = 3;
+const MAX_PROJECT_DIRS = 50;
 const POETRY_LOCK = "poetry.lock";
 const POETRY_TIMEOUT_MS = 10_000;
 /** Quiet period after the last filesystem event before re-resolving (installers write in bursts). */
@@ -32,14 +47,17 @@ export interface PythonEnvWatch {
 }
 
 export interface ResolvePythonEnvOptions {
-  /** Interpreter chosen explicitly for this worktree; wins whenever it is executable. */
+  /**
+   * Interpreter chosen explicitly for this worktree; wins whenever it is usable. Defaults to the
+   * one the user chose for the worktree (see `python-override-store.ts`); null skips any override.
+   */
   overridePath?: string | null;
   /** Environment for `VIRTUAL_ENV` and PATH lookups. Defaults to the login-shell spawn environment. */
   env?: Record<string, string | undefined>;
 }
 
 /**
- * Find the Python interpreter for a worktree, in order: the explicit override, `VIRTUAL_ENV` when
+ * Find the Python interpreter for a worktree, in order: the chosen override, `VIRTUAL_ENV` when
  * it lies inside the worktree, a `.venv` / `venv` / `env` virtual environment at the worktree
  * root, Pixi's default environment, Poetry's environment (only with a `poetry.lock` and `poetry`
  * on PATH), then `python3` / `python` on the login-shell PATH. A candidate counts only when its
@@ -53,12 +71,11 @@ export async function resolvePythonEnv(
   const env = options.env ?? buildSpawnEnv();
   const wtPath = path.resolve(worktreePath);
   try {
-    if (options.overridePath && (await isExecutable(options.overridePath))) {
-      return {
-        source: "override",
-        pythonPath: options.overridePath,
-        envPath: await envPrefixOf(options.overridePath),
-      };
+    const overridePath =
+      options.overridePath === undefined ? getPythonOverride(wtPath) : options.overridePath;
+    if (overridePath) {
+      const found = await interpreterAt(wtPath, overridePath, "override");
+      if (found) return found;
     }
 
     const virtualEnv = env.VIRTUAL_ENV ? path.resolve(env.VIRTUAL_ENV) : null;
@@ -68,9 +85,7 @@ export async function resolvePythonEnv(
     }
 
     for (const name of VENV_DIR_NAMES) {
-      const dir = path.join(wtPath, name);
-      if (!(await Bun.file(path.join(dir, "pyvenv.cfg")).exists())) continue;
-      const found = await envAt(wtPath, dir, "venv");
+      const found = await venvAt(wtPath, path.join(wtPath, name));
       if (found) return found;
     }
 
@@ -80,13 +95,74 @@ export async function resolvePythonEnv(
     const poetry = await poetryEnv(wtPath, env);
     if (poetry) return poetry;
 
-    const PATH = env.PATH ?? "";
-    const system = Bun.which("python3", { PATH }) ?? Bun.which("python", { PATH });
-    return system ? { source: "system", pythonPath: system, envPath: null } : null;
+    return systemPython(env);
   } catch (err) {
     log.warn("Python environment resolution failed", { wtPath, error: err });
     return null;
   }
+}
+
+/**
+ * Every interpreter the user can choose for a worktree, without duplicates: the one automatic
+ * detection picks first, then `.venv` / `venv` / `env` and Pixi environments at the root and in
+ * Python project directories below it (those holding a `pyproject.toml`, `requirements.txt`, ...),
+ * Poetry's environment, and `python3` on the login-shell PATH. Never throws.
+ */
+export async function listPythonEnvs(
+  worktreePath: string,
+  options: Pick<ResolvePythonEnvOptions, "env"> = {},
+): Promise<PythonEnv[]> {
+  const env = options.env ?? buildSpawnEnv();
+  const wtPath = path.resolve(worktreePath);
+  try {
+    const projectDirs = [wtPath, ...(await pythonProjectDirs(wtPath))];
+    const found = await Promise.all([
+      resolvePythonEnv(wtPath, { overridePath: null, env }),
+      ...projectDirs.flatMap((dir) => [
+        ...VENV_DIR_NAMES.map((name) => venvAt(wtPath, path.join(dir, name))),
+        ...pixiEnvDirs(dir).map((envPath) => envAt(wtPath, envPath, "pixi")),
+      ]),
+      poetryEnv(wtPath, env),
+      systemPython(env),
+    ]);
+    const byPath = new Map<string, PythonEnv>();
+    for (const candidate of found) {
+      if (candidate && !byPath.has(candidate.pythonPath))
+        byPath.set(candidate.pythonPath, candidate);
+    }
+    return [...byPath.values()];
+  } catch (err) {
+    log.warn("Listing Python environments failed", { wtPath, error: err });
+    return [];
+  }
+}
+
+/**
+ * Check an interpreter the user entered for a worktree and return it as an absolute interpreter
+ * path. Accepts `~/` paths and environment directories (their `bin/python`). Throws an error
+ * meant for the user when the path is not an executable file or the repository tracks it.
+ */
+export async function normalizePythonOverride(
+  worktreePath: string,
+  input: string,
+): Promise<string> {
+  const wtPath = path.resolve(worktreePath);
+  const trimmed = input.trim();
+  const expanded =
+    trimmed === "~" || trimmed.startsWith("~/") ? path.join(homedir(), trimmed.slice(1)) : trimmed;
+  if (!path.isAbsolute(expanded)) throw new Error("Enter an absolute path to a Python interpreter");
+  const target = path.resolve(expanded);
+  const candidates = isDirectory(target)
+    ? interpreterRelativePaths().map((relative) => path.join(target, relative))
+    : [target];
+  for (const pythonPath of candidates) {
+    if (!(await isExecutable(pythonPath))) continue;
+    if (await isShippedByRepo(wtPath, pythonPath)) {
+      throw new Error("Loxel does not run Python interpreters that the repository tracks in git");
+    }
+    return pythonPath;
+  }
+  throw new Error(`No executable Python interpreter at ${target}`);
 }
 
 /**
@@ -207,6 +283,82 @@ async function envAt(
     return { source, pythonPath, envPath };
   }
   return null;
+}
+
+/** A virtual environment (a directory with `pyvenv.cfg`) at `dir`. */
+async function venvAt(wtPath: string, dir: string): Promise<PythonEnv | null> {
+  if (!(await Bun.file(path.join(dir, "pyvenv.cfg")).exists())) return null;
+  return envAt(wtPath, dir, "venv");
+}
+
+/** An interpreter given by path (the override), held to the same rules as detected ones. */
+async function interpreterAt(
+  wtPath: string,
+  pythonPath: string,
+  source: PythonEnvSource,
+): Promise<PythonEnv | null> {
+  if (!(await isExecutable(pythonPath))) return null;
+  if (await isShippedByRepo(wtPath, pythonPath)) {
+    log.warn("Ignoring a Python interpreter tracked by git", { wtPath, pythonPath });
+    return null;
+  }
+  return { source, pythonPath, envPath: await envPrefixOf(pythonPath) };
+}
+
+function systemPython(env: Record<string, string | undefined>): PythonEnv | null {
+  const PATH = env.PATH ?? "";
+  const system = Bun.which("python3", { PATH }) ?? Bun.which("python", { PATH });
+  return system ? { source: "system", pythonPath: system, envPath: null } : null;
+}
+
+/**
+ * Directories below the worktree root (not the root itself) holding a Python project marker,
+ * from git's view of the tree, so ignored directories such as `node_modules` are skipped.
+ */
+async function pythonProjectDirs(wtPath: string): Promise<string[]> {
+  try {
+    const proc = Bun.spawn(
+      [
+        "git",
+        "-C",
+        wtPath,
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        ...PROJECT_MARKERS.map((marker) => `:(glob)**/${marker}`),
+      ],
+      { env: readOnlyGitEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore" },
+    );
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    if (exitCode !== 0) return [];
+    const dirs = new Set<string>();
+    for (const file of stdout.split("\0")) {
+      const dir = path.posix.dirname(file);
+      if (!file || dir === "." || dir.split("/").length > MAX_PROJECT_DEPTH) continue;
+      dirs.add(dir);
+    }
+    return [...dirs]
+      .toSorted()
+      .slice(0, MAX_PROJECT_DIRS)
+      .map((dir) => path.join(wtPath, dir));
+  } catch (err) {
+    log.debug("Listing Python project directories failed", { wtPath, error: err });
+    return [];
+  }
+}
+
+function pixiEnvDirs(projectDir: string): string[] {
+  const envsDir = path.join(projectDir, PIXI_ENVS_DIR);
+  try {
+    return readdirSync(envsDir)
+      .map((name) => path.join(envsDir, name))
+      .filter(isDirectory);
+  } catch {
+    return [];
+  }
 }
 
 /**
