@@ -402,6 +402,9 @@ function createFilesService(wtPath: string): ProjectFilesService {
     {
       onFileMoved: (oldPath, newPath, source) =>
         broadcastFileMoved(wtPath, oldPath, newPath, source),
+      onPathsChanged: (paths) => {
+        for (const manager of worktreeLspManagers) manager.notifyWatchedFilesChanged(wtPath, paths);
+      },
     },
   );
   return service;
@@ -775,6 +778,15 @@ const terraformLspManager = new TerraformLspManager();
 const pythonLspManager = new PythonLspManager();
 const astroLspManager = new AstroLspManager();
 const xmlLspManager = new XmlLspManager();
+/** Language servers rooted at a worktree, which hear about its file changes. */
+const worktreeLspManagers = [
+  tsLspManager,
+  dockerLspManager,
+  terraformLspManager,
+  pythonLspManager,
+  astroLspManager,
+  xmlLspManager,
+];
 
 function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
   switch (msg.type) {

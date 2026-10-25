@@ -37,6 +37,8 @@ interface PythonLspSession extends WtLspSession {
  * inside Pyright.
  */
 export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspContext> {
+  protected override readonly forwardWatchedFiles = true;
+
   constructor() {
     super("python-lsp");
   }
