@@ -18,6 +18,11 @@ const log = logger.child("files");
 const FILE_NAME = ".editorconfig";
 /** The spec limits section names to 1024 characters; a longer one is ignored with its keys. */
 const MAX_SECTION_LINE = 1026;
+/**
+ * Real files are a few KB. Bounding the size bounds the section count, and with it (see
+ * editorconfig-glob.ts) the time a crafted file in a cloned repository can take per lookup.
+ */
+const MAX_FILE_SIZE = 64 * 1024;
 
 interface Section {
   glob: SectionGlob;
@@ -103,6 +108,11 @@ async function loadConfig(path: string): Promise<EditorConfigFile | null> {
   }
   if (!info.isFile()) {
     configCache.delete(path);
+    return null;
+  }
+  if (info.size > MAX_FILE_SIZE) {
+    configCache.delete(path);
+    log.warn("Ignoring oversized .editorconfig", { path, size: info.size });
     return null;
   }
   const cached = configCache.get(path);

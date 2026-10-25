@@ -196,6 +196,11 @@ describe("resolveEditorConfig", () => {
     });
   });
 
+  test("ignores an oversized file", async () => {
+    await write("repo/.editorconfig", ["[*]", "indent_size = 2", `# ${"x".repeat(70_000)}`]);
+    expect(await resolveEditorConfig(join(repo, "a.ts"), repo)).toEqual({});
+  });
+
   test("re-reads a file that changed, appeared or was removed", async () => {
     const file = join(repo, "pkg/a.ts");
     expect(await resolveEditorConfig(file, repo)).toEqual({});
