@@ -56,7 +56,8 @@ function parse(glob: string): Node[] {
       char(glob[i + 1]!);
       i += 2;
     } else if (c === "*" && glob[i + 1] === "*") {
-      const dirs = glob[i + 2] === "/";
+      // Only a whole `**` segment may match zero directories; `c**/z.c` still needs its `/`.
+      const dirs = glob[i + 2] === "/" && (i === 0 || glob[i - 1] === "/");
       nodes.push({ kind: dirs ? "dirs" : "globstar" });
       i += dirs ? 3 : 2;
     } else if (c === "*" || c === "?") {
