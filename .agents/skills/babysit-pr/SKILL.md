@@ -20,6 +20,6 @@ Get PR $ARGUMENTS to ready-to-merge: the Claude Code Review of the head commit s
 - Vulnerability Check failures get their own PR via `/quick-pr`. Once it merges, merge main into this PR.
 - Unrelated or flaky failures: rerun once, then `/quick-pr` a fix or comment on the existing issue.
 - A review run that failed or was cancelled (often a usage limit): `gh run rerun <id> --failed`.
-- Merging main: `git fetch origin main && git merge origin/main`. Rebase only if the user asks.
+- Merge main only when the PR conflicts with it, or needs a fix that just landed there (like the Vulnerability Check fix above); a PR that is merely behind main stays as is, since each merge adds noise and starts a new review. Use `git fetch origin main && git merge origin/main`, and rebase only if the user asks.
 
 When ready, record the decisions you made along the way in the PR body, and give the user a short summary: what was fixed, reworked, deferred (with issue links) and skipped.
