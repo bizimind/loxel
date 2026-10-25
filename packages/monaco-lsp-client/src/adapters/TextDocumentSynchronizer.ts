@@ -23,6 +23,7 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
     private readonly _server: typeof api.TServerInterface,
     private readonly _capabilities: ILspCapabilitiesRegistry,
     private readonly _languageIds?: ReadonlySet<string>,
+    private readonly _modelFilter?: (textModel: monaco.editor.ITextModel) => boolean,
   ) {
     super();
 
@@ -68,7 +69,7 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
       throw new Error("Not started");
     }
 
-    if (this._languageIds && !this._languageIds.has(m.getLanguageId())) return undefined;
+    if (!this.isSyncedModel(m)) return undefined;
     const existing = this._managedModels.get(m);
     if (existing) return existing;
 
@@ -76,6 +77,11 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
     this._managedModels.set(m, mm);
     this._managedModelsReverse.set(m.uri.toString(true), m);
     return mm;
+  }
+
+  isSyncedModel(textModel: monaco.editor.ITextModel): boolean {
+    if (this._languageIds && !this._languageIds.has(textModel.getLanguageId())) return false;
+    return this._modelFilter?.(textModel) ?? true;
   }
 
   private _removeManagedModel(m: monaco.editor.ITextModel): void {

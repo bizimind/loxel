@@ -21,6 +21,8 @@ const POETRY_TIMEOUT_MS = 10_000;
 const WATCH_DEBOUNCE_MS = 1000;
 
 const IS_WINDOWS = process.platform === "win32";
+/** `runGit` exit code when git could not be started (missing binary, unusable directory). */
+const GIT_SPAWN_FAILED = -1;
 
 /** A live {@link watchPythonEnv} watch. */
 export interface PythonEnvWatch {
@@ -42,7 +44,7 @@ export interface ResolvePythonEnvOptions {
  * Find the Python interpreter for a worktree, in order: the explicit override, `VIRTUAL_ENV` when
  * it lies inside the worktree, a `.venv` / `venv` / `env` virtual environment at the worktree
  * root, Pixi's default environment, Poetry's environment (only with a `poetry.lock` and `poetry`
- * on PATH), then `python3` / `python` on the login-shell PATH. A candidate counts only when its
+ * on PATH), then `python3` / `python` on the login-shell PATH. Any candidate counts only when its
  * interpreter exists, is executable, and is not a file the repository tracks. Never throws;
  * returns null when nothing is found.
  */
@@ -80,9 +82,18 @@ export async function resolvePythonEnv(
     const poetry = await poetryEnv(wtPath, env);
     if (poetry) return poetry;
 
+    // PATH can include a directory of the worktree itself (direnv's `PATH_add bin`).
     const PATH = env.PATH ?? "";
-    const system = Bun.which("python3", { PATH }) ?? Bun.which("python", { PATH });
-    return system ? { source: "system", pythonPath: system, envPath: null } : null;
+    for (const name of ["python3", "python"]) {
+      // Entry by entry, so a tracked hit early on PATH does not hide a real interpreter later.
+      for (const dir of PATH.split(path.delimiter)) {
+        const system = dir ? Bun.which(name, { PATH: dir }) : null;
+        if (system && !(await isShippedByRepo(wtPath, system))) {
+          return { source: "system", pythonPath: system, envPath: null };
+        }
+      }
+    }
+    return null;
   } catch (err) {
     log.warn("Python environment resolution failed", { wtPath, error: err });
     return null;
@@ -210,9 +221,10 @@ async function envAt(
 }
 
 /**
- * Whether the interpreter (or what its symlinks resolve to) is a file git tracks in the worktree.
- * Real environments are never committed, and Pyright executes the interpreter, so a committed
- * `.venv/bin/python` would otherwise run repository code as soon as a Python file is opened.
+ * Whether the interpreter (or what its symlinks resolve to) is a file git tracks in the worktree,
+ * including in a submodule or nested repository inside it. Real environments are never committed,
+ * and Pyright executes the interpreter, so a committed `.venv/bin/python` would otherwise run
+ * repository code as soon as a Python file is opened.
  */
 async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<boolean> {
   const candidates = [pythonPath, await realpath(pythonPath)];
@@ -220,18 +232,46 @@ async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<bool
   return tracked.some(Boolean);
 }
 
+/**
+ * Asks the innermost repository containing `filePath`, since a submodule or nested repository
+ * tracks its own files and the worktree's index does not list them. Git is asked about the
+ * physical path (parent directory resolved, the file itself kept, so a committed symlink still
+ * counts) wherever it is: a committed symlink can reach another checkout of the same repository.
+ * Inside a git worktree, any answer other than a clear "untracked" counts as tracked (fail
+ * closed); outside it, a path in no repository is untracked.
+ */
 async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
+  const realWtPath = await realpath(wtPath);
+  const physical = path.join(await realpath(path.dirname(filePath)), path.basename(filePath));
+  const worktreeRepo = await runGit(realWtPath, ["rev-parse", "--show-toplevel"]);
+  if (worktreeRepo.exitCode === GIT_SPAWN_FAILED) return true;
+  // Not a repository at all, so nothing in it can be committed.
+  if (worktreeRepo.exitCode !== 0) return false;
+
+  const innermost = await runGit(path.dirname(physical), ["rev-parse", "--show-toplevel"]);
+  if (innermost.exitCode !== 0) return isInside(physical, realWtPath);
+  const listed = await runGit(innermost.stdout.trim(), [
+    "ls-files",
+    "--error-unmatch",
+    "--",
+    physical,
+  ]);
+  // `--error-unmatch` exits 1 for an untracked path; anything else is tracked or an error.
+  return listed.exitCode !== 1;
+}
+
+async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string }> {
   try {
-    const proc = Bun.spawn(["git", "-C", wtPath, "ls-files", "--error-unmatch", "--", filePath], {
+    const proc = Bun.spawn(["git", "-C", cwd, ...args], {
       env: readOnlyGitEnv(),
       stdin: "ignore",
-      stdout: "ignore",
+      stdout: "pipe",
       stderr: "ignore",
     });
-    // Non-zero for untracked files, paths outside the repository, and non-repositories.
-    return (await proc.exited) === 0;
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return { exitCode, stdout };
   } catch {
-    return false;
+    return { exitCode: GIT_SPAWN_FAILED, stdout: "" };
   }
 }
 
@@ -305,6 +345,17 @@ async function isExecutable(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * `PATH` without the worktree's own directories, for processes that look up `python` themselves
+ * (Pyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
+ */
+export function pathOutsideWorktree(PATH: string, wtPath: string): string {
+  const root = path.resolve(wtPath);
+  return PATH.split(path.delimiter)
+    .filter((dir) => dir && !isInside(path.resolve(root, dir), root))
+    .join(path.delimiter);
 }
 
 function isInside(child: string, parent: string): boolean {

@@ -3,7 +3,6 @@ import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { EXT_TO_LANG, FILENAME_TO_LANG } from "@/lib/highlighter";
 import { cn } from "@/lib/utils";
 import {
   BUILTIN_FILE_ASSOCIATIONS,
@@ -15,10 +14,8 @@ import { EditableCell } from "./EditableCell";
 
 const BUILTIN_IDS = new Set(BUILTIN_FILE_ASSOCIATIONS.map((b) => b.id));
 
-/** All known language IDs, sorted alphabetically. */
-const LANGUAGE_OPTIONS = [
-  ...new Set([...Object.values(EXT_TO_LANG), ...Object.values(FILENAME_TO_LANG)]),
-].sort();
+/** All language IDs the built-in associations use, sorted alphabetically. */
+const LANGUAGE_OPTIONS = [...new Set(BUILTIN_FILE_ASSOCIATIONS.map((b) => b.language))].sort();
 
 function LanguageSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [editing, setEditing] = useState(false);

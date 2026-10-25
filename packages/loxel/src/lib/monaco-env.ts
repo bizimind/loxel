@@ -14,9 +14,12 @@ import { connectAstroLsp, disconnectAstroLsp } from "./astro-lsp-client";
 import { connectDockerLsp, disconnectDockerLsp } from "./docker-lsp-client";
 import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { getHighlighter } from "./highlighter";
+import { isLiveEditorModel } from "./live-editor-model";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { dispatchOpenFile } from "./open-file";
+import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
 import { isWithin } from "./project-file-helpers";
+import { registerPythonLanguageConfiguration } from "./python-language-config";
 import { connectPythonLsp, disconnectPythonLsp } from "./python-lsp-client";
 import { connectTerraformLsp, disconnectTerraformLsp } from "./terraform-lsp-client";
 import { connectTsLsp } from "./ts-lsp-client";
@@ -87,6 +90,36 @@ monaco.languages.register({ id: "dockerbake", aliases: ["Docker Bake", "dockerba
 
 // Monarch tokenizer for docker-bake HCL — not a Shiki-bundled language.
 registerDockerBakeMonarch();
+
+// pip requirements files — Shiki has no grammar for them, so a Monarch tokenizer.
+registerPipRequirementsLanguage();
+
+// TOML as its own language ID so shikiToMonaco attaches Shiki's TOML grammar (Monaco ships none).
+monaco.languages.register({ id: "toml", extensions: [".toml"], aliases: ["TOML", "toml"] });
+monaco.languages.setLanguageConfiguration("toml", {
+  comments: { lineComment: "#" },
+  brackets: [
+    ["{", "}"],
+    ["[", "]"],
+  ],
+  autoClosingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: '"""', close: '"""', notIn: ["comment"] },
+    { open: "'''", close: "'''", notIn: ["comment"] },
+    { open: '"', close: '"', notIn: ["string"] },
+    { open: "'", close: "'", notIn: ["string", "comment"] },
+  ],
+  surroundingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: '"', close: '"' },
+    { open: "'", close: "'" },
+  ],
+});
+
+// Docstring auto-close and dedent after block-ending statements, on top of Monaco's built-in config.
+registerPythonLanguageConfiguration();
 
 // Astro language configuration (brackets, comments, auto-closing pairs).
 // shikiToMonaco handles tokenization; this provides editing behavior.
@@ -163,14 +196,10 @@ function createLazyLspConnector(opts: {
   const isMatch = (model: monaco.editor.ITextModel): boolean => {
     if (!opts.languageIds.includes(model.getLanguageId())) return false;
     if (!activeWt) return false;
-    // Live editors use file:// or loxel://HEAD (see CodeEditorPanel); diff, compare and history
-    // models use other loxel authorities and are not counted.
-    const { scheme, authority, path } = model.uri;
-    const isLiveEditor = scheme === "file" || (scheme === "loxel" && authority === "HEAD");
-    if (!isLiveEditor) return false;
-    if (isWithin(path, activeWt)) return true;
+    if (!isLiveEditorModel(model)) return false;
+    if (isWithin(model.uri.path, activeWt)) return true;
     // Files outside every project (the Others section) are served by the active worktree's LSP.
-    return !deriveProject(path, useProjectStore.getState().projects);
+    return !deriveProject(model.uri.path, useProjectStore.getState().projects);
   };
 
   const countExistingModels = (): number => {
@@ -272,10 +301,16 @@ initSchemaSync();
 // WebSocket at /ws/ts-lsp via packages/monaco-lsp-client. No providers are
 // registered here — doing so would compete with the LSP-backed providers.
 
-// Handle cross-file navigation from "go to definition" — opens target in a new editor tab.
+// Handle cross-file navigation from "go to definition" and document/hover links — opens the
+// target in a new editor tab. Servers answer with editor model URIs (file:// or loxel://HEAD, see
+// CodeEditorPanel) or file:// URIs of files outside every project (stdlib, installed packages),
+// which open as external files.
 monaco.editor.registerEditorOpener({
-  openCodeEditor(_source, resource, selectionOrPosition) {
-    if (resource.scheme !== "loxel") return false;
+  openCodeEditor(source, resource, selectionOrPosition) {
+    if (resource.scheme !== "loxel" && resource.scheme !== "file") return false;
+    // A target in the source's own model is revealed in place by Monaco; this also covers
+    // models that are not files on disk, such as the frontmatter editor's.
+    if (source.getModel()?.uri.toString() === resource.toString()) return false;
 
     const filePath = resource.path;
     let line = 1;

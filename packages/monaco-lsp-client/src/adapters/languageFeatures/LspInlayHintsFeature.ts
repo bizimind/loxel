@@ -11,7 +11,7 @@ import { Disposable } from "../../utils";
 import { assertTargetTextModel } from "../ITextModelBridge";
 import { LspConnection } from "../LspConnection";
 import { toMonacoLanguageSelector } from "./common";
-import { toMonacoCommand, toMonacoInlayHintKind } from "./common";
+import { toMonacoInlayHintKind } from "./common";
 
 export class LspInlayHintsFeature extends Disposable {
   private readonly _providers = new Set<LspInlayHintsProvider>();
@@ -107,7 +107,7 @@ class LspInlayHintsProvider implements monaco.languages.InlayHintsProvider {
         }
 
         if (resolved.label !== hint._lspInlayHint.label) {
-          hint.label = toLspInlayHintLabel(resolved.label);
+          hint.label = toLspInlayHintLabel(resolved.label, this._client);
         }
 
         if (resolved.textEdits) {
@@ -134,6 +134,7 @@ class LspInlayHintsProvider implements monaco.languages.InlayHintsProvider {
     range: monaco.Range,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.InlayHintList | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, range.getStartPosition());
 
     const result = await retryOnContentModified(() =>
@@ -150,7 +151,7 @@ class LspInlayHintsProvider implements monaco.languages.InlayHintsProvider {
     return {
       hints: result.map((hint) => {
         const monacoHint: ExtendedInlayHint = {
-          label: toLspInlayHintLabel(hint.label),
+          label: toLspInlayHintLabel(hint.label, this._client),
           position: assertTargetTextModel(
             this._client.bridge.translateBack(translated.textDocument, hint.position),
             model,
@@ -194,6 +195,7 @@ async function retryOnContentModified<T>(cb: () => Promise<T>): Promise<T> {
 
 function toLspInlayHintLabel(
   label: string | InlayHintLabelPart[],
+  client: LspConnection,
 ): string | monaco.languages.InlayHintLabelPart[] {
   if (typeof label === "string") {
     return label;
@@ -203,7 +205,7 @@ function toLspInlayHintLabel(
     const monacoLabelPart: monaco.languages.InlayHintLabelPart = {
       label: part.value,
       tooltip: toMonacoTooltip(part.tooltip),
-      command: toMonacoCommand(part.command),
+      command: client.commands.toMonacoCommand(part.command),
     };
 
     if (part.location) {

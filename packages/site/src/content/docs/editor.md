@@ -1,6 +1,6 @@
 ---
 title: Editor
-description: Quick Open, Find in Files, autosave, formatter auto-detection, conflict handling, and deleted or moved files.
+description: Quick Open, Find in Files, autosave, formatter auto-detection, indentation, Python files, conflict handling, and deleted or moved files.
 order: 10
 ---
 
@@ -38,26 +38,43 @@ Loxel autosaves 250ms after you stop typing, with a maximum 5s wait. You never h
 
 Press `Cmd+S` to save immediately. Explicit save is the trigger for format on save — by default, the formatter runs only on `Cmd+S`, not on autosave. If you want the formatter to also run on autosave, enable **Also format on auto-save** in Settings > Editor.
 
-> **Note:** Format on save is per-language. If no formatter is detected for the current file type, `Cmd+S` saves without formatting.
+> **Note:** Format on save is per-language. If no formatter is detected for the current file type, `Cmd+S` saves without formatting. If a detected formatter isn't installed, can't start, or takes longer than 5 seconds, the file is saved unformatted and Loxel tells you once per session.
 
 ---
 
 ## Formatter auto-detection
 
-Loxel detects which formatters are available in the active worktree by inspecting config files and `package.json`. Detection is per-worktree — switching worktrees picks up that worktree's toolchain.
+Loxel detects which formatters are available in the active worktree by inspecting config files, `package.json` and `pyproject.toml`. Detection is per-worktree — switching worktrees picks up that worktree's toolchain.
 
 Supported formatters:
 
-| Formatter      | Detected from                                              | Formats                                              |
-| -------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
-| `prettier`     | A Prettier config file or `prettier` key in `package.json` | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, GraphQL |
-| `oxfmt`        | An `.oxfmtrc.*` file or an `oxfmt` dependency              | The same as Prettier, plus TOML                      |
-| `rustfmt`      | `rustfmt.toml`                                             | `.rs` files                                          |
-| `ruff`         | `pyproject.toml`                                           | `.py` files                                          |
-| `clang-format` | `.clang-format`                                            | C and C++ files                                      |
-| `deno`         | `deno.json`                                                | JS and TS files                                      |
+| Formatter      | Detected from                                                            | Formats                                              |
+| -------------- | ------------------------------------------------------------------------ | ---------------------------------------------------- |
+| `prettier`     | A Prettier config file or `prettier` key in `package.json`               | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, GraphQL |
+| `oxfmt`        | An `.oxfmtrc.*` file or an `oxfmt` dependency                            | The same as Prettier, plus TOML                      |
+| `rustfmt`      | `rustfmt.toml`                                                           | `.rs` files                                          |
+| `ruff`         | `ruff.toml`, `.ruff.toml`, a `[tool.ruff]` table, or a `ruff` dependency | `.py` and `.pyi` files                               |
+| `black`        | A `[tool.black]` table in `pyproject.toml`, or a `black` dependency      | `.py` and `.pyi` files                               |
+| `clang-format` | `.clang-format`                                                          | C and C++ files                                      |
+| `deno`         | `deno.json`                                                              | JS and TS files                                      |
 
-When a project has both Prettier and oxfmt, Prettier wins for the languages it supports. The formatters found in the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+When a project has both Prettier and oxfmt, Prettier wins for the languages it supports.
+
+Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's `.venv` or `venv` when they're installed there (and the environment isn't committed to git), so the version pinned in your dev dependencies is the one used, and files your ruff config excludes are left as they are. The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+
+---
+
+## Indentation
+
+Files indent with 2 spaces by default. Python and Rust use 4 spaces and Go uses tabs, matching their formatters. In **Settings > Editor**, **Default Indentation** changes the default, and **Per-Extension Overrides** set the indentation for a file extension, taking precedence over both.
+
+---
+
+## Python files
+
+Python source (`.py`), stub (`.pyi`), and `.pyw` files get highlighting and Python language features. Typing `"""` or `'''` adds the closing quotes, typing the closing quotes steps over them, and pressing Enter after `return`, `pass`, `break`, `continue`, or `raise` dedents the next line.
+
+Project files are recognized too: `pyproject.toml`, `uv.lock`, `poetry.lock`, and `Pipfile` are highlighted as TOML, `Pipfile.lock` as JSON, and `requirements*.txt`, `requirements*.in`, `requirements/*.txt`, and `constraints*.txt` as pip requirements. In the file tree, `.venv`, `venv`, `__pycache__`, and Python tool cache folders show a distinct folder icon. To treat other files as a given language, add a glob in **Settings > File Associations**.
 
 ---
 

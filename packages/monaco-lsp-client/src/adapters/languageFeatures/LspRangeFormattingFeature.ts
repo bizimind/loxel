@@ -48,6 +48,7 @@ class LspDocumentRangeFormattingProvider
     options: monaco.languages.FormattingOptions,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.TextEdit[] | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, range.getStartPosition());
 
     const result = await this._client.server.textDocumentRangeFormatting({

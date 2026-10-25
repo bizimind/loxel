@@ -28,13 +28,13 @@ The active worktree gets its own TypeScript language server process. Switching w
 | Document symbols | Symbol outline for the current file          |
 | Folding ranges   | Collapse functions, blocks, and regions      |
 
-These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quick fixes); the code editor has no right-click menu.
+These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quick fixes); the code editor has no right-click menu. They work in editor tabs; the [diff viewer](/docs/diff-viewer) shows code without them.
 
 ---
 
 ## Navigation
 
-`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. There is no inline peek; definitions always open as a full tab.
+`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. There is no inline peek; definitions always open as a full tab.
 
 ---
 
@@ -59,7 +59,7 @@ Loxel runs language servers for six other languages. Each one is independent of 
 | YAML      | Always active              | `.yml`, `.yaml`                                                  |
 | Terraform | First matching file opened | `.tf`, `.tfvars`, `.hcl`                                         |
 | Docker    | First matching file opened | `Dockerfile`, `Containerfile`, `*.dockerfile`, `docker-bake.hcl` |
-| Python    | First matching file opened | `.py`                                                            |
+| Python    | First matching file opened | `.py`, `.pyi`, `.pyw`                                            |
 | Astro     | First matching file opened | `.astro`                                                         |
 | XML       | First matching file opened | `.xml`, `.xsd`, `.xsl`, `.xslt`, `.plist`, and other XML formats |
 

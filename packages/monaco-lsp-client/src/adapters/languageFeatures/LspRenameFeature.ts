@@ -1,10 +1,10 @@
 import * as monaco from "monaco-editor";
 
-import type { RenameRegistrationOptions, WorkspaceEdit } from "../../types";
+import type { RenameRegistrationOptions } from "../../types";
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";
-import { toMonacoLanguageSelector } from "./common";
+import { toMonacoLanguageSelector, toMonacoWorkspaceEdit } from "./common";
 
 export class LspRenameFeature extends Disposable {
   constructor(private readonly _connection: LspConnection) {
@@ -45,7 +45,8 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
     position: monaco.Position,
     newName: string,
     _token: monaco.CancellationToken,
-  ): Promise<monaco.languages.WorkspaceEdit | null> {
+  ): Promise<(monaco.languages.WorkspaceEdit & monaco.languages.Rejection) | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, position);
 
     const result = await this._client.server.textDocumentRename({
@@ -66,6 +67,7 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
     position: monaco.Position,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.RenameLocation | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     if (!this._capabilities.prepareProvider) {
       return null;
     }
@@ -95,46 +97,4 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
 
     return null;
   }
-}
-
-function toMonacoWorkspaceEdit(
-  edit: WorkspaceEdit,
-  client: LspConnection,
-): monaco.languages.WorkspaceEdit {
-  const edits: monaco.languages.IWorkspaceTextEdit[] = [];
-
-  if (edit.changes) {
-    for (const uri in edit.changes) {
-      const textEdits = edit.changes[uri];
-      if (!textEdits) continue;
-      for (const textEdit of textEdits) {
-        const translated = client.bridge.translateBackRange({ uri }, textEdit.range);
-        edits.push({
-          resource: translated.textModel.uri,
-          versionId: undefined,
-          textEdit: { range: translated.range, text: textEdit.newText },
-        });
-      }
-    }
-  }
-
-  if (edit.documentChanges) {
-    for (const change of edit.documentChanges) {
-      if ("textDocument" in change) {
-        // TextDocumentEdit
-        const uri = change.textDocument.uri;
-        for (const textEdit of change.edits) {
-          const translated = client.bridge.translateBackRange({ uri }, textEdit.range);
-          edits.push({
-            resource: translated.textModel.uri,
-            versionId: change.textDocument.version ?? undefined,
-            textEdit: { range: translated.range, text: textEdit.newText },
-          });
-        }
-      }
-      // TODO: Handle CreateFile, RenameFile, DeleteFile
-    }
-  }
-
-  return { edits };
 }

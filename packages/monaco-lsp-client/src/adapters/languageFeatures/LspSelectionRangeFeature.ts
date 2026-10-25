@@ -45,6 +45,7 @@ class LspSelectionRangeProvider implements monaco.languages.SelectionRangeProvid
     positions: monaco.Position[],
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.SelectionRange[][] | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     if (positions.length === 0) {
       return null;
     }

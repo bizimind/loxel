@@ -1,10 +1,12 @@
 import type { IMessageTransport } from "@hediet/json-rpc";
 import { TypedChannel } from "@hediet/json-rpc";
+import type * as monaco from "monaco-editor";
 
 import type { ClientCapabilities } from "../types";
 import { api } from "../types";
 import type { IDisposable } from "../utils";
 import { DisposableStore } from "../utils";
+import { LspApplyEditFeature } from "./languageFeatures/LspApplyEditFeature";
 import { LspCodeActionFeature } from "./languageFeatures/LspCodeActionFeature";
 import { LspCodeLensFeature } from "./languageFeatures/LspCodeLensFeature";
 import { LspCompletionFeature } from "./languageFeatures/LspCompletionFeature";
@@ -32,17 +34,26 @@ import { LspTypeDefinitionFeature } from "./languageFeatures/LspTypeDefinitionFe
 import type { OptionsOf, RegistrableCapability } from "./LspCapabilitiesRegistry";
 import { LspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 import { LspConnection } from "./LspConnection";
+import { LspServerCommands } from "./LspServerCommands";
 import { TextDocumentSynchronizer } from "./TextDocumentSynchronizer";
 
 export interface MonacoLspClientOptions {
   /** Restrict model sync and provider registration to these language(s). */
   languageId?: string | readonly string[];
+  /**
+   * Further restrict model sync to models this returns true for. Requests from
+   * Monaco providers for any other model are not sent: the server has never
+   * seen it. Use it to keep read-only views (diffs, history) away from the
+   * server.
+   */
+  modelFilter?: (textModel: monaco.editor.ITextModel) => boolean;
 }
 
 export class MonacoLspClient {
   private _connection: LspConnection;
   private readonly _capabilitiesRegistry: LspCapabilitiesRegistry;
   private readonly _bridge: TextDocumentSynchronizer;
+  private readonly _commands: LspServerCommands;
   private readonly _features: IDisposable;
 
   private _initPromise: Promise<void>;
@@ -58,13 +69,20 @@ export class MonacoLspClient {
       : undefined;
     const defaultLanguageIds = languageIds ? [...languageIds] : undefined;
     this._capabilitiesRegistry = new LspCapabilitiesRegistry(c);
-    this._bridge = new TextDocumentSynchronizer(s.server, this._capabilitiesRegistry, languageIds);
+    this._bridge = new TextDocumentSynchronizer(
+      s.server,
+      this._capabilitiesRegistry,
+      languageIds,
+      options?.modelFilter,
+    );
+    this._commands = new LspServerCommands(s.server, this._capabilitiesRegistry);
 
     this._connection = new LspConnection(
       s.server,
       this._bridge,
       this._capabilitiesRegistry,
       c,
+      this._commands,
       defaultLanguageIds,
     );
     this._features = this.createFeatures();
@@ -76,6 +94,7 @@ export class MonacoLspClient {
 
   dispose(): void {
     this._features.dispose();
+    this._commands.dispose();
     this._bridge.dispose();
     this._capabilitiesRegistry.dispose();
   }
@@ -146,6 +165,7 @@ export class MonacoLspClient {
     store.add(new LspDiagnosticsFeature(this._connection));
     store.add(new LspLinkedEditingRangeFeature(this._connection));
     store.add(new LspInlineCompletionFeature(this._connection));
+    store.add(new LspApplyEditFeature(this._connection));
 
     return store;
   }

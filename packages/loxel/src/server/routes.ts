@@ -52,6 +52,7 @@ import type { FileTree } from "./external-folders-service";
 import { externalFoldersStoreKey } from "./external-folders-service";
 import type { HistoryStep } from "./file-operations-service";
 import { listFolderApps } from "./folder-apps";
+import type { FormatResult } from "./format-service";
 import * as git from "./git-commands";
 import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
@@ -133,7 +134,7 @@ export interface RouteContext {
     filePath: string,
     worktreePath: string | undefined,
     settings: FormattingSettings,
-  ) => Promise<string | null>;
+  ) => Promise<FormatResult>;
   /** Return detected formatters for a worktree. */
   getDetectedFormatters: (worktreePath: string) => { command: string; extensions: string[] }[];
   /** Type `command` into terminal `terminalId` when its panel attaches and the shell spawns. */
@@ -889,9 +890,13 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     ? parseFormattingSettings(body.formattingSettings)
     : undefined;
 
+  // Returned to the client so it can tell the user why a save went out unformatted.
+  let formatNotice: string | undefined;
   async function maybeFormat(c: string, fp: string, wtPath: string): Promise<string> {
     if (!shouldFormat || !formattingSettings) return c;
-    return (await ctx.formatContent(c, fp, wtPath, formattingSettings)) ?? c;
+    const result = await ctx.formatContent(c, fp, wtPath, formattingSettings);
+    formatNotice = result.notice;
+    return result.content ?? c;
   }
 
   // Absolute path mode: resolve via ctx.resolveFilePath
@@ -924,7 +929,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
       await Bun.write(join(tree.root, relativePath), content);
     });
     void tree.filesService.trackFile(relativePath);
-    return json({ success: true, content });
+    return json({ success: true, content, formatNotice });
   }
 
   // Relative path mode (legacy): use worktreePath from body
@@ -942,7 +947,7 @@ async function handleFileWrite(req: Request, ctx: RouteContext): Promise<Respons
     // Fallback for when no subscriber has activated resources yet
     await git.writeWorkingTreeFileContent(resolved.cwd, resolved.wtPath, filePath, content);
   }
-  return json({ success: true, content });
+  return json({ success: true, content, formatNotice });
 }
 
 // GET /api/detected-formatters?wt= — Return auto-detected formatters for a worktree
