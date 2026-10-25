@@ -108,7 +108,7 @@ describe("splitWatchedFilesRegistration", () => {
 });
 
 describe("WatchedFilesForwarder glob matching", () => {
-  test("Pyright's watchers: `**` and `**/pyrightconfig.json` relative to the worktree", () => {
+  test("basedpyright's watchers: `**` and `**/pyrightconfig.json` relative to the worktree", () => {
     const all = forwarder([{ globPattern: "**", kind: 7 }]);
     expect(all.kindsFor(`${ROOT}/main.py`)).toBe(7);
     expect(all.kindsFor(`${ROOT}/pkg/.hidden/mod.py`)).toBe(7);
