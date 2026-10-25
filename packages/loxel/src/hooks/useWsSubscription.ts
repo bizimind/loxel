@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
 import { onWorktreeSavesDrained } from "@/lib/save-editor-content";
+import { queryKeys } from "@/queries/query-keys";
+import { queryClient } from "@/query-client";
 import { openEditorPaths, useEditorStateStore } from "@/store/editor-state";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -17,7 +19,12 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
     const prev = prevWtRef.current;
     prevWtRef.current = activeWorktreePath;
     if (prev === activeWorktreePath) return;
-    if (activeWorktreePath) wsClient.subscribeWorktree(activeWorktreePath);
+    if (activeWorktreePath) {
+      wsClient.subscribeWorktree(activeWorktreePath);
+      // `python_env_changed` reaches only subscribers, so a cached interpreter may have gone
+      // stale while this window was on another worktree.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pythonEnvAll() });
+    }
     if (prev) {
       onWorktreeSavesDrained(prev, () => wsClient.unsubscribeWorktree(prev));
     }

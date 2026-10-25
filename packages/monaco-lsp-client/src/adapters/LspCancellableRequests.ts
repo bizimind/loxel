@@ -12,6 +12,30 @@ export class CancellationError extends Error {
   }
 }
 
+/** `promise`, or a `CancellationError` as soon as `token` is cancelled. */
+export function untilCancelled<T>(
+  promise: Promise<T>,
+  token: monaco.CancellationToken,
+): Promise<T> {
+  if (token.isCancellationRequested) return Promise.reject(new CancellationError());
+  return new Promise<T>((resolve, reject) => {
+    const cancellation = token.onCancellationRequested(() => {
+      cancellation.dispose();
+      reject(new CancellationError());
+    });
+    promise.then(
+      (value) => {
+        cancellation.dispose();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cancellation.dispose();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
 interface CancellableRequestType<TParams, TResult> {
   method: string;
   paramsSerializer: ISerializer<TParams>;

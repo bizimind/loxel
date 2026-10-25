@@ -28,7 +28,7 @@ interface QuickPickProps<T> {
 }
 
 /**
- * The modal picker behind Quick Open, the command palette and Go to Symbol: a query input over a
+ * The modal picker behind Quick Open and Go to Symbol: a query input over a
  * list of items. ↑/↓ move between the input and the items, Enter accepts, and typing while an item
  * is focused goes back to the query.
  */
@@ -64,10 +64,15 @@ export function QuickPick<T>({
   }, [isOpen]);
 
   // Keep focus in the list when the items change under a focused item.
+  // Results that stream in while an item is focused leave that item focused; only an item that was
+  // unmounted hands focus to the first one.
   useEffect(() => {
     if (items.length === 0) return;
-    if (document.activeElement === inputRef.current) return;
-    getOptions(listRef.current)[0]?.focus();
+    const active = document.activeElement;
+    if (active === inputRef.current) return;
+    const options = getOptions(listRef.current);
+    if (active instanceof HTMLButtonElement && options.includes(active)) return;
+    options[0]?.focus();
   }, [items]);
 
   const handleKeyDown = useCallback(

@@ -38,6 +38,7 @@ class FakeServer implements IMessageTransport {
   constructor(
     private readonly _serverCapabilities: JSONObject,
     private readonly _answer: (request: RequestMessage) => Answer,
+    private readonly _answersInitialize = true,
   ) {}
 
   setListener(listener: MessageListener | undefined): void {
@@ -53,7 +54,9 @@ class FakeServer implements IMessageTransport {
     const request = { id: Number(message.id), method: message.method, params: message.params };
     if (request.method === "initialize") {
       this.clientCapabilities = (message.params as { capabilities: unknown }).capabilities;
-      this._reply(request.id, { result: { capabilities: this._serverCapabilities } });
+      if (this._answersInitialize) {
+        this._reply(request.id, { result: { capabilities: this._serverCapabilities } });
+      }
       return;
     }
     this.requests.push(request);
@@ -255,6 +258,31 @@ describe("workspace symbols", () => {
       expect(await client.resolveWorkspaceSymbol(symbol, tokenSource().token)).toBe(symbol);
     }
     expect(server.requests.map((r) => r.method)).toEqual(["workspace/symbol"]);
+    client.dispose();
+  });
+
+  test("a search started during the handshake waits for the server's capabilities", async () => {
+    const server = new FakeServer({ workspaceSymbolProvider: true }, () => ({
+      result: [{ name: "A", kind: 5, location: { uri: "file:///w/a.py", range: range(0, 6, 7) } }],
+    }));
+    const client = new MonacoLspClient(server);
+
+    const symbols = await client.workspaceSymbols("a", tokenSource().token);
+
+    expect(symbols.map((s) => s.name)).toEqual(["A"]);
+    client.dispose();
+  });
+
+  test("cancelling while the handshake hangs rejects without sending the request", async () => {
+    const server = new FakeServer({ workspaceSymbolProvider: true }, () => ({ result: [] }), false);
+    const client = new MonacoLspClient(server);
+    const tokens = tokenSource();
+
+    const pending = client.workspaceSymbols("a", tokens.token);
+    tokens.cancel();
+
+    await expect(pending).rejects.toThrow("Canceled");
+    expect(server.requests).toEqual([]);
     client.dispose();
   });
 

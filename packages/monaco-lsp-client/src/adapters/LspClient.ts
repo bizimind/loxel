@@ -98,7 +98,10 @@ export class MonacoLspClient {
       defaultLanguageIds,
     );
     this._features = this.createFeatures();
-    this._workspaceSymbols = new LspWorkspaceSymbolFeature(this._connection);
+    this._workspaceSymbols = new LspWorkspaceSymbolFeature(
+      this._connection,
+      () => this._initPromise,
+    );
 
     this._initPromise = this._init().catch((err: unknown) => {
       console.error("[MonacoLspClient] initialization failed:", err);

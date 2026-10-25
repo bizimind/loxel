@@ -170,6 +170,7 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "tree.toggleExpanded": ["Space"],
   "tree.open": ["Enter"],
   "tree.rename": ["F2", "Shift+F6"],
+  "python.selectInterpreter": [],
   "app.settings": ["Cmd+Comma"],
 });
 

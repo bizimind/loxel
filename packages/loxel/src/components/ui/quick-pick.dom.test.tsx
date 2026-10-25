@@ -26,10 +26,15 @@ function Harness({ items, onAccept }: { items: string[]; onAccept: (item: string
 
 function setup(items = ["alpha", "beta", "gamma"]) {
   const onAccept = mock((_item: string) => {});
-  render(<Harness items={items} onAccept={onAccept} />);
+  const { rerender } = render(<Harness items={items} onAccept={onAccept} />);
   const input = screen.getByPlaceholderText("Pick");
   input.focus();
-  return { onAccept, input, option: (name: string) => screen.getByRole("button", { name }) };
+  return {
+    onAccept,
+    input,
+    option: (name: string) => screen.getByRole("button", { name }),
+    setItems: (next: string[]) => rerender(<Harness items={next} onAccept={onAccept} />),
+  };
 }
 
 describe("QuickPick", () => {
@@ -59,6 +64,24 @@ describe("QuickPick", () => {
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     fireEvent.keyDown(document.activeElement!, { key: "Enter" });
     expect(onAccept).toHaveBeenCalledWith("beta");
+  });
+
+  test("items that stream in keep a still-listed item focused", () => {
+    const { input, option, setItems, onAccept } = setup();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    setItems(["alpha", "beta", "gamma", "delta"]);
+    expect(document.activeElement).toBe(option("beta"));
+    fireEvent.keyDown(document.activeElement!, { key: "Enter" });
+    expect(onAccept).toHaveBeenCalledWith("beta");
+  });
+
+  test("an unmounted focused item hands focus to the first item", () => {
+    const { input, option, setItems } = setup();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    setItems(["alpha", "gamma"]);
+    expect(document.activeElement).toBe(option("alpha"));
   });
 
   test("typing while an item is focused edits the query", () => {

@@ -23,6 +23,11 @@ export interface ProjectFilesServiceOptions {
    * relative to this root.
    */
   gitStatus?: boolean;
+  /**
+   * Called with the absolute paths of each batch of watcher events, before the refresh pass that
+   * handles them. Git-ignored directories are already filtered out.
+   */
+  onPathsChanged?: (paths: string[]) => void;
   /** Called with absolute paths when a tracked file (see `trackFile`) was renamed or moved. */
   onFileMoved?: (oldPath: string, newPath: string, source: FileMoveSource) => void;
 }
@@ -127,11 +132,13 @@ export class ProjectFilesService {
         return true;
       },
       normalizeKey: (filename) => filename.replaceAll(sep, "/"),
-      onFlush: (changes) =>
-        this.request((work) => {
+      onFlush: (changes) => {
+        options.onPathsChanged?.(changes.map((change) => join(worktreeCwd, change.key)));
+        return this.request((work) => {
           addChanges(work, changes);
           this.noteOperation(work);
-        }),
+        });
+      },
       onUnknownChange: () =>
         this.request((work) => {
           work.rescanAll = true;

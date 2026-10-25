@@ -8,6 +8,7 @@ import type {
 } from "../../types";
 import { api, capabilities, SymbolTag } from "../../types";
 import { Disposable } from "../../utils";
+import { untilCancelled } from "../LspCancellableRequests";
 import type { LspConnection } from "../LspConnection";
 import { lspSymbolKindToMonacoSymbolKind, toMonacoSymbolKind, toMonacoSymbolTag } from "./common";
 
@@ -33,7 +34,15 @@ export class LspWorkspaceSymbolFeature extends Disposable {
   /** The server's symbol behind each item, sent back on resolve (it may carry `data`). */
   private readonly _serverSymbols = new WeakMap<WorkspaceSymbolItem, WorkspaceSymbol>();
 
-  constructor(private readonly _connection: LspConnection) {
+  /**
+   * @param _whenInitialized Settles once the initialize handshake is over and the server's static
+   * capabilities are registered, so a search started during the handshake waits for them instead
+   * of reporting that the server has no symbols.
+   */
+  constructor(
+    private readonly _connection: LspConnection,
+    private readonly _whenInitialized: () => Promise<void>,
+  ) {
     super();
 
     this._register(
@@ -63,11 +72,15 @@ export class LspWorkspaceSymbolFeature extends Disposable {
     );
   }
 
-  /** Symbols matching `query`; empty when the server has no workspace symbol provider. */
+  /**
+   * Symbols matching `query`; empty when the server has no workspace symbol provider. Waits for
+   * the initialize handshake first.
+   */
   async provideWorkspaceSymbols(
     query: string,
     token: monaco.CancellationToken,
   ): Promise<WorkspaceSymbolItem[]> {
+    await untilCancelled(this._whenInitialized(), token);
     if (this._registrations.size === 0) return [];
     const result = await this._connection.cancellableRequests.request(
       api.server.workspaceSymbol,
