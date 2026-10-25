@@ -3,15 +3,30 @@ import { describe, expect, mock, test } from "bun:test";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 
-import { QuickPick, QuickPickMessage } from "./quick-pick";
+import { PickerDialog, PickerMessage } from "./picker-dialog";
 
-function Harness({ items, onAccept }: { items: string[]; onAccept: (item: string) => void }) {
+const noop = () => {};
+
+function Harness({
+  items,
+  onAccept,
+  onSubmitQuery,
+  onClose = noop,
+  isOpen = true,
+}: {
+  items: string[];
+  onAccept: (item: string) => void;
+  onSubmitQuery?: (query: string) => void;
+  onClose?: () => void;
+  isOpen?: boolean;
+}) {
   const [query, setQuery] = useState("");
   return (
-    <QuickPick
+    <PickerDialog
       name="Test"
-      isOpen
-      onClose={() => {}}
+      isOpen={isOpen}
+      onClose={onClose}
+      onSubmitQuery={onSubmitQuery}
       query={query}
       onQueryChange={setQuery}
       placeholder="Pick"
@@ -19,7 +34,7 @@ function Harness({ items, onAccept }: { items: string[]; onAccept: (item: string
       getKey={(item) => item}
       renderItem={(item) => item}
       onAccept={onAccept}
-      emptyState={<QuickPickMessage>Nothing</QuickPickMessage>}
+      emptyState={<PickerMessage>Nothing</PickerMessage>}
     />
   );
 }
@@ -37,7 +52,7 @@ function setup(items = ["alpha", "beta", "gamma"]) {
   };
 }
 
-describe("QuickPick", () => {
+describe("PickerDialog", () => {
   test("Enter in the input accepts the first item", () => {
     const { onAccept, input } = setup();
     fireEvent.keyDown(input, { key: "Enter" });
@@ -94,6 +109,29 @@ describe("QuickPick", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(document.activeElement!, { key: "Backspace" });
     expect(input).toHaveValue("ab");
+  });
+
+  test("Enter submits the trimmed query in input mode", () => {
+    const onSubmitQuery = mock((_query: string) => {});
+    render(<Harness items={[]} onAccept={() => {}} onSubmitQuery={onSubmitQuery} />);
+    const input = screen.getByPlaceholderText("Pick");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSubmitQuery).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "  ~/venv/bin/python " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSubmitQuery).toHaveBeenCalledWith("~/venv/bin/python");
+  });
+
+  test("closing through isOpen is not reported as a dismissal", () => {
+    const onClose = mock(() => {});
+    const { rerender } = render(<Harness items={["a"]} onAccept={() => {}} onClose={onClose} />);
+    // The close event follows `dialog.close()` (synchronously in happy-dom, a task later in browsers).
+    rerender(<Harness items={["a"]} onAccept={() => {}} onClose={onClose} isOpen={false} />);
+    expect(onClose).not.toHaveBeenCalled();
+    // A close the user makes (Escape) still dismisses.
+    rerender(<Harness items={["a"]} onAccept={() => {}} onClose={onClose} />);
+    fireEvent(document.querySelector("dialog")!, new Event("close"));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   test("shows the empty state without items", () => {

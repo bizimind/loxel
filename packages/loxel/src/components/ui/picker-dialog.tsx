@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import { ModalErrorBoundary } from "@/components/ui/modal-error-boundary";
 import { cn } from "@/lib/utils";
 
-interface QuickPickProps<T> {
+interface PickerDialogProps<T> {
   /** Names the picker in its error boundary. */
   name: string;
   isOpen: boolean;
@@ -19,6 +19,10 @@ interface QuickPickProps<T> {
   renderItem: (item: T) => ReactNode;
   /** Runs on a click, on Enter on a focused item, or on Enter in the input (for the first item). */
   onAccept: (item: T) => void;
+  /** Makes the picker a free-text input: Enter with no item to accept submits the trimmed query. */
+  onSubmitQuery?: (query: string) => void;
+  /** The input takes focus again whenever this changes while the picker is open. */
+  focusKey?: string;
   /** Shown at the end of the input row (a spinner, a parsed `:line` suffix). */
   inputAdornment?: ReactNode;
   /** Shown in the list area when there are no items. */
@@ -28,11 +32,11 @@ interface QuickPickProps<T> {
 }
 
 /**
- * The modal picker behind Quick Open and Go to Symbol: a query input over a
+ * The modal picker behind Quick Open, Go to Symbol and the command palette: a query input over a
  * list of items. ↑/↓ move between the input and the items, Enter accepts, and typing while an item
  * is focused goes back to the query.
  */
-export function QuickPick<T>({
+export function PickerDialog<T>({
   name,
   isOpen,
   onClose,
@@ -43,25 +47,45 @@ export function QuickPick<T>({
   getKey,
   renderItem,
   onAccept,
+  onSubmitQuery,
+  focusKey,
   inputAdornment,
   emptyState,
   footer,
   itemClassName,
-}: QuickPickProps<T>) {
+}: PickerDialogProps<T>) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // Set while the dialog closes because `isOpen` turned false, so the `close` event that follows a
+  // task later is not taken for a dismissal: by then the owner may have opened a follow-up request
+  // (the command palette's input after a pick), which `onClose` would cancel.
+  const closingRef = useRef(false);
+  const handleDialogClose = useCallback(() => {
+    if (closingRef.current) {
+      closingRef.current = false;
+      return;
+    }
+    onClose();
+  }, [onClose]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (isOpen && !dialog.open) {
       dialog.showModal();
-      requestAnimationFrame(() => inputRef.current?.focus());
     } else if (!isOpen && dialog.open) {
+      closingRef.current = true;
       dialog.close();
     }
   }, [isOpen]);
+
+  // Focus the input on open, and again when the owner swaps what the picker shows without closing
+  // it, which unmounts a focused item.
+  useEffect(() => {
+    if (isOpen) requestAnimationFrame(() => inputRef.current?.focus());
+  }, [isOpen, focusKey]);
 
   // Keep focus in the list when the items change under a focused item.
   // Results that stream in while an item is focused leave that item focused; only an item that was
@@ -99,7 +123,12 @@ export function QuickPick<T>({
       if (e.key === "Enter") {
         e.preventDefault();
         const item = items[Math.max(currentIdx, 0)];
-        if (item !== undefined) onAccept(item);
+        if (item !== undefined) {
+          onAccept(item);
+          return;
+        }
+        const value = query.trim();
+        if (onSubmitQuery && value) onSubmitQuery(value);
         return;
       }
 
@@ -123,7 +152,7 @@ export function QuickPick<T>({
         inputRef.current?.focus();
       }
     },
-    [items, onAccept, onQueryChange, query],
+    [items, onAccept, onSubmitQuery, onQueryChange, query],
   );
 
   return createPortal(
@@ -131,7 +160,7 @@ export function QuickPick<T>({
       <dialog
         ref={dialogRef}
         className="bg-popover text-popover-foreground border-border mx-auto mt-[15vh] mb-auto w-[600px] max-w-[90vw] overflow-visible rounded-lg border p-0 shadow-2xl backdrop:bg-black/50"
-        onClose={onClose}
+        onClose={handleDialogClose}
         onClick={(e) => {
           if (e.target === e.currentTarget) onClose();
         }}
@@ -157,7 +186,7 @@ export function QuickPick<T>({
               <button
                 type="button"
                 key={getKey(item)}
-                data-quick-pick-option
+                data-picker-option
                 className={cn(
                   "border-border/50 w-full border-b px-3 text-left transition-colors outline-none last:border-b-0",
                   "hover:bg-primary/50 focus:bg-primary",
@@ -179,10 +208,10 @@ export function QuickPick<T>({
 }
 
 /** Centered message for a picker's list area (loading, errors, no matches). */
-export function QuickPickMessage({ children }: { children: ReactNode }) {
+export function PickerMessage({ children }: { children: ReactNode }) {
   return <div className="text-muted-foreground px-4 py-8 text-center text-xs">{children}</div>;
 }
 
 function getOptions(list: HTMLElement | null): HTMLButtonElement[] {
-  return Array.from(list?.querySelectorAll<HTMLButtonElement>("[data-quick-pick-option]") ?? []);
+  return Array.from(list?.querySelectorAll<HTMLButtonElement>("[data-picker-option]") ?? []);
 }

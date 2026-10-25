@@ -3,7 +3,7 @@ import * as monaco from "monaco-editor";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
-import { QuickPick, QuickPickMessage } from "@/components/ui/quick-pick";
+import { PickerDialog, PickerMessage } from "@/components/ui/picker-dialog";
 import { abbreviateHomePath } from "@/lib/home-path";
 import { getConnectedLspClients } from "@/lib/lsp-client";
 import { dispatchOpenFile } from "@/lib/open-file";
@@ -110,7 +110,7 @@ export function SymbolSearchModal() {
       : abbreviateHomePath(filePath, homeDir);
 
   return (
-    <QuickPick
+    <PickerDialog
       name="Symbol Search"
       isOpen={isOpen}
       onClose={close}
@@ -124,7 +124,7 @@ export function SymbolSearchModal() {
       inputAdornment={
         searching && <LoaderIcon className="text-muted-foreground size-3.5 animate-spin" />
       }
-      emptyState={<QuickPickMessage>{emptyMessage(query, searching)}</QuickPickMessage>}
+      emptyState={<PickerMessage>{emptyMessage(query, searching)}</PickerMessage>}
       renderItem={({ symbol, filePath, indices }) => (
         <div className="flex items-center gap-2 text-sm">
           <SymbolKindIcon kind={symbol.kind} className="size-4 shrink-0" />

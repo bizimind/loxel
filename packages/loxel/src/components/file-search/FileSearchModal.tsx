@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo } from "react";
 
 import * as api from "@/api/client";
 import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
-import { QuickPick, QuickPickMessage } from "@/components/ui/quick-pick";
+import { PickerDialog, PickerMessage } from "@/components/ui/picker-dialog";
 import { FileTypeIcon } from "@/lib/file-icons";
 import { frontendLog } from "@/lib/frontend-logger";
 import { type FuzzyResult, fuzzyMatchPath } from "@/lib/fuzzy-match";
@@ -126,7 +126,7 @@ export function FileSearchModal() {
   );
 
   return (
-    <QuickPick
+    <PickerDialog
       name="File Search"
       isOpen={isOpen}
       onClose={close}
@@ -150,11 +150,11 @@ export function FileSearchModal() {
       }
       emptyState={
         <>
-          {loading && !files && <QuickPickMessage>Loading files...</QuickPickMessage>}
+          {loading && !files && <PickerMessage>Loading files...</PickerMessage>}
           {!loading && !files && error && (
-            <QuickPickMessage>Failed to load files — please try again</QuickPickMessage>
+            <PickerMessage>Failed to load files — please try again</PickerMessage>
           )}
-          {files && searchQuery && <QuickPickMessage>No matching files</QuickPickMessage>}
+          {files && searchQuery && <PickerMessage>No matching files</PickerMessage>}
         </>
       }
       renderItem={(match) => {
