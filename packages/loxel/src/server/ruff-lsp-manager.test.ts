@@ -94,9 +94,12 @@ class FakeClient {
   }
 
   /** Sends `initialize` right after connecting, while the manager still resolves ruff. */
-  async start(wtPath: string): Promise<{ capabilities: Record<string, unknown> }> {
+  async start(
+    wtPath: string,
+    capabilities: Record<string, unknown> = {},
+  ): Promise<{ capabilities: Record<string, unknown> }> {
     this.manager.createSession(this.ws, wtPath);
-    const result = await this.request("initialize", { processId: null, capabilities: {} });
+    const result = await this.request("initialize", { processId: null, capabilities });
     this.send({ method: "initialized", params: {} });
     return result as { capabilities: Record<string, unknown> };
   }
@@ -142,13 +145,20 @@ describe.skipIf(!(await Bun.file(BUNDLED_RUFF).exists()))("RuffLspManager with r
       manager = new RuffLspManager();
       const client = new FakeClient(manager);
 
-      const { capabilities } = await client.start(wt);
+      // Like monaco-lsp-client, so ruff 0.17+ registers formatting dynamically.
+      const { capabilities } = await client.start(wt, {
+        textDocument: {
+          formatting: { dynamicRegistration: true },
+          rangeFormatting: { dynamicRegistration: true },
+        },
+      });
       expect(capabilities.codeActionProvider).toMatchObject({
         codeActionKinds: expect.arrayContaining([
           "source.fixAll.ruff",
           "source.organizeImports.ruff",
         ]),
       });
+      expect(capabilities.documentFormattingProvider).toBeUndefined();
 
       const uri = client.open(join(wt, "app.py"), "import sys\nimport os\ndef f(:\n  pass\n");
       const report = (await client.request("textDocument/diagnostic", {
@@ -180,6 +190,20 @@ describe.skipIf(!(await Bun.file(BUNDLED_RUFF).exists()))("RuffLspManager with r
         })) as { items: { code?: string }[] };
         codes = report.items.map((d) => d.code ?? "");
       }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "suppresses formatting that ruff advertises statically",
+    async () => {
+      // Without dynamic registration support ruff advertises formatting in its initialize result,
+      // the way ruff before 0.17 always does.
+      manager = new RuffLspManager();
+      const { capabilities } = await new FakeClient(manager).start(await makeDir("ruff-lsp-"));
+      expect(capabilities.codeActionProvider).toBeDefined();
+      expect(capabilities.documentFormattingProvider).toBeUndefined();
+      expect(capabilities.documentRangeFormattingProvider).toBeUndefined();
     },
     TEST_TIMEOUT_MS,
   );

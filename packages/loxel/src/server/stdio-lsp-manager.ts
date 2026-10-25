@@ -179,12 +179,13 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected readonly requiresFullTextSync: boolean = false;
 
   /**
-   * LSP methods whose dynamic `client/registerCapability` registrations are
-   * dropped before they reach Monaco (the server is told they succeeded), so
-   * no provider is registered for them. Semantic tokens are dropped as well
-   * when `disableSemanticTokens` is set.
+   * LSP features Monaco must not get from this server: their capability is
+   * deleted from the initialize response and their dynamic
+   * `client/registerCapability` entries are dropped (the server is told they
+   * succeeded), whichever way the server advertises them. Semantic tokens are
+   * suppressed as well when `disableSemanticTokens` is set.
    */
-  protected readonly suppressedRegistrations: readonly string[] = [];
+  protected readonly suppressedFeatures: readonly SuppressibleFeature[] = [];
 
   /**
    * Set to true for servers that should hear about on-disk changes to files that are not open
@@ -457,9 +458,9 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       }
     }
 
-    const suppressed = this.disableSemanticTokens
-      ? [...this.suppressedRegistrations, "textDocument/semanticTokens"]
-      : this.suppressedRegistrations;
+    const suppressed: readonly SuppressibleFeature[] = this.disableSemanticTokens
+      ? [...this.suppressedFeatures, "textDocument/semanticTokens"]
+      : this.suppressedFeatures;
     if (suppressed.length > 0) {
       try {
         const parsed = didParse ? preparsed : JSON.parse(body);
@@ -478,7 +479,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             Array.isArray(msg.params?.registrations)
           ) {
             const filtered = msg.params.registrations.filter(
-              (r) => !suppressed.includes(r?.method ?? ""),
+              (r) => !suppressed.some((method) => method === r?.method),
             );
             if (filtered.length === 0 && msg.id !== undefined) {
               this.writeToStdin(
@@ -492,11 +493,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             return;
           }
 
-          // initialize response — strip semanticTokensProvider so Monaco
+          // initialize response — strip the suppressed capabilities so Monaco
           // never registers a provider in the first place.
-          if (this.disableSemanticTokens && msg.id !== undefined && msg.result?.capabilities) {
-            if ("semanticTokensProvider" in msg.result.capabilities) {
-              delete msg.result.capabilities.semanticTokensProvider;
+          if (msg.id !== undefined && msg.result?.capabilities) {
+            const caps = msg.result.capabilities;
+            const present = suppressed
+              .map((method) => SERVER_CAPABILITY_OF[method])
+              .filter((key) => key in caps);
+            if (present.length > 0) {
+              for (const key of present) delete caps[key];
               session.ws.send(JSON.stringify(parsed));
               return;
             }
@@ -549,7 +554,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         // Detached (or replaced by a newer connection) while resolving.
         if (this._pendingFrames.get(ws) !== frames) return;
         this._pendingFrames.delete(ws);
-        this.spawnSession(ws, context, resolved);
+        try {
+          this.spawnSession(ws, context, resolved);
+        } catch (err) {
+          // Nothing else would answer the client's `initialize`; close so it fails visibly.
+          this.log.error(`${this.name} failed to start`, { error: err });
+          ws.close(4001, `${this.name} failed to start`);
+          return;
+        }
         const session = this.sessions.get(ws);
         if (!session) return;
         for (const frame of frames) this.handleClientData(session, frame);
@@ -856,6 +868,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
  * preserve caller intent; nested object keys from the server are added only
  * where the client didn't already specify them.
  */
+/** The server capability that advertises each suppressible LSP feature statically. */
+const SERVER_CAPABILITY_OF = {
+  "textDocument/formatting": "documentFormattingProvider",
+  "textDocument/rangeFormatting": "documentRangeFormattingProvider",
+  "textDocument/semanticTokens": "semanticTokensProvider",
+} as const;
+
+export type SuppressibleFeature = keyof typeof SERVER_CAPABILITY_OF;
+
 function mergeInitOptions(
   existing: Record<string, unknown> | undefined,
   add: Record<string, unknown>,

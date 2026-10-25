@@ -48,7 +48,7 @@ Pyright reads only `disablePullDiagnostics` from `initializationOptions`; its se
 
 ## Ruff — Second Server for a Language
 
-Runs next to Pyright on the same `python` models: its own route, client and lazy connector, each client keeping its own diagnostics markers. `resolveBinary` is async: the `ruff` beside the resolved interpreter if the repo does not ship it and it is at least 0.5.3, else the downloaded one. Drops its formatting registrations (`suppressedRegistrations`) so format on save stays the only Python formatter, and turns off syntax errors that Pyright already reports.
+Runs next to Pyright on the same `python` models: its own route, client and lazy connector, each client keeping its own diagnostics markers. `resolveBinary` is async: the `ruff` beside the resolved interpreter if the repo does not ship it and it is at least 0.5.3, else the downloaded one. Suppresses its formatting (`suppressedFeatures`) so format on save stays the only Python formatter, and turns off syntax errors that Pyright already reports.
 
 ## Astro — Use as Template
 

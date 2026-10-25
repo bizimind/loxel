@@ -57,7 +57,7 @@ Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped
 ### Optional overrides
 
 - **`disableSemanticTokens` / `requiresFullTextSync`** — Readonly flags, see Decision Points.
-- **`suppressedRegistrations`** — LSP methods whose dynamic registrations are dropped before Monaco sees them (ruff's formatting, owned by format on save).
+- **`suppressedFeatures`** — LSP features (formatting, semantic tokens) stripped from both the initialize response and dynamic registrations before Monaco sees them (ruff's formatting, owned by format on save).
 - **`spawnArgs()`** — Override if the server doesn't use `["--stdio"]`.
 - **`getInitializationOptions(session)`** — For config the server reads at startup (SDK paths, indexing settings).
 - **`onClientInitialized(session)`** — For push-based config via `workspace/didChangeConfiguration` after handshake (Docker's compose settings, YAML's schemas).

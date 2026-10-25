@@ -4,9 +4,11 @@ import type { ServerWebSocket, Subprocess } from "bun";
 
 import { logger } from "./logger";
 import { isShippedByRepo, resolvePythonEnv } from "./python-env";
+import { buildSpawnEnv } from "./shell-env";
 import {
   type SpawnOptions,
   StdioLspManager,
+  type SuppressibleFeature,
   type WtLspContext,
   type WtLspSession,
 } from "./stdio-lsp-manager";
@@ -31,7 +33,7 @@ const VERSION_TIMEOUT_MS = 5_000;
 export class RuffLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
   /** Ruff watches its config files (`pyproject.toml`, `ruff.toml`) to reload settings. */
   protected override readonly forwardWatchedFiles = true;
-  protected override readonly suppressedRegistrations = [
+  protected override readonly suppressedFeatures: readonly SuppressibleFeature[] = [
     "textDocument/formatting",
     "textDocument/rangeFormatting",
   ];
@@ -107,12 +109,18 @@ export async function resolveRuffBinary(
 }
 
 async function isUsableRuff(wtPath: string, ruff: string): Promise<boolean> {
-  if (!(await Bun.file(ruff).exists())) return false;
-  if (await isShippedByRepo(wtPath, ruff)) {
-    log.warn("Ignoring a ruff binary tracked by git", { wtPath, ruff });
+  try {
+    if (!(await Bun.file(ruff).exists())) return false;
+    if (await isShippedByRepo(wtPath, ruff)) {
+      log.warn("Ignoring a ruff binary tracked by git", { wtPath, ruff });
+      return false;
+    }
+  } catch (err) {
+    // Removed between the checks; the next candidate may still do.
+    log.debug("Could not check a ruff binary", { ruff, error: err });
     return false;
   }
-  const version = await ruffVersion(ruff);
+  const version = await ruffVersion(wtPath, ruff);
   if (!version || compareVersions(version, MIN_SERVER_VERSION) < 0) {
     log.info("Ignoring a ruff without a stable language server", { ruff, version });
     return false;
@@ -120,10 +128,15 @@ async function isUsableRuff(wtPath: string, ruff: string): Promise<boolean> {
   return true;
 }
 
-/** `[major, minor, patch]` from `ruff --version`, or null when it does not run. */
-async function ruffVersion(ruff: string): Promise<number[] | null> {
+/**
+ * `[major, minor, patch]` from `ruff --version`, or null when it does not run. Probed where the
+ * server will run, since a shim (pyenv, asdf) picks its ruff by directory and environment.
+ */
+async function ruffVersion(wtPath: string, ruff: string): Promise<number[] | null> {
   try {
     const proc = Bun.spawn([ruff, "--version"], {
+      cwd: wtPath,
+      env: buildSpawnEnv(),
       stdin: "ignore",
       stdout: "pipe",
       stderr: "ignore",
