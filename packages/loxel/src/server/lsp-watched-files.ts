@@ -22,9 +22,9 @@ const WATCH_KIND_ALL = 7;
 /** Quiet period before a batch is sent; the file watcher already coalesced its own events. */
 const DEBOUNCE_MS = 250;
 /**
- * Most changes kept while the server has no watcher registered. A server reads the disk before it
- * registers its watchers (tsc only once the project has loaded), so changes in between are
- * replayed when it registers instead of being lost.
+ * Most changes kept from before the server's watchers were registered. A server reads the disk
+ * before it registers its watchers (tsc only once the project has loaded), so changes in between
+ * are replayed to every later registration that wants them instead of being lost.
  */
 const EARLY_LIMIT = 10_000;
 /** Longest a change waits for quiet, so a file written continuously cannot hold back the rest. */
@@ -124,7 +124,11 @@ export function splitWatchedFilesRegistration(body: string): WatchedFilesRegistr
 export class WatchedFilesForwarder {
   private readonly registrations = new Map<string, Watcher[]>();
   private readonly pending = new Set<string>();
-  /** Changes queued while nothing was registered, replayed by the next registration. */
+  /**
+   * Changes queued while no watcher was registered. Each registration takes the ones its watchers
+   * want; the rest stay for a later one, since a server may register its watchers in several
+   * entries or frames.
+   */
   private readonly early = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** When the oldest pending path was queued; the batch goes out by {@link MAX_WAIT_MS} after. */
@@ -148,10 +152,17 @@ export class WatchedFilesForwarder {
       id,
       Array.isArray(watchers) ? watchers.flatMap((w) => this.compileWatcher(w) ?? []) : [],
     );
-    if (this.early.size === 0) return;
-    const early = [...this.early];
-    this.early.clear();
-    this.queue(early);
+    const wanted = [...this.early].filter((p) => this.kindsFor(p) !== 0);
+    for (const p of wanted) this.early.delete(p);
+    this.queue(wanted);
+  }
+
+  /** Whether any registration holds a usable watcher (an empty or malformed one does not count). */
+  private hasWatchers(): boolean {
+    for (const watchers of this.registrations.values()) {
+      if (watchers.length > 0) return true;
+    }
+    return false;
   }
 
   /** Forget a registration; false when the id is not one of ours. */
@@ -160,12 +171,12 @@ export class WatchedFilesForwarder {
   }
 
   /**
-   * Queue changed absolute paths. Paths no registered watcher matches are dropped; while nothing
-   * is registered they are kept for the next registration instead.
+   * Queue changed absolute paths. Paths no registered watcher matches are dropped; while no watcher
+   * is registered they are kept for later registrations instead.
    */
   queue(paths: Iterable<string>): void {
     if (this.disposed) return;
-    if (this.registrations.size === 0) {
+    if (!this.hasWatchers()) {
       for (const p of paths) {
         if (this.early.size >= EARLY_LIMIT) break;
         this.early.add(p);

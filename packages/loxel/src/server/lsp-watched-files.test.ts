@@ -258,6 +258,28 @@ describe("WatchedFilesForwarder batching", () => {
     ]);
   });
 
+  test("keeps early changes for a later registration that wants them", async () => {
+    const root = await tempTree();
+    await writeFile(join(root, "a.ts"), "export {};\n");
+    await writeFile(join(root, "tsconfig.json"), "{}\n");
+    const batches: FileEvent[][] = [];
+    const f = new WatchedFilesForwarder(root, (changes) => batches.push(changes), 20);
+    f.queue([join(root, "a.ts"), join(root, "tsconfig.json")]);
+
+    // An empty registration does not end the early phase.
+    f.register("empty", { watchers: [] });
+    f.queue([join(root, "late.ts")]);
+    // Two entries of one request: each takes only what its watchers want.
+    f.register("sources", { watchers: [{ globPattern: "**/*.ts" }] });
+    f.register("config", { watchers: [{ globPattern: "**/tsconfig.json" }] });
+    await Bun.sleep(100);
+
+    const uris = batches.flat().map((e) => e.uri);
+    expect(uris.toSorted()).toEqual(
+      ["a.ts", "late.ts", "tsconfig.json"].map((p) => pathToFileURL(join(root, p)).href).toSorted(),
+    );
+  });
+
   test("drops changes a watcher's kind excludes", async () => {
     const root = await tempTree();
     const batches: FileEvent[][] = [];
