@@ -24,10 +24,10 @@ const VERSION_TIMEOUT_MS = 5_000;
 
 /**
  * Manages `ruff server` child processes, one per worktree: lint diagnostics, quick fixes, fix all
- * and organize imports for Python, next to Pyright's type checking (Pyright offers no organize
+ * and organize imports for Python, next to basedpyright's type checking (basedpyright offers no organize
  * imports code action, so the two never compete for it). Ruff finds its configuration
  * per file (nearest `.ruff.toml` / `ruff.toml` / `pyproject.toml`), so nothing is configured here
- * beyond turning off what another owner already provides: syntax errors (Pyright reports them) and
+ * beyond turning off what another owner already provides: syntax errors (basedpyright reports them) and
  * formatting (format on save picks ruff or black per project, see `python-formatter.ts`).
  */
 export class RuffLspManager extends StdioLspManager<WtLspSession, WtLspContext> {

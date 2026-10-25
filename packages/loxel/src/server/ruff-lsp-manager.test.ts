@@ -164,7 +164,7 @@ describe.skipIf(!(await Bun.file(BUNDLED_RUFF).exists()))("RuffLspManager with r
       const report = (await client.request("textDocument/diagnostic", {
         textDocument: { uri },
       })) as { items: { code?: string }[] };
-      // Pyright reports syntax errors; ruff only lints.
+      // basedpyright reports syntax errors; ruff only lints.
       expect(report.items.map((d) => d.code)).not.toContain("invalid-syntax");
 
       const linted = client.open(join(wt, "lint.py"), "import os\nimport sys\n");

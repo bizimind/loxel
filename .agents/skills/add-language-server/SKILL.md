@@ -28,7 +28,7 @@ Resolve these with the user before starting:
 
 **Three approaches — pick one:**
 
-**A. Bun-built from NPM package** — `packages/loxel/scripts/build-<name>.ts`. Two-step: `Bun.build()` bundles the entry point, then `bun build --compile` produces a standalone binary in `build/`. Use `resolvePackage()` from `./resolve-package.ts` to locate the NPM package. Some servers need Bun.build plugins (see pyright and yaml-ls build scripts for examples). Add the NPM package as a devDependency.
+**A. Bun-built from NPM package** — `packages/loxel/scripts/build-<name>.ts`. Two-step: `Bun.build()` bundles the entry point, then `bun build --compile` produces a standalone binary in `build/`. Use `resolvePackage()` from `./resolve-package.ts` to locate the NPM package. Some servers need Bun.build plugins (see the yaml-ls build script) or runtime shims (see the basedpyright build script). Add the NPM package as a devDependency.
 
 **B. Downloaded pre-built binary** — `packages/loxel/scripts/download-<name>.ts`. For Go/Rust/GraalVM-native binaries. Pin SHA256 digests per platform. Hash the downloaded bytes _in memory before writing or extracting_ — never extract untrusted content before verification. For archives, pass the expected binary's member name to `unzip` or `tar` to restrict extraction to that single file. See docker-ls (raw binary), terraform-ls (zip), xml-lsp (zip with rename), and ruff (tarball, or zip on Windows) download scripts.
 
@@ -61,8 +61,8 @@ Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped
 - **`spawnArgs()`** — Override if the server doesn't use `["--stdio"]`.
 - **`getInitializationOptions(session)`** — For config the server reads at startup (SDK paths, indexing settings).
 - **`onClientInitialized(session)`** — For push-based config via `workspace/didChangeConfiguration` after handshake (Docker's compose settings, YAML's schemas).
-- **`workspaceConfiguration(session, section)`** — For servers that pull config with `workspace/configuration` (Pyright). Defining it advertises the capability and answers the requests server-side; call `notifyConfigurationChanged(session)` to make the server pull again.
-- **`forwardWatchedFiles`** — Readonly flag for servers that register file watchers to learn about changes to unopened files and config (Pyright, TypeScript). The base answers the registrations and forwards matching worktree changes; needs `getSessionWorkspace`.
+- **`workspaceConfiguration(session, section)`** — For servers that pull config with `workspace/configuration` (basedpyright). Defining it advertises the capability and answers the requests server-side; call `notifyConfigurationChanged(session)` to make the server pull again.
+- **`forwardWatchedFiles`** — Readonly flag for servers that register file watchers to learn about changes to unopened files and config (basedpyright, TypeScript). The base answers the registrations and forwards matching worktree changes; needs `getSessionWorkspace`.
 - **`onSessionClosed(session)`** — Release per-session resources (watchers); must be idempotent.
 - **`handleServerFrame(session, body)` / `handleClientData(session, data)`** — For intercepting/transforming messages. Only TypeScript and Docker use these.
 
@@ -124,7 +124,7 @@ createLazyLspConnector({
 
 ## Layer 6: Highlighting & Icons
 
-**`packages/loxel/src/lib/highlighter.ts`** — Add to `BUNDLED_LANGUAGES` (if Shiki supports it) and map in `EXT_TO_LANG` (or `FILENAME_TO_LANG` for extensionless names like `Dockerfile`). If the Shiki language ID differs from Monaco's, add a mapping in `monaco-theme.ts` `LANG_MAP`.
+**`packages/loxel/src/lib/highlighter.ts`** — Add to `BUNDLED_LANGUAGES` (if Shiki supports it) and map in `EXT_TO_LANG` (or `FILENAME_TO_LANG` for extensionless names like `Dockerfile`). If the Shiki language ID differs from Monaco's, add a mapping in `monaco-theme.ts` `LANG_MAP`. If the server emits semantic tokens, give each token type in its legend a rule in `monaco-theme.ts` `DARK_SEMANTIC_RULES`; a type without one loses its TextMate color.
 
 **`packages/loxel/src/lib/file-icons.tsx`** — Add SVG to `public/icons/`, map extension in `EXT_MAP`, config filenames in `FILE_NAME_MAP`.
 
@@ -138,6 +138,7 @@ Add the language to the `useFileScheme` check. Most LSPs need `file://` URIs for
 
 - **`packages/loxel/electron-builder.yml`** — Add `from: build/<binary-name>` to `extraResources`
 - **`.github/workflows/release-loxel.yml`** — Add ad-hoc codesign (`codesign -s - -f packages/loxel/build/<binary>`) and staging copy (`cp ... staging/`) lines next to the existing LSP binaries
+- **`packages/loxel/src/electron/main.ts`** — If the server ships a resource directory (like `typeshed-fallback`), add it to `UPDATE_RESOURCE_DIRS` so in-place updates replace it instead of extracting over it
 
 ## Checklist
 

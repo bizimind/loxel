@@ -20,7 +20,7 @@ import {
 let markerOwnerCount = 0;
 
 export class LspDiagnosticsFeature extends Disposable {
-  /** Per client, so servers sharing a model (Pyright and ruff for Python) keep their own markers. */
+  /** Per client, so servers sharing a model (basedpyright and ruff for Python) keep their own markers. */
   private readonly _diagnosticsMarkerOwner = `lsp-${++markerOwnerCount}`;
   private readonly _pullDiagnosticProviders = new Map<
     monaco.editor.ITextModel,

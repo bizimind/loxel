@@ -21,8 +21,8 @@ extraResources:
     to: terraform-ls
   - from: build/ruff
     to: ruff
-  - from: build/pyright-langserver
-    to: pyright-langserver
+  - from: build/basedpyright-langserver
+    to: basedpyright-langserver
   - from: build/astro-ls
     to: astro-ls
   - from: build/lemminx/lemminx

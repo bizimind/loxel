@@ -260,14 +260,14 @@ createLazyLspConnector({
   disconnect: disconnectDockerLsp,
 });
 
-// pyright: only worktrees with .py/.pyi files pay the cost.
+// basedpyright: only worktrees with .py/.pyi files pay the cost.
 createLazyLspConnector({
   languageIds: ["python"],
   connect: connectPythonLsp,
   disconnect: disconnectPythonLsp,
 });
 
-// ruff server: lint diagnostics, quick fixes, fix all and organize imports, next to Pyright.
+// ruff server: lint diagnostics, quick fixes, fix all and organize imports, next to basedpyright.
 createLazyLspConnector({
   languageIds: ["python"],
   connect: connectRuffLsp,

@@ -394,9 +394,9 @@ function pixiEnvDirs(projectDir: string): string[] {
 /**
  * Whether an executable (or what its symlinks resolve to) is a file git tracks in the worktree,
  * including in a submodule or nested repository inside it. Real environments are never committed,
- * and Loxel executes interpreters and environment tools (Loxel and Pyright run the interpreter,
- * ruff runs as a language server), so a committed `.venv/bin/python` would otherwise run
- * repository code as soon as a Python file is opened.
+ * and Loxel executes interpreters and environment tools (Loxel and basedpyright run the
+ * interpreter, ruff runs as a language server), so a committed `.venv/bin/python` would otherwise
+ * run repository code as soon as a Python file is opened.
  */
 export async function isShippedByRepo(wtPath: string, executable: string): Promise<boolean> {
   const candidates = [executable, await realpath(executable)];
@@ -521,7 +521,7 @@ async function isExecutable(filePath: string): Promise<boolean> {
 
 /**
  * `PATH` without the worktree's own directories, for processes that look up `python` themselves
- * (Pyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
+ * (basedpyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
  */
 export function pathOutsideWorktree(PATH: string, wtPath: string): string {
   const root = path.resolve(wtPath);
