@@ -431,6 +431,29 @@ async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean
   return listed.exitCode !== 1;
 }
 
+/**
+ * Whether git tracks any file in `dir`, asked like {@link isTrackedByGit} (innermost repository,
+ * physical path, fail closed inside a git worktree). Activating an environment in a terminal puts
+ * its whole `bin` first on PATH, so a committed `bin/git` written into an existing ignored venv
+ * would shadow the real one even though the interpreter itself is untracked.
+ */
+export async function hasTrackedFiles(wtPath: string, dir: string): Promise<boolean> {
+  try {
+    const realWtPath = await realpath(wtPath);
+    const physical = await realpath(dir);
+    const worktreeRepo = await runGit(realWtPath, ["rev-parse", "--show-toplevel"]);
+    if (worktreeRepo.exitCode === GIT_SPAWN_FAILED) return true;
+    if (worktreeRepo.exitCode !== 0) return false;
+
+    const innermost = await runGit(physical, ["rev-parse", "--show-toplevel"]);
+    if (innermost.exitCode !== 0) return isInside(physical, realWtPath);
+    const listed = await runGit(innermost.stdout.trim(), ["ls-files", "--", physical]);
+    return listed.exitCode !== 0 || listed.stdout.trim() !== "";
+  } catch {
+    return true;
+  }
+}
+
 async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string }> {
   try {
     const proc = Bun.spawn(["git", "-C", cwd, ...args], {

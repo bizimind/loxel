@@ -204,6 +204,8 @@ export interface TerminalSpawnTarget {
   scrollbackLines?: number;
   /** The panel's window, exposed to the shell as `LOXEL_WINDOW_ID`. */
   windowId?: string;
+  /** Activate the worktree's Python environment in the shell (`terminal.activatePythonEnv`); defaults to true. */
+  activatePythonEnv?: boolean;
 }
 
 /** Client-to-server WebSocket message types (JSON text frames) */
