@@ -44,7 +44,7 @@ Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexi
 
 Build script patches webpack dynamic require and copies `typeshed-fallback` directory (also listed in electron-builder.yml extraResources).
 
-Pyright reads only `disablePullDiagnostics` from `initializationOptions`; its settings come from `workspace/configuration`. The manager implements `workspaceConfiguration` to answer only `python.pythonPath` from the Python environment resolver (`python-env.ts`) and re-announces config when the watcher sees the environment change. See LANGUAGE_SERVERS.md "Python environment".
+Pyright reads only `disablePullDiagnostics` from `initializationOptions`; its settings come from `workspace/configuration`. The manager implements `workspaceConfiguration` to answer only `python.pythonPath` from the Python environment resolver (`python-env.ts`) and re-announces config when the watcher sees the environment change or the worktree's chosen interpreter changes (`refreshWorktreeEnvironment`). See LANGUAGE_SERVERS.md "Python environment".
 
 ## Ruff — Second Server for a Language
 

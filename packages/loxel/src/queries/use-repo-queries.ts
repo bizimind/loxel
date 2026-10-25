@@ -172,3 +172,13 @@ export function useExternalFilesQuery() {
     staleTime: Infinity, // WebSocket bridge handles updates via external_files_changed
   });
 }
+
+/** The worktree's Python interpreter; `enabled` defers the request until something shows it. */
+export function usePythonEnvQuery(enabled: boolean) {
+  return useScopedQuery({
+    queryKey: (pp, wt) => queryKeys.pythonEnv(pp, wt),
+    queryFn: (wt) => api.getPythonEnv(wt),
+    extraEnabled: enabled,
+    staleTime: Infinity, // WebSocket bridge invalidates it on python_env_changed
+  });
+}

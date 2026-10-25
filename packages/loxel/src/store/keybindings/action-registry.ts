@@ -8,6 +8,7 @@ import type { SplitDirection } from "@/api/panel-placement-model";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
 import { canRenameActiveTab } from "@/lib/tab-rename";
+import { useWorktreeStore } from "@/store/worktrees";
 
 /**
  * All action IDs in the application. Adding an action here automatically
@@ -89,6 +90,7 @@ export type ActionId =
   | "tree.toggleExpanded"
   | "tree.open"
   | "tree.rename"
+  | "python.selectInterpreter"
   | "app.settings";
 
 /**
@@ -111,7 +113,15 @@ const DIRECTION_LABELS: Record<SplitDirection, string> = {
   down: "Down",
 };
 
-export type ActionCategory = "panel" | "toggle" | "nav" | "sidebar" | "worktree" | "tree" | "app";
+export type ActionCategory =
+  | "panel"
+  | "toggle"
+  | "nav"
+  | "sidebar"
+  | "worktree"
+  | "tree"
+  | "language"
+  | "app";
 
 export interface ActionDef {
   id: ActionId;
@@ -123,6 +133,10 @@ export interface ActionDef {
    * key resolves as unbound and reaches the focused widget (terminal, editor, …).
    */
   isEnabled?: () => boolean;
+}
+
+function hasActiveWorktree(): boolean {
+  return useWorktreeStore.getState().activeWorktreePath !== null;
 }
 
 function isFindTargetFocused(): boolean {
@@ -277,6 +291,14 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "tree.open", label: "Tree: Open", category: "tree", hidden: true },
   { id: "tree.rename", label: "Tree: Rename", category: "tree", hidden: true },
 
+  // Languages
+  {
+    id: "python.selectInterpreter",
+    label: "Python: Select Interpreter",
+    category: "language",
+    isEnabled: hasActiveWorktree,
+  },
+
   // App
   { id: "app.settings", label: "Open Settings", category: "app" },
 ];
@@ -295,3 +317,7 @@ export function getActionsByCategory(category: ActionCategory): ActionDef[] {
 
 /** All action IDs as a set, for fast membership checks. */
 export const ACTION_IDS = new Set<ActionId>(ACTIONS.map((a) => a.id));
+
+export function isActionId(id: string): id is ActionId {
+  return (ACTION_IDS as ReadonlySet<string>).has(id);
+}
