@@ -87,8 +87,14 @@ export class LspDiagnosticsFeature extends Disposable {
     capability: DiagnosticRegistrationOptions,
     disposables: DisposableStore,
   ): void {
-    // Check if model matches the document selector
-    if (!matchesDocumentSelector(model, capability.documentSelector)) {
+    if (!this._connection.bridge.isSyncedModel(model)) return;
+    if (
+      !matchesDocumentSelector(
+        model,
+        capability.documentSelector,
+        this._connection.defaultLanguageIds,
+      )
+    ) {
       return;
     }
 

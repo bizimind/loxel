@@ -1,5 +1,7 @@
 import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client";
 
+import { isLiveEditorModel } from "./live-editor-model";
+
 /**
  * Factory for worktree-scoped LSP client connections. Each call creates an
  * independent connect/disconnect pair backed by a single WebSocket transport.
@@ -9,7 +11,7 @@ import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client
  * disposes the old transport (killing the server-side subprocess) and opens a
  * new connection. Both the worktree switch and `disconnect()` dispose the
  * client (unregistering providers and closing synced documents) before the
- * transport.
+ * transport. Only editor tabs' live models are synced to the server (see `isLiveEditorModel`).
  */
 export function createWorktreeLspClient(wsPath: string, languageId?: string | readonly string[]) {
   let currentWtPath: string | null = null;
@@ -37,7 +39,10 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
         }
         connecting = false;
         currentTransport = transport;
-        currentClient = new MonacoLspClient(transport, languageId ? { languageId } : undefined);
+        currentClient = new MonacoLspClient(transport, {
+          languageId,
+          modelFilter: isLiveEditorModel,
+        });
       },
       () => {
         if (currentWtPath === wtPath) {

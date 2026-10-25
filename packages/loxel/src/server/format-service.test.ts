@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -29,13 +29,20 @@ async function makeWorktree(files: Record<string, string>): Promise<string> {
 /** A fake formatter that echoes its arguments, so tests can tell which binary ran and how. */
 const ECHO_ARGS_SCRIPT = '#!/bin/sh\necho "$(basename "$0") $*"\n';
 
-/** Install `ECHO_ARGS_SCRIPT` as `<venvDir>/bin/<command>` in a venv marked by `pyvenv.cfg`. */
-async function makeFakeVenv(venvDir: string, command: string): Promise<void> {
+/**
+ * Install `script` as `<venvDir>/bin/<command>` in a venv marked by `pyvenv.cfg`. Each fake binary
+ * is written once, executable from creation, and never rewritten: rewriting a script that was just
+ * executed and running it again is racy on Linux (ETXTBSY), which made a test flaky in CI.
+ */
+async function makeFakeVenv(
+  venvDir: string,
+  command: string,
+  script = ECHO_ARGS_SCRIPT,
+): Promise<void> {
   const bin = join(venvDir, "bin", command);
   await mkdir(dirname(bin), { recursive: true });
   await writeFile(join(venvDir, "pyvenv.cfg"), "home = /usr/bin\n");
-  await writeFile(bin, ECHO_ARGS_SCRIPT);
-  await chmod(bin, 0o755);
+  await writeFile(bin, script, { mode: 0o755 });
 }
 
 const AUTO_DETECT: FormattingSettings = DEFAULT_FORMATTING_SETTINGS;
@@ -201,7 +208,9 @@ describe("FormatService Python detection", () => {
       "services/api/pyproject.toml": "[tool.ruff]",
       "services/web/pyproject.toml": "[project]\nname = 'web'",
     });
-    await makeFakeVenv(join(wt, ".venv"), "ruff");
+    // The root venv's ruff prints a marker, so the echoed args below prove the subproject's own
+    // venv won over the root one.
+    await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\necho root-venv\n");
     await makeFakeVenv(join(wt, "services/api/.venv"), "ruff");
     // A directory named like a venv without `pyvenv.cfg` is not a venv.
     await mkdir(join(wt, "services/api/pkg/.venv/bin"), { recursive: true });
@@ -211,9 +220,6 @@ describe("FormatService Python detection", () => {
     const api = join(wt, "services/api/pkg/mod.py");
     const result = await service.format("x=1\n", api, wt, AUTO_DETECT);
     expect(result.content).toBe(`ruff format --force-exclude --stdin-filename ${api}\n`);
-    // The subproject's own venv wins over the root one: swap in a marker to tell them apart.
-    await writeFile(join(wt, "services/api/.venv/bin/ruff"), "#!/bin/sh\necho subproject-venv\n");
-    expect((await service.format("x=1\n", api, wt, AUTO_DETECT)).content).toBe("subproject-venv\n");
 
     const web = join(wt, "services/web/app.py");
     expect(await service.format("x=1\n", web, wt, AUTO_DETECT)).toEqual({ content: null });
@@ -290,8 +296,7 @@ describe("FormatService failure notices", () => {
 
   test("reports a formatter that is found but cannot start", async () => {
     const wt = await makeWorktree({ "ruff.toml": "" });
-    await makeFakeVenv(join(wt, ".venv"), "ruff");
-    await writeFile(join(wt, ".venv/bin/ruff"), "#!/nonexistent/python3\n");
+    await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/nonexistent/python3\n");
     const result = await new FormatService().format("x=1\n", join(wt, "a.py"), wt, AUTO_DETECT);
     expect(result).toEqual({
       content: null,
@@ -302,8 +307,7 @@ describe("FormatService failure notices", () => {
 
   test("does not report a formatter that exits non-zero (e.g. a syntax error)", async () => {
     const wt = await makeWorktree({ "ruff.toml": "" });
-    await makeFakeVenv(join(wt, ".venv"), "ruff");
-    await writeFile(join(wt, ".venv/bin/ruff"), "#!/bin/sh\nexit 2\n");
+    await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\nexit 2\n");
     const result = await new FormatService().format("def (", join(wt, "a.py"), wt, AUTO_DETECT);
     expect(result).toEqual({ content: null });
   });

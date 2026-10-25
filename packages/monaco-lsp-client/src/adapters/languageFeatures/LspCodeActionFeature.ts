@@ -1,21 +1,15 @@
 import * as monaco from "monaco-editor";
 
-import type {
-  CodeActionRegistrationOptions,
-  Command,
-  WorkspaceEdit,
-  CodeAction,
-} from "../../types";
+import type { CodeAction, CodeActionRegistrationOptions, Command } from "../../types";
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";
-import { toMonacoLanguageSelector } from "./common";
+import { toMonacoLanguageSelector, toMonacoWorkspaceEdit } from "./common";
 import {
   lspCodeActionKindToMonacoCodeActionKind,
   toMonacoCodeActionKind,
   toLspDiagnosticSeverity,
   toLspCodeActionTriggerKind,
-  toMonacoCommand,
 } from "./common";
 
 export class LspCodeActionFeature extends Disposable {
@@ -78,10 +72,20 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
         if (codeAction._lspAction) {
           const resolved = await this._client.server.codeActionResolve(codeAction._lspAction);
           if (resolved.edit) {
-            codeAction.edit = toMonacoWorkspaceEdit(resolved.edit, this._client);
+            const edit = toMonacoWorkspaceEdit(resolved.edit, this._client);
+            if (edit.rejectReason) {
+              // Monaco's resolveCodeAction has no rejection surface (unlike rename), and a
+              // throw becomes an uncaught error while Monaco still runs the command. Leave
+              // the action with neither edit nor command so it is refused whole.
+              console.warn(`[MonacoLspClient] code action refused: ${edit.rejectReason}`);
+              codeAction.edit = undefined;
+              codeAction.command = undefined;
+              return codeAction;
+            }
+            codeAction.edit = edit;
           }
           if (resolved.command) {
-            codeAction.command = toMonacoCommand(resolved.command);
+            codeAction.command = this._client.commands.toMonacoCommand(resolved.command);
           }
         }
         return codeAction;
@@ -95,6 +99,7 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
     context: monaco.languages.CodeActionContext,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.CodeActionList | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, range.getStartPosition());
 
     const result = await this._client.server.textDocumentCodeAction({
@@ -118,26 +123,23 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
 
     return {
       actions: actions.map((action) => {
-        if ("title" in action && !("kind" in action)) {
-          // Command
-          const cmd = action as Command;
+        if (isCommand(action)) {
           const monacoAction: ExtendedCodeAction = {
-            title: cmd.title,
-            command: toMonacoCommand(cmd),
+            title: action.title,
+            command: this._client.commands.toMonacoCommand(action),
           };
           return monacoAction;
         }
 
-        // CodeAction
-        const codeAction = action as CodeAction;
+        const edit = action.edit ? toMonacoWorkspaceEdit(action.edit, this._client) : undefined;
         const monacoAction: ExtendedCodeAction = {
-          title: codeAction.title,
-          kind: toMonacoCodeActionKind(codeAction.kind),
-          isPreferred: codeAction.isPreferred,
-          disabled: codeAction.disabled?.reason,
-          edit: codeAction.edit ? toMonacoWorkspaceEdit(codeAction.edit, this._client) : undefined,
-          command: toMonacoCommand(codeAction.command),
-          _lspAction: codeAction,
+          title: action.title,
+          kind: toMonacoCodeActionKind(action.kind),
+          isPreferred: action.isPreferred,
+          disabled: action.disabled?.reason ?? edit?.rejectReason,
+          edit,
+          command: this._client.commands.toMonacoCommand(action.command),
+          _lspAction: action,
         };
         return monacoAction;
       }),
@@ -146,42 +148,8 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
   }
 }
 
-function toMonacoWorkspaceEdit(
-  edit: WorkspaceEdit,
-  client: LspConnection,
-): monaco.languages.WorkspaceEdit {
-  const edits: monaco.languages.IWorkspaceTextEdit[] = [];
-
-  if (edit.changes) {
-    for (const uri in edit.changes) {
-      const textEdits = edit.changes[uri];
-      if (!textEdits) continue;
-      for (const textEdit of textEdits) {
-        const translated = client.bridge.translateBackRange({ uri }, textEdit.range);
-        edits.push({
-          resource: translated.textModel.uri,
-          versionId: undefined,
-          textEdit: { range: translated.range, text: textEdit.newText },
-        });
-      }
-    }
-  }
-
-  if (edit.documentChanges) {
-    for (const change of edit.documentChanges) {
-      if ("textDocument" in change) {
-        const uri = change.textDocument.uri;
-        for (const textEdit of change.edits) {
-          const translated = client.bridge.translateBackRange({ uri }, textEdit.range);
-          edits.push({
-            resource: translated.textModel.uri,
-            versionId: change.textDocument.version ?? undefined,
-            textEdit: { range: translated.range, text: textEdit.newText },
-          });
-        }
-      }
-    }
-  }
-
-  return { edits };
+// A bare `Command` names its command as a string; a `CodeAction` may carry a
+// `command` too, but as a nested `Command` object.
+function isCommand(action: Command | CodeAction): action is Command {
+  return typeof action.command === "string";
 }

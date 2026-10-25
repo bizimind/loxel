@@ -2,29 +2,11 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import type * as monaco from "monaco-editor";
 
+import { FakeEmitter, fakeMonaco, fakeMonacoModule } from "../testing/fake-monaco";
 import type { TextDocumentChangeRegistrationOptions } from "../types";
 import { api, capabilities, TextDocumentSyncKind } from "../types";
 import type { IDisposable } from "../utils";
 import type { ILspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
-
-type Listener<T> = (e: T) => void;
-
-class FakeEmitter<T> {
-  private readonly _listeners = new Set<Listener<T>>();
-
-  readonly event = (listener: Listener<T>): IDisposable => {
-    this._listeners.add(listener);
-    return { dispose: () => this._listeners.delete(listener) };
-  };
-
-  fire(e: T): void {
-    for (const l of [...this._listeners]) l(e);
-  }
-
-  get size(): number {
-    return this._listeners.size;
-  }
-}
 
 interface FakeModel {
   readonly model: monaco.editor.ITextModel;
@@ -32,12 +14,12 @@ interface FakeModel {
   readonly willDispose: FakeEmitter<void>;
 }
 
-function createFakeModel(path: string): FakeModel {
+function createFakeModel(path: string, languageId = "typescript"): FakeModel {
   const contentChanged = new FakeEmitter<monaco.editor.IModelContentChangedEvent>();
   const willDispose = new FakeEmitter<void>();
   const model = {
-    uri: { toString: () => `file://${path}` },
-    getLanguageId: () => "typescript",
+    uri: { toString: () => `file://${path}`, path },
+    getLanguageId: () => languageId,
     getVersionId: () => 1,
     getValue: () => "",
     onDidChangeContent: contentChanged.event,
@@ -46,16 +28,7 @@ function createFakeModel(path: string): FakeModel {
   return { model, contentChanged, willDispose };
 }
 
-const models: FakeModel[] = [];
-const didCreateModel = new FakeEmitter<monaco.editor.ITextModel>();
-
-mock.module("monaco-editor", () => ({
-  editor: {
-    getModels: () => models.map((m) => m.model),
-    onDidCreateModel: didCreateModel.event,
-    getModel: () => null,
-  },
-}));
+mock.module("monaco-editor", () => fakeMonacoModule);
 
 const { TextDocumentSynchronizer } = await import("./TextDocumentSynchronizer");
 
@@ -93,13 +66,13 @@ const emptyChange = { changes: [] } as unknown as monaco.editor.IModelContentCha
 
 describe("TextDocumentSynchronizer", () => {
   beforeEach(() => {
-    models.length = 0;
+    fakeMonaco.reset();
   });
 
   test("dispose closes every managed model and stops forwarding changes", () => {
     const a = createFakeModel("/a.ts");
     const b = createFakeModel("/b.ts");
-    models.push(a, b);
+    fakeMonaco.models.push(a.model, b.model);
     const { server, calls } = createServer();
     const { registry, start } = createRegistry();
 
@@ -131,14 +104,14 @@ describe("TextDocumentSynchronizer", () => {
     sync.dispose();
 
     const late = createFakeModel("/late.ts");
-    didCreateModel.fire(late.model);
+    fakeMonaco.didCreateModel.fire(late.model);
     expect(calls).toEqual([]);
     expect(late.contentChanged.size).toBe(0);
   });
 
   test("a model disposed by Monaco is closed once and removed", () => {
     const a = createFakeModel("/a.ts");
-    models.push(a);
+    fakeMonaco.models.push(a.model);
     const { server, calls } = createServer();
     const { registry, start } = createRegistry();
 
@@ -150,5 +123,31 @@ describe("TextDocumentSynchronizer", () => {
 
     sync.dispose();
     expect(calls).toEqual(["open", "close"]);
+  });
+
+  test("syncs only models that match the language ids and the model filter", () => {
+    const live = createFakeModel("/live.py", "python");
+    const diff = createFakeModel("/diff.py", "python");
+    const other = createFakeModel("/other.ts");
+    fakeMonaco.models.push(live.model, diff.model, other.model);
+    const { server, calls } = createServer();
+    const { registry, start } = createRegistry();
+
+    const sync = new TextDocumentSynchronizer(
+      server,
+      registry,
+      new Set(["python"]),
+      (m) => m.uri.path !== "/diff.py",
+    );
+    start();
+    expect(calls).toEqual(["open"]);
+    expect(sync.isSyncedModel(live.model)).toBe(true);
+    expect(sync.isSyncedModel(diff.model)).toBe(false);
+    expect(sync.isSyncedModel(other.model)).toBe(false);
+
+    const lateDiff = createFakeModel("/diff.py", "python");
+    fakeMonaco.didCreateModel.fire(lateDiff.model);
+    expect(calls).toEqual(["open"]);
+    expect(lateDiff.contentChanged.size).toBe(0);
   });
 });

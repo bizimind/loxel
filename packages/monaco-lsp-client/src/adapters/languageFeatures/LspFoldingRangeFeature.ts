@@ -89,6 +89,7 @@ class LspFoldingRangeProvider implements monaco.languages.FoldingRangeProvider {
     _context: monaco.languages.FoldingContext,
     _token: monaco.CancellationToken,
   ): Promise<monaco.languages.FoldingRange[] | null> {
+    if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, new monaco.Position(1, 1));
 
     const result = await this._client.server.textDocumentFoldingRange({
