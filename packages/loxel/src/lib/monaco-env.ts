@@ -17,7 +17,9 @@ import { getHighlighter } from "./highlighter";
 import { isLiveEditorModel } from "./live-editor-model";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { dispatchOpenFile } from "./open-file";
+import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
 import { isWithin } from "./project-file-helpers";
+import { registerPythonLanguageConfiguration } from "./python-language-config";
 import { connectPythonLsp, disconnectPythonLsp } from "./python-lsp-client";
 import { connectTerraformLsp, disconnectTerraformLsp } from "./terraform-lsp-client";
 import { connectTsLsp } from "./ts-lsp-client";
@@ -88,6 +90,36 @@ monaco.languages.register({ id: "dockerbake", aliases: ["Docker Bake", "dockerba
 
 // Monarch tokenizer for docker-bake HCL — not a Shiki-bundled language.
 registerDockerBakeMonarch();
+
+// pip requirements files — Shiki has no grammar for them, so a Monarch tokenizer.
+registerPipRequirementsLanguage();
+
+// TOML as its own language ID so shikiToMonaco attaches Shiki's TOML grammar (Monaco ships none).
+monaco.languages.register({ id: "toml", extensions: [".toml"], aliases: ["TOML", "toml"] });
+monaco.languages.setLanguageConfiguration("toml", {
+  comments: { lineComment: "#" },
+  brackets: [
+    ["{", "}"],
+    ["[", "]"],
+  ],
+  autoClosingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: '"""', close: '"""', notIn: ["comment"] },
+    { open: "'''", close: "'''", notIn: ["comment"] },
+    { open: '"', close: '"', notIn: ["string"] },
+    { open: "'", close: "'", notIn: ["string", "comment"] },
+  ],
+  surroundingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: '"', close: '"' },
+    { open: "'", close: "'" },
+  ],
+});
+
+// Docstring auto-close and dedent after block-ending statements, on top of Monaco's built-in config.
+registerPythonLanguageConfiguration();
 
 // Astro language configuration (brackets, comments, auto-closing pairs).
 // shikiToMonaco handles tokenization; this provides editing behavior.

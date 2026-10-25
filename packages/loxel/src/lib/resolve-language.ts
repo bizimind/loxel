@@ -22,7 +22,11 @@ export function resolveLanguage(
 
   for (const assoc of associations) {
     if (!assoc.enabled) continue;
-    if (picomatch.isMatch(filePath, assoc.glob) || picomatch.isMatch(filename, assoc.glob)) {
+    // `dot` lets `**` cross dot directories (`.worktrees/`, `.vscode/`) and `*` match dotfiles.
+    if (
+      picomatch.isMatch(filePath, assoc.glob, { dot: true }) ||
+      picomatch.isMatch(filename, assoc.glob, { dot: true })
+    ) {
       return assoc.language;
     }
   }

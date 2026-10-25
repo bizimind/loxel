@@ -59,7 +59,7 @@ Loxel runs language servers for six other languages. Each one is independent of 
 | YAML      | Always active              | `.yml`, `.yaml`                                                  |
 | Terraform | First matching file opened | `.tf`, `.tfvars`, `.hcl`                                         |
 | Docker    | First matching file opened | `Dockerfile`, `Containerfile`, `*.dockerfile`, `docker-bake.hcl` |
-| Python    | First matching file opened | `.py`                                                            |
+| Python    | First matching file opened | `.py`, `.pyi`, `.pyw`                                            |
 | Astro     | First matching file opened | `.astro`                                                         |
 | XML       | First matching file opened | `.xml`, `.xsd`, `.xsl`, `.xslt`, `.plist`, and other XML formats |
 

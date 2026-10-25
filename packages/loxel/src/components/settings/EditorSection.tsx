@@ -7,8 +7,19 @@ import { Input } from "@/components/ui/input";
 import type { FormatterOverride } from "@/lib/formatting-model";
 import { cn } from "@/lib/utils";
 import type { IndentationOverride } from "@/store/settings-store";
-import { DEFAULT_EDITOR_SETTINGS, useSettingsStore } from "@/store/settings-store";
+import {
+  BUILTIN_LANGUAGE_INDENTATION,
+  DEFAULT_EDITOR_SETTINGS,
+  useSettingsStore,
+} from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
+
+const BUILTIN_INDENTATION_SUMMARY = [...BUILTIN_LANGUAGE_INDENTATION]
+  .map(
+    ([lang, { tabSize, insertSpaces }]) =>
+      `${lang}: ${insertSpaces ? `${tabSize} spaces` : "tabs"}`,
+  )
+  .join(", ");
 
 export function EditorSection() {
   const indentation = useSettingsStore((s) => s.editor.indentation);
@@ -116,6 +127,10 @@ export function EditorSection() {
 
       <div className="space-y-1.5">
         <label className="text-muted-foreground text-xs">Per-Extension Overrides</label>
+        <p className="text-muted-foreground text-[10px]">
+          Built-in language defaults ({BUILTIN_INDENTATION_SUMMARY}) take precedence over the
+          default above. An override for a file&apos;s extension takes precedence over both.
+        </p>
 
         {overrides.length > 0 && (
           <div className="space-y-1">

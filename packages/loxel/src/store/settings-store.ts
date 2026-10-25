@@ -109,16 +109,41 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   formatting: structuredClone(DEFAULT_FORMATTING_SETTINGS),
 };
 
-/** Resolve indentation config for a given file path (extension match → default). */
-export function resolveIndentation(editor: EditorSettings, filePath: string): IndentationDefaults {
-  const lastSlash = filePath.lastIndexOf("/");
-  const basename = filePath.slice(lastSlash + 1);
-  if (!basename.includes(".")) return editor.indentation;
-  const ext = basename.split(".").pop()!.toLowerCase();
-  if (!ext) return editor.indentation;
-  const override = editor.overrides.find((o) => o.extension.toLowerCase() === ext);
+/**
+ * Built-in indentation for languages whose formatter-enforced convention differs from the
+ * global default, keyed by resolved (highlighter) language ID.
+ */
+export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, IndentationDefaults> = new Map([
+  ["go", { tabSize: 4, insertSpaces: false }], // gofmt
+  ["python", { tabSize: 4, insertSpaces: true }], // PEP 8, ruff, black
+  ["rust", { tabSize: 4, insertSpaces: true }], // rustfmt
+]);
+
+/**
+ * Resolve indentation for a file: a per-extension user override wins, then the built-in
+ * default for the file's resolved language, then the global default.
+ */
+export function resolveIndentation(
+  editor: EditorSettings,
+  filePath: string,
+  language: string | null,
+): IndentationDefaults {
+  const override = findIndentationOverride(editor.overrides, filePath);
   if (override) return { tabSize: override.tabSize, insertSpaces: override.insertSpaces };
-  return editor.indentation;
+  const builtin = language ? BUILTIN_LANGUAGE_INDENTATION.get(language) : undefined;
+  return builtin ?? editor.indentation;
+}
+
+function findIndentationOverride(
+  overrides: IndentationOverride[],
+  filePath: string,
+): IndentationOverride | undefined {
+  const basename = filePath.slice(filePath.lastIndexOf("/") + 1);
+  const dot = basename.lastIndexOf(".");
+  if (dot === -1) return undefined;
+  const ext = basename.slice(dot + 1).toLowerCase();
+  if (!ext) return undefined;
+  return overrides.find((o) => o.extension.toLowerCase() === ext);
 }
 
 /** Per-zone default: size + which panel is active, or `false` (zone closed). */
@@ -186,6 +211,12 @@ export const BUILTIN_FILE_ASSOCIATIONS: FileAssociation[] = [
   fa("**/docker-bake.hcl", "dockerbake"),
   fa("**/docker-bake.override.hcl", "dockerbake"),
   fa("**/*.docker-bake.hcl", "dockerbake"),
+
+  // pip requirements and constraints files (pip-tools inputs use .in).
+  fa("**/requirements*.txt", "pip-requirements"),
+  fa("**/requirements*.in", "pip-requirements"),
+  fa("**/requirements/*.txt", "pip-requirements"),
+  fa("**/constraints*.txt", "pip-requirements"),
 
   // Filename-based defaults (from FILENAME_TO_LANG)
   ...Object.entries(FILENAME_TO_LANG).map(([name, lang]) => fa(`**/${name}`, lang)),

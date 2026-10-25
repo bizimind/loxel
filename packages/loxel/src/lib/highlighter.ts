@@ -67,6 +67,8 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   "composer.lock": "json",
   "cargo.lock": "toml",
   "poetry.lock": "toml",
+  "uv.lock": "toml",
+  "pipfile.lock": "json",
   "gemfile.lock": "ruby",
   "yarn.lock": "yaml",
 
@@ -82,6 +84,7 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   guardfile: "ruby",
 
   // Config files
+  pipfile: "toml",
   dockerfile: "dockerfile",
   containerfile: "dockerfile",
   "docker-bake.hcl": "dockerbake",
@@ -210,6 +213,8 @@ export const EXT_TO_LANG: Record<string, string> = {
 
   // Scripting
   py: "python",
+  pyi: "python",
+  pyw: "python",
   rb: "ruby",
   php: "php",
 
