@@ -4,7 +4,13 @@ import type { ServerWebSocket, Subprocess } from "bun";
 
 import type { PythonEnv } from "@/api/python-env-model";
 
-import { type PythonEnvWatch, resolvePythonEnv, watchPythonEnv } from "./python-env";
+import {
+  pathOutsideWorktree,
+  type PythonEnvWatch,
+  resolvePythonEnv,
+  watchPythonEnv,
+} from "./python-env";
+import { buildSpawnEnv } from "./shell-env";
 import {
   type SpawnOptions,
   StdioLspManager,
@@ -65,7 +71,10 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
-    return { cwd: context.wtPath };
+    // Without a resolved interpreter Pyright runs `python3` / `python` from its PATH; keep the
+    // worktree's own directories out of it, matching the resolver's refusal of committed ones.
+    const PATH = pathOutsideWorktree(buildSpawnEnv().PATH ?? "", context.wtPath);
+    return { cwd: context.wtPath, env: { PATH } };
   }
 
   protected buildSession(
