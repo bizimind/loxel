@@ -220,7 +220,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * forwarding them (monaco-lsp-client does not implement that request).
    * Returns the value for one requested `section`; `null` means unset.
    * Defining it also advertises the `workspace.configuration` client
-   * capability in `initialize`, which pull-based servers such as Pyright
+   * capability in `initialize`, which pull-based servers such as basedpyright
    * need before they ask. Call {@link notifyConfigurationChanged} when an
    * answer would change.
    */
@@ -526,7 +526,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       stdout: "pipe",
       stderr: "pipe",
       cwd: opts.cwd,
-      // Login-shell environment, so servers that run user tools (Pyright's
+      // Login-shell environment, so servers that run user tools (basedpyright's
       // interpreter probe, terraform-ls's `terraform`) find the user's PATH
       // even when Loxel was launched from Finder.
       env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },

@@ -399,7 +399,7 @@ function pixiEnvDirs(projectDir: string): string[] {
  * Whether the repository ships any part of the environment at `envPath`: a file git tracks inside
  * it, or the `executable` about to run from it (or what its symlinks resolve to), including in a
  * submodule or nested repository. Real environments are never committed, and whatever runs from
- * one (Loxel and Pyright running the interpreter, format-on-save running ruff or black) would
+ * one (Loxel and basedpyright running the interpreter, format-on-save running ruff or black) would
  * otherwise run repository code, through the executable itself or files it loads such as a `.pth`
  * hook in `site-packages`. The one trust rule for environments, shared by the resolver and the
  * formatter.
@@ -563,7 +563,7 @@ async function isExecutable(filePath: string): Promise<boolean> {
 
 /**
  * `PATH` without the worktree's own directories, for processes that look up `python` themselves
- * (Pyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
+ * (basedpyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
  */
 export function pathOutsideWorktree(PATH: string, wtPath: string): string {
   const root = path.resolve(wtPath);

@@ -26,7 +26,7 @@ const MAX_WAIT_MS = 1000;
 /**
  * A file whose last write came within this long of its creation, or whose last metadata change
  * (a rename or move into place) came this long after its last write, is reported as created. The
- * watcher does not say whether a path is new, and servers differ there: Pyright re-resolves
+ * watcher does not say whether a path is new, and servers differ there: basedpyright re-resolves
  * imports only for created files, so a new module reported as changed would stay unresolved.
  */
 const CREATED_WINDOW_MS = 1000;
