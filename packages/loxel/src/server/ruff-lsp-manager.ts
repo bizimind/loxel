@@ -29,6 +29,8 @@ const VERSION_TIMEOUT_MS = 5_000;
  * formatting (format on save picks ruff or black per project, see `python-formatter.ts`).
  */
 export class RuffLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
+  /** Ruff watches its config files (`pyproject.toml`, `ruff.toml`) to reload settings. */
+  protected override readonly forwardWatchedFiles = true;
   protected override readonly suppressedRegistrations = [
     "textDocument/formatting",
     "textDocument/rangeFormatting",

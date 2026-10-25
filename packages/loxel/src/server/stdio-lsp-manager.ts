@@ -5,6 +5,12 @@ import type { FileSink, ServerWebSocket, Subprocess } from "bun";
 import type { LogCategory } from "@/api/log-entry-model";
 
 import { logger } from "./logger";
+import {
+  type FileEvent,
+  splitWatchedFilesRegistration,
+  WatchedFilesForwarder,
+  withWatchedFilesCapability,
+} from "./lsp-watched-files";
 import { buildSpawnEnv } from "./shell-env";
 import {
   createStderrThrottle,
@@ -74,6 +80,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private readonly _sessionsByKey = new Map<string, ServerWebSocket<unknown>>();
   /** Client frames received while an async {@link resolveBinary} runs, replayed once spawned. */
   private readonly _pendingFrames = new Map<ServerWebSocket<unknown>, string[]>();
+  /** Sessions whose server registered file watchers (see {@link forwardWatchedFiles}). */
+  private readonly watchedFiles = new Map<TSession, WatchedFilesForwarder>();
   protected readonly log: ReturnType<typeof logger.child>;
 
   constructor(protected readonly name: LogCategory) {
@@ -81,14 +89,27 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   }
 
   handleMessage(ws: ServerWebSocket<unknown>, data: string): void {
+    const frame = this.forwardWatchedFiles ? withWatchedFilesCapability(data) : data;
     const pending = this._pendingFrames.get(ws);
     if (pending) {
-      pending.push(data);
+      pending.push(frame);
       return;
     }
     const session = this.sessions.get(ws);
     if (!session) return;
-    this.handleClientData(session, data);
+    this.handleClientData(session, frame);
+  }
+
+  /**
+   * Forward changed files of a worktree, as reported by its file watcher, to the language servers
+   * rooted there that registered a matching file watcher. Only managers with
+   * {@link forwardWatchedFiles} have such servers.
+   */
+  notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
+    const root = path.resolve(wtPath);
+    for (const [session, forwarder] of this.watchedFiles) {
+      if (forwarder.root === root && this.isSessionLive(session)) forwarder.queue(paths);
+    }
   }
 
   detach(ws: ServerWebSocket<unknown>): void {
@@ -166,6 +187,16 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected readonly suppressedRegistrations: readonly string[] = [];
 
   /**
+   * Set to true for servers that should hear about on-disk changes to files that are not open
+   * (dependencies, config files, edits by git or agents). The `workspace.didChangeWatchedFiles`
+   * client capability is added to `initialize`, the server's watcher registrations are answered
+   * here instead of reaching the client, and {@link notifyWatchedFilesChanged} forwards matching
+   * changes as `workspace/didChangeWatchedFiles`. Needs {@link getSessionWorkspace}: only changes
+   * inside the session's worktree are reported, and none in its git-ignored directories.
+   */
+  protected readonly forwardWatchedFiles: boolean = false;
+
+  /**
    * Return a dedup key for this session context. When non-null, the base class
    * enforces at most one active session per key — if a new WebSocket arrives
    * for a key that already has a session, the old session is killed first.
@@ -182,6 +213,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * `rootUri` / `rootPath` / `workspaceFolders` injected into the
    * `initialize` request. Returns null by default (no injection).
    * Subclasses that carry `wtPath` on their session override this.
+   * It is also the root whose file changes reach the server when
+   * {@link forwardWatchedFiles} is set.
    */
   protected getSessionWorkspace(_session: TSession): string | null {
     return null;
@@ -578,7 +611,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
           stderr: recentStderrLines.join("\n") || "(empty)",
         });
       }
-      this.onSessionClosed(session);
+      this.releaseSession(session);
       if (this.sessions.get(ws) === session) {
         this.sessions.delete(ws);
       }
@@ -643,12 +676,69 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   // ---------------------------------------------------------------------------
 
   private killSession(session: TSession): void {
-    this.onSessionClosed(session);
+    this.releaseSession(session);
     try {
       session.proc.kill();
     } catch {
       // Already dead
     }
+  }
+
+  private releaseSession(session: TSession): void {
+    this.watchedFiles.get(session)?.dispose();
+    this.watchedFiles.delete(session);
+    this.onSessionClosed(session);
+  }
+
+  /**
+   * Take the server's `workspace/didChangeWatchedFiles` (un)registrations out of a
+   * `client/registerCapability` / `client/unregisterCapability` request before it reaches the
+   * client, which cannot watch files: remember the watchers and acknowledge the request, or pass
+   * on what remains when it carries other registrations too. True when the frame was consumed.
+   */
+  private interceptWatchedFilesRegistration(session: TSession, body: string): boolean {
+    if (!this.forwardWatchedFiles) return false;
+    const root = this.getSessionWorkspace(session);
+    if (!root) return false;
+    const request = splitWatchedFilesRegistration(body);
+    if (!request) return false;
+    // A frame drained after teardown must not create a forwarder nothing would dispose.
+    if (!this.isSessionLive(session)) return true;
+
+    let forwarder = this.watchedFiles.get(session);
+    if (request.register) {
+      if (!forwarder) {
+        forwarder = new WatchedFilesForwarder(path.resolve(root), (changes) =>
+          this.sendWatchedFilesChanged(session, changes),
+        );
+        this.watchedFiles.set(session, forwarder);
+      }
+      for (const entry of request.entries) forwarder.register(entry.id, entry.registerOptions);
+    } else {
+      for (const entry of request.entries) forwarder?.unregister(entry.id);
+    }
+
+    if (request.remainder === null) {
+      this.writeToStdin(
+        session,
+        JSON.stringify({ jsonrpc: "2.0", id: request.requestId, result: null }),
+      );
+    } else {
+      this.handleServerFrame(session, request.remainder);
+    }
+    return true;
+  }
+
+  private sendWatchedFilesChanged(session: TSession, changes: FileEvent[]): void {
+    if (!this.isSessionLive(session)) return;
+    this.writeToStdin(
+      session,
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "workspace/didChangeWatchedFiles",
+        params: { changes },
+      }),
+    );
   }
 
   private async answerWorkspaceConfiguration(
@@ -715,6 +805,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       const body = session.stdoutBuf.subarray(messageStart, messageEnd).toString("utf-8");
       session.stdoutBuf = session.stdoutBuf.subarray(messageEnd);
 
+      if (this.interceptWatchedFilesRegistration(session, body)) continue;
       this.handleServerFrame(session, body);
     }
   }

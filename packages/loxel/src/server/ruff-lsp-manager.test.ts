@@ -135,7 +135,7 @@ class FakeClient {
 
 describe.skipIf(!(await Bun.file(BUNDLED_RUFF).exists()))("RuffLspManager with ruff", () => {
   test(
-    "serves lint diagnostics and code actions, but neither formatting nor syntax errors",
+    "serves lint diagnostics, code actions and config reloads, but neither formatting nor syntax errors",
     async () => {
       const wt = await makeDir("ruff-lsp-");
       await writeFile(join(wt, "pyproject.toml"), "[tool.ruff.lint]\nselect = ['F', 'I']\n");
@@ -164,7 +164,22 @@ describe.skipIf(!(await Bun.file(BUNDLED_RUFF).exists()))("RuffLspManager with r
       expect(lint.items.map((d) => d.code)).toEqual(["F401", "F401"]);
 
       // Ruff registers formatting dynamically; format on save owns Python formatting instead.
+      // Its config-file watchers are kept on the server too.
       expect(client.serverRequests).not.toContain("client/registerCapability");
+
+      // An edited config reaches ruff as a watched file, and its diagnostics follow.
+      await writeFile(join(wt, "pyproject.toml"), "[tool.ruff.lint]\nselect = ['I']\n");
+      manager.notifyWatchedFilesChanged(wt, [join(wt, "pyproject.toml")]);
+      const deadline = Date.now() + TEST_TIMEOUT_MS / 2;
+      let codes = ["F401"];
+      while (codes.length > 0) {
+        if (Date.now() > deadline) throw new Error(`ruff kept its old rules: ${codes.join()}`);
+        await Bun.sleep(100);
+        const report = (await client.request("textDocument/diagnostic", {
+          textDocument: { uri: linted },
+        })) as { items: { code?: string }[] };
+        codes = report.items.map((d) => d.code ?? "");
+      }
     },
     TEST_TIMEOUT_MS,
   );
