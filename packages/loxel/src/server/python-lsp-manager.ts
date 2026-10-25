@@ -41,6 +41,8 @@ interface PythonLspSession extends WtLspSession {
  * inside Pyright.
  */
 export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspContext> {
+  protected override readonly forwardWatchedFiles = true;
+
   /** @param onEnvironmentResolved Called when a session's interpreter resolves to a different one. */
   constructor(private readonly onEnvironmentResolved: (wtPath: string) => void = () => {}) {
     super("python-lsp");

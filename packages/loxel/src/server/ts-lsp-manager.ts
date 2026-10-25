@@ -89,6 +89,8 @@ interface LspContentChange {
  * semantic token responses with custom JSX tokens.
  */
 export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
+  protected override readonly forwardWatchedFiles = true;
+
   constructor() {
     super("ts-lsp");
   }
@@ -110,6 +112,10 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
 
   protected override getSessionKey(context: TsLspContext): string {
     return context.wtPath;
+  }
+
+  protected override getSessionWorkspace(session: TsLspSession): string {
+    return session.wtPath;
   }
 
   protected override spawnArgs(): readonly string[] {
