@@ -14,6 +14,19 @@ Click **Add project** in the worktree sidebar. The dialog has two tabs: **New Pr
 
 When you choose multi-workspace (see [Clone](#clone)) for a new or imported repository, an extra step lets you list files to copy into each new worktree (such as `.env`) and setup commands to run in it. Loxel writes them to the repo-root `init.wt.sh` hook.
 
+Loxel pre-fills both lists from what the repository contains: `.env` files, direnv and mise configuration, the install command for a JavaScript lockfile (Bun, pnpm, npm, Yarn), and one command that creates the worktree's Python environment:
+
+| Project has                               | Suggested command                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `uv.lock`                                 | `uv sync`                                                                                   |
+| `poetry.lock`                             | `poetry install`                                                                            |
+| `pdm.lock`                                | `pdm install`                                                                               |
+| `Pipfile.lock`                            | `pipenv install --dev`                                                                      |
+| `pyproject.toml` with a `[tool.uv]` table | `uv sync`                                                                                   |
+| `requirements*.txt` files                 | `uv venv && uv pip install -r ...`, or with `python3 -m venv .venv` when uv isn't installed |
+
+Every worktree gets its own Python environment, since a virtual environment can't be shared between checkouts. Once it exists, the Python language server and new terminals in that worktree use it.
+
 ### Detect
 
 Enter a path or browse to a folder on disk and Loxel will inspect it. The result is one of three classifications: bare repo, regular repo, or a non-repo folder. No changes are made at this step — it's read-only.

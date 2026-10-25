@@ -4,7 +4,7 @@ import type { RenameRegistrationOptions } from "../../types";
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";
-import { toMonacoLanguageSelector, toMonacoWorkspaceEdit } from "./common";
+import { toMonacoLanguageSelector } from "./common";
 
 export class LspRenameFeature extends Disposable {
   constructor(private readonly _connection: LspConnection) {
@@ -40,11 +40,15 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
     private readonly _capabilities: RenameRegistrationOptions,
   ) {}
 
+  /**
+   * Applies the rename itself and hands Monaco an empty edit: Monaco's standalone bulk-edit
+   * service can only edit open models, and a rename usually touches files that are not open.
+   */
   async provideRenameEdits(
     model: monaco.editor.ITextModel,
     position: monaco.Position,
     newName: string,
-    _token: monaco.CancellationToken,
+    token: monaco.CancellationToken,
   ): Promise<(monaco.languages.WorkspaceEdit & monaco.languages.Rejection) | null> {
     if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, position);
@@ -55,11 +59,13 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
       newName,
     });
 
-    if (!result) {
+    // Monaco cancels when the user moves on (types, moves the caret) before the edit arrives.
+    if (!result || token.isCancellationRequested) {
       return null;
     }
 
-    return toMonacoWorkspaceEdit(result, this._client);
+    const applied = await this._client.edits.apply(result);
+    return applied.applied ? { edits: [] } : { edits: [], rejectReason: applied.failureReason };
   }
 
   async resolveRenameLocation(

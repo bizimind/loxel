@@ -1,5 +1,5 @@
-// codeql[js/stack-trace-exposure] — local dev server to local Electron UI; no untrusted network boundary
 export function json(data: unknown, status = 200): Response {
+  // codeql[js/stack-trace-exposure] — loopback-only server to the local Electron UI; no untrusted network boundary
   return new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json" },

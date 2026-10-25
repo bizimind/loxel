@@ -41,6 +41,7 @@ import { logger } from "./logger";
 import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
+import { resolvePythonEnv } from "./python-env";
 import { PythonLspManager } from "./python-lsp-manager";
 import { onPythonOverrideChange } from "./python-override-store";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
@@ -216,7 +217,7 @@ function broadcastAll(message: WsMessage) {
  */
 function terminalSpawnTarget(
   msg: TerminalSpawnTarget,
-): Pick<TerminalSpawnOptions, "cwd" | "worktreePath" | "envOverrides"> {
+): Pick<TerminalSpawnOptions, "cwd" | "worktreePath" | "envOverrides" | "activatePythonEnv"> {
   const envOverrides: Record<string, string> = {
     LOXEL: "1",
     LOXEL_PORT: String(config.port),
@@ -231,7 +232,12 @@ function terminalSpawnTarget(
     log.warn("Terminal cwd is gone, starting in the worktree", { terminalId: msg.id, cwd });
     cwd = msg.worktreePath;
   }
-  return { cwd, worktreePath: msg.worktreePath, envOverrides };
+  return {
+    cwd,
+    worktreePath: msg.worktreePath,
+    envOverrides,
+    activatePythonEnv: msg.activatePythonEnv,
+  };
 }
 
 function sendTo(ws: ServerWebSocket<WsData>, message: WsMessage) {
@@ -753,6 +759,7 @@ const agentOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
 const terminalManager = new TerminalManager({
   isSequenceEnabled: isNotificationSequenceEnabled,
+  pythonEnvFor: (worktreePath) => resolvePythonEnv(worktreePath),
   onNotification: (session, payload) => {
     const notification = notificationStore.add({
       source: { kind: "terminal", panelId: session.id, worktreePath: session.worktreePath },
@@ -890,18 +897,18 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
     }
 
     case "terminal_spawn":
-      try {
-        terminalManager.ensureSpawned(msg.id, {
+      terminalManager
+        .ensureSpawned(msg.id, {
           ...terminalSpawnTarget(msg),
           // The panel's first attach resizes the PTY to its xterm.
           cols: 80,
           rows: 24,
           scrollbackLines: msg.scrollbackLines,
+        })
+        .catch((err: unknown) => {
+          log.error("Failed to spawn terminal", { terminalId: msg.id, error: err });
+          sendTo(ws, { type: "error", message: "Failed to start terminal" });
         });
-      } catch (err) {
-        log.error("Failed to spawn terminal", { terminalId: msg.id, error: err });
-        sendTo(ws, { type: "error", message: "Failed to start terminal" });
-      }
       break;
 
     case "terminal_detach":

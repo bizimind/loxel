@@ -122,6 +122,7 @@ export async function openTerminal(terminal: OpenTerminalPanel): Promise<void> {
       cwd: terminal.cwd,
       worktreePath: target,
       scrollbackLines: useSettingsStore.getState().terminal.scrollbackLines,
+      activatePythonEnv: useSettingsStore.getState().terminal.activatePythonEnv,
       windowId: WINDOW_ID,
     });
   }
