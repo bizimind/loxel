@@ -19,8 +19,8 @@ extraResources:
     to: docker-language-server
   - from: build/terraform-ls
     to: terraform-ls
-  - from: build/pyright-langserver
-    to: pyright-langserver
+  - from: build/basedpyright-langserver
+    to: basedpyright-langserver
   - from: build/astro-ls
     to: astro-ls
   - from: build/lemminx/lemminx

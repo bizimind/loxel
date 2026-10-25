@@ -4,15 +4,15 @@ Quick reference for per-LSP quirks. Consult when the new integration needs behav
 
 ## Integration Matrix
 
-| LSP              | Binary Source | Scope    | Connection | Semantic Tokens | Full-text Sync | Spawn Args      | Init Options            |
-| ---------------- | ------------- | -------- | ---------- | --------------- | -------------- | --------------- | ----------------------- |
-| TypeScript (tsc) | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences             |
-| YAML             | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (post-init)  |
-| Docker           | downloaded    | worktree | lazy       | disabled        | yes            | `start --stdio` | compose=off (post-init) |
-| Terraform        | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs    |
-| Python (Pyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter (pulled)    |
-| Astro            | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path     |
-| XML (LemMinX)    | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | none                    |
+| LSP                   | Binary Source | Scope    | Connection | Semantic Tokens | Full-text Sync | Spawn Args      | Init Options                  |
+| --------------------- | ------------- | -------- | ---------- | --------------- | -------------- | --------------- | ----------------------------- |
+| TypeScript (tsc)      | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences                   |
+| YAML                  | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (post-init)        |
+| Docker                | downloaded    | worktree | lazy       | disabled        | yes            | `start --stdio` | compose=off (post-init)       |
+| Terraform             | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
+| Python (basedpyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
+| Astro                 | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
+| XML (LemMinX)         | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | none                          |
 
 ## TypeScript — Do Not Use as Template
 
@@ -39,11 +39,11 @@ Also: serves two language IDs via array, overrides `resolveBinary()` for Windows
 
 Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexing.ignoreDirectoryNames` via init options.
 
-## Python (Pyright)
+## Python (basedpyright)
 
-Build script patches webpack dynamic require and copies `typeshed-fallback` directory (also listed in electron-builder.yml extraResources).
+The npm package ships one pre-bundled file; the build script compiles it through a wrapper entry that sets `__rootDirectory` and replaces `v8.getHeapStatistics` (a full heap walk under Bun that made completions and code actions take seconds), and copies the `typeshed-fallback` directory (also listed in electron-builder.yml extraResources and the release archive).
 
-Pyright reads only `disablePullDiagnostics` from `initializationOptions`; its settings come from `workspace/configuration`. The manager implements `workspaceConfiguration` to answer only `python.pythonPath` from the Python environment resolver (`python-env.ts`) and re-announces config when the watcher sees the environment change. See LANGUAGE_SERVERS.md "Python environment".
+basedpyright reads only `disablePullDiagnostics` from `initializationOptions`; its settings come from `workspace/configuration`. The manager implements `workspaceConfiguration` to answer `python.pythonPath` from the Python environment resolver (`python-env.ts`) and the `basedpyright` section (`standard` ruleset), and re-announces config when the watcher sees the environment change or the worktree's chosen interpreter changes (`refreshWorktreeEnvironment`). Its semantic tokens include `selfParameter`, `clsParameter` and `decorator`, which have rules in `monaco-theme.ts`. See LANGUAGE_SERVERS.md "Python environment".
 
 ## Astro — Use as Template
 

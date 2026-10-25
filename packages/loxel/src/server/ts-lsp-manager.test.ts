@@ -1,6 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { toClientUris, toServerUris } from "./ts-lsp-manager";
+import type { ServerWebSocket } from "bun";
+
+import { TsLspManager, toClientUris, toServerUris } from "./ts-lsp-manager";
+import { resolveTypeScriptBinary } from "./typescript-path";
 
 describe("toServerUris", () => {
   test("translates TS/JS editor model URIs in any authority casing", () => {
@@ -58,4 +64,132 @@ describe("toClientUris", () => {
     const body = JSON.stringify({ uri: "loxel://HEAD/repo/src/a.ts" });
     expect(toClientUris(toServerUris(body))).toBe(body);
   });
+});
+
+// Drives the real `tsc --lsp` through the manager the way the Monaco client does.
+
+const TEST_TIMEOUT_MS = 30_000;
+const MISSING_MODULE = "Cannot find module './b'";
+
+let root: string | undefined;
+let manager: TsLspManager | undefined;
+
+afterEach(async () => {
+  manager?.destroy();
+  manager = undefined;
+  if (root) await rm(root, { recursive: true, force: true });
+  root = undefined;
+});
+
+/** Stands in for the WebSocket and the Monaco LSP client behind it. */
+class FakeClient {
+  readonly ws: ServerWebSocket<unknown>;
+  /** Server→client requests that reached the client. */
+  readonly requests: Array<{ method: string; params: unknown }> = [];
+  private readonly responses = new Map<number, (result: unknown) => void>();
+  private nextId = 1;
+
+  constructor(private readonly manager: TsLspManager) {
+    const ws = {
+      send: (data: string) => {
+        this.receive(data);
+        return data.length;
+      },
+      close: () => {},
+    };
+    this.ws = ws as unknown as ServerWebSocket<unknown>;
+  }
+
+  async start(wtPath: string): Promise<void> {
+    this.manager.createSession(this.ws, wtPath);
+    await this.request("initialize", {
+      processId: null,
+      rootUri: null,
+      capabilities: { textDocument: { diagnostic: {} } },
+    });
+    this.send({ method: "initialized", params: {} });
+  }
+
+  open(filePath: string, text: string): string {
+    const uri = `loxel://HEAD${filePath}`;
+    this.send({
+      method: "textDocument/didOpen",
+      params: { textDocument: { uri, languageId: "typescript", version: 1, text } },
+    });
+    return uri;
+  }
+
+  async diagnosticMessages(uri: string): Promise<string[]> {
+    const result = (await this.request("textDocument/diagnostic", { textDocument: { uri } })) as {
+      items?: Array<{ message: string }>;
+    } | null;
+    return result?.items?.map((d) => d.message) ?? [];
+  }
+
+  private request(method: string, params: unknown): Promise<unknown> {
+    const id = this.nextId++;
+    return new Promise((resolve) => {
+      this.responses.set(id, resolve);
+      this.send({ id, method, params });
+    });
+  }
+
+  private send(message: Record<string, unknown>): void {
+    this.manager.handleMessage(this.ws, JSON.stringify({ jsonrpc: "2.0", ...message }));
+  }
+
+  private receive(data: string): void {
+    const message = JSON.parse(data) as {
+      id?: number;
+      method?: string;
+      params?: unknown;
+      result?: unknown;
+    };
+    if (message.method !== undefined && message.id !== undefined) {
+      this.requests.push({ method: message.method, params: message.params });
+      this.send({ id: message.id, result: null });
+      return;
+    }
+    if (message.id !== undefined) this.responses.get(message.id)?.(message.result);
+  }
+}
+
+describe.skipIf(resolveTypeScriptBinary() === null)("TsLspManager with tsc --lsp", () => {
+  test(
+    "resolves a module created on disk once the file watcher reports it",
+    async () => {
+      // Upper case in the path: tsc registers its watchers lowercased on case-insensitive disks.
+      root = await realpath(await mkdtemp(join(tmpdir(), "TsLsp-")));
+      await mkdir(join(root, "src"));
+      await writeFile(join(root, "tsconfig.json"), JSON.stringify({ include: ["src"] }));
+      const source = 'import { y } from "./b";\nexport const x: number = y;\n';
+      await writeFile(join(root, "src", "a.ts"), source);
+
+      manager = new TsLspManager();
+      const client = new FakeClient(manager);
+      await client.start(root);
+      const uri = client.open(join(root, "src", "a.ts"), source);
+      expect((await client.diagnosticMessages(uri)).join("\n")).toContain(MISSING_MODULE);
+
+      const created = join(root, "src", "b.ts");
+      await writeFile(created, "export const y = 1;\n");
+      manager.notifyWatchedFilesChanged(root, [created]);
+
+      const deadline = Date.now() + 10_000;
+      let messages = await client.diagnosticMessages(uri);
+      while (messages.some((m) => m.includes(MISSING_MODULE)) && Date.now() < deadline) {
+        await Bun.sleep(100);
+        messages = await client.diagnosticMessages(uri);
+      }
+      expect(messages).toEqual([]);
+      // The watcher registrations were answered by the manager, not passed to the client.
+      const registered = client.requests.flatMap((r) =>
+        r.method === "client/registerCapability"
+          ? (r.params as { registrations: Array<{ method: string }> }).registrations
+          : [],
+      );
+      expect(registered.map((r) => r.method)).not.toContain("workspace/didChangeWatchedFiles");
+    },
+    TEST_TIMEOUT_MS,
+  );
 });

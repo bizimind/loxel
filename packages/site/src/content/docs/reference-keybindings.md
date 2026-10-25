@@ -93,6 +93,14 @@ Back/forward work like a browser's history, across all projects. Worktree number
 
 ---
 
+## Languages
+
+| Action                     | Shortcut                                |
+| -------------------------- | --------------------------------------- |
+| Python: Select Interpreter | unbound — command palette or status bar |
+
+---
+
 ## File tree
 
 | Action                    | Shortcut               |
