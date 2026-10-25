@@ -36,6 +36,8 @@ import { LspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 import { LspConnection } from "./LspConnection";
 import { LspServerCommands } from "./LspServerCommands";
 import { TextDocumentSynchronizer } from "./TextDocumentSynchronizer";
+import type { WorkspaceFileSystem } from "./WorkspaceEditApplier";
+import { WorkspaceEditApplier } from "./WorkspaceEditApplier";
 
 export interface MonacoLspClientOptions {
   /** Restrict model sync and provider registration to these language(s). */
@@ -47,6 +49,14 @@ export interface MonacoLspClientOptions {
    * server.
    */
   modelFilter?: (textModel: monaco.editor.ITextModel) => boolean;
+  /**
+   * Disk access for workspace edits (rename, code actions, `workspace/applyEdit`). With it they
+   * can edit files that have no model and create, rename or delete files; without it they are
+   * refused when they touch a file that is not open or hold a file operation.
+   */
+  workspaceFileSystem?: WorkspaceFileSystem;
+  /** Called with the reason when a workspace edit is refused or fails, to tell the user. */
+  onWorkspaceEditFailure?: (reason: string) => void;
 }
 
 export class MonacoLspClient {
@@ -54,6 +64,7 @@ export class MonacoLspClient {
   private readonly _capabilitiesRegistry: LspCapabilitiesRegistry;
   private readonly _bridge: TextDocumentSynchronizer;
   private readonly _commands: LspServerCommands;
+  private readonly _edits: WorkspaceEditApplier;
   private readonly _features: IDisposable;
 
   private _initPromise: Promise<void>;
@@ -76,6 +87,10 @@ export class MonacoLspClient {
       options?.modelFilter,
     );
     this._commands = new LspServerCommands(s.server, this._capabilitiesRegistry);
+    this._edits = new WorkspaceEditApplier(this._capabilitiesRegistry, {
+      fileSystem: options?.workspaceFileSystem,
+      onFailure: options?.onWorkspaceEditFailure,
+    });
 
     this._connection = new LspConnection(
       s.server,
@@ -83,6 +98,7 @@ export class MonacoLspClient {
       this._capabilitiesRegistry,
       c,
       this._commands,
+      this._edits,
       defaultLanguageIds,
     );
     this._features = this.createFeatures();
@@ -95,6 +111,7 @@ export class MonacoLspClient {
   dispose(): void {
     this._features.dispose();
     this._commands.dispose();
+    this._edits.dispose();
     this._bridge.dispose();
     this._capabilitiesRegistry.dispose();
   }

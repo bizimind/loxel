@@ -4,6 +4,7 @@ import { api } from "../types";
 import type { ITextModelBridge } from "./ITextModelBridge";
 import { LspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 import type { LspServerCommands } from "./LspServerCommands";
+import type { WorkspaceEditApplier } from "./WorkspaceEditApplier";
 
 /**
  * Cross-feature coordination hook. Populated by `LspSemanticTokensFeature`
@@ -25,6 +26,7 @@ export class LspConnection {
     public readonly capabilities: LspCapabilitiesRegistry,
     public readonly connection: TypedChannel,
     public readonly commands: LspServerCommands,
+    public readonly edits: WorkspaceEditApplier,
     public readonly defaultLanguageIds?: readonly string[],
   ) {}
 }

@@ -4,10 +4,9 @@ import { useCallback, useState } from "react";
 import * as api from "@/api/client";
 import type { TreeNode } from "@/components/tree";
 import { showToast } from "@/components/ui/toast";
+import { moveFile } from "@/lib/file-operations";
 import { frontendLog } from "@/lib/frontend-logger";
 import { fileParentDir } from "@/lib/project-file-helpers";
-import { invalidateDirQueries } from "@/queries/query-helpers";
-import { getCurrentWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 export const DETACHED_FILE_DRAG_TYPE = "application/x-detached-file";
@@ -59,14 +58,7 @@ async function moveProjectFile(srcPath: string, destDir: string) {
   try {
     const wt = useWorktreeStore.getState().activeWorktreePath;
     if (!wt) return;
-    const { newPath } = await api.moveProjectFile(wt, { srcPath, destDir });
-    getCurrentWorktreeUI().getState().renameProjectPaths(srcPath, newPath);
-    window.dispatchEvent(
-      new CustomEvent("loxel-file-moved", { detail: { oldPath: srcPath, newPath } }),
-    );
-    const srcParentDir = fileParentDir(srcPath, wt);
-    const destDirAbs = destDir || wt;
-    invalidateDirQueries(srcParentDir, destDirAbs);
+    await moveFile({ wt, srcPath, destDir });
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Move failed");
   }

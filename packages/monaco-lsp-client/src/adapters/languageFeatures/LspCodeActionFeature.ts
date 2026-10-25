@@ -1,10 +1,16 @@
 import * as monaco from "monaco-editor";
 
-import type { CodeAction, CodeActionRegistrationOptions, Command } from "../../types";
+import type {
+  CodeAction,
+  CodeActionRegistrationOptions,
+  Command,
+  WorkspaceEdit,
+} from "../../types";
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";
-import { toMonacoLanguageSelector, toMonacoWorkspaceEdit } from "./common";
+import { isLspCommand } from "../LspServerCommands";
+import { toMonacoLanguageSelector } from "./common";
 import {
   lspCodeActionKindToMonacoCodeActionKind,
   toMonacoCodeActionKind,
@@ -12,9 +18,24 @@ import {
   toLspCodeActionTriggerKind,
 } from "./common";
 
+let nextApplyCommandId = 0;
+
 export class LspCodeActionFeature extends Disposable {
+  /**
+   * Monaco applies a code action's `edit` with its standalone bulk-edit service, which can only
+   * edit open models, so actions carry their edit to this command instead: it applies the edit
+   * through the client's workspace-edit path, then runs the action's own command.
+   */
+  private readonly _applyCommandId = `monaco-lsp-client.applyCodeAction.${nextApplyCommandId++}`;
+
   constructor(private readonly _connection: LspConnection) {
     super();
+
+    this._register(
+      monaco.editor.registerCommand(this._applyCommandId, (_accessor, edit: unknown, command) =>
+        this._apply(edit, command),
+      ),
+    );
 
     this._register(
       this._connection.capabilities.addStaticClientCapabilities({
@@ -45,16 +66,38 @@ export class LspCodeActionFeature extends Disposable {
               capability.documentSelector,
               this._connection.defaultLanguageIds,
             ),
-            new LspCodeActionProvider(this._connection, capability),
+            new LspCodeActionProvider(this._connection, capability, (edit, command) =>
+              this._toMonacoCommand(edit, command),
+            ),
           );
         },
       ),
     );
   }
+
+  private _toMonacoCommand(
+    edit: WorkspaceEdit | undefined,
+    command: Command | undefined,
+  ): monaco.languages.Command | undefined {
+    if (!edit) return this._connection.commands.toMonacoCommand(command);
+    return { id: this._applyCommandId, title: command?.title ?? "", arguments: [edit, command] };
+  }
+
+  private async _apply(edit: unknown, command: unknown): Promise<void> {
+    if (!isWorkspaceEdit(edit)) {
+      throw new Error(`${this._applyCommandId} expects an LSP WorkspaceEdit argument`);
+    }
+    const result = await this._connection.edits.apply(edit);
+    if (!result.applied || !isLspCommand(command)) return;
+    if (await this._connection.commands.executeServerCommand(command)) return;
+    // Monaco has no public way to run a client command (one that is not the server's) from here.
+    console.warn(`[MonacoLspClient] code action command ${command.command} was not run`);
+  }
 }
 
 interface ExtendedCodeAction extends monaco.languages.CodeAction {
   _lspAction?: CodeAction;
+  _resolved?: boolean;
 }
 
 class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
@@ -63,31 +106,25 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
   constructor(
     private readonly _client: LspConnection,
     private readonly _capabilities: CodeActionRegistrationOptions,
+    private readonly _toMonacoCommand: (
+      edit: WorkspaceEdit | undefined,
+      command: Command | undefined,
+    ) => monaco.languages.Command | undefined,
   ) {
     if (_capabilities.resolveProvider) {
+      // Monaco resolves an action without an `edit` (all of ours) on hover and before applying it.
       this.resolveCodeAction = async (
         codeAction: ExtendedCodeAction,
         _token: monaco.CancellationToken,
       ): Promise<ExtendedCodeAction> => {
-        if (codeAction._lspAction) {
-          const resolved = await this._client.server.codeActionResolve(codeAction._lspAction);
-          if (resolved.edit) {
-            const edit = toMonacoWorkspaceEdit(resolved.edit, this._client);
-            if (edit.rejectReason) {
-              // Monaco's resolveCodeAction has no rejection surface (unlike rename), and a
-              // throw becomes an uncaught error while Monaco still runs the command. Leave
-              // the action with neither edit nor command so it is refused whole.
-              console.warn(`[MonacoLspClient] code action refused: ${edit.rejectReason}`);
-              codeAction.edit = undefined;
-              codeAction.command = undefined;
-              return codeAction;
-            }
-            codeAction.edit = edit;
-          }
-          if (resolved.command) {
-            codeAction.command = this._client.commands.toMonacoCommand(resolved.command);
-          }
-        }
+        const action = codeAction._lspAction;
+        if (!action || action.edit || codeAction._resolved) return codeAction;
+        const resolved = await this._client.server.codeActionResolve(action);
+        codeAction._resolved = true;
+        codeAction.command = this._toMonacoCommand(
+          resolved.edit,
+          resolved.command ?? action.command,
+        );
         return codeAction;
       };
     }
@@ -131,14 +168,14 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
           return monacoAction;
         }
 
-        const edit = action.edit ? toMonacoWorkspaceEdit(action.edit, this._client) : undefined;
         const monacoAction: ExtendedCodeAction = {
           title: action.title,
           kind: toMonacoCodeActionKind(action.kind),
           isPreferred: action.isPreferred,
-          disabled: action.disabled?.reason ?? edit?.rejectReason,
-          edit,
-          command: this._client.commands.toMonacoCommand(action.command),
+          disabled:
+            action.disabled?.reason ??
+            (action.edit ? this._client.edits.unsupportedReason(action.edit) : undefined),
+          command: this._toMonacoCommand(action.edit, action.command),
           _lspAction: action,
         };
         return monacoAction;
@@ -152,4 +189,12 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
 // `command` too, but as a nested `Command` object.
 function isCommand(action: Command | CodeAction): action is Command {
   return typeof action.command === "string";
+}
+
+function isWorkspaceEdit(value: unknown): value is WorkspaceEdit {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    ("changes" in value || "documentChanges" in value)
+  );
 }

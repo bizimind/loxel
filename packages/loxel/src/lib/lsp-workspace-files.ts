@@ -1,0 +1,150 @@
+import type { WorkspaceFileSystem, WorkspaceFileType } from "@bizimind/monaco-lsp-client";
+import type * as monaco from "monaco-editor";
+
+import * as api from "@/api/client";
+import { ApiError } from "@/api/client";
+import { invalidateDirQueries } from "@/queries/query-helpers";
+
+import { deleteFile, moveFile, renameFile } from "./file-operations";
+import { pathName, relativeTo } from "./project-file-helpers";
+
+/** Folders whose files language-server edits never change: dependencies and git's own. */
+const PROTECTED_SEGMENTS = new Set(["node_modules", "site-packages", "dist-packages", ".git"]);
+
+/**
+ * The disk side of language-server workspace edits (rename, code actions, `workspace/applyEdit`)
+ * for worktree `wtPath`. Files with no editor model are read and written through the file-content
+ * routes, unformatted; files are created, renamed, moved and deleted through the file-operation
+ * routes, so open tabs follow, the files panel refreshes, and its undo covers those operations.
+ *
+ * Only files of the worktree itself are changed: never anything outside it (the standard library,
+ * an environment elsewhere, Others folders, drafts), under a dependency folder (`node_modules`,
+ * `site-packages`) or under `.git`. Lexical paths are checked first, then their real paths, so a
+ * symlink cannot lead an edit out of the worktree.
+ */
+export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
+  let realRoot: Promise<string> | undefined;
+  const getRealRoot = () =>
+    (realRoot ??= api.getPathInfo(wtPath).then(
+      (info) => info.path,
+      (error: unknown) => {
+        realRoot = undefined;
+        throw error;
+      },
+    ));
+
+  /** Creates `dir` and its missing parents inside the worktree. */
+  async function ensureDir(dir: string): Promise<void> {
+    if (dir === wtPath || (await pathInfo(dir))) return;
+    const parent = parentOf(dir);
+    await ensureDir(parent);
+    const { path } = await api.createProjectDir(wtPath, { dir: parent, name: pathName(dir) });
+    if (path !== dir) throw new Error(`Could not create the folder ${dir}`);
+    invalidateDirQueries(parent);
+  }
+
+  return {
+    async stat(uri: monaco.Uri): Promise<WorkspaceFileType | undefined> {
+      const path = editablePath(uri, wtPath);
+      const info = await pathInfo(path);
+      if (info) {
+        assertWorktreeFile(info.path, await getRealRoot());
+        return info.isDir ? "directory" : "file";
+      }
+      // Nothing there yet: the nearest existing folder is where it would be created.
+      for (let dir = parentOf(path); dir !== wtPath; dir = parentOf(dir)) {
+        const dirInfo = await pathInfo(dir);
+        if (dirInfo) {
+          assertWorktreeFile(dirInfo.path, await getRealRoot());
+          break;
+        }
+      }
+      return undefined;
+    },
+
+    async readFile(uri) {
+      const { content } = await api.getFileContentByPath(editablePath(uri, wtPath), wtPath);
+      return content;
+    },
+
+    async writeFile(uri, content) {
+      const path = editablePath(uri, wtPath);
+      await api.writeFileContent({
+        path,
+        content,
+        nonce: crypto.randomUUID(),
+        worktreePath: wtPath,
+      });
+    },
+
+    async createFile(uri) {
+      const path = editablePath(uri, wtPath);
+      const dir = parentOf(path);
+      await ensureDir(dir);
+      const created = await api.createProjectFile(wtPath, { dir, name: pathName(path) });
+      invalidateDirQueries(dir);
+      // The route picks a free name when the file appeared meanwhile.
+      if (created.path !== path) throw new Error(`${path} already exists`);
+    },
+
+    async rename(source, target) {
+      const sourcePath = editablePath(source, wtPath);
+      const targetPath = editablePath(target, wtPath);
+      const targetDir = parentOf(targetPath);
+      let path = sourcePath;
+      if (parentOf(sourcePath) !== targetDir) {
+        await ensureDir(targetDir);
+        path = await moveFile({ wt: wtPath, srcPath: sourcePath, destDir: targetDir });
+      }
+      if (pathName(path) !== pathName(targetPath)) {
+        path = await renameFile({
+          wt: wtPath,
+          path,
+          newName: pathName(targetPath),
+          isDetached: false,
+        });
+      }
+      if (path !== targetPath) throw new Error(`${sourcePath} was moved to ${path} instead`);
+    },
+
+    async delete(uri) {
+      await deleteFile({ wt: wtPath, path: editablePath(uri, wtPath), isDetached: false });
+    },
+  };
+}
+
+/** The absolute path of a worktree file's uri (`file://` or `loxel://HEAD/`), checked lexically. */
+function editablePath(uri: monaco.Uri, wtPath: string): string {
+  const isFileUri =
+    uri.scheme === "file" || (uri.scheme === "loxel" && uri.authority.toLowerCase() === "head");
+  if (!isFileUri || uri.query || uri.fragment) {
+    throw new Error(`${uri.toString(true)} is not a file of the worktree`);
+  }
+  assertWorktreeFile(uri.path, wtPath);
+  return uri.path;
+}
+
+function assertWorktreeFile(path: string, root: string): void {
+  const relative = relativeTo(path, root);
+  const segments = relative?.split("/") ?? [];
+  if (!relative || segments.some((s) => s === "." || s === ".." || s === "")) {
+    throw new Error(`${path} is outside the worktree`);
+  }
+  if (segments.some((s) => PROTECTED_SEGMENTS.has(s))) {
+    throw new Error(`${path} belongs to a dependency or to git, so it is not changed`);
+  }
+}
+
+/** The real path and kind of `path`, or undefined when nothing is there. */
+async function pathInfo(path: string): Promise<{ path: string; isDir: boolean } | undefined> {
+  try {
+    return await api.getPathInfo(path);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return undefined;
+    throw error;
+  }
+}
+
+function parentOf(path: string): string {
+  return path.slice(0, path.lastIndexOf("/")) || "/";
+}

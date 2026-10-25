@@ -5,9 +5,9 @@ import * as api from "@/api/client";
 import type { FileOperationResult } from "@/api/file-operations-model";
 import type { FilesTreeHandle } from "@/components/tree";
 import { showToast } from "@/components/ui/toast";
+import { deleteFile, renameFile } from "@/lib/file-operations";
 import { frontendLog } from "@/lib/frontend-logger";
 import { fileParentDir } from "@/lib/project-file-helpers";
-import { renameFile } from "@/lib/rename-file";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -107,16 +107,7 @@ export function useFileOperations(
       const wt = useWorktreeStore.getState().activeWorktreePath;
       if (!wt) return;
 
-      if (isDetachedPath(path)) {
-        await api.deleteDetachedFile(wt, path);
-      } else {
-        await api.deleteProjectFile(wt, path);
-      }
-      window.dispatchEvent(new CustomEvent("loxel-file-deleted", { detail: { filePath: path } }));
-      const sel = getCurrentWorktreeUI().getState().selectedProjectFile;
-      if (sel === path || sel?.startsWith(path + "/")) {
-        getCurrentWorktreeUI().getState().setSelectedProjectFile(null);
-      }
+      await deleteFile({ wt, path, isDetached: isDetachedPath(path) });
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Delete failed");
     }

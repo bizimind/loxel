@@ -32,6 +32,14 @@ These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quic
 
 ---
 
+## Edits across files
+
+Renaming a symbol updates every reference the language server finds, including in files you don't have open, and quick fixes and other code actions can edit, create, rename, or delete files the same way. Files open in a tab change in the tab, where `Cmd+Z` undoes the change. Files that aren't open are written to disk directly, unformatted, and the editor can't undo that change; revert it with Git if needed. Created, renamed, and deleted files go through the same operations as the file tree: open tabs follow a renamed file, a deleted file's tab closes, and `Cmd+Z` in the file tree undoes them.
+
+An edit only ever changes files of the current worktree. If it would touch anything else — a file outside the worktree, such as the Python standard library, or anything under `node_modules`, `site-packages`, or `.git` — nothing is changed and a notification says why. If a file changes on disk while an edit is being applied, the edit stops there, and the notification says how many of its changes were applied.
+
+---
+
 ## Navigation
 
 `Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. There is no inline peek; definitions always open as a full tab.
