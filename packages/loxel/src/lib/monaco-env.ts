@@ -14,6 +14,7 @@ import { connectAstroLsp, disconnectAstroLsp } from "./astro-lsp-client";
 import { connectDockerLsp, disconnectDockerLsp } from "./docker-lsp-client";
 import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { getHighlighter } from "./highlighter";
+import { isLiveEditorModel } from "./live-editor-model";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { dispatchOpenFile } from "./open-file";
 import { isWithin } from "./project-file-helpers";
@@ -163,14 +164,10 @@ function createLazyLspConnector(opts: {
   const isMatch = (model: monaco.editor.ITextModel): boolean => {
     if (!opts.languageIds.includes(model.getLanguageId())) return false;
     if (!activeWt) return false;
-    // Live editors use file:// or loxel://HEAD (see CodeEditorPanel); diff, compare and history
-    // models use other loxel authorities and are not counted.
-    const { scheme, authority, path } = model.uri;
-    const isLiveEditor = scheme === "file" || (scheme === "loxel" && authority === "HEAD");
-    if (!isLiveEditor) return false;
-    if (isWithin(path, activeWt)) return true;
+    if (!isLiveEditorModel(model)) return false;
+    if (isWithin(model.uri.path, activeWt)) return true;
     // Files outside every project (the Others section) are served by the active worktree's LSP.
-    return !deriveProject(path, useProjectStore.getState().projects);
+    return !deriveProject(model.uri.path, useProjectStore.getState().projects);
   };
 
   const countExistingModels = (): number => {

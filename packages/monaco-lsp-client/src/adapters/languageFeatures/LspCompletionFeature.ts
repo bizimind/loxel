@@ -8,7 +8,6 @@ import type {
 } from "../../types";
 import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
-import type { ITextModelBridge } from "../ITextModelBridge";
 import { assertTargetTextModel } from "../ITextModelBridge";
 import { LspConnection } from "../LspConnection";
 import { toMonacoLanguageSelector } from "./common";
@@ -19,7 +18,6 @@ import {
   toMonacoCompletionItemTag,
   toLspCompletionTriggerKind,
   toMonacoInsertTextRules,
-  toMonacoCommand,
 } from "./common";
 
 export class LspCompletionFeature extends Disposable {
@@ -88,7 +86,7 @@ class LspCompletionProvider implements monaco.languages.CompletionItemProvider {
         applyLspCompletionItemProperties(
           item,
           resolved,
-          this._client.bridge,
+          this._client,
           item._translated,
           item._model,
         );
@@ -107,7 +105,7 @@ class LspCompletionProvider implements monaco.languages.CompletionItemProvider {
     context: monaco.languages.CompletionContext,
     token: monaco.CancellationToken,
   ): Promise<monaco.languages.CompletionList & { suggestions: ExtendedCompletionItem[] }> {
-    if (token.isCancellationRequested) {
+    if (token.isCancellationRequested || !this._client.bridge.isSyncedModel(model)) {
       return { suggestions: [] };
     }
     const translated = this._client.bridge.translate(model, position);
@@ -133,7 +131,7 @@ class LspCompletionProvider implements monaco.languages.CompletionItemProvider {
       incomplete: isIncomplete,
       suggestions: items.map<ExtendedCompletionItem>((i) => {
         const item: ExtendedCompletionItem = {
-          ...convertLspToMonacoCompletionItem(i, this._client.bridge, translated, model, position),
+          ...convertLspToMonacoCompletionItem(i, this._client, translated, model, position),
           _lspItem: i,
           _translated: translated,
           _model: model,
@@ -147,7 +145,7 @@ class LspCompletionProvider implements monaco.languages.CompletionItemProvider {
 
 function convertLspToMonacoCompletionItem(
   lspItem: CompletionItem,
-  bridge: ITextModelBridge,
+  client: LspConnection,
   translated: TextDocumentPositionParams,
   model: monaco.editor.ITextModel,
   position: monaco.Position,
@@ -159,18 +157,18 @@ function convertLspToMonacoCompletionItem(
     if ("range" in lspItem.textEdit) {
       insertText = lspItem.textEdit.newText;
       range = assertTargetTextModel(
-        bridge.translateBackRange(translated.textDocument, lspItem.textEdit.range),
+        client.bridge.translateBackRange(translated.textDocument, lspItem.textEdit.range),
         model,
       ).range;
     } else {
       insertText = lspItem.textEdit.newText;
       range = {
         insert: assertTargetTextModel(
-          bridge.translateBackRange(translated.textDocument, lspItem.textEdit.insert),
+          client.bridge.translateBackRange(translated.textDocument, lspItem.textEdit.insert),
           model,
         ).range,
         replace: assertTargetTextModel(
-          bridge.translateBackRange(translated.textDocument, lspItem.textEdit.replace),
+          client.bridge.translateBackRange(translated.textDocument, lspItem.textEdit.replace),
           model,
         ).range,
       };
@@ -202,7 +200,7 @@ function convertLspToMonacoCompletionItem(
     range: range,
   };
 
-  applyLspCompletionItemProperties(item, lspItem, bridge, translated, model);
+  applyLspCompletionItemProperties(item, lspItem, client, translated, model);
 
   return item;
 }
@@ -210,7 +208,7 @@ function convertLspToMonacoCompletionItem(
 function applyLspCompletionItemProperties(
   monacoItem: monaco.languages.CompletionItem,
   lspItem: CompletionItem,
-  bridge: ITextModelBridge,
+  client: LspConnection,
   translated: TextDocumentPositionParams,
   targetModel: monaco.editor.ITextModel,
 ): void {
@@ -232,14 +230,14 @@ function applyLspCompletionItemProperties(
   if (lspItem.additionalTextEdits && lspItem.additionalTextEdits.length > 0) {
     monacoItem.additionalTextEdits = lspItem.additionalTextEdits.map((edit) => ({
       range: assertTargetTextModel(
-        bridge.translateBackRange(translated.textDocument, edit.range),
+        client.bridge.translateBackRange(translated.textDocument, edit.range),
         targetModel,
       ).range,
       text: edit.newText,
     }));
   }
   if (lspItem.command) {
-    monacoItem.command = toMonacoCommand(lspItem.command);
+    monacoItem.command = client.commands.toMonacoCommand(lspItem.command);
   }
 }
 
