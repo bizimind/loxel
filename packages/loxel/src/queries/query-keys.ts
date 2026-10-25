@@ -23,6 +23,10 @@ export const queryKeys = {
   /** Prefix key for invalidating all fileContent queries for a given file, regardless of ref/worktree. */
   fileContentPrefix: (projectPath: string | null, path: string) =>
     ["fileContent", projectPath, path] as const,
+  /** `.editorconfig` properties of an open file; invalidated when an `.editorconfig` changes. */
+  editorConfig: (path: string, worktree?: string) => ["editorConfig", path, worktree] as const,
+  /** Prefix key matching a file's `editorConfig` queries for every worktree. */
+  editorConfigPrefix: (path: string) => ["editorConfig", path] as const,
   diagnostics: (
     projectPath: string | null,
     ref: string | undefined,

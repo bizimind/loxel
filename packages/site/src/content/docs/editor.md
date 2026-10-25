@@ -1,6 +1,6 @@
 ---
 title: Editor
-description: Quick Open, Find in Files, autosave, formatter auto-detection, indentation, Python files, conflict handling, and deleted or moved files.
+description: Quick Open, Find in Files, autosave, formatter auto-detection, indentation, EditorConfig, Python files, conflict handling, and deleted or moved files.
 order: 10
 ---
 
@@ -66,7 +66,24 @@ Python formatters are detected from the config closest to the file, so each proj
 
 ## Indentation
 
-Files indent with 2 spaces by default. Python and Rust use 4 spaces and Go uses tabs, matching their formatters. In **Settings > Editor**, **Default Indentation** changes the default, and **Per-Extension Overrides** set the indentation for a file extension, taking precedence over both.
+Files indent with 2 spaces by default. Python and Rust use 4 spaces and Go uses tabs, matching their formatters. A project's [`.editorconfig`](#editorconfig) takes precedence over these defaults. In **Settings > Editor**, **Default Indentation** changes the default, and **Per-Extension Overrides** set the indentation for a file extension, taking precedence over everything else, `.editorconfig` included.
+
+---
+
+## EditorConfig
+
+Loxel follows your project's [`.editorconfig`](https://editorconfig.org) files. For each file it reads the `.editorconfig` in the file's folder and in every folder above it, up to the worktree root (or the root of an [other folder](#other-folders)), and stops early at one that sets `root = true`. When several set the same property, the closest file wins.
+
+| Property                                   | Effect                                                                     |
+| ------------------------------------------ | -------------------------------------------------------------------------- |
+| `indent_style`, `indent_size`, `tab_width` | Indentation as you type; a per-extension override in Settings still wins   |
+| `trim_trailing_whitespace`                 | Trailing spaces and tabs are removed on save                               |
+| `insert_final_newline`                     | A missing final newline is added on save; `false` leaves the file as it is |
+| `end_of_line`                              | Line endings are converted to `lf` or `crlf` on save                       |
+
+Changes made on save are a separate step in the undo history, so `Cmd+Z` brings them back, and the autosave after an undo leaves the file as you restored it. On autosave, whitespace at the end of the lines you're typing on is kept, so a space you just typed doesn't vanish; it's removed by a later save. Edits to an `.editorconfig` apply to open files right away.
+
+`charset`, `max_line_length`, and `end_of_line = cr` aren't applied by the editor. When Prettier formats on save, it reads `.editorconfig` too, `max_line_length` included, just like the Prettier command line. Markdown files and drawings are saved in their editors' own formats and don't use `.editorconfig`, and neither do drafts or files opened from outside a project.
 
 ---
 

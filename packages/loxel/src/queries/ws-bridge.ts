@@ -23,6 +23,18 @@ import { isWorkingTreeDiffKey, queryKeys, workingTreeFileContentKey } from "./qu
 
 const log = frontendLog.child("files");
 
+const EDITORCONFIG_SUFFIX = "/.editorconfig";
+
+/** Refetch the `.editorconfig` properties of open files under `dir` (ending in `/`; "" for all). */
+function invalidateEditorConfigBelow(dir: string): void {
+  queryClient.invalidateQueries({
+    predicate: ({ queryKey }) =>
+      queryKey[0] === "editorConfig" &&
+      typeof queryKey[1] === "string" &&
+      queryKey[1].startsWith(dir),
+  });
+}
+
 /**
  * Apply a `file_content_changed` event to an open editor (`editorKey`, see `useEditorStateStore`):
  * clean editors refresh their query (or take the stashed content of their own write), dirty ones
@@ -226,14 +238,22 @@ export function useWsBridge(): void {
             queryClient.invalidateQueries({ queryKey: diffContentKey, exact: true });
           }
 
+          if (changedPath.endsWith(EDITORCONFIG_SUFFIX)) {
+            invalidateEditorConfigBelow(changedPath.slice(0, -EDITORCONFIG_SUFFIX.length + 1));
+          }
+
           for (const [editorKey, entry] of useEditorStateStore.getState().files) {
             if (entry.filePath === changedPath) {
               refreshOpenFile(projectPath, message.wtPath, editorKey, nonces);
             } else if (entry.filePath.startsWith(changedPath + "/")) {
               // A removed or re-created directory is reported as one event for the directory,
               // not for the files inside it. Only their existence can have changed (a modified
-              // file reports itself), so just re-check that.
+              // file reports itself), so just re-check that, and re-read the `.editorconfig`s
+              // that may have come or gone with it.
               void checkOpenFileExists(projectPath, message.wtPath, editorKey);
+              queryClient.invalidateQueries({
+                queryKey: queryKeys.editorConfigPrefix(entry.filePath),
+              });
             }
           }
           break;
@@ -274,6 +294,8 @@ export function useWsBridge(): void {
           queryClient.invalidateQueries({
             queryKey: queryKeys.externalFiles(projectPath, message.wtPath),
           });
+          // Covers the worktree's Others folders too, whose paths share no prefix with it.
+          invalidateEditorConfigBelow("");
 
           // A broad query invalidation refreshes clean editors. Dirty/saving editors
           // need the same conflict-aware state-machine path as a normal file event.
