@@ -31,6 +31,7 @@ import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { deriveProject, useProjectStore } from "@/store/projects";
 import { useSearchStore } from "@/store/search";
 import { useSettingsStore } from "@/store/settings-store";
+import { useSymbolSearchStore } from "@/store/symbol-search";
 import { getCenterApi, showPanel } from "@/store/tools-bar";
 import { goBackWorktree, goForwardWorktree } from "@/store/worktree-history";
 import { getOrderedWorktrees, useWorktreeStore } from "@/store/worktrees";
@@ -281,6 +282,9 @@ export function useActionHandler(): (actionId: ActionId) => void {
 
       case "nav.openFile":
         useFileSearchStore.getState().open();
+        break;
+      case "nav.goToSymbol":
+        useSymbolSearchStore.getState().open();
         break;
       case "nav.recentNotification": {
         const recent = usePanelNotificationStore.getState().notifications[0];

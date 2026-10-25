@@ -1,5 +1,5 @@
-import type { IMessageTransport } from "@hediet/json-rpc";
-import { TypedChannel } from "@hediet/json-rpc";
+import type { IMessageTransport, IRequestSender } from "@hediet/json-rpc";
+import { Channel, StreamBasedChannel, TypedChannel } from "@hediet/json-rpc";
 import type * as monaco from "monaco-editor";
 
 import type { ClientCapabilities } from "../types";
@@ -31,6 +31,9 @@ import { LspSelectionRangeFeature } from "./languageFeatures/LspSelectionRangeFe
 import { LspSemanticTokensFeature } from "./languageFeatures/LspSemanticTokensFeature";
 import { LspSignatureHelpFeature } from "./languageFeatures/LspSignatureHelpFeature";
 import { LspTypeDefinitionFeature } from "./languageFeatures/LspTypeDefinitionFeature";
+import type { WorkspaceSymbolItem } from "./languageFeatures/LspWorkspaceSymbolFeature";
+import { LspWorkspaceSymbolFeature } from "./languageFeatures/LspWorkspaceSymbolFeature";
+import { LspCancellableRequests } from "./LspCancellableRequests";
 import type { OptionsOf, RegistrableCapability } from "./LspCapabilitiesRegistry";
 import { LspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 import { LspConnection } from "./LspConnection";
@@ -55,13 +58,21 @@ export class MonacoLspClient {
   private readonly _bridge: TextDocumentSynchronizer;
   private readonly _commands: LspServerCommands;
   private readonly _features: IDisposable;
+  private readonly _workspaceSymbols: LspWorkspaceSymbolFeature;
 
   private _initPromise: Promise<void>;
 
   constructor(transport: IMessageTransport, options?: MonacoLspClientOptions) {
-    const c = TypedChannel.fromTransport(transport);
+    // `TypedChannel.fromTransport`, keeping the request sender it connects (in `startListen`)
+    // for requests that must know their JSON-RPC id to be cancelled.
+    const streamChannel = StreamBasedChannel.createChannel(transport, undefined);
+    let requestSender: IRequestSender | undefined;
+    const c = new TypedChannel(
+      new Channel((listener) => (requestSender = streamChannel.connect(listener))),
+    );
     const s = api.getServer(c, {});
     c.startListen();
+    if (!requestSender) throw new Error("[MonacoLspClient] the channel did not connect on listen");
 
     const languageId = options?.languageId;
     const languageIds = languageId
@@ -83,9 +94,11 @@ export class MonacoLspClient {
       this._capabilitiesRegistry,
       c,
       this._commands,
+      new LspCancellableRequests(requestSender, s.server),
       defaultLanguageIds,
     );
     this._features = this.createFeatures();
+    this._workspaceSymbols = new LspWorkspaceSymbolFeature(this._connection);
 
     this._initPromise = this._init().catch((err: unknown) => {
       console.error("[MonacoLspClient] initialization failed:", err);
@@ -94,6 +107,7 @@ export class MonacoLspClient {
 
   dispose(): void {
     this._features.dispose();
+    this._workspaceSymbols.dispose();
     this._commands.dispose();
     this._bridge.dispose();
     this._capabilitiesRegistry.dispose();
@@ -120,6 +134,26 @@ export class MonacoLspClient {
   /** Declare additional client capabilities before the initialize handshake. */
   addStaticClientCapabilities(caps: ClientCapabilities): IDisposable {
     return this._capabilitiesRegistry.addStaticClientCapabilities(caps);
+  }
+
+  /**
+   * Symbols matching `query` across the server's workspace (`workspace/symbol`), empty when the
+   * server has no workspace symbol provider. Cancelling `token` sends `$/cancelRequest` and
+   * rejects with a `Canceled` error.
+   */
+  workspaceSymbols(query: string, token: monaco.CancellationToken): Promise<WorkspaceSymbolItem[]> {
+    return this._workspaceSymbols.provideWorkspaceSymbols(query, token);
+  }
+
+  /**
+   * Fills in the range of a symbol from `workspaceSymbols` that came without one, through
+   * `workspaceSymbol/resolve`; returns it unchanged when there is nothing to resolve.
+   */
+  resolveWorkspaceSymbol(
+    symbol: WorkspaceSymbolItem,
+    token: monaco.CancellationToken,
+  ): Promise<WorkspaceSymbolItem> {
+    return this._workspaceSymbols.resolveWorkspaceSymbol(symbol, token);
   }
 
   /** Typed LSP server interface. Call any LSP method directly. */

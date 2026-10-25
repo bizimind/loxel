@@ -2,6 +2,17 @@ import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client
 
 import { isLiveEditorModel } from "./live-editor-model";
 
+/** Every connected worktree client, with the worktree it serves. */
+const connectedClients = new Map<MonacoLspClient, string>();
+
+/**
+ * The language-server clients connected for `wtPath` now: TypeScript for the active worktree,
+ * plus each lazily started server while a file of its language is open.
+ */
+export function getConnectedLspClients(wtPath: string): MonacoLspClient[] {
+  return [...connectedClients].filter(([, path]) => path === wtPath).map(([client]) => client);
+}
+
 /**
  * Factory for worktree-scoped LSP client connections. Each call creates an
  * independent connect/disconnect pair backed by a single WebSocket transport.
@@ -43,6 +54,7 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
           languageId,
           modelFilter: isLiveEditorModel,
         });
+        connectedClients.set(currentClient, wtPath);
       },
       () => {
         if (currentWtPath === wtPath) {
@@ -56,6 +68,7 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
   // Dispose the client before the transport so its `textDocument/didClose`
   // notifications still go out over a live socket.
   function teardown(): void {
+    if (currentClient) connectedClients.delete(currentClient);
     currentClient?.dispose();
     currentClient = null;
     currentTransport?.dispose();
