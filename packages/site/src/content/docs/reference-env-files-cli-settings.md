@@ -47,6 +47,7 @@ All Loxel state lives under `~/.local/state/loxel/loxel/`. Dev mode (`LOXEL_DEV=
 | `detached/{projectHash}/{wtHash}/` | Draft markdown and Excalidraw files                                                                     |
 | `logs/server-{instanceId}.log`     | Server logs in NDJSON format; rotated at 5 MB                                                           |
 | `updates/`                         | Downloaded update archives                                                                              |
+| `zsh-python-env/`                  | zsh startup files Loxel uses to activate Python environments in terminals; rewritten by Loxel           |
 
 Draft folder names are the first 12 hex characters of the SHA-256 of the project path and the worktree path. A review database's name is the first 32 hex characters of the SHA-256 of the repo's shared `.git` directory.
 
@@ -124,7 +125,7 @@ Open settings with `Cmd+,`. Settings and keybindings are saved in `stores.db` in
 | Models            | Model library — add or remove OpenRouter model entries with their API keys                                                                                                                                          |
 | Keybindings       | Per-action shortcut overrides — see [Keyboard Shortcuts](/docs/reference-keybindings)                                                                                                                               |
 | Layout            | Which panels each side zone (left, bottom, right) holds and opens by default, and the zone sizes; applies to new worktree layouts                                                                                   |
-| Terminal          | Scrollback buffer size (1,000–100,000 lines; default 50,000), notification sequences — see [Terminals](/docs/terminals)                                                                                             |
+| Terminal          | Scrollback buffer size (1,000–100,000 lines; default 50,000), notification sequences, Python environment activation in new terminals (on by default) — see [Terminals](/docs/terminals)                             |
 | Editor            | Default indentation (Python, Rust, and Go have built-in defaults) and per-extension overrides, format on save and on autosave, formatter auto-detection and manual formatter overrides — see [Editor](/docs/editor) |
 | File Associations | Glob-to-language mappings for custom file types                                                                                                                                                                     |
 | Schemas           | JSON and YAML schema mappings; `tsconfig.json`, `package.json`, and GitHub workflow files are built in                                                                                                              |

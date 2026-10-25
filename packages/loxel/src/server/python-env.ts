@@ -503,6 +503,17 @@ async function isRealDirectory(target: string): Promise<boolean> {
   }
 }
 
+/**
+ * Whether git tracks any file in `dir` (or what it resolves to), asked like the environment rule
+ * (innermost repository, physical path, fail closed inside a git worktree, and on any error).
+ * Activating an environment in a terminal puts its whole `bin` first on PATH, so a committed
+ * `bin/git` written into an existing ignored venv would shadow the real one even though the
+ * interpreter itself is untracked.
+ */
+export async function hasTrackedFiles(wtPath: string, dir: string): Promise<boolean> {
+  return isShippedByRepo(wtPath, dir).catch(() => true);
+}
+
 async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string }> {
   try {
     const proc = Bun.spawn(["git", "-C", cwd, ...args], {
