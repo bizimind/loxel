@@ -45,7 +45,7 @@ runs_json="$(gh run list --workflow claude-code-review.yml --branch "$branch" --
   --json databaseId,headSha,status,conclusion,createdAt,updatedAt,url)"
 
 clean_comments_json="$(gh api --paginate "repos/$repo/issues/$pr/comments" \
-  --jq '.[] | select(.user.login == "claude[bot]" and (.body | contains("No issues found")))
+  --jq '.[] | select((.user.login == "claude[bot]" or .user.login == "github-actions[bot]") and (.body | contains("No issues found")))
     | {created_at, url: .html_url, reviewed: ([.body | capture("Reviewed commit: (?<s>[0-9a-f]{40})")][0].s // null)}' |
   jq -s .)"
 
