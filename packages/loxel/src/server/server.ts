@@ -64,7 +64,7 @@ import type {
   WsData,
   WorktreeLspType,
 } from "./server-state";
-import { resolveLoginShellEnv } from "./shell-env";
+import { LOGIN_SHELL_ENV_WAIT_MS, resolveLoginShellEnv } from "./shell-env";
 import { recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
 import type { TerminalSpawnOptions } from "./terminal-manager";
@@ -1067,8 +1067,9 @@ function detachClientAgents(ws: ServerWebSocket<WsData>) {
 // Load encryption key from Keychain (macOS) — must complete before any secret access
 await initSecretStore();
 
-// Resolve login shell env for hook execution (non-blocking — best effort)
-resolveLoginShellEnv().catch(() => {});
+// Resolve the login shell env for spawned tools (hooks, terminals, language servers) while the
+// projects load; serving waits for it below.
+const loginShellEnv = resolveLoginShellEnv();
 
 const repoArg = process.argv[2];
 const data = await loadProjects();
@@ -1144,6 +1145,10 @@ const routeContext: RouteContext = {
   setTerminalCommand: (terminalId, command) =>
     terminalManager.setInitialCommand(terminalId, command),
 };
+
+// Clients spawn language servers and terminals as soon as they connect, so let the login-shell PATH
+// land first, but never let a slow or hung shell config hold up startup (it still applies later).
+await Promise.race([loginShellEnv, Bun.sleep(LOGIN_SHELL_ENV_WAIT_MS)]);
 
 const server = Bun.serve<WsData>({
   port: config.port,

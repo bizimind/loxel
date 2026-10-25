@@ -5,6 +5,9 @@ import { logger } from "./logger";
 
 const log = logger.child("server");
 
+/** How long server startup waits for {@link resolveLoginShellEnv} before serving without it. */
+export const LOGIN_SHELL_ENV_WAIT_MS = 2000;
+
 /** Resolved PATH from the user's login shell */
 let resolvedPath: string | null = null;
 
@@ -16,7 +19,7 @@ let resolvedPath: string | null = null;
  * nvm, mise, homebrew). This runs the user's login shell to capture the
  * full PATH, so hook scripts can find tools like bun/npm.
  *
- * Call once at server startup.
+ * Call once at server startup. Never rejects.
  */
 export async function resolveLoginShellEnv(): Promise<void> {
   const shell = process.env.SHELL || "/bin/zsh";

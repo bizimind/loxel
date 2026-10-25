@@ -10,7 +10,7 @@ Quick reference for per-LSP quirks. Consult when the new integration needs behav
 | YAML             | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (post-init)  |
 | Docker           | downloaded    | worktree | lazy       | disabled        | yes            | `start --stdio` | compose=off (post-init) |
 | Terraform        | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs    |
-| Python (Pyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | analysis settings       |
+| Python (Pyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter (pulled)    |
 | Astro            | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path     |
 | XML (LemMinX)    | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | none                    |
 
@@ -42,6 +42,8 @@ Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexi
 ## Python (Pyright)
 
 Build script patches webpack dynamic require and copies `typeshed-fallback` directory (also listed in electron-builder.yml extraResources).
+
+Pyright reads only `disablePullDiagnostics` from `initializationOptions`; its settings come from `workspace/configuration`. The manager implements `workspaceConfiguration` to answer only `python.pythonPath` from the Python environment resolver (`python-env.ts`) and re-announces config when the watcher sees the environment change. See LANGUAGE_SERVERS.md "Python environment".
 
 ## Astro — Use as Template
 

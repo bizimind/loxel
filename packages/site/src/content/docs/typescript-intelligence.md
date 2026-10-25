@@ -65,6 +65,26 @@ Loxel runs language servers for six other languages. Each one is independent of 
 
 YAML starts with Loxel and stays running. The others start the first time you open a matching file and stop automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
 
+### Python environment
+
+The Python server checks your code against the project's own Python environment, so imports of installed packages resolve and checks follow that Python version. For each worktree Loxel uses the first of:
+
+1. The virtual environment that was active in the shell Loxel was started from, if it is inside the worktree.
+2. A `.venv`, `venv` or `env` virtual environment at the worktree root (what uv, PDM and `python -m venv` create).
+3. Pixi's default environment.
+4. Poetry's environment, when the project has a `poetry.lock`.
+5. `python3` on your shell's `PATH`.
+
+Creating or syncing an environment while Loxel is open, for example with `uv sync`, is picked up automatically, as are packages installed into it later.
+
+To use a different environment, set `venvPath` and `venv` in `pyrightconfig.json`, or in the `[tool.pyright]` table of `pyproject.toml`. That setting takes precedence over the detected environment:
+
+```toml
+[tool.pyright]
+venvPath = "."
+venv = ".venv-py313"
+```
+
 ---
 
 ## See also

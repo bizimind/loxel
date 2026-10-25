@@ -5,6 +5,7 @@ import type { FileSink, ServerWebSocket, Subprocess } from "bun";
 import type { LogCategory } from "@/api/log-entry-model";
 
 import { logger } from "./logger";
+import { buildSpawnEnv } from "./shell-env";
 import {
   createStderrThrottle,
   STDERR_THROTTLE_CAPACITY,
@@ -170,13 +171,28 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    *
    * Use this for config the server reads once at startup and cannot change
    * later — e.g. Terraform's `indexing.ignoreDirectoryNames`, Astro's
-   * `typescript.tsdk` path, Pyright's analysis settings. For servers that
-   * expect push-based config via `workspace/didChangeConfiguration` after
-   * initialization, use {@link onClientInitialized} instead.
+   * `typescript.tsdk` path. For servers that expect push-based config via
+   * `workspace/didChangeConfiguration` after initialization, use
+   * {@link onClientInitialized}; for servers that pull it, use
+   * {@link workspaceConfiguration}.
    */
   protected getInitializationOptions(_session: TSession): Record<string, unknown> | null {
     return null;
   }
+
+  /**
+   * Answer the server's `workspace/configuration` requests here instead of
+   * forwarding them (monaco-lsp-client does not implement that request).
+   * Returns the value for one requested `section`; `null` means unset.
+   * Defining it also advertises the `workspace.configuration` client
+   * capability in `initialize`, which pull-based servers such as Pyright
+   * need before they ask. Call {@link notifyConfigurationChanged} when an
+   * answer would change.
+   */
+  protected workspaceConfiguration?(
+    session: TSession,
+    section: string | undefined,
+  ): Promise<unknown>;
 
   /**
    * Handle a JSON-RPC frame from the WebSocket client. Default: forward to
@@ -194,13 +210,22 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             rootUri?: string | null;
             rootPath?: string | null;
             workspaceFolders?: unknown;
-            capabilities?: { textDocument?: Record<string, unknown> };
+            capabilities?: {
+              textDocument?: Record<string, unknown>;
+              workspace?: Record<string, unknown>;
+            };
             initializationOptions?: Record<string, unknown>;
           };
         };
         if (msg.method === "initialize") {
           if (this.disableSemanticTokens && msg.params?.capabilities?.textDocument) {
             delete msg.params.capabilities.textDocument.semanticTokens;
+          }
+          if (this.workspaceConfiguration && msg.params?.capabilities) {
+            msg.params.capabilities.workspace = {
+              ...msg.params.capabilities.workspace,
+              configuration: true,
+            };
           }
           const workspace = this.getSessionWorkspace(session);
           if (workspace && msg.params) {
@@ -329,6 +354,13 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected onClientInitialized(_session: TSession): void {}
 
   /**
+   * Fired once a session is gone: detached, destroyed, or its process
+   * exited. May fire more than once for the same session, so overrides must
+   * be idempotent. Override to release per-session resources.
+   */
+  protected onSessionClosed(_session: TSession): void {}
+
+  /**
    * Handle a decoded JSON-RPC frame from the LSP server. Default: forward to
    * the WebSocket verbatim, but scrub semantic-tokens capability/registrations
    * when `disableSemanticTokens` is set. Subclasses may override to translate
@@ -346,7 +378,21 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       // Not JSON — skip.
     }
     if (didParse && typeof preparsed === "object" && preparsed !== null) {
-      const m = preparsed as { error?: { code?: number; message?: string; data?: unknown } };
+      const m = preparsed as {
+        id?: number | string;
+        method?: string;
+        params?: { items?: unknown };
+        error?: { code?: number; message?: string; data?: unknown };
+      };
+      if (
+        this.workspaceConfiguration &&
+        m.method === "workspace/configuration" &&
+        m.id !== undefined &&
+        Array.isArray(m.params?.items)
+      ) {
+        void this.answerWorkspaceConfiguration(session, m.id, m.params.items);
+        return;
+      }
       if (m.error && typeof m.error === "object") {
         this.log.info(`[${this.name}] LSP error response`, {
           code: m.error.code,
@@ -445,7 +491,10 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       stdout: "pipe",
       stderr: "pipe",
       cwd: opts.cwd,
-      env: { ...process.env, NODE_OPTIONS: "", ...opts.env },
+      // Login-shell environment, so servers that run user tools (Pyright's
+      // interpreter probe, terraform-ls's `terraform`) find the user's PATH
+      // even when Loxel was launched from Finder.
+      env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },
     });
 
     const session = this.buildSession(ws, proc, context);
@@ -481,10 +530,31 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
           stderr: recentStderrLines.join("\n") || "(empty)",
         });
       }
+      this.onSessionClosed(session);
       if (this.sessions.get(ws) === session) {
         this.sessions.delete(ws);
       }
     });
+  }
+
+  /** True while `session` is still the live session of its WebSocket. */
+  protected isSessionLive(session: TSession): boolean {
+    return this.sessions.get(session.ws) === session;
+  }
+
+  /**
+   * Tell the server its configuration changed. Sends `settings: null`, so a
+   * server that pulls configuration asks {@link workspaceConfiguration} again.
+   */
+  protected notifyConfigurationChanged(session: TSession): void {
+    this.writeToStdin(
+      session,
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "workspace/didChangeConfiguration",
+        params: { settings: null },
+      }),
+    );
   }
 
   /** Write a JSON-RPC message to the LSP stdin with Content-Length framing. */
@@ -519,17 +589,45 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       if (Bun.file(localBin).size) return localBin;
     }
 
-    return Bun.which(binaryName);
+    return Bun.which(binaryName, { PATH: buildSpawnEnv().PATH ?? "" });
   }
 
   // ---------------------------------------------------------------------------
 
   private killSession(session: TSession): void {
+    this.onSessionClosed(session);
     try {
       session.proc.kill();
     } catch {
       // Already dead
     }
+  }
+
+  private async answerWorkspaceConfiguration(
+    session: TSession,
+    id: number | string,
+    items: unknown[],
+  ): Promise<void> {
+    let result: unknown[];
+    try {
+      result = await Promise.all(
+        items.map((item) => {
+          const section =
+            typeof item === "object" && item !== null && "section" in item
+              ? item.section
+              : undefined;
+          return this.workspaceConfiguration?.(
+            session,
+            typeof section === "string" ? section : undefined,
+          );
+        }),
+      );
+    } catch (err) {
+      this.log.warn(`[${this.name}] workspace/configuration answer failed`, { error: err });
+      result = items.map(() => null);
+    }
+    if (!this.isSessionLive(session)) return;
+    this.writeToStdin(session, JSON.stringify({ jsonrpc: "2.0", id, result }));
   }
 
   private async readStdout(session: TSession): Promise<void> {
