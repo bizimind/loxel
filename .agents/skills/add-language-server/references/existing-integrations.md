@@ -43,7 +43,7 @@ Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexi
 
 The npm package ships one pre-bundled file; the build script compiles it through a wrapper entry that sets `__rootDirectory` and replaces `v8.getHeapStatistics` (a full heap walk under Bun that made completions and code actions take seconds), and copies the `typeshed-fallback` directory (also listed in electron-builder.yml extraResources and the release archive).
 
-basedpyright reads only `disablePullDiagnostics` from `initializationOptions`; its settings come from `workspace/configuration`. The manager implements `workspaceConfiguration` to answer `python.pythonPath` from the Python environment resolver (`python-env.ts`) and the `basedpyright` section (`standard` ruleset), and re-announces config when the watcher sees the environment change. Its semantic tokens include `selfParameter`, `clsParameter` and `decorator`, which have rules in `monaco-theme.ts`. See LANGUAGE_SERVERS.md "Python environment".
+basedpyright reads only `disablePullDiagnostics` from `initializationOptions`; its settings come from `workspace/configuration`. The manager implements `workspaceConfiguration` to answer `python.pythonPath` from the Python environment resolver (`python-env.ts`) and the `basedpyright` section (`standard` ruleset), and re-announces config when the watcher sees the environment change or the worktree's chosen interpreter changes (`refreshWorktreeEnvironment`). Its semantic tokens include `selfParameter`, `clsParameter` and `decorator`, which have rules in `monaco-theme.ts`. See LANGUAGE_SERVERS.md "Python environment".
 
 ## Astro — Use as Template
 

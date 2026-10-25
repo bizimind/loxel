@@ -210,11 +210,11 @@ importers:
   packages/logger:
     dependencies:
       '@axiomhq/js':
-        specifier: ^1.8.0
-        version: 1.8.0
+        specifier: ^2.0.0
+        version: 2.0.0
       '@axiomhq/logging':
         specifier: ^0.4.1
-        version: 0.4.1(@axiomhq/js@1.8.0)
+        version: 0.4.1(@axiomhq/js@2.0.0)
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -737,8 +737,8 @@ packages:
   '@astrojs/yaml2ts@0.2.4':
     resolution: {integrity: sha512-8oddpOae35pJsXPQXhTkM0ypfKPskVsh2bCxRtbf7e+/Epw2nReakFYpLKjZMEr75CsoF203PMnCocpfz0s69A==}
 
-  '@axiomhq/js@1.8.0':
-    resolution: {integrity: sha512-VRkqV9XH+pkj8d9eRdw8TuWvXdCkVDMtDOz2rix5UAg7x5SlOeWhUz9fwc0ZgySosMSMA7WP7X0fFX8N/jBHtQ==}
+  '@axiomhq/js@2.0.0':
+    resolution: {integrity: sha512-mhDH0KLFkDko9ytoltgmch2gOiwE6kY6VWhCmTux9lzL9hmjTej68JeQKwq9GGqOY7xwDsya88bNiTnp/zc8+Q==}
     engines: {node: '>=20'}
 
   '@axiomhq/logging@0.4.1':
@@ -6888,13 +6888,13 @@ snapshots:
     dependencies:
       yaml: 2.9.1
 
-  '@axiomhq/js@1.8.0':
+  '@axiomhq/js@2.0.0':
     dependencies:
       fetch-retry: 6.0.0
 
-  '@axiomhq/logging@0.4.1(@axiomhq/js@1.8.0)':
+  '@axiomhq/logging@0.4.1(@axiomhq/js@2.0.0)':
     optionalDependencies:
-      '@axiomhq/js': 1.8.0
+      '@axiomhq/js': 2.0.0
 
   '@babel/code-frame@7.29.7':
     dependencies:
