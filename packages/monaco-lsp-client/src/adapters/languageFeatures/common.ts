@@ -478,7 +478,7 @@ export function toMonacoLanguageSelector(
 /**
  * Whether `model` matches `selector`, with the same semantics as
  * `toMonacoLanguageSelector`: a null or empty selector (which servers such as
- * Pyright send when registering pull diagnostics) falls back to the client's
+ * basedpyright send when registering pull diagnostics) falls back to the client's
  * own language ids, and `typescript`/`javascript` filters also match tsx/jsx.
  */
 export function matchesDocumentSelector(

@@ -70,6 +70,8 @@ export interface TerminalSettings {
   scrollbackLines: number;
   /** Which OSC notification sequences to detect. */
   notificationSequences: NotificationSequences;
+  /** Activate the worktree's Python environment in new terminals. */
+  activatePythonEnv: boolean;
 }
 
 export const DEFAULT_TERMINAL_SCROLLBACK = DEFAULT_SCROLLBACK_LINES;
@@ -450,6 +452,7 @@ export const useSettingsStore = create<SettingsState>()(
       terminal: {
         scrollbackLines: DEFAULT_TERMINAL_SCROLLBACK,
         notificationSequences: { ...DEFAULT_NOTIFICATION_SEQUENCES },
+        activatePythonEnv: true,
       },
       editor: structuredClone(DEFAULT_EDITOR_SETTINGS),
       schemas: [],
@@ -727,7 +730,7 @@ export const useSettingsStore = create<SettingsState>()(
         fileAssociations: state.fileAssociations,
         autoRevealInExplorer: state.autoRevealInExplorer,
       }),
-      version: 10,
+      version: 11,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -882,6 +885,17 @@ export const useSettingsStore = create<SettingsState>()(
           // v9 → v10: add auto-reveal in explorer setting
           if (state.autoRevealInExplorer === undefined) {
             state.autoRevealInExplorer = false;
+          }
+        }
+
+        if (version <= 10) {
+          // v10 → v11: add Python environment activation to terminal settings
+          const terminal =
+            typeof state.terminal === "object" && state.terminal !== null
+              ? (state.terminal as Record<string, unknown>)
+              : undefined;
+          if (terminal && typeof terminal.activatePythonEnv !== "boolean") {
+            terminal.activatePythonEnv = true;
           }
         }
 

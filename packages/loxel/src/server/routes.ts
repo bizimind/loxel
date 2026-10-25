@@ -77,6 +77,7 @@ import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
 import { listOthers, worktreeTree } from "./server-state";
+import { scanSetupSuggestions } from "./setup-suggestions";
 import { buildSpawnEnv } from "./shell-env";
 import * as storeDb from "./store-db";
 import {
@@ -1753,49 +1754,16 @@ async function handleDetectPath(req: Request, _ctx: RouteContext): Promise<Respo
   }
 }
 
-/** Detection rules for auto-suggesting workspace setup files and commands. */
-const SUGGESTION_RULES: Array<{ file: string; copyFile?: string; commands?: string[] }> = [
-  { file: "bun.lock", commands: ["bun i --frozen-lockfile"] },
-  { file: "bun.lockb", commands: ["bun i --frozen-lockfile"] },
-  { file: "pnpm-lock.yaml", commands: ["pnpm i --frozen-lockfile"] },
-  { file: "package-lock.json", commands: ["npm ci"] },
-  { file: "yarn.lock", commands: ["yarn install --frozen-lockfile"] },
-  { file: ".env", copyFile: ".env" },
-  { file: ".env.local", copyFile: ".env.local" },
-  { file: ".envrc", copyFile: ".envrc", commands: ["direnv allow"] },
-  { file: ".mise.toml", commands: ["mise trust", "mise i"] },
-  { file: ".tool-versions", commands: ["mise trust", "mise i"] },
-];
-
 // GET /api/projects/scan-suggestions?path=... — auto-detect files and commands for workspace setup
-function handleScanSuggestions(req: Request, _ctx: RouteContext): Response {
+async function handleScanSuggestions(req: Request, _ctx: RouteContext): Promise<Response> {
   const url = new URL(req.url);
   const rawPath = url.searchParams.get("path") ?? "";
-  if (!rawPath) return json({ files: [], commands: [] });
+  const empty: ScanSuggestionsResult = { files: [], commands: [] };
+  if (!rawPath) return json(empty);
   const dirPath = expandTilde(rawPath);
-
-  if (!existsSync(dirPath)) return json({ files: [], commands: [] });
-
-  const files: string[] = [];
-  const commands: string[] = [];
-  const seenCommands = new Set<string>();
-
-  for (const rule of SUGGESTION_RULES) {
-    if (existsSync(join(dirPath, rule.file))) {
-      if (rule.copyFile && !files.includes(rule.copyFile)) {
-        files.push(rule.copyFile);
-      }
-      for (const cmd of rule.commands ?? []) {
-        if (!seenCommands.has(cmd)) {
-          seenCommands.add(cmd);
-          commands.push(cmd);
-        }
-      }
-    }
-  }
-
-  const result: ScanSuggestionsResult = { files, commands };
-  return json(result);
+  if (!existsSync(dirPath)) return json(empty);
+  // The init hook runs with this PATH (the `hookEnv` passed to wt).
+  return json(await scanSetupSuggestions(dirPath, buildSpawnEnv().PATH ?? ""));
 }
 
 // POST /api/projects/create — create a brand new project
@@ -2110,6 +2078,18 @@ export async function writeInitHook(
 
   if (commands.length > 0) {
     lines.push("");
+    // Python installers (poetry, pdm, pipenv, `uv pip`) target an active virtual environment,
+    // and its `bin` shadows the real tools: both would be another checkout's when `wt add` runs
+    // from one of its terminals.
+    lines.push(
+      'if [[ -n "${VIRTUAL_ENV:-}" ]]; then',
+      '  venv_bin=":$VIRTUAL_ENV/bin:"',
+      '  PATH=":$PATH:"',
+      '  while [[ "$PATH" == *"$venv_bin"* ]]; do PATH=${PATH//"$venv_bin"/:}; done',
+      "  PATH=${PATH#:}; PATH=${PATH%:}",
+      "  unset VIRTUAL_ENV venv_bin",
+      "fi",
+    );
     lines.push(...commands);
   }
 

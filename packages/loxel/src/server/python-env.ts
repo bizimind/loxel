@@ -394,7 +394,7 @@ function pixiEnvDirs(projectDir: string): string[] {
 /**
  * Whether the interpreter (or what its symlinks resolve to) is a file git tracks in the worktree,
  * including in a submodule or nested repository inside it. Real environments are never committed,
- * and Loxel and Pyright execute the interpreter, so a committed `.venv/bin/python` would otherwise
+ * and Loxel and basedpyright execute the interpreter, so a committed `.venv/bin/python` would otherwise
  * run repository code as soon as a Python file is opened.
  */
 async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<boolean> {
@@ -429,6 +429,29 @@ async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean
   ]);
   // `--error-unmatch` exits 1 for an untracked path; anything else is tracked or an error.
   return listed.exitCode !== 1;
+}
+
+/**
+ * Whether git tracks any file in `dir`, asked like {@link isTrackedByGit} (innermost repository,
+ * physical path, fail closed inside a git worktree). Activating an environment in a terminal puts
+ * its whole `bin` first on PATH, so a committed `bin/git` written into an existing ignored venv
+ * would shadow the real one even though the interpreter itself is untracked.
+ */
+export async function hasTrackedFiles(wtPath: string, dir: string): Promise<boolean> {
+  try {
+    const realWtPath = await realpath(wtPath);
+    const physical = await realpath(dir);
+    const worktreeRepo = await runGit(realWtPath, ["rev-parse", "--show-toplevel"]);
+    if (worktreeRepo.exitCode === GIT_SPAWN_FAILED) return true;
+    if (worktreeRepo.exitCode !== 0) return false;
+
+    const innermost = await runGit(physical, ["rev-parse", "--show-toplevel"]);
+    if (innermost.exitCode !== 0) return isInside(physical, realWtPath);
+    const listed = await runGit(innermost.stdout.trim(), ["ls-files", "--", physical]);
+    return listed.exitCode !== 0 || listed.stdout.trim() !== "";
+  } catch {
+    return true;
+  }
 }
 
 async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string }> {
@@ -520,7 +543,7 @@ async function isExecutable(filePath: string): Promise<boolean> {
 
 /**
  * `PATH` without the worktree's own directories, for processes that look up `python` themselves
- * (Pyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
+ * (basedpyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
  */
 export function pathOutsideWorktree(PATH: string, wtPath: string): string {
   const root = path.resolve(wtPath);

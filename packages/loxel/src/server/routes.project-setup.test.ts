@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("generated init.wt.sh", () => {
-  test("copies quoted nested paths and runs setup commands in the worktree", async () => {
+  test("copies quoted nested paths and runs setup commands in the worktree, outside any venv", async () => {
     root = await mkdtemp(join(tmpdir(), "loxel-project-setup-"));
     const worktree = join(root, "worktree");
     const file = "config/user's settings.env";
@@ -23,11 +23,21 @@ describe("generated init.wt.sh", () => {
     await mkdir(worktree);
     await writeFile(join(root, ".wt-local-res", file), "TOKEN=value\n");
 
-    await writeInitHook(root, [file], ["printf 'ready\\n' > setup.txt"]);
+    await writeInitHook(
+      root,
+      [file],
+      ["printf 'ready\\n' > setup.txt", 'printf "%s %s" "${VIRTUAL_ENV-none}" "$PATH" > venv.txt'],
+    );
     await chmod(join(root, "init.wt.sh"), 0o755);
     const proc = Bun.spawn(["bash", join(root, "init.wt.sh")], {
       cwd: worktree,
-      env: { ...process.env, WT_ROOT: root },
+      // As when `wt add` runs from a terminal with another checkout's venv active.
+      env: {
+        ...process.env,
+        WT_ROOT: root,
+        VIRTUAL_ENV: join(root, ".venv"),
+        PATH: `${join(root, ".venv", "bin")}:/usr/bin:/bin`,
+      },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -35,6 +45,7 @@ describe("generated init.wt.sh", () => {
     expect(await proc.exited).toBe(0);
     expect(await Bun.file(join(worktree, file)).text()).toBe("TOKEN=value\n");
     expect(await Bun.file(join(worktree, "setup.txt")).text()).toBe("ready\n");
+    expect(await Bun.file(join(worktree, "venv.txt")).text()).toBe("none /usr/bin:/bin");
   });
 
   test("rejects paths that escape the local resource directory", async () => {
