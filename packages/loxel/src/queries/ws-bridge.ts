@@ -318,6 +318,12 @@ export function useWsBridge(): void {
           break;
         }
 
+        case "python_env_changed":
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.pythonEnv(deriveProjectPath(message.wtPath), message.wtPath),
+          });
+          break;
+
         case "external_files_changed": {
           const projectPath = deriveProjectPath(message.wtPath);
           queryClient.setQueryData(

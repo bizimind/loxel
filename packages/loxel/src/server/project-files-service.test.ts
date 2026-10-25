@@ -197,3 +197,30 @@ describe("ProjectFilesService move reporting", () => {
     expect(sources).not.toContain("external");
   }, 20000);
 });
+
+describe("ProjectFilesService changed paths", () => {
+  test("reports absolute changed paths outside git-ignored directories", async () => {
+    const repo = await seedRepo();
+    await Bun.write(path.join(repo, ".gitignore"), ".venv/\n");
+    await Bun.write(path.join(repo, ".venv", "pyvenv.cfg"), "home = /usr/bin\n");
+    const reported = new Set<string>();
+    const service = new ProjectFilesService(repo, () => {}, undefined, undefined, {
+      onPathsChanged: (paths) => {
+        for (const p of paths) reported.add(p);
+      },
+    });
+    cleanups.push(() => service.stop());
+    await service.start();
+    await Bun.sleep(300);
+    reported.clear();
+
+    await Bun.write(path.join(repo, ".venv", "lib.py"), "x = 1\n");
+    await Bun.write(path.join(repo, "main.py"), "y = 1\n");
+
+    const deadline = Date.now() + 8000;
+    while (!reported.has(path.join(repo, "main.py")) && Date.now() < deadline) await Bun.sleep(50);
+    await Bun.sleep(200);
+    expect(reported.has(path.join(repo, "main.py"))).toBe(true);
+    expect([...reported].filter((p) => p.includes(".venv"))).toEqual([]);
+  }, 20000);
+});

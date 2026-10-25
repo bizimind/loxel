@@ -1,11 +1,15 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
-import { PythonLspManager } from "./python-lsp-manager";
+// Interpreter overrides live in the store database; keep the tests' state out of the real one.
+const stateDir = await mkdtemp(join(tmpdir(), "python-lsp-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+const { PythonLspManager } = await import("./python-lsp-manager");
+const { setPythonOverride } = await import("./python-override-store");
 
 // Drives the real Pyright through the manager the way the Monaco client does, against a real
 // virtual environment holding a package that exists nowhere else.
@@ -21,7 +25,11 @@ const MISSING_IMPORT = `Import "${PACKAGE}" could not be resolved`;
 const SENTINEL = `sentinel: int = "not an int"`;
 
 let root: string | undefined;
-let manager: PythonLspManager | undefined;
+let manager: InstanceType<typeof PythonLspManager> | undefined;
+
+afterAll(async () => {
+  await rm(stateDir, { recursive: true, force: true });
+});
 
 afterEach(async () => {
   manager?.destroy();
@@ -42,7 +50,7 @@ class FakeClient {
   private readonly responses = new Map<number, (result: unknown) => void>();
   private diagnosticsWaiter: (() => void) | null = null;
 
-  constructor(private readonly manager: PythonLspManager) {
+  constructor(private readonly manager: InstanceType<typeof PythonLspManager>) {
     const ws = {
       send: (data: string) => {
         this.receive(data);
@@ -130,22 +138,27 @@ class FakeClient {
 
 async function makeWorktree(): Promise<string> {
   root = await realpath(await mkdtemp(join(tmpdir(), "python-lsp-")));
+  const wt = join(root, "wt");
+  await mkdir(wt);
   await writeFile(
-    join(root, "main.py"),
+    join(wt, "main.py"),
     `import ${PACKAGE}\n\nprint(${PACKAGE}.VALUE)\n${SENTINEL}\n`,
   );
-  return root;
+  return wt;
 }
 
-/** A real venv (no pip, so no network) with `PACKAGE` installed into its site-packages. */
-async function makeVenvWithPackage(wtPath: string): Promise<void> {
-  const venv = join(wtPath, ".venv");
+/**
+ * A real venv (no pip, so no network) with `PACKAGE` installed into its site-packages, at
+ * `venv`. Returns its interpreter.
+ */
+async function makeVenvWithPackage(venv: string): Promise<string> {
   const created = Bun.spawnSync([python3!, "-m", "venv", "--without-pip", venv]);
   if (created.exitCode !== 0) throw new Error(`venv creation failed: ${created.stderr}`);
   const [pythonDir] = (await readdir(join(venv, "lib"))).filter((n) => n.startsWith("python"));
   const pkg = join(venv, "lib", pythonDir!, "site-packages", PACKAGE);
   await mkdir(pkg, { recursive: true });
   await writeFile(join(pkg, "__init__.py"), "VALUE = 1\n");
+  return join(venv, "bin", "python");
 }
 
 const hasMissingImport = (diagnostics: Diagnostic[]) =>
@@ -158,7 +171,7 @@ describe.skipIf(!canRun)("PythonLspManager with Pyright", () => {
     "resolves imports installed only in the worktree's .venv",
     async () => {
       const wt = await makeWorktree();
-      await makeVenvWithPackage(wt);
+      await makeVenvWithPackage(join(wt, ".venv"));
       manager = new PythonLspManager();
       const client = new FakeClient(manager);
       await client.start(wt);
@@ -181,7 +194,45 @@ describe.skipIf(!canRun)("PythonLspManager with Pyright", () => {
       const uri = client.open(join(wt, "main.py"), await Bun.file(join(wt, "main.py")).text());
       await client.waitForDiagnostics(uri, (d) => analyzed(d) && hasMissingImport(d));
 
-      await makeVenvWithPackage(wt);
+      await makeVenvWithPackage(join(wt, ".venv"));
+      await client.waitForDiagnostics(uri, (d) => analyzed(d) && !hasMissingImport(d));
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "switches to an interpreter chosen for the worktree without a restart",
+    async () => {
+      const wt = await makeWorktree();
+      const picked = await makeVenvWithPackage(join(root!, "picked"));
+      manager = new PythonLspManager();
+      const client = new FakeClient(manager);
+      await client.start(wt);
+
+      const uri = client.open(join(wt, "main.py"), await Bun.file(join(wt, "main.py")).text());
+      await client.waitForDiagnostics(uri, (d) => analyzed(d) && hasMissingImport(d));
+
+      setPythonOverride(wt, picked);
+      manager.refreshWorktreeEnvironment(wt);
+      await client.waitForDiagnostics(uri, (d) => analyzed(d) && !hasMissingImport(d));
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "resolves a module created on disk once the file watcher reports it",
+    async () => {
+      const wt = await makeWorktree();
+      manager = new PythonLspManager();
+      const client = new FakeClient(manager);
+      await client.start(wt);
+
+      const uri = client.open(join(wt, "main.py"), await Bun.file(join(wt, "main.py")).text());
+      await client.waitForDiagnostics(uri, (d) => analyzed(d) && hasMissingImport(d));
+
+      const module = join(wt, `${PACKAGE}.py`);
+      await writeFile(module, "VALUE = 1\n");
+      manager.notifyWatchedFilesChanged(wt, [module]);
       await client.waitForDiagnostics(uri, (d) => analyzed(d) && !hasMissingImport(d));
     },
     TEST_TIMEOUT_MS,

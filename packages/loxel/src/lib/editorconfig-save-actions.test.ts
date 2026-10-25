@@ -57,6 +57,12 @@ describe("applyEditorConfigOnSave", () => {
     expect(save("a\n", { insertFinalNewline: false })).toBe("a\n");
   });
 
+  test("a whitespace-only last line kept by an autosave gets no newline", () => {
+    const both = { trimTrailingWhitespace: true, insertFinalNewline: true };
+    expect(save("f() {\n  foo();\n  ", both, "auto", [[3, 3]])).toBe("f() {\n  foo();\n  ");
+    expect(save("f() {\n  foo();\n  ", both, "explicit", [[3, 3]])).toBe("f() {\n  foo();\n");
+  });
+
   test("combines trimming the last line with the final newline", () => {
     const both = { trimTrailingWhitespace: true, insertFinalNewline: true };
     expect(save("a\nb  ", both)).toBe("a\nb\n");

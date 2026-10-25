@@ -148,7 +148,8 @@ export function resolveIndentation(
     ? editorConfig.indentStyle === "space"
     : base.insertSpaces;
   const tabSize = editorConfig.tabWidth ?? base.tabSize;
-  return { tabSize, insertSpaces, indentSize: editorConfig.indentSize ?? tabSize };
+  // Not `tabSize`: that can be the `.editorconfig`'s tab_width, which says nothing about indentation.
+  return { tabSize, insertSpaces, indentSize: editorConfig.indentSize ?? base.tabSize };
 }
 
 function findIndentationOverride(

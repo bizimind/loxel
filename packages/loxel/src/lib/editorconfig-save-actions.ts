@@ -12,8 +12,8 @@ const TRAILING_WHITESPACE = /[ \t]+$/;
 
 /**
  * Edits that apply `trim_trailing_whitespace` and `insert_final_newline` to a model.
- * `insert_final_newline = false` leaves the end of the file as it is, and an empty file gets no
- * newline. Lines in `keepLines` are not trimmed.
+ * `insert_final_newline = false` leaves the end of the file as it is, and a file whose last line is
+ * blank gets no newline. Lines in `keepLines` are not trimmed.
  */
 export function editorConfigSaveEdits(
   model: LineSource,
@@ -38,9 +38,10 @@ export function editorConfigSaveEdits(
     }
   }
   if (!properties.insertFinalNewline) return edits;
-  const lastLine = model.getLineContent(lineCount);
-  const lastLineEmpty = lastLineTrim ? lastLineTrim.range.startColumn === 1 : lastLine === "";
-  if (lastLineEmpty) return edits;
+  // A blank last line needs no newline: either it is empty, or it holds only whitespace that a
+  // newline would freeze into a line the user never typed (an autosave keeps the whitespace on
+  // the cursor's line, so it can still be there).
+  if (/^[ \t]*$/.test(model.getLineContent(lineCount))) return edits;
   // Replacing the trimmed whitespace with the newline keeps the edits from touching each other.
   if (lastLineTrim) lastLineTrim.text = model.getEOL();
   else {

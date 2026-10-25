@@ -84,6 +84,17 @@ test("a pathological glob matches in linear time", () => {
   expect(performance.now() - start).toBeLessThan(50);
 });
 
+test("an oversized section name or expansion is ignored", () => {
+  const config = parseEditorConfig(
+    `[${"*".repeat(2000)}]\nindent_size = 4\n[*]\nindent_size = 2\n`,
+  );
+  expect(config.sections.map((section) => section.properties)).toEqual([[["indent_size", "2"]]]);
+  const start = performance.now();
+  const glob = compileSectionGlob(`{a,b}{c,d}{e,f}{g,h}{i,j}{k,l}{m,n}{o,p}${"*".repeat(1000)}`);
+  expect(globMatches(glob, "a".repeat(200))).toBe(false);
+  expect(performance.now() - start).toBeLessThan(50);
+});
+
 test("a glob expanding to too many alternatives matches nothing", () => {
   expect(
     globMatches(compileSectionGlob("{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}"), "aaaaaaaaa"),

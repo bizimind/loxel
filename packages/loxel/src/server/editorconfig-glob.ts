@@ -24,8 +24,13 @@ type Node = Token | { kind: "alt"; options: Node[][] };
 /** The token sequences a section glob's braces expand to; empty matches nothing. */
 export type SectionGlob = Token[][];
 
-/** More alternatives than any real `.editorconfig` uses; past it the section matches nothing. */
+/**
+ * Bounds on a section's expansion, far beyond any real `.editorconfig`: past them the section
+ * matches nothing. Matching costs tokens x path length, so the total token count is what bounds
+ * the time a crafted file can take.
+ */
 const MAX_ALTERNATIVES = 256;
+const MAX_TOTAL_TOKENS = 4096;
 
 /**
  * Compile a section name. A glob without `/` matches the file name in any directory below the
@@ -172,13 +177,20 @@ function expand(nodes: Node[]): Token[][] | null {
     const options: Token[][] = [];
     for (const option of node.options) {
       const expanded = expand(option);
-      if (!expanded) return null;
+      // Checked as options accumulate, so a huge expansion is rejected before it is built.
+      if (!expanded || sequences.length * (options.length + expanded.length) > MAX_ALTERNATIVES) {
+        return null;
+      }
       options.push(...expanded);
     }
-    if (sequences.length * options.length > MAX_ALTERNATIVES) return null;
     sequences = sequences.flatMap((sequence) => options.map((option) => [...sequence, ...option]));
+    if (totalTokens(sequences) > MAX_TOTAL_TOKENS) return null;
   }
-  return sequences;
+  return totalTokens(sequences) > MAX_TOTAL_TOKENS ? null : sequences;
+}
+
+function totalTokens(sequences: Token[][]): number {
+  return sequences.reduce((sum, sequence) => sum + sequence.length, 0);
 }
 
 /**

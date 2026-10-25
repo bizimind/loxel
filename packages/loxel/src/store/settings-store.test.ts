@@ -76,6 +76,13 @@ describe("resolveIndentation", () => {
         tabWidth: 8,
       }),
     ).toEqual({ tabSize: 8, insertSpaces: true, indentSize: 4 });
+    // tab_width alone is a tab's display width; the indent size stays the language default.
+    expect(
+      resolveIndentation(settings(), "/repo/app.ts", "typescript", {
+        indentStyle: "space",
+        tabWidth: 4,
+      }),
+    ).toEqual({ tabSize: 4, insertSpaces: true, indentSize: 2 });
     // Save-only properties leave indentation alone.
     expect(
       resolveIndentation(settings(), "/repo/app.ts", "typescript", { insertFinalNewline: true }),

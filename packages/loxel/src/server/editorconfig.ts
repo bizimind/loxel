@@ -16,6 +16,8 @@ const log = logger.child("files");
  */
 
 const FILE_NAME = ".editorconfig";
+/** The spec limits section names to 1024 characters; a longer one is ignored with its keys. */
+const MAX_SECTION_LINE = 1026;
 
 interface Section {
   glob: SectionGlob;
@@ -37,7 +39,7 @@ export function parseEditorConfig(text: string): EditorConfigFile {
     const line = rawLine.trim();
     if (line === "" || line.startsWith("#") || line.startsWith(";")) continue;
     if (line.startsWith("[")) {
-      if (!line.endsWith("]") || line.length === 2) {
+      if (!line.endsWith("]") || line.length === 2 || line.length > MAX_SECTION_LINE) {
         current = "invalid";
         continue;
       }
