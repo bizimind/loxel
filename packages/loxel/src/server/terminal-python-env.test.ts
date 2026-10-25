@@ -187,6 +187,19 @@ describe.skipIf(!Bun.which("zsh"))("zsh startup shim", () => {
     expect(result.stderr).not.toContain("zsh-python-env");
   });
 
+  test("moves rather than duplicates a directory whose name holds pattern characters", async () => {
+    const odd = join(root, "Projects (work) [1]*", ".venv");
+    await mkdir(join(odd, "bin"), { recursive: true });
+    await writeFile(join(odd, "pyvenv.cfg"), "home = /usr/bin\n");
+    const oddBin = join(odd, "bin");
+    const result = await startZsh({
+      pythonEnv: { source: "venv", pythonPath: join(oddBin, "python"), envPath: odd },
+      files: { ".zshrc": "setopt glob_subst; path=(/usr/bin /bin $path)\n" },
+    });
+    expect(result.first).toBe(oddBin);
+    expect(result.path?.split(":").filter((dir) => dir === oddBin)).toHaveLength(1);
+  });
+
   test("leaves a virtual environment the user's startup files activated in front", async () => {
     const result = await startZsh({
       files: { ".zshrc": "export VIRTUAL_ENV=/other/venv; path=(/other/venv/bin $path)\n" },

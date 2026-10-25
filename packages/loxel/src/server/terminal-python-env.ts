@@ -21,7 +21,7 @@ const log = logger.child("terminal");
  * for them: each sources the user's file with the user's `ZDOTDIR` restored, and the last one
  * (`.zlogin`) puts `$LOXEL_PYTHON_ENV_BIN` back in front, unless the user's files activated a
  * different virtual environment, then hands `ZDOTDIR` back. The wrappers run with the user's
- * options in effect (`no_unset`, `ksh_arrays`, ...), so every expansion has a default and the
+ * options in effect (`no_unset`, `ksh_arrays`, `glob_subst`, ...), so every expansion has a default and the
  * PATH logic runs under `emulate -L zsh`; the `source` calls stay at top level so the user's
  * `typeset`s remain global.
  */
@@ -55,7 +55,8 @@ if [[ -f "$ZDOTDIR/.zlogin" ]]; then source "$ZDOTDIR/.zlogin"; fi
   if [[ "\${ZDOTDIR-}" == "$HOME" ]]; then unset ZDOTDIR; fi
   local bin="\${LOXEL_PYTHON_ENV_BIN-}"
   if [[ -n "$bin" ]] && [[ -z "\${VIRTUAL_ENV-}" || "\${VIRTUAL_ENV-}" == "\${bin:h}" ]]; then
-    path=("$bin" "\${(@)path:#\${(b)bin}}")
+    # Literal match: emulate turns glob_subst off, so $bin is not taken as a pattern.
+    path=("$bin" "\${(@)path:#$bin}")
   fi
 }
 unset LOXEL_USER_ZDOTDIR LOXEL_PYTHON_ENV_BIN _loxel_zdotdir
