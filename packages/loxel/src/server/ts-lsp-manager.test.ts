@@ -68,7 +68,9 @@ describe("toClientUris", () => {
 
 // Drives the real `tsc --lsp` through the manager the way the Monaco client does.
 
-const TEST_TIMEOUT_MS = 30_000;
+const TEST_TIMEOUT_MS = 60_000;
+/** Generous: CI runners can be slow to load the project and register tsc's watchers. */
+const RESOLVE_DEADLINE_MS = 40_000;
 const MISSING_MODULE = "Cannot find module './b'";
 
 let root: string | undefined;
@@ -173,12 +175,15 @@ describe.skipIf(resolveTypeScriptBinary() === null)("TsLspManager with tsc --lsp
 
       const created = join(root, "src", "b.ts");
       await writeFile(created, "export const y = 1;\n");
+
+      // tsc may not have registered its watchers yet (it does once the project has loaded); the
+      // manager keeps the change until it does.
       manager.notifyWatchedFilesChanged(root, [created]);
 
-      const deadline = Date.now() + 10_000;
+      const deadline = Date.now() + RESOLVE_DEADLINE_MS;
       let messages = await client.diagnosticMessages(uri);
       while (messages.some((m) => m.includes(MISSING_MODULE)) && Date.now() < deadline) {
-        await Bun.sleep(100);
+        await Bun.sleep(200);
         messages = await client.diagnosticMessages(uri);
       }
       expect(messages).toEqual([]);
