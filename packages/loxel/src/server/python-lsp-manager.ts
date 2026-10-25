@@ -57,6 +57,8 @@ export function pythonSettings(env: PythonEnv | null, wtPath: string): Record<st
  * still takes precedence inside basedpyright.
  */
 export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspContext> {
+  protected override readonly forwardWatchedFiles = true;
+
   constructor() {
     super("python-lsp");
   }

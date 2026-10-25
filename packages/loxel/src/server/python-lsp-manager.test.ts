@@ -245,4 +245,23 @@ describe.skipIf(!canRun)("PythonLspManager with basedpyright", () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  test(
+    "resolves a module created on disk once the file watcher reports it",
+    async () => {
+      const wt = await makeWorktree();
+      manager = new PythonLspManager();
+      const client = new FakeClient(manager);
+      await client.start(wt);
+
+      const uri = client.open(join(wt, "main.py"), await Bun.file(join(wt, "main.py")).text());
+      await client.waitForDiagnostics(uri, (d) => analyzed(d) && hasMissingImport(d));
+
+      const module = join(wt, `${PACKAGE}.py`);
+      await writeFile(module, "VALUE = 1\n");
+      manager.notifyWatchedFilesChanged(wt, [module]);
+      await client.waitForDiagnostics(uri, (d) => analyzed(d) && !hasMissingImport(d));
+    },
+    TEST_TIMEOUT_MS,
+  );
 });

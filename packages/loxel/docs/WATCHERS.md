@@ -14,6 +14,7 @@ How the server keeps project files, Git status, refs, logs, worktrees, drafts an
 | `ExternalFolderRegistry`   | server-wide         | each Others folder, git status disabled | Others section of every worktree listing the folder    |
 | Git fsmonitor              | Git (user config)   | one daemon per Git directory            | Git status acceleration, only if the user enables it   |
 | Language servers           | LSP managers        | implementation-specific                 | diagnostics and language features                      |
+| Python environment         | `PythonLspManager`  | candidate and resolved envs, flat       | basedpyright's interpreter and installed packages      |
 
 For a bare project, the project Git directory is also the repository root and therefore contains `.worktrees`. Classification must stay allowlist-based and anchored at the beginning of the reported path; a catch-all would treat source edits and dependency writes as Git metadata.
 
@@ -60,6 +61,8 @@ The client refetches only working-tree diffs (staged, unstaged, uncommitted) on 
 - Write nonces annotate the resulting event so the originating editor can suppress its echo.
 - `pause()` closes active watch handles but deliberately keeps caches, tracked files, queued changes, and nonce state. It waits for an in-flight flush to finish before removal starts. `resume()` recreates those handles, requests a conservative directory rescan, and emits a catch-up notification for every individually watched file because `fs.watch` cannot replay the paused interval. `stop()` is permanent teardown and clears state.
 
+A worktree's `ProjectFilesService` also hands each batch's absolute paths to `onPathsChanged` before its refresh pass, which `server.ts` forwards to the worktree's language servers as `workspace/didChangeWatchedFiles` (see "Watched files" in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)). Language servers therefore add no watcher of their own: they see each named-path batch the file tree sees, git-ignored directories excluded. Rescans without named paths (a null-filename event, the conservative rescan after `resume()`) reach no language server.
+
 `ProjectFilesService` (worktree trees and Others folders) also recognizes renames and moves of files editors have open, through [file-move-detector.ts](../src/server/file-move-detector.ts). Routes track a file's identity (device, inode and birth time, from `lstat` so symlinks are never followed) when an editor reads or writes it, up to 1,000 per tree with the least recently used dropped. Each pass stats only the tracked files whose path or an ancestor directory changed. Only when one of them vanished does it look for where it went: a tracked path that now holds its identity (renamed onto another open file), or among the pass's other changed paths, capped at 200 stats, a file with the same identity or the same relative path under a directory that appeared. A vanished file stays matchable for 2 s, which covers a move whose new path is reported in a later pass than the old one, not the reverse order. Matches are broadcast as `file_moved { oldPath, newPath, source }` before the pass's `file_content_changed` events, which still include the old path (the diff view needs it; editors ignore it once the move is applied). `FileOperationsService` brackets every operation with the tree's `beginOperation`, and each change is stamped when it is queued rather than when its pass runs, so changes queued during an operation or within 1 s after it make the pass's moves `loxel`; anything else is `external`. Drafts and individually opened external files are not covered, and a move across volumes is a copy plus a delete.
 
 The pause/stop distinction is important during worktree removal. A failed removal must resume the same service state; calling `stop()` would erase `ProjectFilesService` caches, `DetachedFilesService` entries, and `ExternalFilesService`'s tracked-file set.
@@ -94,7 +97,7 @@ Status and working-tree diffs run with `-c diff.ignoreSubmodules=dirty` (`SUBMOD
 
 When the user does enable fsmonitor, daemon count scales with Git directories, not just top-level worktrees. Git reuses one daemon via `<gitdir>/fsmonitor--daemon.ipc`; a high count alone is not evidence of a leak.
 
-Language servers may run their own watchers. Worktree teardown stops the language servers rooted at the removed worktree along with its other watchers.
+Language servers may run their own watchers; basedpyright and TypeScript instead receive the worktree watcher's changes (basedpyright's manager also watches the Python environment). Worktree teardown stops the language servers rooted at the removed worktree along with its other watchers.
 
 ## Review checklist
 
