@@ -236,21 +236,20 @@ async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<bool
  * Asks the innermost repository containing `filePath`, since a submodule or nested repository
  * tracks its own files and the worktree's index does not list them. Git is asked about the
  * physical path (parent directory resolved, the file itself kept, so a committed symlink still
- * counts), and only while that path is physically inside the worktree: an environment the
- * worktree merely links to, such as another worktree's `.venv`, is not the repository's content.
- * Inside a git worktree, any answer other than a clear "untracked" counts as tracked (fail closed).
+ * counts) wherever it is: a committed symlink can reach another checkout of the same repository.
+ * Inside a git worktree, any answer other than a clear "untracked" counts as tracked (fail
+ * closed); outside it, a path in no repository is untracked.
  */
 async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
   const realWtPath = await realpath(wtPath);
   const physical = path.join(await realpath(path.dirname(filePath)), path.basename(filePath));
-  if (!isInside(physical, realWtPath)) return false;
   const worktreeRepo = await runGit(realWtPath, ["rev-parse", "--show-toplevel"]);
   if (worktreeRepo.exitCode === GIT_SPAWN_FAILED) return true;
   // Not a repository at all, so nothing in it can be committed.
   if (worktreeRepo.exitCode !== 0) return false;
 
   const innermost = await runGit(path.dirname(physical), ["rev-parse", "--show-toplevel"]);
-  if (innermost.exitCode !== 0) return true;
+  if (innermost.exitCode !== 0) return isInside(physical, realWtPath);
   const listed = await runGit(innermost.stdout.trim(), [
     "ls-files",
     "--error-unmatch",

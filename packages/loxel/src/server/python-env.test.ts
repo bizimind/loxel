@@ -157,6 +157,19 @@ describe("resolvePythonEnv", () => {
     expect(env?.pythonPath).toBe(python3);
   });
 
+  test("skips an interpreter a committed symlink reaches in another checkout", async () => {
+    const { wt, outside, bin } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    // Another checkout of the same repository, which commits a venv-shaped payload.
+    Bun.spawnSync(["git", "-C", outside, "init", "-q"]);
+    await makeVenv(join(outside, "payload"));
+    Bun.spawnSync(["git", "-C", outside, "add", "payload"]);
+    await symlink(join(outside, "payload"), join(wt, ".venv"));
+    const system = await writeExecutable(join(bin, "python3"));
+
+    expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
+  });
+
   test("uses a .venv symlinked to an environment outside the worktree", async () => {
     const { wt, outside } = await makeRoot();
     Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
