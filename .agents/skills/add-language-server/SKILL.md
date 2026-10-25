@@ -61,6 +61,7 @@ Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped
 - **`getInitializationOptions(session)`** — For config the server reads at startup (SDK paths, indexing settings).
 - **`onClientInitialized(session)`** — For push-based config via `workspace/didChangeConfiguration` after handshake (Docker's compose settings, YAML's schemas).
 - **`workspaceConfiguration(session, section)`** — For servers that pull config with `workspace/configuration` (Pyright). Defining it advertises the capability and answers the requests server-side; call `notifyConfigurationChanged(session)` to make the server pull again.
+- **`forwardWatchedFiles`** — Readonly flag for servers that register file watchers to learn about changes to unopened files and config (Pyright, TypeScript). The base answers the registrations and forwards matching worktree changes; needs `getSessionWorkspace`.
 - **`onSessionClosed(session)`** — Release per-session resources (watchers); must be idempotent.
 - **`handleServerFrame(session, body)` / `handleClientData(session, data)`** — For intercepting/transforming messages. Only TypeScript and Docker use these.
 
@@ -74,7 +75,7 @@ Add `| WorktreeLspData<"<name>-lsp">` to the `WsData` union.
 
 (`index.ts` is only the process entry point; the server lives in `server.ts`.)
 
-1. Import and instantiate the manager at module level
+1. Import and instantiate the manager at module level, and add it to `worktreeLspManagers` if worktree-scoped
 2. Add `"<name>-lsp"` to the `worktreeLspTypes` array (WebSocket upgrade route `/ws/<name>-lsp?wt=<path>`)
 3. Add `open`/`close`/`message` handlers in the websocket block
 4. Call `.destroy()` in `shutdown()`
