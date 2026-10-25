@@ -1,4 +1,4 @@
-import { readdirSync, statSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
 import { access, constants, lstat, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -152,7 +152,8 @@ export async function listPythonEnvs(
 /**
  * Check an interpreter the user entered for a worktree and return it as an absolute interpreter
  * path. Accepts `~/` paths and environment directories (their `bin/python`). Throws an error
- * meant for the user when the path is not an executable file or the repository tracks it.
+ * meant for the user when the path is not an executable file or the repository tracks it or any
+ * file of its environment.
  */
 export async function normalizePythonOverride(
   worktreePath: string,
@@ -170,7 +171,9 @@ export async function normalizePythonOverride(
   for (const pythonPath of candidates) {
     if (!(await isExecutable(pythonPath))) continue;
     if (await isInterpreterShippedByRepo(wtPath, pythonPath)) {
-      throw new Error("Loxel does not run Python interpreters that the repository tracks in git");
+      throw new Error(
+        "Loxel does not run a Python interpreter or environment that the repository tracks in git",
+      );
     }
     return pythonPath;
   }
@@ -337,7 +340,9 @@ async function systemPython(
     // Entry by entry, so a tracked hit early on PATH does not hide a real interpreter later.
     for (const dir of PATH.split(path.delimiter)) {
       const system = dir ? Bun.which(name, { PATH: dir }) : null;
-      if (system && !(await isShippedByRepo(wtPath, system))) {
+      // The environment rule too, so PATH cannot hand back an interpreter from an environment
+      // the checks above rejected (direnv's `PATH_add .venv/bin`).
+      if (system && !(await isInterpreterShippedByRepo(wtPath, system))) {
         return { source: "system", pythonPath: system, envPath: null };
       }
     }
@@ -409,11 +414,35 @@ export async function isEnvShippedByRepo(
   envPath: string,
   executable: string,
 ): Promise<boolean> {
-  const shipped = await Promise.all([
-    isShippedByRepo(wtPath, envPath),
-    isShippedByRepo(wtPath, executable),
-  ]);
+  const targets = [...(await envTargets(wtPath, envPath)), executable];
+  const shipped = await Promise.all(targets.map((target) => isShippedByRepo(wtPath, target)));
   return shipped.some(Boolean);
+}
+
+/**
+ * What of the environment at `envPath` to ask git about: the whole directory, or, when the
+ * worktree lies inside it (an environment created at the repository root, `python -m venv .`),
+ * only the environment's own entries, since the directory then also holds the repository's files.
+ */
+async function envTargets(wtPath: string, envPath: string): Promise<string[]> {
+  const resolveReal = (target: string) => realpath(target).catch(() => target);
+  const [realWtPath, realEnvPath] = await Promise.all([resolveReal(wtPath), resolveReal(envPath)]);
+  if (!isInside(wtPath, envPath) && !isInside(realWtPath, realEnvPath)) return [envPath];
+  const libDir = path.join(envPath, "lib");
+  let libEntries: string[] = [];
+  try {
+    libEntries = readdirSync(libDir);
+  } catch {
+    // No `lib` directory: nothing installed there to check.
+  }
+  return [
+    path.join(envPath, "pyvenv.cfg"),
+    path.join(envPath, "conda-meta"),
+    path.join(envPath, "Lib", "site-packages"),
+    ...libEntries
+      .filter((name) => name.startsWith("python"))
+      .map((name) => path.join(libDir, name, "site-packages")),
+  ].filter((target) => existsSync(target));
 }
 
 /** `isEnvShippedByRepo` for an interpreter given by path: its environment, if it is in one. */
