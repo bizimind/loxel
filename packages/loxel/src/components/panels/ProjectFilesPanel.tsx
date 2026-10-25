@@ -14,6 +14,7 @@ import type { FilesTreeHandle, TreeNode } from "@/components/tree";
 import { FilesTree, InlineRenameInput, TREE_PATH_ATTR, TREE_SECTION_ATTR } from "@/components/tree";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { showToast } from "@/components/ui/toast";
+import { useActiveEditorFilePath } from "@/hooks/useActiveEditorFilePath";
 import { useDragAutoScroll } from "@/hooks/useDragAutoScroll";
 import { useFileClipboard } from "@/hooks/useFileClipboard";
 import { useFileOperations } from "@/hooks/useFileOperations";
@@ -43,7 +44,6 @@ import { useDetachedFilesQuery, useExternalFilesQuery } from "@/queries/use-repo
 import { getQueryScope } from "@/queries/use-scope";
 import { openEditorPaths, useEditorStateStore } from "@/store/editor-state";
 import { useSettingsStore } from "@/store/settings-store";
-import { getCenterApi, subscribeCenterApi } from "@/store/tools-bar";
 import { getCurrentWorktreeUI, useWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -260,20 +260,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
   }, [revealFileInTree]);
 
   const autoReveal = useSettingsStore((s) => s.autoRevealInExplorer);
-  const [centerApi, setCenterApiState] = useState(() => getCenterApi());
-  const [activeEditorFilePath, setActiveEditorFilePath] = useState(() => getActiveEditorFilePath());
-  useEffect(() => subscribeCenterApi(setCenterApiState), []);
-
-  useEffect(() => {
-    if (!centerApi) {
-      setActiveEditorFilePath(null);
-      return;
-    }
-    const updateActiveEditorFilePath = () => setActiveEditorFilePath(getActiveEditorFilePath());
-    updateActiveEditorFilePath();
-    const disposable = centerApi.onDidActivePanelChange(updateActiveEditorFilePath);
-    return () => disposable.dispose();
-  }, [centerApi]);
+  const activeEditorFilePath = useActiveEditorFilePath();
 
   useEffect(() => {
     if (!autoReveal || !activeEditorFilePath) return;

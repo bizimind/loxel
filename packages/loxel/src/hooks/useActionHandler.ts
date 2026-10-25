@@ -15,6 +15,7 @@ import {
 } from "@/lib/focus-navigation";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
+import { selectPythonInterpreter } from "@/lib/python-interpreter";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { renameActiveTab } from "@/lib/tab-rename";
 import { useCommandPaletteStore } from "@/store/command-palette";
@@ -380,6 +381,11 @@ export function useActionHandler(): (actionId: ActionId) => void {
         ctx.wtState.requestRemoveWorktree(ctx.project.path, wt).catch(console.error);
         break;
       }
+
+      // -- Languages --
+      case "python.selectInterpreter":
+        void selectPythonInterpreter();
+        break;
 
       // -- App --
       case "app.settings":

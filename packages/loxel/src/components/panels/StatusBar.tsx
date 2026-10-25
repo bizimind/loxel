@@ -23,6 +23,8 @@ import { useStatusQuery } from "@/queries/use-repo-queries";
 import { toKeyBinding } from "@/store/keybindings/key-combo";
 import { usePendingChordStore } from "@/store/keybindings/pending-chord";
 
+import { PythonInterpreterStatus } from "./PythonInterpreterStatus";
+
 /** Shows the keystrokes of a chord in progress, like "⌘\ … waiting for the next key". */
 function PendingChordIndicator() {
   const steps = usePendingChordStore((s) => s.steps);
@@ -104,6 +106,8 @@ export function StatusBar() {
           </div>
         </>
       )}
+
+      <PythonInterpreterStatus />
 
       <PendingChordIndicator />
 
