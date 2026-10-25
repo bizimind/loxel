@@ -36,7 +36,12 @@ import type {
   ScanSuggestionsResult,
   WorkspaceSetup,
 } from "@/api/project-model";
-import type { PythonEnvResponse } from "@/api/python-env-model";
+import type {
+  PythonEnv,
+  PythonEnvCandidatesResponse,
+  PythonEnvResponse,
+  PythonInterpreter,
+} from "@/api/python-env-model";
 import type { SearchMatch } from "@/api/search-model";
 import type { WsMessage } from "@/api/ws-protocol";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
@@ -59,7 +64,13 @@ import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
 import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
 import * as projectStore from "./project-store";
-import { resolvePythonEnv } from "./python-env";
+import { listPythonEnvs, normalizePythonOverride, resolvePythonEnv } from "./python-env";
+import {
+  getPythonOverride,
+  pythonOverrideStoreKey,
+  setPythonOverride,
+} from "./python-override-store";
+import { pythonVersion } from "./python-version";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
@@ -960,19 +971,80 @@ function handleDetectedFormatters(req: Request, ctx: RouteContext): Response {
   return json({ formatters });
 }
 
-// GET /api/python-env?wt= — The Python interpreter Loxel uses for a worktree
-async function handlePythonEnv(req: Request, ctx: RouteContext): Promise<Response> {
+/**
+ * The worktree path of a `wt` query parameter, once it is known to be a real worktree of its
+ * project: resolving a Python environment may run `poetry` in the directory.
+ */
+async function resolvePythonWorktree(req: Request, ctx: RouteContext): Promise<string | Response> {
   const resolved = resolveWorktreeFromReq(req, ctx);
   if (resolved instanceof Response) return resolved;
-  // Resolution may run `poetry` in the directory, so only a real worktree of the project is accepted.
-  const wtPath = resolve(resolved.wtPath);
+  return validatedWorktreePath(resolved.wtPath, resolved.cwd);
+}
+
+async function validatedWorktreePath(wtPath: string, cwd: string): Promise<string | Response> {
+  const absolute = resolve(wtPath);
   try {
-    await git.validateWorktreePath(wtPath, resolved.cwd);
+    await git.validateWorktreePath(absolute, cwd);
   } catch {
     return error("Not a worktree of this project", 400);
   }
-  const response: PythonEnvResponse = { env: await resolvePythonEnv(wtPath) };
+  return absolute;
+}
+
+async function withVersion(env: PythonEnv): Promise<PythonInterpreter> {
+  return { ...env, version: await pythonVersion(env.pythonPath) };
+}
+
+async function pythonEnvResponse(wtPath: string): Promise<PythonEnvResponse> {
+  const env = await resolvePythonEnv(wtPath);
+  return { env: env && (await withVersion(env)), overridePath: getPythonOverride(wtPath) };
+}
+
+// GET /api/python-env?wt= — The Python interpreter Loxel uses for a worktree
+async function handlePythonEnv(req: Request, ctx: RouteContext): Promise<Response> {
+  const wtPath = await resolvePythonWorktree(req, ctx);
+  if (wtPath instanceof Response) return wtPath;
+  return json(await pythonEnvResponse(wtPath));
+}
+
+// GET /api/python-env/candidates?wt= — Interpreters the user can choose for a worktree
+async function handlePythonEnvCandidates(req: Request, ctx: RouteContext): Promise<Response> {
+  const wtPath = await resolvePythonWorktree(req, ctx);
+  if (wtPath instanceof Response) return wtPath;
+  const { candidates, automatic } = await listPythonEnvs(wtPath);
+  const response: PythonEnvCandidatesResponse = {
+    candidates: await Promise.all(candidates.map(withVersion)),
+    automaticPath: automatic?.pythonPath ?? null,
+    overridePath: getPythonOverride(wtPath),
+  };
   return json(response);
+}
+
+// POST /api/python-env/override — Choose a worktree's interpreter, or (null) return to detection
+async function handlePythonOverride(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const resolved = resolveProjectFromBody(body, ctx);
+  if (resolved instanceof Response) return resolved;
+  const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
+  if (wtPath instanceof Response) return wtPath;
+  const { pythonPath } = body;
+  if (pythonPath !== null && typeof pythonPath !== "string") {
+    return error("pythonPath must be a string or null", 400);
+  }
+  let chosen: string | null = null;
+  if (pythonPath !== null) {
+    try {
+      chosen = await normalizePythonOverride(wtPath, pythonPath);
+    } catch (err) {
+      return error(err instanceof Error ? err.message : "Invalid Python interpreter", 400);
+    }
+    // Language servers and terminals will run it, so take only what answers like a Python.
+    if (!(await pythonVersion(chosen))) {
+      return error(`${chosen} did not report a Python version; is it a Python interpreter?`, 400);
+    }
+  }
+  setPythonOverride(wtPath, chosen);
+  return json(await pythonEnvResponse(wtPath));
 }
 
 // ---------------------------------------------------------------------------
@@ -2253,8 +2325,10 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
     wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
     ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
     ctx.completeWorktreeRemoval(wtPath);
-    // A worktree later created at the same path starts with an empty Others section.
+    // A worktree later created at the same path starts with an empty Others section and its own
+    // Python interpreter detection.
     storeDb.deleteStore(externalFoldersStoreKey(wtPath));
+    storeDb.deleteStore(pythonOverrideStoreKey(wtPath));
     return json(result);
   } catch (err) {
     try {
@@ -3006,6 +3080,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/update/status": handleGetUpdateStatus,
     "/api/detected-formatters": handleDetectedFormatters,
     "/api/python-env": handlePythonEnv,
+    "/api/python-env/candidates": handlePythonEnvCandidates,
   },
   POST: {
     "/api/log": handleLogIngest,
@@ -3055,6 +3130,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/open": handleOpen,
     "/api/external-folders/add": handleExternalFolderAdd,
     "/api/external-folders/remove": handleExternalFolderRemove,
+    "/api/python-env/override": handlePythonOverride,
   },
 };
 

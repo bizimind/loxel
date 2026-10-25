@@ -1,11 +1,26 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { pathOutsideWorktree, resolvePythonEnv, watchPythonEnv } from "./python-env";
+// Interpreter overrides live in the store database; keep the tests' state out of the real one.
+const stateDir = await mkdtemp(join(tmpdir(), "python-env-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+const {
+  listPythonEnvs,
+  normalizePythonOverride,
+  pathOutsideWorktree,
+  resolvePythonEnv,
+  watchPythonEnv,
+} = await import("./python-env");
+const { getPythonOverride, onPythonOverrideChange, setPythonOverride } =
+  await import("./python-override-store");
 
 let root: string | undefined;
+
+afterAll(async () => {
+  await rm(stateDir, { recursive: true, force: true });
+});
 
 afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true });
@@ -241,6 +256,53 @@ describe("resolvePythonEnv", () => {
     expect(env?.pythonPath).toBe(system);
   });
 
+  test("skips an interpreter committed inside a submodule", async () => {
+    const { wt, outside, bin } = await makeRoot();
+    const git = (cwd: string, ...args: string[]) =>
+      Bun.spawnSync(["git", "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
+    // A repository whose `.venv` is itself committed, used as the worktree's `.venv` submodule.
+    await makeVenv(outside);
+    git(outside, "init", "-q");
+    git(outside, "add", ".");
+    git(outside, "commit", "-qm", "venv");
+    git(wt, "init", "-q");
+    git(wt, "-c", "protocol.file.allow=always", "submodule", "add", "-q", outside, ".venv");
+    expect(await Bun.file(join(wt, ".venv", "bin", "python")).exists()).toBe(true);
+    const system = await writeExecutable(join(bin, "python3"));
+
+    expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
+  });
+
+  test("uses the override chosen for the worktree unless told not to", async () => {
+    const { wt } = await makeRoot();
+    const venvPython = await makeVenv(join(wt, ".venv"));
+    const picked = await makeVenv(join(root!, "picked"));
+    setPythonOverride(wt, picked);
+
+    expect(await resolvePythonEnv(wt, { env: { PATH: "" } })).toEqual({
+      source: "override",
+      pythonPath: picked,
+      envPath: join(root!, "picked"),
+    });
+    const automatic = await resolvePythonEnv(wt, { overridePath: null, env: { PATH: "" } });
+    expect(automatic?.pythonPath).toBe(venvPython);
+
+    setPythonOverride(wt, null);
+    expect((await resolvePythonEnv(wt, { env: { PATH: "" } }))?.pythonPath).toBe(venvPython);
+  });
+
+  test("skips an override the repository tracks", async () => {
+    const { wt, bin } = await makeRoot();
+    const tracked = await makeVenv(join(wt, "committed"));
+    const git = (...args: string[]) => Bun.spawnSync(["git", "-C", wt, ...args]);
+    git("init", "-q");
+    git("add", "committed");
+    const system = await writeExecutable(join(bin, "python3"));
+
+    const env = await resolvePythonEnv(wt, { overridePath: tracked, env: { PATH: bin } });
+    expect(env?.pythonPath).toBe(system);
+  });
+
   test("falls back to python3, then python, on PATH, and to null", async () => {
     const { wt, bin } = await makeRoot();
     expect(await resolvePythonEnv(wt, { env: { PATH: bin } })).toBeNull();
@@ -311,5 +373,101 @@ describe("watchPythonEnv", () => {
   test("ignores unrelated files at the worktree root", async () => {
     const { wt } = await makeRoot();
     expect(await changesWithin(wt, () => writeFile(join(wt, "main.py"), "print(1)\n"))).toBe(0);
+  });
+});
+
+describe("python override store", () => {
+  test("persists one override per worktree and reports changes", async () => {
+    const { wt } = await makeRoot();
+    const other = join(root!, "other");
+    const changed: string[] = [];
+    const unsubscribe = onPythonOverrideChange((path) => changed.push(path));
+
+    setPythonOverride(wt, "/opt/python/bin/python3");
+    expect(getPythonOverride(wt)).toBe("/opt/python/bin/python3");
+    // The same worktree spelled with a trailing slash shares the override.
+    expect(getPythonOverride(`${wt}/`)).toBe("/opt/python/bin/python3");
+    expect(getPythonOverride(other)).toBeNull();
+
+    setPythonOverride(wt, null);
+    expect(getPythonOverride(wt)).toBeNull();
+    unsubscribe();
+    setPythonOverride(wt, "/ignored");
+    expect(changed).toEqual([wt, wt]);
+    setPythonOverride(wt, null);
+  });
+});
+
+describe("listPythonEnvs", () => {
+  test("lists root and nested environments, Pixi, and the system interpreter once each", async () => {
+    const { wt, bin } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    const rootVenv = await makeVenv(join(wt, ".venv"));
+    await mkdir(join(wt, "services", "api"), { recursive: true });
+    await writeFile(join(wt, "services", "api", "pyproject.toml"), "[project]\nname = 'api'\n");
+    const nested = await makeVenv(join(wt, "services", "api", "venv"));
+    // Not a project directory: no marker file, so its venv is not looked for.
+    await makeVenv(join(wt, "scratch", ".venv"));
+    const pixi = await writeExecutable(join(wt, ".pixi", "envs", "test", "bin", "python"));
+    const system = await writeExecutable(join(bin, "python3"));
+
+    const { candidates, automatic } = await listPythonEnvs(wt, { env: { PATH: bin } });
+    expect(candidates.map((e) => e.pythonPath)).toEqual([rootVenv, pixi, nested, system]);
+    expect(candidates.map((e) => e.source)).toEqual(["venv", "pixi", "venv", "system"]);
+    expect(automatic?.pythonPath).toBe(rootVenv);
+
+    // A chosen interpreter found nowhere else is listed last.
+    const picked = await makeVenv(join(root!, "picked"));
+    setPythonOverride(wt, picked);
+    const withOverride = await listPythonEnvs(wt, { env: { PATH: bin } });
+    expect(withOverride.candidates.at(-1)).toEqual({
+      source: "override",
+      pythonPath: picked,
+      envPath: join(root!, "picked"),
+    });
+    expect(withOverride.automatic?.pythonPath).toBe(rootVenv);
+    setPythonOverride(wt, null);
+  });
+
+  test("leaves out environments the repository tracks", async () => {
+    const { wt } = await makeRoot();
+    await mkdir(join(wt, "lib"), { recursive: true });
+    await writeFile(join(wt, "lib", "setup.py"), "");
+    await makeVenv(join(wt, "lib", ".venv"));
+    const git = (...args: string[]) => Bun.spawnSync(["git", "-C", wt, ...args]);
+    git("init", "-q");
+    git("add", "lib");
+
+    expect(await listPythonEnvs(wt, { env: { PATH: "" } })).toEqual({
+      candidates: [],
+      automatic: null,
+    });
+  });
+});
+
+describe("normalizePythonOverride", () => {
+  test("accepts an interpreter or an environment directory", async () => {
+    const { wt } = await makeRoot();
+    const python = await makeVenv(join(root!, "env"));
+    expect(await normalizePythonOverride(wt, python)).toBe(python);
+    expect(await normalizePythonOverride(wt, ` ${join(root!, "env")} `)).toBe(python);
+  });
+
+  test("rejects relative, missing, non-executable, and tracked interpreters", async () => {
+    const { wt } = await makeRoot();
+    await expect(normalizePythonOverride(wt, "venv/bin/python")).rejects.toThrow("absolute");
+    await expect(normalizePythonOverride(wt, join(root!, "nope"))).rejects.toThrow(
+      "No executable Python interpreter",
+    );
+    await writeFile(join(root!, "plain"), "");
+    await expect(normalizePythonOverride(wt, join(root!, "plain"))).rejects.toThrow(
+      "No executable Python interpreter",
+    );
+
+    const tracked = await makeVenv(join(wt, ".venv"));
+    const git = (...args: string[]) => Bun.spawnSync(["git", "-C", wt, ...args]);
+    git("init", "-q");
+    git("add", ".venv");
+    await expect(normalizePythonOverride(wt, tracked)).rejects.toThrow("tracks in git");
   });
 });

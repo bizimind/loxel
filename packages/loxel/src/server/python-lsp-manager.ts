@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { ServerWebSocket, Subprocess } from "bun";
 
 import type { PythonEnv } from "@/api/python-env-model";
@@ -20,6 +22,8 @@ interface PythonLspSession extends WtLspSession {
   /** Latest resolution of the worktree's interpreter; replaced whenever the environment changes. */
   pythonEnv: Promise<PythonEnv | null>;
   envWatch: PythonEnvWatch | null;
+  /** The interpreter last resolved, to report only real changes; undefined before the first. */
+  resolvedEnv: PythonEnv | null | undefined;
   /** Set once the client's `initialized` reached the server, after which config may be pushed. */
   initialized: boolean;
 }
@@ -39,8 +43,17 @@ interface PythonLspSession extends WtLspSession {
 export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspContext> {
   protected override readonly forwardWatchedFiles = true;
 
-  constructor() {
+  /** @param onEnvironmentResolved Called when a session's interpreter resolves to a different one. */
+  constructor(private readonly onEnvironmentResolved: (wtPath: string) => void = () => {}) {
     super("python-lsp");
+  }
+
+  /** Re-resolve the interpreter of the worktree's sessions, e.g. after its override changed. */
+  refreshWorktreeEnvironment(wtPath: string): void {
+    const target = path.resolve(wtPath);
+    for (const session of this.sessions.values()) {
+      if (path.resolve(session.wtPath) === target) this.refreshEnvironment(session, true);
+    }
   }
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
@@ -79,6 +92,7 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       documentContents: new Map(),
       pythonEnv: Promise.resolve(null),
       envWatch: null,
+      resolvedEnv: undefined,
       initialized: false,
     };
     // Watch the layout before the first resolution so nothing created meanwhile is missed.
@@ -137,6 +151,12 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       if (previous?.hasPendingChange) next.nudge();
       previous?.close();
       if (notify && session.initialized) this.notifyConfigurationChanged(session);
+      // Packages installed into the same environment re-resolve too; only a different
+      // interpreter is news to the UI.
+      if (session.resolvedEnv === undefined || !isSameEnv(session.resolvedEnv, env)) {
+        this.onEnvironmentResolved(session.wtPath);
+      }
+      session.resolvedEnv = env;
     });
   }
 
@@ -145,4 +165,8 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       if (this.isSessionLive(session)) this.refreshEnvironment(session, true);
     });
   }
+}
+
+function isSameEnv(a: PythonEnv | null, b: PythonEnv | null): boolean {
+  return a?.source === b?.source && a?.pythonPath === b?.pythonPath && a?.envPath === b?.envPath;
 }
