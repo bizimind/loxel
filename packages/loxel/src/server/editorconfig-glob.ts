@@ -257,6 +257,9 @@ function numberMatches(
   next: Uint8Array,
 ): boolean {
   let end = path[start] === "+" || path[start] === "-" ? start + 1 : start;
+  // Zero-padded numbers are not matched: `{3..120}` does not match `060`, as in every core.
+  const second = path[end + 1];
+  if (path[end] === "0" && second !== undefined && second >= "0" && second <= "9") return false;
   while (end < path.length && path[end]! >= "0" && path[end]! <= "9") {
     end++;
     const value = Number(path.slice(start, end));
