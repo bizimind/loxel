@@ -379,9 +379,11 @@ export class FormatService {
     // formatters win over global installs.
     if (worktreePath) {
       env.PATH = prependPath(env.PATH, join(worktreePath, "node_modules", ".bin"));
-      const venvBin = PYTHON_FORMAT_EXTENSIONS.includes(ext)
-        ? await findVenvBin(fileDir(filePath, worktreePath), worktreePath)
-        : undefined;
+      // A command given as a path does not go through PATH.
+      const venvBin =
+        PYTHON_FORMAT_EXTENSIONS.includes(ext) && !command.includes("/")
+          ? await findVenvBin(fileDir(filePath, worktreePath), worktreePath, command)
+          : undefined;
       if (venvBin) env.PATH = prependPath(env.PATH, venvBin);
     }
 

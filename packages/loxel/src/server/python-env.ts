@@ -1,5 +1,5 @@
 import { readdirSync, statSync, watch, type FSWatcher } from "node:fs";
-import { access, constants, realpath } from "node:fs/promises";
+import { access, constants, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import type { PythonEnv, PythonEnvSource } from "@/api/python-env-model";
@@ -211,8 +211,12 @@ async function envAt(
   for (const relative of interpreterRelativePaths()) {
     const pythonPath = path.join(envPath, relative);
     if (!(await isExecutable(pythonPath))) continue;
-    if (await isShippedByRepo(wtPath, pythonPath)) {
-      log.warn("Ignoring a Python interpreter tracked by git", { wtPath, pythonPath });
+    if (await isEnvShippedByRepo(wtPath, envPath, pythonPath)) {
+      log.warn("Ignoring a Python environment with files tracked by git", {
+        wtPath,
+        envPath,
+        pythonPath,
+      });
       return null;
     }
     return { source, pythonPath, envPath };
@@ -221,24 +225,44 @@ async function envAt(
 }
 
 /**
- * Whether the interpreter (or what its symlinks resolve to) is a file git tracks in the worktree,
- * including in a submodule or nested repository inside it. Real environments are never committed,
- * and Pyright executes the interpreter, so a committed `.venv/bin/python` would otherwise run
- * repository code as soon as a Python file is opened.
+ * Whether the repository ships any part of the environment at `envPath`: a file git tracks inside
+ * it, or the `executable` about to run from it (or what its symlinks resolve to), including in a
+ * submodule or nested repository. Real environments are never committed, and whatever runs from
+ * one (Pyright launching the interpreter, format-on-save running ruff or black) would otherwise
+ * run repository code, through the executable itself or files it loads such as a `.pth` hook in
+ * `site-packages`. The one trust rule for environments, shared by the resolver and the formatter.
  */
-async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<boolean> {
-  const candidates = [pythonPath, await realpath(pythonPath)];
+export async function isEnvShippedByRepo(
+  wtPath: string,
+  envPath: string,
+  executable: string,
+): Promise<boolean> {
+  const shipped = await Promise.all([
+    isShippedByRepo(wtPath, envPath),
+    isShippedByRepo(wtPath, executable),
+  ]);
+  return shipped.some(Boolean);
+}
+
+/**
+ * Whether `target` (a file or directory, or what its symlinks resolve to) is, or for a directory
+ * contains, something git tracks in the worktree, including in a submodule or nested repository.
+ */
+async function isShippedByRepo(wtPath: string, target: string): Promise<boolean> {
+  const candidates = [target, await realpath(target)];
   const tracked = await Promise.all(candidates.map((file) => isTrackedByGit(wtPath, file)));
   return tracked.some(Boolean);
 }
 
 /**
  * Asks the innermost repository containing `filePath`, since a submodule or nested repository
- * tracks its own files and the worktree's index does not list them. Git is asked about the
- * physical path (parent directory resolved, the file itself kept, so a committed symlink still
- * counts) wherever it is: a committed symlink can reach another checkout of the same repository.
- * Inside a git worktree, any answer other than a clear "untracked" counts as tracked (fail
- * closed); outside it, a path in no repository is untracked.
+ * tracks its own files and the worktree's index does not list them. For a real directory that is
+ * the directory's own repository if it is one (a venv can be a repository itself), and any
+ * tracked file inside counts. Git is asked about the physical path (parent directory resolved,
+ * the entry itself kept, so a committed symlink still counts) wherever it is: a committed symlink
+ * can reach another checkout of the same repository. Inside a git worktree, any answer other than
+ * a clear "untracked" counts as tracked (fail closed); outside it, a path in no repository is
+ * untracked.
  */
 async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
   const realWtPath = await realpath(wtPath);
@@ -248,7 +272,8 @@ async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean
   // Not a repository at all, so nothing in it can be committed.
   if (worktreeRepo.exitCode !== 0) return false;
 
-  const innermost = await runGit(path.dirname(physical), ["rev-parse", "--show-toplevel"]);
+  const lookupDir = (await isRealDirectory(physical)) ? physical : path.dirname(physical);
+  const innermost = await runGit(lookupDir, ["rev-parse", "--show-toplevel"]);
   if (innermost.exitCode !== 0) return isInside(physical, realWtPath);
   const listed = await runGit(innermost.stdout.trim(), [
     "ls-files",
@@ -258,6 +283,15 @@ async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean
   ]);
   // `--error-unmatch` exits 1 for an untracked path; anything else is tracked or an error.
   return listed.exitCode !== 1;
+}
+
+/** A directory that is not a symlink (`lstat`), so a committed symlink is asked about as itself. */
+async function isRealDirectory(target: string): Promise<boolean> {
+  try {
+    return (await lstat(target)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string }> {
