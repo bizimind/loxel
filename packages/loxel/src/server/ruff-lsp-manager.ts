@@ -19,7 +19,7 @@ const RUFF = process.platform === "win32" ? "ruff.exe" : "ruff";
 /** Where `download:ruff` puts the bundled binary in dev mode. */
 const DEV_PATH = path.resolve(import.meta.dir, "../../build", RUFF);
 /** First release whose `ruff server` is stable (older ones lack it or need `--preview`). */
-const MIN_SERVER_VERSION = [0, 5, 3] as const;
+const MIN_SERVER_VERSION = "0.5.3";
 const VERSION_TIMEOUT_MS = 5_000;
 
 /**
@@ -121,7 +121,7 @@ async function isUsableRuff(wtPath: string, ruff: string): Promise<boolean> {
     return false;
   }
   const version = await ruffVersion(wtPath, ruff);
-  if (!version || compareVersions(version, MIN_SERVER_VERSION) < 0) {
+  if (!version || Bun.semver.order(version, MIN_SERVER_VERSION) < 0) {
     log.info("Ignoring a ruff without a stable language server", { ruff, version });
     return false;
   }
@@ -129,10 +129,10 @@ async function isUsableRuff(wtPath: string, ruff: string): Promise<boolean> {
 }
 
 /**
- * `[major, minor, patch]` from `ruff --version`, or null when it does not run. Probed where the
+ * The `major.minor.patch` that `ruff --version` reports, or null when it does not run. Probed where the
  * server will run, since a shim (pyenv, asdf) picks its ruff by directory and environment.
  */
-async function ruffVersion(wtPath: string, ruff: string): Promise<number[] | null> {
+async function ruffVersion(wtPath: string, ruff: string): Promise<string | null> {
   try {
     const proc = Bun.spawn([ruff, "--version"], {
       cwd: wtPath,
@@ -143,17 +143,9 @@ async function ruffVersion(wtPath: string, ruff: string): Promise<number[] | nul
       timeout: VERSION_TIMEOUT_MS,
     });
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    const match = /^ruff (\d+)\.(\d+)\.(\d+)/.exec(stdout.trim());
-    return exitCode === 0 && match ? match.slice(1).map(Number) : null;
+    const match = /^ruff (\d+\.\d+\.\d+)/.exec(stdout.trim());
+    return exitCode === 0 && match?.[1] ? match[1] : null;
   } catch {
     return null;
   }
-}
-
-function compareVersions(a: readonly number[], b: readonly number[]): number {
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const diff = (a[i] ?? 0) - (b[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
 }

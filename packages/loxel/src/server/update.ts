@@ -67,19 +67,6 @@ function getCurrentPlatform(): string {
   return `${os}-${cpu}`;
 }
 
-// --- Version comparison ---
-
-function compareVersions(a: string, b: string): number {
-  const partsA = a.split(".").map(Number);
-  const partsB = b.split(".").map(Number);
-  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-    const numA = partsA[i] ?? 0;
-    const numB = partsB[i] ?? 0;
-    if (numA !== numB) return numA - numB;
-  }
-  return 0;
-}
-
 // --- Check for update ---
 
 export async function checkForUpdate(broadcastAlways: (msg: WsMessage) => void): Promise<void> {
@@ -105,7 +92,7 @@ export async function checkForUpdate(broadcastAlways: (msg: WsMessage) => void):
     const manifest = parsed.data;
     const current = getCurrentVersion();
 
-    if (compareVersions(manifest.version, current) <= 0) {
+    if (Bun.semver.order(manifest.version, current) <= 0) {
       // Manifest version is not newer than the running version — fully up to date
       setState({ state: "idle" }, broadcastAlways);
       log.info(`Up to date (${current})`);
