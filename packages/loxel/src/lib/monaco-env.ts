@@ -259,7 +259,7 @@ createLazyLspConnector({
   disconnect: disconnectDockerLsp,
 });
 
-// pyright: only worktrees with .py/.pyi files pay the cost.
+// basedpyright: only worktrees with .py/.pyi files pay the cost.
 createLazyLspConnector({
   languageIds: ["python"],
   connect: connectPythonLsp,

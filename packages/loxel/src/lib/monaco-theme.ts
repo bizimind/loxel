@@ -26,12 +26,21 @@ function readThemeColors(el: Element) {
   };
 }
 
-// Semantic token rules from LSPs (TypeScript, Astro LS) — these layer on top of
-// TextMate syntax tokens and are styled by Monaco's semantic token renderer.
+// Semantic token rules from LSPs (TypeScript, basedpyright) — these layer on top of
+// TextMate syntax tokens and are styled by Monaco's semantic token renderer. A token
+// type without a rule is painted in the default foreground, hiding its TextMate color,
+// so every type a server emits needs a rule here.
 const DARK_SEMANTIC_RULES: monaco.editor.ITokenThemeRule[] = [
   { token: "function", foreground: "659488" }, // #659488
   // { token: "function", foreground: "57A8F5" },
   { token: "member", foreground: "659488" }, // #659488
+  { token: "method", foreground: "659488" }, // #659488
+  { token: "decorator", foreground: "659488" }, // #659488
+  { token: "keyword", foreground: "6DA0CF" }, // #6DA0CF
+  { token: "type", foreground: "BDBEC4" }, // #BDBEC4
+  // Python `self` / `cls`, matching the TextMate `variable.language` color
+  { token: "selfParameter", foreground: "CF8E6D" }, // #CF8E6D
+  { token: "clsParameter", foreground: "CF8E6D" }, // #CF8E6D
   { token: "enumMember", foreground: "a6859e" }, // #a6859e
   { token: "class", foreground: "BDBEC4" }, // #BDBEC4
   { token: "interface", foreground: "BDBEC4" }, // #BDBEC4

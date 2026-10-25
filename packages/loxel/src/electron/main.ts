@@ -454,6 +454,14 @@ function parsePendingUpdate(raw: string): PendingUpdate {
   return data as PendingUpdate;
 }
 
+/**
+ * Resource directories an update replaces wholesale instead of extracting over, so files dropped
+ * by the new version do not linger (stale typeshed stubs would shadow the bundled ones).
+ * `tsgo-lib` is the preview-era directory, included so the migration removes it on success while
+ * retaining a rollback path if installation fails.
+ */
+const UPDATE_RESOURCE_DIRS = ["renderer", "typescript-lib", "typeshed-fallback", "tsgo-lib"];
+
 /** Compute SHA256 hash of a file synchronously. */
 function sha256File(filePath: string): string {
   const content = fs.readFileSync(filePath);
@@ -502,10 +510,7 @@ function handlePendingUpdateSync(): void {
       const src = path.join(targetDir, file);
       if (fs.existsSync(src)) fs.copyFileSync(src, path.join(backupDir, file));
     }
-    // Include the preview-era directory so the migration removes it on success
-    // while retaining a rollback path if installation fails.
-    const resourceDirs = ["renderer", "typescript-lib", "tsgo-lib"];
-    for (const dir of resourceDirs) {
+    for (const dir of UPDATE_RESOURCE_DIRS) {
       const source = path.join(targetDir, dir);
       if (!fs.existsSync(source)) continue;
       fs.cpSync(source, path.join(backupDir, dir), { recursive: true });
@@ -559,7 +564,7 @@ function handlePendingUpdateSync(): void {
           const backup = path.join(backupDir, file);
           if (fs.existsSync(backup)) fs.copyFileSync(backup, path.join(targetDir, file));
         }
-        for (const dir of ["renderer", "typescript-lib", "tsgo-lib"]) {
+        for (const dir of UPDATE_RESOURCE_DIRS) {
           const backup = path.join(backupDir, dir);
           if (!fs.existsSync(backup)) continue;
           const dest = path.join(targetDir, dir);

@@ -25,16 +25,36 @@ interface PythonLspSession extends WtLspSession {
 }
 
 /**
- * Manages Pyright (`pyright-langserver`) child processes, one per worktree.
- * Each `/ws/python-lsp?wt=<path>` connection gets its own subprocess
+ * Settings answered for the `basedpyright` section. Loxel defaults to the
+ * `standard` ruleset because basedpyright's own `recommended` flags ordinary
+ * code (unused call results, unknown types); a project config file
+ * (`pyrightconfig.json`, `[tool.basedpyright]` / `[tool.pyright]`) replaces
+ * these analysis settings entirely. Sending `analysis` resets
+ * `autoSearchPaths` unless it is repeated.
+ */
+const BASEDPYRIGHT_SETTINGS = { analysis: { typeCheckingMode: "standard", autoSearchPaths: true } };
+
+/**
+ * Settings answered for the `python` section: the resolved interpreter. Without one,
+ * basedpyright would run a root `.venv/bin/python` it finds itself, even one the repository
+ * commits, which the resolver refuses. A `venvPath` with no `venv` turns that detection off
+ * without selecting an environment, so it falls back to `python3` on its (worktree-free) PATH.
+ */
+export function pythonSettings(env: PythonEnv | null, wtPath: string): Record<string, string> {
+  return env ? { pythonPath: env.pythonPath } : { venvPath: wtPath };
+}
+
+/**
+ * Manages basedpyright (`basedpyright-langserver`) child processes, one per
+ * worktree. Each `/ws/python-lsp?wt=<path>` connection gets its own subprocess
  * rooted at the worktree path so cross-file references and module
  * resolution work against the full worktree workspace.
  *
- * Pyright does not discover project virtual environments itself, so the
- * worktree's interpreter comes from {@link resolvePythonEnv} and reaches
- * Pyright as `python.pythonPath` through `workspace/configuration`. A
- * `pyrightconfig.json` / `[tool.pyright]` `venv` still takes precedence
- * inside Pyright.
+ * The worktree's interpreter comes from {@link resolvePythonEnv}, the single
+ * source of truth (basedpyright's own root `.venv` detection covers less), and
+ * reaches basedpyright as `python.pythonPath` through `workspace/configuration`.
+ * A `pyrightconfig.json` / `[tool.basedpyright]` / `[tool.pyright]` `venv`
+ * still takes precedence inside basedpyright.
  */
 export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspContext> {
   constructor() {
@@ -50,7 +70,7 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
   }
 
   protected resolveBinary(): string | null {
-    return this.resolveBundledBinary("pyright-langserver");
+    return this.resolveBundledBinary("basedpyright-langserver");
   }
 
   protected override getSessionKey(context: WtLspContext): string {
@@ -58,7 +78,7 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
-    // Without a resolved interpreter Pyright runs `python3` / `python` from its PATH; keep the
+    // Without a resolved interpreter basedpyright runs `python3` / `python` from its PATH; keep the
     // worktree's own directories out of it, matching the resolver's refusal of committed ones.
     const PATH = pathOutsideWorktree(buildSpawnEnv().PATH ?? "", context.wtPath);
     return { cwd: context.wtPath, env: { PATH } };
@@ -102,17 +122,14 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
     session: PythonLspSession,
     section: string | undefined,
   ): Promise<unknown> {
+    if (section === "basedpyright") return BASEDPYRIGHT_SETTINGS;
     if (section !== "python") return null;
-    // Only the interpreter: Pyright's own defaults (open-files-only diagnostics, auto search
-    // paths, library types) are what Loxel wants, and sending any `analysis` section would reset
-    // `autoSearchPaths` unless it is repeated.
-    const env = await session.pythonEnv;
-    return env ? { pythonPath: env.pythonPath } : null;
+    return pythonSettings(await session.pythonEnv, session.wtPath);
   }
 
   /**
-   * Re-resolve the interpreter, then watch for the next change. Pyright pulls configuration once
-   * at startup, so a change after that is announced (`notify`) and Pyright asks again; that also
+   * Re-resolve the interpreter, then watch for the next change. basedpyright pulls configuration
+   * once at startup, so a change after that is announced (`notify`) and it asks again; that also
    * makes it re-resolve imports after packages are installed into the same environment. The old
    * watch stays armed until the new one is, and a change it saw in between is handed to the new
    * watch's debounce, so nothing written during resolution is lost.
