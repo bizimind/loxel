@@ -1,6 +1,9 @@
 import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client";
 
+import { showToast } from "@/components/ui/toast";
+
 import { isLiveEditorModel } from "./live-editor-model";
+import { createLspWorkspaceFiles } from "./lsp-workspace-files";
 
 /**
  * Factory for worktree-scoped LSP client connections. Each call creates an
@@ -12,6 +15,8 @@ import { isLiveEditorModel } from "./live-editor-model";
  * new connection. Both the worktree switch and `disconnect()` dispose the
  * client (unregistering providers and closing synced documents) before the
  * transport. Only editor tabs' live models are synced to the server (see `isLiveEditorModel`).
+ * Workspace edits (rename, code actions) also change the worktree's files that are not open
+ * (see `createLspWorkspaceFiles`), and a toast says why when one fails.
  */
 export function createWorktreeLspClient(wsPath: string, languageId?: string | readonly string[]) {
   let currentWtPath: string | null = null;
@@ -42,6 +47,8 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
         currentClient = new MonacoLspClient(transport, {
           languageId,
           modelFilter: isLiveEditorModel,
+          workspaceFileSystem: createLspWorkspaceFiles(wtPath),
+          onWorkspaceEditFailure: (reason) => showToast(`Edit not applied: ${reason}`),
         });
       },
       () => {

@@ -30,22 +30,60 @@ type CommandHandler = (accessor: unknown, ...args: unknown[]) => unknown;
 
 export const fakeMonaco = {
   models: [] as monaco.editor.ITextModel[],
+  editors: [] as monaco.editor.ICodeEditor[],
   commands: new Map<string, CommandHandler>(),
+  /** Language providers registered through `monaco.languages.register<Kind>Provider`, by kind. */
+  providers: new Map<string, unknown>(),
   didCreateModel: new FakeEmitter<monaco.editor.ITextModel>(),
   reset(): void {
     this.models.length = 0;
+    this.editors.length = 0;
     this.commands.clear();
+    this.providers.clear();
   },
 };
 
 /** Stands in for a Monaco enum: every member reads as its own name. */
 const anyEnum: unknown = new Proxy({}, { get: (_target, key) => String(key) });
-/** Stands in for `monaco.languages`, whose members the adapters only read as enums at load time. */
-const anyNamespace: unknown = new Proxy({}, { get: () => anyEnum });
+/**
+ * Stands in for `monaco.languages`: `register<Kind>Provider` records the provider under its kind in
+ * `fakeMonaco.providers`; any other member reads as an enum.
+ */
+const languagesNamespace: unknown = new Proxy(
+  {},
+  {
+    get: (_target, key) => {
+      const kind = /^register(\w+)Provider$/.exec(String(key))?.[1];
+      if (!kind) return anyEnum;
+      return (_selector: unknown, provider: unknown): IDisposable => {
+        fakeMonaco.providers.set(kind, provider);
+        return { dispose: () => fakeMonaco.providers.delete(kind) };
+      };
+    },
+  },
+);
+
+/** Enough of `monaco.Uri.parse` for lookups and messages: `scheme://authority/path`. */
+function parseUri(
+  value: string,
+): Pick<monaco.Uri, "scheme" | "authority" | "path" | "toString" | "with"> {
+  const match = /^([^:]+):\/\/([^/]*)(.*)$/.exec(value);
+  if (!match) throw new Error(`Not a uri: ${value}`);
+  const [, scheme = "", authority = "", path = ""] = match;
+  return {
+    scheme,
+    authority,
+    path: decodeURIComponent(path),
+    toString: () => value,
+    with: (change) => parseUri(`${scheme}://${authority}${change.path ?? path}`) as monaco.Uri,
+  };
+}
 
 export const fakeMonacoModule = {
+  Uri: { parse: parseUri },
   editor: {
     getModels: () => fakeMonaco.models,
+    getEditors: () => fakeMonaco.editors,
     getModel: (uri: monaco.Uri) =>
       fakeMonaco.models.find((m) => m.uri.toString() === uri.toString()) ?? null,
     onDidCreateModel: fakeMonaco.didCreateModel.event,
@@ -54,7 +92,7 @@ export const fakeMonacoModule = {
       return { dispose: () => fakeMonaco.commands.delete(id) };
     },
   },
-  languages: anyNamespace,
+  languages: languagesNamespace,
   MarkerSeverity: anyEnum,
   MarkerTag: anyEnum,
 };

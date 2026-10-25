@@ -48,7 +48,7 @@ export class LspServerCommands extends Disposable {
 
     this._register(
       monaco.editor.registerCommand(this._monacoCommandId, (_accessor, command: unknown) => {
-        if (!isCommand(command)) {
+        if (!isLspCommand(command)) {
           throw new Error(`${this._monacoCommandId} expects an LSP Command argument`);
         }
         // Monaco commands are global: another server could hand out this id.
@@ -66,6 +66,13 @@ export class LspServerCommands extends Disposable {
       return { id: command.command, title: command.title, arguments: command.arguments };
     }
     return { id: this._monacoCommandId, title: command.title, arguments: [command] };
+  }
+
+  /** Runs `command` if it is one of the server's; returns false for a client command. */
+  async executeServerCommand(command: Command): Promise<boolean> {
+    if (!this._isServerCommand(command.command)) return false;
+    await this._execute(command);
+    return true;
   }
 
   private _isServerCommand(name: string): boolean {
@@ -87,7 +94,7 @@ export class LspServerCommands extends Disposable {
   }
 }
 
-function isCommand(value: unknown): value is Command {
+export function isLspCommand(value: unknown): value is Command {
   return (
     typeof value === "object" &&
     value !== null &&
