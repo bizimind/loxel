@@ -72,6 +72,8 @@ interface LspContentChange {
 export abstract class StdioLspManager<TSession extends BaseLspSession, TContext = void> {
   protected readonly sessions = new Map<ServerWebSocket<unknown>, TSession>();
   private readonly _sessionsByKey = new Map<string, ServerWebSocket<unknown>>();
+  /** Client frames received while an async {@link resolveBinary} runs, replayed once spawned. */
+  private readonly _pendingFrames = new Map<ServerWebSocket<unknown>, string[]>();
   protected readonly log: ReturnType<typeof logger.child>;
 
   constructor(protected readonly name: LogCategory) {
@@ -79,12 +81,18 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   }
 
   handleMessage(ws: ServerWebSocket<unknown>, data: string): void {
+    const pending = this._pendingFrames.get(ws);
+    if (pending) {
+      pending.push(data);
+      return;
+    }
     const session = this.sessions.get(ws);
     if (!session) return;
     this.handleClientData(session, data);
   }
 
   detach(ws: ServerWebSocket<unknown>): void {
+    this._pendingFrames.delete(ws);
     const session = this.sessions.get(ws);
     if (!session) return;
     this.killSession(session);
@@ -103,12 +111,18 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     }
     this.sessions.clear();
     this._sessionsByKey.clear();
+    this._pendingFrames.clear();
   }
 
   // ---------------------------------------------------------------------------
   // Hooks for subclasses
 
-  protected abstract resolveBinary(): string | null;
+  /**
+   * The server binary for a session, or null when none is available. May be
+   * async (a lookup in the session's project); frames the client sends
+   * meanwhile are held and replayed once the server is spawned.
+   */
+  protected abstract resolveBinary(context: TContext): string | null | Promise<string | null>;
 
   protected spawnArgs(): readonly string[] {
     return ["--stdio"];
@@ -142,6 +156,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * its entire document with each incremental fragment's replacement text.
    */
   protected readonly requiresFullTextSync: boolean = false;
+
+  /**
+   * LSP methods whose dynamic `client/registerCapability` registrations are
+   * dropped before they reach Monaco (the server is told they succeeded), so
+   * no provider is registered for them. Semantic tokens are dropped as well
+   * when `disableSemanticTokens` is set.
+   */
+  protected readonly suppressedRegistrations: readonly string[] = [];
 
   /**
    * Return a dedup key for this session context. When non-null, the base class
@@ -402,7 +424,10 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       }
     }
 
-    if (this.disableSemanticTokens) {
+    const suppressed = this.disableSemanticTokens
+      ? [...this.suppressedRegistrations, "textDocument/semanticTokens"]
+      : this.suppressedRegistrations;
+    if (suppressed.length > 0) {
       try {
         const parsed = didParse ? preparsed : JSON.parse(body);
         if (typeof parsed === "object" && parsed !== null) {
@@ -413,14 +438,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             result?: { capabilities?: Record<string, unknown> };
           };
 
-          // Dynamic registration — drop semantic-tokens entries before they
-          // reach Monaco so no provider ever gets registered.
+          // Dynamic registration — drop suppressed entries before they reach
+          // Monaco so no provider ever gets registered.
           if (
             msg.method === "client/registerCapability" &&
             Array.isArray(msg.params?.registrations)
           ) {
             const filtered = msg.params.registrations.filter(
-              (r) => r?.method !== "textDocument/semanticTokens",
+              (r) => !suppressed.includes(r?.method ?? ""),
             );
             if (filtered.length === 0 && msg.id !== undefined) {
               this.writeToStdin(
@@ -436,7 +461,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
           // initialize response — strip semanticTokensProvider so Monaco
           // never registers a provider in the first place.
-          if (msg.id !== undefined && msg.result?.capabilities) {
+          if (this.disableSemanticTokens && msg.id !== undefined && msg.result?.capabilities) {
             if ("semanticTokensProvider" in msg.result.capabilities) {
               delete msg.result.capabilities.semanticTokensProvider;
               session.ws.send(JSON.stringify(parsed));
@@ -475,7 +500,30 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       this._sessionsByKey.set(key, ws);
     }
 
-    const bin = this.resolveBinary();
+    const bin = this.resolveBinary(context);
+    if (!(bin instanceof Promise)) {
+      this.spawnSession(ws, context, bin);
+      return;
+    }
+    const frames: string[] = [];
+    this._pendingFrames.set(ws, frames);
+    void bin
+      .catch((err: unknown) => {
+        this.log.error(`${this.name} binary resolution failed`, { error: err });
+        return null;
+      })
+      .then((resolved) => {
+        // Detached (or replaced by a newer connection) while resolving.
+        if (this._pendingFrames.get(ws) !== frames) return;
+        this._pendingFrames.delete(ws);
+        this.spawnSession(ws, context, resolved);
+        const session = this.sessions.get(ws);
+        if (!session) return;
+        for (const frame of frames) this.handleClientData(session, frame);
+      });
+  }
+
+  private spawnSession(ws: ServerWebSocket<unknown>, context: TContext, bin: string | null): void {
     if (!bin) {
       this.log.error(`${this.name} binary not found`);
       ws.close(4001, `${this.name} binary not found — is it installed?`);

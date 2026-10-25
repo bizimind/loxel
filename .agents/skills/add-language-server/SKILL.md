@@ -30,7 +30,7 @@ Resolve these with the user before starting:
 
 **A. Bun-built from NPM package** — `packages/loxel/scripts/build-<name>.ts`. Two-step: `Bun.build()` bundles the entry point, then `bun build --compile` produces a standalone binary in `build/`. Use `resolvePackage()` from `./resolve-package.ts` to locate the NPM package. Some servers need Bun.build plugins (see pyright and yaml-ls build scripts for examples). Add the NPM package as a devDependency.
 
-**B. Downloaded pre-built binary** — `packages/loxel/scripts/download-<name>.ts`. For Go/Rust/GraalVM-native binaries. Pin SHA256 digests per platform. Hash the downloaded bytes _in memory before writing or extracting_ — never extract untrusted content before verification. For zip archives, pass the expected binary filename to `unzip` to restrict extraction to that single file. See docker-ls (raw binary), terraform-ls (zip), and xml-lsp (zip with rename) download scripts.
+**B. Downloaded pre-built binary** — `packages/loxel/scripts/download-<name>.ts`. For Go/Rust/GraalVM-native binaries. Pin SHA256 digests per platform. Hash the downloaded bytes _in memory before writing or extracting_ — never extract untrusted content before verification. For archives, pass the expected binary's member name to `unzip` or `tar` to restrict extraction to that single file. See docker-ls (raw binary), terraform-ls (zip), xml-lsp (zip with rename), and ruff (tarball, or zip on Windows) download scripts.
 
 **C. Copied from an installed package** — Simple copy script (TypeScript 7's `copy-typescript.ts` pattern).
 
@@ -45,7 +45,7 @@ Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped
 ### Required
 
 - **`createSession(ws, wtPath)` / `destroySession(ws)`** — Public entry points called from `server.ts`; delegate to `startSession(ws, { wtPath })` / `detach(ws)`.
-- **`resolveBinary()`** — Abstract. Usually `return this.resolveBundledBinary("<binary>")`, which checks execPath sibling → `node_modules/.bin` → PATH. Pass a `devPath` (absolute path under `build/`) for downloaded binaries; it replaces the `node_modules/.bin` check.
+- **`resolveBinary(context)`** — Abstract. Usually `return this.resolveBundledBinary("<binary>")`, which checks execPath sibling → `node_modules/.bin` → PATH. Pass a `devPath` (absolute path under `build/`) for downloaded binaries; it replaces the `node_modules/.bin` check. May return a promise for a per-worktree lookup (ruff prefers the project environment's binary); the base holds client frames until it resolves.
 - **`buildSession(ws, proc, context)`** — Abstract. Return the session object (copy Astro's).
 
 ### Worktree-scoped (copy from Astro)
@@ -57,6 +57,7 @@ Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped
 ### Optional overrides
 
 - **`disableSemanticTokens` / `requiresFullTextSync`** — Readonly flags, see Decision Points.
+- **`suppressedRegistrations`** — LSP methods whose dynamic registrations are dropped before Monaco sees them (ruff's formatting, owned by format on save).
 - **`spawnArgs()`** — Override if the server doesn't use `["--stdio"]`.
 - **`getInitializationOptions(session)`** — For config the server reads at startup (SDK paths, indexing settings).
 - **`onClientInitialized(session)`** — For push-based config via `workspace/didChangeConfiguration` after handshake (Docker's compose settings, YAML's schemas).

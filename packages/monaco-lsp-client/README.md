@@ -14,7 +14,8 @@ Forked from [`@vscode/monaco-lsp-client`](https://github.com/microsoft/monaco-ed
 - `workspace/applyEdit` is handled: the edit is applied to open Monaco models, one undo stop per model, and refused whole when a target has no model, a versioned edit is stale, or it holds file create/rename/delete operations (the client does not declare `resourceOperations`). Rename and code-action edits use the same conversion: `documentChanges` wins over `changes`, and file operations reject the rename or refuse the code action (disabled in the list, or a no-op when they only appear on resolve) instead of being dropped
 - Additional features: inline completions and linked editing ranges
 - Document-filter glob patterns are matched with `picomatch`
-- `MonacoLspClient.dispose()` unregisters providers, closes synced documents and drops the capability registry
+- `MonacoLspClient.dispose()` unregisters providers, closes synced documents, removes its diagnostics markers and drops the capability registry
+- Each client sets its diagnostics markers under an owner of its own, so several servers on one model (Pyright and ruff for Python) do not overwrite each other's
 - Markdown from the server (completion and signature-help documentation, hover contents, inlay-hint tooltips) is rendered untrusted, so command links and other trusted-only markdown are not executed
 - Document sync honors the negotiated `TextDocumentSyncKind`: `Full` sends the whole text, `None` sends no `didChange`, `Incremental` sends deltas
 - Completion lists propagate the server's `isIncomplete` flag so Monaco re-requests as the user types, and completion and signature-help requests are skipped, or their results dropped, once Monaco cancels them

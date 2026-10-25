@@ -221,13 +221,14 @@ async function envAt(
 }
 
 /**
- * Whether the interpreter (or what its symlinks resolve to) is a file git tracks in the worktree,
+ * Whether an executable (or what its symlinks resolve to) is a file git tracks in the worktree,
  * including in a submodule or nested repository inside it. Real environments are never committed,
- * and Pyright executes the interpreter, so a committed `.venv/bin/python` would otherwise run
- * repository code as soon as a Python file is opened.
+ * and Loxel executes interpreters and environment tools (Pyright runs the interpreter, ruff runs
+ * as a language server), so a committed `.venv/bin/python` would otherwise run repository code as
+ * soon as a Python file is opened.
  */
-async function isShippedByRepo(wtPath: string, pythonPath: string): Promise<boolean> {
-  const candidates = [pythonPath, await realpath(pythonPath)];
+export async function isShippedByRepo(wtPath: string, executable: string): Promise<boolean> {
+  const candidates = [executable, await realpath(executable)];
   const tracked = await Promise.all(candidates.map((file) => isTrackedByGit(wtPath, file)));
   return tracked.some(Boolean);
 }

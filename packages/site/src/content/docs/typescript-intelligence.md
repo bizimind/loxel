@@ -85,6 +85,18 @@ venvPath = "."
 venv = ".venv-py313"
 ```
 
+### Python linting
+
+Python files also get [Ruff](https://docs.astral.sh/ruff/)'s linter, alongside type checking:
+
+- Lint problems are underlined as you type, and `Cmd+.` offers Ruff's quick fixes, including disabling a rule for one line with a `# noqa` comment.
+- `Shift+Option+O` organizes the file's imports.
+- **Fix All** (press `F1` and search for it) applies every automatic fix in the file.
+
+Ruff reads its settings from the `ruff.toml`, `.ruff.toml` or `pyproject.toml` closest to each file, so each project in a monorepo keeps its own rules. Without any Ruff configuration, Ruff's default rules apply.
+
+If Ruff 0.5.3 or newer is installed in the project's Python environment (see above), Loxel uses that one, so the version pinned in your dev dependencies applies. Otherwise it uses the Ruff that ships with Loxel. Syntax errors come from the type checker only, and formatting stays with [format on save](/docs/editor#formatter-auto-detection).
+
 ---
 
 ## See also

@@ -138,6 +138,7 @@ export type WsData =
   | WorktreeLspData<"docker-lsp">
   | WorktreeLspData<"terraform-lsp">
   | WorktreeLspData<"python-lsp">
+  | WorktreeLspData<"ruff-lsp">
   | WorktreeLspData<"astro-lsp">
   | WorktreeLspData<"xml-lsp">;
 

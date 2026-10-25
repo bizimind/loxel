@@ -32,9 +32,12 @@ export const fakeMonaco = {
   models: [] as monaco.editor.ITextModel[],
   commands: new Map<string, CommandHandler>(),
   didCreateModel: new FakeEmitter<monaco.editor.ITextModel>(),
+  /** owner → model URI → markers, as set through `setModelMarkers`. */
+  markers: new Map<string, Map<string, monaco.editor.IMarkerData[]>>(),
   reset(): void {
     this.models.length = 0;
     this.commands.clear();
+    this.markers.clear();
   },
 };
 
@@ -49,6 +52,16 @@ export const fakeMonacoModule = {
     getModel: (uri: monaco.Uri) =>
       fakeMonaco.models.find((m) => m.uri.toString() === uri.toString()) ?? null,
     onDidCreateModel: fakeMonaco.didCreateModel.event,
+    setModelMarkers: (
+      model: monaco.editor.ITextModel,
+      owner: string,
+      markers: monaco.editor.IMarkerData[],
+    ) => {
+      const byModel = fakeMonaco.markers.get(owner) ?? new Map();
+      byModel.set(model.uri.toString(), markers);
+      fakeMonaco.markers.set(owner, byModel);
+    },
+    removeAllMarkers: (owner: string) => fakeMonaco.markers.delete(owner),
     registerCommand: (id: string, handler: CommandHandler): IDisposable => {
       fakeMonaco.commands.set(id, handler);
       return { dispose: () => fakeMonaco.commands.delete(id) };

@@ -47,6 +47,7 @@ import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
+import { RuffLspManager } from "./ruff-lsp-manager";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
 import { createServerPerfMonitor } from "./server-perf-monitor";
@@ -773,6 +774,7 @@ const tsLspManager = new TsLspManager();
 const dockerLspManager = new DockerLspManager();
 const terraformLspManager = new TerraformLspManager();
 const pythonLspManager = new PythonLspManager();
+const ruffLspManager = new RuffLspManager();
 const astroLspManager = new AstroLspManager();
 const xmlLspManager = new XmlLspManager();
 
@@ -1178,6 +1180,7 @@ const server = Bun.serve<WsData>({
         "docker-lsp",
         "terraform-lsp",
         "python-lsp",
+        "ruff-lsp",
         "astro-lsp",
         "xml-lsp",
       ];
@@ -1239,6 +1242,10 @@ const server = Bun.serve<WsData>({
         pythonLspManager.createSession(ws, ws.data.wtPath);
         return;
       }
+      if (ws.data?.type === "ruff-lsp") {
+        ruffLspManager.createSession(ws, ws.data.wtPath);
+        return;
+      }
       if (ws.data?.type === "astro-lsp") {
         astroLspManager.createSession(ws, ws.data.wtPath);
         return;
@@ -1280,6 +1287,10 @@ const server = Bun.serve<WsData>({
       }
       if (ws.data?.type === "python-lsp") {
         pythonLspManager.destroySession(ws);
+        return;
+      }
+      if (ws.data?.type === "ruff-lsp") {
+        ruffLspManager.destroySession(ws);
         return;
       }
       if (ws.data?.type === "astro-lsp") {
@@ -1342,6 +1353,10 @@ const server = Bun.serve<WsData>({
       }
       if (ws.data?.type === "python-lsp") {
         if (typeof message === "string") pythonLspManager.handleMessage(ws, message);
+        return;
+      }
+      if (ws.data?.type === "ruff-lsp") {
+        if (typeof message === "string") ruffLspManager.handleMessage(ws, message);
         return;
       }
       if (ws.data?.type === "astro-lsp") {
@@ -1417,6 +1432,7 @@ function shutdown(exitCode = 0) {
   dockerLspManager.destroy();
   terraformLspManager.destroy();
   pythonLspManager.destroy();
+  ruffLspManager.destroy();
   astroLspManager.destroy();
   xmlLspManager.destroy();
   perfMonitor.dispose();
