@@ -68,7 +68,9 @@ describe("toClientUris", () => {
 
 // Drives the real `tsc --lsp` through the manager the way the Monaco client does.
 
-const TEST_TIMEOUT_MS = 30_000;
+const TEST_TIMEOUT_MS = 60_000;
+/** Generous: CI runners are slow to load the project and send tsc's watcher registrations. */
+const RESOLVE_DEADLINE_MS = 40_000;
 const MISSING_MODULE = "Cannot find module './b'";
 
 let root: string | undefined;
@@ -173,14 +175,17 @@ describe.skipIf(resolveTypeScriptBinary() === null)("TsLspManager with tsc --lsp
 
       const created = join(root, "src", "b.ts");
       await writeFile(created, "export const y = 1;\n");
-      manager.notifyWatchedFilesChanged(root, [created]);
 
-      const deadline = Date.now() + 10_000;
-      let messages = await client.diagnosticMessages(uri);
-      while (messages.some((m) => m.includes(MISSING_MODULE)) && Date.now() < deadline) {
-        await Bun.sleep(100);
+      // tsc registers its file watchers asynchronously once the project has loaded, and a change
+      // reported before that is dropped like any watcher event without a registration. So keep
+      // reporting the file until tsc resolves it; repeated reports of a path are harmless.
+      const deadline = Date.now() + RESOLVE_DEADLINE_MS;
+      let messages: string[];
+      do {
+        manager.notifyWatchedFilesChanged(root, [created]);
+        await Bun.sleep(500);
         messages = await client.diagnosticMessages(uri);
-      }
+      } while (messages.some((m) => m.includes(MISSING_MODULE)) && Date.now() < deadline);
       expect(messages).toEqual([]);
       // The watcher registrations were answered by the manager, not passed to the client.
       const registered = client.requests.flatMap((r) =>
