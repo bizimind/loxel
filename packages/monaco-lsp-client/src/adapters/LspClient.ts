@@ -87,7 +87,7 @@ export class MonacoLspClient {
       options?.modelFilter,
     );
     this._commands = new LspServerCommands(s.server, this._capabilitiesRegistry);
-    this._edits = new WorkspaceEditApplier(this._capabilitiesRegistry, {
+    this._edits = new WorkspaceEditApplier(s.server, this._capabilitiesRegistry, {
       fileSystem: options?.workspaceFileSystem,
       onFailure: options?.onWorkspaceEditFailure,
     });

@@ -3,7 +3,16 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type * as monaco from "monaco-editor";
 
 import { fakeMonaco, fakeMonacoModule } from "../testing/fake-monaco";
-import type { ClientCapabilities, Range, TextEdit, WorkspaceEdit } from "../types";
+import type {
+  ClientCapabilities,
+  FileOperationFilter,
+  Range,
+  RenameFilesParams,
+  TextEdit,
+  WorkspaceEdit,
+} from "../types";
+import { api, capabilities, FileOperationPatternKind } from "../types";
+import type { IDisposable } from "../utils";
 import type { ILspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 import type { WorkspaceFileSystem } from "./WorkspaceEditApplier";
 
@@ -77,19 +86,35 @@ function fakeFileSystem(files: Record<string, string>, dirs: string[] = []) {
   return { fs, disk, calls, refused };
 }
 
-function fakeCapabilities() {
+/** A registry recording declared capabilities, and a server answering `willRenameFiles`. */
+function fakeLsp(willRename: (params: RenameFilesParams) => WorkspaceEdit | null = () => null) {
   const declared: ClientCapabilities[] = [];
+  const handlers = new Map<unknown, (options: unknown) => IDisposable>();
   const registry = {
     addStaticClientCapabilities: (caps: ClientCapabilities) => {
       declared.push(caps);
       return { dispose: () => {} };
     },
+    registerCapabilityHandler: (capability: unknown, _static: boolean, handler: never) => {
+      handlers.set(capability, handler);
+      return { dispose: () => {} };
+    },
   } as unknown as ILspCapabilitiesRegistry;
-  return { registry, declared };
+  const asked: RenameFilesParams[] = [];
+  const server = {
+    workspaceWillRenameFiles: async (params: RenameFilesParams) => {
+      asked.push(params);
+      return willRename(params);
+    },
+  } as unknown as typeof api.TServerInterface;
+  const registerWillRename = (filters: FileOperationFilter[]) =>
+    handlers.get(capabilities.workspaceWillRenameFiles)?.({ filters });
+  return { server, registry, declared, asked, registerWillRename };
 }
 
 function applier(fs?: WorkspaceFileSystem, onFailure?: (reason: string) => void) {
-  return new WorkspaceEditApplier(fakeCapabilities().registry, { fileSystem: fs, onFailure });
+  const { server, registry } = fakeLsp();
+  return new WorkspaceEditApplier(server, registry, { fileSystem: fs, onFailure });
 }
 
 function range(line: number, start: number, end = start): Range {
@@ -110,18 +135,22 @@ describe("WorkspaceEditApplier", () => {
   });
 
   test("declares file operations and abort failure handling only with a file system", () => {
-    const withFs = fakeCapabilities();
-    new WorkspaceEditApplier(withFs.registry, { fileSystem: fakeFileSystem({}).fs }).dispose();
-    const declared: unknown = withFs.declared[0]?.workspace?.workspaceEdit;
+    const withFs = fakeLsp();
+    const fileSystem = fakeFileSystem({}).fs;
+    new WorkspaceEditApplier(withFs.server, withFs.registry, { fileSystem }).dispose();
+    const declared: unknown = withFs.declared[0]?.workspace;
     expect(declared).toEqual({
-      documentChanges: true,
-      resourceOperations: ["create", "rename", "delete"],
-      failureHandling: "abort",
+      workspaceEdit: {
+        documentChanges: true,
+        resourceOperations: ["create", "rename", "delete"],
+        failureHandling: "abort",
+      },
+      fileOperations: { dynamicRegistration: true, willRename: true },
     });
 
-    const without = fakeCapabilities();
-    new WorkspaceEditApplier(without.registry).dispose();
-    expect(without.declared[0]?.workspace?.workspaceEdit).toEqual({ documentChanges: true });
+    const without = fakeLsp();
+    new WorkspaceEditApplier(without.server, without.registry).dispose();
+    expect(without.declared[0]?.workspace).toEqual({ workspaceEdit: { documentChanges: true } });
   });
 
   test("edits an open model and writes a file that is not open", async () => {
@@ -320,6 +349,49 @@ describe("WorkspaceEditApplier", () => {
     expect(disk.get("/w/main.py")).toBe("import pkg.b\n");
     expect(disk.get("/w/pkg/b.py")).toBe("y = 1\n");
     expect(disk.has("/w/pkg/a.py")).toBe(false);
+  });
+
+  test("asks a registered server for the edits a rename implies and applies them first", async () => {
+    const { fs, disk, calls } = fakeFileSystem({
+      "/w/src/util.ts": "export const x = 1;\n",
+      "/w/src/main.ts": 'import { x } from "./util.js";\n',
+    });
+    const lsp = fakeLsp(() => ({
+      changes: { "file:///w/src/main.ts": [edit(0, 19, 28, "./tools.js")] },
+    }));
+    const files = new WorkspaceEditApplier(lsp.server, lsp.registry, { fileSystem: fs });
+    lsp.registerWillRename([
+      { pattern: { glob: "**/*.{ts,tsx}", matches: FileOperationPatternKind.file } },
+    ]);
+
+    const result = await files.apply({
+      documentChanges: [
+        { kind: "rename", oldUri: "file:///w/src/util.ts", newUri: "file:///w/src/./tools.ts" },
+      ],
+    });
+
+    expect(result).toEqual({ applied: true });
+    expect(lsp.asked).toEqual([
+      { files: [{ oldUri: "file:///w/src/util.ts", newUri: "file:///w/src/tools.ts" }] },
+    ]);
+    expect(calls).toEqual(["write /w/src/main.ts", "rename /w/src/util.ts /w/src/tools.ts"]);
+    expect(disk.get("/w/src/main.ts")).toBe('import { x } from "./tools.js";\n');
+  });
+
+  test("does not ask a server about renames its filters do not match", async () => {
+    const { fs } = fakeFileSystem({ "/w/a.py": "a" }, ["/w/pkg"]);
+    const lsp = fakeLsp();
+    const files = new WorkspaceEditApplier(lsp.server, lsp.registry, { fileSystem: fs });
+    lsp.registerWillRename([
+      { pattern: { glob: "**/*.ts" } },
+      { pattern: { glob: "**", matches: FileOperationPatternKind.file } },
+    ]);
+
+    await files.apply({
+      documentChanges: [{ kind: "rename", oldUri: "file:///w/pkg", newUri: "file:///w/lib" }],
+    });
+
+    expect(lsp.asked).toEqual([]);
   });
 
   test("rename onto an existing file: refused, skipped, or replacing it", async () => {

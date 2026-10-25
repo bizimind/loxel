@@ -62,11 +62,19 @@ const languagesNamespace: unknown = new Proxy(
 );
 
 /** Enough of `monaco.Uri.parse` for lookups and messages: `scheme://authority/path`. */
-function parseUri(value: string): Pick<monaco.Uri, "scheme" | "authority" | "path" | "toString"> {
+function parseUri(
+  value: string,
+): Pick<monaco.Uri, "scheme" | "authority" | "path" | "toString" | "with"> {
   const match = /^([^:]+):\/\/([^/]*)(.*)$/.exec(value);
   if (!match) throw new Error(`Not a uri: ${value}`);
   const [, scheme = "", authority = "", path = ""] = match;
-  return { scheme, authority, path: decodeURIComponent(path), toString: () => value };
+  return {
+    scheme,
+    authority,
+    path: decodeURIComponent(path),
+    toString: () => value,
+    with: (change) => parseUri(`${scheme}://${authority}${change.path ?? path}`) as monaco.Uri,
+  };
 }
 
 export const fakeMonacoModule = {

@@ -1,15 +1,23 @@
 import * as monaco from "monaco-editor";
+import picomatch from "picomatch";
 
 import type {
   ApplyWorkspaceEditResult,
   CreateFile,
   DeleteFile,
+  FileOperationFilter,
   Position,
   RenameFile,
   TextEdit,
   WorkspaceEdit,
 } from "../types";
-import { FailureHandlingKind, ResourceOperationKind } from "../types";
+import {
+  api,
+  capabilities,
+  FailureHandlingKind,
+  FileOperationPatternKind,
+  ResourceOperationKind,
+} from "../types";
 import { Disposable } from "../utils";
 import type { ILspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 
@@ -84,26 +92,44 @@ type Entry =
  * applied (`failureHandling: "abort"`), and the reason says how far it got.
  */
 export class WorkspaceEditApplier extends Disposable {
+  /** Filters of the server's `workspace/willRenameFiles` registrations. */
+  private readonly _willRenameFilters = new Set<readonly FileOperationFilter[]>();
+
   constructor(
-    capabilities: ILspCapabilitiesRegistry,
+    private readonly _server: typeof api.TServerInterface,
+    registry: ILspCapabilitiesRegistry,
     private readonly _options: WorkspaceEditApplierOptions = {},
   ) {
     super();
+    if (!_options.fileSystem) {
+      this._register(
+        registry.addStaticClientCapabilities({
+          workspace: { workspaceEdit: { documentChanges: true } },
+        }),
+      );
+      return;
+    }
+
     this._register(
-      capabilities.addStaticClientCapabilities({
+      registry.addStaticClientCapabilities({
         workspace: {
-          workspaceEdit: _options.fileSystem
-            ? {
-                documentChanges: true,
-                resourceOperations: [
-                  ResourceOperationKind.Create,
-                  ResourceOperationKind.Rename,
-                  ResourceOperationKind.Delete,
-                ],
-                failureHandling: FailureHandlingKind.Abort,
-              }
-            : { documentChanges: true },
+          workspaceEdit: {
+            documentChanges: true,
+            resourceOperations: [
+              ResourceOperationKind.Create,
+              ResourceOperationKind.Rename,
+              ResourceOperationKind.Delete,
+            ],
+            failureHandling: FailureHandlingKind.Abort,
+          },
+          fileOperations: { dynamicRegistration: true, willRename: true },
         },
+      }),
+    );
+    this._register(
+      registry.registerCapabilityHandler(capabilities.workspaceWillRenameFiles, true, (options) => {
+        this._willRenameFilters.add(options.filters);
+        return { dispose: () => this._willRenameFilters.delete(options.filters) };
       }),
     );
   }
@@ -129,7 +155,9 @@ export class WorkspaceEditApplier extends Disposable {
 
     let steps: Step[];
     try {
-      steps = await new EditPlanner(this._options.fileSystem).plan(edit);
+      steps = await new EditPlanner(this._options.fileSystem, (source, target, isFolder) =>
+        this._willRename(source, target, isFolder),
+      ).plan(edit);
     } catch (error) {
       return { applied: false, failureReason: errorMessage(error) };
     }
@@ -158,6 +186,30 @@ export class WorkspaceEditApplier extends Disposable {
       }
     }
     return { applied: true };
+  }
+
+  /**
+   * Asks the server for the edits a rename implies (imports of a moved module) when it registered
+   * for `workspace/willRenameFiles` on that path, as it would for a rename made in the file tree:
+   * a server's own rename edit may hold a bare file rename and rely on this for the references.
+   */
+  private async _willRename(
+    source: monaco.Uri,
+    target: monaco.Uri,
+    isFolder: boolean,
+  ): Promise<WorkspaceEdit | null> {
+    const kind = isFolder ? FileOperationPatternKind.folder : FileOperationPatternKind.file;
+    const interested = [...this._willRenameFilters].some((filters) =>
+      filters.some((filter) => matchesFileOperationFilter(filter, source.path, kind)),
+    );
+    if (!interested) return null;
+    try {
+      return await this._server.workspaceWillRenameFiles({
+        files: [{ oldUri: source.toString(), newUri: target.toString() }],
+      });
+    } catch (error) {
+      throw new Error(`Could not get the edits for renaming ${describe(source)}`, { cause: error });
+    }
   }
 
   private async _execute(step: Step): Promise<void> {
@@ -209,28 +261,43 @@ class EditPlanner {
   private readonly _versionedModels = new Set<monaco.editor.ITextModel>();
   private readonly _steps: Step[] = [];
 
-  constructor(private readonly _fs: WorkspaceFileSystem | undefined) {}
+  /** Set while planning the edits a rename implies, which do not ask for further ones. */
+  private _inWillRename = false;
+
+  constructor(
+    private readonly _fs: WorkspaceFileSystem | undefined,
+    private readonly _willRename: (
+      source: monaco.Uri,
+      target: monaco.Uri,
+      isFolder: boolean,
+    ) => Promise<WorkspaceEdit | null>,
+  ) {}
 
   async plan(edit: WorkspaceEdit): Promise<Step[]> {
+    await this._planEdit(edit);
+    return this._steps;
+  }
+
+  /** Plans `edit`'s changes; `change` overrides their indexes (for edits a rename implies). */
+  private async _planEdit(edit: WorkspaceEdit, change?: number): Promise<void> {
     if (edit.documentChanges) {
-      for (const [index, change] of edit.documentChanges.entries()) {
-        if ("textDocument" in change) {
+      for (const [index, documentChange] of edit.documentChanges.entries()) {
+        if ("textDocument" in documentChange) {
           await this._textEdit(
-            index,
-            change.textDocument.uri,
-            change.edits,
-            change.textDocument.version ?? undefined,
+            change ?? index,
+            documentChange.textDocument.uri,
+            documentChange.edits,
+            documentChange.textDocument.version ?? undefined,
           );
         } else {
-          await this._resourceOperation(index, change);
+          await this._resourceOperation(change ?? index, documentChange);
         }
       }
     } else if (edit.changes) {
       for (const [index, [uri, edits]] of Object.entries(edit.changes).entries()) {
-        await this._textEdit(index, uri, edits, undefined);
+        await this._textEdit(change ?? index, uri, edits, undefined);
       }
     }
-    return this._steps;
   }
 
   private async _textEdit(
@@ -240,7 +307,7 @@ class EditPlanner {
     version: number | undefined,
   ): Promise<void> {
     if (edits.length === 0) return;
-    const uri = monaco.Uri.parse(rawUri);
+    const uri = parseUri(rawUri);
     const label = describe(uri);
     const entry = await this._entry(uri);
     if (entry.type === "moved") {
@@ -303,7 +370,7 @@ class EditPlanner {
   }
 
   private async _create(change: number, operation: CreateFile): Promise<void> {
-    const uri = monaco.Uri.parse(operation.uri);
+    const uri = parseUri(operation.uri);
     const label = describe(uri);
     const entry = await this._entry(uri);
     if (entry.type !== "missing") {
@@ -322,8 +389,8 @@ class EditPlanner {
   }
 
   private async _rename(change: number, operation: RenameFile): Promise<void> {
-    const source = monaco.Uri.parse(operation.oldUri);
-    const target = monaco.Uri.parse(operation.newUri);
+    const source = parseUri(operation.oldUri);
+    const target = parseUri(operation.newUri);
     const sourceEntry = await this._entry(source);
     if (sourceEntry.type === "missing" || sourceEntry.type === "moved") {
       throw new Error(`${describe(source)} does not exist`);
@@ -334,6 +401,19 @@ class EditPlanner {
         if (operation.options?.ignoreIfExists) return;
         throw new Error(`${describe(target)} already exists`);
       }
+    }
+    if (!this._inWillRename) {
+      const implied = await this._willRename(source, target, sourceEntry.type === "directory");
+      if (implied) {
+        this._inWillRename = true;
+        try {
+          await this._planEdit(implied, change);
+        } finally {
+          this._inWillRename = false;
+        }
+      }
+    }
+    if (targetEntry.type !== "missing") {
       this._steps.push({ change, label: describe(target), kind: "delete", uri: target });
     }
     this._steps.push({ change, label: describe(source), kind: "rename", source, target });
@@ -350,7 +430,7 @@ class EditPlanner {
   }
 
   private async _delete(change: number, operation: DeleteFile): Promise<void> {
-    const uri = monaco.Uri.parse(operation.uri);
+    const uri = parseUri(operation.uri);
     const label = describe(uri);
     const entry = await this._entry(uri);
     if (entry.type === "missing") {
@@ -393,6 +473,34 @@ class EditPlanner {
     this._entries.set(k, entry);
     return entry;
   }
+}
+
+/** Parses a server uri, resolving `.` and `..` path segments (`src/./b.ts` names `src/b.ts`). */
+function parseUri(value: string): monaco.Uri {
+  const uri = monaco.Uri.parse(value);
+  const segments = uri.path.split("/");
+  if (!segments.some((s) => s === "." || s === "..")) return uri;
+  const resolved: string[] = [];
+  for (const segment of segments) {
+    if (segment === "..") {
+      if (resolved.length > 1) resolved.pop();
+    } else if (segment !== ".") {
+      resolved.push(segment);
+    }
+  }
+  return uri.with({ path: resolved.join("/") || "/" });
+}
+
+function matchesFileOperationFilter(
+  filter: FileOperationFilter,
+  path: string,
+  kind: FileOperationPatternKind,
+): boolean {
+  // The scheme is not compared: a client may show a server's `file:` documents under its own
+  // scheme, and asking about a path the server does not care about only costs a null answer.
+  const { glob, matches, options } = filter.pattern;
+  if (matches && matches !== kind) return false;
+  return picomatch.isMatch(path, glob, { dot: true, nocase: options?.ignoreCase });
 }
 
 function key(uri: monaco.Uri): string {
