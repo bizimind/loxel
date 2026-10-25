@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
+import type { PythonEnv } from "@/api/python-env-model";
 import type { TerminalState } from "@/api/ws-protocol";
 
 import { TerminalManager } from "./terminal-manager";
@@ -31,9 +32,12 @@ afterEach(() => {
   for (const manager of managers.splice(0)) manager.destroyAll();
 });
 
-function createManager(initialCommandTtlMs?: number): TerminalManager {
+function createManager(
+  initialCommandTtlMs?: number,
+  pythonEnvFor: (worktreePath: string) => Promise<PythonEnv | null> = async () => null,
+): TerminalManager {
   const manager = new TerminalManager(
-    { isSequenceEnabled: () => false, onNotification: () => {}, onExit: () => {} },
+    { isSequenceEnabled: () => false, onNotification: () => {}, onExit: () => {}, pythonEnvFor },
     initialCommandTtlMs,
   );
   managers.push(manager);
@@ -106,9 +110,9 @@ describe("TerminalManager initial commands", () => {
     const id = crypto.randomUUID();
     manager.setInitialCommand(id, "echo hello-from-$((40+2))");
 
-    manager.ensureSpawned(id, attachOptions);
+    await manager.ensureSpawned(id, attachOptions);
     const session = manager.get(id);
-    manager.ensureSpawned(id, attachOptions);
+    await manager.ensureSpawned(id, attachOptions);
     expect(manager.get(id)).toBe(session);
     expect(session?.attached).toBe(false);
 
@@ -148,5 +152,61 @@ describe("TerminalManager initial commands", () => {
     manager.write(id, new TextEncoder().encode("echo done-$((1+1))\n"));
     await until(() => sink.outputText().includes("done-2"));
     expect(sink.outputText()).not.toContain("hello-from-42");
+  });
+});
+
+describe("TerminalManager Python environments", () => {
+  const originalShell = process.env.SHELL;
+  afterEach(() => {
+    process.env.SHELL = originalShell;
+  });
+
+  test("activates the worktree's environment in the shell", async () => {
+    process.env.SHELL = "/bin/sh";
+    const envPath = "/tmp/loxel-test-env";
+    const asked: string[] = [];
+    const manager = createManager(undefined, async (worktreePath) => {
+      asked.push(worktreePath);
+      return { source: "pixi", pythonPath: `${envPath}/bin/python`, envPath };
+    });
+    const id = crypto.randomUUID();
+    // Only zsh keeps the entry first (macOS /etc/profile reorders PATH for sh), so check presence.
+    manager.setInitialCommand(
+      id,
+      `case ":$PATH:" in *:${envPath}/bin:*) echo env-on-$((1+1));; esac`,
+    );
+    const sink = createRecordingSink();
+    await manager.attach(id, sink.sink, { ...attachOptions, worktreePath: "/" });
+    await until(() => sink.outputText().includes("env-on-2"));
+    expect(asked).toEqual(["/"]);
+
+    // Turned off in settings: the environment is not even resolved.
+    const off = crypto.randomUUID();
+    await manager.attach(off, createRecordingSink().sink, {
+      ...attachOptions,
+      activatePythonEnv: false,
+    });
+    expect(asked).toEqual(["/"]);
+  });
+
+  test("concurrent starts share one shell, and one closed while starting never runs", async () => {
+    process.env.SHELL = "/bin/sh";
+    let release = () => {};
+    const gate = new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    });
+    const manager = createManager(undefined, () => gate);
+
+    const id = crypto.randomUUID();
+    const first = manager.attach(id, createRecordingSink().sink, attachOptions);
+    const second = manager.ensureSpawned(id, attachOptions);
+    const closed = crypto.randomUUID();
+    const neverStarted = manager.ensureSpawned(closed, attachOptions);
+    manager.destroy(closed);
+
+    release();
+    await Promise.all([first, second, neverStarted]);
+    expect(manager.get(id)?.attached).toBe(true);
+    expect(manager.get(closed)).toBeUndefined();
   });
 });

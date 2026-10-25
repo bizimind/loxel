@@ -1,6 +1,6 @@
 ---
 title: Terminals
-description: Full PTY sessions, persistence, injected env vars, the loxel CLI, and TUI agents.
+description: Full PTY sessions, persistence, Python environments, injected env vars, the loxel CLI, and TUI agents.
 order: 12
 ---
 
@@ -39,6 +39,16 @@ Press `Cmd+F` in a terminal to search its output and scrollback. Matches are hig
 ## Notifications
 
 Terminal programs can raise Loxel notifications with the OSC 9 (iTerm2), OSC 777 (rxvt-unicode) and OSC 99 (Kitty) escape sequences; choose which ones Loxel listens to in **Settings > Terminal**. Notifications appear under the bell in the top bar and as a dot on the worktree in the sidebar. Press `` Ctrl+` `` to jump to the panel that raised the most recent one.
+
+---
+
+## Python environments
+
+When a worktree has a Python environment, new terminals in it start with that environment active, as if you had run `source .venv/bin/activate`: its `python`, `pip` and installed tools come first on `PATH`, and `VIRTUAL_ENV` is set. It is the environment the [Python language server](/docs/typescript-intelligence#python-environment) uses, such as a `.venv` that `uv sync` created. Terminals opened before the environment existed keep running without it; open a new terminal to get it.
+
+If your shell setup activates a virtual environment itself (direnv, mise, or your own startup files), that one wins. In zsh, the macOS default, the environment stays first on `PATH` even after your startup files rearrange `PATH`. In other shells it is still on `PATH`, but startup files that rebuild `PATH`, as macOS does for login shells, can put system directories ahead of it.
+
+To start terminals without it, turn off **Activate Python Environment** in **Settings > Terminal**.
 
 ---
 

@@ -2,12 +2,14 @@
  * Terminal sessions keyed by the client-generated terminal ID. Spawns the shell on first attach,
  * tracks orphaned sessions, and owns the shell environment. See docs/TERMINALS.md.
  */
+import type { PythonEnv } from "@/api/python-env-model";
 import type { NotificationSequence } from "@/api/ws-protocol";
 import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
+import { activatePythonEnv } from "./terminal-python-env";
 import type { TerminalSink } from "./terminal-session";
 import { TerminalSession } from "./terminal-session";
 
@@ -16,6 +18,8 @@ const textEncoder = new TextEncoder();
 
 /** How long a command registered for a terminal waits for its panel to attach before it is dropped. */
 const INITIAL_COMMAND_TTL_MS = 60_000;
+/** How long a new shell waits for its Python environment before starting without it. */
+const PYTHON_ENV_TIMEOUT_MS = 3000;
 
 export interface TerminalSpawnOptions {
   cols: number;
@@ -26,6 +30,8 @@ export interface TerminalSpawnOptions {
   worktreePath?: string;
   /** Applied only when the session is spawned. */
   envOverrides?: Record<string, string>;
+  /** Activate the worktree's Python environment; defaults to true. Applied only when spawned. */
+  activatePythonEnv?: boolean;
   scrollbackLines?: number;
 }
 
@@ -40,6 +46,8 @@ export interface TerminalManagerHooks {
   onNotification: (session: TerminalSession, payload: OscPayload) => void;
   /** Called after the session has been removed. */
   onExit: (session: TerminalSession, exitCode: number) => void;
+  /** The Python environment to activate in a new shell for this worktree; null for none. */
+  pythonEnvFor: (worktreePath: string) => Promise<PythonEnv | null>;
 }
 
 /** Build terminal-specific env: login shell PATH + TERM fallback. */
@@ -54,6 +62,8 @@ function buildTerminalEnv(): Record<string, string | undefined> {
 
 export class TerminalManager {
   private sessions = new Map<string, TerminalSession>();
+  /** Spawns waiting for their environment; resolves to null when destroyed meanwhile. */
+  private starting = new Map<string, Promise<TerminalSession | null>>();
   private initialCommands = new Map<
     string,
     { command: string; timer: ReturnType<typeof setTimeout> }
@@ -100,13 +110,11 @@ export class TerminalManager {
 
   /** Attach a client to the session, spawning the shell first if the session does not exist. */
   async attach(id: string, sink: TerminalSink, options: TerminalAttachOptions): Promise<void> {
-    let session = this.sessions.get(id);
-    if (session) {
-      session.resize(options.cols, options.rows);
-      session.setScrollbackLines(options.scrollbackLines);
-    } else {
-      session = this.spawn(id, options);
-    }
+    const session = this.sessions.get(id) ?? (await this.start(id, options));
+    // Closed while its environment was being resolved.
+    if (!session) return;
+    session.resize(options.cols, options.rows);
+    session.setScrollbackLines(options.scrollbackLines);
     return session.attach(sink, { epoch: options.sinceEpoch, offset: options.sinceOffset });
   }
 
@@ -114,17 +122,65 @@ export class TerminalManager {
    * Spawn the shell of terminal `id` with no client attached, unless it is already running. For a
    * panel that may not mount for a while (`loxel terminal --no-focus`); its first attach binds it.
    */
-  ensureSpawned(id: string, options: TerminalSpawnOptions): void {
-    if (!this.sessions.has(id)) this.spawn(id, options);
+  async ensureSpawned(id: string, options: TerminalSpawnOptions): Promise<void> {
+    if (!this.sessions.has(id)) await this.start(id, options);
   }
 
-  private spawn(id: string, options: TerminalSpawnOptions): TerminalSession {
-    const shell = process.env.SHELL || "/bin/bash";
-    const { cols, rows, cwd, worktreePath } = options;
-    log.info(`Spawning terminal ${id.slice(0, 8)} with ${shell} (${cols}x${rows}) in ${cwd}`);
+  /**
+   * Spawn once the environment is ready. Concurrent callers for the same ID share one spawn, and
+   * one destroyed before its environment is ready never starts.
+   */
+  private start(id: string, options: TerminalSpawnOptions): Promise<TerminalSession | null> {
+    const pending = this.starting.get(id);
+    if (pending) return pending;
+    const started = this.buildEnv(options).then((env) => {
+      if (this.starting.get(id) !== started) return null;
+      this.starting.delete(id);
+      return this.spawn(id, options, env);
+    });
+    this.starting.set(id, started);
+    return started;
+  }
 
+  private async buildEnv(
+    options: TerminalSpawnOptions,
+  ): Promise<Record<string, string | undefined>> {
     const env = buildTerminalEnv();
     if (options.envOverrides) Object.assign(env, options.envOverrides);
+    if (options.activatePythonEnv === false) return env;
+    const worktreePath = options.worktreePath ?? options.cwd;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), PYTHON_ENV_TIMEOUT_MS);
+    });
+    try {
+      const pythonEnv = await Promise.race([this.hooks.pythonEnvFor(worktreePath), timedOut]);
+      if (pythonEnv === "timeout") {
+        log.warn("Python environment took too long; starting the terminal without it", {
+          worktreePath,
+        });
+      } else if (pythonEnv) {
+        activatePythonEnv(env, pythonEnv, terminalShell());
+      }
+    } catch (err) {
+      log.warn("Could not activate the Python environment in a terminal", {
+        worktreePath,
+        error: err,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    return env;
+  }
+
+  private spawn(
+    id: string,
+    options: TerminalSpawnOptions,
+    env: Record<string, string | undefined>,
+  ): TerminalSession {
+    const shell = terminalShell();
+    const { cols, rows, cwd, worktreePath } = options;
+    log.info(`Spawning terminal ${id.slice(0, 8)} with ${shell} (${cols}x${rows}) in ${cwd}`);
 
     const session = new TerminalSession({
       id,
@@ -176,6 +232,7 @@ export class TerminalManager {
   }
 
   destroy(id: string): void {
+    this.starting.delete(id);
     const session = this.sessions.get(id);
     if (!session) return;
     this.sessions.delete(id);
@@ -198,7 +255,12 @@ export class TerminalManager {
   }
 
   destroyAll(): void {
+    this.starting.clear();
     for (const id of [...this.sessions.keys()]) this.destroy(id);
     for (const id of [...this.initialCommands.keys()]) this.clearInitialCommand(id);
   }
+}
+
+function terminalShell(): string {
+  return process.env.SHELL || "/bin/bash";
 }

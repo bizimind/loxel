@@ -149,6 +149,7 @@ function sendAttach(
     cwd,
     worktreePath,
     scrollbackLines: useSettingsStore.getState().terminal.scrollbackLines,
+    activatePythonEnv: useSettingsStore.getState().terminal.activatePythonEnv,
     windowId: WINDOW_ID,
     ...(since === undefined ? {} : { sinceEpoch: since.epoch, sinceOffset: since.offset }),
   });
