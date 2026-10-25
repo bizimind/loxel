@@ -1,14 +1,7 @@
 import * as monaco from "monaco-editor";
 import picomatch from "picomatch";
 
-import type {
-  Diagnostic,
-  DocumentSelector,
-  Location,
-  LocationLink,
-  TextEdit,
-  WorkspaceEdit,
-} from "../../types";
+import type { Diagnostic, DocumentSelector, Location, LocationLink } from "../../types";
 import {
   CodeActionKind,
   CodeActionTriggerKind,
@@ -399,44 +392,6 @@ export function toMonacoLocation(
   const translatedRange = client.bridge.translateBackRange({ uri: location.uri }, location.range);
   return { uri: translatedRange.textModel.uri, range: translatedRange.range };
 }
-/**
- * Converts an LSP workspace edit to Monaco text edits, resolving each URI
- * through the bridge. `documentChanges` wins over `changes` when a server sends
- * both, as the spec asks. File create/rename/delete operations have no Monaco
- * text-edit form: the client does not declare `resourceOperations`, and an edit
- * that has one anyway is rejected whole rather than applied partially.
- */
-export function toMonacoWorkspaceEdit(
-  edit: WorkspaceEdit,
-  client: LspConnection,
-): monaco.languages.WorkspaceEdit & monaco.languages.Rejection {
-  const edits: monaco.languages.IWorkspaceTextEdit[] = [];
-  const addTextEdits = (uri: string, textEdits: TextEdit[], versionId: number | undefined) => {
-    for (const textEdit of textEdits) {
-      const translated = client.bridge.translateBackRange({ uri }, textEdit.range);
-      edits.push({
-        resource: translated.textModel.uri,
-        versionId,
-        textEdit: { range: translated.range, text: textEdit.newText },
-      });
-    }
-  };
-
-  if (edit.documentChanges) {
-    for (const change of edit.documentChanges) {
-      if (!("textDocument" in change)) {
-        return { edits: [], rejectReason: `File ${change.kind} operations are not supported` };
-      }
-      addTextEdits(change.textDocument.uri, change.edits, change.textDocument.version ?? undefined);
-    }
-  } else if (edit.changes) {
-    for (const [uri, textEdits] of Object.entries(edit.changes)) {
-      addTextEdits(uri, textEdits, undefined);
-    }
-  }
-
-  return { edits };
-}
 // Monaco registers tsx/jsx as separate language IDs from typescript/javascript,
 // but LSP servers return document selectors with only typescript/javascript.
 // Expand selectors so providers also match tsx/jsx models.
@@ -478,7 +433,7 @@ export function toMonacoLanguageSelector(
 /**
  * Whether `model` matches `selector`, with the same semantics as
  * `toMonacoLanguageSelector`: a null or empty selector (which servers such as
- * Pyright send when registering pull diagnostics) falls back to the client's
+ * basedpyright send when registering pull diagnostics) falls back to the client's
  * own language ids, and `typescript`/`javascript` filters also match tsx/jsx.
  */
 export function matchesDocumentSelector(

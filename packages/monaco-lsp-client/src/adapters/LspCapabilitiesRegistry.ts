@@ -269,6 +269,7 @@ class DynamicFromStaticOptions {
     o.set(capabilities.textDocumentPrepareTypeHierarchy, (s) => s.typeHierarchyProvider);
     o.set(capabilities.workspaceSymbol, (s) => s.workspaceSymbolProvider);
     o.set(capabilities.workspaceExecuteCommand, (s) => s.executeCommandProvider);
+    o.set(capabilities.workspaceWillRenameFiles, (s) => s.workspace?.fileOperations?.willRename);
     return o;
   }
 

@@ -7,6 +7,7 @@ import { MonacoLspClient } from "./adapters/LspClient";
 export { MonacoLspClient, WebSocketTransport, createTransportToWorker, createTransportToIFrame };
 export { capabilities } from "./types";
 export type { MonacoLspClientOptions };
+export type { WorkspaceFileSystem, WorkspaceFileType } from "./adapters/WorkspaceEditApplier";
 export type { WorkspaceSymbolItem } from "./adapters/languageFeatures/LspWorkspaceSymbolFeature";
 export type { RegistrableCapability, OptionsOf } from "./adapters/LspCapabilitiesRegistry";
 export type { ClientCapabilities } from "./types";

@@ -13,6 +13,10 @@ const SUGGESTED_COMMANDS = [
   "direnv allow",
   "mise trust",
   "mise i",
+  "uv sync",
+  "poetry install",
+  "pdm install",
+  "pipenv install --dev",
 ];
 
 export interface WorkspaceConfig {
