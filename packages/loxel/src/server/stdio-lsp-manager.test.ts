@@ -200,6 +200,31 @@ describe("StdioLspManager watched files", () => {
     expect(client.toClient).toEqual([]);
   });
 
+  test("delivers changes reported before the server registered its watchers", async () => {
+    const { client, root } = await setup();
+    await mkdir(root);
+    await writeFile(join(root, "early.py"), "x = 1\n");
+    manager!.notifyWatchedFilesChanged(root, [join(root, "early.py")]);
+
+    client.emit({
+      id: 7,
+      method: "client/registerCapability",
+      params: {
+        registrations: [
+          {
+            id: "w1",
+            method: WATCHED_FILES,
+            registerOptions: { watchers: [{ globPattern: "**" }] },
+          },
+        ],
+      },
+    });
+    const changed = await client.serverReceived((f) => f.method === WATCHED_FILES);
+    expect(changed.params).toEqual({
+      changes: [{ uri: pathToFileURL(join(root, "early.py")).href, type: FileChangeType.Created }],
+    });
+  });
+
   test("passes the other registrations of a mixed request on to the client", async () => {
     const { client } = await setup();
     client.emit({

@@ -242,12 +242,26 @@ describe("WatchedFilesForwarder batching", () => {
     expect(Date.now() - started).toBeLessThan(600);
   });
 
-  test("drops changes a watcher's kind excludes, and everything before a registration", async () => {
+  test("replays changes queued before the server registered its watchers", async () => {
     const root = await tempTree();
+    await writeFile(join(root, "early.py"), "x = 1\n");
     const batches: FileEvent[][] = [];
     const f = new WatchedFilesForwarder(root, (changes) => batches.push(changes), 20);
-    f.queue([join(root, "a.py")]);
-    f.register("reg", { watchers: [{ globPattern: "**", kind: 1 }] });
+    f.queue([join(root, "early.py"), join(root, "early.txt")]);
+    await Bun.sleep(60);
+    expect(batches).toHaveLength(0);
+
+    f.register("reg", { watchers: [{ globPattern: "**/*.py" }] });
+    await Bun.sleep(100);
+    expect(batches).toEqual([
+      [{ uri: pathToFileURL(join(root, "early.py")).href, type: FileChangeType.Created }],
+    ]);
+  });
+
+  test("drops changes a watcher's kind excludes", async () => {
+    const root = await tempTree();
+    const batches: FileEvent[][] = [];
+    const f = forwarder([{ globPattern: "**", kind: 1 }], (changes) => batches.push(changes), root);
     f.queue([join(root, "deleted.py")]);
     await Bun.sleep(100);
     expect(batches).toHaveLength(0);

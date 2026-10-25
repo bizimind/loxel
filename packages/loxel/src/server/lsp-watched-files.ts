@@ -21,6 +21,12 @@ const WATCH_KIND_BIT: Record<FileChangeTypeValue, number> = { 1: 1, 2: 2, 3: 4 }
 const WATCH_KIND_ALL = 7;
 /** Quiet period before a batch is sent; the file watcher already coalesced its own events. */
 const DEBOUNCE_MS = 250;
+/**
+ * Most changes kept while the server has no watcher registered. A server reads the disk before it
+ * registers its watchers (tsc only once the project has loaded), so changes in between are
+ * replayed when it registers instead of being lost.
+ */
+const EARLY_LIMIT = 10_000;
 /** Longest a change waits for quiet, so a file written continuously cannot hold back the rest. */
 const MAX_WAIT_MS = 1000;
 /**
@@ -118,6 +124,8 @@ export function splitWatchedFilesRegistration(body: string): WatchedFilesRegistr
 export class WatchedFilesForwarder {
   private readonly registrations = new Map<string, Watcher[]>();
   private readonly pending = new Set<string>();
+  /** Changes queued while nothing was registered, replayed by the next registration. */
+  private readonly early = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** When the oldest pending path was queued; the batch goes out by {@link MAX_WAIT_MS} after. */
   private pendingSince = 0;
@@ -140,6 +148,10 @@ export class WatchedFilesForwarder {
       id,
       Array.isArray(watchers) ? watchers.flatMap((w) => this.compileWatcher(w) ?? []) : [],
     );
+    if (this.early.size === 0) return;
+    const early = [...this.early];
+    this.early.clear();
+    this.queue(early);
   }
 
   /** Forget a registration; false when the id is not one of ours. */
@@ -147,9 +159,19 @@ export class WatchedFilesForwarder {
     return this.registrations.delete(id);
   }
 
-  /** Queue changed absolute paths. Paths no registered watcher matches are dropped. */
+  /**
+   * Queue changed absolute paths. Paths no registered watcher matches are dropped; while nothing
+   * is registered they are kept for the next registration instead.
+   */
   queue(paths: Iterable<string>): void {
     if (this.disposed) return;
+    if (this.registrations.size === 0) {
+      for (const p of paths) {
+        if (this.early.size >= EARLY_LIMIT) break;
+        this.early.add(p);
+      }
+      return;
+    }
     const wasEmpty = this.pending.size === 0;
     for (const p of paths) {
       if (this.kindsFor(p) !== 0) this.pending.add(p);
@@ -177,6 +199,7 @@ export class WatchedFilesForwarder {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.pending.clear();
+    this.early.clear();
     this.registrations.clear();
   }
 
