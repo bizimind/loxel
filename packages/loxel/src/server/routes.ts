@@ -1985,8 +1985,17 @@ export async function writeInitHook(
   if (commands.length > 0) {
     lines.push("");
     // Python installers (poetry, pdm, pipenv, `uv pip`) target an active virtual environment,
-    // which would be another checkout's when `wt add` runs from one of its terminals.
-    lines.push("unset VIRTUAL_ENV");
+    // and its `bin` shadows the real tools: both would be another checkout's when `wt add` runs
+    // from one of its terminals.
+    lines.push(
+      'if [[ -n "${VIRTUAL_ENV:-}" ]]; then',
+      '  venv_bin=":$VIRTUAL_ENV/bin:"',
+      '  PATH=":$PATH:"',
+      '  while [[ "$PATH" == *"$venv_bin"* ]]; do PATH=${PATH//"$venv_bin"/:}; done',
+      "  PATH=${PATH#:}; PATH=${PATH%:}",
+      "  unset VIRTUAL_ENV venv_bin",
+      "fi",
+    );
     lines.push(...commands);
   }
 

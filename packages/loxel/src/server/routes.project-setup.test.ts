@@ -26,13 +26,18 @@ describe("generated init.wt.sh", () => {
     await writeInitHook(
       root,
       [file],
-      ["printf 'ready\\n' > setup.txt", 'printf "%s" "${VIRTUAL_ENV-none}" > venv.txt'],
+      ["printf 'ready\\n' > setup.txt", 'printf "%s %s" "${VIRTUAL_ENV-none}" "$PATH" > venv.txt'],
     );
     await chmod(join(root, "init.wt.sh"), 0o755);
     const proc = Bun.spawn(["bash", join(root, "init.wt.sh")], {
       cwd: worktree,
       // As when `wt add` runs from a terminal with another checkout's venv active.
-      env: { ...process.env, WT_ROOT: root, VIRTUAL_ENV: join(root, ".venv") },
+      env: {
+        ...process.env,
+        WT_ROOT: root,
+        VIRTUAL_ENV: join(root, ".venv"),
+        PATH: `${join(root, ".venv", "bin")}:/usr/bin:/bin`,
+      },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -40,7 +45,7 @@ describe("generated init.wt.sh", () => {
     expect(await proc.exited).toBe(0);
     expect(await Bun.file(join(worktree, file)).text()).toBe("TOKEN=value\n");
     expect(await Bun.file(join(worktree, "setup.txt")).text()).toBe("ready\n");
-    expect(await Bun.file(join(worktree, "venv.txt")).text()).toBe("none");
+    expect(await Bun.file(join(worktree, "venv.txt")).text()).toBe("none /usr/bin:/bin");
   });
 
   test("rejects paths that escape the local resource directory", async () => {

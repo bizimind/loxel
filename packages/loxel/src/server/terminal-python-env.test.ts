@@ -1,11 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { PythonEnv } from "@/api/python-env-model";
 
-const root = await mkdtemp(join(tmpdir(), "loxel-terminal-python-env-"));
+const root = await realpath(await mkdtemp(join(tmpdir(), "loxel-terminal-python-env-")));
 process.env.LOXEL_STATE_DIR = join(root, "state");
 const { activatePythonEnv } = await import("./terminal-python-env");
 
@@ -13,71 +13,130 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-const venvPath = join(root, "wt", ".venv");
+function git(cwd: string, ...args: string[]): void {
+  const result = Bun.spawnSync(["git", "-C", cwd, ...args], { stderr: "pipe" });
+  if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+}
+
+/** A git worktree holding an untracked venv, as uv or `python -m venv` leave it. */
+const wt = join(root, "wt");
+const venvPath = join(wt, ".venv");
 const venvBin = join(venvPath, "bin");
 const venv: PythonEnv = { source: "venv", pythonPath: join(venvBin, "python"), envPath: venvPath };
 await mkdir(venvBin, { recursive: true });
 await writeFile(join(venvPath, "pyvenv.cfg"), "home = /usr/bin\n");
+git(wt, "init", "-q");
+
+const pixiPath = join(wt, ".pixi", "envs", "default");
+const pixi: PythonEnv = {
+  source: "pixi",
+  pythonPath: join(pixiPath, "bin", "python"),
+  envPath: pixiPath,
+};
+await mkdir(join(pixiPath, "bin"), { recursive: true });
+await mkdir(join(pixiPath, "conda-meta"));
 
 describe("activatePythonEnv", () => {
-  test("exports what the venv's activate script would, moving its bin to the front", () => {
+  test("exports what the venv's activate script would, moving its bin to the front", async () => {
     const env: Record<string, string | undefined> = {
       PATH: `/usr/bin:${venvBin}:/bin`,
       PYTHONHOME: "/opt/python",
       VIRTUAL_ENV_PROMPT: "(other)",
     };
-    activatePythonEnv(env, venv, "/bin/bash");
+    await activatePythonEnv(env, venv, "/bin/bash", wt);
     expect(env).toEqual({ PATH: `${venvBin}:/usr/bin:/bin`, VIRTUAL_ENV: venvPath });
   });
 
   test("puts a conda-style environment on PATH without claiming it is a venv", async () => {
-    const pixiPath = join(root, "wt", ".pixi", "envs", "default");
-    await mkdir(join(pixiPath, "conda-meta"), { recursive: true });
     const env: Record<string, string | undefined> = { PATH: "/usr/bin", VIRTUAL_ENV: "/elsewhere" };
-    activatePythonEnv(
-      env,
-      { source: "pixi", pythonPath: join(pixiPath, "bin", "python"), envPath: pixiPath },
-      "/bin/bash",
-    );
+    await activatePythonEnv(env, pixi, "/bin/bash", wt);
     expect(env).toEqual({ PATH: `${join(pixiPath, "bin")}:/usr/bin` });
   });
 
-  test("leaves the environment alone for an interpreter outside any environment", () => {
+  test("leaves the environment alone for an interpreter outside any environment", async () => {
     const env = { PATH: "/usr/bin" };
-    activatePythonEnv(
+    const system: PythonEnv = { source: "system", pythonPath: "/usr/bin/python3", envPath: null };
+    await activatePythonEnv(env, system, "/bin/zsh", wt);
+    expect(env).toEqual({ PATH: "/usr/bin" });
+  });
+
+  test("refuses a directory the login shell's PATH eval would interpret", async () => {
+    // macOS path_helper output is eval'd, and a branch (so a worktree directory) can be named so.
+    const hostile = join(root, "wt-$(touch pwned)", ".venv");
+    await mkdir(join(hostile, "bin"), { recursive: true });
+    const env = { PATH: "/usr/bin" };
+    await activatePythonEnv(
       env,
-      { source: "system", pythonPath: "/usr/bin/python3", envPath: null },
+      { source: "venv", pythonPath: join(hostile, "bin", "python"), envPath: hostile },
       "/bin/zsh",
+      wt,
+    );
+    expect(env).toEqual({ PATH: "/usr/bin" });
+  });
+
+  test("refuses a bin holding files the repository tracks", async () => {
+    const repo = join(root, "tracked");
+    const bin = join(repo, ".venv", "bin");
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(repo, ".gitignore"), ".venv/\n");
+    await writeFile(join(bin, "git"), "#!/bin/sh\n");
+    git(repo, "init", "-q");
+    git(repo, "add", "-f", ".gitignore", ".venv/bin/git");
+
+    const env = { PATH: "/usr/bin" };
+    await activatePythonEnv(
+      env,
+      { source: "venv", pythonPath: join(bin, "python"), envPath: join(repo, ".venv") },
+      "/bin/bash",
+      repo,
     );
     expect(env).toEqual({ PATH: "/usr/bin" });
   });
 });
 
 describe.skipIf(!Bun.which("zsh"))("zsh startup shim", () => {
-  /** Start a login zsh whose own startup files live in `userZdotdir`, and print what it ended up with. */
-  async function startZsh(userFiles: Record<string, string>): Promise<Record<string, string>> {
-    const userZdotdir = await mkdtemp(join(root, "zdotdir-"));
-    for (const [name, content] of Object.entries(userFiles)) {
-      await writeFile(join(userZdotdir, name), content);
+  interface StartOptions {
+    /** The user's startup files, in `$HOME` unless `zdotdir` is set. */
+    files: Record<string, string>;
+    pythonEnv?: PythonEnv;
+    /** Inherit `ZDOTDIR` pointing at a separate directory holding `files`. */
+    zdotdir?: boolean;
+  }
+
+  /** Start a login zsh with the given user startup files, and report what it ended up with. */
+  async function startZsh(options: StartOptions): Promise<Record<string, string>> {
+    const home = await mkdtemp(join(root, "home-"));
+    const userDir = options.zdotdir ? await mkdtemp(join(root, "zdotdir-")) : home;
+    for (const [name, content] of Object.entries(options.files)) {
+      await mkdir(dirname(join(userDir, name)), { recursive: true });
+      await writeFile(join(userDir, name), content.replaceAll("$TEST_DIR", userDir));
     }
-    const env: Record<string, string | undefined> = { ...process.env, ZDOTDIR: userZdotdir };
-    activatePythonEnv(env, venv, "/bin/zsh");
+    const env: Record<string, string | undefined> = { ...process.env, HOME: home };
+    if (options.zdotdir) env.ZDOTDIR = userDir;
+    else delete env.ZDOTDIR;
+    await activatePythonEnv(env, options.pythonEnv ?? venv, "/bin/zsh", wt);
+
+    // Written to work under whatever options the user's files set (no_unset, ksh_arrays).
     const report = [
-      'print -r -- "first=${path[1]}"',
-      'print -r -- "zdotdir=${ZDOTDIR-unset}"',
-      'print -r -- "histfile=$HISTFILE"',
+      'print -r -- "first=${PATH%%:*}"',
+      'print -r -- "path=$PATH"',
+      'print -r -- "zdotdir=${ZDOTDIR-unset} ${(t)ZDOTDIR-}"',
+      'print -r -- "histfile=${HISTFILE-}"',
       'print -r -- "leaked=${LOXEL_PYTHON_ENV_BIN-}${LOXEL_USER_ZDOTDIR-}${_loxel_zdotdir-}"',
-      'print -r -- "seen=$SEEN"',
+      'print -r -- "seen=${SEEN-}"',
     ].join("; ");
     const proc = Bun.spawn(["zsh", "-il", "-c", report], {
       env,
       stdin: "ignore",
       stdout: "pipe",
-      stderr: "ignore",
+      stderr: "pipe",
     });
-    const stdout = await new Response(proc.stdout).text();
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
     await proc.exited;
-    const result: Record<string, string> = { userZdotdir };
+    const result: Record<string, string> = { home, userDir, stderr };
     for (const line of stdout.split("\n")) {
       const at = line.indexOf("=");
       if (at > 0) result[line.slice(0, at)] = line.slice(at + 1);
@@ -87,22 +146,50 @@ describe.skipIf(!Bun.which("zsh"))("zsh startup shim", () => {
 
   test("runs the user's startup files, then keeps the environment first on PATH", async () => {
     const result = await startZsh({
-      ".zshenv": 'SEEN="env:$ZDOTDIR"\n',
-      // What macOS path_helper and Homebrew's shellenv do to an inherited PATH.
-      ".zprofile": 'path=(/usr/bin /bin $path); SEEN="$SEEN profile"\n',
-      ".zshrc": 'SEEN="$SEEN rc"\n',
-      ".zlogin": 'SEEN="$SEEN login"\n',
+      files: {
+        ".zshenv": 'SEEN="env:$ZDOTDIR"\n',
+        // What macOS path_helper and Homebrew's shellenv do to an inherited PATH.
+        ".zprofile": 'path=(/usr/bin /bin $path); SEEN="$SEEN profile"\n',
+        ".zshrc": 'SEEN="$SEEN rc"\n',
+        ".zlogin": 'SEEN="$SEEN login"\n',
+      },
     });
     expect(result.first).toBe(venvBin);
-    expect(result.seen).toBe(`env:${result.userZdotdir} profile rc login`);
-    expect(result.zdotdir).toBe(result.userZdotdir);
+    expect(result.seen).toBe(`env:${result.home} profile rc login`);
+    expect(result.zdotdir).toBe("unset ");
     expect(result.histfile?.startsWith(join(root, "state"))).toBe(false);
     expect(result.leaked).toBe("");
   });
 
+  test("follows an inherited ZDOTDIR, and one the user's .zshenv sets without exporting", async () => {
+    const inherited = await startZsh({ zdotdir: true, files: { ".zshrc": "SEEN=rc\n" } });
+    expect(inherited.seen).toBe("rc");
+    expect(inherited.zdotdir).toBe(`${inherited.userDir} scalar-export`);
+
+    const custom = await startZsh({
+      files: { ".zshenv": "ZDOTDIR=$TEST_DIR/zsh\n", "zsh/.zshrc": "SEEN=custom-rc\n" },
+    });
+    expect(custom.seen).toBe("custom-rc");
+    expect(custom.zdotdir).toBe(`${custom.home}/zsh scalar`);
+    expect(custom.first).toBe(venvBin);
+  });
+
+  test("works under the user's no_unset and ksh_arrays", async () => {
+    const result = await startZsh({
+      pythonEnv: pixi,
+      files: { ".zshenv": "setopt no_unset\n", ".zshrc": 'setopt ksh_arrays; SEEN="rc"\n' },
+    });
+    expect(result.seen).toBe("rc");
+    expect(result.first).toBe(join(pixiPath, "bin"));
+    expect(result.path?.split(":")).toContain("/usr/bin");
+    expect(result.leaked).toBe("");
+    // macOS /etc/zshrc itself trips over no_unset; only the shim's own files must not.
+    expect(result.stderr).not.toContain("zsh-python-env");
+  });
+
   test("leaves a virtual environment the user's startup files activated in front", async () => {
     const result = await startZsh({
-      ".zshrc": "export VIRTUAL_ENV=/other/venv; path=(/other/venv/bin $path)\n",
+      files: { ".zshrc": "export VIRTUAL_ENV=/other/venv; path=(/other/venv/bin $path)\n" },
     });
     expect(result.first).toBe("/other/venv/bin");
   });

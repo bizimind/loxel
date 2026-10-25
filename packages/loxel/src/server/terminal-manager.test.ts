@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { PythonEnv } from "@/api/python-env-model";
 import type { TerminalState } from "@/api/ws-protocol";
@@ -163,7 +166,8 @@ describe("TerminalManager Python environments", () => {
 
   test("activates the worktree's environment in the shell", async () => {
     process.env.SHELL = "/bin/sh";
-    const envPath = "/tmp/loxel-test-env";
+    const envPath = await mkdtemp(join(tmpdir(), "loxel-test-env-"));
+    await mkdir(join(envPath, "bin"));
     const asked: string[] = [];
     const manager = createManager(undefined, async (worktreePath) => {
       asked.push(worktreePath);
@@ -187,6 +191,7 @@ describe("TerminalManager Python environments", () => {
       activatePythonEnv: false,
     });
     expect(asked).toEqual(["/"]);
+    await rm(envPath, { recursive: true });
   });
 
   test("concurrent starts share one shell, and one closed while starting never runs", async () => {
@@ -208,5 +213,46 @@ describe("TerminalManager Python environments", () => {
     await Promise.all([first, second, neverStarted]);
     expect(manager.get(id)?.attached).toBe(true);
     expect(manager.get(closed)).toBeUndefined();
+  });
+
+  /** A manager whose environment lookup waits until `release()`. */
+  function gatedManager(initialCommandTtlMs?: number) {
+    let release = () => {};
+    const gate = new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    });
+    return { manager: createManager(initialCommandTtlMs, () => gate), release };
+  }
+
+  test("a client that detaches while the shell starts is not bound to it", async () => {
+    process.env.SHELL = "/bin/sh";
+    const { manager, release } = gatedManager();
+    const id = crypto.randomUUID();
+    const attached = manager.attach(id, createRecordingSink().sink, attachOptions);
+    manager.detach(id);
+    release();
+    await attached;
+    expect(manager.get(id)?.attached).toBe(false);
+    expect(manager.hasOrphanSessions()).toBe(true);
+  });
+
+  test("input, a resize and the initial command sent while the shell starts all reach it", async () => {
+    process.env.SHELL = "/bin/sh";
+    // The command's TTL runs out before the environment does, but it was claimed at attach.
+    const { manager, release } = gatedManager(50);
+    const id = crypto.randomUUID();
+    manager.setInitialCommand(id, "echo first-$((1+1))");
+    const sink = createRecordingSink();
+    const attached = manager.attach(id, sink.sink, attachOptions);
+    manager.write(id, new TextEncoder().encode("echo second-$((2+2))\n"));
+    manager.resize(id, 100, 30);
+    await Bun.sleep(100);
+    release();
+    await attached;
+    await until(() => sink.outputText().includes("second-4"));
+    expect(sink.outputText().indexOf("first-2")).toBeLessThan(
+      sink.outputText().indexOf("second-4"),
+    );
+    expect(manager.get(id)?.cols).toBe(100);
   });
 });

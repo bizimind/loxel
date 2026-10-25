@@ -60,10 +60,21 @@ function buildTerminalEnv(): Record<string, string | undefined> {
   return env;
 }
 
+/** A shell waiting for its environment, and what reached it meanwhile. */
+interface PendingStart {
+  /** Resolves to null when the terminal was destroyed meanwhile. */
+  session: Promise<TerminalSession | null>;
+  /** The client to bind once spawned; cleared by a detach. */
+  sink: TerminalSink | null;
+  /** The latest size an attach or resize asked for. */
+  size: { cols: number; rows: number } | null;
+  /** Keystrokes sent before the shell existed, written to it in order once it does. */
+  input: Uint8Array[];
+}
+
 export class TerminalManager {
   private sessions = new Map<string, TerminalSession>();
-  /** Spawns waiting for their environment; resolves to null when destroyed meanwhile. */
-  private starting = new Map<string, Promise<TerminalSession | null>>();
+  private starting = new Map<string, PendingStart>();
   private initialCommands = new Map<
     string,
     { command: string; timer: ReturnType<typeof setTimeout> }
@@ -110,12 +121,22 @@ export class TerminalManager {
 
   /** Attach a client to the session, spawning the shell first if the session does not exist. */
   async attach(id: string, sink: TerminalSink, options: TerminalAttachOptions): Promise<void> {
-    const session = this.sessions.get(id) ?? (await this.start(id, options));
-    // Closed while its environment was being resolved.
-    if (!session) return;
-    session.resize(options.cols, options.rows);
+    const running = this.sessions.get(id);
+    const since = { epoch: options.sinceEpoch, offset: options.sinceOffset };
+    if (running) {
+      running.resize(options.cols, options.rows);
+      running.setScrollbackLines(options.scrollbackLines);
+      return running.attach(sink, since);
+    }
+
+    const pending = this.start(id, options);
+    pending.sink = sink;
+    pending.size = { cols: options.cols, rows: options.rows };
+    const session = await pending.session;
+    // Destroyed, detached, or taken over by a later attach while the environment was resolved.
+    if (!session || pending.sink !== sink) return;
     session.setScrollbackLines(options.scrollbackLines);
-    return session.attach(sink, { epoch: options.sinceEpoch, offset: options.sinceOffset });
+    return session.attach(sink, since);
   }
 
   /**
@@ -123,23 +144,33 @@ export class TerminalManager {
    * panel that may not mount for a while (`loxel terminal --no-focus`); its first attach binds it.
    */
   async ensureSpawned(id: string, options: TerminalSpawnOptions): Promise<void> {
-    if (!this.sessions.has(id)) await this.start(id, options);
+    if (!this.sessions.has(id)) await this.start(id, options).session;
   }
 
   /**
    * Spawn once the environment is ready. Concurrent callers for the same ID share one spawn, and
-   * one destroyed before its environment is ready never starts.
+   * one destroyed before its environment is ready never starts. The initial command is claimed
+   * now, so its TTL cannot run out while the environment resolves.
    */
-  private start(id: string, options: TerminalSpawnOptions): Promise<TerminalSession | null> {
-    const pending = this.starting.get(id);
-    if (pending) return pending;
-    const started = this.buildEnv(options).then((env) => {
-      if (this.starting.get(id) !== started) return null;
-      this.starting.delete(id);
-      return this.spawn(id, options, env);
-    });
-    this.starting.set(id, started);
-    return started;
+  private start(id: string, options: TerminalSpawnOptions): PendingStart {
+    const existing = this.starting.get(id);
+    if (existing) return existing;
+    const command = this.takeInitialCommand(id);
+    const pending: PendingStart = {
+      session: this.buildEnv(options).then((env) => {
+        if (this.starting.get(id) !== pending) return null;
+        this.starting.delete(id);
+        const session = this.spawn(id, options, env, command);
+        if (pending.size) session.resize(pending.size.cols, pending.size.rows);
+        for (const data of pending.input) session.write(data);
+        return session;
+      }),
+      sink: null,
+      size: null,
+      input: [],
+    };
+    this.starting.set(id, pending);
+    return pending;
   }
 
   private async buildEnv(
@@ -160,7 +191,7 @@ export class TerminalManager {
           worktreePath,
         });
       } else if (pythonEnv) {
-        activatePythonEnv(env, pythonEnv, terminalShell());
+        await activatePythonEnv(env, pythonEnv, terminalShell(), worktreePath);
       }
     } catch (err) {
       log.warn("Could not activate the Python environment in a terminal", {
@@ -177,6 +208,7 @@ export class TerminalManager {
     id: string,
     options: TerminalSpawnOptions,
     env: Record<string, string | undefined>,
+    command: string | null,
   ): TerminalSession {
     const shell = terminalShell();
     const { cols, rows, cwd, worktreePath } = options;
@@ -206,12 +238,13 @@ export class TerminalManager {
 
     // Typed ahead: the PTY queues the bytes until the shell reads its first line, so the command
     // shows up at the prompt and in shell history exactly as if the user had entered it.
-    const command = this.takeInitialCommand(id);
     if (command !== null) session.write(textEncoder.encode(`${command}\n`));
     return session;
   }
 
   detach(id: string): void {
+    const pending = this.starting.get(id);
+    if (pending) pending.sink = null;
     this.sessions.get(id)?.detach();
   }
 
@@ -220,11 +253,19 @@ export class TerminalManager {
   }
 
   write(id: string, data: Uint8Array): void {
-    this.sessions.get(id)?.write(data);
+    const session = this.sessions.get(id);
+    if (session) session.write(data);
+    else this.starting.get(id)?.input.push(data);
   }
 
   resize(id: string, cols: number, rows: number): void {
-    this.sessions.get(id)?.resize(cols, rows);
+    const session = this.sessions.get(id);
+    if (session) {
+      session.resize(cols, rows);
+      return;
+    }
+    const pending = this.starting.get(id);
+    if (pending) pending.size = { cols, rows };
   }
 
   ack(id: string, syncOffset: number, bytes: number): void {
