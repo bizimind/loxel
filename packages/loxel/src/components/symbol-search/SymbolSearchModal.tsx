@@ -1,6 +1,6 @@
 import { LoaderIcon } from "lucide-react";
 import * as monaco from "monaco-editor";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { HighlightedLabel } from "@/components/ui/HighlightedLabel";
 import { QuickPick, QuickPickMessage } from "@/components/ui/quick-pick";
@@ -8,8 +8,13 @@ import { abbreviateHomePath } from "@/lib/home-path";
 import { getConnectedLspClients } from "@/lib/lsp-client";
 import { dispatchOpenFile } from "@/lib/open-file";
 import { isWithin } from "@/lib/project-file-helpers";
+import { cn } from "@/lib/utils";
 import type { WorkspaceSymbolResult } from "@/lib/workspace-symbols";
-import { resolveWorkspaceSymbolLocation, searchWorkspaceSymbols } from "@/lib/workspace-symbols";
+import {
+  resolveWorkspaceSymbolLocation,
+  searchWorkspaceSymbols,
+  symbolKey,
+} from "@/lib/workspace-symbols";
 import { useProjectStore } from "@/store/projects";
 import { useSymbolSearchStore } from "@/store/symbol-search";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -21,31 +26,39 @@ const MAX_VISIBLE = 200;
 const RESOLVE_TIMEOUT_MS = 2000;
 
 interface SearchState {
-  /** The trimmed query `results` answer. */
+  /** The worktree and trimmed query `results` answer. */
+  wtPath: string | null;
   query: string;
   results: WorkspaceSymbolResult[];
+  /** Every server has answered or given up. */
+  done: boolean;
 }
+
+const NO_SEARCH: SearchState = { wtPath: null, query: "", results: [], done: true };
+const NO_RESULTS: WorkspaceSymbolResult[] = [];
 
 /**
  * Searches `workspace/symbol` on the active worktree's connected language servers as the query
- * changes, debounced. A newer query cancels the request in flight (`$/cancelRequest`).
+ * changes, debounced, showing each server's answer as it arrives. A newer query cancels the
+ * requests in flight (`$/cancelRequest`).
  */
 function useWorkspaceSymbolSearch(isOpen: boolean, wtPath: string | null, query: string) {
-  const [state, setState] = useState<SearchState>({ query: "", results: [] });
+  const [state, setState] = useState<SearchState>(NO_SEARCH);
   const trimmed = query.trim();
+
+  // A new session starts empty, so results of an earlier one are never shown or accepted.
+  useEffect(() => {
+    if (!isOpen) setState(NO_SEARCH);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || !wtPath || !trimmed) return;
     const tokens = new monaco.CancellationTokenSource();
     const timer = setTimeout(() => {
-      void searchWorkspaceSymbols(
-        getConnectedLspClients(wtPath),
-        trimmed,
-        wtPath,
-        tokens.token,
-      ).then((results) => {
-        if (!tokens.token.isCancellationRequested) setState({ query: trimmed, results });
-      });
+      const sources = getConnectedLspClients(wtPath);
+      void searchWorkspaceSymbols(sources, trimmed, wtPath, tokens.token, (results, done) =>
+        setState({ wtPath, query: trimmed, results, done }),
+      );
     }, DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
@@ -54,9 +67,13 @@ function useWorkspaceSymbolSearch(isOpen: boolean, wtPath: string | null, query:
     };
   }, [isOpen, wtPath, trimmed]);
 
-  if (!trimmed) return { results: [], searching: false };
-  // Keep showing the previous answer while the next one is on its way.
-  return { results: state.results, searching: state.query !== trimmed };
+  if (!trimmed || !wtPath) return { results: NO_RESULTS, searching: false };
+  // Keep showing the previous query's answer, in this worktree, while the next one arrives.
+  const current = state.wtPath === wtPath;
+  return {
+    results: current ? state.results : NO_RESULTS,
+    searching: !current || state.query !== trimmed || !state.done,
+  };
 }
 
 function emptyMessage(query: string, searching: boolean): string {
@@ -75,7 +92,7 @@ export function SymbolSearchModal() {
   const homeDir = useProjectStore((s) => s.homeDir);
 
   const { results, searching } = useWorkspaceSymbolSearch(isOpen, wtPath, query);
-  const visible = results.slice(0, MAX_VISIBLE);
+  const visible = useMemo(() => results.slice(0, MAX_VISIBLE), [results]);
 
   const openSymbol = useCallback(
     (result: WorkspaceSymbolResult) => {
@@ -101,9 +118,7 @@ export function SymbolSearchModal() {
       onQueryChange={setQuery}
       placeholder="Go to symbol in workspace"
       items={visible}
-      getKey={({ filePath, symbol }) =>
-        `${filePath}:${symbol.range?.startLineNumber}:${symbol.range?.startColumn}:${symbol.kind}:${symbol.name}`
-      }
+      getKey={symbolKey}
       onAccept={openSymbol}
       itemClassName="py-1.5"
       inputAdornment={
@@ -113,7 +128,12 @@ export function SymbolSearchModal() {
       renderItem={({ symbol, filePath, indices }) => (
         <div className="flex items-center gap-2 text-sm">
           <SymbolKindIcon kind={symbol.kind} className="size-4 shrink-0" />
-          <span className="shrink-0">
+          <span
+            className={cn(
+              "shrink-0",
+              symbol.tags.includes(monaco.languages.SymbolTag.Deprecated) && "line-through",
+            )}
+          >
             <HighlightedLabel text={symbol.name} indices={indices} />
           </span>
           {symbol.containerName && (

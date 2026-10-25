@@ -16,18 +16,18 @@ The active worktree gets its own TypeScript language server process. Switching w
 
 ## Supported features
 
-| Feature           | Description                                                  |
-| ----------------- | ------------------------------------------------------------ |
-| Hover             | Type information and JSDoc for any symbol                    |
-| Go-to-definition  | Jump to the declaration of any symbol                        |
-| Find references   | Jump to the usages of a symbol                               |
-| Completions       | Context-aware autocompletion as you type                     |
-| Rename            | Rename a symbol and update all references                    |
-| Code actions      | Quick fixes, imports, and refactors                          |
-| Signature help    | Function parameter hints while typing a call                 |
-| Document symbols  | Symbol outline for the current file                          |
-| Workspace symbols | [Go to Symbol](/docs/editor#go-to-symbol) across the project |
-| Folding ranges    | Collapse functions, blocks, and regions                      |
+| Feature           | Description                                                             |
+| ----------------- | ----------------------------------------------------------------------- |
+| Hover             | Type information and JSDoc for any symbol                               |
+| Go-to-definition  | Jump to the declaration of any symbol                                   |
+| Find references   | Jump to the usages of a symbol                                          |
+| Completions       | Context-aware autocompletion as you type                                |
+| Rename            | Rename a symbol and update all references                               |
+| Code actions      | Quick fixes, imports, and refactors                                     |
+| Signature help    | Function parameter hints while typing a call                            |
+| Document symbols  | Symbol outline for the current file                                     |
+| Workspace symbols | [Go to Symbol](/docs/editor#go-to-symbol) in the projects of open files |
+| Folding ranges    | Collapse functions, blocks, and regions                                 |
 
 These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quick fixes); the code editor has no right-click menu. They work in editor tabs; the [diff viewer](/docs/diff-viewer) shows code without them.
 

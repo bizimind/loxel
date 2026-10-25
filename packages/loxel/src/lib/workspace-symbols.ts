@@ -26,33 +26,74 @@ export interface WorkspaceSymbolResult {
 
 type Candidate = Omit<WorkspaceSymbolResult, "indices">;
 
+/** How long one server may take to answer before it is cancelled and left out of a search. */
+const SOURCE_TIMEOUT_MS = 3000;
+
 /**
- * Queries `workspace/symbol` on every source at once and merges the answers into one ranked
- * list (see `rankWorkspaceSymbols`). A source that fails is logged and left out. Once `token`
- * is cancelled the answers are stale and the result is empty.
+ * Queries `workspace/symbol` on every source at once. Each time a source answers, `onResults`
+ * receives everything merged so far (see `rankWorkspaceSymbols`), so a slow server does not hold
+ * back the others; `done` is true on the last call. A source that fails, or has not answered
+ * after `timeoutMs`, is cancelled and left out. Nothing is reported once `token` is cancelled.
  */
 export async function searchWorkspaceSymbols(
   sources: readonly WorkspaceSymbolSource[],
   query: string,
   wtPath: string,
   token: monaco.CancellationToken,
-): Promise<WorkspaceSymbolResult[]> {
-  const answers = await Promise.allSettled(sources.map((s) => s.workspaceSymbols(query, token)));
-  if (token.isCancellationRequested) return [];
-
+  onResults: (results: WorkspaceSymbolResult[], done: boolean) => void,
+  timeoutMs = SOURCE_TIMEOUT_MS,
+): Promise<void> {
+  if (sources.length === 0) {
+    onResults([], true);
+    return;
+  }
   const candidates: Candidate[] = [];
-  answers.forEach((answer, i) => {
-    if (answer.status === "rejected") {
-      log.warn("workspace/symbol failed", { error: answer.reason });
-      return;
+  let pending = sources.length;
+  await Promise.all(
+    sources.map(async (source) => {
+      const symbols = await querySource(source, query, token, timeoutMs);
+      pending -= 1;
+      if (token.isCancellationRequested) return;
+      for (const symbol of symbols) {
+        const filePath = symbolFilePath(symbol.uri);
+        if (filePath) candidates.push({ symbol, source, filePath });
+      }
+      onResults(rankWorkspaceSymbols(query, candidates, wtPath), pending === 0);
+    }),
+  );
+}
+
+/** The last failure logged per source, so a server that keeps failing logs once, not per keystroke. */
+const lastFailure = new WeakMap<WorkspaceSymbolSource, string>();
+
+async function querySource(
+  source: WorkspaceSymbolSource,
+  query: string,
+  token: monaco.CancellationToken,
+  timeoutMs: number,
+): Promise<WorkspaceSymbolItem[]> {
+  const tokens = new monaco.CancellationTokenSource(token);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    tokens.cancel();
+  }, timeoutMs);
+  try {
+    const symbols = await source.workspaceSymbols(query, tokens.token);
+    lastFailure.delete(source);
+    return symbols;
+  } catch (error) {
+    if (token.isCancellationRequested) return [];
+    const message = timedOut ? "timed out" : String(error);
+    if (lastFailure.get(source) !== message) {
+      lastFailure.set(source, message);
+      log.warn("workspace/symbol failed", { error, timedOut });
     }
-    const source = sources[i]!;
-    for (const symbol of answer.value) {
-      const filePath = symbolFilePath(symbol.uri);
-      if (filePath) candidates.push({ symbol, source, filePath });
-    }
-  });
-  return rankWorkspaceSymbols(query, candidates, wtPath);
+    return [];
+  } finally {
+    clearTimeout(timer);
+    tokens.dispose();
+  }
 }
 
 /**
@@ -71,11 +112,11 @@ export function rankWorkspaceSymbols(
   const scored: Array<{ result: WorkspaceSymbolResult; score: number; isProjectFile: boolean }> =
     [];
   for (const candidate of candidates) {
-    const { name, kind, range } = candidate.symbol;
-    const key = `${candidate.filePath}\0${name}\0${kind}\0${range?.startLineNumber}:${range?.startColumn}`;
+    const key = symbolKey(candidate);
     if (seen.has(key)) continue;
     seen.add(key);
 
+    const { name } = candidate.symbol;
     const match = fuzzyMatch(query, name);
     scored.push({
       result: { ...candidate, indices: match?.indices ?? [] },
@@ -93,6 +134,20 @@ export function rankWorkspaceSymbols(
       (a.result.symbol.range?.startLineNumber ?? 0) - (b.result.symbol.range?.startLineNumber ?? 0),
   );
   return scored.map((s) => s.result);
+}
+
+/**
+ * Identifies a symbol across servers. The container tells apart same-named symbols of one file
+ * that come without a range (left to `workspaceSymbol/resolve`).
+ */
+export function symbolKey({
+  filePath,
+  symbol,
+}: Pick<WorkspaceSymbolResult, "filePath" | "symbol">): string {
+  const { name, kind, containerName, range } = symbol;
+  return [filePath, name, kind, containerName, range?.startLineNumber, range?.startColumn].join(
+    "\0",
+  );
 }
 
 /** `fuzzyMatch`'s tiers (3 prefix, 2 substring, 1 subsequence) with exact matches above them. */
@@ -142,12 +197,12 @@ function isProjectFile(filePath: string, wtPath: string): boolean {
  * (see LANGUAGE_SERVERS.md). Other schemes cannot be opened in an editor tab.
  */
 function symbolFilePath(uri: string): string | null {
-  let url: URL;
   try {
-    url = new URL(uri);
+    const url = new URL(uri);
+    if (url.protocol !== "file:" && url.protocol !== "loxel:") return null;
+    return decodeURIComponent(url.pathname);
   } catch {
+    // Not a URI, or a malformed percent escape.
     return null;
   }
-  if (url.protocol !== "file:" && url.protocol !== "loxel:") return null;
-  return decodeURIComponent(url.pathname);
 }

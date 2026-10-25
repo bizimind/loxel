@@ -54,7 +54,12 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
           languageId,
           modelFilter: isLiveEditorModel,
         });
-        connectedClients.set(currentClient, wtPath);
+        const client = currentClient;
+        connectedClients.set(client, wtPath);
+        // A socket the server closed (replaced by a newer connection) never answers again.
+        transport.state.onChange(({ state }) => {
+          if (state === "closed") connectedClients.delete(client);
+        });
       },
       () => {
         if (currentWtPath === wtPath) {
