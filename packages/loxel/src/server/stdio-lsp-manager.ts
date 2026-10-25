@@ -56,6 +56,15 @@ interface LspRange {
   end: LspPosition;
 }
 
+/** The server capability that advertises each suppressible LSP feature statically. */
+const SERVER_CAPABILITY_OF = {
+  "textDocument/formatting": "documentFormattingProvider",
+  "textDocument/rangeFormatting": "documentRangeFormattingProvider",
+  "textDocument/semanticTokens": "semanticTokensProvider",
+} as const;
+
+export type SuppressibleFeature = keyof typeof SERVER_CAPABILITY_OF;
+
 interface LspContentChange {
   range?: LspRange;
   text: string;
@@ -868,15 +877,6 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
  * preserve caller intent; nested object keys from the server are added only
  * where the client didn't already specify them.
  */
-/** The server capability that advertises each suppressible LSP feature statically. */
-const SERVER_CAPABILITY_OF = {
-  "textDocument/formatting": "documentFormattingProvider",
-  "textDocument/rangeFormatting": "documentRangeFormattingProvider",
-  "textDocument/semanticTokens": "semanticTokensProvider",
-} as const;
-
-export type SuppressibleFeature = keyof typeof SERVER_CAPABILITY_OF;
-
 function mergeInitOptions(
   existing: Record<string, unknown> | undefined,
   add: Record<string, unknown>,
