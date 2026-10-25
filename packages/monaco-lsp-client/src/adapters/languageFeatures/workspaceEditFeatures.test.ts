@@ -13,6 +13,7 @@ mock.module("monaco-editor", () => fakeMonacoModule);
 
 const { LspRenameFeature } = await import("./LspRenameFeature");
 const { LspCodeActionFeature } = await import("./LspCodeActionFeature");
+const { LspApplyEditFeature } = await import("./LspApplyEditFeature");
 
 const renameEdit: WorkspaceEdit = { changes: { "file:///w/b.py": [] } };
 const model = { uri: { toString: () => "file:///w/a.py" } } as unknown as monaco.editor.ITextModel;
@@ -54,6 +55,7 @@ function setup(server: Record<string, unknown>, result: ApplyWorkspaceEditResult
       toMonacoCommand: (command: Command | undefined) =>
         command && { id: command.command, title: command.title, arguments: command.arguments },
       executeServerCommand: async (command: Command) => {
+        if (!command.command.startsWith("server.")) return false;
         executed.push(command);
         return true;
       },
@@ -155,6 +157,26 @@ describe("LspCodeActionFeature", () => {
     expect(executed).toEqual([serverCommand]);
   });
 
+  test("runs a client command on the focused editor after the edit", async () => {
+    const triggered: unknown[][] = [];
+    fakeMonaco.editors.push({
+      hasTextFocus: () => true,
+      hasWidgetFocus: () => false,
+      trigger: (...args: unknown[]) => triggered.push(args),
+    } as unknown as monaco.editor.ICodeEditor);
+    const clientCommand: Command = { title: "Rename", command: "editor.action.rename" };
+    const { list, run, applied } = codeActions(
+      [{ title: "Extract", edit: { changes: {} }, command: clientCommand }],
+      { applied: true },
+    );
+
+    const [action] = await list();
+    await run(action?.command);
+
+    expect(applied).toHaveLength(1);
+    expect(triggered).toEqual([["monaco-lsp-client", "editor.action.rename", undefined]]);
+  });
+
   test("does not run the action's command when its edit was not applied", async () => {
     const edit: WorkspaceEdit = { changes: {} };
     const { list, run, executed } = codeActions([{ title: "Fix", edit, command: serverCommand }], {
@@ -189,5 +211,26 @@ describe("LspCodeActionFeature", () => {
 
     expect(resolves()).toBe(1);
     expect(applied).toEqual([edit]);
+  });
+});
+
+describe("LspApplyEditFeature", () => {
+  test("answers workspace/applyEdit with the workspace-edit path's result", async () => {
+    const ctx = setup({}, { applied: false, failureReason: "outside" });
+    let handler: ((params: { edit: WorkspaceEdit }) => Promise<unknown>) | undefined;
+    const connection = ctx.connection as unknown as { connection: unknown };
+    connection.connection = {
+      registerRequestHandler: (_type: unknown, h: typeof handler) => {
+        handler = h;
+        return { dispose: () => {} };
+      },
+    };
+    const feature = new LspApplyEditFeature(ctx.connection);
+
+    const answer = await handler?.({ edit: renameEdit });
+
+    expect(answer).toEqual({ ok: { applied: false, failureReason: "outside" } });
+    expect(ctx.applied).toEqual([renameEdit]);
+    feature.dispose();
   });
 });

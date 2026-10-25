@@ -441,6 +441,35 @@ describe("WorkspaceEditApplier", () => {
     expect(calls).toEqual([]);
   });
 
+  test("refuses, before changing anything, a file looked at before its folder was renamed", async () => {
+    const { fs, calls } = fakeFileSystem({ "/w/lib/a.py": "a" }, ["/w/lib"]);
+
+    const result = await applier(fs).apply({
+      documentChanges: [
+        docEdit("file:///w/lib/a.py", [edit(0, 0, 1, "b")]),
+        { kind: "rename", oldUri: "file:///w/lib", newUri: "file:///w/lib2" },
+        docEdit("file:///w/lib/a.py", [edit(0, 0, 1, "c")]),
+      ],
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.failureReason).toContain("inside a folder renamed or deleted");
+    expect(calls).toEqual([]);
+  });
+
+  test("applies edits one after another, each against the previous one's result", async () => {
+    const { fs, disk } = fakeFileSystem({ "/w/a.py": "a" });
+    const files = applier(fs);
+
+    const results = await Promise.all([
+      files.apply({ changes: { "file:///w/a.py": [edit(0, 0, 1, "X")] } }),
+      files.apply({ changes: { "file:///w/a.py": [edit(0, 1, 1, "!")] } }),
+    ]);
+
+    expect(results).toEqual([{ applied: true }, { applied: true }]);
+    expect(disk.get("/w/a.py")).toBe("X!");
+  });
+
   test("delete honors ignoreIfNotExists and needs recursive for a folder", async () => {
     const { fs, calls } = fakeFileSystem({ "/w/a.py": "a" }, ["/w/pkg"]);
     const del = (uri: string, options?: { recursive?: boolean; ignoreIfNotExists?: boolean }) =>
@@ -477,6 +506,10 @@ describe("applyTextEdits", () => {
 
   test("clamps a character past the line end and a line past the text end", () => {
     expect(applyTextEdits("ab\r\ncd", [edit(0, 9, 9, "!"), edit(7, 0, 0, "?")])).toBe("ab!\r\ncd?");
+  });
+
+  test("applies an insert touching a replace that starts at the same place", () => {
+    expect(applyTextEdits("abcdef", [edit(0, 1, 3, "X"), edit(0, 1, 1, "+")])).toBe("a+Xdef");
   });
 
   test("throws on overlapping edits", () => {

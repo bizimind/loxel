@@ -8,8 +8,25 @@ import { invalidateDirQueries } from "@/queries/query-helpers";
 import { deleteFile, moveFile, renameFile } from "./file-operations";
 import { pathName, relativeTo } from "./project-file-helpers";
 
-/** Folders whose files language-server edits never change: dependencies and git's own. */
-const PROTECTED_SEGMENTS = new Set(["node_modules", "site-packages", "dist-packages", ".git"]);
+/**
+ * Folders whose files language-server edits never change: dependencies, Python environments kept
+ * in the worktree (whose standard library copies live outside `site-packages`), git's own, and
+ * other worktrees nested in this one (`wt`'s `.worktrees`).
+ */
+const PROTECTED_SEGMENTS = new Set([
+  "node_modules",
+  "site-packages",
+  "dist-packages",
+  "__pypackages__",
+  ".venv",
+  "venv",
+  ".tox",
+  ".nox",
+  ".pixi",
+  ".conda",
+  ".git",
+  ".worktrees",
+]);
 
 /**
  * The disk side of language-server workspace edits (rename, code actions, `workspace/applyEdit`)
@@ -39,8 +56,14 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
     const parent = parentOf(dir);
     await ensureDir(parent);
     const { path } = await api.createProjectDir(wtPath, { dir: parent, name: pathName(dir) });
-    if (path !== dir) throw new Error(`Could not create the folder ${dir}`);
     invalidateDirQueries(parent);
+    if (path !== dir) await refuseStray(path, `${dir} already exists`);
+  }
+
+  /** Removes what a create route made under a free name (the path appeared meanwhile), then throws. */
+  async function refuseStray(stray: string, reason: string): Promise<never> {
+    await deleteFile({ wt: wtPath, path: stray, isDetached: false });
+    throw new Error(reason);
   }
 
   return {
@@ -63,7 +86,11 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
     },
 
     async readFile(uri) {
-      const { content } = await api.getFileContentByPath(editablePath(uri, wtPath), wtPath);
+      const path = editablePath(uri, wtPath);
+      const { content } = await api.getFileContentByPath(path, wtPath);
+      // The route decodes as UTF-8, replacing invalid bytes: writing that back would corrupt the file.
+      if (content.includes("\uFFFD"))
+        throw new Error(`${path} is not UTF-8 text, so it is not changed`);
       return content;
     },
 
@@ -84,25 +111,20 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
       const created = await api.createProjectFile(wtPath, { dir, name: pathName(path) });
       invalidateDirQueries(dir);
       // The route picks a free name when the file appeared meanwhile.
-      if (created.path !== path) throw new Error(`${path} already exists`);
+      if (created.path !== path) await refuseStray(created.path, `${path} already exists`);
     },
 
     async rename(source, target) {
       const sourcePath = editablePath(source, wtPath);
       const targetPath = editablePath(target, wtPath);
       const targetDir = parentOf(targetPath);
-      let path = sourcePath;
-      if (parentOf(sourcePath) !== targetDir) {
+      const newName = pathName(targetPath);
+      let path: string;
+      if (parentOf(sourcePath) === targetDir) {
+        path = await renameFile({ wt: wtPath, path: sourcePath, newName, isDetached: false });
+      } else {
         await ensureDir(targetDir);
-        path = await moveFile({ wt: wtPath, srcPath: sourcePath, destDir: targetDir });
-      }
-      if (pathName(path) !== pathName(targetPath)) {
-        path = await renameFile({
-          wt: wtPath,
-          path,
-          newName: pathName(targetPath),
-          isDetached: false,
-        });
+        path = await moveFile({ wt: wtPath, srcPath: sourcePath, destDir: targetDir, newName });
       }
       if (path !== targetPath) throw new Error(`${sourcePath} was moved to ${path} instead`);
     },
@@ -131,7 +153,7 @@ function assertWorktreeFile(path: string, root: string): void {
     throw new Error(`${path} is outside the worktree`);
   }
   if (segments.some((s) => PROTECTED_SEGMENTS.has(s))) {
-    throw new Error(`${path} belongs to a dependency or to git, so it is not changed`);
+    throw new Error(`${path} belongs to a dependency, an environment or git, so it is not changed`);
   }
 }
 

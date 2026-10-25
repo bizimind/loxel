@@ -17,7 +17,9 @@ mock.module("@/api/client", () => ({
     if (!entry) throw new ApiError("Path not found", 404);
     return { path: entry.real, isDir: entry.isDir };
   },
-  getFileContentByPath: async (path: string) => ({ content: `content of ${path}` }),
+  getFileContentByPath: async (path: string) => ({
+    content: path.endsWith(".latin1") ? "caf\uFFFD" : `content of ${path}`,
+  }),
   writeFileContent: async (options: unknown) => {
     calls.push(["write", options]);
     return { success: true };
@@ -30,7 +32,8 @@ mock.module("@/api/client", () => ({
   },
   createProjectFile: async (wt: string, options: { dir: string; name: string }) => {
     calls.push(["createFile", wt, options]);
-    return { path: `${options.dir}/${options.name}` };
+    const path = `${options.dir}/${options.name}`;
+    return { path: disk.has(path) ? `${path.replace(/\.py$/, "")} 2.py` : path };
   },
 }));
 mock.module("@/queries/query-helpers", () => ({ invalidateDirQueries: () => {} }));
@@ -39,9 +42,9 @@ mock.module("./file-operations", () => ({
     calls.push(["rename", options]);
     return `${options.path.slice(0, options.path.lastIndexOf("/"))}/${options.newName}`;
   },
-  moveFile: async (options: { srcPath: string; destDir: string }) => {
+  moveFile: async (options: { srcPath: string; destDir: string; newName?: string }) => {
     calls.push(["move", options]);
-    return `${options.destDir}/${options.srcPath.split("/").pop()}`;
+    return `${options.destDir}/${options.newName ?? options.srcPath.split("/").pop()}`;
   },
   deleteFile: async (options: unknown) => {
     calls.push(["delete", options]);
@@ -94,6 +97,9 @@ describe("createLspWorkspaceFiles", () => {
       "file:///repo/.venv/lib/python3.12/site-packages/requests/api.py",
       "file:///repo/node_modules/left-pad/index.js",
       "file:///repo/.git/config",
+      "file:///repo/.venv/lib/python3.12/os.py",
+      "file:///repo/.pixi/envs/default/lib/python3.12/os.py",
+      "file:///repo/.worktrees/feature/src/a.ts",
       "loxel://compare/repo/pkg/a.py#panel-old",
       "loxel://HEAD/repo/pkg/a.py#new",
     ]) {
@@ -141,8 +147,23 @@ describe("createLspWorkspaceFiles", () => {
     await files().rename(uri("file:///repo/pkg/a.py"), uri("file:///repo/lib/c.py"));
     expect(calls).toEqual([
       ["createDir", WT, { dir: "/repo", name: "lib" }],
-      ["move", { wt: WT, srcPath: "/repo/pkg/a.py", destDir: "/repo/lib" }],
-      ["rename", { wt: WT, path: "/repo/lib/a.py", newName: "c.py", isDetached: false }],
+      ["move", { wt: WT, srcPath: "/repo/pkg/a.py", destDir: "/repo/lib", newName: "c.py" }],
+    ]);
+  });
+
+  test("refuses to read a file that is not UTF-8, which writing back would corrupt", async () => {
+    await expect(files().readFile(uri("file:///repo/pkg/notes.latin1"))).rejects.toThrow(
+      "not UTF-8",
+    );
+  });
+
+  test("removes the file the create route made under a free name when the path appeared", async () => {
+    await expect(files().createFile(uri("file:///repo/pkg/a.py"))).rejects.toThrow(
+      "/repo/pkg/a.py already exists",
+    );
+    expect(calls.at(-1)).toEqual([
+      "delete",
+      { wt: WT, path: "/repo/pkg/a 2.py", isDetached: false },
     ]);
   });
 });

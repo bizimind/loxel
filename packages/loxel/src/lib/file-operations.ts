@@ -1,5 +1,5 @@
 import * as api from "@/api/client";
-import { fileParentDir } from "@/lib/project-file-helpers";
+import { fileParentDir, pathName } from "@/lib/project-file-helpers";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 import { getCurrentWorktreeUI } from "@/store/worktree-ui";
 
@@ -32,21 +32,29 @@ export async function renameFile(options: {
 
 /**
  * Move a file or directory of worktree `wt` (or one of its Others folders) into `destDir`
- * (empty for the worktree root), keeping its name, and tell the rest of the app like
- * `renameFile`. Returns the new absolute path. Throws when the server refuses the move.
+ * (empty for the worktree root), renaming it to `newName` if given, and tell the rest of the app
+ * like `renameFile`, once for the whole move so an open tab with unsaved edits moves in one step.
+ * Returns the new absolute path. Throws when the server refuses the move or the rename.
  */
 export async function moveFile(options: {
   wt: string;
   srcPath: string;
   destDir: string;
+  newName?: string;
 }): Promise<string> {
-  const { wt, srcPath, destDir } = options;
-  const { newPath } = await api.moveProjectFile(wt, { srcPath, destDir });
-  getCurrentWorktreeUI().getState().renameProjectPaths(srcPath, newPath);
-  window.dispatchEvent(
-    new CustomEvent("loxel-file-moved", { detail: { oldPath: srcPath, newPath } }),
-  );
-  invalidateDirQueries(fileParentDir(srcPath, wt), destDir || wt);
+  const { wt, srcPath, destDir, newName } = options;
+  let { newPath } = await api.moveProjectFile(wt, { srcPath, destDir });
+  try {
+    if (newName && pathName(newPath) !== newName) {
+      ({ newPath } = await api.renameProjectFile(wt, { path: newPath, newName }));
+    }
+  } finally {
+    getCurrentWorktreeUI().getState().renameProjectPaths(srcPath, newPath);
+    window.dispatchEvent(
+      new CustomEvent("loxel-file-moved", { detail: { oldPath: srcPath, newPath } }),
+    );
+    invalidateDirQueries(fileParentDir(srcPath, wt), destDir || wt);
+  }
   return newPath;
 }
 

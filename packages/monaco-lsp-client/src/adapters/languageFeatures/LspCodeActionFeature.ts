@@ -32,8 +32,9 @@ export class LspCodeActionFeature extends Disposable {
     super();
 
     this._register(
-      monaco.editor.registerCommand(this._applyCommandId, (_accessor, edit: unknown, command) =>
-        this._apply(edit, command),
+      monaco.editor.registerCommand(
+        this._applyCommandId,
+        (_accessor, edit: unknown, command: unknown) => this._apply(edit, command),
       ),
     );
 
@@ -90,8 +91,14 @@ export class LspCodeActionFeature extends Disposable {
     const result = await this._connection.edits.apply(edit);
     if (!result.applied || !isLspCommand(command)) return;
     if (await this._connection.commands.executeServerCommand(command)) return;
-    // Monaco has no public way to run a client command (one that is not the server's) from here.
-    console.warn(`[MonacoLspClient] code action command ${command.command} was not run`);
+    // A client command (`editor.action.*`): run it on the editor the action was applied in, as
+    // Monaco would have. `trigger` passes one argument, which is what editor actions take.
+    const editor = monaco.editor.getEditors().find((e) => e.hasTextFocus() || e.hasWidgetFocus());
+    if (!editor || (command.arguments?.length ?? 0) > 1) {
+      console.warn(`[MonacoLspClient] code action command ${command.command} was not run`);
+      return;
+    }
+    editor.trigger("monaco-lsp-client", command.command, command.arguments?.[0]);
   }
 }
 

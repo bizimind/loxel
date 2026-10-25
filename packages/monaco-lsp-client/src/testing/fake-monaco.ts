@@ -30,12 +30,14 @@ type CommandHandler = (accessor: unknown, ...args: unknown[]) => unknown;
 
 export const fakeMonaco = {
   models: [] as monaco.editor.ITextModel[],
+  editors: [] as monaco.editor.ICodeEditor[],
   commands: new Map<string, CommandHandler>(),
   /** Language providers registered through `monaco.languages.register<Kind>Provider`, by kind. */
   providers: new Map<string, unknown>(),
   didCreateModel: new FakeEmitter<monaco.editor.ITextModel>(),
   reset(): void {
     this.models.length = 0;
+    this.editors.length = 0;
     this.commands.clear();
     this.providers.clear();
   },
@@ -81,6 +83,7 @@ export const fakeMonacoModule = {
   Uri: { parse: parseUri },
   editor: {
     getModels: () => fakeMonaco.models,
+    getEditors: () => fakeMonaco.editors,
     getModel: (uri: monaco.Uri) =>
       fakeMonaco.models.find((m) => m.uri.toString() === uri.toString()) ?? null,
     onDidCreateModel: fakeMonaco.didCreateModel.event,

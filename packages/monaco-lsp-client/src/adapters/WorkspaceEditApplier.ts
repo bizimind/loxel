@@ -143,10 +143,18 @@ export class WorkspaceEditApplier extends Disposable {
     return undefined;
   }
 
-  async apply(edit: WorkspaceEdit): Promise<ApplyWorkspaceEditResult> {
-    const result = await this._apply(edit);
-    if (!result.applied) this._options.onFailure?.(result.failureReason ?? "The edit failed");
-    return result;
+  /** The edit being applied: edits apply one at a time, each planned against the last's result. */
+  private _queue: Promise<unknown> = Promise.resolve();
+
+  apply(edit: WorkspaceEdit): Promise<ApplyWorkspaceEditResult> {
+    const run = async () => {
+      const result = await this._apply(edit);
+      if (!result.applied) this._options.onFailure?.(result.failureReason ?? "The edit failed");
+      return result;
+    };
+    const next = this._queue.then(run, run);
+    this._queue = next.catch(() => {});
+    return next;
   }
 
   private async _apply(edit: WorkspaceEdit): Promise<ApplyWorkspaceEditResult> {
@@ -258,6 +266,8 @@ class EditPlanner {
   private readonly _entries = new Map<string, Entry>();
   /** Folders renamed away, renamed into, or deleted earlier in the edit. */
   private readonly _changedDirs: string[] = [];
+  /** How many of `_changedDirs` existed when each entry was recorded. */
+  private readonly _changedDirsSeen = new Map<string, number>();
   private readonly _versionedModels = new Set<monaco.editor.ITextModel>();
   private readonly _steps: Step[] = [];
 
@@ -385,7 +395,7 @@ class EditPlanner {
       return;
     }
     this._steps.push({ change, label, kind: "create", uri });
-    this._entries.set(key(uri), { type: "disk", readFrom: uri, text: "" });
+    this._set(key(uri), { type: "disk", readFrom: uri, text: "" });
   }
 
   private async _rename(change: number, operation: RenameFile): Promise<void> {
@@ -418,14 +428,14 @@ class EditPlanner {
     }
     this._steps.push({ change, label: describe(source), kind: "rename", source, target });
 
-    this._entries.set(key(source), { type: "missing" });
+    this._set(key(source), { type: "missing" });
     if (sourceEntry.type === "directory") {
       this._changedDirs.push(key(source), key(target));
-      this._entries.set(key(target), { type: "directory" });
+      this._set(key(target), { type: "directory" });
     } else if (sourceEntry.type === "model") {
-      this._entries.set(key(target), { type: "moved" });
+      this._set(key(target), { type: "moved" });
     } else {
-      this._entries.set(key(target), { ...sourceEntry });
+      this._set(key(target), { ...sourceEntry });
     }
   }
 
@@ -444,19 +454,21 @@ class EditPlanner {
       this._changedDirs.push(key(uri));
     }
     this._steps.push({ change, label, kind: "delete", uri });
-    this._entries.set(key(uri), { type: "missing" });
+    this._set(key(uri), { type: "missing" });
   }
 
   /** What `uri` holds at this point of the plan; the first look checks it with `stat`. */
   private async _entry(uri: monaco.Uri): Promise<Entry> {
     const k = key(uri);
-    const known = this._entries.get(k);
-    if (known) return known;
-    if (this._changedDirs.some((dir) => k.startsWith(`${dir}/`))) {
+    // A folder renamed or deleted after the path was looked at changes it too.
+    const seen = this._changedDirsSeen.get(k) ?? 0;
+    if (this._changedDirs.slice(seen).some((dir) => k.startsWith(`${dir}/`))) {
       throw new Error(
         `Changing ${describe(uri)} inside a folder renamed or deleted in the same edit is not supported`,
       );
     }
+    const known = this._entries.get(k);
+    if (known) return known;
 
     const model = monaco.editor.getModel(uri) ?? undefined;
     let entry: Entry;
@@ -470,8 +482,13 @@ class EditPlanner {
         entry = type === "file" ? { type: "model", model } : { type: "missing", model };
       else entry = type === "file" ? { type: "disk", readFrom: uri } : { type: "missing" };
     }
-    this._entries.set(k, entry);
+    this._set(k, entry);
     return entry;
+  }
+
+  private _set(k: string, entry: Entry): void {
+    this._entries.set(k, entry);
+    this._changedDirsSeen.set(k, this._changedDirs.length);
   }
 }
 
@@ -528,11 +545,28 @@ function comparePositions(a: Position, b: Position): number {
   return a.line === b.line ? a.character - b.character : a.line - b.line;
 }
 
+/**
+ * Orders edits by start, an insert before a replace starting at the same place (they touch, which
+ * the spec allows), and otherwise keeps their order.
+ */
+function sortByStart<T>(
+  edits: readonly T[],
+  compareStarts: (a: T, b: T) => number,
+  isEmpty: (e: T) => boolean,
+): T[] {
+  return edits.toSorted((a, b) => compareStarts(a, b) || Number(isEmpty(b)) - Number(isEmpty(a)));
+}
+
 /** Monaco throws on overlapping edits mid-way, after other changes were already applied. */
 function hasOverlappingRanges(edits: readonly TextEdit[]): boolean {
-  const ranges = edits.map((e) => e.range).toSorted((a, b) => comparePositions(a.start, b.start));
+  const ranges = sortByStart(
+    edits.map((e) => e.range),
+    (a, b) => comparePositions(a.start, b.start),
+    (r) => comparePositions(r.start, r.end) === 0,
+  );
   return ranges.some((range, i) => {
     const previous = ranges[i - 1];
+    if (comparePositions(range.end, range.start) < 0) return true;
     return previous !== undefined && comparePositions(range.start, previous.end) < 0;
   });
 }
@@ -558,13 +592,20 @@ export function applyTextEdits(text: string, edits: readonly TextEdit[]): string
     return Math.min(start + position.character, lineEnd);
   };
 
-  const spans = edits
-    .map((e) => ({ start: offsetOf(e.range.start), end: offsetOf(e.range.end), text: e.newText }))
-    .toSorted((a, b) => a.start - b.start);
+  const spans = sortByStart(
+    edits.map((e) => ({
+      start: offsetOf(e.range.start),
+      end: offsetOf(e.range.end),
+      text: e.newText,
+    })),
+    (a, b) => a.start - b.start,
+    (span) => span.start === span.end,
+  );
   let result = "";
   let last = 0;
   for (const span of spans) {
-    if (span.start < last || span.end < span.start) throw new Error("edits overlap");
+    if (span.end < span.start) throw new Error("an edit's range ends before it starts");
+    if (span.start < last) throw new Error("edits overlap");
     result += text.slice(last, span.start) + span.text;
     last = span.end;
   }
