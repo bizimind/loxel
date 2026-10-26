@@ -156,7 +156,7 @@ Schemas come from **Settings > Schemas**, the same mappings JSON and YAML files 
 - `uv.toml`
 - `rustfmt.toml` and `.rustfmt.toml`
 
-Turn a built-in schema off to stop checking files against it, or add your own mapping: a glob ending in `.toml` and the schema's URL or local path. Your mappings take precedence over the built-in ones for the same file. Schemas are downloaded when a file first needs them and cached for a day.
+Turn a built-in schema off to stop checking files against it, or add your own mapping: a glob ending in `.toml` and the schema's URL or local path. Your mappings take precedence over the built-in ones for the same file. A TOML glob with wildcards, such as `config/*.toml`, applies only to files inside the project, and its `*` also matches files in subfolders. Schemas are downloaded when a file first needs them and cached for a day.
 
 A `#:schema` comment at the top of a file picks its schema directly, by URL or by a path relative to the file, and takes precedence over the settings:
 

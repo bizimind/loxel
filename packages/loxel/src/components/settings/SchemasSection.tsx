@@ -48,8 +48,9 @@ export function SchemasSection() {
           <h3 className="text-foreground text-sm font-medium">Schemas</h3>
           <p className="text-muted-foreground mt-1 text-xs">
             Map JSON Schemas to files for auto-completion, hover and validation in JSON, YAML and
-            TOML files. A glob ending in .json, .yml/.yaml or .toml applies to that language, any
-            other glob to all three. User mappings take precedence over built-in ones.
+            TOML files. A glob ending in .json/.jsonc, .yml/.yaml or .toml applies to that language,
+            any other glob to all three. For TOML files, user mappings take precedence over built-in
+            ones.
           </p>
         </div>
         <Button variant="outline" size="xs" onClick={handleAdd}>

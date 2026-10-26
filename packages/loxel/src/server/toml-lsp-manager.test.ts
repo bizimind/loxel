@@ -9,21 +9,29 @@ import type { ServerWebSocket } from "bun";
 import { TomlLspManager, tombiSettings, toTombiPatterns } from "./toml-lsp-manager";
 
 describe("toTombiPatterns", () => {
-  test("anchors globs at any depth, like Monaco's JSON fileMatch", () => {
-    expect(toTombiPatterns("**/pyproject.toml")).toEqual(["**/pyproject.toml"]);
-    expect(toTombiPatterns("pyproject.toml")).toEqual(["**/pyproject.toml"]);
-    expect(toTombiPatterns("config/*.toml")).toEqual(["**/config/*.toml"]);
-    expect(toTombiPatterns("/config/*.toml")).toEqual(["**/config/*.toml"]);
-    expect(toTombiPatterns("/")).toEqual([]);
+  test("matches plain names at any depth, like Monaco's JSON fileMatch", () => {
+    expect(toTombiPatterns("**/pyproject.toml", "/wt")).toEqual(["**/pyproject.toml"]);
+    expect(toTombiPatterns("pyproject.toml", "/wt")).toEqual(["**/pyproject.toml"]);
+    expect(toTombiPatterns("/.cargo/config.toml", "/wt")).toEqual(["**/.cargo/config.toml"]);
+    expect(toTombiPatterns("/", "/wt")).toEqual([]);
+  });
+
+  test("anchors wildcard patterns at the worktree, since Tombi's `*` also matches `/`", () => {
+    expect(toTombiPatterns("config/*.toml", "/wt")).toEqual(["/wt/**/config/*.toml"]);
+    expect(toTombiPatterns("**/**/*.toml", "/wt")).toEqual(["/wt/**/*.toml"]);
+    expect(toTombiPatterns("app?.toml", "/a [b]*")).toEqual(["/a [[]b[]][*]/**/app?.toml"]);
   });
 
   test("expands brace alternatives, which Tombi does not support", () => {
-    expect(toTombiPatterns("**/{ruff,.ruff}.toml")).toEqual(["**/ruff.toml", "**/.ruff.toml"]);
-    expect(toTombiPatterns("{a,b}/*.{toml,tml}")).toEqual([
-      "**/a/*.toml",
-      "**/a/*.tml",
-      "**/b/*.toml",
-      "**/b/*.tml",
+    expect(toTombiPatterns("**/{ruff,.ruff}.toml", "/wt")).toEqual([
+      "**/ruff.toml",
+      "**/.ruff.toml",
+    ]);
+    expect(toTombiPatterns("{a,b}/*.{toml,tml}", "/wt")).toEqual([
+      "/wt/**/a/*.toml",
+      "/wt/**/a/*.tml",
+      "/wt/**/b/*.toml",
+      "/wt/**/b/*.tml",
     ]);
   });
 });
@@ -31,10 +39,13 @@ describe("toTombiPatterns", () => {
 describe("tombiSettings", () => {
   test("maps each schema URL to its globs, with the catalogs and strict mode off", () => {
     expect(
-      tombiSettings({
-        "https://json.schemastore.org/pyproject.json": ["**/pyproject.toml"],
-        "file:///schemas/app.json": ["app.toml", "**/{dev,prod}.toml"],
-      }),
+      tombiSettings(
+        {
+          "https://json.schemastore.org/pyproject.json": ["**/pyproject.toml"],
+          "file:///schemas/app.json": ["app.toml", "conf/{dev,prod}.toml", "env/*.toml"],
+        },
+        "/wt",
+      ),
     ).toEqual({
       tombi: {
         schema: { strict: false, catalog: { paths: [] } },
@@ -42,7 +53,7 @@ describe("tombiSettings", () => {
           { path: "https://json.schemastore.org/pyproject.json", include: ["**/pyproject.toml"] },
           {
             path: "file:///schemas/app.json",
-            include: ["**/app.toml", "**/dev.toml", "**/prod.toml"],
+            include: ["**/app.toml", "**/conf/dev.toml", "**/conf/prod.toml", "/wt/**/env/*.toml"],
           },
         ],
       },
@@ -122,10 +133,15 @@ class FakeClient {
     return report.items.map((item) => item.message);
   }
 
-  /** Wait until the server has asked the client to pull diagnostics again `count` times. */
-  async refreshed(count: number): Promise<void> {
+  /** How many times the server has asked the client to pull diagnostics again. */
+  refreshCount(): number {
+    return this.serverRequests.filter((m) => m === "workspace/diagnostic/refresh").length;
+  }
+
+  /** Wait until the server has asked the client to pull diagnostics again more than `count` times. */
+  async refreshedAfter(count: number): Promise<void> {
     const deadline = Date.now() + 10_000;
-    while (this.serverRequests.filter((m) => m === "workspace/diagnostic/refresh").length < count) {
+    while (this.refreshCount() <= count) {
       if (Date.now() > deadline) throw new Error("no workspace/diagnostic/refresh");
       await Bun.sleep(50);
     }
@@ -188,17 +204,21 @@ describe.skipIf(!(await Bun.file(BUNDLED_TOMBI).exists()))("TomlLspManager with 
       expect(capabilities.completionProvider).toBeDefined();
 
       const uri = client.open(appToml, "name = 5\nextra = true\n");
-      await client.refreshed(1);
+      await client.refreshedAfter(0);
       const mapped = await client.diagnostics(uri);
       expect(mapped).toHaveLength(2);
       expect(mapped.join("\n")).toContain("String");
 
+      // Each push's own refresh, not one left over from startup, must bring the new diagnostics.
+      let before = client.refreshCount();
       manager.updateSchemas({});
-      await client.refreshed(2);
+      await client.refreshedAfter(before);
       expect(await client.diagnostics(uri)).toEqual([]);
 
-      manager.updateSchemas({ [schemaUrl]: ["**/app.toml"] });
-      await client.refreshed(3);
+      before = client.refreshCount();
+      // A wildcard glob, which reaches Tombi anchored at the worktree.
+      manager.updateSchemas({ [schemaUrl]: ["app*.toml"] });
+      await client.refreshedAfter(before);
       expect(await client.diagnostics(uri)).toHaveLength(2);
 
       // Tombi asks for the workspace folders; the manager answers instead of the client.
@@ -216,7 +236,7 @@ describe.skipIf(!(await Bun.file(BUNDLED_TOMBI).exists()))("TomlLspManager with 
       await client.start(root);
       const directive = join(root, "directive.toml");
       const uri = client.open(directive, "#:schema ./schema.json\nname = 5\n");
-      await client.refreshed(1);
+      await client.refreshedAfter(0);
       expect((await client.diagnostics(uri)).join("\n")).toContain("String");
     },
     TEST_TIMEOUT_MS,

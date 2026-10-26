@@ -223,7 +223,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * `rootUri` / `rootPath` / `workspaceFolders` injected into the
    * `initialize` request. Returns null by default (no injection).
    * Subclasses that carry `wtPath` on their session override this.
-   * It is also the root whose file changes reach the server when
+   * It is also the single folder the base answers `workspace/workspaceFolders`
+   * with, and the root whose file changes reach the server when
    * {@link forwardWatchedFiles} is set.
    */
   protected getSessionWorkspace(_session: TSession): string | null {
