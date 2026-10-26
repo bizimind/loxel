@@ -15,7 +15,7 @@ import * as api from "@/api/client";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
 import { getDisplayFilename } from "@/lib/detached-path";
-import { type SaveOptions, saveEditorContent } from "@/lib/save-editor-content";
+import { type SaveOptions, type SaveReason, saveEditorContent } from "@/lib/save-editor-content";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
 import { type EditorFileState, useEditorStateStore } from "@/store/editor-state";
@@ -64,8 +64,12 @@ export interface DiskSyncedContent<T> {
   cacheKey: string;
   /** Whether the active query errored. */
   isError: boolean;
-  /** Ref the editor must populate with a fn returning current serialized content for save. */
-  getSerializedContentRef: MutableRefObject<(() => string | null) | null>;
+  /**
+   * Ref the editor must populate with a fn returning its current serialized content. Called only
+   * to write it, so an editor may first adjust the content for `reason` (the code editor applies
+   * `.editorconfig` save actions).
+   */
+  getSerializedContentRef: MutableRefObject<((reason: SaveReason) => string | null) | null>;
   /** Trigger a save. Uses getSerializedContentRef to read current content. Includes saveOptionsRef. */
   save: () => Promise<void>;
   /**
@@ -123,7 +127,7 @@ export function useDiskSyncedContent<T>(
   const isProgrammaticRef = useRef(false);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveCapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const getSerializedContentRef = useRef<(() => string | null) | null>(null);
+  const getSerializedContentRef = useRef<((reason: SaveReason) => string | null) | null>(null);
 
   // --- Flush pending save on scope change ---
   // With absolute paths, cacheKey only changes if filePath changes (e.g. file rename).
@@ -137,7 +141,7 @@ export function useDiskSyncedContent<T>(
     }
     const fn = getSerializedContentRef.current;
     if (fn && !isFileDeleted(editorKeyRef.current)) {
-      const content = fn();
+      const content = fn("auto");
       if (content !== null) {
         saveEditorContent(
           filePathRef.current,
@@ -179,7 +183,7 @@ export function useDiskSyncedContent<T>(
         const fn = getSerializedContentRef.current;
         const target = flushTarget(editorKey);
         if (fn && target) {
-          const content = fn();
+          const content = fn("auto");
           if (content !== null) {
             // A moved file's flush goes to its new path, whose tab is keyed by that path.
             const key = target === filePath ? editorKey : target;
@@ -211,7 +215,7 @@ export function useDiskSyncedContent<T>(
       autosaveTimerRef.current = null;
       autosaveCapTimerRef.current = null;
       if (!unsaved) return null;
-      const content = getSerializedContentRef.current?.() ?? null;
+      const content = getSerializedContentRef.current?.("auto") ?? null;
       return content === null ? null : { content, options: saveOptionsRef.current };
     };
     useEditorStateStore.getState().registerPendingEdit(editorKey, take);
@@ -284,7 +288,7 @@ export function useDiskSyncedContent<T>(
     if (isFileDeleted(editorKeyRef.current) || isFileMoving(editorKeyRef.current)) return;
     const fn = getSerializedContentRef.current;
     if (!fn) return;
-    const content = fn();
+    const content = fn("auto");
     if (content === null) return;
     await saveEditorContent(
       filePathRef.current,
@@ -310,7 +314,7 @@ export function useDiskSyncedContent<T>(
     }
     const fn = getSerializedContentRef.current;
     if (!fn) return;
-    const content = fn();
+    const content = fn("explicit");
     if (content === null) return;
     await saveEditorContent(
       filePathRef.current,

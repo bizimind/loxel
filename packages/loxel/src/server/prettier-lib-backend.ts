@@ -7,7 +7,10 @@ const log = logger.child("format");
 
 interface PrettierModule {
   format(source: string, options: Record<string, unknown>): Promise<string>;
-  resolveConfig(filepath: string): Promise<Record<string, unknown> | null>;
+  resolveConfig(
+    filepath: string,
+    options?: { editorconfig?: boolean; useCache?: boolean },
+  ): Promise<Record<string, unknown> | null>;
 }
 
 export class PrettierLibBackend implements FormatterBackend {
@@ -22,7 +25,10 @@ export class PrettierLibBackend implements FormatterBackend {
     if (!prettier) return null;
 
     try {
-      const config = (await prettier.resolveConfig(filePath)) ?? {};
+      // `.editorconfig` too, as the prettier CLI does (the library's default is to ignore it).
+      // Uncached: prettier never notices config edits, and the editor follows them right away.
+      const config =
+        (await prettier.resolveConfig(filePath, { editorconfig: true, useCache: false })) ?? {};
       return await prettier.format(content, { ...config, filepath: filePath });
     } catch (err) {
       log.warn("Prettier format failed", {

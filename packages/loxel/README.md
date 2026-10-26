@@ -119,7 +119,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 
 **Features**
 
-- [docs/EDITOR.md](docs/EDITOR.md) — Monaco and markdown editors, disk sync and saving, file operations, drafts, Others files, localdb, search
+- [docs/EDITOR.md](docs/EDITOR.md) — Monaco and markdown editors, EditorConfig, disk sync and saving, file operations, drafts, Others files, localdb, search
 - [docs/LANGUAGE_SERVERS.md](docs/LANGUAGE_SERVERS.md) — language-server managers and routing, URI schemes, diagnostics, formatting, schemas, highlighting and editing behavior
 - [docs/TERMINALS.md](docs/TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
 - [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
