@@ -1,5 +1,5 @@
-import { readdirSync, statSync, watch, type FSWatcher } from "node:fs";
-import { access, constants, realpath } from "node:fs/promises";
+import { existsSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
+import { access, constants, lstat, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -152,7 +152,8 @@ export async function listPythonEnvs(
 /**
  * Check an interpreter the user entered for a worktree and return it as an absolute interpreter
  * path. Accepts `~/` paths and environment directories (their `bin/python`). Throws an error
- * meant for the user when the path is not an executable file or the repository tracks it.
+ * meant for the user when the path is not an executable file or the repository tracks it or any
+ * file of its environment.
  */
 export async function normalizePythonOverride(
   worktreePath: string,
@@ -169,8 +170,10 @@ export async function normalizePythonOverride(
     : [target];
   for (const pythonPath of candidates) {
     if (!(await isExecutable(pythonPath))) continue;
-    if (await isShippedByRepo(wtPath, pythonPath)) {
-      throw new Error("Loxel does not run Python interpreters that the repository tracks in git");
+    if (await isInterpreterShippedByRepo(wtPath, pythonPath)) {
+      throw new Error(
+        "Loxel does not run a Python interpreter or environment that the repository tracks in git",
+      );
     }
     return pythonPath;
   }
@@ -292,8 +295,12 @@ async function envAt(
   for (const relative of interpreterRelativePaths()) {
     const pythonPath = path.join(envPath, relative);
     if (!(await isExecutable(pythonPath))) continue;
-    if (await isShippedByRepo(wtPath, pythonPath)) {
-      log.warn("Ignoring a Python interpreter tracked by git", { wtPath, pythonPath });
+    if (await isEnvShippedByRepo(wtPath, envPath, pythonPath)) {
+      log.warn("Ignoring a Python environment with files tracked by git", {
+        wtPath,
+        envPath,
+        pythonPath,
+      });
       return null;
     }
     return { source, pythonPath, envPath };
@@ -316,7 +323,7 @@ async function interpreterAt(
   // A relative path would be checked against the server's directory but tracked-checked in the
   // worktree; overrides are stored absolute, so anything else is not one Loxel wrote.
   if (!path.isAbsolute(pythonPath) || !(await isExecutable(pythonPath))) return null;
-  if (await isShippedByRepo(wtPath, pythonPath)) {
+  if (await isInterpreterShippedByRepo(wtPath, pythonPath)) {
     log.warn("Ignoring a Python interpreter tracked by git", { wtPath, pythonPath });
     return null;
   }
@@ -333,7 +340,9 @@ async function systemPython(
     // Entry by entry, so a tracked hit early on PATH does not hide a real interpreter later.
     for (const dir of PATH.split(path.delimiter)) {
       const system = dir ? Bun.which(name, { PATH: dir }) : null;
-      if (system && !(await isShippedByRepo(wtPath, system))) {
+      // The environment rule too, so PATH cannot hand back an interpreter from an environment
+      // the checks above rejected (direnv's `PATH_add .venv/bin`).
+      if (system && !(await isInterpreterShippedByRepo(wtPath, system))) {
         return { source: "system", pythonPath: system, envPath: null };
       }
     }
@@ -392,25 +401,77 @@ function pixiEnvDirs(projectDir: string): string[] {
 }
 
 /**
- * Whether an executable (or what its symlinks resolve to) is a file git tracks in the worktree,
- * including in a submodule or nested repository inside it. Real environments are never committed,
- * and Loxel executes interpreters and environment tools (Loxel and basedpyright run the
- * interpreter, ruff runs as a language server), so a committed `.venv/bin/python` would otherwise
- * run repository code as soon as a Python file is opened.
+ * Whether the repository ships any part of the environment at `envPath`: a file git tracks inside
+ * it, or the `executable` about to run from it (or what its symlinks resolve to), including in a
+ * submodule or nested repository. Real environments are never committed, and whatever runs from
+ * one (Loxel and basedpyright running the interpreter, format-on-save running ruff or black) would
+ * otherwise run repository code, through the executable itself or files it loads such as a `.pth`
+ * hook in `site-packages`. The one trust rule for environments, shared by the resolver, the
+ * formatter and ruff's language server.
  */
-export async function isShippedByRepo(wtPath: string, executable: string): Promise<boolean> {
-  const candidates = [executable, await realpath(executable)];
+export async function isEnvShippedByRepo(
+  wtPath: string,
+  envPath: string,
+  executable: string,
+): Promise<boolean> {
+  const targets = [...(await envTargets(wtPath, envPath)), executable];
+  const shipped = await Promise.all(targets.map((target) => isShippedByRepo(wtPath, target)));
+  return shipped.some(Boolean);
+}
+
+/**
+ * What of the environment at `envPath` to ask git about: the whole directory, or, when the
+ * worktree lies inside it (an environment created at the repository root, `python -m venv .`),
+ * only the environment's own entries, since the directory then also holds the repository's files.
+ */
+async function envTargets(wtPath: string, envPath: string): Promise<string[]> {
+  const resolveReal = (target: string) => realpath(target).catch(() => target);
+  const [realWtPath, realEnvPath] = await Promise.all([resolveReal(wtPath), resolveReal(envPath)]);
+  if (!isInside(wtPath, envPath) && !isInside(realWtPath, realEnvPath)) return [envPath];
+  const libDir = path.join(envPath, "lib");
+  let libEntries: string[] = [];
+  try {
+    libEntries = readdirSync(libDir);
+  } catch {
+    // No `lib` directory: nothing installed there to check.
+  }
+  return [
+    path.join(envPath, "pyvenv.cfg"),
+    path.join(envPath, "conda-meta"),
+    path.join(envPath, "Lib", "site-packages"),
+    ...libEntries
+      .filter((name) => name.startsWith("python"))
+      .map((name) => path.join(libDir, name, "site-packages")),
+  ].filter((target) => existsSync(target));
+}
+
+/** `isEnvShippedByRepo` for an interpreter given by path: its environment, if it is in one. */
+async function isInterpreterShippedByRepo(wtPath: string, pythonPath: string): Promise<boolean> {
+  const envPath = await envPrefixOf(pythonPath);
+  return envPath
+    ? isEnvShippedByRepo(wtPath, envPath, pythonPath)
+    : isShippedByRepo(wtPath, pythonPath);
+}
+
+/**
+ * Whether `target` (a file or directory, or what its symlinks resolve to) is, or for a directory
+ * contains, something git tracks in the worktree, including in a submodule or nested repository.
+ */
+export async function isShippedByRepo(wtPath: string, target: string): Promise<boolean> {
+  const candidates = [target, await realpath(target)];
   const tracked = await Promise.all(candidates.map((file) => isTrackedByGit(wtPath, file)));
   return tracked.some(Boolean);
 }
 
 /**
  * Asks the innermost repository containing `filePath`, since a submodule or nested repository
- * tracks its own files and the worktree's index does not list them. Git is asked about the
- * physical path (parent directory resolved, the file itself kept, so a committed symlink still
- * counts) wherever it is: a committed symlink can reach another checkout of the same repository.
- * Inside a git worktree, any answer other than a clear "untracked" counts as tracked (fail
- * closed); outside it, a path in no repository is untracked.
+ * tracks its own files and the worktree's index does not list them. For a real directory that is
+ * the directory's own repository if it is one (a venv can be a repository itself), and any
+ * tracked file inside counts. Git is asked about the physical path (parent directory resolved,
+ * the entry itself kept, so a committed symlink still counts) wherever it is: a committed symlink
+ * can reach another checkout of the same repository. Inside a git worktree, any answer other than
+ * a clear "untracked" counts as tracked (fail closed); outside it, a path in no repository is
+ * untracked.
  */
 async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
   const realWtPath = await realpath(wtPath);
@@ -420,7 +481,8 @@ async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean
   // Not a repository at all, so nothing in it can be committed.
   if (worktreeRepo.exitCode !== 0) return false;
 
-  const innermost = await runGit(path.dirname(physical), ["rev-parse", "--show-toplevel"]);
+  const lookupDir = (await isRealDirectory(physical)) ? physical : path.dirname(physical);
+  const innermost = await runGit(lookupDir, ["rev-parse", "--show-toplevel"]);
   if (innermost.exitCode !== 0) return isInside(physical, realWtPath);
   const listed = await runGit(innermost.stdout.trim(), [
     "ls-files",
@@ -432,27 +494,24 @@ async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean
   return listed.exitCode !== 1;
 }
 
+/** A directory that is not a symlink (`lstat`), so a committed symlink is asked about as itself. */
+async function isRealDirectory(target: string): Promise<boolean> {
+  try {
+    return (await lstat(target)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Whether git tracks any file in `dir`, asked like {@link isTrackedByGit} (innermost repository,
- * physical path, fail closed inside a git worktree). Activating an environment in a terminal puts
- * its whole `bin` first on PATH, so a committed `bin/git` written into an existing ignored venv
- * would shadow the real one even though the interpreter itself is untracked.
+ * Whether git tracks any file in `dir` (or what it resolves to), asked like the environment rule
+ * (innermost repository, physical path, fail closed inside a git worktree, and on any error).
+ * Activating an environment in a terminal puts its whole `bin` first on PATH, so a committed
+ * `bin/git` written into an existing ignored venv would shadow the real one even though the
+ * interpreter itself is untracked.
  */
 export async function hasTrackedFiles(wtPath: string, dir: string): Promise<boolean> {
-  try {
-    const realWtPath = await realpath(wtPath);
-    const physical = await realpath(dir);
-    const worktreeRepo = await runGit(realWtPath, ["rev-parse", "--show-toplevel"]);
-    if (worktreeRepo.exitCode === GIT_SPAWN_FAILED) return true;
-    if (worktreeRepo.exitCode !== 0) return false;
-
-    const innermost = await runGit(physical, ["rev-parse", "--show-toplevel"]);
-    if (innermost.exitCode !== 0) return isInside(physical, realWtPath);
-    const listed = await runGit(innermost.stdout.trim(), ["ls-files", "--", physical]);
-    return listed.exitCode !== 0 || listed.stdout.trim() !== "";
-  } catch {
-    return true;
-  }
+  return isShippedByRepo(wtPath, dir).catch(() => true);
 }
 
 async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number; stdout: string }> {

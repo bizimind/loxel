@@ -2,8 +2,10 @@ import path from "node:path";
 
 import type { ServerWebSocket, Subprocess } from "bun";
 
+import type { PythonEnv } from "@/api/python-env-model";
+
 import { logger } from "./logger";
-import { isShippedByRepo, resolvePythonEnv } from "./python-env";
+import { isEnvShippedByRepo, isShippedByRepo, resolvePythonEnv } from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
 import {
   type SpawnOptions,
@@ -49,8 +51,9 @@ export class RuffLspManager extends StdioLspManager<WtLspSession, WtLspContext> 
     this.detach(ws);
   }
 
-  protected resolveBinary(context: WtLspContext): Promise<string | null> {
-    return resolveRuffBinary(context.wtPath, this.resolveBundledBinary(RUFF, DEV_PATH));
+  protected async resolveBinary(context: WtLspContext): Promise<string | null> {
+    const env = await resolvePythonEnv(context.wtPath);
+    return pickRuffBinary(context.wtPath, env, this.resolveBundledBinary(RUFF, DEV_PATH));
   }
 
   protected override spawnArgs(): readonly string[] {
@@ -89,18 +92,22 @@ export class RuffLspManager extends StdioLspManager<WtLspSession, WtLspContext> 
 }
 
 /**
- * The ruff to run for a worktree: the one installed in its Python environment (next to the
- * interpreter `resolvePythonEnv` finds), so the project's pinned version applies, else `bundled`.
+ * The ruff to run for a worktree: the one installed in its Python environment `env` (next to the
+ * interpreter `resolvePythonEnv` found), so the project's pinned version applies, else `bundled`.
  * A candidate counts only when the repository does not ship it and it is new enough to serve.
  */
-export async function resolveRuffBinary(
+export async function pickRuffBinary(
   wtPath: string,
+  env: PythonEnv | null,
   bundled: string | null,
 ): Promise<string | null> {
-  const env = await resolvePythonEnv(wtPath);
   const fromEnv = env ? path.join(path.dirname(env.pythonPath), RUFF) : null;
-  for (const candidate of [fromEnv, bundled]) {
-    if (candidate && (await isUsableRuff(wtPath, candidate))) {
+  const candidates = [
+    { ruff: fromEnv, envPath: env?.envPath ?? null },
+    { ruff: bundled, envPath: null },
+  ];
+  for (const { ruff: candidate, envPath } of candidates) {
+    if (candidate && (await isUsableRuff(wtPath, candidate, envPath))) {
       log.info("Using ruff", { wtPath, ruff: candidate, fromEnv: candidate === fromEnv });
       return candidate;
     }
@@ -108,10 +115,23 @@ export async function resolveRuffBinary(
   return null;
 }
 
-async function isUsableRuff(wtPath: string, ruff: string): Promise<boolean> {
+/**
+ * Whether `ruff` exists, is not shipped by the repository and serves. A ruff in an environment is
+ * checked with the whole environment (`isEnvShippedByRepo`); one outside any (a system
+ * interpreter's directory, the bundled one) only as a file, since its directory can belong to an
+ * unrelated repository (Homebrew's prefix tracks `bin/brew`).
+ */
+async function isUsableRuff(
+  wtPath: string,
+  ruff: string,
+  envPath: string | null,
+): Promise<boolean> {
   try {
     if (!(await Bun.file(ruff).exists())) return false;
-    if (await isShippedByRepo(wtPath, ruff)) {
+    const shipped = envPath
+      ? await isEnvShippedByRepo(wtPath, envPath, ruff)
+      : await isShippedByRepo(wtPath, ruff);
+    if (shipped) {
       log.warn("Ignoring a ruff binary tracked by git", { wtPath, ruff });
       return false;
     }

@@ -2,6 +2,7 @@ import type { FormattingSettings } from "@/lib/formatting-model";
 
 import type { TypeScriptDiagnostic } from "./diagnostics-model";
 import type { DiffInfo } from "./diff-model";
+import type { EditorConfigResponse } from "./editorconfig-model";
 import type {
   BranchCommits,
   BranchInfo,
@@ -227,6 +228,18 @@ export async function getFileContentByPath(
   params.set("path", absolutePath);
   if (worktreePath) params.set("wt", worktreePath);
   return fetchJson<{ content: string }>(`/file-content?${params.toString()}`, { signal });
+}
+
+/** The `.editorconfig` properties that apply to a file (empty when none do). */
+export async function getEditorConfig(
+  absolutePath: string,
+  worktreePath?: string | null,
+  signal?: AbortSignal,
+): Promise<EditorConfigResponse> {
+  const params = new URLSearchParams();
+  params.set("path", absolutePath);
+  if (worktreePath) params.set("wt", worktreePath);
+  return fetchJson<EditorConfigResponse>(`/editorconfig?${params.toString()}`, { signal });
 }
 
 export async function writeFileContent(options: {

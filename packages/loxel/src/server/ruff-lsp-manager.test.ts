@@ -5,7 +5,9 @@ import { join, resolve } from "node:path";
 
 import { $, type ServerWebSocket } from "bun";
 
-import { RuffLspManager, resolveRuffBinary } from "./ruff-lsp-manager";
+import type { PythonEnv } from "@/api/python-env-model";
+
+import { pickRuffBinary, RuffLspManager } from "./ruff-lsp-manager";
 
 const roots: string[] = [];
 let manager: RuffLspManager | undefined;
@@ -39,17 +41,26 @@ async function worktreeWithVenvRuff(version: string): Promise<{ wt: string; venv
   return { wt, venvRuff: await fakeRuff(join(bin, "ruff"), version) };
 }
 
-describe.skipIf(process.platform === "win32")("resolveRuffBinary", () => {
+/** The environment `resolvePythonEnv` reports for {@link worktreeWithVenvRuff}'s `.venv`. */
+function venvEnv(wt: string): PythonEnv {
+  return {
+    source: "venv",
+    pythonPath: join(wt, ".venv", "bin", "python"),
+    envPath: join(wt, ".venv"),
+  };
+}
+
+describe.skipIf(process.platform === "win32")("pickRuffBinary", () => {
   test("prefers the ruff installed in the worktree's environment", async () => {
     const { wt, venvRuff } = await worktreeWithVenvRuff("0.9.0");
     const bundled = await fakeRuff(join(await makeDir("ruff-bundled-"), "ruff"), "0.17.2");
-    expect(await resolveRuffBinary(wt, bundled)).toBe(venvRuff);
+    expect(await pickRuffBinary(wt, venvEnv(wt), bundled)).toBe(venvRuff);
   });
 
   test("falls back to the bundled ruff when the environment's has no stable server", async () => {
     const { wt } = await worktreeWithVenvRuff("0.4.10");
     const bundled = await fakeRuff(join(await makeDir("ruff-bundled-"), "ruff"), "0.17.2");
-    expect(await resolveRuffBinary(wt, bundled)).toBe(bundled);
+    expect(await pickRuffBinary(wt, venvEnv(wt), bundled)).toBe(bundled);
   });
 
   test("never runs a ruff the repository ships", async () => {
@@ -57,7 +68,16 @@ describe.skipIf(process.platform === "win32")("resolveRuffBinary", () => {
     await $`git init -q ${wt}`.quiet();
     await $`git -C ${wt} add -f -- .venv/bin/ruff`.quiet();
     const bundled = await fakeRuff(join(await makeDir("ruff-bundled-"), "ruff"), "0.17.2");
-    expect(await resolveRuffBinary(wt, bundled)).toBe(bundled);
+    expect(await pickRuffBinary(wt, venvEnv(wt), bundled)).toBe(bundled);
+  });
+
+  test("never runs a ruff from an environment the repository ships part of", async () => {
+    const { wt } = await worktreeWithVenvRuff("0.9.0");
+    await $`git init -q ${wt}`.quiet();
+    // ruff itself is untracked, but a committed environment can still run repository code.
+    await $`git -C ${wt} add -f -- .venv/pyvenv.cfg`.quiet();
+    const bundled = await fakeRuff(join(await makeDir("ruff-bundled-"), "ruff"), "0.17.2");
+    expect(await pickRuffBinary(wt, venvEnv(wt), bundled)).toBe(bundled);
   });
 });
 

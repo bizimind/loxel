@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import type { EditorConfigProperties } from "@/api/editorconfig-model";
 import {
   DEFAULT_SCROLLBACK_LINES,
   type AgentSessionOptions,
@@ -121,19 +122,36 @@ export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, IndentationDefaul
   ["rust", { tabSize: 4, insertSpaces: true }], // rustfmt
 ]);
 
+/** Indentation for one file. `indentSize` differs from `tabSize` only when an `.editorconfig` sets them apart. */
+export interface ResolvedIndentation extends IndentationDefaults {
+  indentSize: number;
+}
+
 /**
- * Resolve indentation for a file: a per-extension user override wins, then the built-in
+ * Resolve indentation for a file. A per-extension user override wins outright: it is the one
+ * choice the user made explicitly for this file type. Otherwise each property the file's
+ * `.editorconfig` sets (the project's convention) wins, and the rest comes from the built-in
  * default for the file's resolved language, then the global default.
  */
 export function resolveIndentation(
   editor: EditorSettings,
   filePath: string,
   language: string | null,
-): IndentationDefaults {
+  editorConfig: EditorConfigProperties = {},
+): ResolvedIndentation {
   const override = findIndentationOverride(editor.overrides, filePath);
-  if (override) return { tabSize: override.tabSize, insertSpaces: override.insertSpaces };
-  const builtin = language ? BUILTIN_LANGUAGE_INDENTATION.get(language) : undefined;
-  return builtin ?? editor.indentation;
+  if (override) {
+    const { tabSize, insertSpaces } = override;
+    return { tabSize, insertSpaces, indentSize: tabSize };
+  }
+  const base =
+    (language ? BUILTIN_LANGUAGE_INDENTATION.get(language) : undefined) ?? editor.indentation;
+  const insertSpaces = editorConfig.indentStyle
+    ? editorConfig.indentStyle === "space"
+    : base.insertSpaces;
+  const tabSize = editorConfig.tabWidth ?? base.tabSize;
+  // Not `tabSize`: that can be the `.editorconfig`'s tab_width, which says nothing about indentation.
+  return { tabSize, insertSpaces, indentSize: editorConfig.indentSize ?? base.tabSize };
 }
 
 function findIndentationOverride(
