@@ -5,6 +5,17 @@ import { showToast } from "@/components/ui/toast";
 import { isLiveEditorModel } from "./live-editor-model";
 import { createLspWorkspaceFiles } from "./lsp-workspace-files";
 
+/** Every connected worktree client, with the worktree it serves. */
+const connectedClients = new Map<MonacoLspClient, string>();
+
+/**
+ * The language-server clients connected for `wtPath` now: TypeScript for the active worktree,
+ * plus each lazily started server while a file of its language is open.
+ */
+export function getConnectedLspClients(wtPath: string): MonacoLspClient[] {
+  return [...connectedClients].filter(([, path]) => path === wtPath).map(([client]) => client);
+}
+
 /**
  * Factory for worktree-scoped LSP client connections. Each call creates an
  * independent connect/disconnect pair backed by a single WebSocket transport.
@@ -50,6 +61,12 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
           workspaceFileSystem: createLspWorkspaceFiles(wtPath),
           onWorkspaceEditFailure: (reason) => showToast(`Edit not applied: ${reason}`),
         });
+        const client = currentClient;
+        connectedClients.set(client, wtPath);
+        // A socket the server closed (replaced by a newer connection) never answers again.
+        transport.state.onChange(({ state }) => {
+          if (state === "closed") connectedClients.delete(client);
+        });
       },
       () => {
         if (currentWtPath === wtPath) {
@@ -63,6 +80,7 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
   // Dispose the client before the transport so its `textDocument/didClose`
   // notifications still go out over a live socket.
   function teardown(): void {
+    if (currentClient) connectedClients.delete(currentClient);
     currentClient?.dispose();
     currentClient = null;
     currentTransport?.dispose();

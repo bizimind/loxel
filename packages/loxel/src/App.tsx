@@ -20,6 +20,7 @@ import { TopBar } from "./components/panels/TopBar";
 import { SearchModal } from "./components/search/SearchModal";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { Sidebar } from "./components/sidebar/Sidebar";
+import { SymbolSearchModal } from "./components/symbol-search/SymbolSearchModal";
 import { LeftToolsBar } from "./components/tools-bar/LeftToolsBar";
 import { RightToolsBar } from "./components/tools-bar/RightToolsBar";
 import { ConfirmDialogHost } from "./components/ui/confirm-dialog-host";
@@ -108,6 +109,7 @@ export default function App() {
       <SearchModal />
       <FileSearchModal />
       <CommandPaletteModal />
+      <SymbolSearchModal />
       <ToastContainer />
       <ConfirmDialogHost />
     </div>

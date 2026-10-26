@@ -135,6 +135,8 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "nav.commandPalette": ["Cmd+Shift+P"],
   "nav.search": ["Cmd+Shift+F"],
   "nav.openFile": ["Cmd+P"],
+  // JetBrains' Go to Symbol; ⌘T (VS Code's) is New Terminal here.
+  "nav.goToSymbol": ["Cmd+Alt+O"],
   "nav.recentNotification": ["Ctrl+Backtick"],
   // Context-aware: only while focus is in a panel with a find bar (browser, terminal)
   "find.open": ["Cmd+F"],

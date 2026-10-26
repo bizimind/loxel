@@ -1,6 +1,6 @@
 ---
 title: Editor
-description: Quick Open, Find in Files, autosave, formatter auto-detection, indentation, EditorConfig, Python files, conflict handling, and deleted or moved files.
+description: Quick Open, Go to Symbol, Find in Files, autosave, formatter auto-detection, indentation, EditorConfig, Python files, conflict handling, and deleted or moved files.
 order: 10
 ---
 
@@ -15,6 +15,14 @@ Press `Cmd+P` to open Quick Open. Type any part of a file path and results filte
 When the query is empty, Quick Open shows your 15 most recently opened files — useful for returning to files you were working in without retyping.
 
 **Jump to a line:** append `:line` or `:line:col` to the filename. For example, `src/app.ts:42` opens `app.ts` and scrolls to line 42; `src/app.ts:42:8` positions the cursor at column 8 on that line. Line numbers are 1-indexed.
+
+---
+
+## Go to Symbol
+
+Press `Cmd+Alt+O` (or run **Go to Symbol in Workspace** from the command palette) to find a class, function, method or other symbol anywhere in the worktree by name. Results filter with fuzzy matching as you type and show each symbol's kind, the class or module that contains it, and its file and line. Press `Enter` to open the file at the symbol.
+
+Symbols come from the worktree's language servers, so what is searched follows what you have open: TypeScript symbols cover the projects of the TypeScript files you have open (in a monorepo, open a file in a package to include that package), and other languages whose language server supports symbol search, such as Python and Terraform, are searched once a file of that language is open. Among equally good matches, your project's own symbols are listed before those of installed packages. Results appear as each language server answers.
 
 ---
 

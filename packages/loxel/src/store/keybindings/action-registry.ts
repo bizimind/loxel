@@ -60,6 +60,7 @@ export type ActionId =
   | "nav.commandPalette"
   | "nav.search"
   | "nav.openFile"
+  | "nav.goToSymbol"
   | "nav.recentNotification"
   | "find.open"
   | "find.next"
@@ -224,6 +225,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "nav.commandPalette", label: "Command Palette", category: "nav", hidden: true },
   { id: "nav.search", label: "Find in Files", category: "nav" },
   { id: "nav.openFile", label: "Open File", category: "nav" },
+  { id: "nav.goToSymbol", label: "Go to Symbol in Workspace", category: "nav" },
   { id: "nav.recentNotification", label: "Go to Recent Notification", category: "nav" },
 
   // Find in the focused panel (browser, terminal). Elsewhere the key reaches the widget's own find.

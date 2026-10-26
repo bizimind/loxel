@@ -55,6 +55,7 @@ Splits are chords: press `Cmd+\`, release, then press the next key. The status b
 | Action                                  | Shortcut      |
 | --------------------------------------- | ------------- |
 | Quick Open (file)                       | `Cmd+P`       |
+| Go to symbol in workspace               | `Cmd+Alt+O`   |
 | Find in files                           | `Cmd+Shift+F` |
 | Command palette                         | `Cmd+Shift+P` |
 | Open settings                           | `Cmd+,`       |
