@@ -23,7 +23,7 @@ definitions() {
 }
 added="$(definitions +)"
 removed="$(definitions -)"
-files="$(git diff --name-only "$(git merge-base "$base" HEAD)" -- . ':(exclude)*.md' ':(exclude)*.mdx' |
+files="$(git diff --name-only --no-renames "$(git merge-base "$base" HEAD)" -- . ':(exclude)*.md' ':(exclude)*.mdx' |
   sed -E 's#.*/##; s/\.[^.]+$//' | grep -E '^.{4,}$' | grep -vxE 'index|types|package|README' | sort -u || true)"
 
 report() {
