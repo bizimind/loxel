@@ -56,6 +56,15 @@ interface LspRange {
   end: LspPosition;
 }
 
+/** The server capability that advertises each suppressible LSP feature statically. */
+const SERVER_CAPABILITY_OF = {
+  "textDocument/formatting": "documentFormattingProvider",
+  "textDocument/rangeFormatting": "documentRangeFormattingProvider",
+  "textDocument/semanticTokens": "semanticTokensProvider",
+} as const;
+
+export type SuppressibleFeature = keyof typeof SERVER_CAPABILITY_OF;
+
 interface LspContentChange {
   range?: LspRange;
   text: string;
@@ -78,6 +87,8 @@ interface LspContentChange {
 export abstract class StdioLspManager<TSession extends BaseLspSession, TContext = void> {
   protected readonly sessions = new Map<ServerWebSocket<unknown>, TSession>();
   private readonly _sessionsByKey = new Map<string, ServerWebSocket<unknown>>();
+  /** Client frames received while an async {@link resolveBinary} runs, replayed once spawned. */
+  private readonly _pendingFrames = new Map<ServerWebSocket<unknown>, string[]>();
   /** Each session's file-change forwarder, when {@link forwardWatchedFiles} and it has a worktree. */
   private readonly watchedFiles = new Map<TSession, WatchedFilesForwarder>();
   protected readonly log: ReturnType<typeof logger.child>;
@@ -87,12 +98,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   }
 
   handleMessage(ws: ServerWebSocket<unknown>, data: string): void {
+    const frame = this.forwardWatchedFiles ? withWatchedFilesCapability(data) : data;
+    const pending = this._pendingFrames.get(ws);
+    if (pending) {
+      pending.push(frame);
+      return;
+    }
     const session = this.sessions.get(ws);
     if (!session) return;
-    this.handleClientData(
-      session,
-      this.forwardWatchedFiles ? withWatchedFilesCapability(data) : data,
-    );
+    this.handleClientData(session, frame);
   }
 
   /**
@@ -108,6 +122,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   }
 
   detach(ws: ServerWebSocket<unknown>): void {
+    this._pendingFrames.delete(ws);
     const session = this.sessions.get(ws);
     if (!session) return;
     this.killSession(session);
@@ -126,12 +141,18 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     }
     this.sessions.clear();
     this._sessionsByKey.clear();
+    this._pendingFrames.clear();
   }
 
   // ---------------------------------------------------------------------------
   // Hooks for subclasses
 
-  protected abstract resolveBinary(): string | null;
+  /**
+   * The server binary for a session, or null when none is available. May be
+   * async (a lookup in the session's project); frames the client sends
+   * meanwhile are held and replayed once the server is spawned.
+   */
+  protected abstract resolveBinary(context: TContext): string | null | Promise<string | null>;
 
   protected spawnArgs(): readonly string[] {
     return ["--stdio"];
@@ -165,6 +186,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * its entire document with each incremental fragment's replacement text.
    */
   protected readonly requiresFullTextSync: boolean = false;
+
+  /**
+   * LSP features Monaco must not get from this server: their capability is
+   * deleted from the initialize response and their dynamic
+   * `client/registerCapability` entries are dropped (the server is told they
+   * succeeded), whichever way the server advertises them. Semantic tokens are
+   * suppressed as well when `disableSemanticTokens` is set.
+   */
+  protected readonly suppressedFeatures: readonly SuppressibleFeature[] = [];
 
   /**
    * Set to true for servers that should hear about on-disk changes to files that are not open
@@ -437,7 +467,10 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       }
     }
 
-    if (this.disableSemanticTokens) {
+    const suppressed: readonly SuppressibleFeature[] = this.disableSemanticTokens
+      ? [...this.suppressedFeatures, "textDocument/semanticTokens"]
+      : this.suppressedFeatures;
+    if (suppressed.length > 0) {
       try {
         const parsed = didParse ? preparsed : JSON.parse(body);
         if (typeof parsed === "object" && parsed !== null) {
@@ -448,14 +481,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             result?: { capabilities?: Record<string, unknown> };
           };
 
-          // Dynamic registration — drop semantic-tokens entries before they
-          // reach Monaco so no provider ever gets registered.
+          // Dynamic registration — drop suppressed entries before they reach
+          // Monaco so no provider ever gets registered.
           if (
             msg.method === "client/registerCapability" &&
             Array.isArray(msg.params?.registrations)
           ) {
             const filtered = msg.params.registrations.filter(
-              (r) => r?.method !== "textDocument/semanticTokens",
+              (r) => !suppressed.some((method) => method === r?.method),
             );
             if (filtered.length === 0 && msg.id !== undefined) {
               this.writeToStdin(
@@ -469,11 +502,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             return;
           }
 
-          // initialize response — strip semanticTokensProvider so Monaco
+          // initialize response — strip the suppressed capabilities so Monaco
           // never registers a provider in the first place.
           if (msg.id !== undefined && msg.result?.capabilities) {
-            if ("semanticTokensProvider" in msg.result.capabilities) {
-              delete msg.result.capabilities.semanticTokensProvider;
+            const caps = msg.result.capabilities;
+            const present = suppressed
+              .map((method) => SERVER_CAPABILITY_OF[method])
+              .filter((key) => key in caps);
+            if (present.length > 0) {
+              for (const key of present) delete caps[key];
               session.ws.send(JSON.stringify(parsed));
               return;
             }
@@ -510,7 +547,37 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       this._sessionsByKey.set(key, ws);
     }
 
-    const bin = this.resolveBinary();
+    const bin = this.resolveBinary(context);
+    if (!(bin instanceof Promise)) {
+      this.spawnSession(ws, context, bin);
+      return;
+    }
+    const frames: string[] = [];
+    this._pendingFrames.set(ws, frames);
+    void bin
+      .catch((err: unknown) => {
+        this.log.error(`${this.name} binary resolution failed`, { error: err });
+        return null;
+      })
+      .then((resolved) => {
+        // Detached (or replaced by a newer connection) while resolving.
+        if (this._pendingFrames.get(ws) !== frames) return;
+        this._pendingFrames.delete(ws);
+        try {
+          this.spawnSession(ws, context, resolved);
+        } catch (err) {
+          // Nothing else would answer the client's `initialize`; close so it fails visibly.
+          this.log.error(`${this.name} failed to start`, { error: err });
+          ws.close(4001, `${this.name} failed to start`);
+          return;
+        }
+        const session = this.sessions.get(ws);
+        if (!session) return;
+        for (const frame of frames) this.handleClientData(session, frame);
+      });
+  }
+
+  private spawnSession(ws: ServerWebSocket<unknown>, context: TContext, bin: string | null): void {
     if (!bin) {
       this.log.error(`${this.name} binary not found`);
       ws.close(4001, `${this.name} binary not found — is it installed?`);

@@ -406,8 +406,8 @@ function pixiEnvDirs(projectDir: string): string[] {
  * submodule or nested repository. Real environments are never committed, and whatever runs from
  * one (Loxel and basedpyright running the interpreter, format-on-save running ruff or black) would
  * otherwise run repository code, through the executable itself or files it loads such as a `.pth`
- * hook in `site-packages`. The one trust rule for environments, shared by the resolver and the
- * formatter.
+ * hook in `site-packages`. The one trust rule for environments, shared by the resolver, the
+ * formatter and ruff's language server.
  */
 export async function isEnvShippedByRepo(
   wtPath: string,
@@ -457,7 +457,7 @@ async function isInterpreterShippedByRepo(wtPath: string, pythonPath: string): P
  * Whether `target` (a file or directory, or what its symlinks resolve to) is, or for a directory
  * contains, something git tracks in the worktree, including in a submodule or nested repository.
  */
-async function isShippedByRepo(wtPath: string, target: string): Promise<boolean> {
+export async function isShippedByRepo(wtPath: string, target: string): Promise<boolean> {
   const candidates = [target, await realpath(target)];
   const tracked = await Promise.all(candidates.map((file) => isTrackedByGit(wtPath, file)));
   return tracked.some(Boolean);

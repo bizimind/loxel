@@ -21,6 +21,7 @@ import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
 import { isWithin } from "./project-file-helpers";
 import { registerPythonLanguageConfiguration } from "./python-language-config";
 import { connectPythonLsp, disconnectPythonLsp } from "./python-lsp-client";
+import { connectRuffLsp, disconnectRuffLsp } from "./ruff-lsp-client";
 import { connectTerraformLsp, disconnectTerraformLsp } from "./terraform-lsp-client";
 import { connectTsLsp } from "./ts-lsp-client";
 import { connectXmlLsp, disconnectXmlLsp } from "./xml-lsp-client";
@@ -264,6 +265,13 @@ createLazyLspConnector({
   languageIds: ["python"],
   connect: connectPythonLsp,
   disconnect: disconnectPythonLsp,
+});
+
+// ruff server: lint diagnostics, quick fixes, fix all and organize imports, next to basedpyright.
+createLazyLspConnector({
+  languageIds: ["python"],
+  connect: connectRuffLsp,
+  disconnect: disconnectRuffLsp,
 });
 
 // astro-ls: only worktrees with .astro files pay the cost.

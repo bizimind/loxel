@@ -16,7 +16,8 @@ Forked from [`@vscode/monaco-lsp-client`](https://github.com/microsoft/monaco-ed
 - Additional features: inline completions and linked editing ranges
 - Workspace symbols: Monaco standalone has no workspace symbol provider, so `client.workspaceSymbols(query, token)` sends `workspace/symbol` and returns `WorkspaceSymbolItem`s (Monaco kinds and tags, 1-based range, or no range when the server defers it), and `client.resolveWorkspaceSymbol(item, token)` fills a missing range through `workspaceSymbol/resolve`. Cancelling the token sends `$/cancelRequest` for the request's id (`LspCancellableRequests`, which sends through the channel's request sender because `TypedChannel.request` does not expose ids) and rejects with a `Canceled` error
 - Document-filter glob patterns are matched with `picomatch`
-- `MonacoLspClient.dispose()` unregisters providers, closes synced documents and drops the capability registry
+- `MonacoLspClient.dispose()` unregisters providers, closes synced documents, removes its diagnostics markers and drops the capability registry
+- Each client sets its diagnostics markers under an owner of its own, so several servers on one model (basedpyright and ruff for Python) do not overwrite each other's
 - Markdown from the server (completion and signature-help documentation, hover contents, inlay-hint tooltips) is rendered untrusted, so command links and other trusted-only markdown are not executed
 - Document sync honors the negotiated `TextDocumentSyncKind`: `Full` sends the whole text, `None` sends no `didChange`, `Incremental` sends deltas
 - Completion lists propagate the server's `isIncomplete` flag so Monaco re-requests as the user types, and completion and signature-help requests are skipped, or their results dropped, once Monaco cancels them

@@ -11,6 +11,7 @@ Quick reference for per-LSP quirks. Consult when the new integration needs behav
 | Docker                | downloaded    | worktree | lazy       | disabled        | yes            | `start --stdio` | compose=off (post-init)       |
 | Terraform             | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
 | Python (basedpyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
+| Python (ruff)         | downloaded    | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
 | Astro                 | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
 | XML (LemMinX)         | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | none                          |
 
@@ -44,6 +45,10 @@ Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexi
 The npm package ships one pre-bundled file; the build script compiles it through a wrapper entry that sets `__rootDirectory` and replaces `v8.getHeapStatistics` (a full heap walk under Bun that made completions and code actions take seconds), and copies the `typeshed-fallback` directory (also listed in electron-builder.yml extraResources and the release archive).
 
 basedpyright reads only `disablePullDiagnostics` from `initializationOptions`; its settings come from `workspace/configuration`. The manager implements `workspaceConfiguration` to answer `python.pythonPath` from the Python environment resolver (`python-env.ts`) and the `basedpyright` section (`standard` ruleset), and re-announces config when the watcher sees the environment change or the worktree's chosen interpreter changes (`refreshWorktreeEnvironment`). Its semantic tokens include `selfParameter`, `clsParameter` and `decorator`, which have rules in `monaco-theme.ts`. See LANGUAGE_SERVERS.md "Python environment".
+
+## Ruff — Second Server for a Language
+
+Runs next to basedpyright on the same `python` models: its own route, client and lazy connector, each client keeping its own diagnostics markers. `resolveBinary` is async: the `ruff` beside the resolved interpreter if the repo does not ship it and it is at least 0.5.3, else the downloaded one. Suppresses its formatting (`suppressedFeatures`) so format on save stays the only Python formatter, and turns off syntax errors that basedpyright already reports.
 
 ## Astro — Use as Template
 

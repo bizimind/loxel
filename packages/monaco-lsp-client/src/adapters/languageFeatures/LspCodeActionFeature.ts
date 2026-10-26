@@ -70,6 +70,10 @@ export class LspCodeActionFeature extends Disposable {
             new LspCodeActionProvider(this._connection, capability, (edit, command) =>
               this._toMonacoCommand(edit, command),
             ),
+            // Monaco enables kind-specific commands (Organize Imports, Fix All) only for providers
+            // that declare the kind; LSP kinds are Monaco kinds (`source.organizeImports.ruff`
+            // counts as `source.organizeImports`).
+            { providedCodeActionKinds: capability.codeActionKinds },
           );
         },
       ),

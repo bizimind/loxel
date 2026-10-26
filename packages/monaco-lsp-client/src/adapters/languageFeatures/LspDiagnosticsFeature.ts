@@ -17,8 +17,11 @@ import {
   toDiagnosticMarker,
 } from "./common";
 
+let markerOwnerCount = 0;
+
 export class LspDiagnosticsFeature extends Disposable {
-  private readonly _diagnosticsMarkerOwner = "lsp";
+  /** Per client, so servers sharing a model (basedpyright and ruff for Python) keep their own markers. */
+  private readonly _diagnosticsMarkerOwner = `lsp-${++markerOwnerCount}`;
   private readonly _pullDiagnosticProviders = new Map<
     monaco.editor.ITextModel,
     ModelDiagnosticProvider
@@ -26,6 +29,9 @@ export class LspDiagnosticsFeature extends Disposable {
 
   constructor(private readonly _connection: LspConnection) {
     super();
+
+    // The next client gets a new owner, so this one's markers would otherwise outlive it.
+    this._register({ dispose: () => monaco.editor.removeAllMarkers(this._diagnosticsMarkerOwner) });
 
     this._register(
       this._connection.capabilities.addStaticClientCapabilities({
