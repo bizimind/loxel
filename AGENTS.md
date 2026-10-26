@@ -50,6 +50,8 @@ bun test --cwd packages/wt src/git/name.test.ts
 bun test --cwd packages/wt --test-name-pattern "validates"
 ```
 
+Tests must not depend on timing: wait for the event, callback or condition the code signals (or use fake timers) instead of sleeps, fixed timeouts or wall-clock assertions. A test that only passes on a fast, idle machine is a flaky test.
+
 ## Architecture
 
 ### Packages
@@ -204,7 +206,7 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 - Docs use progressive disclosure: this file is an index pointing to package READMEs, and a large package's README (e.g. `packages/loxel`) is in turn an index pointing to its nested docs and specs.
 
-- In every PR, search the package's `docs/`, its README, the indexes that link them, and the site pages for every identifier, file, message type, and behavior you changed or moved, and fix every stale hit in the same PR, not only the section you set out to edit. If a doc's scope changes, update its one-line description in each index that links it.
+- In every PR, search the package's `docs/`, its README, the indexes that link them, and the site pages for every identifier, file, message type, and behavior you changed or moved, and fix every stale hit in the same PR, not only the section you set out to edit. If a doc's scope changes, update its one-line description in each index that links it. `scripts/docs-sweep.sh` lists the doc lines that mention what your branch changed; run it before the first push and review every hit.
 
 - There are two kinds of docs, and they differ in audience, content, and style. Keep them separate:
   - **Public docs** (the site pages under `packages/site/src/content/docs/`, and the user-facing parts of package READMEs) are feature- and usage-centric: what the product or tool can do, how to use it, and the configuration, commands, paths, and shortcuts a user needs. They never name source files, modules, internal data structures, or implementation mechanics, and they are written for someone who has not read the code.
@@ -274,7 +276,7 @@ When asked to implement a feature, fix a bug, or execute a plan, the expected de
 4. Task two sub agents in parallel:
    - **Code review**: review your changes for correctness, quality, and security (provide full context: the task, files changed, and relevant architecture)
 
-   - **Follow-up ideas**: explore feature ideas, improvements, or optimizations related to the current work — file GitHub issues for worthwhile ones
+   - **Follow-up ideas**: explore feature ideas, improvements, or optimizations related to the current work — file GitHub issues for at most the two most worthwhile ones, after searching open and closed issues for duplicates, and mention the rest in the PR body
 
 5. Fix review findings directly in the PR. Only create GitHub issues for items that are clearly out of scope and low urgency (e.g., a broader refactor or a pattern change affecting many files).
 

@@ -18,8 +18,8 @@ Get PR $ARGUMENTS to ready-to-merge: the Claude Code Review of the head commit s
 - One session per PR: if `ListAgents` shows another session on this PR's branch, agree on a single owner with SendMessage before pushing.
 - Review threads: use `/fix-pr-comments`, which decides what to fix, rework, defer or skip without stopping to ask. Never leave a bug or security issue that this PR introduced.
 - Vulnerability Check failures get their own PR via `/quick-pr`. Once it merges, merge main into this PR.
-- Unrelated or flaky failures: rerun once, then `/quick-pr` a fix or comment on the existing issue.
+- Unrelated or flaky failures: rerun once. If the failure also happens on main or keeps coming back, `/quick-pr` a fix now; otherwise comment on its existing issue.
 - A review run that failed or was cancelled (often a usage limit): `gh run rerun <id> --failed`.
-- Merge main only when the PR conflicts with it, or needs a fix that just landed there (like the Vulnerability Check fix above); a PR that is merely behind main stays as is, since each merge adds noise and starts a new review. Use `git fetch origin main && git merge origin/main`, and rebase only if the user asks.
+- Merge main only when the PR conflicts with it, or needs a fix that just landed there (like the Vulnerability Check fix above); a PR that is merely behind main stays as is, since each merge adds noise and starts a new review. Use `git fetch origin main && git merge origin/main`, and rebase only if the user asks. After the merge, check that `git diff origin/main` still shows exactly this PR's changes: nothing of yours dropped while resolving a conflict, and no line duplicated by the merge.
 
 When ready, record the decisions you made along the way in the PR body, and give the user a short summary: what was fixed, reworked, deferred (with issue links) and skipped.
