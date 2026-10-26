@@ -89,7 +89,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private readonly _sessionsByKey = new Map<string, ServerWebSocket<unknown>>();
   /** Client frames received while an async {@link resolveBinary} runs, replayed once spawned. */
   private readonly _pendingFrames = new Map<ServerWebSocket<unknown>, string[]>();
-  /** Sessions whose server registered file watchers (see {@link forwardWatchedFiles}). */
+  /** Each session's file-change forwarder, when {@link forwardWatchedFiles} and it has a worktree. */
   private readonly watchedFiles = new Map<TSession, WatchedFilesForwarder>();
   protected readonly log: ReturnType<typeof logger.child>;
 
@@ -601,6 +601,16 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
     const session = this.buildSession(ws, proc, context);
     this.sessions.set(ws, session);
+    // From the start, so changes made before the server registers its watchers reach it too.
+    const watchedRoot = this.forwardWatchedFiles ? this.getSessionWorkspace(session) : null;
+    if (watchedRoot) {
+      this.watchedFiles.set(
+        session,
+        new WatchedFilesForwarder(path.resolve(watchedRoot), (changes) =>
+          this.sendWatchedFilesChanged(session, changes),
+        ),
+      );
+    }
 
     // Per-session token bucket to cap stderr volume so a chatty LSP (e.g.
     // terraform-ls's workspace-walker spew) can't evict useful entries from
@@ -719,24 +729,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    */
   private interceptWatchedFilesRegistration(session: TSession, body: string): boolean {
     if (!this.forwardWatchedFiles) return false;
-    const root = this.getSessionWorkspace(session);
-    if (!root) return false;
     const request = splitWatchedFilesRegistration(body);
     if (!request) return false;
-    // A frame drained after teardown must not create a forwarder nothing would dispose.
-    if (!this.isSessionLive(session)) return true;
+    const forwarder = this.watchedFiles.get(session);
+    // None: the session is gone (drop the frame) or has no worktree (leave it to the client).
+    if (!forwarder) return !this.isSessionLive(session);
 
-    let forwarder = this.watchedFiles.get(session);
-    if (request.register) {
-      if (!forwarder) {
-        forwarder = new WatchedFilesForwarder(path.resolve(root), (changes) =>
-          this.sendWatchedFilesChanged(session, changes),
-        );
-        this.watchedFiles.set(session, forwarder);
-      }
-      for (const entry of request.entries) forwarder.register(entry.id, entry.registerOptions);
-    } else {
-      for (const entry of request.entries) forwarder?.unregister(entry.id);
+    for (const entry of request.entries) {
+      if (request.register) forwarder.register(entry.id, entry.registerOptions);
+      else forwarder.unregister(entry.id);
     }
 
     if (request.remainder === null) {
