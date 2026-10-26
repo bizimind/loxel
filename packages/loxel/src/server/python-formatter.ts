@@ -1,7 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { $ } from "bun";
+import { logger } from "./logger";
+import { isEnvShippedByRepo } from "./python-env";
+
+const log = logger.child("format");
 
 export const PYTHON_FORMAT_EXTENSIONS: readonly string[] = ["py", "pyi"];
 
@@ -54,17 +57,21 @@ export function detectPythonFormatter(startDir: string, wtRoot: string): PythonF
 
 /**
  * `bin` of the nearest virtual environment (`.venv` or `venv` holding a `pyvenv.cfg`) from
- * `startDir` up to `wtRoot`, so formatters pinned in the project's dev dependencies win over
- * global installs. Venvs with files tracked by git are skipped: a cloned repo that commits
- * `.venv/bin/ruff` would otherwise run its own code on every save. Deliberately minimal; to be
- * unified with the server's Python environment resolver.
+ * `startDir` up to `wtRoot` that has `command`, so a formatter pinned in the project's dev
+ * dependencies wins over global installs. Environments the repository ships any part of are
+ * skipped (`isEnvShippedByRepo`, the same rule the Python environment resolver applies).
  */
-export async function findVenvBin(startDir: string, wtRoot: string): Promise<string | undefined> {
+export async function findVenvBin(
+  startDir: string,
+  wtRoot: string,
+  command: string,
+): Promise<string | undefined> {
   for (const dir of dirsUpToRoot(startDir, wtRoot)) {
     for (const name of VENV_DIR_NAMES) {
       const venv = join(dir, name);
-      if (!existsSync(join(venv, "pyvenv.cfg"))) continue;
-      if (await isTrackedByGit(venv, wtRoot)) continue;
+      const executable = join(venv, "bin", command);
+      if (!existsSync(join(venv, "pyvenv.cfg")) || !existsSync(executable)) continue;
+      if (await isShipped(wtRoot, venv, executable)) continue;
       return join(venv, "bin");
     }
   }
@@ -72,33 +79,32 @@ export async function findVenvBin(startDir: string, wtRoot: string): Promise<str
 }
 
 /**
- * Whether git tracks any file in each venv directory seen, kept until the worktree's formatter
- * state is invalidated (`forgetVenvTracking`): a venv's tracked status rarely changes, and saves
- * should not spawn git each time.
+ * `isEnvShippedByRepo` per venv executable, kept until the worktree's formatter state is
+ * invalidated (`forgetVenvTracking`): it rarely changes, and saves should not spawn git each time.
  */
-const venvTracked = new Map<string, Promise<boolean>>();
+const shippedByExecutable = new Map<string, Promise<boolean>>();
 
-function isTrackedByGit(venv: string, wtRoot: string): Promise<boolean> {
-  let tracked = venvTracked.get(venv);
-  if (!tracked) {
-    // Outside a git repo `ls-files` fails, and nothing can be tracked.
-    tracked = $`git -C ${wtRoot} ls-files -- ${venv}`
-      .quiet()
-      .text()
-      .then(
-        (out) => out.trim().length > 0,
-        () => false,
-      );
-    venvTracked.set(venv, tracked);
+function isShipped(wtRoot: string, venv: string, executable: string): Promise<boolean> {
+  let shipped = shippedByExecutable.get(executable);
+  if (!shipped) {
+    shipped = isEnvShippedByRepo(wtRoot, venv, executable).catch((err: unknown) => {
+      // Fail closed: an environment that cannot be checked is not used.
+      log.warn("Skipping a venv for formatters: could not check whether git tracks it", {
+        venv,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return true;
+    });
+    shippedByExecutable.set(executable, shipped);
   }
-  return tracked;
+  return shipped;
 }
 
 /** Drop cached venv tracking state for venvs inside `wtRoot`. */
 export function forgetVenvTracking(wtRoot: string): void {
   const prefix = resolve(wtRoot) + sep;
-  for (const venv of venvTracked.keys()) {
-    if (venv.startsWith(prefix)) venvTracked.delete(venv);
+  for (const executable of shippedByExecutable.keys()) {
+    if (executable.startsWith(prefix)) shippedByExecutable.delete(executable);
   }
 }
 

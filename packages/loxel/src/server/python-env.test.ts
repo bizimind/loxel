@@ -150,6 +150,68 @@ describe("resolvePythonEnv", () => {
     expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
   });
 
+  test("skips an environment the repository ships other files of", async () => {
+    const { wt, bin } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    await makeVenv(join(wt, ".venv"));
+    // The interpreter is untracked, but a startup hook it loads is committed.
+    const hook = join(wt, ".venv", "lib", "python3.12", "site-packages", "hook.pth");
+    await mkdir(dirname(hook), { recursive: true });
+    await writeFile(hook, "import os\n");
+    Bun.spawnSync(["git", "-C", wt, "add", "-f", hook]);
+    const system = await writeExecutable(join(bin, "python3"));
+
+    expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
+  });
+
+  test("skips an environment that is its own repository tracking any file", async () => {
+    const { wt, bin } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    await makeVenv(join(wt, ".venv"));
+    Bun.spawnSync(["git", "-C", join(wt, ".venv"), "init", "-q"]);
+    Bun.spawnSync(["git", "-C", join(wt, ".venv"), "add", "pyvenv.cfg"]);
+    const system = await writeExecutable(join(bin, "python3"));
+
+    expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
+  });
+
+  test("does not hand back an environment it rejected through PATH", async () => {
+    const { wt } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    await makeVenv(join(wt, ".venv"));
+    const hook = join(wt, ".venv", "lib", "python3.12", "site-packages", "hook.pth");
+    await mkdir(dirname(hook), { recursive: true });
+    await writeFile(hook, "import os\n");
+    Bun.spawnSync(["git", "-C", wt, "add", "-f", hook]);
+
+    expect(await resolvePythonEnv(wt, { env: { PATH: join(wt, ".venv", "bin") } })).toBeNull();
+  });
+
+  test("uses an environment created at the worktree root despite the repository's files", async () => {
+    const { wt } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    await writeFile(join(wt, ".gitignore"), "/bin/\n/lib/\n/pyvenv.cfg\n");
+    await writeFile(join(wt, "app.py"), "");
+    Bun.spawnSync(["git", "-C", wt, "add", ".gitignore", "app.py"]);
+    const python = await makeVenv(wt);
+
+    const env = await resolvePythonEnv(wt, { env: { PATH: "", VIRTUAL_ENV: wt } });
+    expect(env).toEqual({ source: "virtual-env", pythonPath: python, envPath: wt });
+  });
+
+  test("still checks a root-level environment's own files", async () => {
+    const { wt } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    const python = await makeVenv(wt);
+    const hook = join(wt, "lib", "python3.12", "site-packages", "hook.pth");
+    await mkdir(dirname(hook), { recursive: true });
+    await writeFile(hook, "import os\n");
+    Bun.spawnSync(["git", "-C", wt, "add", hook]);
+
+    expect(await resolvePythonEnv(wt, { env: { PATH: "", VIRTUAL_ENV: wt } })).toBeNull();
+    await expect(normalizePythonOverride(wt, python)).rejects.toThrow("tracks in git");
+  });
+
   test("skips an interpreter git cannot vouch for inside a repository", async () => {
     const { wt, bin } = await makeRoot();
     Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
@@ -469,5 +531,13 @@ describe("normalizePythonOverride", () => {
     git("init", "-q");
     git("add", ".venv");
     await expect(normalizePythonOverride(wt, tracked)).rejects.toThrow("tracks in git");
+  });
+
+  test("rejects an interpreter whose environment has other tracked files", async () => {
+    const { wt } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    const python = await makeVenv(join(wt, "venv"));
+    Bun.spawnSync(["git", "-C", wt, "add", join(wt, "venv", "pyvenv.cfg")]);
+    await expect(normalizePythonOverride(wt, python)).rejects.toThrow("tracks in git");
   });
 });
