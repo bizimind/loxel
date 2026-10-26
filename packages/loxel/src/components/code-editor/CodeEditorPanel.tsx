@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
+import type { EditorConfigProperties } from "@/api/editorconfig-model";
 import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeInspector";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
@@ -18,6 +19,7 @@ import {
 } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { computeLineEdits } from "@/lib/compute-line-edits";
+import { applyEditorConfigOnSave } from "@/lib/editorconfig-save-actions";
 import { removeDollarSchema, setDollarSchema } from "@/lib/json-schema-registry";
 import { validateStrictJson } from "@/lib/json-strict-validator";
 import { addSaveAction } from "@/lib/monaco-save-action";
@@ -37,6 +39,8 @@ import { useUIStore } from "@/store/ui";
 type IStandaloneCodeEditor = monacoEditor.IStandaloneCodeEditor;
 
 const identity = (s: string) => s;
+
+const NO_EDITORCONFIG: EditorConfigProperties = {};
 
 function normalizeHex(color: string): string {
   const c = color.toLowerCase().replace(/^#/, "");
@@ -227,6 +231,15 @@ export function CodeEditorPanel({
   resolvedLangRef.current = resolvedLang;
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
 
+  // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
+  const { data: editorConfigData } = useQuery({
+    queryKey: queryKeys.editorConfig(filePath, panelWorktreePath ?? undefined),
+    queryFn: ({ signal }) => api.getEditorConfig(filePath, panelWorktreePath, signal),
+  });
+  const editorConfig = editorConfigData?.properties ?? NO_EDITORCONFIG;
+  const editorConfigRef = useRef(editorConfig);
+  editorConfigRef.current = editorConfig;
+
   // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one),
   // only for files tsc can report on.
   const { data: diagData } = useQuery({
@@ -276,14 +289,12 @@ export function CodeEditorPanel({
       model = monaco.editor.createModel(content, language, uri);
     }
 
-    const resolved = resolveIndentation(editorSettings, filePath, resolvedLangRef.current);
-    model.updateOptions({ tabSize: resolved.tabSize, insertSpaces: resolved.insertSpaces });
-
     const editor = monaco.editor.create(container, {
       model,
       theme: getMonacoThemeName(darkMode),
-      tabSize: resolved.tabSize,
-      insertSpaces: resolved.insertSpaces,
+      // Editor-level tabSize/insertSpaces are global in standalone Monaco: setting them would reset
+      // every open model's indentation. Indentation is set per model below; this constant flag only
+      // keeps Monaco from overriding it.
       detectIndentation: false,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
@@ -321,6 +332,15 @@ export function CodeEditorPanel({
     });
 
     editorRef.current = editor;
+    // After `create`: the first editor flips the global `detectIndentation`, which resets models.
+    model.updateOptions(
+      resolveIndentation(
+        editorSettings,
+        filePath,
+        resolvedLangRef.current,
+        editorConfigRef.current,
+      ),
+    );
 
     // TextMate scope inspector — shows real TextMate scope stack instead of
     // the lossy reverse-mapped scopes from shikiToMonaco.
@@ -397,7 +417,21 @@ export function CodeEditorPanel({
       },
     });
 
-    getSerializedContentRef.current = () => editor.getModel()?.getValue() ?? null;
+    // Whether the last user change was an undo or redo. The autosave that follows it skips the
+    // save actions, which would otherwise redo what the user just undid (and clear redo).
+    let lastChangeWasUndo = false;
+    getSerializedContentRef.current = (reason) => {
+      if (reason === "explicit" || !lastChangeWasUndo) {
+        // The save actions are part of what gets written, not an edit that needs saving again.
+        isProgrammaticRef.current = true;
+        try {
+          applyEditorConfigOnSave(editor, editorConfigRef.current, reason);
+        } finally {
+          isProgrammaticRef.current = false;
+        }
+      }
+      return editor.getModel()?.getValue() ?? null;
+    };
     mergeGetRef.current = () => editor.getModel()?.getValue() ?? null;
     mergeApplyRef.current = (merged, programmatic) => {
       const model = editor.getModel();
@@ -412,8 +446,9 @@ export function CodeEditorPanel({
     };
 
     // Listen for user edits (guarded against programmatic setValue)
-    editor.onDidChangeModelContent(() => {
+    editor.onDidChangeModelContent((e) => {
       if (isProgrammaticRef.current) return;
+      lastChangeWasUndo = e.isUndoing || e.isRedoing;
       handleChange(editor.getModel()?.getValue() ?? "");
     });
 
@@ -561,10 +596,8 @@ export function CodeEditorPanel({
     if (!editor) return;
     const model = editor.getModel();
     if (!model) return;
-    const { tabSize, insertSpaces } = resolveIndentation(editorSettings, filePath, resolvedLang);
-    editor.updateOptions({ tabSize, insertSpaces, detectIndentation: false });
-    model.updateOptions({ tabSize, insertSpaces });
-  }, [editorSettings, filePath, resolvedLang]);
+    model.updateOptions(resolveIndentation(editorSettings, filePath, resolvedLang, editorConfig));
+  }, [editorSettings, filePath, resolvedLang, editorConfig]);
 
   // Apply TypeScript diagnostics as Monaco markers
   useEffect(() => {

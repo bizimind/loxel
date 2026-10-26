@@ -24,6 +24,7 @@ import {
 } from "@bizimind/wt/lib";
 
 import type { DiffInfo } from "@/api/diff-model";
+import type { EditorConfigResponse } from "@/api/editorconfig-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
 import type { LogCategory, LogLevel } from "@/api/log-entry-model";
 import { LOG_CATEGORIES, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
@@ -52,6 +53,7 @@ import { isHttpUrl } from "@/url-utils";
 
 import { config } from "./config";
 import { getDiagnostics } from "./diagnostics";
+import { resolveEditorConfig } from "./editorconfig";
 import { describeError } from "./error-message";
 import type { FileTree } from "./external-folders-service";
 import { externalFoldersStoreKey } from "./external-folders-service";
@@ -969,6 +971,26 @@ function handleDetectedFormatters(req: Request, ctx: RouteContext): Response {
   if (!wtPath) return error("Missing wt parameter", 400);
   const formatters = ctx.getDetectedFormatters(wtPath);
   return json({ formatters });
+}
+
+// GET /api/editorconfig?path=<abs>&wt= — The .editorconfig properties for a file. Only files in a
+// tree (the worktree or an Others folder) have any: the lookup stops at the tree root, and drafts
+// and individually opened external files have no tree.
+async function handleEditorConfig(req: Request, ctx: RouteContext): Promise<Response> {
+  const url = new URL(req.url);
+  const path = url.searchParams.get("path");
+  if (!path || !isAbsolute(path)) return error("Missing or relative path parameter", 400);
+  const resolved = ctx.resolveFilePath(path, url.searchParams.get("wt") ?? undefined);
+  const response: EditorConfigResponse = {
+    properties:
+      resolved?.type === "tree" && resolved.relativePath
+        ? await resolveEditorConfig(
+            join(resolved.tree.root, resolved.relativePath),
+            resolved.tree.root,
+          )
+        : {},
+  };
+  return json(response);
 }
 
 /**
@@ -3081,6 +3103,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detected-formatters": handleDetectedFormatters,
     "/api/python-env": handlePythonEnv,
     "/api/python-env/candidates": handlePythonEnvCandidates,
+    "/api/editorconfig": handleEditorConfig,
   },
   POST: {
     "/api/log": handleLogIngest,

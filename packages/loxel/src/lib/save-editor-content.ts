@@ -48,6 +48,12 @@ function decrementPending(worktreePath: string): void {
   }
 }
 
+/**
+ * Why an editor's content is being written: `explicit` for Cmd+S (and re-creating a deleted file),
+ * `auto` for autosave and for flushing unsaved edits (unmount, a move carrying them over).
+ */
+export type SaveReason = "auto" | "explicit";
+
 export interface SaveOptions {
   format?: boolean;
   formattingSettings?: FormattingSettings;
