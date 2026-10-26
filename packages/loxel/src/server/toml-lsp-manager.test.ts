@@ -91,6 +91,8 @@ class FakeClient {
   readonly serverRequests: string[] = [];
   private nextId = 1;
   private readonly responses = new Map<number, (result: unknown) => void>();
+  /** Callbacks waiting for a server→client request, each told about every new one. */
+  private readonly serverRequestListeners = new Set<() => void>();
 
   constructor(private readonly manager: TomlLspManager) {
     const ws = {
@@ -138,13 +140,17 @@ class FakeClient {
     return this.serverRequests.filter((m) => m === "workspace/diagnostic/refresh").length;
   }
 
-  /** Wait until the server has asked the client to pull diagnostics again more than `count` times. */
-  async refreshedAfter(count: number): Promise<void> {
-    const deadline = Date.now() + 10_000;
-    while (this.refreshCount() <= count) {
-      if (Date.now() > deadline) throw new Error("no workspace/diagnostic/refresh");
-      await Bun.sleep(50);
-    }
+  /** Resolves once the server has asked the client to pull diagnostics again more than `count` times. */
+  refreshedAfter(count: number): Promise<void> {
+    return new Promise((resolve) => {
+      const check = () => {
+        if (this.refreshCount() <= count) return;
+        this.serverRequestListeners.delete(check);
+        resolve();
+      };
+      this.serverRequestListeners.add(check);
+      check();
+    });
   }
 
   request(method: string, params: unknown): Promise<unknown> {
@@ -164,6 +170,7 @@ class FakeClient {
     if (message.method !== undefined && message.id !== undefined) {
       this.serverRequests.push(message.method);
       this.send({ id: message.id, result: null });
+      for (const listener of this.serverRequestListeners) listener();
       return;
     }
     if (message.id !== undefined) this.responses.get(message.id)?.(message.result);

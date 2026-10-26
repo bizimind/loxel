@@ -30,7 +30,7 @@ Resolve these with the user before starting:
 
 **A. Bun-built from NPM package** — `packages/loxel/scripts/build-<name>.ts`. Two-step: `Bun.build()` bundles the entry point, then `bun build --compile` produces a standalone binary in `build/`. Use `resolvePackage()` from `./resolve-package.ts` to locate the NPM package. Some servers need Bun.build plugins (see the yaml-ls build script) or runtime shims (see the basedpyright build script). Add the NPM package as a devDependency.
 
-**B. Downloaded pre-built binary** — `packages/loxel/scripts/download-<name>.ts`. For Go/Rust/GraalVM-native binaries. Pin SHA256 digests per platform. Hash the downloaded bytes _in memory before writing or extracting_ — never extract untrusted content before verification. For archives, pass the expected binary's member name to `unzip` or `tar` to restrict extraction to that single file. See docker-ls (raw binary), terraform-ls (zip), xml-lsp (zip with rename), and ruff (tarball, or zip on Windows) download scripts.
+**B. Downloaded pre-built binary** — `packages/loxel/scripts/download-<name>.ts`. For Go/Rust/GraalVM-native binaries. Pin SHA256 digests per platform. Hash the downloaded bytes _in memory before writing or extracting_ — never extract untrusted content before verification. For archives, pass the expected binary's member name to `unzip` or `tar` to restrict extraction to that single file. See docker-ls (raw binary), terraform-ls (zip), xml-lsp (zip with rename) download scripts; a binary in a tarball (or a zip on Windows) needs only `downloadReleaseBinary` from `download-release-binary.ts` (ruff, Tombi).
 
 **C. Copied from an installed package** — Simple copy script (TypeScript 7's `copy-typescript.ts` pattern).
 
@@ -51,7 +51,7 @@ Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped
 ### Worktree-scoped (copy from Astro)
 
 - **`getSessionKey(context)`** — Return `context.wtPath` (prevents double-spawn). The default `null` is for global managers (YAML).
-- **`getSessionWorkspace(session)`** — Return `session.wtPath` so `rootUri`/`workspaceFolders` are injected into `initialize`.
+- **`getSessionWorkspace(session)`** — Return `session.wtPath` so `rootUri`/`workspaceFolders` are injected into `initialize` and `workspace/workspaceFolders` requests are answered.
 - **`spawnOptions(context)`** — Return `{ cwd: context.wtPath }`.
 
 ### Optional overrides
