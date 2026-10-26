@@ -140,7 +140,8 @@ export type WsData =
   | WorktreeLspData<"python-lsp">
   | WorktreeLspData<"ruff-lsp">
   | WorktreeLspData<"astro-lsp">
-  | WorktreeLspData<"xml-lsp">;
+  | WorktreeLspData<"xml-lsp">
+  | WorktreeLspData<"toml-lsp">;
 
 export type WorktreeLspData<T extends string = string> = { type: T; wtPath: string };
 export type WorktreeLspType = Extract<WsData, { wtPath: string }>["type"];

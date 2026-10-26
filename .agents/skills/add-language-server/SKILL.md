@@ -110,7 +110,7 @@ YAML is special — uses a custom client that doesn't use `createWorktreeLspClie
 
 **File:** `packages/loxel/src/lib/monaco-env.ts`
 
-1. **Register the language** with `monaco.languages.register()` if Monaco doesn't ship it (common ones like json, xml, yaml, python, dockerfile are built in; `monaco-env.ts` already registers terraform, astro, tsx, jsx, dockerbake).
+1. **Register the language** with `monaco.languages.register()` if Monaco doesn't ship it (common ones like json, xml, yaml, python, dockerfile are built in; `monaco-env.ts` already registers terraform, astro, tsx, jsx, dockerbake, toml).
 2. **Set language configuration** (brackets, comments, auto-closing pairs) via `monaco.languages.setLanguageConfiguration()`.
 3. **Wire the lazy connector:**
 

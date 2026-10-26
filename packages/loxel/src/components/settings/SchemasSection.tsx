@@ -3,6 +3,7 @@ import { useCallback } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { classifySchemaGlob, type SchemaLanguage } from "@/lib/schema-glob";
 import { cn } from "@/lib/utils";
 import {
   BUILTIN_SCHEMA_DEFAULTS,
@@ -13,6 +14,21 @@ import {
 import { EditableCell } from "./EditableCell";
 
 const BUILTIN_IDS = new Set(BUILTIN_SCHEMA_DEFAULTS.map((b) => b.id));
+
+const LANGUAGE_LABELS: Record<SchemaLanguage, string> = {
+  json: "JSON",
+  yaml: "YAML",
+  toml: "TOML",
+};
+
+/** The languages a glob's schema applies to, e.g. "TOML" or "JSON, YAML, TOML". */
+function languagesLabel(glob: string): string {
+  const languages = classifySchemaGlob(glob);
+  return (Object.keys(LANGUAGE_LABELS) as SchemaLanguage[])
+    .filter((language) => languages[language])
+    .map((language) => LANGUAGE_LABELS[language])
+    .join(", ");
+}
 
 export function SchemasSection() {
   const schemas = useSettingsStore(selectEffectiveSchemas);
@@ -31,8 +47,9 @@ export function SchemasSection() {
         <div>
           <h3 className="text-foreground text-sm font-medium">Schemas</h3>
           <p className="text-muted-foreground mt-1 text-xs">
-            Configure JSON Schema mappings for auto-completion and validation in JSON and YAML
-            files.
+            Map JSON Schemas to files for auto-completion, hover and validation in JSON, YAML and
+            TOML files. A glob ending in .json, .yml/.yaml or .toml applies to that language, any
+            other glob to all three. User mappings take precedence over built-in ones.
           </p>
         </div>
         <Button variant="outline" size="xs" onClick={handleAdd}>
@@ -43,9 +60,10 @@ export function SchemasSection() {
 
       <div className="divide-border/50 divide-y rounded-md bg-[var(--surface-2)]">
         {/* Header */}
-        <div className="text-muted-foreground grid grid-cols-[1fr_1fr_28px_28px] items-center gap-2 px-3 py-1.5 text-[10px] font-medium tracking-wider uppercase">
+        <div className="text-muted-foreground grid grid-cols-[1fr_1fr_88px_28px_28px] items-center gap-2 px-3 py-1.5 text-[10px] font-medium tracking-wider uppercase">
           <span>Glob Pattern</span>
           <span>Schema URL</span>
+          <span>Languages</span>
           <span />
           <span />
         </div>
@@ -57,7 +75,7 @@ export function SchemasSection() {
             <div
               key={schema.id}
               className={cn(
-                "group grid grid-cols-[1fr_1fr_28px_28px] items-center gap-2 px-3",
+                "group grid grid-cols-[1fr_1fr_88px_28px_28px] items-center gap-2 px-3",
                 isBuiltin ? "py-1.5" : "py-0.5",
               )}
             >
@@ -70,6 +88,7 @@ export function SchemasSection() {
                       Built-in
                     </span>
                   </span>
+                  <LanguagesCell glob={schema.glob} />
                   <span />
                 </>
               ) : (
@@ -84,6 +103,7 @@ export function SchemasSection() {
                     onChange={(v) => updateSchema(schema.id, { url: v })}
                     placeholder="https://... or /path/to/schema.json"
                   />
+                  <LanguagesCell glob={schema.glob} />
                   <button
                     onClick={() => removeSchema(schema.id)}
                     className="text-muted-foreground hover:text-destructive flex size-7 items-center justify-center rounded p-1 opacity-0 transition-colors group-hover:opacity-100"
@@ -99,4 +119,8 @@ export function SchemasSection() {
       </div>
     </div>
   );
+}
+
+function LanguagesCell({ glob }: { glob: string }) {
+  return <span className="text-muted-foreground truncate text-[10px]">{languagesLabel(glob)}</span>;
 }

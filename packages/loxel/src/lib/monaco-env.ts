@@ -23,6 +23,7 @@ import { registerPythonLanguageConfiguration } from "./python-language-config";
 import { connectPythonLsp, disconnectPythonLsp } from "./python-lsp-client";
 import { connectRuffLsp, disconnectRuffLsp } from "./ruff-lsp-client";
 import { connectTerraformLsp, disconnectTerraformLsp } from "./terraform-lsp-client";
+import { connectTomlLsp, disconnectTomlLsp } from "./toml-lsp-client";
 import { connectTsLsp } from "./ts-lsp-client";
 import { connectXmlLsp, disconnectXmlLsp } from "./xml-lsp-client";
 import { connectYamlLsp } from "./yaml-lsp-client";
@@ -286,6 +287,13 @@ createLazyLspConnector({
   languageIds: ["xml"],
   connect: connectXmlLsp,
   disconnect: disconnectXmlLsp,
+});
+
+// Tombi: schema validation and completion for TOML (Settings > Schemas), plus TOML syntax checks.
+createLazyLspConnector({
+  languageIds: ["toml"],
+  connect: connectTomlLsp,
+  disconnect: disconnectTomlLsp,
 });
 
 // Initialize JSON language service — schemas populated dynamically via json-schema-registry.
