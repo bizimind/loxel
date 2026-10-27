@@ -103,7 +103,7 @@ Loxel follows your project's [`.editorconfig`](https://editorconfig.org) files. 
 
 Changes made on save are a separate step in the undo history, so `Cmd+Z` brings them back, and the autosave after an undo leaves the file as you restored it. On autosave, whitespace at the end of the lines you're typing on is kept, so a space you just typed doesn't vanish; it's removed by a later save. Edits to an `.editorconfig` apply to open files right away.
 
-A newly opened file can be edited once its `.editorconfig` has been read, so your first keystrokes already follow it. `charset` and `end_of_line = cr` aren't applied by the editor. When Prettier formats on save, it reads `.editorconfig` too, `max_line_length` included, just like the Prettier command line. Markdown files and drawings are saved in their editors' own formats and don't use `.editorconfig`, and neither do drafts or files opened from outside a project.
+A newly opened file can be edited once its `.editorconfig` has been read, at most half a second after it opens, so your first keystrokes already follow it. `charset` and `end_of_line = cr` aren't applied by the editor. When Prettier formats on save, it reads `.editorconfig` too, `max_line_length` included, just like the Prettier command line. Markdown files and drawings are saved in their editors' own formats and don't use `.editorconfig`, and neither do drafts or files opened from outside a project.
 
 ---
 

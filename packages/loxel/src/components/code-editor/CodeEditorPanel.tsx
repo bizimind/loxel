@@ -17,6 +17,7 @@ import {
   useDiskSyncedContent,
   useFormatOnSave,
 } from "@/hooks/use-disk-synced-content";
+import { useFirstLoadGate } from "@/hooks/useFirstLoadGate";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { computeLineEdits } from "@/lib/compute-line-edits";
 import { detectIndentation } from "@/lib/detect-indentation";
@@ -44,6 +45,9 @@ type IStandaloneCodeEditor = monacoEditor.IStandaloneCodeEditor;
 const identity = (s: string) => s;
 
 const NO_EDITORCONFIG: EditorConfigProperties = {};
+
+/** Longest the editor waits read-only for a file's `.editorconfig` before using the fallbacks. */
+const EDITORCONFIG_GATE_MS = 500;
 
 function rulersFor(editorConfig: EditorConfigProperties): number[] {
   return editorConfig.maxLineLength === undefined ? [] : [editorConfig.maxLineLength];
@@ -244,9 +248,12 @@ export function CodeEditorPanel({
     queryFn: ({ signal }) => api.getEditorConfig(filePath, panelWorktreePath, signal),
   });
   const { data: editorConfigData } = editorConfigQuery;
-  // Not while paused (offline), which would keep the editor read-only indefinitely.
-  const editorConfigPending =
-    editorConfigQuery.isPending && editorConfigQuery.fetchStatus !== "paused";
+  // Read-only until the first `.editorconfig` load settles, so the first edit already indents by
+  // it; never longer than the cap, and not while the query is paused (offline) or after an error.
+  const editorConfigPending = useFirstLoadGate(
+    editorConfigQuery.isPending && editorConfigQuery.fetchStatus !== "paused",
+    EDITORCONFIG_GATE_MS,
+  );
   const editorConfig = editorConfigData?.properties ?? NO_EDITORCONFIG;
   const editorConfigRef = useRef(editorConfig);
   editorConfigRef.current = editorConfig;
@@ -327,7 +334,6 @@ export function CodeEditorPanel({
     const editor = monaco.editor.create(container, {
       model,
       theme: getMonacoThemeName(darkMode),
-      // Until the `.editorconfig` is known, so the first edit already indents by it.
       readOnly: editorConfigPendingRef.current,
       rulers: rulersFor(editorConfigRef.current),
       // Editor-level tabSize/insertSpaces are global in standalone Monaco: setting them would reset
