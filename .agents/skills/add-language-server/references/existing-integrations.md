@@ -24,6 +24,7 @@ The most complex manager. Unique behaviors not found in other LSPs:
 - LanguageId fixup: `tsx` -> `typescriptreact`, `jsx` -> `javascriptreact`
 - Server-side filtering of non-TS files via `shouldDropForNonTsUri()`
 - Inline `workspace/configuration` response (TypeScript blocks until answered)
+- Per-file indentation for quick fixes: TypeScript has one format setting per server, so the manager switches it (`workspace/didChangeConfiguration`) to the requesting file's indentation, which the client reports with `loxel/documentIndentation`, before forwarding code action and completion requests
 - Forwards watched files like basedpyright, ruff and Tombi; the base takes its watcher registrations out before `handleServerFrame` sees them
 
 ## YAML — Global Singleton

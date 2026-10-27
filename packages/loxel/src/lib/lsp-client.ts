@@ -1,4 +1,5 @@
 import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client";
+import type { IDisposable } from "monaco-editor";
 
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
@@ -30,12 +31,18 @@ export function getConnectedLspClients(wtPath: string): MonacoLspClient[] {
  * Workspace edits (rename, code actions) also change the worktree's files that are not open
  * (see `createLspWorkspaceFiles`), and a toast says why when one fails. A socket the server closes
  * with `LSP_RESTART_CLOSE_CODE` (it restarts the language server) is reconnected, which
- * re-initializes the server and re-opens the synced documents.
+ * re-initializes the server and re-opens the synced documents. `onConnected` runs for each
+ * connection's transport, and what it returns is disposed with the connection.
  */
-export function createWorktreeLspClient(wsPath: string, languageId?: string | readonly string[]) {
+export function createWorktreeLspClient(
+  wsPath: string,
+  languageId?: string | readonly string[],
+  onConnected?: (transport: WebSocketTransport) => IDisposable,
+) {
   let currentWtPath: string | null = null;
   let currentTransport: WebSocketTransport | null = null;
   let currentClient: MonacoLspClient | null = null;
+  let currentExtension: IDisposable | null = null;
   let connecting = false;
 
   function connect(wtPath: string): void {
@@ -69,6 +76,7 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
         });
         const client = currentClient;
         connectedClients.set(client, wtPath);
+        currentExtension = onConnected?.(transport) ?? null;
         // A socket the server closed (replaced by a newer connection) never answers again.
         transport.state.onChange(({ state }) => {
           if (state === "closed") connectedClients.delete(client);
@@ -93,6 +101,8 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
   // notifications still go out over a live socket.
   function teardown(): void {
     if (currentClient) connectedClients.delete(currentClient);
+    currentExtension?.dispose();
+    currentExtension = null;
     currentClient?.dispose();
     currentClient = null;
     currentTransport?.dispose();

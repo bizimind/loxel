@@ -1,3 +1,10 @@
+import { fileURLToPath } from "node:url";
+
+import {
+  DOCUMENT_INDENTATION_METHOD,
+  type DocumentIndentation,
+  documentIndentationParamsSchema,
+} from "@/api/lsp-indentation-model";
 import { isRecord } from "@/lib/is-record";
 import { TS_SOURCE_EXTENSIONS } from "@/lib/typescript-files";
 
@@ -39,12 +46,58 @@ export function toClientUris(body: string): string {
 }
 
 /**
+ * TypeScript 7's user preferences, by the raw names it reads at the top of a settings section.
+ * TypeScript keeps one set per server: the `js/ts` section covers TS and JS files alike.
+ */
+const PREFERENCES = {
+  includeCompletionsForModuleExports: true,
+  includeCompletionsForImportStatements: true,
+  includeAutomaticOptionalChainCompletions: true,
+  importModuleSpecifierPreference: "shortest",
+} as const;
+
+/**
+ * The `js/ts` settings section: the preferences, plus the format settings TypeScript indents the
+ * code of quick fixes and completions with (its default is 4 spaces).
+ */
+function typeScriptSettings(indentation: DocumentIndentation | null): Record<string, unknown> {
+  if (!indentation) return { ...PREFERENCES };
+  // Capped: TypeScript builds each indentation string in full, and an `.editorconfig` can say 1e9.
+  const tabSize = Math.min(indentation.tabSize, MAX_INDENT_COLUMNS);
+  const indentSize = Math.min(indentation.indentSize, MAX_INDENT_COLUMNS);
+  const format = { tabSize, indentSize, convertTabsToSpaces: indentation.insertSpaces };
+  return { ...PREFERENCES, format };
+}
+
+const MAX_INDENT_COLUMNS = 16;
+
+/** Client requests whose edits TypeScript indents with its format settings. */
+const INDENTED_EDIT_REQUESTS = new Set([
+  "textDocument/codeAction",
+  "textDocument/completion",
+  "completionItem/resolve",
+]);
+
+interface SessionIndentation {
+  /** Each live editor model's indentation, by file path. */
+  documents: Map<string, DocumentIndentation>;
+  /** What TypeScript indents with now; absent while it has its default. */
+  current?: DocumentIndentation;
+}
+
+/**
  * Manages `tsc --lsp -stdio` child processes, one per worktree. Translates loxel://HEAD/... ↔
- * file:///... URIs, answers TypeScript's `workspace/configuration` with Loxel's preferences, and
- * gives `.tsx`/`.jsx` documents the language ids TypeScript expects.
+ * file:///... URIs, gives TypeScript Loxel's preferences, and gives `.tsx`/`.jsx` documents the
+ * language ids TypeScript expects.
+ *
+ * TypeScript applies one set of format settings to every file, so the bridge keeps each document's
+ * indentation (the client's `loxel/documentIndentation` notifications) and, before forwarding a
+ * request whose edits TypeScript indents, switches the settings to that document's indentation
+ * when they differ. TypeScript applies a configuration change before it reads the next request.
  */
 export class TsLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
+  private readonly indentation = new WeakMap<WtLspSession, SessionIndentation>();
 
   constructor() {
     super("ts-lsp");
@@ -66,6 +119,10 @@ export class TsLspManager extends WorktreeLspManager {
         const msg = parsed as { id?: number | string; method?: string; params?: unknown };
 
         if (msg.method !== undefined) {
+          if (msg.method === DOCUMENT_INDENTATION_METHOD) {
+            this.setDocumentIndentation(session, msg.params);
+            return;
+          }
           if (this.shouldDropForNonTsUri(msg.method, msg.params)) return;
 
           // Inject rootUri/workspaceFolders so TypeScript knows which project to load.
@@ -73,12 +130,11 @@ export class TsLspManager extends WorktreeLspManager {
             outgoing = this.augmentInitializeRequest(session, parsed as Record<string, unknown>);
           } else if (msg.method === "textDocument/didOpen" && setReactLanguageId(msg.params)) {
             outgoing = JSON.stringify(parsed);
-          }
-
-          // After server acks init, push TS preferences so TypeScript enables
-          // module-export completions, inlay hints, etc. in steady state too.
-          if (msg.method === "initialized") {
-            queueMicrotask(() => this.sendConfigUpdate(session));
+          } else if (msg.method === "textDocument/didClose") {
+            const path = documentPath(textDocumentUri(msg.params));
+            if (path) this.sessionIndentation(session).documents.delete(path);
+          } else if (INDENTED_EDIT_REQUESTS.has(msg.method)) {
+            this.indentLike(session, requestDocumentPath(msg.method, msg.params));
           }
         }
       }
@@ -98,34 +154,35 @@ export class TsLspManager extends WorktreeLspManager {
 
   // ---------------------------------------------------------------------------
 
-  private sendConfigUpdate(session: WtLspSession): void {
+  private sessionIndentation(session: WtLspSession): SessionIndentation {
+    let state = this.indentation.get(session);
+    if (!state) {
+      state = { documents: new Map() };
+      this.indentation.set(session, state);
+    }
+    return state;
+  }
+
+  private setDocumentIndentation(session: WtLspSession, params: unknown): void {
+    const parsed = documentIndentationParamsSchema.safeParse(params);
+    if (!parsed.success) {
+      this.log.warn("Ignoring a malformed document indentation", { error: parsed.error.message });
+      return;
+    }
+    const path = documentPath(parsed.data.textDocument.uri);
+    if (path) this.sessionIndentation(session).documents.set(path, parsed.data.indentation);
+  }
+
+  /** Switch TypeScript's format settings to the indentation of the document at `path`. */
+  private indentLike(session: WtLspSession, path: string | null): void {
+    const state = this.sessionIndentation(session);
+    const indentation = path ? state.documents.get(path) : undefined;
+    if (!indentation || sameIndentation(indentation, state.current)) return;
+    state.current = indentation;
     const msg = JSON.stringify({
       jsonrpc: "2.0",
       method: "workspace/didChangeConfiguration",
-      params: {
-        settings: {
-          typescript: {
-            preferences: {
-              includeCompletionsForModuleExports: true,
-              includeCompletionsForImportStatements: true,
-              includeCompletionsWithInsertText: true,
-              includeCompletionsWithSnippetText: true,
-              includeAutomaticOptionalChainCompletions: true,
-              allowIncompleteCompletions: true,
-              importModuleSpecifierPreference: "shortest",
-              includePackageJsonAutoImports: "auto",
-            },
-          },
-          javascript: {
-            preferences: {
-              includeCompletionsForModuleExports: true,
-              includeCompletionsForImportStatements: true,
-              includeCompletionsWithInsertText: true,
-              allowIncompleteCompletions: true,
-            },
-          },
-        },
-      },
+      params: { settings: { "js/ts": typeScriptSettings(indentation) } },
     });
     this.writeToStdin(session, msg);
   }
@@ -135,16 +192,9 @@ export class TsLspManager extends WorktreeLspManager {
     params.rootUri = fileUri(session.wtPath);
     params.rootPath = session.wtPath;
     params.workspaceFolders = workspaceFolders(session.wtPath);
-    params.initializationOptions = {
-      preferences: {
-        includeCompletionsForModuleExports: true,
-        includeCompletionsForImportStatements: true,
-        includeCompletionsWithInsertText: true,
-        includeCompletionsWithSnippetText: true,
-        includeAutomaticOptionalChainCompletions: true,
-        allowIncompleteCompletions: true,
-      },
-    };
+    // TypeScript reads these as the `js/ts` section when the client cannot answer
+    // `workspace/configuration` (monaco-lsp-client does not).
+    params.initializationOptions = { userPreferences: typeScriptSettings(null) };
     msg.params = params;
     return JSON.stringify(msg);
   }
@@ -156,19 +206,16 @@ export class TsLspManager extends WorktreeLspManager {
    */
   private shouldDropForNonTsUri(method: string, params: unknown): boolean {
     if (!method.startsWith("textDocument/")) return false;
-    if (typeof params !== "object" || params === null) return false;
-    const td = (params as { textDocument?: unknown }).textDocument;
-    if (typeof td !== "object" || td === null) return false;
-    const uri = (td as { uri?: unknown }).uri;
-    if (typeof uri !== "string") return false;
+    const uri = textDocumentUri(params);
+    if (uri === undefined) return false;
     return !TS_EXTENSIONS.test(uri);
   }
 
   /**
    * Handle server→client requests locally (don't forward to the WebSocket
-   * client). Returns true if consumed. TypeScript sends `workspace/configuration`
-   * immediately after `initialized` and blocks until it's answered — so we
-   * reply inline with our canned TS/JS preferences.
+   * client). Returns true if consumed. TypeScript asks for `workspace/configuration`
+   * after `initialized` if the client advertises it, and blocks until it's answered,
+   * so we reply inline with the current settings.
    */
   private handleServerRequest(session: WtLspSession, body: string): boolean {
     let msg: unknown;
@@ -185,23 +232,8 @@ export class TsLspManager extends WorktreeLspManager {
       const items = ((m.params as { items?: unknown[] } | undefined)?.items ?? []) as Array<{
         section?: string;
       }>;
-      const prefs = {
-        includeCompletionsForModuleExports: true,
-        includeCompletionsForImportStatements: true,
-        includeCompletionsWithInsertText: true,
-        includeCompletionsWithSnippetText: true,
-        includeAutomaticOptionalChainCompletions: true,
-        allowIncompleteCompletions: true,
-        importModuleSpecifierPreference: "shortest" as const,
-        includePackageJsonAutoImports: "auto" as const,
-      };
-      const result = items.map((item) => {
-        const section = (item.section ?? "").toLowerCase();
-        if (section === "typescript" || section === "javascript" || section === "js/ts") {
-          return { preferences: prefs };
-        }
-        return {};
-      });
+      const settings = typeScriptSettings(this.sessionIndentation(session).current ?? null);
+      const result = items.map((item) => (item.section === "js/ts" ? settings : null));
       this.writeToStdin(session, JSON.stringify({ jsonrpc: "2.0", id: m.id, result }));
       return true;
     }
@@ -221,6 +253,41 @@ export class TsLspManager extends WorktreeLspManager {
     }
 
     return false;
+  }
+}
+
+function sameIndentation(a: DocumentIndentation, b: DocumentIndentation | undefined): boolean {
+  return (
+    a.tabSize === b?.tabSize && a.indentSize === b.indentSize && a.insertSpaces === b.insertSpaces
+  );
+}
+
+function textDocumentUri(params: unknown): string | undefined {
+  const textDocument = isRecord(params) ? params.textDocument : undefined;
+  return isRecord(textDocument) && typeof textDocument.uri === "string"
+    ? textDocument.uri
+    : undefined;
+}
+
+/**
+ * The file a request's edits are for: its text document, or for `completionItem/resolve` the file
+ * TypeScript recorded in the item's data.
+ */
+function requestDocumentPath(method: string, params: unknown): string | null {
+  if (method !== "completionItem/resolve") return documentPath(textDocumentUri(params));
+  const data = isRecord(params) ? params.data : undefined;
+  return isRecord(data) && typeof data.fileName === "string" ? data.fileName : null;
+}
+
+/** The file path of a client or server document URI, or null for any other URI. */
+function documentPath(uri: string | undefined): string | null {
+  if (uri === undefined) return null;
+  const serverUri = toServerUris(uri);
+  if (!serverUri.startsWith("file:")) return null;
+  try {
+    return fileURLToPath(serverUri);
+  } catch {
+    return null;
   }
 }
 
