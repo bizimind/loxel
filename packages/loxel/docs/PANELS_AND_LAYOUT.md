@@ -15,7 +15,7 @@ Both registries live in [panels.tsx](../src/components/dockview/panels.tsx): `ou
 
 Imperative code never holds a `DockviewApi`. Module-level references live in [tools-bar.ts](../src/store/tools-bar.ts): `setDockviewApi` (outer, set by `setupOuterDockview`), `getCenterApi` / `subscribeCenterApi` / `getCenterApiWorktree` (center, set by `CenterHost`). The center API is replaced on every worktree switch, so always re-read it.
 
-Center panels that need their worktree get it from `params.worktreePath`, captured at creation, and expose it to descendants through [panel-context.ts](../src/components/dockview/panel-context.ts) (`usePanelWorktreePath`), so a panel keeps talking to the worktree it was created for.
+Center panels that need their worktree get it from `params.worktreePath`, captured at creation, and expose it to descendants through [panel-context.ts](../src/components/dockview/panel-context.ts) (`usePanelWorktreePath`; `getPanelWorktreePath(panel)` outside React), so a panel keeps talking to the worktree it was created for.
 
 Where to look:
 
