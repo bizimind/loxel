@@ -92,7 +92,7 @@ describe("Python editing in Monaco", () => {
       },
     );
     const registered = registerPythonLanguageConfiguration();
-    monaco.languages.register({ id: "toml" }); // registered by monaco-env.ts in the app
+    monaco.languages.register({ id: "toml" }); // registered by monaco-languages.ts in the app
     container = document.createElement("div");
     document.body.append(container);
     const model = monaco.editor.createModel("", "python");

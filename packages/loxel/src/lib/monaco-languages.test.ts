@@ -7,27 +7,27 @@ import { BUILTIN_FILE_ASSOCIATIONS } from "@/store/settings-store";
 import { registerLoxelLanguages } from "./monaco-languages";
 import { toMonacoLanguage } from "./monaco-theme";
 
-/** Languages Monaco registers itself, before Loxel adds its own. */
-const monacoLanguages = new Set(monaco.languages.getLanguages().map(({ id }) => id));
+/** Languages Loxel registers, captured from the calls so other registrations don't count. */
+const loxelLanguages: string[] = [];
 /** Every configuration Loxel registers, by language. */
 const configurations = new Map<string, monaco.languages.LanguageConfiguration>();
 
 {
-  const setConfiguration = monaco.languages.setLanguageConfiguration;
-  const spy = spyOn(monaco.languages, "setLanguageConfiguration").mockImplementation(
+  const { register, setLanguageConfiguration } = monaco.languages;
+  const registerSpy = spyOn(monaco.languages, "register").mockImplementation((language) => {
+    loxelLanguages.push(language.id);
+    return register(language);
+  });
+  const configurationSpy = spyOn(monaco.languages, "setLanguageConfiguration").mockImplementation(
     (id, configuration) => {
       configurations.set(id, configuration);
-      return setConfiguration(id, configuration);
+      return setLanguageConfiguration(id, configuration);
     },
   );
   registerLoxelLanguages();
-  spy.mockRestore();
+  registerSpy.mockRestore();
+  configurationSpy.mockRestore();
 }
-
-const loxelLanguages = monaco.languages
-  .getLanguages()
-  .map(({ id }) => id)
-  .filter((id) => !monacoLanguages.has(id));
 
 describe("registerLoxelLanguages", () => {
   test("registers every language a built-in file association resolves to", () => {
@@ -51,7 +51,7 @@ describe("registerLoxelLanguages", () => {
     ]);
   });
 
-  // Monaco only configures the languages it registers; Shiki's grammars only tokenize.
+  // Monaco only configures the languages it registers itself; Shiki's grammars only tokenize.
   test.each(loxelLanguages)("gives %s comments, brackets and auto-closing pairs", (id) => {
     const configuration = configurations.get(id);
     const { lineComment, blockComment } = configuration?.comments ?? {};
