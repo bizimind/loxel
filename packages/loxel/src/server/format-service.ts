@@ -14,7 +14,7 @@ import {
   PYTHON_FORMAT_EXTENSIONS,
   type PythonFormatter,
 } from "./python-formatter";
-import { buildSpawnEnv } from "./shell-env";
+import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 
 const log = logger.child("format");
 
@@ -444,10 +444,15 @@ export class FormatService {
       // Bun.spawn throws ENOENT both when the executable is not on PATH and when it is found but
       // its interpreter is gone (e.g. a venv whose Python was upgraded away).
       if (!(err instanceof Error && "code" in err && err.code === "ENOENT")) return UNFORMATTED;
-      const notice = Bun.which(command, { PATH: env.PATH ?? "" })
-        ? `Format on save skipped: "${command}" could not be started; its interpreter may be missing.`
-        : `Format on save skipped: "${command}" is not installed.`;
-      return { content: null, notice };
+      if (Bun.which(command, { PATH: env.PATH ?? "" })) {
+        return {
+          content: null,
+          notice: `Format on save skipped: "${command}" could not be started; its interpreter may be missing.`,
+        };
+      }
+      // It may have been installed since the login-shell PATH was captured; the next save retries.
+      void refreshLoginShellEnv();
+      return { content: null, notice: `Format on save skipped: "${command}" is not installed.` };
     }
   }
 }

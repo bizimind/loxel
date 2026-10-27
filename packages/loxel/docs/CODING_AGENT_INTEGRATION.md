@@ -43,7 +43,7 @@ Server to client: `agent_event { id, seq, event }`, `agent_exit { id, exitCode }
 
 ### Session config and models
 
-`buildSessionConfig` passes `workspaceRoot`, `models`, `mode`, `profile`, and `declaredTools` from `sessionOptions`, a child logger, the handler table, and `env: buildSpawnEnv()` ([shell-env.ts](../src/server/shell-env.ts)), which is the server env with the resolved login-shell `PATH` and `~/.local/bin`, plus `AI_AGENT=loxel`, the cross-agent marker that tells tools such as the `loxel` CLI an agent ran them (the CLI then opens without focus). That env is only used for tool subprocesses. `AgentSessionOptions` is `Pick<SessionConfig, "models" | "mode" | "profile" | "declaredTools">`.
+`buildSessionConfig` passes `workspaceRoot`, `models`, `mode`, `profile`, and `declaredTools` from `sessionOptions`, a child logger, the handler table, and `env: buildSpawnEnv()` ([shell-env.ts](../src/server/shell-env.ts)), which is the server env with the login-shell environment applied (see [TERMINALS.md](TERMINALS.md#environment)) and `~/.local/bin` on `PATH`, plus `AI_AGENT=loxel`, the cross-agent marker that tells tools such as the `loxel` CLI an agent ran them (the CLI then opens without focus). That env is only used for tool subprocesses. `AgentSessionOptions` is `Pick<SessionConfig, "models" | "mode" | "profile" | "declaredTools">`.
 
 ### Lifecycle
 

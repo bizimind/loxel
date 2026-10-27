@@ -69,9 +69,11 @@ const SHIM_HEADER =
 /**
  * /etc/profile and /etc/zprofile `eval` the output of macOS `path_helper`, which prints PATH in
  * double quotes, so these characters in a PATH entry would be interpreted by the shell. Branch
- * names (and so worktree directories) may contain them.
+ * names (and so worktree directories) may contain them. Not checked on Windows, whose paths are
+ * full of backslashes and whose shells run no such startup.
  */
 const SHELL_EVAL_CHARS = /["$`\\]/;
+const IS_WINDOWS = process.platform === "win32";
 
 let zshShimWritten = false;
 
@@ -98,7 +100,8 @@ function ensureZshShim(): string {
  * its `bin` first on PATH (moved, not duplicated, when already there), `VIRTUAL_ENV` for a venv,
  * and no `PYTHONHOME`. An interpreter outside any environment changes nothing, and so does a `bin`
  * the shell could misread or that holds files git tracks in `worktreePath`. For zsh, also routes
- * startup through the shim that keeps the entry first after the user's startup files.
+ * startup through the shim that keeps the entry first after the user's startup files; other shells
+ * get the PATH entry without `VIRTUAL_ENV`, since their startup may move the entry back.
  */
 export async function activatePythonEnv(
   env: Record<string, string | undefined>,
@@ -108,7 +111,7 @@ export async function activatePythonEnv(
 ): Promise<void> {
   if (!pythonEnv.envPath) return;
   const binDir = path.dirname(pythonEnv.pythonPath);
-  if (SHELL_EVAL_CHARS.test(binDir)) {
+  if (!IS_WINDOWS && SHELL_EVAL_CHARS.test(binDir)) {
     log.warn("Not activating a Python environment whose path the shell would interpret", {
       binDir,
     });
@@ -126,8 +129,14 @@ export async function activatePythonEnv(
   delete env.PYTHONHOME;
   // An environment inherited from wherever Loxel was launched no longer applies.
   delete env.VIRTUAL_ENV_PROMPT;
-  if (existsSync(path.join(pythonEnv.envPath, "pyvenv.cfg"))) env.VIRTUAL_ENV = pythonEnv.envPath;
-  else delete env.VIRTUAL_ENV;
+  // Only zsh gets the shim that keeps `bin` first. Other login shells can rebuild PATH with the
+  // system directories ahead of it, and a VIRTUAL_ENV naming the venv (shown by prompts, honored
+  // by uv and poetry) would then contradict the `python` and `pip` the shell runs.
+  if (shimDir && existsSync(path.join(pythonEnv.envPath, "pyvenv.cfg"))) {
+    env.VIRTUAL_ENV = pythonEnv.envPath;
+  } else {
+    delete env.VIRTUAL_ENV;
+  }
 
   if (!shimDir) return;
   // A ZDOTDIR that already is the shim (Loxel started from a shell mid-startup) would recurse.

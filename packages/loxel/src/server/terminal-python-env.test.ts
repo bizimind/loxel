@@ -43,8 +43,16 @@ describe("activatePythonEnv", () => {
       PYTHONHOME: "/opt/python",
       VIRTUAL_ENV_PROMPT: "(other)",
     };
-    await activatePythonEnv(env, venv, "/bin/bash", wt);
-    expect(env).toEqual({ PATH: `${venvBin}:/usr/bin:/bin`, VIRTUAL_ENV: venvPath });
+    await activatePythonEnv(env, venv, "/bin/zsh", wt);
+    expect(env).toMatchObject({ PATH: `${venvBin}:/usr/bin:/bin`, VIRTUAL_ENV: venvPath });
+    expect(env.PYTHONHOME).toBeUndefined();
+    expect(env.VIRTUAL_ENV_PROMPT).toBeUndefined();
+  });
+
+  test("does not claim a venv in shells without the shim, whose startup can reorder PATH", async () => {
+    const env: Record<string, string | undefined> = { PATH: "/usr/bin", VIRTUAL_ENV: "/elsewhere" };
+    await activatePythonEnv(env, venv, "/opt/homebrew/bin/fish", wt);
+    expect(env).toEqual({ PATH: `${venvBin}:/usr/bin` });
   });
 
   test("puts a conda-style environment on PATH without claiming it is a venv", async () => {

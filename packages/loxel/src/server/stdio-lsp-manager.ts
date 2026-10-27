@@ -11,7 +11,7 @@ import {
   WatchedFilesForwarder,
   withWatchedFilesCapability,
 } from "./lsp-watched-files";
-import { buildSpawnEnv } from "./shell-env";
+import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import {
   createStderrThrottle,
   STDERR_THROTTLE_CAPACITY,
@@ -701,7 +701,10 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       if (Bun.file(localBin).size) return localBin;
     }
 
-    return Bun.which(binaryName, { PATH: buildSpawnEnv().PATH ?? "" });
+    const found = Bun.which(binaryName, { PATH: buildSpawnEnv().PATH ?? "" });
+    // It may have been installed since the login-shell PATH was captured; the next start retries.
+    if (!found) void refreshLoginShellEnv();
+    return found;
   }
 
   // ---------------------------------------------------------------------------

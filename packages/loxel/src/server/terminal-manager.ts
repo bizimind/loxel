@@ -8,7 +8,7 @@ import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 
 import { logger } from "./logger";
-import { buildSpawnEnv } from "./shell-env";
+import { buildShellSpawnEnv } from "./shell-env";
 import { activatePythonEnv } from "./terminal-python-env";
 import type { TerminalSink } from "./terminal-session";
 import { TerminalSession } from "./terminal-session";
@@ -52,7 +52,7 @@ export interface TerminalManagerHooks {
 
 /** Build terminal-specific env: login shell PATH + TERM fallback. */
 function buildTerminalEnv(): Record<string, string | undefined> {
-  const env = buildSpawnEnv();
+  const env = buildShellSpawnEnv();
   if (!env.TERM) env.TERM = "xterm-256color";
   // A server started from an agent's session (e.g. a dev server) must not mark the user's shells
   // as an agent's, or their own `loxel` commands would open without focus.
