@@ -89,6 +89,8 @@ export interface WorktreeResources {
   fileOpsHistory: FileOperationsHistory;
   /** Connected clients subscribing to this worktree's events. */
   subscribers: Set<ServerWebSocket<WsData>>;
+  /** Keeps the worktree's Python environment resolution shared and watched (see `python-env.ts`). */
+  unsubscribePythonEnv: () => void;
 }
 
 /** A worktree's Others section: its open folders, then its open external files. */

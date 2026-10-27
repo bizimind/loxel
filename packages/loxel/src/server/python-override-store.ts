@@ -14,9 +14,11 @@ export function pythonOverrideStoreKey(wtPath: string): string {
 
 /** The interpreter chosen for a worktree, or null when it uses automatic detection. */
 export function getPythonOverride(wtPath: string): string | null {
-  const raw = getStore(pythonOverrideStoreKey(wtPath));
-  if (!raw) return null;
   try {
+    // Inside the try: a store that cannot be read falls back to automatic detection instead of
+    // failing every resolution of the worktree.
+    const raw = getStore(pythonOverrideStoreKey(wtPath));
+    if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed === "object" && parsed !== null && "pythonPath" in parsed) {
       const { pythonPath } = parsed;

@@ -10,6 +10,7 @@ const stateDir = await mkdtemp(join(tmpdir(), "python-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { PythonLspManager, pythonSettings } = await import("./python-lsp-manager");
 const { setPythonOverride } = await import("./python-override-store");
+const { refreshPythonEnv } = await import("./python-env");
 
 // Drives the real basedpyright through the manager the way the Monaco client does, against a real
 // virtual environment holding a package that exists nowhere else.
@@ -272,7 +273,7 @@ describe.skipIf(!canRun)("PythonLspManager with basedpyright", () => {
       await client.waitForDiagnostics(uri, (d) => analyzed(d) && hasMissingImport(d));
 
       setPythonOverride(wt, picked);
-      manager.refreshWorktreeEnvironment(wt);
+      refreshPythonEnv(wt);
       await client.waitForDiagnostics(uri, (d) => analyzed(d) && !hasMissingImport(d));
     },
     TEST_TIMEOUT_MS,

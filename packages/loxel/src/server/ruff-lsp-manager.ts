@@ -3,9 +3,17 @@ import path from "node:path";
 import type { ServerWebSocket, Subprocess } from "bun";
 
 import type { PythonEnv } from "@/api/python-env-model";
+import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
 import { logger } from "./logger";
-import { isEnvShippedByRepo, isShippedByRepo, resolvePythonEnv } from "./python-env";
+import {
+  getPythonEnv,
+  getPythonEnvNow,
+  isEnvShippedByRepo,
+  isSamePythonEnv,
+  isShippedByRepo,
+  subscribePythonEnv,
+} from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
 import {
   type SpawnOptions,
@@ -31,14 +39,22 @@ const VERSION_TIMEOUT_MS = 5_000;
  * per file (nearest `.ruff.toml` / `ruff.toml` / `pyproject.toml`), so nothing is configured here
  * beyond turning off what another owner already provides: syntax errors (basedpyright reports them) and
  * formatting (format on save picks ruff or black per project, see `python-formatter.ts`).
+ *
+ * The binary is picked again after every re-resolution of the worktree's Python environment
+ * (`uv sync` creating `.venv`, ruff upgraded in it, another interpreter chosen); when the pick
+ * differs, the socket is closed with {@link LSP_RESTART_CLOSE_CODE} so the client reconnects and
+ * a new session starts with the new binary.
  */
-export class RuffLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
+export class RuffLspManager extends StdioLspManager<RuffLspSession, WtLspContext> {
   /** Ruff watches its config files (`pyproject.toml`, `ruff.toml`) to reload settings. */
   protected override readonly forwardWatchedFiles = true;
   protected override readonly suppressedFeatures: readonly SuppressibleFeature[] = [
     "textDocument/formatting",
     "textDocument/rangeFormatting",
   ];
+  /** The pick behind each worktree's spawn and the environment it was made for, from `resolveBinary` until its session is built. */
+  private readonly spawnedRuff = new Map<string, { pick: RuffPick; env: PythonEnv | null }>();
+
   constructor() {
     super("ruff-lsp");
   }
@@ -52,8 +68,10 @@ export class RuffLspManager extends StdioLspManager<WtLspSession, WtLspContext> 
   }
 
   protected async resolveBinary(context: WtLspContext): Promise<string | null> {
-    const env = await resolvePythonEnv(context.wtPath);
-    return pickRuffBinary(context.wtPath, env, this.resolveBundledBinary(RUFF, DEV_PATH));
+    const env = await getPythonEnv(context.wtPath);
+    const pick = await this.pick(context.wtPath, env);
+    if (pick) this.spawnedRuff.set(context.wtPath, { pick, env });
+    return pick?.path ?? null;
   }
 
   protected override spawnArgs(): readonly string[] {
@@ -80,72 +98,149 @@ export class RuffLspManager extends StdioLspManager<WtLspSession, WtLspContext> 
     ws: ServerWebSocket<unknown>,
     proc: Subprocess,
     context: WtLspContext,
-  ): WtLspSession {
-    return {
+  ): RuffLspSession {
+    const spawned = this.spawnedRuff.get(context.wtPath);
+    const session: RuffLspSession = {
       ws,
       proc,
       wtPath: context.wtPath,
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
+      ruff: spawned?.pick ?? null,
+      unsubscribeEnv: null,
+      repicking: Promise.resolve(),
     };
+    this.spawnedRuff.delete(context.wtPath);
+    session.unsubscribeEnv = subscribePythonEnv(context.wtPath, ({ env }) => {
+      // One pick at a time, so the last re-resolution decides.
+      session.repicking = session.repicking.then(() => this.repick(session, env));
+    });
+    // A re-resolution that landed while the binary was picked and spawned was heard by no one.
+    session.repicking = getPythonEnvNow(context.wtPath).then((env) =>
+      spawned && isSamePythonEnv(env, spawned.env) ? undefined : this.repick(session, env),
+    );
+    return session;
   }
+
+  protected override onSessionClosed(session: RuffLspSession): void {
+    session.unsubscribeEnv?.();
+    session.unsubscribeEnv = null;
+  }
+
+  private pick(wtPath: string, env: PythonEnv | null): Promise<RuffPick | null> {
+    return pickRuffBinary(wtPath, env, this.resolveBundledBinary(RUFF, DEV_PATH));
+  }
+
+  /** Restart the session's ruff when the environment now calls for a different one. */
+  private async repick(session: RuffLspSession, env: PythonEnv | null): Promise<void> {
+    if (!this.isSessionLive(session)) return;
+    const next = await this.pick(session.wtPath, env);
+    // Without any usable ruff now, the running one keeps serving.
+    if (!next || !this.isSessionLive(session) || isSamePick(next, session.ruff)) return;
+    // The environment's ruff still in place and trusted, whose version just could not be read (a
+    // timeout while the OS scans it, a reinstall in progress), is no reason to restart.
+    const running = session.ruff?.path;
+    if (
+      running &&
+      running === envRuff(env) &&
+      next.path !== running &&
+      (await isTrustedRuff(session.wtPath, running, env?.envPath ?? null))
+    ) {
+      return;
+    }
+    if (!this.isSessionLive(session)) return;
+    this.log.info("Restarting ruff for a different binary", {
+      wtPath: session.wtPath,
+      from: session.ruff,
+      to: next,
+    });
+    const { ws } = session;
+    this.detach(ws);
+    ws.close(LSP_RESTART_CLOSE_CODE, "ruff changed; reconnect");
+  }
+}
+
+interface RuffLspSession extends WtLspSession {
+  /** The binary this session runs; null when unknown. */
+  ruff: RuffPick | null;
+  unsubscribeEnv: (() => void) | null;
+  repicking: Promise<void>;
+}
+
+/** A ruff binary and the version it reported. */
+export interface RuffPick {
+  path: string;
+  version: string;
+}
+
+function isSamePick(a: RuffPick, b: RuffPick | null): boolean {
+  return a.path === b?.path && a.version === b.version;
 }
 
 /**
  * The ruff to run for a worktree: the one installed in its Python environment `env` (next to the
- * interpreter `resolvePythonEnv` found), so the project's pinned version applies, else `bundled`.
- * A candidate counts only when the repository does not ship it and it is new enough to serve.
+ * interpreter the shared resolution found), so the project's pinned version applies, else
+ * `bundled`. A candidate counts only when the repository does not ship it and it is new enough to
+ * serve.
  */
 export async function pickRuffBinary(
   wtPath: string,
   env: PythonEnv | null,
   bundled: string | null,
-): Promise<string | null> {
-  const fromEnv = env ? path.join(path.dirname(env.pythonPath), RUFF) : null;
+): Promise<RuffPick | null> {
+  const fromEnv = envRuff(env);
   const candidates = [
     { ruff: fromEnv, envPath: env?.envPath ?? null },
     { ruff: bundled, envPath: null },
   ];
   for (const { ruff: candidate, envPath } of candidates) {
-    if (candidate && (await isUsableRuff(wtPath, candidate, envPath))) {
-      log.info("Using ruff", { wtPath, ruff: candidate, fromEnv: candidate === fromEnv });
-      return candidate;
+    const version = candidate ? await usableRuffVersion(wtPath, candidate, envPath) : null;
+    if (candidate && version) {
+      log.info("Using ruff", { wtPath, ruff: candidate, version, fromEnv: candidate === fromEnv });
+      return { path: candidate, version };
     }
   }
   return null;
 }
 
 /**
- * Whether `ruff` exists, is not shipped by the repository and serves. A ruff in an environment is
+ * The version of `ruff` when it exists, is not shipped by the repository and serves. A ruff in an environment is
  * checked with the whole environment (`isEnvShippedByRepo`); one outside any (a system
  * interpreter's directory, the bundled one) only as a file, since its directory can belong to an
  * unrelated repository (Homebrew's prefix tracks `bin/brew`).
  */
-async function isUsableRuff(
+async function usableRuffVersion(
+  wtPath: string,
+  ruff: string,
+  envPath: string | null,
+): Promise<string | null> {
+  if (!(await isTrustedRuff(wtPath, ruff, envPath))) return null;
+  const version = await ruffVersion(wtPath, ruff);
+  if (!version || Bun.semver.order(version, MIN_SERVER_VERSION) < 0) {
+    log.info("Ignoring a ruff without a stable language server", { ruff, version });
+    return null;
+  }
+  return version;
+}
+
+/** The ruff next to the environment's interpreter, whether or not it exists. */
+function envRuff(env: PythonEnv | null): string | null {
+  return env ? path.join(path.dirname(env.pythonPath), RUFF) : null;
+}
+
+/** Whether `ruff` exists and the repository ships neither it nor, for one in an environment, any of that environment. */
+async function isTrustedRuff(
   wtPath: string,
   ruff: string,
   envPath: string | null,
 ): Promise<boolean> {
-  try {
-    if (!(await Bun.file(ruff).exists())) return false;
-    const shipped = envPath
-      ? await isEnvShippedByRepo(wtPath, envPath, ruff)
-      : await isShippedByRepo(wtPath, ruff);
-    if (shipped) {
-      log.warn("Ignoring a ruff binary tracked by git", { wtPath, ruff });
-      return false;
-    }
-  } catch (err) {
-    // Removed between the checks; the next candidate may still do.
-    log.debug("Could not check a ruff binary", { ruff, error: err });
-    return false;
-  }
-  const version = await ruffVersion(wtPath, ruff);
-  if (!version || Bun.semver.order(version, MIN_SERVER_VERSION) < 0) {
-    log.info("Ignoring a ruff without a stable language server", { ruff, version });
-    return false;
-  }
-  return true;
+  if (!(await Bun.file(ruff).exists())) return false;
+  // Both checks treat a ruff removed meanwhile as shipped, so the next candidate gets its turn.
+  const shipped = envPath
+    ? await isEnvShippedByRepo(wtPath, envPath, ruff)
+    : await isShippedByRepo(wtPath, ruff);
+  if (shipped) log.warn("Ignoring a ruff binary tracked by git", { wtPath, ruff });
+  return !shipped;
 }
 
 /**

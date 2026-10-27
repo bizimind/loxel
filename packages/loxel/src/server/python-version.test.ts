@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,14 +29,14 @@ async function fakePython(body: string): Promise<{ python: string; runs: () => P
 describe("pythonVersion", () => {
   test("reads the version once per interpreter file", async () => {
     const { python, runs } = await fakePython(`echo "Python 3.12.13"`);
-    expect(await pythonVersion(python)).toBe("3.12.13");
-    expect(await pythonVersion(python)).toBe("3.12.13");
+    expect(await pythonVersion(python, root!)).toBe("3.12.13");
+    expect(await pythonVersion(python, root!)).toBe("3.12.13");
     expect(await runs()).toBe(1);
   });
 
   test("reads Python 2's version from stderr", async () => {
     const { python } = await fakePython(`echo "Python 2.7.18" >&2`);
-    expect(await pythonVersion(python)).toBe("2.7.18");
+    expect(await pythonVersion(python, root!)).toBe("2.7.18");
   });
 
   test("does not cache a failed read", async () => {
@@ -44,12 +44,21 @@ describe("pythonVersion", () => {
     const { python, runs } = await fakePython(
       `[ "$(wc -l < "$0.runs")" -gt 1 ] && echo "Python 3.13.1"`,
     );
-    expect(await pythonVersion(python)).toBeNull();
-    expect(await pythonVersion(python)).toBe("3.13.1");
+    expect(await pythonVersion(python, root!)).toBeNull();
+    expect(await pythonVersion(python, root!)).toBe("3.13.1");
     expect(await runs()).toBe(2);
   });
 
+  test("asks from the worktree, so a version-manager shim reads its .python-version", async () => {
+    // Like a pyenv shim: the version comes from `.python-version` in the working directory.
+    const { python } = await fakePython(`echo "Python $(cat .python-version)"`);
+    const wt = join(root!, "wt");
+    await mkdir(wt);
+    await writeFile(join(wt, ".python-version"), "3.11.9\n");
+    expect(await pythonVersion(python, wt)).toBe("3.11.9");
+  });
+
   test("returns null for a missing file", async () => {
-    expect(await pythonVersion("/nonexistent/python")).toBeNull();
+    expect(await pythonVersion("/nonexistent/python", tmpdir())).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client";
 
+import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 
 import { isLiveEditorModel } from "./live-editor-model";
@@ -27,7 +28,9 @@ export function getConnectedLspClients(wtPath: string): MonacoLspClient[] {
  * client (unregistering providers and closing synced documents) before the
  * transport. Only editor tabs' live models are synced to the server (see `isLiveEditorModel`).
  * Workspace edits (rename, code actions) also change the worktree's files that are not open
- * (see `createLspWorkspaceFiles`), and a toast says why when one fails.
+ * (see `createLspWorkspaceFiles`), and a toast says why when one fails. A socket the server closes
+ * with `LSP_RESTART_CLOSE_CODE` (it restarts the language server) is reconnected, which
+ * re-initializes the server and re-opens the synced documents.
  */
 export function createWorktreeLspClient(wsPath: string, languageId?: string | readonly string[]) {
   let currentWtPath: string | null = null;
@@ -47,8 +50,9 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const address = `${proto}//${location.host}/${wsPath}?wt=${encodeURIComponent(wtPath)}`;
 
-    WebSocketTransport.connectTo({ address }).then(
-      (transport) => {
+    openSocket(address).then(
+      (socket) => {
+        const transport = WebSocketTransport.fromWebSocket(socket);
         if (currentWtPath !== wtPath) {
           transport.dispose();
           return;
@@ -68,6 +72,12 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
         // A socket the server closed (replaced by a newer connection) never answers again.
         transport.state.onChange(({ state }) => {
           if (state === "closed") connectedClients.delete(client);
+        });
+        socket.addEventListener("close", (event) => {
+          if (event.code !== LSP_RESTART_CLOSE_CODE || currentTransport !== transport) return;
+          teardown();
+          currentWtPath = null;
+          connect(wtPath);
         });
       },
       () => {
@@ -96,4 +106,12 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
   }
 
   return { connect, disconnect };
+}
+
+function openSocket(address: string): Promise<WebSocket> {
+  const socket = new WebSocket(address);
+  return new Promise((resolve, reject) => {
+    socket.addEventListener("open", () => resolve(socket), { once: true });
+    socket.addEventListener("error", reject, { once: true });
+  });
 }
