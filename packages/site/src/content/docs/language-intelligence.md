@@ -18,7 +18,7 @@ If a language server crashes, Loxel starts it again within a few seconds and the
 
 Opening the same worktree in a second window moves its language servers to that window. The first window keeps editing normally, without language features for that worktree, and does not take them back on its own, so two windows never fight over them.
 
-While a language server is stopped, for any of these reasons or because it could not start, the status bar shows it, for example `basedpyright stopped` or `TypeScript in another window`. Hover it to see why, and click it to start it again (or to take the servers back into this window). **Restart Language Servers** in the command palette restarts every language server of the current worktree, stopped or not.
+While a language server is stopped, for any of these reasons or because it could not start, the status bar shows it, for example `basedpyright stopped` or `TypeScript in another window`. Hover it to see why, and click it to start it again (or to take the servers back into this window). **Restart Language Servers** in the command palette restarts every language server of the current worktree and the shared YAML one, stopped or not.
 
 ---
 

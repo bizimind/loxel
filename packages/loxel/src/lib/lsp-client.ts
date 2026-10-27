@@ -3,6 +3,7 @@ import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client
 import { showToast } from "@/components/ui/toast";
 import { useLspStatusStore } from "@/store/lsp-status";
 
+import { frontendLog } from "./frontend-logger";
 import { isLiveEditorModel } from "./live-editor-model";
 import {
   createLspConnection,
@@ -12,6 +13,8 @@ import {
   type LspLink,
 } from "./lsp-connection";
 import { createLspWorkspaceFiles } from "./lsp-workspace-files";
+
+const log = frontendLog.child("ui");
 
 /** Every connected worktree client, with the worktree it serves. */
 const connectedClients = new Map<MonacoLspClient, string>();
@@ -72,10 +75,13 @@ export interface LspClientOptions {
 export function createLspClient({ route, name, languageId }: LspClientOptions) {
   const markerOwner = route.replace(/^ws\//, "");
 
-  async function open(wtPath: string | null): Promise<LspLink> {
+  async function open(wtPath: string | null, signal: AbortSignal): Promise<LspLink> {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const query = wtPath === null ? "" : `?wt=${encodeURIComponent(wtPath)}`;
-    const { socket, closed } = await openSocket(`${proto}//${location.host}/${route}${query}`);
+    const address = `${proto}//${location.host}/${route}${query}`;
+    const { socket, closed } = await openSocket(address, signal);
+    // Superseded while the open settled (the abort closed the socket): start no client on it.
+    signal.throwIfAborted();
     const transport = WebSocketTransport.fromWebSocket(socket);
     let client: MonacoLspClient;
     try {
@@ -98,22 +104,34 @@ export function createLspClient({ route, name, languageId }: LspClientOptions) {
       // socket.
       dispose() {
         connectedClients.delete(client);
-        client.dispose();
+        try {
+          client.dispose();
+        } catch (err) {
+          log.error("Language-server client dispose failed", { route, error: err });
+        }
         transport.dispose();
       },
     };
   }
 
+  /** The stop last toasted, so a stop that keeps recurring (a missing binary) toasts once. */
+  let toasted: string | null = null;
+
   function onStateChange(state: LspConnectionState): void {
     const { setStopped } = useLspStatusStore.getState();
+    if (state.state === "connected") toasted = null;
     if (state.state !== "stopped") {
       setStopped(route, null);
       return;
     }
     setStopped(route, { name, reason: state.reason, detail: state.detail });
+    const stop = `${state.reason}\n${state.detail}`;
+    if (stop === toasted) return;
     if (state.reason === "crashed") {
+      toasted = stop;
       showToast(`${name} kept crashing and was stopped. Click it in the status bar to restart it.`);
     } else if (state.reason === "start-failed") {
+      toasted = stop;
       showToast(`${name} could not start. Click it in the status bar to try again.`);
     }
   }
@@ -123,8 +141,16 @@ export function createLspClient({ route, name, languageId }: LspClientOptions) {
   return { connect: connection.connect, disconnect: connection.disconnect };
 }
 
-/** Open a socket, listening for its close from the start so none is missed. */
-function openSocket(address: string): Promise<{ socket: WebSocket; closed: Promise<LspClose> }> {
+/**
+ * Open a socket, listening for its close from the start so none is missed. Aborting `signal`
+ * closes it, opening or open, and rejects if it has not opened yet.
+ */
+function openSocket(
+  address: string,
+  signal: AbortSignal,
+): Promise<{ socket: WebSocket; closed: Promise<LspClose> }> {
+  const superseded = () => new Error("Language-server connection superseded");
+  if (signal.aborted) return Promise.reject(superseded());
   const socket = new WebSocket(address);
   const closed = new Promise<LspClose>((resolve) => {
     socket.addEventListener(
@@ -134,6 +160,14 @@ function openSocket(address: string): Promise<{ socket: WebSocket; closed: Promi
     );
   });
   return new Promise((resolve, reject) => {
+    signal.addEventListener(
+      "abort",
+      () => {
+        socket.close();
+        reject(superseded());
+      },
+      { once: true },
+    );
     socket.addEventListener("open", () => resolve({ socket, closed }), { once: true });
     socket.addEventListener("error", reject, { once: true });
   });

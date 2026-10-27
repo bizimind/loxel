@@ -683,7 +683,10 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       if (!this.isSessionLive(session)) return;
       this.detach(ws);
       try {
-        ws.close(LSP_EXITED_CLOSE_CODE, `${this.name} exited with code ${code}`);
+        const how = proc.signalCode
+          ? `was killed by ${proc.signalCode}`
+          : `exited with code ${code}`;
+        ws.close(LSP_EXITED_CLOSE_CODE, `${this.name} ${how}`);
       } catch (err) {
         this.log.debug("close() on an exited server's WebSocket threw (already closed)", {
           error: err,

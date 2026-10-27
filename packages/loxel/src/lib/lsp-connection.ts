@@ -22,7 +22,10 @@ export interface LspClose {
 export interface LspLink {
   /** Settles once the socket closes, from either side. */
   readonly closed: Promise<LspClose>;
-  /** Dispose the client (its providers and markers go away), then the socket. */
+  /**
+   * Dispose the client (its providers and markers go away), then the socket. Must not throw: the
+   * reconnect policy runs after it.
+   */
   dispose(): void;
 }
 
@@ -43,8 +46,12 @@ export type LspConnectionState =
   | { state: "stopped"; reason: LspStopReason; detail: string };
 
 export interface LspConnectionOptions {
-  /** Open the socket for the worktree (null: a server not scoped to one); rejects when it cannot. */
-  open(wtPath: string | null): Promise<LspLink>;
+  /**
+   * Open the socket for the worktree (null: a server not scoped to one); rejects when it cannot.
+   * `signal` aborts when the attempt is superseded: close a socket still opening, and start no
+   * client on it.
+   */
+  open(wtPath: string | null, signal: AbortSignal): Promise<LspLink>;
   onStateChange(state: LspConnectionState): void;
 }
 
@@ -56,7 +63,8 @@ export interface LspConnection {
   restart: () => void;
   /**
    * Loxel's server is reachable again: reconnect now, with a fresh failure count, if the
-   * connection is waiting to reconnect or stopped for any reason but `replaced`.
+   * connection is waiting to reconnect or stopped for any reason but `replaced`; while an attempt
+   * is in flight, retry at once if it fails.
    */
   resume: () => void;
   readonly state: LspConnectionState;
@@ -80,8 +88,12 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
   let link: LspLink | null = null;
   /** Bumped on every teardown, so a stale open or close is ignored. */
   let generation = 0;
+  /** Aborts the attempt in flight when it is superseded. */
+  let pending: AbortController | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let failures = 0;
+  /** Loxel's server came back while an attempt was in flight: retry at once if that one fails. */
+  let resumed = false;
   let state: LspConnectionState = { state: "idle" };
 
   function setState(next: LspConnectionState): void {
@@ -91,6 +103,8 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
 
   function release(): void {
     generation += 1;
+    pending?.abort();
+    pending = null;
     if (timer) clearTimeout(timer);
     timer = null;
     link?.dispose();
@@ -100,13 +114,17 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
   function attempt(wtPath: string | null): void {
     release();
     const gen = generation;
+    const controller = new AbortController();
+    pending = controller;
     setState({ state: "connecting" });
-    options.open(wtPath).then(
+    options.open(wtPath, controller.signal).then(
       (opened) => {
         if (gen !== generation) {
           opened.dispose();
           return;
         }
+        pending = null;
+        resumed = false;
         link = opened;
         const openedAt = Date.now();
         setState({ state: "connected" });
@@ -118,7 +136,9 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
         });
       },
       () => {
-        if (gen === generation) handleClose(wtPath, null, 0);
+        if (gen !== generation) return;
+        pending = null;
+        handleClose(wtPath, null, 0);
       },
     );
   }
@@ -144,6 +164,12 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
       stop("start-failed", detail);
       return;
     }
+    if (resumed) {
+      resumed = false;
+      failures = 0;
+      attempt(wtPath);
+      return;
+    }
     if (lifetimeMs >= LSP_STABLE_CONNECTION_MS) failures = 0;
     failures += 1;
     if (failures >= LSP_MAX_FAILURES) {
@@ -164,6 +190,7 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
     },
     disconnect: () => {
       target = null;
+      resumed = false;
       release();
       if (state.state !== "idle") setState({ state: "idle" });
     },
@@ -174,6 +201,10 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
     },
     resume: () => {
       if (!target) return;
+      if (state.state === "connecting") {
+        resumed = true;
+        return;
+      }
       const waiting = state.state === "reconnecting";
       const stopped = state.state === "stopped" && state.reason !== "replaced";
       if (!waiting && !stopped) return;

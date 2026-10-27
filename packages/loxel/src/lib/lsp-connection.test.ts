@@ -47,16 +47,22 @@ interface FakeLink {
 
 /** A server whose socket opens and closes when the test says so. */
 class FakeServer {
-  readonly opens: Array<{ wtPath: string | null; accept: () => FakeLink; refuse: () => void }> = [];
+  readonly opens: Array<{
+    wtPath: string | null;
+    signal: AbortSignal;
+    accept: () => FakeLink;
+    refuse: () => void;
+  }> = [];
   readonly states: LspConnectionState[] = [];
   readonly connection: LspConnection;
 
   constructor() {
     this.connection = createLspConnection({
-      open: (wtPath) =>
+      open: (wtPath, signal) =>
         new Promise((resolve, reject) => {
           this.opens.push({
             wtPath,
+            signal,
             accept: () => {
               const closed = Promise.withResolvers<LspClose>();
               const fake: FakeLink = {
@@ -275,5 +281,27 @@ describe("createLspConnection", () => {
     link.close(1000);
     await settle();
     expect(server.opens).toHaveLength(2);
+  });
+
+  test("a superseded attempt is aborted, so it never starts a client", () => {
+    const server = new FakeServer();
+    server.connection.connect("/wt");
+    server.connection.restart();
+
+    expect(server.opens[0]!.signal.aborted).toBe(true);
+    expect(server.opens[1]!.signal.aborted).toBe(false);
+  });
+
+  test("resume during an attempt retries at once if that attempt fails", async () => {
+    const { server, link } = await connected();
+    await crash(link);
+    advance(LSP_RECONNECT_BASE_DELAY_MS);
+    expect(server.state).toEqual({ state: "connecting" });
+
+    server.connection.resume();
+    await server.refuse();
+    expect(server.opens).toHaveLength(3);
+    await server.accept();
+    expect(server.state).toEqual({ state: "connected" });
   });
 });

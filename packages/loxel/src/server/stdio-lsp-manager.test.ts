@@ -12,8 +12,8 @@ import { FileChangeType } from "./lsp-watched-files";
 import { StdioLspManager, type WtLspContext, type WtLspSession } from "./stdio-lsp-manager";
 
 // A stand-in language server: echoes every frame it reads back as a `test/received`
-// notification, writes whatever a `test/emit` notification carries as its own frame, and exits
-// with the code a `test/exit` notification carries.
+// notification, writes whatever a `test/emit` notification carries as its own frame, exits with
+// the code a `test/exit` notification carries, and kills itself on `test/kill`.
 const FAKE_SERVER = `
 let buf = Buffer.alloc(0);
 const write = (msg) => {
@@ -31,6 +31,7 @@ for await (const chunk of process.stdin) {
     const msg = JSON.parse(buf.subarray(end + 4, end + 4 + length).toString());
     buf = buf.subarray(end + 4 + length);
     if (msg.method === "test/exit") process.exit(msg.params.code);
+    if (msg.method === "test/kill") process.kill(process.pid, "SIGKILL");
     if (msg.method === "test/emit") write(msg.params);
     else write({ jsonrpc: "2.0", method: "test/received", params: msg });
   }
@@ -373,6 +374,14 @@ describe("StdioLspManager process exit", () => {
     next.send({ id: 1, method: "initialize", params: { capabilities: {} } });
     await next.serverReceived((f) => f.method === "initialize");
     expect(client.closes).toHaveLength(1);
+  });
+
+  test("names the signal that killed the server", async () => {
+    const { client } = await setupKeyed();
+    client.send({ method: "test/kill" });
+
+    expect(await client.closed).toBe(LSP_EXITED_CLOSE_CODE);
+    expect(client.closes).toEqual([[LSP_EXITED_CLOSE_CODE, "python-lsp was killed by SIGKILL"]]);
   });
 
   test("a server stopped by detach does not close the socket", async () => {
