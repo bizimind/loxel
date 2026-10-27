@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { type Mock, afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 
 import * as monaco from "monaco-editor";
 
@@ -81,13 +81,16 @@ describe("Python editing in Monaco", () => {
 
   /** Every Python configuration registered, in order: Monaco's built-in one and ours. */
   const pythonConfigurations: monaco.languages.LanguageConfiguration[] = [];
+  let setConfigurationSpy: Mock<typeof monaco.languages.setLanguageConfiguration>;
 
   beforeAll(async () => {
     const setConfiguration = monaco.languages.setLanguageConfiguration;
-    spyOn(monaco.languages, "setLanguageConfiguration").mockImplementation((id, configuration) => {
-      if (id === "python") pythonConfigurations.push(configuration);
-      return setConfiguration(id, configuration);
-    });
+    setConfigurationSpy = spyOn(monaco.languages, "setLanguageConfiguration").mockImplementation(
+      (id, configuration) => {
+        if (id === "python") pythonConfigurations.push(configuration);
+        return setConfiguration(id, configuration);
+      },
+    );
     const registered = registerPythonLanguageConfiguration();
     monaco.languages.register({ id: "toml" }); // registered by monaco-env.ts in the app
     container = document.createElement("div");
@@ -116,6 +119,7 @@ describe("Python editing in Monaco", () => {
   });
 
   afterAll(() => {
+    setConfigurationSpy.mockRestore();
     const model = editor.getModel();
     editor.dispose();
     model?.dispose();

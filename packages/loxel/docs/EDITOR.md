@@ -131,7 +131,7 @@ The save properties are applied on the client by [editorconfig-save-actions.ts](
 1. `file`: the choice made with Change Indentation, kept in the panel's state while the tab is open.
 2. `editorconfig`: the file's `.editorconfig` properties.
 3. `override`: the user's per-extension override.
-4. `detected`: [detect-indentation.ts](../src/lib/detect-indentation.ts), run on the disk content (not the live text, so typing does not shift it). It is adapted from Monaco's internal `guessIndentation` but reports only what the content shows: nothing without indented lines, and no size for tabs.
+4. `detected`: [detect-indentation.ts](../src/lib/detect-indentation.ts), run when the panel loads the file's content or replaces it with a newer disk version, not on the echoes of its own saves, so neither typing nor a conversion shifts it. It is adapted from Monaco's internal `guessIndentation` but reports only what the content shows: nothing without indented lines, and no size for tabs.
 5. `language`: `BUILTIN_LANGUAGE_INDENTATION`, keyed by resolved language.
 6. `default`: the global default, which sets every property.
 
@@ -139,7 +139,7 @@ The save properties are applied on the client by [editorconfig-save-actions.ts](
 
 Indentation is only ever set with `model.updateOptions`: in standalone Monaco, editor-level `tabSize` and `insertSpaces` are global settings, and changing them resets every open model, so the editor passes only a constant `detectIndentation: false` (Monaco's own detection would replace the resolved values), and sets its model's options after `monaco.editor.create`, since the first editor flipping that flag resets models too.
 
-The status bar lives outside the panels, so each code editor tab publishes its resolution, its model's line ending and two callbacks (set the file choice, convert the indentation through Monaco's `editor.action.indentationToSpaces`/`ToTabs`) to [editor-indentation.ts](../src/store/editor-indentation.ts), keyed by file path. [IndentationStatus.tsx](../src/components/panels/IndentationStatus.tsx) shows the active editor's entry, and the `editor.changeIndentation` action runs the quick picks in [indentation-status.ts](../src/lib/indentation-status.ts), which also turns a resolution into the status item's label, source and tooltip.
+The status bar lives outside the panels, so each code editor tab publishes its resolution, its model's line ending and two callbacks (set the file choice; convert the indentation through Monaco's `editor.action.indentationToSpaces`/`ToTabs` and choose the resulting style and sizes) to [editor-indentation.ts](../src/store/editor-indentation.ts), keyed by file path. [IndentationStatus.tsx](../src/components/panels/IndentationStatus.tsx) shows the active editor's entry, and the `editor.changeIndentation` action runs the quick picks in [indentation-status.ts](../src/lib/indentation-status.ts), which also turns a resolution into the status item's label, source and tooltip.
 
 ## Markdown editor (Milkdown)
 

@@ -8,12 +8,12 @@ import type {
 } from "@/store/settings-store";
 
 const SHORT_SOURCE_LABELS: Record<IndentationSource, string> = {
-  file: "this file",
+  file: "chosen for this file",
   editorconfig: ".editorconfig",
-  override: "settings",
+  override: "extension setting",
   detected: "detected",
   language: "language default",
-  default: "default",
+  default: "default setting",
 };
 
 const SOURCE_DESCRIPTIONS: Record<IndentationSource, string> = {
@@ -56,14 +56,15 @@ export function describeIndentation({
     details.push(`Tab size ${tabSize}, ${describe("tabSize")}`);
   }
   if (override && (override.insertSpaces !== insertSpaces || override.tabSize !== size)) {
-    const outranking = shownSources.filter((s) => s === "file" || s === "editorconfig");
+    const outranking = shownSources.flatMap((s) => {
+      if (s === "file") return ["your choice for this file"];
+      return s === "editorconfig" ? [".editorconfig"] : [];
+    });
     const style = override.insertSpaces
       ? `${override.tabSize} spaces`
       : `tabs, size ${override.tabSize}`;
     details.push(
-      `Your setting for .${override.extension} files (${style}) is outranked by ${outranking
-        .map((s) => SHORT_SOURCE_LABELS[s])
-        .join(" and ")}`,
+      `Your setting for .${override.extension} files (${style}) is outranked by ${outranking.join(" and ")}`,
     );
   }
 

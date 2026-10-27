@@ -39,6 +39,15 @@ describe("detectIndentation", () => {
     expect(detectIndentation(yaml).indentSize).toBe(2);
   });
 
+  test("lets 2 win over 4 with at least two thirds of 4's steps", () => {
+    // Steps: 2, 4, 4, 2, 4 (two 2s, three 4s).
+    const twoWins = lines("a:", "  b:", "      c: 1", "  d:", "    e: 1", "f: 1");
+    expect(detectIndentation(twoWins).indentSize).toBe(2);
+    // Steps: 4, 4, 4, 4, 2, 2 (two 2s, four 4s).
+    const fourWins = lines("a:", "    b:", "        c: 1", "    d: 1", "e:", "  f: 1", "g: 1");
+    expect(detectIndentation(fourWins).indentSize).toBe(4);
+  });
+
   test("ignores blank and whitespace-only lines, and CRLF line endings", () => {
     const content = "def f():\r\n\r\n    x = 1\r\n        \r\n    if x:\r\n        y()\r\n";
     expect(detectIndentation(content)).toEqual({ insertSpaces: true, tabSize: 4, indentSize: 4 });

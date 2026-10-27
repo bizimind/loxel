@@ -51,8 +51,8 @@ export function detectIndentation(content: string): IndentationLayer {
       size = candidate;
     }
   }
-  // Deeper nesting (YAML, JSON) produces 4-column steps in a 2-space file: let 2 win when it has
-  // at least two thirds of 4's count.
+  // Deeper nesting (YAML, JSON) produces 4-column steps in a 2-space file: as in Monaco, let 2 win
+  // when it has at least two thirds of 4's count.
   if (size === 4 && stepCounts[2]! > 0 && stepCounts[2]! >= (stepCounts[4]! * 2) / 3) size = 2;
   return size === undefined
     ? { insertSpaces: true }

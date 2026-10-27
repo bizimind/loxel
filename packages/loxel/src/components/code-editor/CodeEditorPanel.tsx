@@ -29,7 +29,7 @@ import { resolveLanguage } from "@/lib/resolve-language";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
 import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
-import { useEditorIndentationStore } from "@/store/editor-indentation";
+import { type EditorIndentation, useEditorIndentationStore } from "@/store/editor-indentation";
 import { useEditorStateStore } from "@/store/editor-state";
 import {
   type IndentationLayer,
@@ -239,20 +239,24 @@ export function CodeEditorPanel({
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
 
   // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
-  const { data: editorConfigData, isPending: editorConfigPending } = useQuery({
+  const editorConfigQuery = useQuery({
     queryKey: queryKeys.editorConfig(filePath, panelWorktreePath ?? undefined),
     queryFn: ({ signal }) => api.getEditorConfig(filePath, panelWorktreePath, signal),
   });
+  const { data: editorConfigData } = editorConfigQuery;
+  // Not while paused (offline), which would keep the editor read-only indefinitely.
+  const editorConfigPending =
+    editorConfigQuery.isPending && editorConfigQuery.fetchStatus !== "paused";
   const editorConfig = editorConfigData?.properties ?? NO_EDITORCONFIG;
   const editorConfigRef = useRef(editorConfig);
   editorConfigRef.current = editorConfig;
   const editorConfigPendingRef = useRef(editorConfigPending);
   editorConfigPendingRef.current = editorConfigPending;
 
-  // Detected from the disk content, not the live text, so typing does not shift it.
-  const detectedIndentation = useMemo(
-    () => (diskContent === null ? undefined : detectIndentation(diskContent)),
-    [diskContent],
+  // Detected when the file's content is loaded or replaced from disk, not on the echoes of its own
+  // saves, so neither typing nor a conversion shifts it.
+  const [detectedIndentation, setDetectedIndentation] = useState(() =>
+    diskContent === null ? undefined : detectIndentation(diskContent),
   );
   // Chosen with Change Indentation; lasts while the tab is open.
   const [fileIndentation, setFileIndentation] = useState<IndentationLayer | null>(null);
@@ -574,6 +578,7 @@ export function CodeEditorPanel({
       isProgrammaticRef.current = true;
       model.setValue(diskContent);
       isProgrammaticRef.current = false;
+      setDetectedIndentation(detectIndentation(diskContent));
     }
   }, [diskContent, filePath]);
 
@@ -633,27 +638,38 @@ export function CodeEditorPanel({
 
   const convertIndentation = useCallback((insertSpaces: boolean) => {
     const editor = editorRef.current;
-    if (!editor) return;
+    const model = editor?.getModel();
+    // Monaco's actions do nothing in a read-only editor, so neither does choosing the style.
+    if (!editor || !model || editor.getOption(monaco.editor.EditorOption.readOnly)) return;
     // Monaco's actions convert by the model's tab size, then set `insertSpaces` on the model.
     const action = insertSpaces
       ? "editor.action.indentationToSpaces"
       : "editor.action.indentationToTabs";
     void editor.getAction(action)?.run();
-    setFileIndentation((choice) => ({ ...choice, insertSpaces }));
+    // Keep the sizes the conversion used, whichever source they came from.
+    const { tabSize, indentSize } = model.getOptions();
+    setFileIndentation({ insertSpaces, tabSize, indentSize });
   }, []);
 
   // Publish the indentation for the status bar while this is the file's tab.
+  const publishedIndentationRef = useRef<EditorIndentation | null>(null);
   useEffect(() => {
-    useEditorIndentationStore
-      .getState()
-      .publish(filePath, {
-        resolution: indentation,
-        eol,
-        setFileChoice: setFileIndentation,
-        convert: convertIndentation,
-      });
+    const entry: EditorIndentation = {
+      resolution: indentation,
+      eol,
+      setFileChoice: setFileIndentation,
+      convert: convertIndentation,
+    };
+    publishedIndentationRef.current = entry;
+    useEditorIndentationStore.getState().publish(filePath, entry);
   }, [filePath, indentation, eol, convertIndentation]);
-  useEffect(() => () => useEditorIndentationStore.getState().remove(filePath), [filePath]);
+  useEffect(
+    () => () => {
+      const entry = publishedIndentationRef.current;
+      if (entry) useEditorIndentationStore.getState().remove(filePath, entry);
+    },
+    [filePath],
+  );
 
   // Apply TypeScript diagnostics as Monaco markers
   useEffect(() => {
@@ -729,6 +745,7 @@ export function CodeEditorPanel({
       model.pushEditOperations([], edits, () => []);
     }
     isProgrammaticRef.current = false;
+    setDetectedIndentation(detectIndentation(content));
   }, [hookAcceptDisk, isProgrammaticRef]);
 
   return (

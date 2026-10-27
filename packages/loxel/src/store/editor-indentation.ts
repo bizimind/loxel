@@ -19,15 +19,16 @@ interface EditorIndentationState {
   /** Keyed by file path; only a file's own tab publishes. */
   byFile: ReadonlyMap<string, EditorIndentation>;
   publish: (filePath: string, entry: EditorIndentation) => void;
-  remove: (filePath: string) => void;
+  /** Removes `entry`, unless another tab of the file has published since. */
+  remove: (filePath: string, entry: EditorIndentation) => void;
 }
 
 export const useEditorIndentationStore = create<EditorIndentationState>()((set) => ({
   byFile: new Map(),
   publish: (filePath, entry) => set((s) => ({ byFile: new Map(s.byFile).set(filePath, entry) })),
-  remove: (filePath) =>
+  remove: (filePath, entry) =>
     set((s) => {
-      if (!s.byFile.has(filePath)) return s;
+      if (s.byFile.get(filePath) !== entry) return s;
       const byFile = new Map(s.byFile);
       byFile.delete(filePath);
       return { byFile };

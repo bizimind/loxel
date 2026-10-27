@@ -90,7 +90,7 @@ describe("describeIndentation", () => {
     expect(agreeing.details.some((d) => d.includes("outranked"))).toBe(false);
 
     const applied = describeIndentation(resolve("/repo/a.py", { language: "python" }, [override]));
-    expect(applied).toMatchObject({ label: "Spaces: 2", source: "settings" });
+    expect(applied).toMatchObject({ label: "Spaces: 2", source: "extension setting" });
   });
 });
 
@@ -99,15 +99,11 @@ describe("changeIndentation", () => {
   const setFileChoice = mock<EditorIndentation["setFileChoice"]>();
   const convert = mock<EditorIndentation["convert"]>();
 
+  let published: EditorIndentation | null = null;
+
   function publish(inputs: IndentationInputs): void {
-    useEditorIndentationStore
-      .getState()
-      .publish(filePath, {
-        resolution: resolve(filePath, inputs),
-        eol: "LF",
-        setFileChoice,
-        convert,
-      });
+    published = { resolution: resolve(filePath, inputs), eol: "LF", setFileChoice, convert };
+    useEditorIndentationStore.getState().publish(filePath, published);
   }
 
   /** Waits for the palette to show a loaded pick list. */
@@ -128,7 +124,8 @@ describe("changeIndentation", () => {
 
   afterEach(() => {
     useCommandPaletteStore.getState().close();
-    useEditorIndentationStore.getState().remove(filePath);
+    if (published) useEditorIndentationStore.getState().remove(filePath, published);
+    published = null;
     setFileChoice.mockClear();
     convert.mockClear();
   });
@@ -137,7 +134,7 @@ describe("changeIndentation", () => {
     publish({ language: "typescript" });
     const done = changeIndentation(filePath);
     const first = await shownPick();
-    expect(first.placeholder).toBe("Spaces: 2 (default)");
+    expect(first.placeholder).toBe("Spaces: 2 (default setting)");
     expect(first.items.map((i) => i.id)).toEqual(["spaces", "tabs", "toSpaces", "toTabs"]);
     useCommandPaletteStore.getState().submit("spaces");
 
