@@ -13,7 +13,7 @@ import {
   PYTHON_FORMAT_EXTENSIONS,
   type PythonFormatter,
 } from "./python-formatter";
-import { buildSpawnEnv } from "./shell-env";
+import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 
 const log = logger.child("format");
 
@@ -470,6 +470,8 @@ function spawnFormatter(
 function spawnFailureNotice(command: string, err: unknown, PATH: string): string {
   const code = err instanceof Error && "code" in err ? String(err.code) : null;
   if (code === "ENOENT" && !Bun.which(command, { PATH })) {
+    // It may have been installed since the login-shell PATH was captured; the next save retries.
+    void refreshLoginShellEnv();
     return `Format on save skipped: "${command}" is not installed.`;
   }
   const detail = code === "ENOENT" ? "; its interpreter may be missing" : ` (${code ?? "error"})`;

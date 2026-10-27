@@ -41,7 +41,12 @@ import { logger } from "./logger";
 import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
-import { getPythonEnv, refreshPythonEnv, subscribePythonEnv } from "./python-env";
+import {
+  getPythonEnv,
+  refreshAllPythonEnvs,
+  refreshPythonEnv,
+  subscribePythonEnv,
+} from "./python-env";
 import { PythonLspManager } from "./python-lsp-manager";
 import { onPythonOverrideChange } from "./python-override-store";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
@@ -67,7 +72,7 @@ import type {
   WsData,
   WorktreeLspType,
 } from "./server-state";
-import { LOGIN_SHELL_ENV_WAIT_MS, resolveLoginShellEnv } from "./shell-env";
+import { LOGIN_SHELL_ENV_WAIT_MS, onLoginShellEnvChange, resolveLoginShellEnv } from "./shell-env";
 import { recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
 import type { TerminalSpawnOptions } from "./terminal-manager";
@@ -1108,7 +1113,9 @@ function detachClientAgents(ws: ServerWebSocket<WsData>) {
 await initSecretStore();
 
 // Resolve the login shell env for spawned tools (hooks, terminals, language servers) while the
-// projects load; serving waits for it below.
+// projects load; serving waits for it below. Python environments resolved before a capture (with
+// the inherited PATH, or an older capture's) resolve again when it changed what they read.
+onLoginShellEnvChange((names) => refreshAllPythonEnvs(names));
 const loginShellEnv = resolveLoginShellEnv();
 
 const repoArg = process.argv[2];
