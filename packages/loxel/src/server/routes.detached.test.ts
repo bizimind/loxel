@@ -49,7 +49,8 @@ describe("detached file project destinations", () => {
       updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
-      setTerminalCommand: () => {},
+      activeWindow: () => null,
+      startTerminal: async () => {},
     };
   });
 

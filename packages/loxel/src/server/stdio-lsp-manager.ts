@@ -123,16 +123,18 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   detach(ws: ServerWebSocket<unknown>): void {
     this._pendingFrames.delete(ws);
-    const session = this.sessions.get(ws);
-    if (!session) return;
-    this.killSession(session);
-    this.sessions.delete(ws);
+    // Also without a session (still resolving its binary, or it failed to start): the key is
+    // claimed from the start.
     for (const [key, mappedWs] of this._sessionsByKey) {
       if (mappedWs === ws) {
         this._sessionsByKey.delete(key);
         break;
       }
     }
+    const session = this.sessions.get(ws);
+    if (!session) return;
+    this.killSession(session);
+    this.sessions.delete(ws);
   }
 
   destroy(): void {
@@ -570,27 +572,38 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         // Detached (or replaced by a newer connection) while resolving.
         if (this._pendingFrames.get(ws) !== frames) return;
         this._pendingFrames.delete(ws);
-        try {
-          this.spawnSession(ws, context, resolved);
-        } catch (err) {
-          // Nothing else would answer the client's `initialize`; close so it fails visibly.
-          this.log.error(`${this.name} failed to start`, { error: err });
-          ws.close(4001, `${this.name} failed to start`);
-          return;
-        }
+        this.spawnSession(ws, context, resolved);
         const session = this.sessions.get(ws);
         if (!session) return;
         for (const frame of frames) this.handleClientData(session, frame);
       });
   }
 
+  /**
+   * Spawn the server for `ws`, or, when it cannot start, release `ws`'s session and close it with
+   * 4001: nothing else would answer the client's `initialize`, so it fails visibly.
+   */
   private spawnSession(ws: ServerWebSocket<unknown>, context: TContext, bin: string | null): void {
-    if (!bin) {
+    let reason: string;
+    if (bin) {
+      try {
+        this.spawnProcess(ws, context, bin);
+        return;
+      } catch (err) {
+        // E.g. `Bun.spawn` throwing synchronously because the binary cannot be executed (EACCES,
+        // ENOEXEC).
+        this.log.error(`${this.name} failed to start`, { error: err });
+        reason = `${this.name} failed to start`;
+      }
+    } else {
       this.log.error(`${this.name} binary not found`);
-      ws.close(4001, `${this.name} binary not found — is it installed?`);
-      return;
+      reason = `${this.name} binary not found — is it installed?`;
     }
+    this.detach(ws);
+    ws.close(4001, reason);
+  }
 
+  private spawnProcess(ws: ServerWebSocket<unknown>, context: TContext, bin: string): void {
     const args = this.spawnArgs();
     const opts = this.spawnOptions(context);
     this.log.info(`Spawning ${this.name} ${args.join(" ")}: ${bin}`);
@@ -606,7 +619,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },
     });
 
-    const session = this.buildSession(ws, proc, context);
+    // Until it is in `sessions` nothing else would kill the process (`detach` finds the session there).
+    let session: TSession;
+    try {
+      session = this.buildSession(ws, proc, context);
+    } catch (err) {
+      proc.kill();
+      throw err;
+    }
     this.sessions.set(ws, session);
     // From the start, so changes made before the server registers its watchers reach it too.
     const watchedRoot = this.forwardWatchedFiles ? this.getSessionWorkspace(session) : null;

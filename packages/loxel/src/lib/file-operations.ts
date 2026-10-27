@@ -1,11 +1,12 @@
 import * as api from "@/api/client";
 import { fileParentDir, pathName } from "@/lib/project-file-helpers";
 import { invalidateDirQueries } from "@/queries/query-helpers";
-import { getCurrentWorktreeUI } from "@/store/worktree-ui";
+import { getWorktreeUI } from "@/store/worktree-ui";
 
 /**
- * Rename a file or directory in the active worktree, one of its Others folders, or its Drafts,
- * then tell the rest of the app: remap the worktree's UI paths, move any open editor tab to
+ * Rename a file or directory in worktree `wt`, one of its Others folders, or its Drafts, then
+ * tell the rest of the app: remap `wt`'s UI paths (not the active worktree's: a language-server
+ * edit can still be finishing after a worktree switch), move any open editor tab to
  * the new path (`loxel-file-moved`) and refresh the parent directory listing.
  *
  * Returns the new absolute path. Throws when the server refuses the rename.
@@ -24,7 +25,7 @@ export async function renameFile(options: {
   } else {
     ({ newPath } = await api.renameProjectFile(wt, { path, newName }));
   }
-  getCurrentWorktreeUI().getState().renameProjectPaths(path, newPath);
+  getWorktreeUI(wt).getState().renameProjectPaths(path, newPath);
   window.dispatchEvent(new CustomEvent("loxel-file-moved", { detail: { oldPath: path, newPath } }));
   invalidateDirQueries(fileParentDir(path, wt));
   return newPath;
@@ -49,7 +50,7 @@ export async function moveFile(options: {
       ({ newPath } = await api.renameProjectFile(wt, { path: newPath, newName }));
     }
   } finally {
-    getCurrentWorktreeUI().getState().renameProjectPaths(srcPath, newPath);
+    getWorktreeUI(wt).getState().renameProjectPaths(srcPath, newPath);
     window.dispatchEvent(
       new CustomEvent("loxel-file-moved", { detail: { oldPath: srcPath, newPath } }),
     );
@@ -59,8 +60,8 @@ export async function moveFile(options: {
 }
 
 /**
- * Delete a file or directory in the active worktree, one of its Others folders, or its Drafts,
- * and tell the rest of the app: close its editor tabs (`loxel-file-deleted`), drop the tree
+ * Delete a file or directory in worktree `wt`, one of its Others folders, or its Drafts, and
+ * tell the rest of the app: close its editor tabs (`loxel-file-deleted`), drop `wt`'s tree
  * selection inside it and refresh the parent directory listing. Throws when the server refuses.
  */
 export async function deleteFile(options: {
@@ -72,7 +73,7 @@ export async function deleteFile(options: {
   if (isDetached) await api.deleteDetachedFile(wt, path);
   else await api.deleteProjectFile(wt, path);
   window.dispatchEvent(new CustomEvent("loxel-file-deleted", { detail: { filePath: path } }));
-  const ui = getCurrentWorktreeUI().getState();
+  const ui = getWorktreeUI(wt).getState();
   const selected = ui.selectedProjectFile;
   if (selected === path || selected?.startsWith(path + "/")) ui.setSelectedProjectFile(null);
   invalidateDirQueries(fileParentDir(path, wt));

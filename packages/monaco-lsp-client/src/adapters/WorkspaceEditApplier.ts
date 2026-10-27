@@ -30,9 +30,10 @@ export type WorkspaceFileType = "file" | "directory";
  */
 export interface WorkspaceFileSystem {
   /**
-   * What is at `uri`, or undefined when nothing is. Called for every resource an edit touches,
-   * open models included, before anything changes, so throwing refuses the whole edit: use it to
-   * keep edits out of files they must not change (outside the workspace, dependencies).
+   * What is at `uri`, or undefined when nothing is. Called before anything changes for every
+   * resource an edit touches, so throwing refuses the whole edit: use it to keep edits out of files
+   * they must not change (outside the workspace, dependencies). Open models that only text edits
+   * touch are the exception: those edits change the model, as typing in it would, not the disk.
    */
   stat(uri: monaco.Uri): Promise<WorkspaceFileType | undefined>;
   readFile(uri: monaco.Uri): Promise<string>;
@@ -84,12 +85,15 @@ type Entry =
  * `workspace/applyEdit` share one path instead of Monaco's standalone bulk-edit service, which
  * can only edit open models.
  *
- * An edit is planned whole before anything changes: every resource is checked (`stat`), files
- * without a model are read and edited in memory, versions and overlapping edits are validated.
+ * An edit is planned whole before anything changes: every resource but an open model that is only
+ * text-edited is checked (`stat`), files without a model are read and edited in memory, versions
+ * and overlapping edits are validated.
  * Only then are the changes executed in order: text edits to open models one undo stop per change,
  * other files written back after checking they did not change on disk since they were read, file
  * operations through the file system. A failure there stops the edit, keeping what was already
- * applied (`failureHandling: "abort"`), and the reason says how far it got.
+ * applied (`failureHandling: "abort"`), and the reason says how far it got. Disposing stops it:
+ * queued edits are refused and one being applied stops before its next change, so an edit never
+ * outlives the connection (and worktree) it was made for.
  */
 export class WorkspaceEditApplier extends Disposable {
   /** Filters of the server's `workspace/willRenameFiles` registrations. */
@@ -145,6 +149,12 @@ export class WorkspaceEditApplier extends Disposable {
 
   /** The edit being applied: edits apply one at a time, each planned against the last's result. */
   private _queue: Promise<unknown> = Promise.resolve();
+  private _disposed = false;
+
+  override dispose(): void {
+    this._disposed = true;
+    super.dispose();
+  }
 
   apply(edit: WorkspaceEdit): Promise<ApplyWorkspaceEditResult> {
     const run = async () => {
@@ -158,6 +168,7 @@ export class WorkspaceEditApplier extends Disposable {
   }
 
   private async _apply(edit: WorkspaceEdit): Promise<ApplyWorkspaceEditResult> {
+    if (this._disposed) return { applied: false, failureReason: CLOSED_REASON };
     const unsupported = this.unsupportedReason(edit);
     if (unsupported) return { applied: false, failureReason: unsupported };
 
@@ -182,6 +193,7 @@ export class WorkspaceEditApplier extends Disposable {
 
     for (const [index, step] of steps.entries()) {
       try {
+        if (this._disposed) throw new Error(CLOSED_REASON);
         await this._execute(step);
       } catch (error) {
         const reason = errorMessage(error);
@@ -252,6 +264,8 @@ export class WorkspaceEditApplier extends Disposable {
   }
 }
 
+const CLOSED_REASON = "The language server connection closed";
+
 function isStale(step: Extract<Step, { kind: "model" }>): boolean {
   return step.versionId !== undefined && step.model.getVersionId() !== step.versionId;
 }
@@ -269,6 +283,8 @@ class EditPlanner {
   /** How many of `_changedDirs` existed when each entry was recorded. */
   private readonly _changedDirsSeen = new Map<string, number>();
   private readonly _versionedModels = new Set<monaco.editor.ITextModel>();
+  /** Open models looked at for text edits only, so not checked with `stat` yet. */
+  private readonly _unchecked = new Set<string>();
   private readonly _steps: Step[] = [];
 
   /** Set while planning the edits a rename implies, which do not ask for further ones. */
@@ -319,7 +335,7 @@ class EditPlanner {
     if (edits.length === 0) return;
     const uri = parseUri(rawUri);
     const label = describe(uri);
-    const entry = await this._entry(uri);
+    const entry = await this._entry(uri, true);
     if (entry.type === "moved") {
       throw new Error(`Editing ${label} after renaming it in the same edit is not supported`);
     }
@@ -457,8 +473,12 @@ class EditPlanner {
     this._set(key(uri), { type: "missing" });
   }
 
-  /** What `uri` holds at this point of the plan; the first look checks it with `stat`. */
-  private async _entry(uri: monaco.Uri): Promise<Entry> {
+  /**
+   * What `uri` holds at this point of the plan. The first look checks it with `stat`, except for a
+   * text edit to an open model, which is edited like typing in it would be: a file operation on it
+   * later in the edit checks it then.
+   */
+  private async _entry(uri: monaco.Uri, forTextEdit = false): Promise<Entry> {
     const k = key(uri);
     // A folder renamed or deleted after the path was looked at changes it too.
     const seen = this._changedDirsSeen.get(k) ?? 0;
@@ -468,14 +488,18 @@ class EditPlanner {
       );
     }
     const known = this._entries.get(k);
-    if (known) return known;
+    if (known && (forTextEdit || !this._unchecked.has(k))) return known;
 
     const model = monaco.editor.getModel(uri) ?? undefined;
     let entry: Entry;
     if (!this._fs) {
       if (!model) throw new Error(`${describe(uri)} is not open in the editor`);
       entry = { type: "model", model };
+    } else if (model && forTextEdit) {
+      this._unchecked.add(k);
+      entry = { type: "model", model };
     } else {
+      this._unchecked.delete(k);
       const type = await this._fs.stat(uri);
       if (type === "directory") entry = { type: "directory" };
       else if (model)

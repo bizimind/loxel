@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 
 import * as api from "@/api/client";
 import type { DiffInfo } from "@/api/diff-model";
@@ -14,6 +14,7 @@ import type {
 import { toAbsoluteDir } from "@/lib/detached-path";
 import { queryKeys } from "@/queries/query-keys";
 import { useQueryScope } from "@/queries/use-scope";
+import { deriveProject, useProjectStore } from "@/store/projects";
 import type { DiffSource } from "@/store/worktree-repository";
 import type { BranchFilterPreset } from "@/store/worktree-ui";
 
@@ -173,12 +174,15 @@ export function useExternalFilesQuery() {
   });
 }
 
-/** The worktree's Python interpreter; `enabled` defers the request until something shows it. */
-export function usePythonEnvQuery(enabled: boolean) {
-  return useScopedQuery({
-    queryKey: (pp, wt) => queryKeys.pythonEnv(pp, wt),
-    queryFn: (wt) => api.getPythonEnv(wt),
-    extraEnabled: enabled,
+/**
+ * Worktree `wtPath`'s Python interpreter, given explicitly rather than the active worktree: callers
+ * show it for a panel, which belongs to its own worktree. Null defers the request.
+ */
+export function usePythonEnvQuery(wtPath: string | null) {
+  const projectPath = useProjectStore((s) => deriveProject(wtPath, s.projects)?.path ?? null);
+  return useQuery({
+    queryKey: queryKeys.pythonEnv(projectPath, wtPath),
+    queryFn: wtPath ? () => api.getPythonEnv(wtPath) : skipToken,
     staleTime: Infinity, // WebSocket bridge invalidates it on python_env_changed
   });
 }

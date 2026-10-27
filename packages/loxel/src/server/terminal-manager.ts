@@ -1,6 +1,7 @@
 /**
- * Terminal sessions keyed by the client-generated terminal ID. Spawns the shell on first attach,
- * tracks orphaned sessions, and owns the shell environment. See docs/TERMINALS.md.
+ * Terminal sessions keyed by the terminal ID. Spawns the shell on first attach (or up front for
+ * `loxel terminal`), tracks orphaned sessions, and owns the shell environment. See
+ * docs/TERMINALS.md.
  */
 import type { PythonEnv } from "@/api/python-env-model";
 import type { NotificationSequence } from "@/api/ws-protocol";
@@ -16,8 +17,6 @@ import { TerminalSession } from "./terminal-session";
 const log = logger.child("terminal");
 const textEncoder = new TextEncoder();
 
-/** How long a command registered for a terminal waits for its panel to attach before it is dropped. */
-const INITIAL_COMMAND_TTL_MS = 60_000;
 /** How long a new shell waits for its Python environment before starting without it. */
 const PYTHON_ENV_TIMEOUT_MS = 3000;
 
@@ -33,6 +32,12 @@ export interface TerminalSpawnOptions {
   /** Activate the worktree's Python environment; defaults to true. Applied only when spawned. */
   activatePythonEnv?: boolean;
   scrollbackLines?: number;
+  /**
+   * Typed into the shell as if the user had entered it. Applied only by the call that spawns the
+   * shell and kept nowhere else, so a later respawn under the same ID (server restart, reload)
+   * gets a plain shell and never runs it again.
+   */
+  command?: string;
 }
 
 export interface TerminalAttachOptions extends TerminalSpawnOptions {
@@ -75,48 +80,11 @@ interface PendingStart {
 export class TerminalManager {
   private sessions = new Map<string, TerminalSession>();
   private starting = new Map<string, PendingStart>();
-  private initialCommands = new Map<
-    string,
-    { command: string; timer: ReturnType<typeof setTimeout> }
-  >();
 
-  constructor(
-    private readonly hooks: TerminalManagerHooks,
-    private readonly initialCommandTtlMs = INITIAL_COMMAND_TTL_MS,
-  ) {}
+  constructor(private readonly hooks: TerminalManagerHooks) {}
 
   get(id: string): TerminalSession | undefined {
     return this.sessions.get(id);
-  }
-
-  /**
-   * Type `command` into the shell of terminal `id` once it is spawned, as if the user had entered
-   * it. One-shot: the first spawn consumes it, and it is dropped if no panel attaches within
-   * {@link INITIAL_COMMAND_TTL_MS}, so a later respawn under the same ID (server restart, reload)
-   * gets a plain shell and never re-runs the command.
-   */
-  setInitialCommand(id: string, command: string): void {
-    this.clearInitialCommand(id);
-    const timer = setTimeout(() => {
-      this.initialCommands.delete(id);
-      log.warn(`Dropping initial command for terminal ${id.slice(0, 8)}: no panel attached`);
-    }, this.initialCommandTtlMs);
-    this.initialCommands.set(id, { command, timer });
-  }
-
-  /** Forget a command registered with {@link setInitialCommand}; no-op if none is pending. */
-  clearInitialCommand(id: string): void {
-    const pending = this.initialCommands.get(id);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    this.initialCommands.delete(id);
-  }
-
-  private takeInitialCommand(id: string): string | null {
-    const pending = this.initialCommands.get(id);
-    if (!pending) return null;
-    this.clearInitialCommand(id);
-    return pending.command;
   }
 
   /** Attach a client to the session, spawning the shell first if the session does not exist. */
@@ -140,27 +108,26 @@ export class TerminalManager {
   }
 
   /**
-   * Spawn the shell of terminal `id` with no client attached, unless it is already running. For a
-   * panel that may not mount for a while (`loxel terminal --no-focus`); its first attach binds it.
+   * Spawn the shell of terminal `id` with no client attached, unless it is already running. For
+   * `loxel terminal`, whose panel may not mount for a long time, if ever: its command runs now,
+   * and the panel's first attach binds to the session.
    */
   async ensureSpawned(id: string, options: TerminalSpawnOptions): Promise<void> {
     if (!this.sessions.has(id)) await this.start(id, options).session;
   }
 
   /**
-   * Spawn once the environment is ready. Concurrent callers for the same ID share one spawn, and
-   * one destroyed before its environment is ready never starts. The initial command is claimed
-   * now, so its TTL cannot run out while the environment resolves.
+   * Spawn once the environment is ready. Concurrent callers for the same ID share one spawn (the
+   * first caller's options apply), and one destroyed before its environment is ready never starts.
    */
   private start(id: string, options: TerminalSpawnOptions): PendingStart {
     const existing = this.starting.get(id);
     if (existing) return existing;
-    const command = this.takeInitialCommand(id);
     const pending: PendingStart = {
       session: this.buildEnv(options).then((env) => {
         if (this.starting.get(id) !== pending) return null;
         this.starting.delete(id);
-        const session = this.spawn(id, options, env, command);
+        const session = this.spawn(id, options, env);
         if (pending.size) session.resize(pending.size.cols, pending.size.rows);
         for (const data of pending.input) session.write(data);
         return session;
@@ -208,10 +175,9 @@ export class TerminalManager {
     id: string,
     options: TerminalSpawnOptions,
     env: Record<string, string | undefined>,
-    command: string | null,
   ): TerminalSession {
     const shell = terminalShell();
-    const { cols, rows, cwd, worktreePath } = options;
+    const { cols, rows, cwd, worktreePath, command } = options;
     log.info(`Spawning terminal ${id.slice(0, 8)} with ${shell} (${cols}x${rows}) in ${cwd}`);
 
     const session = new TerminalSession({
@@ -238,7 +204,7 @@ export class TerminalManager {
 
     // Typed ahead: the PTY queues the bytes until the shell reads its first line, so the command
     // shows up at the prompt and in shell history exactly as if the user had entered it.
-    if (command !== null) session.write(textEncoder.encode(`${command}\n`));
+    if (command !== undefined) session.write(textEncoder.encode(`${command}\n`));
     return session;
   }
 
@@ -298,7 +264,6 @@ export class TerminalManager {
   destroyAll(): void {
     this.starting.clear();
     for (const id of [...this.sessions.keys()]) this.destroy(id);
-    for (const id of [...this.initialCommands.keys()]) this.clearInitialCommand(id);
   }
 }
 

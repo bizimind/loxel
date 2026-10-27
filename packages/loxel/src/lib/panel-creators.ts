@@ -21,6 +21,7 @@ import type {
   SplitDirection,
 } from "@/api/panel-placement-model";
 import { nextPanelTitle } from "@/components/dockview/default-layout";
+import { getPanelWorktreePath } from "@/components/dockview/panel-context";
 import { renameEditorCacheKey, setEditorContent } from "@/components/editor/MarkdownEditor";
 import { renameDrawingCacheKey } from "@/components/excalidraw-editor/ExcalidrawEditor";
 import { showToast } from "@/components/ui/toast";
@@ -565,13 +566,6 @@ export function openFileBacked(
 }
 
 // -- File lifecycle handlers --
-
-function getPanelWorktreePath(panel: IDockviewPanel): string | null {
-  const params: unknown = panel.params;
-  if (typeof params !== "object" || params === null || !("worktreePath" in params)) return null;
-  const { worktreePath } = params as Record<string, unknown>;
-  return typeof worktreePath === "string" ? worktreePath : null;
-}
 
 function getPanelFilePath(params: unknown): string | undefined {
   if (typeof params !== "object" || params === null || !("filePath" in params)) return undefined;

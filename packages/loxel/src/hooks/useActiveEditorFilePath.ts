@@ -1,24 +1,38 @@
 import { useEffect, useState } from "react";
 
-import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
+import { type ActiveEditorFile, getActiveEditorFile } from "@/lib/reveal-in-explorer";
 import { getCenterApi, subscribeCenterApi } from "@/store/tools-bar";
 
-/** The file shown by the active center panel, or null when that panel is not a file editor. */
-export function useActiveEditorFilePath(): string | null {
+/**
+ * The file shown by the active center panel and that panel's worktree, or null when the panel is
+ * not a file editor.
+ */
+export function useActiveEditorFile(): ActiveEditorFile | null {
   const [centerApi, setCenterApiState] = useState(() => getCenterApi());
-  const [activeEditorFilePath, setActiveEditorFilePath] = useState(() => getActiveEditorFilePath());
+  const [activeEditorFile, setActiveEditorFile] = useState(() => getActiveEditorFile());
   useEffect(() => subscribeCenterApi(setCenterApiState), []);
 
   useEffect(() => {
     if (!centerApi) {
-      setActiveEditorFilePath(null);
+      setActiveEditorFile(null);
       return;
     }
-    const updateActiveEditorFilePath = () => setActiveEditorFilePath(getActiveEditorFilePath());
-    updateActiveEditorFilePath();
-    const disposable = centerApi.onDidActivePanelChange(updateActiveEditorFilePath);
+    const updateActiveEditorFile = () =>
+      setActiveEditorFile((current) => {
+        const next = getActiveEditorFile();
+        const same =
+          current?.filePath === next?.filePath && current?.worktreePath === next?.worktreePath;
+        return same ? current : next;
+      });
+    updateActiveEditorFile();
+    const disposable = centerApi.onDidActivePanelChange(updateActiveEditorFile);
     return () => disposable.dispose();
   }, [centerApi]);
 
-  return activeEditorFilePath;
+  return activeEditorFile;
+}
+
+/** The file shown by the active center panel, or null when that panel is not a file editor. */
+export function useActiveEditorFilePath(): string | null {
+  return useActiveEditorFile()?.filePath ?? null;
 }
