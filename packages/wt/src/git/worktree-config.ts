@@ -92,6 +92,16 @@ export function isWorktreeConfigBroken(state: WorktreeConfigState): boolean {
 }
 
 /**
+ * Whether the extension is off but main-only settings are still only in the
+ * main `config.worktree`, which git does not read then: an interrupted enable
+ * or disable. Git itself copes (it guesses a bare repo), but tools that read
+ * `core.bare` may not.
+ */
+export function isWorktreeConfigStranded(state: WorktreeConfigState): boolean {
+  return !state.enabled && disableWorktreeConfigCommands(state).length > 0;
+}
+
+/**
  * Git arguments (run in `commonDir`) that turn the extension on, moving the
  * main-only settings out of the shared config first. Empty when it is already
  * on and healthy, so running the result is idempotent; it also repairs the
@@ -107,7 +117,7 @@ export function enableWorktreeConfigCommands(state: WorktreeConfigState): string
     const value = state.shared[key];
     if (value === undefined) continue;
     commands.push(
-      ["config", "--file", state.mainFile, key, value],
+      ["config", "--file", state.mainFile, "--replace-all", key, value],
       ["config", "--file", state.sharedFile, "--unset-all", key],
     );
   }
@@ -120,22 +130,24 @@ export function enableWorktreeConfigCommands(state: WorktreeConfigState): string
 /**
  * Git arguments (run in `commonDir`) that turn the extension off and move the
  * main-only settings back into the shared config. Empty when it is already
- * off. Other settings in `config.worktree` files are left in place, unread
- * until the extension is turned on again.
+ * off and the settings are where they belong; when it is off but they are
+ * still only in the (now unread) main file, as an interrupted enable or
+ * disable leaves them, this moves them back too. Other settings in
+ * `config.worktree` files are left in place, unread until the extension is
+ * turned on again.
  *
  * The extension goes off first: while it is on, `core.bare = true` in the
  * shared config would break the linked worktrees.
  */
 export function disableWorktreeConfigCommands(state: WorktreeConfigState): string[][] {
-  if (!state.enabled) return [];
-  const commands: string[][] = [
-    ["config", "--file", state.sharedFile, "--unset-all", "extensions.worktreeConfig"],
-  ];
+  const commands: string[][] = state.enabled
+    ? [["config", "--file", state.sharedFile, "--unset-all", "extensions.worktreeConfig"]]
+    : [];
   for (const key of MAIN_ONLY_KEYS) {
     const value = state.main[key];
     if (value === undefined) continue;
     commands.push(
-      ["config", "--file", state.sharedFile, key, value],
+      ["config", "--file", state.sharedFile, "--replace-all", key, value],
       ["config", "--file", state.mainFile, "--unset-all", key],
     );
   }

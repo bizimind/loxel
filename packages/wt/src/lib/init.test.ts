@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { rm } from "node:fs/promises";
+import { rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { git, gitSucceeds, pathExists, runGit } from "../git/index.ts";
@@ -122,7 +122,7 @@ describe("planInit", () => {
       commands: [
         "git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'",
         "git fetch origin",
-        "git remote set-head origin --auto",
+        "git remote set-head origin --auto  # if origin has branches",
       ],
     });
     expect(JSON.parse(JSON.stringify(plan))).toEqual(plan);
@@ -135,7 +135,7 @@ describe("planInit", () => {
     const metadata = plan.actions.find((action) => action.id === "worktree-metadata-on");
     expect(metadata?.recommended).toBe(false);
     expect(metadata?.commands).toEqual([
-      "git config --file config.worktree core.bare true",
+      "git config --file config.worktree --replace-all core.bare true",
       "git config --file config --unset-all core.bare",
       "git config --file config extensions.worktreeConfig true",
     ]);
@@ -233,6 +233,51 @@ describe("executeInit", () => {
     expect(statusOf(result.checks, "stale-worktrees")).toBe("ok");
   });
 
+  test("reconnects worktrees of a moved repository instead of pruning them", async () => {
+    repo = await createTestRepo({ bare: true });
+    await executeAdd({ name: "main", repoPath: repo.root, branch: "main" });
+    await executeAdd({ name: "feat/x", repoPath: repo.root });
+    const gone = await executeAdd({ name: "gone", repoPath: repo.root });
+    await rm(gone.path, { recursive: true });
+    const moved = join(repo.root, "..", "moved.git");
+    await rename(repo.root, moved);
+
+    const plan = await planInit(moved);
+    expect(statusOf(plan.checks, "moved-worktrees")).toBe("warn");
+    expect(plan.checks.find((c) => c.id === "stale-worktrees")?.summary).toContain("/gone");
+    expect(plan.checks.find((c) => c.id === "stale-worktrees")?.summary).not.toContain("feat");
+    // The moved main checkout still counts; adding another would collide with it.
+    expect(statusOf(plan.checks, "main-worktree")).toBe("ok");
+    expect(plan.actions.find((a) => a.id === "repair-worktrees")).toMatchObject({
+      recommended: true,
+      commands: [
+        `git worktree repair ${join(moved, ".worktrees", "feat", "x")} ${join(moved, ".worktrees", "main")}`,
+      ],
+    });
+
+    // Pruning alone must not cost the moved worktrees: it reconnects them first.
+    const pruned = await executeInit(moved, { apply: ["prune-worktrees"] });
+    expect(pruned.outcomes[0]?.status).toBe("applied");
+    expect(
+      await git(["rev-parse", "--abbrev-ref", "HEAD"], join(moved, ".worktrees", "feat", "x")),
+    ).toBe("feat/x");
+    const notOk = pruned.checks.filter((c) => c.status !== "ok").map((c) => c.id);
+    expect(notOk).toEqual(["fetch-refspec", "worktree-metadata"]);
+  });
+
+  test("repairs moved worktrees on their own", async () => {
+    repo = await createTestRepo({ bare: true });
+    await executeAdd({ name: "feat", repoPath: repo.root });
+    const moved = join(repo.root, "..", "moved.git");
+    await rename(repo.root, moved);
+
+    const result = await executeInit(moved, { apply: ["repair-worktrees"] });
+    expect(result.outcomes[0]?.status).toBe("applied");
+    await git(["status"], join(moved, ".worktrees", "feat"));
+    expect(statusOf(result.checks, "moved-worktrees")).toBeUndefined();
+    expect(statusOf(result.checks, "stale-worktrees")).toBe("ok");
+  });
+
   test("leaves per-worktree config off unless it is explicitly decided", async () => {
     repo = await createTestRepo({ bare: true });
     const everythingElse = [
@@ -320,7 +365,6 @@ describe("cloneBareRepo", () => {
       expect(result.bare).toBe(true);
       expect(result.outcomes.map((o) => [o.id, o.status])).toEqual([
         ["fetch-refspec", "applied"],
-        ["origin-head", "not-needed"],
         ["main-worktree", "applied"],
       ]);
       expect(
@@ -328,6 +372,39 @@ describe("cloneBareRepo", () => {
       ).toBe("main");
       const notOk = result.checks.filter((c) => c.status !== "ok").map((c) => c.id);
       expect(notOk).toEqual(["worktree-metadata"]);
+    } finally {
+      await target.cleanup();
+    }
+  });
+
+  test("sets up a clone of an empty repository without failing", async () => {
+    repo = await createTestRepo();
+    const empty = join(repo.root, "..", "empty.git");
+    await git(["init", "--bare", empty], repo.root);
+    const target = await createTestDirectory();
+    try {
+      const result = await cloneBareRepo({ url: empty, dir: "e", cwd: target.root });
+      expect(result.outcomes.map((o) => [o.id, o.status])).toEqual([
+        ["fetch-refspec", "applied"],
+        ["main-worktree", "not-needed"],
+      ]);
+    } finally {
+      await target.cleanup();
+    }
+  });
+
+  test("applies only the actions it is given", async () => {
+    repo = await createTestRepo();
+    const target = await createTestDirectory();
+    try {
+      const result = await cloneBareRepo({
+        url: repo.root,
+        dir: "proj",
+        cwd: target.root,
+        apply: ["fetch-refspec"],
+      });
+      expect(result.outcomes.map((o) => o.id)).toEqual(["fetch-refspec"]);
+      expect(await pathExists(join(target.root, "proj", ".worktrees"))).toBe(false);
     } finally {
       await target.cleanup();
     }

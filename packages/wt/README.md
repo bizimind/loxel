@@ -148,11 +148,12 @@ A matching `clean.wt.sh` would remove that container before `wt remove` deletes 
 | `origin/HEAD`           | origin's default branch is recorded, so `wt add` starts from the right branch                                | `git remote set-head origin --auto` |
 | Default branch worktree | a bare repo has its default branch checked out in a worktree                                                 | `wt add main -b main`               |
 | Worktree metadata       | per-worktree config is on, and set up so linked worktrees work (see below)                                   | turn it on or off                   |
-| Stale worktrees         | registered worktrees whose directory is gone                                                                 | `git worktree prune`                |
+| Moved worktrees         | worktrees git lost track of because the repository directory moved; their checkouts are intact               | `git worktree repair`               |
+| Stale worktrees         | registered worktrees whose directory is gone (moved ones are repaired first, never pruned)                   | `git worktree prune`                |
 | Locked worktrees        | worktrees `wt remove` and `wt mv` refuse until unlocked                                                      |                                     |
 | Hooks                   | which hook scripts exist                                                                                     |                                     |
 
-Unattended (an agent, a script, no terminal), every decision is a flag: `--fetch-refspec`, `--set-origin-head`, `--main-worktree`, `--prune`, `--worktree-metadata on|off`, each with a `--no-` form for the yes/no ones. `--yes` applies every recommended fix, and a flag overrides it for its own check. With no terminal and no flags, `wt init` changes nothing and lists the pending decisions with the flag for each.
+Unattended (an agent, a script, no terminal), every decision is a flag: `--fetch-refspec`, `--set-origin-head`, `--main-worktree`, `--repair`, `--prune`, `--worktree-metadata on|off`, each with a `--no-` form for the yes/no ones. `--yes` applies every recommended fix, and a flag overrides it for its own check. With no terminal and no flags, `wt init` changes nothing and lists the pending decisions with the flag for each.
 
 ```bash
 wt doctor                        # report only
@@ -327,7 +328,7 @@ wt remove feature-auth --force         # remove despite uncommitted changes
 
 ### `wt init [url] [dir]`
 
-Without a URL, check the repository's git setup and fix what you choose (see [Checking the Setup](#checking-the-setup)); run from anywhere inside it. With a URL, create a bare clone in `dir` (default: the repository name) with the fetch refspec, `origin/*` fetched, `origin/HEAD` recorded and the default branch checked out as a worktree, then offer the remaining fixes for it.
+Without a URL, check the repository's git setup and fix what you choose (see [Checking the Setup](#checking-the-setup)); run from anywhere inside it. With a URL, create a bare clone in `dir` (default: the repository name) with the fetch refspec, `origin/*` fetched, `origin/HEAD` recorded and the default branch checked out as a worktree, then offer the remaining fixes for it. `--no-fetch-refspec` and `--no-main-worktree` leave those steps out.
 
 ```bash
 wt init                                # walk through what is not ok
@@ -364,7 +365,7 @@ With `-j`, stdout carries only JSON. Progress, hook output and prompts go to std
 {"name","path","removed":true,"branchDeleted":false,"hookRan":true}
 // doctor — exit code 1 when `ok` is false; each check's status is ok | info | warn | fail
 {"root","bare","ok":true,"checks":[{"id","status","title","summary","affects":[...],"fixable"}, ...]}
-// init — `outcomes[].status` is applied | not-needed | failed (exit code 1 if any failed);
+// init — `outcomes[].status` is applied | not-needed | failed (exit code 1 if one failed, or if a failing check is left pending);
 // `pending` lists the undecided fixes with the flag that applies each
 {"root","bare","cloned":false,"outcomes":[{"id","status","commands":[...],"error"}],
  "pending":[{"check":{...},"actions":[{"id","title","recommended","commands","flag"}]}],"checks":[...]}

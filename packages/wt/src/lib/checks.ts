@@ -8,7 +8,7 @@
  * commands they would run are strings) so a UI can show them before anything
  * changes.
  */
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 
 import { compareVersions } from "@bizimind/cli-common";
 
@@ -19,6 +19,7 @@ import {
   enableWorktreeConfigCommands,
   getWorktreeName,
   isWorktreeConfigBroken,
+  isWorktreeConfigStranded,
   listWorktrees,
   pathExists,
   readWorktreeConfigState,
@@ -43,6 +44,7 @@ export type CheckId =
   | "origin-head"
   | "main-worktree"
   | "worktree-metadata"
+  | "moved-worktrees"
   | "stale-worktrees"
   | "locked-worktrees"
   | "hooks";
@@ -63,6 +65,7 @@ export interface Check {
 export type InitActionId =
   | "fetch-refspec"
   | "origin-head"
+  | "repair-worktrees"
   | "prune-worktrees"
   | "worktree-metadata-on"
   | "worktree-metadata-off"
@@ -72,6 +75,7 @@ export type InitActionId =
 export const INIT_ACTION_ORDER: readonly InitActionId[] = [
   "fetch-refspec",
   "origin-head",
+  "repair-worktrees",
   "prune-worktrees",
   "worktree-metadata-on",
   "worktree-metadata-off",
@@ -95,7 +99,8 @@ export interface InitAction {
 
 /** One thing an action runs. */
 export type InitStep =
-  | { kind: "git"; args: string[] }
+  /** `onlyWithOriginRefs`: skipped when no `refs/remotes/origin/*` exists (origin has no branches) */
+  | { kind: "git"; args: string[]; onlyWithOriginRefs?: true }
   | { kind: "add-worktree"; name: string; branch: string };
 
 /** An action together with the steps behind its `commands`. */
@@ -115,6 +120,11 @@ export interface RepoState {
   /** e.g. "2.50.1", or null when unreadable */
   gitVersion: string | null;
   worktrees: Worktree[];
+  /**
+   * Stale worktrees whose checkout still exists under the worktrees directory, at `to`: the
+   * repository (or the worktrees directory) was moved, and `git worktree repair` reconnects them.
+   */
+  relocated: Array<{ from: string; to: string }>;
   originUrl: string | null;
   fetchRefspecs: string[];
   /** Whether any `refs/remotes/origin/*` ref exists */
@@ -169,6 +179,7 @@ export async function inspectRepo(repoPath: string): Promise<RepoState> {
     wtDir: process.env.WT_DIR || undefined,
     gitVersion,
     worktrees,
+    relocated: await findRelocated(worktreeConfig.commonDir, worktreesDir, worktrees),
     originUrl,
     fetchRefspecs: refspecs ? refspecs.split("\n") : [],
     hasOriginRefs: Boolean(originRefs),
@@ -238,7 +249,8 @@ export function describeStep(step: InitStep): string {
   if (step.kind === "add-worktree") {
     return `wt add ${shellArg(step.name)} -b ${shellArg(step.branch)}`;
   }
-  return ["git", ...step.args].map(shellArg).join(" ");
+  const command = ["git", ...step.args].map(shellArg).join(" ");
+  return step.onlyWithOriginRefs ? `${command}  # if origin has branches` : command;
 }
 
 type AddCheck = (check: Omit<Check, "fixable">, ...offered: PlannedAction[]) => void;
@@ -250,6 +262,13 @@ function plannedAction(action: Omit<InitAction, "commands">, steps: InitStep[]):
 function gitStep(...args: string[]): InitStep {
   return { kind: "git", args };
 }
+
+/** `git remote set-head` fails when origin has no branches (an empty repository), so it is skipped then. */
+const SET_ORIGIN_HEAD: InitStep = {
+  kind: "git",
+  args: ["remote", "set-head", "origin", "--auto"],
+  onlyWithOriginRefs: true,
+};
 
 function gitVersionCheck(version: string | null): Omit<Check, "fixable"> {
   const base = { id: "git-version", title: "Git version" } as const;
@@ -327,7 +346,7 @@ function addRemoteChecks(state: RepoState, add: AddCheck): void {
         [
           gitStep("config", "remote.origin.fetch", FETCH_REFSPEC),
           gitStep("fetch", "origin"),
-          gitStep("remote", "set-head", "origin", "--auto"),
+          SET_ORIGIN_HEAD,
         ],
       ),
     );
@@ -348,10 +367,7 @@ function originHeadCheck(state: RepoState): Parameters<AddCheck> {
     return [{ ...base, status: "ok", summary: `origin/HEAD is ${state.originHead}`, affects: [] }];
   }
 
-  const steps = [
-    ...(state.hasOriginRefs ? [] : [gitStep("fetch", "origin")]),
-    gitStep("remote", "set-head", "origin", "--auto"),
-  ];
+  const steps = [...(state.hasOriginRefs ? [] : [gitStep("fetch", "origin")]), SET_ORIGIN_HEAD];
   const action = plannedAction(
     {
       id: "origin-head",
@@ -367,6 +383,17 @@ function originHeadCheck(state: RepoState): Parameters<AddCheck> {
   const unset = state.originHead
     ? `origin/HEAD points to ${state.originHead}, which no longer exists`
     : "origin/HEAD is not set";
+  if (!state.hasOriginRefs) {
+    return [
+      {
+        ...base,
+        status: "warn",
+        summary: `${unset}: nothing has been fetched from origin yet, or origin has no branches`,
+        affects: ["wt add starts new branches from HEAD rather than from origin's default branch"],
+      },
+      action,
+    ];
+  }
   if (state.remoteDefault) {
     return [
       {
@@ -394,18 +421,17 @@ function addMainWorktreeCheck(state: RepoState, add: AddCheck): void {
   if (!state.bare || !branch) return;
 
   const base = { id: "main-worktree", title: "Default branch worktree" } as const;
-  const existing = state.worktrees.find((wt) => !wt.bare && !wt.prunable && wt.branch === branch);
+  // A moved checkout still has the branch: repairing it, not adding another, is the fix.
+  const holder = state.worktrees.find((wt) => !wt.bare && wt.branch === branch);
+  const moved = holder && state.relocated.find((entry) => entry.from === holder.path);
+  const existing = holder && !holder.prunable ? holder.path : moved?.to;
   if (existing) {
-    add({
-      ...base,
-      status: "ok",
-      summary: `${branch} is checked out at ${existing.path}`,
-      affects: [],
-    });
+    add({ ...base, status: "ok", summary: `${branch} is checked out at ${existing}`, affects: [] });
     return;
   }
 
   const path = join(state.worktreesDir, branch);
+  const blocked = holder?.prunable || state.worktrees.some((wt) => wt.prunable && wt.path === path);
   add(
     {
       ...base,
@@ -422,7 +448,12 @@ function addMainWorktreeCheck(state: RepoState, add: AddCheck): void {
         title: `Check out '${branch}' as worktree '${getWorktreeName(path, state.worktreesDir)}'`,
         recommended: true,
         recommendation: "The bare layout keeps the default branch in a worktree of its own",
-        tradeoffs: [`Creates ${path} and runs ${HOOK_INIT} in it, if present`],
+        tradeoffs: [
+          `Creates ${path} and runs ${HOOK_INIT} in it, if present`,
+          ...(blocked
+            ? ["A stale worktree holds the branch or path, so this fails unless it is pruned first"]
+            : []),
+        ],
       },
       [{ kind: "add-worktree", name: getWorktreeName(path, state.worktreesDir), branch }],
     ),
@@ -482,6 +513,24 @@ function addWorktreeMetadataCheck(root: string, config: WorktreeConfigState, add
     );
   };
 
+  if (isWorktreeConfigStranded(config)) {
+    const stranded = Object.keys(config.main).join(" and ");
+    add(
+      {
+        ...base,
+        status: "warn",
+        summary: `Per-worktree config is off, but ${stranded} is only in ${relative(root, config.mainFile)}, which git ignores while it is off (an interrupted change?)`,
+        affects: [`Tools that read ${stranded} from the shared config don't find it`],
+      },
+      {
+        ...disable("Puts the repository back the way it was before per-worktree config"),
+        title: `Move ${stranded} back into the shared config`,
+        recommended: true,
+      },
+      enable(false, "Finishes turning per-worktree config on instead"),
+    );
+    return;
+  }
   if (!config.enabled) {
     add(
       {
@@ -526,7 +575,38 @@ function addWorktreeMetadataCheck(root: string, config: WorktreeConfigState, add
 }
 
 function addWorktreeListChecks(state: RepoState, add: AddCheck): void {
-  const stale = state.worktrees.filter((wt) => !wt.bare && wt.prunable);
+  const repair =
+    state.relocated.length > 0
+      ? gitStep("worktree", "repair", ...state.relocated.map((entry) => entry.to))
+      : null;
+  if (repair) {
+    add(
+      {
+        id: "moved-worktrees",
+        status: "warn",
+        title: "Moved worktrees",
+        summary: `Git lost track of these after the repository moved: ${state.relocated.map((entry) => entry.to).join(", ")}`,
+        affects: [
+          "git fails inside them, and wt lists them as stale under their old paths",
+          "Pruning would drop them from git for good, leaving orphaned checkouts",
+        ],
+      },
+      plannedAction(
+        {
+          id: "repair-worktrees",
+          check: "moved-worktrees",
+          title: "Reconnect moved worktrees (git worktree repair)",
+          recommended: true,
+          recommendation: "Their checkouts are intact; only the paths git recorded are out of date",
+          tradeoffs: ["Rewrites the paths in git's records of these worktrees, nothing else"],
+        },
+        [repair],
+      ),
+    );
+  }
+
+  const movedPaths = new Set(state.relocated.map((entry) => entry.from));
+  const stale = state.worktrees.filter((wt) => !wt.bare && wt.prunable && !movedPaths.has(wt.path));
   if (stale.length === 0) {
     add({
       id: "stale-worktrees",
@@ -557,9 +637,13 @@ function addWorktreeListChecks(state: RepoState, add: AddCheck): void {
           tradeoffs: [
             "Branches are kept",
             "A worktree on a drive that is not mounted right now also counts as gone; lock it (git worktree lock) to keep it registered",
+            ...(repair
+              ? ["Reconnects the moved worktrees first, since pruning would drop them too"]
+              : []),
           ],
         },
-        [gitStep("worktree", "prune", "--verbose")],
+        // `git worktree prune` drops every stale entry, so moved ones are reconnected first.
+        [...(repair ? [repair] : []), gitStep("worktree", "prune", "--verbose")],
       ),
     );
   }
@@ -584,6 +668,47 @@ function addWorktreeListChecks(state: RepoState, add: AddCheck): void {
           ],
         },
   );
+}
+
+/**
+ * Stale worktrees whose checkout is still in the worktrees directory under its old relative
+ * path, typically because the repository directory was moved. A candidate counts only when its
+ * `.git` file names an admin dir of this repository that recorded the stale path, so an
+ * unrelated checkout is never matched.
+ */
+async function findRelocated(
+  commonDir: string,
+  worktreesDir: string,
+  worktrees: Worktree[],
+): Promise<RepoState["relocated"]> {
+  const relocated: RepoState["relocated"] = [];
+  for (const wt of worktrees) {
+    if (wt.bare || !wt.prunable) continue;
+    const segments = wt.path.split("/").filter(Boolean);
+    for (let count = 1; count <= segments.length; count++) {
+      const candidate = join(worktreesDir, ...segments.slice(-count));
+      if (candidate !== wt.path && (await isCheckoutOf(candidate, commonDir, wt.path))) {
+        relocated.push({ from: wt.path, to: candidate });
+        break;
+      }
+    }
+  }
+  return relocated;
+}
+
+/** Whether `dir` is the checkout registered in `commonDir` as living at `recordedPath`. */
+async function isCheckoutOf(
+  dir: string,
+  commonDir: string,
+  recordedPath: string,
+): Promise<boolean> {
+  const dotGit = Bun.file(join(dir, ".git"));
+  if (!(await dotGit.exists())) return false;
+  const pointer = (await dotGit.text().catch(() => "")).match(/^gitdir: (.+)$/m)?.[1]?.trim();
+  if (!pointer) return false;
+  const gitdirFile = Bun.file(join(commonDir, "worktrees", basename(pointer), "gitdir"));
+  if (!(await gitdirFile.exists())) return false;
+  return (await gitdirFile.text()).trim() === join(recordedPath, ".git");
 }
 
 /** The branch a bare repo's HEAD names, else the local twin of the remote default. */

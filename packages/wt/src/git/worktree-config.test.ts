@@ -7,6 +7,7 @@ import {
   disableWorktreeConfigCommands,
   enableWorktreeConfigCommands,
   isWorktreeConfigBroken,
+  isWorktreeConfigStranded,
   readWorktreeConfigState,
 } from "./worktree-config.ts";
 
@@ -132,6 +133,36 @@ describe("worktree config in a bare repo", () => {
     const state = await readWorktreeConfigState(root);
     expect(state.shared).toEqual({});
     expect(state.main).toEqual({ "core.bare": "true" });
+    await git(["status"], linked);
+  });
+});
+
+describe("worktree config left half-changed", () => {
+  test("restores core.bare when the extension is off but it is only in config.worktree", async () => {
+    const { root, linked } = await bareWithWorktree();
+    // An enable interrupted after the move, before the extension was switched on.
+    const [copy, unset] = enableWorktreeConfigCommands(await readWorktreeConfigState(root));
+    await run([copy!, unset!], root);
+    const stranded = await readWorktreeConfigState(root);
+    expect(isWorktreeConfigStranded(stranded)).toBe(true);
+
+    await disable(root);
+    const state = await readWorktreeConfigState(root);
+    expect(isWorktreeConfigStranded(state)).toBe(false);
+    expect(state.shared).toEqual({ "core.bare": "true" });
+    await git(["status"], linked);
+  });
+
+  test("disables over a shared config holding several core.bare lines", async () => {
+    const { root, linked } = await bareWithWorktree();
+    await enable(root);
+    await git(["config", "--file", join(root, "config"), "--add", "core.bare", "false"], root);
+    await git(["config", "--file", join(root, "config"), "--add", "core.bare", "false"], root);
+
+    await disable(root);
+    expect(
+      await git(["config", "--file", join(root, "config"), "--get-all", "core.bare"], root),
+    ).toBe("true");
     await git(["status"], linked);
   });
 });

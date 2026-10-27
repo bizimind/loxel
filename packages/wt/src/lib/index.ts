@@ -13,7 +13,7 @@ export { executeRemove, forceReason, lockedMessage, planRemove } from "./remove.
 export type { RemoveParams, RemovePlan, RemoveResult } from "./remove.ts";
 export { currentManagedWorktree, listManagedWorktrees, resolveWorktreesDir } from "./worktrees.ts";
 export type { ManagedWorktree } from "./worktrees.ts";
-export { cloneBareRepo, diagnose, executeInit, planInit } from "./init.ts";
+export { CLONE_ACTIONS, cloneBareRepo, diagnose, executeInit, planInit } from "./init.ts";
 export type {
   ActionOutcome,
   CloneParams,

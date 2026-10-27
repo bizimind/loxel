@@ -124,6 +124,28 @@ describe("wt init without a terminal", () => {
     expect(await gitSucceeds(["rev-parse", "--git-dir"], outside)).toBe(false);
   });
 
+  test("exits 1 while a failing check is left undecided", async () => {
+    repo = await createTestRepo({ bare: true });
+    await git(["config", "extensions.worktreeConfig", "true"], repo.root);
+
+    const { exitCode, json } = await runCli(["init", "-j"], repo.root);
+    expect(exitCode).toBe(1);
+    expect(json).toMatchObject({ outcomes: [], pending: expect.any(Array) });
+  });
+
+  test("honours --no- flags when cloning", async () => {
+    repo = await createTestRepo();
+    const parent = join(repo.root, "..");
+    const { exitCode, json } = await runCli(
+      ["init", "-j", "--no-main-worktree", repo.root, "clone"],
+      parent,
+    );
+
+    expect(exitCode).toBe(0);
+    expect(json).toMatchObject({ outcomes: [{ id: "fetch-refspec", status: "applied" }] });
+    expect(await Bun.file(join(parent, "clone", ".worktrees")).exists()).toBe(false);
+  });
+
   test("clones a URL into a bare repo set up for wt", async () => {
     repo = await createTestRepo();
     const parent = join(repo.root, "..");

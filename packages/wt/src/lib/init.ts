@@ -70,7 +70,12 @@ export interface CloneParams {
   cwd: string;
   /** Base environment for init.wt.sh in the first worktree (default: process.env) */
   hookEnv?: HookContext["baseEnv"];
+  /** The setup actions to apply after cloning (default: `CLONE_ACTIONS`) */
+  apply?: InitActionId[];
 }
+
+/** What `cloneBareRepo` sets up by default; `fetch-refspec` also records `origin/HEAD`. */
+export const CLONE_ACTIONS: readonly InitActionId[] = ["fetch-refspec", "main-worktree"];
 
 /**
  * Run every check against the repository containing `repoPath`. Read-only.
@@ -157,19 +162,20 @@ export async function executeInit(
 /**
  * Create a bare clone set up the way wt recommends: the fetch refspec a plain
  * `git clone --bare` leaves out, `origin/*` fetched, `origin/HEAD` recorded,
- * and the default branch checked out as the first worktree.
+ * and the default branch checked out as the first worktree (`CLONE_ACTIONS`,
+ * or the actions in `apply`).
  */
 export async function cloneBareRepo(
   params: CloneParams,
   progress: ProgressHandler = silentProgress,
 ): Promise<InitResult> {
   const target = resolve(params.cwd, params.dir ?? defaultCloneDir(params.url));
-  progress.log(`$ git clone --bare ${shellArg(params.url)} ${shellArg(target)}`);
+  progress.log(`$ git clone --bare -- ${shellArg(params.url)} ${shellArg(target)}`);
   await git(["clone", "--bare", "--", params.url, target], params.cwd);
 
   return executeInit(
     target,
-    { apply: ["fetch-refspec", "origin-head", "main-worktree"], hookEnv: params.hookEnv },
+    { apply: [...(params.apply ?? CLONE_ACTIONS)], hookEnv: params.hookEnv },
     progress,
   );
 }
@@ -205,6 +211,18 @@ async function runStep(
     await executeAdd({ name: step.name, repoPath: root, branch: step.branch, hookEnv }, progress);
     return;
   }
+  if (step.onlyWithOriginRefs && !(await hasOriginRefs(root))) {
+    progress.log("    skipped: origin has no branches");
+    return;
+  }
   const output = await git(step.args, root);
   for (const line of output.split("\n")) if (line.trim()) progress.log(`    ${line}`);
+}
+
+async function hasOriginRefs(root: string): Promise<boolean> {
+  const refs = await git(
+    ["for-each-ref", "--count=1", "--format=%(refname)", "refs/remotes/origin/"],
+    root,
+  );
+  return refs !== "";
 }

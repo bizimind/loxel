@@ -20,7 +20,11 @@ function formatDiagnosis(diagnosis: Diagnosis): string {
     "",
     formatChecks(diagnosis.checks),
   ];
-  if (diagnosis.checks.some((check) => check.fixable && check.status !== "ok")) {
+  // Only problems: the optional opt-ins (info) would put the hint on every repository.
+  const fixable = diagnosis.checks.some(
+    (check) => check.fixable && (check.status === "warn" || check.status === "fail"),
+  );
+  if (fixable) {
     lines.push("", "Run 'wt init' to review the fixes.");
   }
   return lines.join("\n");

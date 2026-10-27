@@ -2,6 +2,7 @@ import { createResult, type OutputContext } from "@bizimind/cli-common";
 
 import { detectRepoType } from "../git/index.ts";
 import {
+  CLONE_ACTIONS,
   cloneBareRepo,
   executeInit,
   INIT_ACTION_ORDER,
@@ -20,6 +21,7 @@ import { checkLabel, formatChecks } from "./doctor.ts";
 export interface InitOptions {
   fetchRefspec?: boolean;
   setOriginHead?: boolean;
+  repair?: boolean;
   prune?: boolean;
   worktreeMetadata?: string;
   mainWorktree?: boolean;
@@ -31,6 +33,7 @@ export interface InitOptions {
 export const ACTION_FLAGS: Record<InitActionId, string> = {
   "fetch-refspec": "--fetch-refspec",
   "origin-head": "--set-origin-head",
+  "repair-worktrees": "--repair",
   "prune-worktrees": "--prune",
   "worktree-metadata-on": "--worktree-metadata on",
   "worktree-metadata-off": "--worktree-metadata off",
@@ -75,7 +78,9 @@ export async function initCommand(
     let repoPath = process.cwd();
 
     if (url) {
-      const result = await cloneBareRepo({ url, dir, cwd: repoPath }, ctx);
+      // A --no- flag leaves that part of the clone setup out too.
+      const apply = CLONE_ACTIONS.filter((id) => flags[id] !== false);
+      const result = await cloneBareRepo({ url, dir, cwd: repoPath, apply }, ctx);
       cloned = result.outcomes;
       repoPath = result.root;
     } else if ((await detectRepoType(repoPath)) === "empty") {
@@ -106,7 +111,10 @@ export async function initCommand(
       pending: pending.map(toPending),
       checks: result.checks,
     };
-    const failed = outcomes.some((outcome) => outcome.status === "failed");
+    // Like `wt doctor`, an unattended run fails while a failing check is left undecided.
+    const failed =
+      outcomes.some((outcome) => outcome.status === "failed") ||
+      pending.some(({ check }) => check.status === "fail");
     return createResult<InitCommandResult>(data, formatInitResult, failed ? 1 : 0);
   });
 }
@@ -122,6 +130,7 @@ export function parseFlags(options: InitOptions): FlagDecisions {
   const flags: FlagDecisions = {
     "fetch-refspec": options.fetchRefspec,
     "origin-head": options.setOriginHead,
+    "repair-worktrees": options.repair,
     "prune-worktrees": options.prune,
     "main-worktree": options.mainWorktree,
   };
@@ -228,7 +237,7 @@ function formatInitResult(result: InitCommandResult): string {
           ? `failed: ${outcome.error}`
           : outcome.status === "applied"
             ? "applied"
-            : "already done";
+            : "nothing to do";
       return `  ${OUTCOME_SYMBOL[outcome.status]} ${outcome.id}: ${detail}`;
     });
     sections.push(["Actions:", ...lines].join("\n"));

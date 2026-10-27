@@ -53,6 +53,7 @@ export {
   disableWorktreeConfigCommands,
   enableWorktreeConfigCommands,
   isWorktreeConfigBroken,
+  isWorktreeConfigStranded,
   readWorktreeConfigState,
   type WorktreeConfigState,
 } from "./worktree-config.ts";

@@ -83,6 +83,8 @@ program
   .option("--no-fetch-refspec", "Leave the fetch refspec alone")
   .option("--set-origin-head", "Ask origin for its default branch and record origin/HEAD")
   .option("--no-set-origin-head", "Leave origin/HEAD alone")
+  .option("--repair", "Reconnect worktrees git lost track of after the repo moved")
+  .option("--no-repair", "Leave moved worktrees alone")
   .option("--prune", "Prune worktrees whose directory is gone")
   .option("--no-prune", "Keep stale worktrees")
   .option("--worktree-metadata <on|off>", "Turn per-worktree config (git config --worktree) on/off")
