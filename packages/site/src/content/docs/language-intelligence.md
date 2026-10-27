@@ -1,20 +1,22 @@
 ---
-title: TypeScript Intelligence
-description: Per-worktree language servers, supported features, and other language servers.
+title: Language Intelligence
+description: Per-worktree language servers for TypeScript, Python, TOML and more, Python environments and the interpreter picker.
 order: 13
 ---
 
-Loxel runs a dedicated TypeScript language server per worktree and connects it to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per context, with no cross-worktree interference.
+Loxel runs language servers for TypeScript, Python, TOML and other languages and connects them to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per worktree, with no cross-worktree interference.
 
 ---
 
-## Per-worktree language server
+## Per-worktree language servers
 
-The active worktree gets its own TypeScript language server process. Switching worktrees stops it and starts a fresh one for the worktree you switch to, so expect a short warm-up after a switch. There is no shared server state between worktrees — if one worktree is using an older TypeScript config or a different version of your packages, it does not affect any other worktree's language server.
+The active worktree gets its own language server processes; only the YAML server is shared. Switching worktrees stops them and starts fresh ones for the worktree you switch to, so expect a short warm-up after a switch. There is no shared server state between worktrees — if one worktree is using an older TypeScript config, a different Python environment or a different version of your packages, it does not affect any other worktree's language servers.
 
 ---
 
 ## Supported features
+
+The TypeScript server provides all of these; the [other language servers](#other-languages) provide the ones their language supports.
 
 | Feature           | Description                                                             |
 | ----------------- | ----------------------------------------------------------------------- |
@@ -59,7 +61,7 @@ Loxel uses the official TypeScript 7 native compiler and language server. It pro
 
 ---
 
-## Other language servers
+## Other languages
 
 Loxel runs language servers for seven other languages. Each one is independent of the TypeScript server.
 
@@ -75,7 +77,9 @@ Loxel runs language servers for seven other languages. Each one is independent o
 
 YAML starts with Loxel and stays running. The others start the first time you open a matching file and stop automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
 
-### Python
+---
+
+## Python
 
 Python files are checked by [basedpyright](https://docs.basedpyright.com), a type checker and language server built on Pyright. Besides diagnostics, hover, go-to-definition, references, rename and signature help, you get:
 
@@ -85,7 +89,7 @@ Python files are checked by [basedpyright](https://docs.basedpyright.com), a typ
 - **Quick fixes** (`Cmd+.`): import an undefined name, or silence a rule on one line with `# pyright: ignore[<rule>]`.
 - **Docs for compiled modules**: hover shows documentation for built-in modules such as `math` too.
 
-#### Type-checking rules
+### Type-checking rules
 
 Without a configuration file, Loxel checks with basedpyright's `standard` ruleset, the default of plain Pyright. To choose rules for a project, add a `[tool.basedpyright]` table to `pyproject.toml` or a `pyrightconfig.json` file (a `[tool.pyright]` table works too). Once a project has one, basedpyright's own defaults apply to everything it leaves out, including the stricter `recommended` ruleset, so set `typeCheckingMode` there:
 
@@ -107,13 +111,13 @@ The Python server checks your code against the project's own Python environment,
 4. Pixi's default environment.
 5. Poetry's environment, when the project has a `poetry.lock`, or Pipenv's, when it has a `Pipfile.lock`.
 6. In a monorepo without an environment at the root, the virtual environment of the one project folder below the root that has one. When several do, choose one as described below.
-7. `python3` on your shell's `PATH`.
+7. `python3`, or else `python`, on your shell's `PATH`.
 
 Loxel never uses an interpreter that is committed to the repository, since running it would run the repository's code.
 
 Creating or syncing an environment while Loxel is open, for example with `uv sync`, is picked up automatically, as are packages installed into it later.
 
-#### Seeing and changing the interpreter
+### Seeing and changing the interpreter
 
 While a Python file is the active editor, the status bar shows the worktree's interpreter, for example `Python 3.12.13 (.venv)`. Hover it to see the interpreter's full path and how it was found.
 
@@ -123,15 +127,17 @@ Click it, or run **Python: Select Interpreter** from the command palette (`Cmd+S
 - **Use automatic detection** goes back to the order above.
 - The rest of the list is every environment Loxel found: the ones above, plus `.venv`, `venv` and `env` environments and Pixi environments in project folders below the worktree root (folders with a `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `Pipfile` or `pixi.toml`), which is how you pick a sub-project's environment in a monorepo.
 
-The choice is saved for that worktree and survives restarts. The language server switches to it right away, without a restart. If the chosen interpreter is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
+The choice is saved for that worktree and survives restarts. The language servers switch to it right away, without a restart. If the chosen interpreter is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
 
-A `venvPath` and `venv` setting in `pyrightconfig.json`, or in the `[tool.basedpyright]` (or `[tool.pyright]`) table of `pyproject.toml`, takes precedence over the interpreter Loxel passes to the language server, whether detected or chosen:
+A `venvPath` and `venv` setting in `pyrightconfig.json`, or in the `[tool.basedpyright]` (or `[tool.pyright]`) table of `pyproject.toml`, takes precedence over the interpreter Loxel passes to the type checker, whether detected or chosen:
 
 ```toml
 [tool.basedpyright]
 venvPath = "."
 venv = ".venv-py313"
 ```
+
+The type checker only reads that environment's installed packages and never runs its interpreter; Ruff, format on save and terminals keep using the interpreter above.
 
 ### Python linting
 
@@ -145,7 +151,9 @@ Ruff reads its settings from the `ruff.toml`, `.ruff.toml` or `pyproject.toml` c
 
 If Ruff 0.5.3 or newer is installed in the project's Python environment (see above, including an interpreter you chose), Loxel uses that one, so the version pinned in your dev dependencies applies. Otherwise it uses the Ruff that ships with Loxel. When the environment changes, for example when `uv sync` installs the project's Ruff after a Python file was opened, or you upgrade Ruff or choose another interpreter, the linter restarts with the new Ruff. Syntax errors come from the type checker only, and formatting stays with [format on save](/docs/editor#formatter-auto-detection).
 
-### TOML
+---
+
+## TOML
 
 TOML files are checked by [Tombi](https://tombi-toml.github.io/tombi/). It underlines syntax errors and values that do not match the file's JSON Schema, and the schema also drives completions and hover documentation for keys and values. You also get the document outline, folding, go-to-definition and quick fixes.
 
@@ -172,5 +180,6 @@ Projects that configure Tombi themselves, with a `tombi.toml` or `.tombi.toml` f
 
 ## See also
 
-- [Editor](/docs/editor) — the code editor, where TypeScript diagnostics appear inline
+- [Editor](/docs/editor) — the code editor, where diagnostics appear inline, and format on save
+- [Terminals](/docs/terminals) — new terminals start with the worktree's Python environment active
 - [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — runtime configuration reference

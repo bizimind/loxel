@@ -24,6 +24,7 @@ The most complex manager. Unique behaviors not found in other LSPs:
 - LanguageId fixup: `tsx` -> `typescriptreact`, `jsx` -> `javascriptreact`
 - Server-side filtering of non-TS files via `shouldDropForNonTsUri()`
 - Inline `workspace/configuration` response (TypeScript blocks until answered)
+- Forwards watched files like basedpyright, ruff and Tombi; the base takes its watcher registrations out before `handleServerFrame` sees them
 
 ## YAML — Global Singleton
 
@@ -49,7 +50,7 @@ basedpyright reads only `disablePullDiagnostics` from `initializationOptions`; i
 
 ## Ruff — Second Server for a Language
 
-Runs next to basedpyright on the same `python` models: its own route, client and lazy connector, each client keeping its own diagnostics markers. `resolveBinary` is async: the `ruff` beside the resolved interpreter if the repo does not ship it and it is at least 0.5.3, else the downloaded one. It picks again after each re-resolution of the environment and, when the pick changes, closes the socket with `LSP_RESTART_CLOSE_CODE` so the client reconnects to a new server. Suppresses its formatting (`suppressedFeatures`) so format on save stays the only Python formatter, and turns off syntax errors that basedpyright already reports.
+The pattern for a second server and for project-provided binaries is in `server-manager.md`. Runs next to basedpyright on the same `python` models: its own route, client and lazy connector, each client keeping its own diagnostics markers. `resolveBinary` is async: the `ruff` beside the resolved interpreter if it passes the environment trust rule and is at least 0.5.3, else the downloaded one. It picks again after each re-resolution of the environment and, when the pick changes, closes the socket with `LSP_RESTART_CLOSE_CODE` so the client reconnects to a new server. Suppresses its formatting (`suppressedFeatures`) so format on save stays the only Python formatter, and turns off syntax errors that basedpyright already reports.
 
 ## Astro — Use as Template
 

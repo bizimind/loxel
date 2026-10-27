@@ -11,6 +11,8 @@ export default defineConfig({
   site: "https://bizimind.io",
   output: "static",
   prefetch: true,
+  // Renamed pages keep their old URLs working.
+  redirects: { "/docs/typescript-intelligence": "/docs/language-intelligence" },
   integrations: [react(), mdx(), sitemap()],
   markdown: { processor: satteri({ hastPlugins: [satteriKbd] }) },
   vite: { plugins: [tailwindcss()] },
