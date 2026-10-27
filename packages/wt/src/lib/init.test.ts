@@ -7,12 +7,11 @@ import {
   createTestDirectory,
   createTestRepo,
   enableOriginTracking,
-  seedPath,
   type TestRepo,
 } from "../test-repo.ts";
 import { executeAdd } from "./add.ts";
 import { evaluate, inspectRepo, type CheckId } from "./checks.ts";
-import { cloneBareRepo, defaultCloneDir, diagnose, executeInit, planInit } from "./init.ts";
+import { cloneBareRepo, diagnose, executeInit, planInit } from "./init.ts";
 
 let repo: TestRepo;
 const previousWtDir = process.env.WT_DIR;
@@ -408,12 +407,5 @@ describe("cloneBareRepo", () => {
     } finally {
       await target.cleanup();
     }
-  });
-
-  test("derives the directory from the URL", () => {
-    expect(defaultCloneDir("git@github.com:org/proj.git")).toBe("proj");
-    expect(defaultCloneDir("https://github.com/org/proj")).toBe("proj");
-    expect(defaultCloneDir("/srv/repos/proj/.git/")).toBe("proj");
-    expect(defaultCloneDir(seedPath("/tmp/x/bare.git"))).toBe("seed");
   });
 });

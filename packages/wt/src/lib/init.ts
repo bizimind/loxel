@@ -182,12 +182,11 @@ export async function cloneBareRepo(
 
 /** The directory `git clone` would pick, minus the `.git` suffix: `org/proj.git` → `proj`. */
 export function defaultCloneDir(url: string): string {
-  const trimmed = url.replace(/[/\\]+$/, "").replace(/\/\.git$/, "");
-  const name =
-    trimmed
-      .split(/[/:\\]/)
-      .pop()
-      ?.replace(/\.git$/, "") ?? "";
+  // Split rather than trim with a regex: a `[/\\]+$` on untrusted input backtracks polynomially.
+  const segments = url.split(/[/:\\]/).filter(Boolean);
+  let name = segments.pop() ?? "";
+  if (name === ".git") name = segments.pop() ?? "";
+  if (name.endsWith(".git")) name = name.slice(0, -".git".length);
   if (!name) throw new Error(`Cannot derive a directory name from '${url}'; pass one.`);
   return name;
 }
