@@ -9,6 +9,7 @@ process.env.LOXEL_STATE_DIR = stateDir;
 const {
   getPythonEnv,
   isShippedByRepo,
+  refreshAllPythonEnvs,
   listPythonEnvs,
   normalizePythonOverride,
   pathOutsideWorktree,
@@ -478,6 +479,33 @@ describe("shared resolution", () => {
       await updated;
       expect(updates.at(-1)).toMatchObject({ first: false, changed: true });
       expect(updates[0]).toEqual({ path: python, first: true, changed: true });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  test("re-resolves subscribed worktrees when a relevant login-shell variable changed", async () => {
+    const { wt } = await makeRoot();
+    let resolutions = 0;
+    let notify = () => {};
+    const unsubscribe = subscribePythonEnv(wt, () => {
+      resolutions++;
+      notify();
+    });
+    try {
+      const first = new Promise<void>((resolve) => {
+        notify = resolve;
+      });
+      await getPythonEnv(wt);
+      await first;
+      refreshAllPythonEnvs(["STARSHIP_SESSION_KEY", "SSH_AUTH_SOCK"]);
+      const again = new Promise<void>((resolve) => {
+        notify = resolve;
+      });
+      refreshAllPythonEnvs(["SSH_AUTH_SOCK", "PATH"]);
+      await again;
+      // The irrelevant change started nothing, so the relevant one made the second resolution.
+      expect(resolutions).toBe(2);
     } finally {
       unsubscribe();
     }

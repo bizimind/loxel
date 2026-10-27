@@ -178,6 +178,24 @@ export function refreshPythonEnv(worktreePath: string): void {
   if (entry) startResolution(wtPath, entry);
 }
 
+/** Login-shell variables that resolution reads, directly or through the tools it runs. */
+const RESOLUTION_ENV_VAR =
+  /^(PATH|VIRTUAL_ENV|UV_PROJECT_ENVIRONMENT|(CONDA|PYENV|PIPENV|POETRY)_.*)$/;
+
+/**
+ * Re-resolve every subscribed worktree that has resolved, e.g. after the login-shell environment
+ * was captured again. With `changedNames`, only when one of them can change a resolution: some
+ * startup files export values that differ on every run (session keys, agent sockets).
+ */
+export function refreshAllPythonEnvs(changedNames?: Iterable<string>): void {
+  if (changedNames && !Array.from(changedNames).some((name) => RESOLUTION_ENV_VAR.test(name))) {
+    return;
+  }
+  for (const [wtPath, entry] of worktreeEnvs) {
+    if (entry.resolution) startResolution(wtPath, entry);
+  }
+}
+
 /**
  * Start a re-resolution when the latest one no longer holds: the override was changed behind the
  * store's change hook, or the repository now tracks the settled environment (the trust checks are
