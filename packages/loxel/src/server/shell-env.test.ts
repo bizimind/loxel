@@ -3,7 +3,14 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { captureLoginShellEnv, LoginShellEnv } from "./shell-env";
+import {
+  buildShellSpawnEnv,
+  buildSpawnEnv,
+  captureLoginShellEnv,
+  LoginShellEnv,
+  onLoginShellEnvChange,
+  resolveLoginShellEnv,
+} from "./shell-env";
 
 const root = await mkdtemp(join(tmpdir(), "loxel-shell-env-"));
 afterAll(async () => {
@@ -176,5 +183,25 @@ describe("LoginShellEnv", () => {
     await env.refresh();
     expect(calls.length).toBe(2);
     expect(env.captured?.LOXEL_TEST_VERSION).toBe("3");
+  });
+});
+
+describe("module API", () => {
+  test("reports the startup capture to subscribers and applies it to spawn environments", async () => {
+    const shell = await fakeShell('export PATH="/opt/tools/bin:$PATH" LOXEL_TEST_MODULE_API=yes');
+    const changed: string[][] = [];
+    onLoginShellEnvChange((names) => changed.push([...names]));
+    const inheritedShell = process.env.SHELL;
+    process.env.SHELL = shell;
+    try {
+      await resolveLoginShellEnv();
+    } finally {
+      process.env.SHELL = inheritedShell;
+    }
+    expect(changed).toEqual([expect.arrayContaining(["PATH", "LOXEL_TEST_MODULE_API"])]);
+    expect(buildSpawnEnv()).toMatchObject({ LOXEL_TEST_MODULE_API: "yes" });
+    const terminalEnv = buildShellSpawnEnv();
+    expect(terminalEnv.PATH).toContain(`/opt/tools/bin:${process.env.PATH}`);
+    expect(terminalEnv.LOXEL_TEST_MODULE_API).toBeUndefined();
   });
 });

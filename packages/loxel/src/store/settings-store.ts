@@ -127,31 +127,99 @@ export interface ResolvedIndentation extends IndentationDefaults {
   indentSize: number;
 }
 
+/** The indentation properties one source sets; the ones it leaves out come from the next source. */
+export type IndentationLayer = Partial<ResolvedIndentation>;
+
+/** Where an indentation property came from, in precedence order (see `resolveIndentation`). */
+export type IndentationSource =
+  | "file"
+  | "editorconfig"
+  | "override"
+  | "detected"
+  | "language"
+  | "default";
+
+export interface IndentationInputs {
+  /** The file's resolved (highlighter) language ID. */
+  language: string | null;
+  /** The file's `.editorconfig` properties. */
+  editorConfig?: EditorConfigProperties;
+  /** Detected from the file's content (`detectIndentation`). */
+  detected?: IndentationLayer;
+  /** Chosen for this file in its open tab (the indentation status item). */
+  fileChoice?: IndentationLayer;
+}
+
+export interface IndentationResolution {
+  indentation: ResolvedIndentation;
+  sources: Record<keyof ResolvedIndentation, IndentationSource>;
+  /** The per-extension override matching the file, whether or not a higher source outranks it. */
+  override: IndentationOverride | null;
+}
+
 /**
- * Resolve indentation for a file. A per-extension user override wins outright: it is the one
- * choice the user made explicitly for this file type. Otherwise each property the file's
- * `.editorconfig` sets (the project's convention) wins, and the rest comes from the built-in
- * default for the file's resolved language, then the global default.
+ * Resolve indentation for a file, property by property (`insertSpaces`, `tabSize`, `indentSize`):
+ * each comes from the first of these sources that sets it.
+ *
+ * 1. The choice made for this file in its open tab.
+ * 2. The file's `.editorconfig`: the project's committed convention, which its formatters follow
+ *    too, so it outranks Loxel's settings, as it does in VS Code and JetBrains IDEs.
+ * 3. The user's per-extension override, which applies to every project.
+ * 4. Detection from the file's content, so editing an existing file keeps its style.
+ * 5. The built-in default for the file's resolved language.
+ * 6. The global default, which sets every property.
  */
 export function resolveIndentation(
   editor: EditorSettings,
   filePath: string,
-  language: string | null,
-  editorConfig: EditorConfigProperties = {},
-): ResolvedIndentation {
-  const override = findIndentationOverride(editor.overrides, filePath);
-  if (override) {
-    const { tabSize, insertSpaces } = override;
-    return { tabSize, insertSpaces, indentSize: tabSize };
+  { language, editorConfig = {}, detected = {}, fileChoice = {} }: IndentationInputs,
+): IndentationResolution {
+  const override = findIndentationOverride(editor.overrides, filePath) ?? null;
+  const builtin = language ? BUILTIN_LANGUAGE_INDENTATION.get(language) : undefined;
+  const layers: [IndentationSource, IndentationLayer][] = [
+    ["file", fileChoice],
+    ["editorconfig", editorConfigLayer(editorConfig)],
+    ["override", override ? defaultsLayer(override) : {}],
+    ["detected", detected],
+    ["language", builtin ? defaultsLayer(builtin) : {}],
+    ["default", defaultsLayer(editor.indentation)],
+  ];
+  const [insertSpaces, insertSpacesSource] = resolveProperty(layers, "insertSpaces");
+  const [tabSize, tabSizeSource] = resolveProperty(layers, "tabSize");
+  const [indentSize, indentSizeSource] = resolveProperty(layers, "indentSize");
+  return {
+    indentation: { insertSpaces, tabSize, indentSize },
+    sources: {
+      insertSpaces: insertSpacesSource,
+      tabSize: tabSizeSource,
+      indentSize: indentSizeSource,
+    },
+    override,
+  };
+}
+
+function resolveProperty<K extends keyof ResolvedIndentation>(
+  layers: [IndentationSource, IndentationLayer][],
+  key: K,
+): [ResolvedIndentation[K], IndentationSource] {
+  for (const [source, layer] of layers) {
+    const value = layer[key];
+    if (value !== undefined) return [value, source];
   }
-  const base =
-    (language ? BUILTIN_LANGUAGE_INDENTATION.get(language) : undefined) ?? editor.indentation;
-  const insertSpaces = editorConfig.indentStyle
-    ? editorConfig.indentStyle === "space"
-    : base.insertSpaces;
-  const tabSize = editorConfig.tabWidth ?? base.tabSize;
-  // Not `tabSize`: that can be the `.editorconfig`'s tab_width, which says nothing about indentation.
-  return { tabSize, insertSpaces, indentSize: editorConfig.indentSize ?? base.tabSize };
+  throw new Error(`No indentation source sets ${key}`);
+}
+
+function defaultsLayer({ tabSize, insertSpaces }: IndentationDefaults): IndentationLayer {
+  return { tabSize, insertSpaces, indentSize: tabSize };
+}
+
+function editorConfigLayer(editorConfig: EditorConfigProperties): IndentationLayer {
+  const layer: IndentationLayer = {};
+  if (editorConfig.indentStyle) layer.insertSpaces = editorConfig.indentStyle === "space";
+  // Not `indentSize`: `tab_width` is a tab's display width and says nothing about indentation.
+  if (editorConfig.tabWidth !== undefined) layer.tabSize = editorConfig.tabWidth;
+  if (editorConfig.indentSize !== undefined) layer.indentSize = editorConfig.indentSize;
+  return layer;
 }
 
 function findIndentationOverride(

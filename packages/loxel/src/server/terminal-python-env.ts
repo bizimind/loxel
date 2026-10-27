@@ -10,7 +10,7 @@ import type { PythonEnv } from "@/api/python-env-model";
 
 import { config } from "./config";
 import { logger } from "./logger";
-import { hasTrackedFiles } from "./python-env";
+import { isShippedByRepo } from "./python-env";
 
 const log = logger.child("terminal");
 
@@ -117,7 +117,9 @@ export async function activatePythonEnv(
     });
     return;
   }
-  if (await hasTrackedFiles(worktreePath, binDir)) {
+  // The whole `bin`, not just the interpreter: first on PATH, a committed `bin/git` written into
+  // an ignored venv would shadow the real one.
+  if (await isShippedByRepo(worktreePath, binDir)) {
     log.warn("Not activating a Python environment with files tracked by git", { binDir });
     return;
   }

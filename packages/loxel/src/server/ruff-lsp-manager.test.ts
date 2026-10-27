@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -6,11 +6,21 @@ import { join, resolve } from "node:path";
 import { $, type ServerWebSocket } from "bun";
 
 import type { PythonEnv } from "@/api/python-env-model";
+import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
-import { pickRuffBinary, RuffLspManager } from "./ruff-lsp-manager";
+// The shared environment resolution reads interpreter overrides from the store database; keep
+// the tests' state out of the real one.
+const stateDir = await mkdtemp(join(tmpdir(), "ruff-lsp-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+const { refreshPythonEnv, subscribePythonEnv } = await import("./python-env");
+const { pickRuffBinary, RuffLspManager } = await import("./ruff-lsp-manager");
+
+afterAll(async () => {
+  await rm(stateDir, { recursive: true, force: true });
+});
 
 const roots: string[] = [];
-let manager: RuffLspManager | undefined;
+let manager: InstanceType<typeof RuffLspManager> | undefined;
 
 afterEach(async () => {
   manager?.destroy();
@@ -41,7 +51,7 @@ async function worktreeWithVenvRuff(version: string): Promise<{ wt: string; venv
   return { wt, venvRuff: await fakeRuff(join(bin, "ruff"), version) };
 }
 
-/** The environment `resolvePythonEnv` reports for {@link worktreeWithVenvRuff}'s `.venv`. */
+/** The environment the resolver reports for {@link worktreeWithVenvRuff}'s `.venv`. */
 function venvEnv(wt: string): PythonEnv {
   return {
     source: "venv",
@@ -54,13 +64,13 @@ describe.skipIf(process.platform === "win32")("pickRuffBinary", () => {
   test("prefers the ruff installed in the worktree's environment", async () => {
     const { wt, venvRuff } = await worktreeWithVenvRuff("0.9.0");
     const bundled = await fakeRuff(join(await makeDir("ruff-bundled-"), "ruff"), "0.17.2");
-    expect(await pickRuffBinary(wt, venvEnv(wt), bundled)).toBe(venvRuff);
+    expect((await pickRuffBinary(wt, venvEnv(wt), bundled))?.path).toBe(venvRuff);
   });
 
   test("falls back to the bundled ruff when the environment's has no stable server", async () => {
     const { wt } = await worktreeWithVenvRuff("0.4.10");
     const bundled = await fakeRuff(join(await makeDir("ruff-bundled-"), "ruff"), "0.17.2");
-    expect(await pickRuffBinary(wt, venvEnv(wt), bundled)).toBe(bundled);
+    expect((await pickRuffBinary(wt, venvEnv(wt), bundled))?.path).toBe(bundled);
   });
 
   test("never runs a ruff the repository ships", async () => {
@@ -68,7 +78,7 @@ describe.skipIf(process.platform === "win32")("pickRuffBinary", () => {
     await $`git init -q ${wt}`.quiet();
     await $`git -C ${wt} add -f -- .venv/bin/ruff`.quiet();
     const bundled = await fakeRuff(join(await makeDir("ruff-bundled-"), "ruff"), "0.17.2");
-    expect(await pickRuffBinary(wt, venvEnv(wt), bundled)).toBe(bundled);
+    expect((await pickRuffBinary(wt, venvEnv(wt), bundled))?.path).toBe(bundled);
   });
 
   test("never runs a ruff from an environment the repository ships part of", async () => {
@@ -77,7 +87,7 @@ describe.skipIf(process.platform === "win32")("pickRuffBinary", () => {
     // ruff itself is untracked, but a committed environment can still run repository code.
     await $`git -C ${wt} add -f -- .venv/pyvenv.cfg`.quiet();
     const bundled = await fakeRuff(join(await makeDir("ruff-bundled-"), "ruff"), "0.17.2");
-    expect(await pickRuffBinary(wt, venvEnv(wt), bundled)).toBe(bundled);
+    expect((await pickRuffBinary(wt, venvEnv(wt), bundled))?.path).toBe(bundled);
   });
 });
 
@@ -99,16 +109,22 @@ class FakeClient {
   readonly ws: ServerWebSocket<unknown>;
   /** Server→client requests that reached the client. */
   readonly serverRequests: string[] = [];
+  /** Resolves with the close code once the manager closes the socket. */
+  readonly closed: Promise<number>;
   private nextId = 1;
   private readonly responses = new Map<number, (result: unknown) => void>();
 
-  constructor(private readonly manager: RuffLspManager) {
+  constructor(private readonly manager: InstanceType<typeof RuffLspManager>) {
+    let onClose: (code: number) => void = () => {};
+    this.closed = new Promise((resolve) => {
+      onClose = resolve;
+    });
     const ws = {
       send: (data: string) => {
         this.receive(data);
         return data.length;
       },
-      close: () => {},
+      close: (code: number) => onClose(code),
     };
     this.ws = ws as unknown as ServerWebSocket<unknown>;
   }
@@ -224,6 +240,31 @@ describe.skipIf(!(await Bun.file(BUNDLED_RUFF).exists()))("RuffLspManager with r
       expect(capabilities.codeActionProvider).toBeDefined();
       expect(capabilities.documentFormattingProvider).toBeUndefined();
       expect(capabilities.documentRangeFormattingProvider).toBeUndefined();
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "restarts through a client reconnect when the environment gets its own ruff",
+    async () => {
+      const wt = await makeDir("ruff-lsp-");
+      manager = new RuffLspManager();
+      const client = new FakeClient(manager);
+      // The server's subscription keeps the worktree's resolution shared and watched.
+      const unsubscribe = subscribePythonEnv(wt, () => {});
+      try {
+        await client.start(wt);
+        // `uv sync` after the first file opened: a venv with a ruff that serves.
+        const bin = join(wt, ".venv", "bin");
+        await mkdir(bin, { recursive: true });
+        await writeFile(join(wt, ".venv", "pyvenv.cfg"), "home = /usr/bin\n");
+        await fakeRuff(join(bin, "python"), "0");
+        await fakeRuff(join(bin, "ruff"), "0.9.0");
+        refreshPythonEnv(wt);
+        expect(await client.closed).toBe(LSP_RESTART_CLOSE_CODE);
+      } finally {
+        unsubscribe();
+      }
     },
     TEST_TIMEOUT_MS,
   );

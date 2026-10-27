@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,8 +7,16 @@ import { $ } from "bun";
 
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
 
-import { FormatService } from "./format-service";
-import { findVenvBin } from "./python-formatter";
+// Python files reach the shared environment resolution, which reads interpreter overrides from
+// the store database; keep the tests' state out of the real one.
+const stateDir = await mkdtemp(join(tmpdir(), "format-service-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+const { FormatService } = await import("./format-service");
+const { findVenvBin } = await import("./python-formatter");
+
+afterAll(async () => {
+  await rm(stateDir, { recursive: true, force: true });
+});
 
 let root: string | undefined;
 
@@ -47,7 +55,7 @@ async function makeFakeVenv(
 
 const AUTO_DETECT: FormattingSettings = DEFAULT_FORMATTING_SETTINGS;
 
-function findFormatter(service: FormatService, wt: string, command: string) {
+function findFormatter(service: InstanceType<typeof FormatService>, wt: string, command: string) {
   return service.getDetectedFormatters(wt).find((f) => f.command === command);
 }
 
@@ -265,11 +273,21 @@ describe("FormatService Python detection", () => {
     await $`git -C ${wt} add -- pkg/.venv/bin/ruff`.quiet();
     // The tracked subproject venv is skipped in favor of the untracked one above it.
     expect(await findVenvBin(join(wt, "pkg"), wt, "ruff")).toBe(join(wt, ".venv/bin"));
-    // Tracking state is cached until the worktree is invalidated.
+    // A venv the repository starts tracking is skipped from then on.
     await $`git -C ${wt} add -- .venv/pyvenv.cfg`.quiet();
-    expect(await findVenvBin(join(wt, "pkg"), wt, "ruff")).toBe(join(wt, ".venv/bin"));
-    new FormatService().invalidateCache(wt);
     expect(await findVenvBin(join(wt, "pkg"), wt, "ruff")).toBeUndefined();
+  });
+
+  test("uses the worktree's resolved environment, below a sub-project's own venv", async () => {
+    const wt = await makeWorktree({ "pkg/app.py": "", "other/app.py": "" });
+    // A Pixi environment: no pyvenv.cfg, found only through the shared resolution.
+    const pixi = join(wt, ".pixi/envs/default");
+    await mkdir(join(pixi, "bin"), { recursive: true });
+    await writeFile(join(pixi, "bin/python"), "#!/bin/sh\n", { mode: 0o755 });
+    await writeFile(join(pixi, "bin/ruff"), ECHO_ARGS_SCRIPT, { mode: 0o755 });
+    await makeFakeVenv(join(wt, "pkg/.venv"), "ruff");
+    expect(await findVenvBin(join(wt, "other"), wt, "ruff")).toBe(join(pixi, "bin"));
+    expect(await findVenvBin(join(wt, "pkg"), wt, "ruff")).toBe(join(wt, "pkg/.venv/bin"));
   });
 
   test("only uses venvs that have the formatter", async () => {
@@ -359,6 +377,15 @@ describe("FormatService failure notices", () => {
       notice:
         'Format on save skipped: "ruff" could not be started; its interpreter may be missing.',
     });
+  });
+
+  test("reports a formatter that is not a runnable file", async () => {
+    const wt = await makeWorktree({ "ruff.toml": "" });
+    // No shebang and no binary header: the kernel refuses to run it (ENOEXEC).
+    await makeFakeVenv(join(wt, ".venv"), "ruff", "not a program\n");
+    const result = await new FormatService().format("x=1\n", join(wt, "a.py"), wt, AUTO_DETECT);
+    expect(result.content).toBeNull();
+    expect(result.notice).toStartWith('Format on save skipped: "ruff" could not be started (');
   });
 
   test("does not report a formatter that exits non-zero (e.g. a syntax error)", async () => {
