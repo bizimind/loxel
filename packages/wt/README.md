@@ -365,7 +365,7 @@ With `-j`, stdout carries only JSON. Progress, hook output and prompts go to std
 {"name","path","removed":true,"branchDeleted":false,"hookRan":true}
 // doctor — exit code 1 when `ok` is false; each check's status is ok | info | warn | fail
 {"root","bare","ok":true,"checks":[{"id","status","title","summary","affects":[...],"fixable"}, ...]}
-// init — `outcomes[].status` is applied | not-needed | failed (exit code 1 if one failed, or if a failing check is left pending);
+// init — `outcomes[].status` is applied | not-needed | failed (exit code 1 if one failed, or if any check still fails afterwards, as with `doctor`);
 // `pending` lists the undecided fixes with the flag that applies each
 {"root","bare","cloned":false,"outcomes":[{"id","status","commands":[...],"error"}],
  "pending":[{"check":{...},"actions":[{"id","title","recommended","commands","flag"}]}],"checks":[...]}

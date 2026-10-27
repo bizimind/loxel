@@ -38,10 +38,10 @@ export async function resolveDefaultBranchRef(cwd: string): Promise<string | nul
   // A bare repository's own HEAD *is* the default branch, and it is shared by
   // every linked worktree through the common git dir. A worktree's own HEAD
   // is merely the checked-out branch, so this only applies when the
-  // repository itself is bare. Ask the common dir: from a linked worktree
-  // --is-bare-repository says false, and core.bare is not inherited once
-  // per-worktree config (extensions.worktreeConfig) moves it into the bare
-  // dir's own config.worktree.
+  // repository itself is bare. Read core.bare in the common dir: from a linked
+  // worktree it is not inherited once per-worktree config
+  // (extensions.worktreeConfig) moves it into the bare dir's own
+  // config.worktree, which only the common dir reads.
   const commonDir = (
     await $`git -C ${cwd} rev-parse --path-format=absolute --git-common-dir`
       .env(readOnlyGitEnv())
@@ -96,7 +96,10 @@ async function resolveRemoteHead(cwd: string): Promise<string | null> {
 }
 
 async function isBareRepository(gitDir: string): Promise<boolean> {
-  const result = await $`git -C ${gitDir} rev-parse --is-bare-repository`
+  // Read the config key rather than `rev-parse --is-bare-repository`: run inside
+  // a git dir that command finds no work tree, so it reports `true` for any repo
+  // whose config simply omits core.bare.
+  const result = await $`git -C ${gitDir} config --get --type=bool core.bare`
     .env(readOnlyGitEnv())
     .nothrow()
     .text();

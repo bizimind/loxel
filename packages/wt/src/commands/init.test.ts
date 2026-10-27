@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 
 import { git, gitSucceeds } from "../git/index.ts";
@@ -13,9 +14,14 @@ afterEach(() => repo.cleanup());
 const CLI = join(import.meta.dir, "..", "cli.ts");
 
 /** Run the CLI with no terminal on stdin, as an agent or script would. */
-async function runCli(args: string[], cwd: string): Promise<{ exitCode: number; json: unknown }> {
-  const proc = Bun.spawn(["bun", CLI, ...args], {
+async function runCli(
+  args: string[],
+  cwd: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<{ exitCode: number; json: unknown }> {
+  const proc = Bun.spawn([process.execPath, CLI, ...args], {
     cwd,
+    env,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -131,6 +137,24 @@ describe("wt init without a terminal", () => {
     const { exitCode, json } = await runCli(["init", "-j"], repo.root);
     expect(exitCode).toBe(1);
     expect(json).toMatchObject({ outcomes: [], pending: expect.any(Array) });
+  });
+
+  test("exits 1 when a failing check has no fix, like doctor", async () => {
+    repo = await createTestRepo({ bare: true });
+    // A git that reports a version older than wt supports, and is real git otherwise.
+    const shimDir = join(repo.root, "..", "shim");
+    const realGit = Bun.which("git");
+    await Bun.write(
+      join(shimDir, "git"),
+      `#!/bin/sh\n[ "$1" = "--version" ] && { echo "git version 2.30.0"; exit 0; }\nexec ${realGit} "$@"\n`,
+    );
+    await chmod(join(shimDir, "git"), 0o755);
+    const env = { ...process.env, PATH: `${shimDir}:${process.env.PATH ?? ""}` };
+
+    const init = await runCli(["init", "-j", "--yes"], repo.root, env);
+    expect(init.exitCode).toBe(1);
+    expect(init.json).toMatchObject({ pending: [] });
+    expect((await runCli(["doctor", "-j"], repo.root, env)).exitCode).toBe(1);
   });
 
   test("honours --no- flags when cloning", async () => {

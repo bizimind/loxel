@@ -111,10 +111,11 @@ export async function initCommand(
       pending: pending.map(toPending),
       checks: result.checks,
     };
-    // Like `wt doctor`, an unattended run fails while a failing check is left undecided.
+    // Like `wt doctor`, a run that leaves a check failing exits 1, whether it was skipped,
+    // left undecided or has no fix (an old git).
     const failed =
       outcomes.some((outcome) => outcome.status === "failed") ||
-      pending.some(({ check }) => check.status === "fail");
+      result.checks.some((check) => check.status === "fail");
     return createResult<InitCommandResult>(data, formatInitResult, failed ? 1 : 0);
   });
 }

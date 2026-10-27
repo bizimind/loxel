@@ -110,6 +110,19 @@ describe("resolveDefaultBranchRef", () => {
     }
   });
 
+  test("does not treat a regular repo without core.bare as bare", async () => {
+    const repo = await createRepo();
+    try {
+      await commit(repo.path, "A", { "a.txt": "a" });
+      await $`git -C ${repo.path} checkout -q -b topic`.quiet();
+      await $`git -C ${repo.path} config --unset core.bare`.quiet();
+
+      expect(await resolveDefaultBranchRef(repo.path)).toBe("main");
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
   test("falls back to origin/main when origin/HEAD is missing", async () => {
     const repo = await createRepo();
     try {
