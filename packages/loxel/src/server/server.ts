@@ -41,7 +41,7 @@ import { logger } from "./logger";
 import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
-import { resolvePythonEnv } from "./python-env";
+import { getPythonEnv, refreshPythonEnv, subscribePythonEnv } from "./python-env";
 import { PythonLspManager } from "./python-lsp-manager";
 import { onPythonOverrideChange } from "./python-override-store";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
@@ -490,6 +490,10 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     externalFilesService,
     externalFoldersService,
     subscribers: new Set([ws]),
+    // The status bar's interpreter follows environments created or removed on disk.
+    unsubscribePythonEnv: subscribePythonEnv(wtPath, ({ changed }) => {
+      if (changed) broadcastToSubscribers(wtPath, { type: "python_env_changed", wtPath });
+    }),
   };
 
   wtResources.set(wtPath, resources);
@@ -546,6 +550,7 @@ function teardownWorktreeResources(wtPath: string, resources: WorktreeResources)
   resources.detachedFilesService.stop();
   resources.externalFilesService.stop();
   resources.externalFoldersService.stop();
+  resources.unsubscribePythonEnv();
   formatService.invalidateCache(wtPath);
   wtResources.delete(wtPath);
   log.info(`Worktree resources torn down: ${wtPath}`);
@@ -759,7 +764,7 @@ const agentOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
 const terminalManager = new TerminalManager({
   isSequenceEnabled: isNotificationSequenceEnabled,
-  pythonEnvFor: (worktreePath) => resolvePythonEnv(worktreePath),
+  pythonEnvFor: (worktreePath) => getPythonEnv(worktreePath),
   onNotification: (session, payload) => {
     const notification = notificationStore.add({
       source: { kind: "terminal", panelId: session.id, worktreePath: session.worktreePath },
@@ -784,16 +789,10 @@ const yamlLspManager = new YamlLspManager({});
 const tsLspManager = new TsLspManager();
 const dockerLspManager = new DockerLspManager();
 const terraformLspManager = new TerraformLspManager();
-// The status bar's interpreter follows environments created or removed on disk.
-const pythonLspManager = new PythonLspManager((wtPath) =>
-  broadcastToSubscribers(wtPath, { type: "python_env_changed", wtPath }),
-);
-// A chosen interpreter reaches the language server (and, through the resolver, everything else
-// that resolves the worktree's Python) without a restart.
-onPythonOverrideChange((wtPath) => {
-  pythonLspManager.refreshWorktreeEnvironment(wtPath);
-  broadcastToSubscribers(wtPath, { type: "python_env_changed", wtPath });
-});
+const pythonLspManager = new PythonLspManager();
+// A chosen interpreter reaches everything that shares the worktree's resolution (language
+// servers, terminals, format on save, the status bar) without a restart.
+onPythonOverrideChange(refreshPythonEnv);
 const ruffLspManager = new RuffLspManager();
 const astroLspManager = new AstroLspManager();
 const xmlLspManager = new XmlLspManager();

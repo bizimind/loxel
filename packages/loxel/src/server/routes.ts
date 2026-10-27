@@ -66,7 +66,7 @@ import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
 import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
 import * as projectStore from "./project-store";
-import { listPythonEnvs, normalizePythonOverride, resolvePythonEnv } from "./python-env";
+import { getPythonEnv, listPythonEnvs, normalizePythonOverride } from "./python-env";
 import {
   getPythonOverride,
   pythonOverrideStoreKey,
@@ -1013,13 +1013,13 @@ async function validatedWorktreePath(wtPath: string, cwd: string): Promise<strin
   return absolute;
 }
 
-async function withVersion(env: PythonEnv): Promise<PythonInterpreter> {
-  return { ...env, version: await pythonVersion(env.pythonPath) };
+async function withVersion(env: PythonEnv, wtPath: string): Promise<PythonInterpreter> {
+  return { ...env, version: await pythonVersion(env.pythonPath, wtPath) };
 }
 
 async function pythonEnvResponse(wtPath: string): Promise<PythonEnvResponse> {
-  const env = await resolvePythonEnv(wtPath);
-  return { env: env && (await withVersion(env)), overridePath: getPythonOverride(wtPath) };
+  const env = await getPythonEnv(wtPath);
+  return { env: env && (await withVersion(env, wtPath)), overridePath: getPythonOverride(wtPath) };
 }
 
 // GET /api/python-env?wt= — The Python interpreter Loxel uses for a worktree
@@ -1035,7 +1035,7 @@ async function handlePythonEnvCandidates(req: Request, ctx: RouteContext): Promi
   if (wtPath instanceof Response) return wtPath;
   const { candidates, automatic } = await listPythonEnvs(wtPath);
   const response: PythonEnvCandidatesResponse = {
-    candidates: await Promise.all(candidates.map(withVersion)),
+    candidates: await Promise.all(candidates.map((env) => withVersion(env, wtPath))),
     automaticPath: automatic?.pythonPath ?? null,
     overridePath: getPythonOverride(wtPath),
   };
@@ -1061,7 +1061,7 @@ async function handlePythonOverride(req: Request, ctx: RouteContext): Promise<Re
       return error(err instanceof Error ? err.message : "Invalid Python interpreter", 400);
     }
     // Language servers and terminals will run it, so take only what answers like a Python.
-    if (!(await pythonVersion(chosen))) {
+    if (!(await pythonVersion(chosen, wtPath))) {
       return error(`${chosen} did not report a Python version; is it a Python interpreter?`, 400);
     }
   }

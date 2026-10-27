@@ -1,5 +1,13 @@
 /** Where a worktree's Python interpreter was found, listed in resolution order. */
-export type PythonEnvSource = "override" | "virtual-env" | "venv" | "pixi" | "poetry" | "system";
+export type PythonEnvSource =
+  | "override"
+  | "virtual-env"
+  | "conda"
+  | "venv"
+  | "pixi"
+  | "poetry"
+  | "pipenv"
+  | "system";
 
 /** The Python interpreter Loxel uses for a worktree (language server, terminals, and later tools). */
 export interface PythonEnv {

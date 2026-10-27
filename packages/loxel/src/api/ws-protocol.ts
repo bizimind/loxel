@@ -330,3 +330,10 @@ export function parseOutputFrame(
   const offset = Number(new DataView(data.buffer, data.byteOffset).getBigUint64(BIN_HEADER_SIZE));
   return { terminalId, offset, payload: data.subarray(BIN_OUTPUT_HEADER_SIZE) };
 }
+
+/**
+ * Close code of a language-server socket whose server Loxel restarts (a different binary was
+ * picked); the client reconnects, which starts the new server. 4000 and 4001 (replaced by a newer
+ * connection, failed to start) are final.
+ */
+export const LSP_RESTART_CLOSE_CODE = 4002;

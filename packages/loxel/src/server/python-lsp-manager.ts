@@ -1,14 +1,13 @@
-import path from "node:path";
-
 import type { ServerWebSocket, Subprocess } from "bun";
 
 import type { PythonEnv } from "@/api/python-env-model";
 
 import {
+  getPythonEnv,
+  getPythonEnvNow,
+  isSamePythonEnv,
   pathOutsideWorktree,
-  type PythonEnvWatch,
-  resolvePythonEnv,
-  watchPythonEnv,
+  subscribePythonEnv,
 } from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
 import {
@@ -19,11 +18,9 @@ import {
 } from "./stdio-lsp-manager";
 
 interface PythonLspSession extends WtLspSession {
-  /** Latest resolution of the worktree's interpreter; replaced whenever the environment changes. */
-  pythonEnv: Promise<PythonEnv | null>;
-  envWatch: PythonEnvWatch | null;
-  /** The interpreter last resolved, to report only real changes; undefined before the first. */
-  resolvedEnv: PythonEnv | null | undefined;
+  unsubscribeEnv: (() => void) | null;
+  /** The interpreter last answered in `workspace/configuration`; undefined before the first. */
+  answeredEnv: PythonEnv | null | undefined;
   /** Set once the client's `initialized` reached the server, after which config may be pushed. */
   initialized: boolean;
 }
@@ -54,26 +51,18 @@ export function pythonSettings(env: PythonEnv | null, wtPath: string): Record<st
  * rooted at the worktree path so cross-file references and module
  * resolution work against the full worktree workspace.
  *
- * The worktree's interpreter comes from {@link resolvePythonEnv}, the single
- * source of truth (basedpyright's own root `.venv` detection covers less), and
- * reaches basedpyright as `python.pythonPath` through `workspace/configuration`.
+ * The worktree's interpreter comes from the shared resolution in `python-env.ts`
+ * ({@link getPythonEnv}), the single source of truth (basedpyright's own root
+ * `.venv` detection covers less), and reaches basedpyright as `python.pythonPath`
+ * through `workspace/configuration`.
  * A `pyrightconfig.json` / `[tool.basedpyright]` / `[tool.pyright]` `venv`
  * still takes precedence inside basedpyright.
  */
 export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspContext> {
   protected override readonly forwardWatchedFiles = true;
 
-  /** @param onEnvironmentResolved Called when a session's interpreter resolves to a different one. */
-  constructor(private readonly onEnvironmentResolved: (wtPath: string) => void = () => {}) {
+  constructor() {
     super("python-lsp");
-  }
-
-  /** Re-resolve the interpreter of the worktree's sessions, e.g. after its override changed. */
-  refreshWorktreeEnvironment(wtPath: string): void {
-    const target = path.resolve(wtPath);
-    for (const session of this.sessions.values()) {
-      if (path.resolve(session.wtPath) === target) this.refreshEnvironment(session, true);
-    }
   }
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
@@ -110,14 +99,20 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       wtPath: context.wtPath,
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
-      pythonEnv: Promise.resolve(null),
-      envWatch: null,
-      resolvedEnv: undefined,
+      unsubscribeEnv: null,
+      answeredEnv: undefined,
       initialized: false,
     };
-    // Watch the layout before the first resolution so nothing created meanwhile is missed.
-    session.envWatch = this.watchEnvironment(session, null);
-    this.refreshEnvironment(session);
+    session.unsubscribeEnv = subscribePythonEnv(session.wtPath, ({ env, first }) => {
+      if (!this.isSessionLive(session) || !session.initialized) return;
+      // The first resolution is what the configuration answer waited for; every later one may
+      // mean a different interpreter or packages installed into the same one.
+      if (first && session.answeredEnv !== undefined && isSamePythonEnv(session.answeredEnv, env))
+        return;
+      this.notifyConfigurationChanged(session);
+    });
+    // Resolve while basedpyright starts, rather than when it first asks.
+    void getPythonEnv(session.wtPath);
     return session;
   }
 
@@ -130,8 +125,8 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
   }
 
   protected override onSessionClosed(session: PythonLspSession): void {
-    session.envWatch?.close();
-    session.envWatch = null;
+    session.unsubscribeEnv?.();
+    session.unsubscribeEnv = null;
   }
 
   protected override async workspaceConfiguration(
@@ -140,50 +135,10 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
   ): Promise<unknown> {
     if (section === "basedpyright") return BASEDPYRIGHT_SETTINGS;
     if (section !== "python") return null;
-    return pythonSettings(await session.pythonEnv, session.wtPath);
+    // The last resolution, even while a newer one runs: basedpyright is told to ask again when
+    // that one lands (see the subscription in `buildSession`), instead of analyzing nothing until then.
+    const env = await getPythonEnvNow(session.wtPath);
+    session.answeredEnv = env;
+    return pythonSettings(env, session.wtPath);
   }
-
-  /**
-   * Re-resolve the interpreter, then watch for the next change. basedpyright pulls configuration
-   * once at startup, so a change after that is announced (`notify`) and it asks again; that also
-   * makes it re-resolve imports after packages are installed into the same environment. The old
-   * watch stays armed until the new one is, and a change it saw in between is handed to the new
-   * watch's debounce, so nothing written during resolution is lost.
-   */
-  private refreshEnvironment(session: PythonLspSession, notify = false): void {
-    const resolution = resolvePythonEnv(session.wtPath);
-    session.pythonEnv = resolution;
-    void resolution.then((env) => {
-      if (!this.isSessionLive(session) || session.pythonEnv !== resolution) return;
-      this.log.info("Python environment resolved", {
-        wtPath: session.wtPath,
-        source: env?.source ?? null,
-        pythonPath: env?.pythonPath ?? null,
-      });
-      const previous = session.envWatch;
-      const next = this.watchEnvironment(session, env);
-      session.envWatch = next;
-      // Hand a change the old watch saw during resolution to the new one's debounce, so a write
-      // burst still coalesces into one more round instead of re-resolving back to back.
-      if (previous?.hasPendingChange) next.nudge();
-      previous?.close();
-      if (notify && session.initialized) this.notifyConfigurationChanged(session);
-      // Packages installed into the same environment re-resolve too; only a different
-      // interpreter is news to the UI.
-      if (session.resolvedEnv === undefined || !isSameEnv(session.resolvedEnv, env)) {
-        this.onEnvironmentResolved(session.wtPath);
-      }
-      session.resolvedEnv = env;
-    });
-  }
-
-  private watchEnvironment(session: PythonLspSession, env: PythonEnv | null): PythonEnvWatch {
-    return watchPythonEnv(session.wtPath, env, () => {
-      if (this.isSessionLive(session)) this.refreshEnvironment(session, true);
-    });
-  }
-}
-
-function isSameEnv(a: PythonEnv | null, b: PythonEnv | null): boolean {
-  return a?.source === b?.source && a?.pythonPath === b?.pythonPath && a?.envPath === b?.envPath;
 }

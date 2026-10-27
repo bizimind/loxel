@@ -1,5 +1,4 @@
 import { stat } from "node:fs/promises";
-import path from "node:path";
 
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
@@ -9,7 +8,7 @@ const log = logger.child("server");
 const VERSION_TIMEOUT_MS = 5000;
 const VERSION_RE = /Python (\d+\.\d+\S*)/;
 
-/** Versions by interpreter path and the identity of the file it resolves to. */
+/** Versions by interpreter path, the identity of the file it resolves to, and the directory asked from. */
 const cache = new Map<string, Promise<string | null>>();
 
 /**
@@ -18,18 +17,20 @@ const cache = new Map<string, Promise<string | null>>();
  * failures are not cached.
  * Only pass interpreters the resolver accepted: this executes the file. CPython prints the
  * version before reading any configuration or importing `site`, so no project code runs.
+ * Runs in `cwd`, the worktree the interpreter is for: a version-manager shim (pyenv, asdf)
+ * picks its Python by directory, from the worktree's `.python-version`.
  */
-export async function pythonVersion(pythonPath: string): Promise<string | null> {
+export async function pythonVersion(pythonPath: string, cwd: string): Promise<string | null> {
   let key: string;
   try {
     const info = await stat(pythonPath);
-    key = `${pythonPath}\0${info.dev}:${info.ino}:${info.mtimeMs}:${info.size}`;
+    key = `${pythonPath}\0${info.dev}:${info.ino}:${info.mtimeMs}:${info.size}\0${cwd}`;
   } catch {
     return null;
   }
   let version = cache.get(key);
   if (!version) {
-    version = readVersion(pythonPath);
+    version = readVersion(pythonPath, cwd);
     cache.set(key, version);
     // A failed read (a timeout while the OS scans a fresh binary) is retried next time.
     void version.then((read) => {
@@ -39,10 +40,10 @@ export async function pythonVersion(pythonPath: string): Promise<string | null> 
   return version;
 }
 
-async function readVersion(pythonPath: string): Promise<string | null> {
+async function readVersion(pythonPath: string, cwd: string): Promise<string | null> {
   try {
     const proc = Bun.spawn([pythonPath, "--version"], {
-      cwd: path.dirname(pythonPath),
+      cwd,
       env: buildSpawnEnv(),
       stdin: "ignore",
       stdout: "pipe",
