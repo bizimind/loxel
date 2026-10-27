@@ -105,10 +105,15 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
     };
     session.unsubscribeEnv = subscribePythonEnv(session.wtPath, ({ env, first }) => {
       if (!this.isSessionLive(session) || !session.initialized) return;
-      // The first resolution is what the configuration answer waited for; every later one may
-      // mean a different interpreter or packages installed into the same one.
-      if (first && session.answeredEnv !== undefined && isSamePythonEnv(session.answeredEnv, env))
+      // The first resolution is what the configuration answer waited for (or, not answered yet,
+      // is waiting for); every later one may mean a different interpreter or packages installed
+      // into the same one.
+      if (
+        first &&
+        (session.answeredEnv === undefined || isSamePythonEnv(session.answeredEnv, env))
+      ) {
         return;
+      }
       this.notifyConfigurationChanged(session);
     });
     // Resolve while basedpyright starts, rather than when it first asks.

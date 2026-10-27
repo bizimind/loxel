@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { envBinDir, getPythonEnv, isEnvShippedByRepo, VENV_DIR_NAMES } from "./python-env";
+import { envBinDir, getPythonEnvNow, isEnvShippedByRepo, VENV_DIR_NAMES } from "./python-env";
 
 export const PYTHON_FORMAT_EXTENSIONS: readonly string[] = ["py", "pyi"];
 
@@ -73,7 +73,8 @@ export async function findVenvBin(
     const bin = await venvBinWith(root, venv, command);
     if (bin) return bin;
   }
-  const env = await getPythonEnv(root);
+  // The last resolution: a save should not wait for a re-resolution after a `pip install`.
+  const env = await getPythonEnvNow(root);
   if (env?.envPath) {
     const bin = await binWith(root, env.envPath, dirname(env.pythonPath), command);
     if (bin) return bin;

@@ -455,6 +455,10 @@ describe("resolvePythonEnv discovery", () => {
 });
 
 describe("shared resolution", () => {
+  // The shared resolution reads the process's environment; keep the developer's out of it.
+  for (const name of ["VIRTUAL_ENV", "CONDA_PREFIX", "UV_PROJECT_ENVIRONMENT"])
+    delete process.env[name];
+
   test("is memoized while subscribed and re-resolved once git tracks the chosen environment", async () => {
     const { wt } = await makeRoot();
     Bun.spawnSync(["git", "-C", wt, "init", "-q"]);

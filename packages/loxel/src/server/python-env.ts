@@ -155,6 +155,8 @@ export async function getPythonEnv(worktreePath: string): Promise<PythonEnv | nu
   const entry = worktreeEnvs.get(wtPath);
   if (!entry) return resolvePythonEnv(wtPath);
   await revalidate(wtPath, entry);
+  // Unsubscribed meanwhile: nothing would close a watch armed for it now.
+  if (worktreeEnvs.get(wtPath) !== entry) return resolvePythonEnv(wtPath);
   return entry.resolution ?? startResolution(wtPath, entry);
 }
 
@@ -167,6 +169,7 @@ export async function getPythonEnvNow(worktreePath: string): Promise<PythonEnv |
   const entry = worktreeEnvs.get(wtPath);
   if (!entry) return resolvePythonEnv(wtPath);
   await revalidate(wtPath, entry);
+  if (worktreeEnvs.get(wtPath) !== entry) return resolvePythonEnv(wtPath);
   if (entry.pending && entry.settled && !entry.withdrawn) return entry.settled.env;
   return entry.resolution ?? startResolution(wtPath, entry);
 }
@@ -202,7 +205,7 @@ export function refreshAllPythonEnvs(changedNames?: Iterable<string>): void {
  * cached until a git index they read changes, so this is a few `stat` calls otherwise).
  */
 async function revalidate(wtPath: string, entry: WorktreePythonEnv): Promise<void> {
-  if (!entry.resolution) return;
+  if (!entry.resolution || worktreeEnvs.get(wtPath) !== entry) return;
   if (getPythonOverride(wtPath) !== entry.overridePath) {
     startResolution(wtPath, entry);
     return;
@@ -210,8 +213,8 @@ async function revalidate(wtPath: string, entry: WorktreePythonEnv): Promise<voi
   const { settled } = entry;
   if (!settled?.env || entry.withdrawn) return;
   if (!(await isResolvedEnvShipped(wtPath, settled.env))) return;
-  // Another caller may have noticed first.
-  if (entry.settled !== settled || entry.withdrawn) return;
+  // Another caller may have noticed first, or the worktree was unsubscribed meanwhile.
+  if (entry.settled !== settled || entry.withdrawn || worktreeEnvs.get(wtPath) !== entry) return;
   entry.withdrawn = true;
   startResolution(wtPath, entry);
 }
@@ -253,7 +256,14 @@ function startResolution(wtPath: string, entry: WorktreePythonEnv): Promise<Pyth
       });
     }
     const update = { env: resolved, first: previous === null, changed };
-    for (const listener of entry.listeners) listener(update);
+    for (const listener of entry.listeners) {
+      // One failing listener must not keep the update from the others.
+      try {
+        listener(update);
+      } catch (err) {
+        log.warn("A Python environment listener failed", { wtPath, error: err });
+      }
+    }
   });
   return resolution;
 }
@@ -838,7 +848,10 @@ interface TrackedAnswer {
 
 /** Answers by worktree and physical path. */
 const trackedAnswers = new Map<string, TrackedAnswer>();
-/** Questions being asked, so concurrent checks of one path share a git run. */
+/**
+ * Questions being asked, by key and the worktree index they started from, so concurrent checks
+ * of one path share a git run but a check made after the index changed does not join an older one.
+ */
 const trackedQuestions = new Map<string, Promise<boolean>>();
 
 /**
@@ -865,17 +878,25 @@ async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean
   const key = `${wtPath}\0${physical}`;
   const known = trackedAnswers.get(key);
   if (known && (await stampsMatch(known.indexStamps))) return known.tracked;
-  let question = trackedQuestions.get(key);
+  // Stamped before asking, so a change made while git runs invalidates the answer.
+  const worktreeStamp = await stampIndexes([worktreeRepo.indexFile]);
+  const questionKey = `${key}\0${worktreeStamp[0]![1]}`;
+  let question = trackedQuestions.get(questionKey);
   if (!question) {
-    question = askGit(worktreeRepo, physical, key).finally(() => trackedQuestions.delete(key));
-    trackedQuestions.set(key, question);
+    question = askGit(worktreeRepo, physical, key, worktreeStamp).finally(() =>
+      trackedQuestions.delete(questionKey),
+    );
+    trackedQuestions.set(questionKey, question);
   }
   return question;
 }
 
-async function askGit(worktreeRepo: WorktreeRepo, physical: string, key: string): Promise<boolean> {
-  // Stamped before asking, so a change made while git runs invalidates the answer.
-  const worktreeStamp = await stampIndexes([worktreeRepo.indexFile]);
+async function askGit(
+  worktreeRepo: WorktreeRepo,
+  physical: string,
+  key: string,
+  worktreeStamp: TrackedAnswer["indexStamps"],
+): Promise<boolean> {
   const lookupDir = (await isRealDirectory(physical)) ? physical : path.dirname(physical);
   const innermost = await repoAt(lookupDir);
   if (innermost === GIT_SPAWN_FAILED || !innermost) {
