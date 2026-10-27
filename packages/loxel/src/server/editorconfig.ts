@@ -156,6 +156,9 @@ function toProperties(raw: ReadonlyMap<string, string>): EditorConfigProperties 
   const effectiveTabWidth = tabWidth ?? indentSize;
   if (effectiveTabWidth !== undefined) properties.tabWidth = effectiveTabWidth;
 
+  const maxLineLength = positiveInt(value("max_line_length"));
+  if (maxLineLength !== undefined) properties.maxLineLength = maxLineLength;
+
   const endOfLine = value("end_of_line");
   if (endOfLine === "lf" || endOfLine === "crlf") properties.endOfLine = endOfLine;
 

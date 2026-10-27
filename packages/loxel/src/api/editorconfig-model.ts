@@ -8,6 +8,8 @@ export interface EditorConfigProperties {
   indentSize?: number;
   /** Columns a tab character is displayed as; defaults to a numeric `indent_size`. */
   tabWidth?: number;
+  /** Column the editor shows a ruler at; absent for `off`. */
+  maxLineLength?: number;
   /** Line endings to save with. `cr` is not supported by the editor and is dropped. */
   endOfLine?: "lf" | "crlf";
   insertFinalNewline?: boolean;

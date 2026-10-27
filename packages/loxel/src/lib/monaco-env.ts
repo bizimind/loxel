@@ -121,7 +121,7 @@ monaco.languages.setLanguageConfiguration("toml", {
 });
 
 // Docstring auto-close and dedent after block-ending statements, on top of Monaco's built-in config.
-registerPythonLanguageConfiguration();
+void registerPythonLanguageConfiguration();
 
 // Astro language configuration (brackets, comments, auto-closing pairs).
 // shikiToMonaco handles tokenization; this provides editing behavior.

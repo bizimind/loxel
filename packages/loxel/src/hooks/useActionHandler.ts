@@ -13,6 +13,7 @@ import {
   toggleSidebarPanel,
   toggleWorktreeSidebar,
 } from "@/lib/focus-navigation";
+import { changeIndentation } from "@/lib/indentation-status";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { selectPythonInterpreter } from "@/lib/python-interpreter";
@@ -385,6 +386,11 @@ export function useActionHandler(): (actionId: ActionId) => void {
         ctx.wtState.requestRemoveWorktree(ctx.project.path, wt).catch(console.error);
         break;
       }
+
+      // -- Editor --
+      case "editor.changeIndentation":
+        void changeIndentation();
+        break;
 
       // -- Languages --
       case "python.selectInterpreter": {
