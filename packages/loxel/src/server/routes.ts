@@ -2,6 +2,7 @@ import { accessSync, chmodSync, constants, existsSync, mkdirSync, readdirSync } 
 import { realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   assertCanTransformToBare,
@@ -49,6 +50,7 @@ import { repoNameFromUrl } from "@/components/projects/wizard-detection";
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 import { getMediaType } from "@/lib/media-extensions";
 import { isWithin } from "@/lib/project-file-helpers";
+import { classifySchemaGlob } from "@/lib/schema-glob";
 import { isHttpUrl } from "@/url-utils";
 
 import { config } from "./config";
@@ -140,8 +142,10 @@ export interface RouteContext {
   shutdown: (exitCode?: number) => void;
   /** Resolve a schema URL or file path (with caching). */
   resolveSchema: (urlOrPath: string, baseDir?: string) => Promise<unknown>;
-  /** Update YAML LSP schema mappings on all active sessions. */
+  /** Update YAML LSP schema mappings (schema URL → globs) on all active sessions. */
   updateYamlSchemas: (schemaMap: Record<string, string[]>) => void;
+  /** Update TOML LSP schema mappings (schema URL → globs) on all active sessions. */
+  updateTomlSchemas: (schemaMap: Record<string, string[]>) => void;
   /** Format file content using the resolved formatter. */
   formatContent: (
     content: string,
@@ -2399,22 +2403,19 @@ function handleLogs(req: Request, _ctx: RouteContext): Response {
 // Schema resolution routes
 // ---------------------------------------------------------------------------
 
-/** Classify a glob as JSON-applicable, YAML-applicable, or both. */
-function classifyGlob(glob: string): { json: boolean; yaml: boolean } {
-  const extensions = new Set<string>();
-  const braceMatch = /\.\{([^}]+)\}$/.exec(glob);
-  if (braceMatch) {
-    for (const ext of braceMatch[1]!.split(",")) extensions.add(ext.trim());
-  } else {
-    const simpleMatch = /\.(\w+)$/.exec(glob);
-    if (simpleMatch) extensions.add(simpleMatch[1]!);
-  }
+/**
+ * The schema URL a language server fetches itself: HTTP(S) and other URLs as they are, an absolute
+ * local path as a `file://` URL. Other relative paths are passed on unchanged.
+ */
+function languageServerSchemaUrl(url: string): string {
+  return url.startsWith("/") ? pathToFileURL(url).href : url;
+}
 
-  const isJson = extensions.has("json") || extensions.has("jsonc");
-  const isYaml = extensions.has("yml") || extensions.has("yaml");
-  // If neither matched (e.g. **/*), apply to both
-  if (!isJson && !isYaml) return { json: true, yaml: true };
-  return { json: isJson, yaml: isYaml };
+/** Add `glob` to the globs mapped to `url`. */
+function addSchemaGlob(map: Record<string, string[]>, url: string, glob: string): void {
+  const existing = map[url];
+  if (existing) existing.push(glob);
+  else map[url] = [glob];
 }
 
 // GET /api/schemas/resolve?url=<urlOrPath>&baseDir=<dir>
@@ -2429,41 +2430,27 @@ async function handleSchemaResolve(req: Request, ctx: RouteContext): Promise<Res
   return json(schema);
 }
 
-// POST /api/schemas/sync — resolve configured schemas, update YAML LSP
+// POST /api/schemas/sync — resolve configured schemas, update the YAML and TOML language servers
 async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
   const schemas = body.schemas;
   if (!Array.isArray(schemas)) return error("schemas must be an array");
 
-  const yamlMap: Record<string, string[]> = {};
-
-  // Collect JSON schemas to resolve and build YAML map in a single pass
+  // Monaco's JSON worker gets resolved schemas; the language servers get URLs and fetch them
+  // (and the `$ref`s inside them, often relative to the schema's URL) themselves.
   const jsonToResolve: { glob: string; url: string }[] = [];
+  const yamlMap: Record<string, string[]> = {};
+  const tomlMap: Record<string, string[]> = {};
 
   for (const entry of schemas) {
     if (typeof entry !== "object" || entry === null) continue;
     const { glob, url } = entry as { glob?: string; url?: string };
     if (typeof glob !== "string" || typeof url !== "string") continue;
 
-    const classification = classifyGlob(glob);
-
-    if (classification.json) {
-      jsonToResolve.push({ glob, url });
-    }
-
-    if (classification.yaml) {
-      // Convert local file paths to file:// URLs for yaml-language-server
-      let yamlSchemaUrl = url;
-      if (!url.startsWith("http://") && !url.startsWith("https://")) {
-        yamlSchemaUrl = url.startsWith("/") ? `file://${url}` : url;
-      }
-      const existing = yamlMap[yamlSchemaUrl];
-      if (existing) {
-        existing.push(glob);
-      } else {
-        yamlMap[yamlSchemaUrl] = [glob];
-      }
-    }
+    const languages = classifySchemaGlob(glob);
+    if (languages.json) jsonToResolve.push({ glob, url });
+    if (languages.yaml) addSchemaGlob(yamlMap, languageServerSchemaUrl(url), glob);
+    if (languages.toml) addSchemaGlob(tomlMap, languageServerSchemaUrl(url), glob);
   }
 
   // Resolve JSON schemas in parallel
@@ -2475,7 +2462,8 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
   );
 
   ctx.updateYamlSchemas(yamlMap);
-  return json({ json: jsonResults, yaml: { synced: true } });
+  ctx.updateTomlSchemas(tomlMap);
+  return json({ json: jsonResults, yaml: { synced: true }, toml: { synced: true } });
 }
 
 // ---------------------------------------------------------------------------

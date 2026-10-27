@@ -21,6 +21,8 @@ extraResources:
     to: terraform-ls
   - from: build/ruff
     to: ruff
+  - from: build/tombi
+    to: tombi
   - from: build/basedpyright-langserver
     to: basedpyright-langserver
   - from: build/astro-ls

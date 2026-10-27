@@ -75,6 +75,7 @@ import { TerminalManager } from "./terminal-manager";
 import type { TerminalSink } from "./terminal-session";
 import { isNotificationSequenceEnabled } from "./terminal-settings";
 import { TerraformLspManager } from "./terraform-lsp-manager";
+import { TomlLspManager } from "./toml-lsp-manager";
 import { TsLspManager } from "./ts-lsp-manager";
 import { WorktreeStatusTracker } from "./worktree-status-tracker";
 import { INTERNAL_WORKTREE_PREFIX } from "./worktree-utils";
@@ -796,6 +797,7 @@ onPythonOverrideChange(refreshPythonEnv);
 const ruffLspManager = new RuffLspManager();
 const astroLspManager = new AstroLspManager();
 const xmlLspManager = new XmlLspManager();
+const tomlLspManager = new TomlLspManager({});
 /** Language servers rooted at a worktree, which hear about its file changes. */
 const worktreeLspManagers = [
   tsLspManager,
@@ -805,6 +807,7 @@ const worktreeLspManagers = [
   ruffLspManager,
   astroLspManager,
   xmlLspManager,
+  tomlLspManager,
 ];
 
 function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
@@ -1170,6 +1173,7 @@ const routeContext: RouteContext = {
   shutdown,
   resolveSchema: (url, baseDir) => schemaService.resolve(url, baseDir),
   updateYamlSchemas: (schemaMap) => yamlLspManager.updateSchemas(schemaMap),
+  updateTomlSchemas: (schemaMap) => tomlLspManager.updateSchemas(schemaMap),
   formatContent: (content, filePath, wtPath, settings) =>
     formatService.format(content, filePath, wtPath, settings),
   getDetectedFormatters: (wtPath) => formatService.getDetectedFormatters(wtPath),
@@ -1212,6 +1216,7 @@ const server = Bun.serve<WsData>({
         "ruff-lsp",
         "astro-lsp",
         "xml-lsp",
+        "toml-lsp",
       ];
       for (const lspType of worktreeLspTypes) {
         if (url.pathname !== `/ws/${lspType}`) continue;
@@ -1283,6 +1288,10 @@ const server = Bun.serve<WsData>({
         xmlLspManager.createSession(ws, ws.data.wtPath);
         return;
       }
+      if (ws.data?.type === "toml-lsp") {
+        tomlLspManager.createSession(ws, ws.data.wtPath);
+        return;
+      }
       if (shuttingDown) {
         ws.close(1001, "Server shutting down");
         return;
@@ -1328,6 +1337,10 @@ const server = Bun.serve<WsData>({
       }
       if (ws.data?.type === "xml-lsp") {
         xmlLspManager.destroySession(ws);
+        return;
+      }
+      if (ws.data?.type === "toml-lsp") {
+        tomlLspManager.destroySession(ws);
         return;
       }
       unsubscribeAllWorktrees(ws);
@@ -1394,6 +1407,10 @@ const server = Bun.serve<WsData>({
       }
       if (ws.data?.type === "xml-lsp") {
         if (typeof message === "string") xmlLspManager.handleMessage(ws, message);
+        return;
+      }
+      if (ws.data?.type === "toml-lsp") {
+        if (typeof message === "string") tomlLspManager.handleMessage(ws, message);
         return;
       }
       if (typeof message === "string") {
@@ -1464,6 +1481,7 @@ function shutdown(exitCode = 0) {
   ruffLspManager.destroy();
   astroLspManager.destroy();
   xmlLspManager.destroy();
+  tomlLspManager.destroy();
   perfMonitor.dispose();
   stress.dispose();
   logger.shutdown();

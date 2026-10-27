@@ -14,6 +14,7 @@ Quick reference for per-LSP quirks. Consult when the new integration needs behav
 | Python (ruff)         | downloaded    | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
 | Astro                 | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
 | XML (LemMinX)         | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | none                          |
+| TOML (Tombi)          | downloaded    | worktree | lazy       | disabled        | no             | `lsp`           | schema map (post-init)        |
 
 ## TypeScript — Do Not Use as Template
 
@@ -57,3 +58,7 @@ Simplest worktree-scoped integration. Clean Bun.build (no plugins), standard cli
 ## XML (LemMinX)
 
 Downloaded GraalVM native binary (Java compiled to native — no JRE at runtime). Download script hashes the zip before extraction and restricts unzip to the expected filename. Binary lives in `build/lemminx/lemminx` (subdirectory) because the zip contains a platform-suffixed name (`lemminx-osx-aarch_64`) that gets renamed. Uses `resolveBundledBinary("lemminx", devPath)` with explicit `devPath` since the binary isn't in `node_modules/.bin/`. XML is a Monaco built-in language — no registration or language configuration needed.
+
+## TOML (Tombi) — Schemas Pushed as Editor Configuration
+
+Downloaded Rust binary (tarball, or zip on Windows; static musl builds on Linux), like ruff. Spawned as `tombi lsp`. Gets the Settings > Schemas map like YAML, but per worktree: `updateSchemas()` pushes a `workspace/didChangeConfiguration` `tombi` section (globs converted by `toTombiPatterns`, catalogs and strict mode off) to every initialized session, then an empty `tombi/associateSchema` so Tombi drops its cached diagnostics and asks the client to pull again. Suppresses formatting (format on save owns it), disables semantic tokens (TextMate highlights TOML) and forwards watched files. Tombi asks for `workspace/workspaceFolders`, which the base class answers for every worktree-scoped server. See LANGUAGE_SERVERS.md "TOML (Tombi)".

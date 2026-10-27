@@ -43,6 +43,7 @@ describe("POST /api/open terminals and placement", () => {
       shutdown: () => {},
       resolveSchema: async () => ({}),
       updateYamlSchemas: () => {},
+      updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       setTerminalCommand: (terminalId, command) => commands.push({ terminalId, command }),
