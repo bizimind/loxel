@@ -17,7 +17,8 @@ Forked from [`@vscode/monaco-lsp-client`](https://github.com/microsoft/monaco-ed
 - Workspace symbols: Monaco standalone has no workspace symbol provider, so `client.workspaceSymbols(query, token)` sends `workspace/symbol` and returns `WorkspaceSymbolItem`s (Monaco kinds and tags, 1-based range, or no range when the server defers it), and `client.resolveWorkspaceSymbol(item, token)` fills a missing range through `workspaceSymbol/resolve`. Cancelling the token sends `$/cancelRequest` for the request's id (`LspCancellableRequests`, which sends through the channel's request sender because `TypedChannel.request` does not expose ids) and rejects with a `Canceled` error
 - Document-filter glob patterns are matched with `picomatch`
 - `MonacoLspClient.dispose()` unregisters providers, closes synced documents, removes its diagnostics markers and drops the capability registry
-- Each client sets its diagnostics markers under an owner of its own, so several servers on one model (basedpyright and ruff for Python) do not overwrite each other's
+- Each client sets its diagnostics markers under an owner of its own, so several servers on one model (basedpyright and ruff for Python) do not overwrite each other's: the `markerOwner` option, or by default an owner unique to the client (`lsp-<n>`)
+- Document URIs are sent percent-encoded (`Uri.toString()`, as servers write them, where upstream skips encoding), and URIs from the server are matched to models after `Uri.parse(...).toString()`, since servers differ in what they escape
 - Markdown from the server (completion and signature-help documentation, hover contents, inlay-hint tooltips) is rendered untrusted, so command links and other trusted-only markdown are not executed
 - Document sync honors the negotiated `TextDocumentSyncKind`: `Full` sends the whole text, `None` sends no `didChange`, `Incremental` sends deltas
 - Completion lists propagate the server's `isIncomplete` flag so Monaco re-requests as the user types, and completion and signature-help requests are skipped, or their results dropped, once Monaco cancels them
@@ -37,9 +38,10 @@ const client = new MonacoLspClient(transport, {
   modelFilter: (model) => model.uri.scheme === "file",
   workspaceFileSystem: myFileSystem, // stat/readFile/writeFile/createFile/rename/delete
   onWorkspaceEditFailure: (reason) => showError(reason),
+  markerOwner: "ts-lsp", // diagnostics markers' owner; unique among live clients
 });
 ```
 
 Exports ([`src/index.ts`](src/index.ts)): `MonacoLspClient` (and its `WorkspaceSymbolItem` result type), the transports `WebSocketTransport`, `createTransportToWorker`, and `createTransportToIFrame` (re-exported from `@hediet/json-rpc-*`), the `capabilities` contract plus related types for registering extra client capabilities via `client.addStaticClientCapabilities()`, and the `WorkspaceFileSystem` interface the `workspaceFileSystem` option implements.
 
-The package has no build script (only `typecheck` and `test`); loxel consumes it as TypeScript source and bundles it. Tests run under `bun test` against the fake `monaco-editor` module in [`src/testing/fake-monaco.ts`](src/testing/fake-monaco.ts), which every test file must share. Call `client.dispose()` before disposing the transport so the `textDocument/didClose` notifications reach the server.
+The package has no build script (only `typecheck` and `test`); loxel consumes it as TypeScript source and bundles it. Tests run under `bun test` against the fake `monaco-editor` module in [`src/testing/fake-monaco.ts`](src/testing/fake-monaco.ts) (with Monaco's real `Uri` class), which every test file must share. Call `client.dispose()` before disposing the transport so the `textDocument/didClose` notifications reach the server.

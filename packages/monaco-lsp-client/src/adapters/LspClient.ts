@@ -60,6 +60,12 @@ export interface MonacoLspClientOptions {
   workspaceFileSystem?: WorkspaceFileSystem;
   /** Called with the reason when a workspace edit is refused or fails, to tell the user. */
   onWorkspaceEditFailure?: (reason: string) => void;
+  /**
+   * Owner of the diagnostic markers this client sets. Live clients must not share one, so servers
+   * syncing the same model keep their own markers; a disposed client removes its owner's markers.
+   * Defaults to an owner unique to the client (`lsp-<n>`).
+   */
+  markerOwner?: string;
 }
 
 export class MonacoLspClient {
@@ -113,7 +119,7 @@ export class MonacoLspClient {
       this._edits,
       defaultLanguageIds,
     );
-    this._features = this.createFeatures();
+    this._features = this.createFeatures(options?.markerOwner);
     this._workspaceSymbols = new LspWorkspaceSymbolFeature(
       this._connection,
       () => this._initPromise,
@@ -192,7 +198,7 @@ export class MonacoLspClient {
     this._capabilitiesRegistry.setServerCapabilities(result.capabilities);
   }
 
-  protected createFeatures(): IDisposable {
+  protected createFeatures(markerOwner?: string): IDisposable {
     const store = new DisposableStore();
 
     store.add(new LspCompletionFeature(this._connection));
@@ -216,7 +222,7 @@ export class MonacoLspClient {
     store.add(new LspSelectionRangeFeature(this._connection));
     store.add(new LspInlayHintsFeature(this._connection));
     store.add(new LspSemanticTokensFeature(this._connection));
-    store.add(new LspDiagnosticsFeature(this._connection));
+    store.add(new LspDiagnosticsFeature(this._connection, markerOwner));
     store.add(new LspLinkedEditingRangeFeature(this._connection));
     store.add(new LspInlineCompletionFeature(this._connection));
     store.add(new LspApplyEditFeature(this._connection));

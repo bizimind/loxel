@@ -67,6 +67,8 @@ describe("rankWorkspaceSymbols", () => {
       [item("parse", "file:///usr/lib/python3/json.py"), "/usr/lib/python3/json.py"],
       [item("parse", "file:///x"), `${WT}/node_modules/lib/index.d.ts`],
       [item("parse", "file:///x"), `${WT}/.venv/lib/python3.12/site-packages/p.py`],
+      [item("parse", "file:///x"), `${WT}/.venv/lib/python3.12/json/parse.py`],
+      [item("parse", "file:///x"), `${WT}/.worktrees/feat/src/parse.ts`],
       [item("parse", "file:///x"), `${WT}/src/parse.ts`],
       [item("parse", "file:///x"), `${WT}-other/src/parse.ts`],
     ]);
@@ -76,6 +78,8 @@ describe("rankWorkspaceSymbols", () => {
         `parse /usr/lib/python3/json.py:1`,
         `parse ${WT}/node_modules/lib/index.d.ts:1`,
         `parse ${WT}/.venv/lib/python3.12/site-packages/p.py:1`,
+        `parse ${WT}/.venv/lib/python3.12/json/parse.py:1`,
+        `parse ${WT}/.worktrees/feat/src/parse.ts:1`,
         `parse ${WT}-other/src/parse.ts:1`,
       ].sort(),
     );
@@ -213,12 +217,14 @@ describe("searchWorkspaceSymbols", () => {
       item("a", `file://${WT}/a.ts`),
       item("b", "untitled:Untitled-1"),
       item("c", "not a uri"),
-      item("d", `file://${WT}/bad%E0%A4%A.ts`),
+      item("d", `loxel://abc123${WT}/d.ts#old`),
+      item("e", `loxel://HEAD${WT}/e%20f/%C3%BC.ts`),
     ]);
 
     const calls = await search([failing, ok], "");
 
-    expect(calls.at(-1)?.names).toEqual(["a"]);
+    expect(calls.at(-1)?.names).toEqual(["a", "e"]);
+    expect(calls.at(-1)?.results.map((r) => r.filePath)).toEqual([`${WT}/a.ts`, `${WT}/e f/ü.ts`]);
   });
 
   test("reports an empty, finished search when no server is connected", async () => {

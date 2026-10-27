@@ -3,8 +3,10 @@ import * as monaco from "monaco-editor";
 
 import { frontendLog } from "./frontend-logger";
 import { fuzzyMatch } from "./fuzzy-match";
+import { editorFilePath } from "./live-editor-model";
+import { isInProtectedFolder } from "./lsp-workspace-files";
 import type { FileLocation } from "./open-file";
-import { isWithin } from "./project-file-helpers";
+import { relativeTo } from "./project-file-helpers";
 
 const log = frontendLog.child("search");
 
@@ -98,7 +100,7 @@ async function querySource(
 
 /**
  * Orders symbols from several servers for display. Each server filters by its own matcher (and
- * Pyright's is loose), so they are re-scored against the name here: exact match, then prefix,
+ * basedpyright's is loose), so they are re-scored against the name here: exact match, then prefix,
  * substring and subsequence; symbols only a server matched stay, last. Ties put the project's own
  * files before installed packages and the stdlib, then shorter names, then path and line.
  * The same symbol reported twice (two servers covering one file) is kept once.
@@ -185,24 +187,18 @@ export async function resolveWorkspaceSymbolLocation(
   return range ? { line: range.startLineNumber, column: range.startColumn } : undefined;
 }
 
-/** In the worktree and not in an installed package (`node_modules`, a venv's `site-packages`). */
+/** In the worktree and not in a dependency, environment, git or nested worktree folder. */
 function isProjectFile(filePath: string, wtPath: string): boolean {
-  if (!isWithin(filePath, wtPath)) return false;
-  const relative = filePath.slice(wtPath.length);
-  return !relative.includes("/node_modules/") && !relative.includes("/site-packages/");
+  const relative = relativeTo(filePath, wtPath);
+  return relative !== undefined && !isInProtectedFolder(relative);
 }
 
-/**
- * The file path behind a symbol's URI: `file://` for most servers, `loxel://HEAD/` for TypeScript
- * (see LANGUAGE_SERVERS.md). Other schemes cannot be opened in an editor tab.
- */
+/** The file path behind a symbol's URI, or null when it is not one an editor tab can open. */
 function symbolFilePath(uri: string): string | null {
   try {
-    const url = new URL(uri);
-    if (url.protocol !== "file:" && url.protocol !== "loxel:") return null;
-    return decodeURIComponent(url.pathname);
+    return editorFilePath(monaco.Uri.parse(uri, true));
   } catch {
-    // Not a URI, or a malformed percent escape.
+    // Not a URI.
     return null;
   }
 }

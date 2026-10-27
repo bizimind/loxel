@@ -139,11 +139,11 @@ afterEach(async () => {
   dir = undefined;
 });
 
-async function setup(): Promise<{ client: FakeClient; root: string }> {
+async function setup(wtName = "wt"): Promise<{ client: FakeClient; root: string }> {
   dir = await realpath(await mkdtemp(join(tmpdir(), "stdio-lsp-manager-")));
   const script = join(dir, "fake-server.mjs");
   await writeFile(script, FAKE_SERVER);
-  const root = join(dir, "wt");
+  const root = join(dir, wtName);
   manager = new FakeLspManager(script);
   const client = new FakeClient(manager);
   manager.start(client.ws, root);
@@ -151,6 +151,19 @@ async function setup(): Promise<{ client: FakeClient; root: string }> {
 }
 
 const WATCHED_FILES = "workspace/didChangeWatchedFiles";
+
+describe("StdioLspManager workspace root", () => {
+  test("sends the worktree as a percent-encoded file URI, whatever its name holds", async () => {
+    const { client, root } = await setup("my wt #1 50% ü");
+    client.send({ id: 1, method: "initialize", params: { capabilities: {}, rootUri: null } });
+    const init = await client.serverReceived((f) => f.method === "initialize");
+    const uri = pathToFileURL(root).href;
+    expect(uri).toEndWith("/my%20wt%20%231%2050%25%20%C3%BC");
+    expect(init.params?.rootUri).toBe(uri);
+    expect(init.params?.rootPath).toBe(root);
+    expect(init.params?.workspaceFolders).toEqual([{ uri, name: "my wt #1 50% ü" }]);
+  });
+});
 
 describe("StdioLspManager watched files", () => {
   test("advertises the client capability in initialize", async () => {

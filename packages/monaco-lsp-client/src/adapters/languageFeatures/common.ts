@@ -19,6 +19,7 @@ import {
   SymbolTag,
 } from "../../types";
 import { LspConnection } from "../LspConnection";
+import { toMonacoRange } from "../ranges";
 
 // ============================================================================
 // Code Action Kind
@@ -467,10 +468,7 @@ export function matchesDocumentSelector(
 export function toDiagnosticMarker(diagnostic: Diagnostic): monaco.editor.IMarkerData {
   const marker: monaco.editor.IMarkerData = {
     severity: toMonacoDiagnosticSeverity(diagnostic.severity),
-    startLineNumber: diagnostic.range.start.line + 1,
-    startColumn: diagnostic.range.start.character + 1,
-    endLineNumber: diagnostic.range.end.line + 1,
-    endColumn: diagnostic.range.end.character + 1,
+    ...toMonacoRange(diagnostic.range),
     message: diagnostic.message,
     source: diagnostic.source,
     code: typeof diagnostic.code === "string" ? diagnostic.code : diagnostic.code?.toString(),
@@ -485,10 +483,7 @@ export function toDiagnosticMarker(diagnostic: Diagnostic): monaco.editor.IMarke
   if (diagnostic.relatedInformation) {
     marker.relatedInformation = diagnostic.relatedInformation.map((info) => ({
       resource: monaco.Uri.parse(info.location.uri),
-      startLineNumber: info.location.range.start.line + 1,
-      startColumn: info.location.range.start.character + 1,
-      endLineNumber: info.location.range.end.line + 1,
-      endColumn: info.location.range.end.character + 1,
+      ...toMonacoRange(info.location.range),
       message: info.message,
     }));
   }

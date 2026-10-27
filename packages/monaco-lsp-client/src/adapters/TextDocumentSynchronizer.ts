@@ -11,9 +11,14 @@ import { api, capabilities, TextDocumentSyncKind } from "../types";
 import { Disposable } from "../utils";
 import type { ITextModelBridge } from "./ITextModelBridge";
 import type { ILspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
+import { toLspRange, toMonacoRange } from "./ranges";
 
 export class TextDocumentSynchronizer extends Disposable implements ITextModelBridge {
   private readonly _managedModels = new Map<monaco.editor.ITextModel, ManagedModel>();
+  /**
+   * Keyed by the model uri's `toString()`, Monaco's canonical percent-encoded form; uris from the
+   * server are parsed and re-encoded before the lookup, since servers encode differently.
+   */
   private readonly _managedModelsReverse = new Map</* uri */ string, monaco.editor.ITextModel>();
 
   private _started = false;
@@ -75,7 +80,7 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
 
     const mm = new ManagedModel(m, this._server, this._syncKind, () => this._removeManagedModel(m));
     this._managedModels.set(m, mm);
-    this._managedModelsReverse.set(m.uri.toString(true), m);
+    this._managedModelsReverse.set(m.uri.toString(), m);
     return mm;
   }
 
@@ -88,7 +93,7 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
     const mm = this._managedModels.get(m);
     if (!mm) return;
     this._managedModels.delete(m);
-    this._managedModelsReverse.delete(m.uri.toString(true));
+    this._managedModelsReverse.delete(m.uri.toString());
     mm.dispose();
   }
 
@@ -119,13 +124,7 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
     range: Range,
   ): { textModel: monaco.editor.ITextModel; range: monaco.Range } {
     const textModel = this._resolveModel(textDocument.uri);
-    const monacoRange = new monaco.Range(
-      range.start.line + 1,
-      range.start.character + 1,
-      range.end.line + 1,
-      range.end.character + 1,
-    );
-    return { textModel, range: monacoRange };
+    return { textModel, range: monaco.Range.lift(toMonacoRange(range)) };
   }
 
   /**
@@ -137,9 +136,9 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
    * diagnostics early-return instead of trying to operate on it.
    */
   private _resolveModel(uri: string): monaco.editor.ITextModel {
-    const managed = this._managedModelsReverse.get(uri);
-    if (managed) return managed;
     const monacoUri = monaco.Uri.parse(uri);
+    const managed = this._managedModelsReverse.get(monacoUri.toString());
+    if (managed) return managed;
     const global = monaco.editor.getModel(monacoUri);
     if (global) return global;
     return { uri: monacoUri, isDisposed: () => true } as unknown as monaco.editor.ITextModel;
@@ -150,16 +149,13 @@ export class TextDocumentSynchronizer extends Disposable implements ITextModelBr
     monacoPos: monaco.Position,
   ): { textDocument: TextDocumentIdentifier; position: Position } {
     return {
-      textDocument: { uri: textModel.uri.toString(true) },
+      textDocument: { uri: textModel.uri.toString() },
       position: { line: monacoPos.lineNumber - 1, character: monacoPos.column - 1 },
     };
   }
 
-  translateRange(textModel: monaco.editor.ITextModel, monacoRange: monaco.Range): Range {
-    return {
-      start: { line: monacoRange.startLineNumber - 1, character: monacoRange.startColumn - 1 },
-      end: { line: monacoRange.endLineNumber - 1, character: monacoRange.endColumn - 1 },
-    };
+  translateRange(_textModel: monaco.editor.ITextModel, monacoRange: monaco.Range): Range {
+    return toLspRange(monacoRange);
   }
 }
 
@@ -174,7 +170,8 @@ class ManagedModel extends Disposable {
 
     this._register(_textModel.onWillDispose(onWillDisposeModel));
 
-    const uri = _textModel.uri.toString(true);
+    // Percent-encoded, as servers write uris, so their answers match it.
+    const uri = _textModel.uri.toString();
 
     this._api.textDocumentDidOpen({
       textDocument: {
@@ -213,11 +210,4 @@ function toLspTextDocumentContentChangeEvent(
   change: monaco.editor.IModelContentChange,
 ): TextDocumentContentChangeEvent {
   return { range: toLspRange(change.range), rangeLength: change.rangeLength, text: change.text };
-}
-
-function toLspRange(range: monaco.IRange): Range {
-  return {
-    start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
-    end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
-  };
 }

@@ -1,13 +1,9 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
 
-import type { ServerWebSocket, Subprocess } from "bun";
-
 import {
-  type SpawnOptions,
-  StdioLspManager,
+  WorktreeLspManager,
   type SuppressibleFeature,
-  type WtLspContext,
   type WtLspSession,
 } from "./stdio-lsp-manager";
 
@@ -19,7 +15,7 @@ const TOMBI = process.platform === "win32" ? "tombi.exe" : "tombi";
  * TOML file not governed by a Tombi config file of its own (`tombi.toml`, `[tool.tombi]`, the
  * user's `~/.config/tombi/config.toml`), so those projects keep the behavior of the `tombi` CLI.
  */
-export class TomlLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
+export class TomlLspManager extends WorktreeLspManager {
   // TOML is highlighted by its TextMate grammar; Tombi's tokens would only recolor it.
   protected override readonly disableSemanticTokens = true;
   // Format on save owns formatting, and Tombi's formatter reorders keys by the schema.
@@ -35,14 +31,6 @@ export class TomlLspManager extends StdioLspManager<WtLspSession, WtLspContext> 
 
   constructor(private schemaMap: Record<string, string[]>) {
     super("toml-lsp");
-  }
-
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
-  }
-
-  destroySession(ws: ServerWebSocket<unknown>): void {
-    this.detach(ws);
   }
 
   /** Replace the schema mappings (schema URL → Loxel globs) and push them to every session. */
@@ -62,32 +50,6 @@ export class TomlLspManager extends StdioLspManager<WtLspSession, WtLspContext> 
 
   protected override spawnArgs(): readonly string[] {
     return ["lsp"];
-  }
-
-  protected override spawnOptions(context: WtLspContext): SpawnOptions {
-    return { cwd: context.wtPath };
-  }
-
-  protected buildSession(
-    ws: ServerWebSocket<unknown>,
-    proc: Subprocess,
-    context: WtLspContext,
-  ): WtLspSession {
-    return {
-      ws,
-      proc,
-      wtPath: context.wtPath,
-      stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
-    };
-  }
-
-  protected override getSessionKey(context: WtLspContext): string {
-    return context.wtPath;
-  }
-
-  protected override getSessionWorkspace(session: WtLspSession): string | null {
-    return session.wtPath;
   }
 
   protected override onClientInitialized(session: WtLspSession): void {

@@ -1,15 +1,8 @@
-import type { ServerWebSocket, Subprocess } from "bun";
-
+import { isRecord } from "@/lib/is-record";
 import { TS_SOURCE_EXTENSIONS } from "@/lib/typescript-files";
 
-import {
-  type BaseLspSession,
-  type LspPosition,
-  type SpawnOptions,
-  StdioLspManager,
-  buildLineOffsets,
-  offsetAt,
-} from "./stdio-lsp-manager";
+import { fileUri } from "./lsp-file-uri";
+import { WorktreeLspManager, type WtLspSession, workspaceFolders } from "./stdio-lsp-manager";
 import { resolveTypeScriptBinary } from "./typescript-path";
 
 const TS_EXTENSIONS = new RegExp(
@@ -45,104 +38,27 @@ export function toClientUris(body: string): string {
   );
 }
 
-interface PendingRequest {
-  method: string;
-  /** loxel:// textDocument URI (if scoped to a document). */
-  uri?: string;
-}
-
-interface DocumentState {
-  content: string;
-  /** Monotonically incremented on every didChange for this URI. */
-  version: number;
-}
-
-interface TsLspSession extends BaseLspSession {
-  wtPath: string;
-  pendingRequests: Map<number | string, PendingRequest>;
-  /**
-   * Loxel URI → full text + version, kept in sync from client didOpen/didChange.
-   * Separate from the base's `documentContents` because TS tracks a document
-   * version in addition to the text.
-   */
-  tsDocuments: Map<string, DocumentState>;
-}
-
-interface TsLspContext {
-  wtPath: string;
-}
-
-interface LspRange {
-  start: LspPosition;
-  end: LspPosition;
-}
-
-interface LspContentChange {
-  range?: LspRange;
-  text: string;
-}
-
 /**
- * Manages `tsc --lsp -stdio` child processes, one per WebSocket connection.
- * Each `/ws/ts-lsp?wt=<path>` connection gets its own TypeScript rooted at the
- * worktree path. Translates loxel://HEAD/... ↔ file:///... URIs and augments
- * semantic token responses with custom JSX tokens.
+ * Manages `tsc --lsp -stdio` child processes, one per worktree. Translates loxel://HEAD/... ↔
+ * file:///... URIs, answers TypeScript's `workspace/configuration` with Loxel's preferences, and
+ * gives `.tsx`/`.jsx` documents the language ids TypeScript expects.
  */
-export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
+export class TsLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
 
   constructor() {
     super("ts-lsp");
   }
 
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
-  }
-
-  destroySession(ws: ServerWebSocket<unknown>): void {
-    this.detach(ws);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Hooks
-
   protected resolveBinary(): string | null {
     return resolveTypeScriptBinary();
-  }
-
-  protected override getSessionKey(context: TsLspContext): string {
-    return context.wtPath;
-  }
-
-  protected override getSessionWorkspace(session: TsLspSession): string {
-    return session.wtPath;
   }
 
   protected override spawnArgs(): readonly string[] {
     return ["--lsp", "-stdio"];
   }
 
-  protected override spawnOptions(context: TsLspContext): SpawnOptions {
-    return { cwd: context.wtPath };
-  }
-
-  protected override buildSession(
-    ws: ServerWebSocket<unknown>,
-    proc: Subprocess,
-    context: TsLspContext,
-  ): TsLspSession {
-    return {
-      ws,
-      proc,
-      wtPath: context.wtPath,
-      stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
-      pendingRequests: new Map(),
-      tsDocuments: new Map(),
-    };
-  }
-
-  protected override handleClientData(session: TsLspSession, data: string): void {
+  protected override handleClientData(session: WtLspSession, data: string): void {
     let outgoing = data;
     try {
       const parsed: unknown = JSON.parse(data);
@@ -152,28 +68,10 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
         if (msg.method !== undefined) {
           if (this.shouldDropForNonTsUri(msg.method, msg.params)) return;
 
-          const mutated = this.trackDocumentLifecycle(session, msg.method, msg.params);
-
-          if (msg.id !== undefined) {
-            const pending: PendingRequest = { method: msg.method };
-            const params = msg.params;
-            if (
-              typeof params === "object" &&
-              params !== null &&
-              "textDocument" in params &&
-              typeof (params as { textDocument: unknown }).textDocument === "object" &&
-              (params as { textDocument: { uri?: unknown } }).textDocument !== null
-            ) {
-              const uri = (params as { textDocument: { uri?: unknown } }).textDocument.uri;
-              if (typeof uri === "string") pending.uri = uri;
-            }
-            session.pendingRequests.set(msg.id, pending);
-          }
-
           // Inject rootUri/workspaceFolders so TypeScript knows which project to load.
           if (msg.method === "initialize") {
             outgoing = this.augmentInitializeRequest(session, parsed as Record<string, unknown>);
-          } else if (mutated) {
+          } else if (msg.method === "textDocument/didOpen" && setReactLanguageId(msg.params)) {
             outgoing = JSON.stringify(parsed);
           }
 
@@ -191,21 +89,16 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
     this.writeToStdin(session, toServerUris(outgoing));
   }
 
-  protected override handleServerFrame(session: TsLspSession, body: string): void {
+  protected override handleServerFrame(session: WtLspSession, body: string): void {
     // Server→client requests we fulfill locally (TypeScript blocks on
     // workspace/configuration until we answer).
     if (this.handleServerRequest(session, body)) return;
-
-    const intercepted = this.interceptServerMessage(session, body);
-    // An empty string means the interceptor consumed the message.
-    if (intercepted === "") return;
-
-    session.ws.send(toClientUris(intercepted));
+    session.ws.send(toClientUris(body));
   }
 
   // ---------------------------------------------------------------------------
 
-  private sendConfigUpdate(session: TsLspSession): void {
+  private sendConfigUpdate(session: WtLspSession): void {
     const msg = JSON.stringify({
       jsonrpc: "2.0",
       method: "workspace/didChangeConfiguration",
@@ -237,13 +130,11 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
     this.writeToStdin(session, msg);
   }
 
-  private augmentInitializeRequest(session: TsLspSession, msg: Record<string, unknown>): string {
-    const rootUri = `file://${session.wtPath}`;
-    const workspaceName = session.wtPath.split("/").pop() || session.wtPath;
+  private augmentInitializeRequest(session: WtLspSession, msg: Record<string, unknown>): string {
     const params = (msg.params as Record<string, unknown> | undefined) ?? {};
-    params.rootUri = rootUri;
+    params.rootUri = fileUri(session.wtPath);
     params.rootPath = session.wtPath;
-    params.workspaceFolders = [{ uri: rootUri, name: workspaceName }];
+    params.workspaceFolders = workspaceFolders(session.wtPath);
     params.initializationOptions = {
       preferences: {
         includeCompletionsForModuleExports: true,
@@ -256,55 +147,6 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
     };
     msg.params = params;
     return JSON.stringify(msg);
-  }
-
-  /** Returns true if the params object was mutated and must be re-serialized. */
-  private trackDocumentLifecycle(session: TsLspSession, method: string, params: unknown): boolean {
-    if (typeof params !== "object" || params === null) return false;
-    let mutated = false;
-
-    if (method === "textDocument/didOpen") {
-      const p = params as { textDocument?: { uri?: string; text?: string; languageId?: string } };
-      if (p.textDocument?.uri && typeof p.textDocument.text === "string") {
-        session.tsDocuments.set(p.textDocument.uri, { content: p.textDocument.text, version: 0 });
-      }
-      // Monaco reports `tsx`/`jsx` for .tsx/.jsx files, but LSP
-      // needs `typescriptreact`/`javascriptreact` for TypeScript to enable JSX mode.
-      if (p.textDocument?.uri) {
-        const uri = p.textDocument.uri;
-        const current = p.textDocument.languageId;
-        if (/\.tsx$/i.test(uri) && current !== "typescriptreact") {
-          p.textDocument.languageId = "typescriptreact";
-          mutated = true;
-        } else if (/\.jsx$/i.test(uri) && current !== "javascriptreact") {
-          p.textDocument.languageId = "javascriptreact";
-          mutated = true;
-        }
-      }
-    } else if (method === "textDocument/didChange") {
-      const p = params as { textDocument?: { uri?: string }; contentChanges?: LspContentChange[] };
-      const uri = p.textDocument?.uri;
-      const changes = p.contentChanges;
-      if (!uri || !Array.isArray(changes)) return mutated;
-      const state = session.tsDocuments.get(uri);
-      if (state === undefined) return mutated;
-      let content = state.content;
-      for (const change of changes) {
-        if (!change.range) {
-          content = change.text;
-          continue;
-        }
-        const offsets = buildLineOffsets(content);
-        const start = offsetAt(offsets, content.length, change.range.start);
-        const end = offsetAt(offsets, content.length, change.range.end);
-        content = content.slice(0, start) + change.text + content.slice(end);
-      }
-      session.tsDocuments.set(uri, { content, version: state.version + 1 });
-    } else if (method === "textDocument/didClose") {
-      const p = params as { textDocument?: { uri?: string } };
-      if (p.textDocument?.uri) session.tsDocuments.delete(p.textDocument.uri);
-    }
-    return mutated;
   }
 
   /**
@@ -328,7 +170,7 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
    * immediately after `initialized` and blocks until it's answered — so we
    * reply inline with our canned TS/JS preferences.
    */
-  private handleServerRequest(session: TsLspSession, body: string): boolean {
+  private handleServerRequest(session: WtLspSession, body: string): boolean {
     let msg: unknown;
     try {
       msg = JSON.parse(body);
@@ -380,23 +222,23 @@ export class TsLspManager extends StdioLspManager<TsLspSession, TsLspContext> {
 
     return false;
   }
+}
 
-  private interceptServerMessage(session: TsLspSession, body: string): string {
-    let msg: unknown;
-    try {
-      msg = JSON.parse(body);
-    } catch {
-      return body;
-    }
-    if (typeof msg !== "object" || msg === null || !("id" in msg) || !("result" in msg)) {
-      return body;
-    }
+const REACT_LANGUAGE_IDS: Record<string, string> = {
+  tsx: "typescriptreact",
+  jsx: "javascriptreact",
+};
 
-    const response = msg as { id: number | string; result: unknown };
-    const pending = session.pendingRequests.get(response.id);
-    if (!pending) return body;
-    session.pendingRequests.delete(response.id);
-
-    return body;
-  }
+/**
+ * Monaco reports `tsx`/`jsx` for .tsx/.jsx files, but TypeScript needs `typescriptreact` /
+ * `javascriptreact` in a `textDocument/didOpen` to enable JSX mode. True when it changed `params`.
+ */
+export function setReactLanguageId(params: unknown): boolean {
+  const textDocument = isRecord(params) ? params.textDocument : undefined;
+  if (!isRecord(textDocument) || typeof textDocument.uri !== "string") return false;
+  const extension = /\.([jt]sx)$/i.exec(textDocument.uri)?.[1]?.toLowerCase();
+  const languageId = extension ? REACT_LANGUAGE_IDS[extension] : undefined;
+  if (!languageId || textDocument.languageId === languageId) return false;
+  textDocument.languageId = languageId;
+  return true;
 }

@@ -2,10 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { ServerWebSocket } from "bun";
 
-import { TsLspManager, toClientUris, toServerUris } from "./ts-lsp-manager";
+import { setReactLanguageId, TsLspManager, toClientUris, toServerUris } from "./ts-lsp-manager";
 import { resolveTypeScriptBinary } from "./typescript-path";
 
 describe("toServerUris", () => {
@@ -66,6 +67,24 @@ describe("toClientUris", () => {
   });
 });
 
+describe("setReactLanguageId", () => {
+  test("gives .tsx and .jsx documents TypeScript's JSX language ids", () => {
+    const tsx = { textDocument: { uri: "loxel://HEAD/a/B.TSX", languageId: "tsx" } };
+    expect(setReactLanguageId(tsx)).toBe(true);
+    expect(tsx.textDocument.languageId).toBe("typescriptreact");
+    const jsx = { textDocument: { uri: "loxel://HEAD/a/b.jsx", languageId: "jsx" } };
+    expect(setReactLanguageId(jsx)).toBe(true);
+    expect(jsx.textDocument.languageId).toBe("javascriptreact");
+  });
+
+  test("leaves other documents and correct ids alone", () => {
+    expect(setReactLanguageId({ textDocument: { uri: "loxel://HEAD/a.ts" } })).toBe(false);
+    const ok = { textDocument: { uri: "loxel://HEAD/a.tsx", languageId: "typescriptreact" } };
+    expect(setReactLanguageId(ok)).toBe(false);
+    expect(setReactLanguageId(null)).toBe(false);
+  });
+});
+
 // Drives the real `tsc --lsp` through the manager the way the Monaco client does.
 
 const TEST_TIMEOUT_MS = 60_000;
@@ -113,7 +132,8 @@ class FakeClient {
   }
 
   open(filePath: string, text: string): string {
-    const uri = `loxel://HEAD${filePath}`;
+    // Percent-encoded, as Monaco's `Uri.toString()` writes it.
+    const uri = `loxel://HEAD${pathToFileURL(filePath).pathname}`;
     this.send({
       method: "textDocument/didOpen",
       params: { textDocument: { uri, languageId: "typescript", version: 1, text } },
@@ -161,7 +181,8 @@ describe.skipIf(resolveTypeScriptBinary() === null)("TsLspManager with tsc --lsp
     "resolves a module created on disk once the file watcher reports it",
     async () => {
       // Upper case in the path: tsc registers its watchers lowercased on case-insensitive disks.
-      root = await realpath(await mkdtemp(join(tmpdir(), "TsLsp-")));
+      // `#`, `%`, a space and a non-ASCII letter: the root and documents must reach tsc encoded.
+      root = await realpath(await mkdtemp(join(tmpdir(), "TsLsp #1 50% ü-")));
       await mkdir(join(root, "src"));
       await writeFile(join(root, "tsconfig.json"), JSON.stringify({ include: ["src"] }));
       const source = 'import { y } from "./b";\nexport const x: number = y;\n';

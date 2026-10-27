@@ -20,6 +20,7 @@ import {
 } from "../types";
 import { Disposable } from "../utils";
 import type { ILspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
+import { toMonacoRange } from "./ranges";
 
 export type WorkspaceFileType = "file" | "directory";
 
@@ -357,7 +358,7 @@ class EditPlanner {
         model,
         versionId: first ? model.getVersionId() : undefined,
         operations: edits.map((e) => ({
-          range: toMonacoRange(e.range.start, e.range.end),
+          range: toMonacoRange(e.range),
           text: e.newText,
           forceMoveMarkers: true,
         })),
@@ -554,15 +555,6 @@ function describe(uri: monaco.Uri): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function toMonacoRange(start: Position, end: Position): monaco.IRange {
-  return {
-    startLineNumber: start.line + 1,
-    startColumn: start.character + 1,
-    endLineNumber: end.line + 1,
-    endColumn: end.character + 1,
-  };
 }
 
 function comparePositions(a: Position, b: Position): number {
