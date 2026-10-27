@@ -53,6 +53,38 @@ describe("resolveIndentation", () => {
     });
   });
 
+  test.each([
+    ["/repo/Program.cs", "csharp"],
+    ["/repo/Main.kt", "kotlin"],
+    ["/repo/index.php", "php"],
+    ["/repo/justfile", "just"],
+  ])("indents %s with 4 spaces", (path, language) => {
+    expect(indentation(settings(), path, { language })).toEqual({
+      tabSize: 4,
+      insertSpaces: true,
+      indentSize: 4,
+    });
+  });
+
+  test("indents Makefiles with tabs even when the content is mostly indented with spaces", () => {
+    const resolution = resolveIndentation(settings(), "/repo/Makefile", {
+      language: "make",
+      detected: { insertSpaces: true, tabSize: 4, indentSize: 4 },
+    });
+    expect(resolution.indentation).toEqual({ tabSize: 4, insertSpaces: false, indentSize: 4 });
+    expect(resolution.sources.insertSpaces).toBe("language");
+
+    // A project or user that sets another style explicitly still wins.
+    expect(
+      indentation(settings(), "/repo/Makefile", {
+        language: "make",
+        editorConfig: { indentStyle: "space" },
+      }).insertSpaces,
+    ).toBe(true);
+    const editor = settings([{ id: "1", extension: "mk", tabSize: 2, insertSpaces: true }]);
+    expect(indentation(editor, "/repo/rules.mk", { language: "make" }).insertSpaces).toBe(true);
+  });
+
   test("keys built-in defaults by resolved language, not extension", () => {
     // An extensionless script resolved as Python by its shebang.
     expect(indentation(settings(), "/repo/bin/manage", { language: "python" }).tabSize).toBe(4);
