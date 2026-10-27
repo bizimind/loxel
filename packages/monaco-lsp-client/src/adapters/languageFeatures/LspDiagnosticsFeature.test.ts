@@ -13,7 +13,7 @@ const { LspDiagnosticsFeature } = await import("./LspDiagnosticsFeature");
 const URI = "file:///wt/app.py";
 
 /** A diagnostics feature on a fake connection, plus a way to deliver `publishDiagnostics`. */
-function setup(model: monaco.editor.ITextModel) {
+function setup(model: monaco.editor.ITextModel, markerOwner?: string) {
   let publish: ((params: PublishDiagnosticsParams) => void) | undefined;
   const noop = { dispose: () => {} };
   const connection = {
@@ -30,7 +30,7 @@ function setup(model: monaco.editor.ITextModel) {
     },
     bridge: { translateBack: () => ({ textModel: model }) },
   } as unknown as LspConnection;
-  const feature = new LspDiagnosticsFeature(connection);
+  const feature = new LspDiagnosticsFeature(connection, markerOwner);
   const send = (message: string) =>
     publish?.({
       uri: URI,
@@ -65,5 +65,18 @@ describe("LspDiagnosticsFeature", () => {
     // A disposed client's markers go with it; the other server's stay.
     ruff.feature.dispose();
     expect(messagesByOwner()).toEqual([["another type error"]]);
+  });
+
+  test("a given owner is used, and the next client of a route takes it over", () => {
+    const model = { uri: { toString: () => URI }, isDisposed: () => false };
+    const first = setup(model as unknown as monaco.editor.ITextModel, "python-lsp");
+    first.send("old worktree");
+    expect([...fakeMonaco.markers.keys()]).toEqual(["python-lsp"]);
+
+    first.feature.dispose();
+    const next = setup(model as unknown as monaco.editor.ITextModel, "python-lsp");
+    next.send("new worktree");
+    expect([...fakeMonaco.markers.keys()]).toEqual(["python-lsp"]);
+    expect(messagesByOwner()).toEqual([["new worktree"]]);
   });
 });

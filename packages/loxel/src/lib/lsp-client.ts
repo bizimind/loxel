@@ -58,6 +58,8 @@ export function createWorktreeLspClient(wsPath: string, languageId?: string | re
         currentClient = new MonacoLspClient(transport, {
           languageId,
           modelFilter: isLiveEditorModel,
+          // One client per route at a time: each takes over the markers' owner of the one before.
+          markerOwner: wsPath.replace(/^ws\//, ""),
           workspaceFileSystem: createLspWorkspaceFiles(wtPath),
           onWorkspaceEditFailure: (reason) => showToast(`Edit not applied: ${reason}`),
         });

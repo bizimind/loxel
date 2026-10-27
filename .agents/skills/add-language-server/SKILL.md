@@ -40,19 +40,11 @@ Add a `build:<name>` or `download:<name>` script in package.json and chain it in
 
 **File:** `packages/loxel/src/server/<name>-lsp-manager.ts`
 
-Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped integration. Extend `StdioLspManager<WtLspSession, WtLspContext>` (from `stdio-lsp-manager.ts`) and call `super("<name>-lsp")` (the name is a `LogCategory`, see Layer 3).
+Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped integration. Extend `WorktreeLspManager` (from `stdio-lsp-manager.ts`) and call `super("<name>-lsp")` (the name is a `LogCategory`, see Layer 3). It supplies the worktree plumbing: `createSession(ws, wtPath)` / `destroySession(ws)` for `server.ts`, the session, one session per worktree, `cwd` and the worktree as `rootUri`/`workspaceFolders`. Extend `StdioLspManager` directly only when the session needs more state (Python, ruff), and implement that plumbing the way `WorktreeLspManager` does.
 
 ### Required
 
-- **`createSession(ws, wtPath)` / `destroySession(ws)`** — Public entry points called from `server.ts`; delegate to `startSession(ws, { wtPath })` / `detach(ws)`.
 - **`resolveBinary(context)`** — Abstract. Usually `return this.resolveBundledBinary("<binary>")`, which checks execPath sibling → `node_modules/.bin` → PATH. Pass a `devPath` (absolute path under `build/`) for downloaded binaries; it replaces the `node_modules/.bin` check. May return a promise for a per-worktree lookup (ruff prefers the project environment's binary); the base holds client frames until it resolves.
-- **`buildSession(ws, proc, context)`** — Abstract. Return the session object (copy Astro's).
-
-### Worktree-scoped (copy from Astro)
-
-- **`getSessionKey(context)`** — Return `context.wtPath` (prevents double-spawn). The default `null` is for global managers (YAML).
-- **`getSessionWorkspace(session)`** — Return `session.wtPath` so `rootUri`/`workspaceFolders` are injected into `initialize` and `workspace/workspaceFolders` requests are answered.
-- **`spawnOptions(context)`** — Return `{ cwd: context.wtPath }`.
 
 ### Optional overrides
 
@@ -62,7 +54,7 @@ Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped
 - **`getInitializationOptions(session)`** — For config the server reads at startup (SDK paths, indexing settings).
 - **`onClientInitialized(session)`** — For push-based config via `workspace/didChangeConfiguration` after handshake (Docker's compose settings, YAML's schemas).
 - **`workspaceConfiguration(session, section)`** — For servers that pull config with `workspace/configuration` (basedpyright). Defining it advertises the capability and answers the requests server-side; call `notifyConfigurationChanged(session)` to make the server pull again.
-- **`forwardWatchedFiles`** — Readonly flag for servers that register file watchers to learn about changes to unopened files and config (basedpyright, TypeScript). The base answers the registrations and forwards matching worktree changes; needs `getSessionWorkspace`.
+- **`forwardWatchedFiles`** — Readonly flag for servers that register file watchers to learn about changes to unopened files and config (basedpyright, TypeScript). The base answers the registrations and forwards matching worktree changes; needs `getSessionWorkspace` (`WorktreeLspManager` provides it).
 - **`onSessionClosed(session)`** — Release per-session resources (watchers); must be idempotent.
 - **`handleServerFrame(session, body)` / `handleClientData(session, data)`** — For intercepting/transforming messages. Only TypeScript and Docker use these.
 
@@ -143,7 +135,7 @@ Add the language to the `useFileScheme` check. Most LSPs need `file://` URIs for
 ## Checklist
 
 - [ ] Binary sourced and script chained in `build:server:standalone`
-- [ ] LSP manager extends `StdioLspManager` with `resolveBinary`, `buildSession`, worktree hooks, and correct flags
+- [ ] LSP manager extends `WorktreeLspManager` with `resolveBinary` and correct flags
 - [ ] `server-state.ts` WsData union entry
 - [ ] `server.ts`: import, instantiate, route, handlers, destroy
 - [ ] `log-entry-model.ts` log category

@@ -20,7 +20,11 @@ export function connectYamlLsp(): void {
     (transport) => {
       // TODO: consider returning the client instead of relying on self-registration in the constructor
       // eslint-disable-next-line no-new
-      new MonacoLspClient(transport, { languageId: "yaml", modelFilter: isLiveEditorModel });
+      new MonacoLspClient(transport, {
+        languageId: "yaml",
+        modelFilter: isLiveEditorModel,
+        markerOwner: "yaml-lsp",
+      });
     },
     () => {
       connected = false;

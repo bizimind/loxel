@@ -6,12 +6,14 @@ import { ApiError } from "@/api/client";
 import { invalidateDirQueries } from "@/queries/query-helpers";
 
 import { deleteFile, moveFile, renameFile } from "./file-operations";
+import { editorFilePath } from "./live-editor-model";
 import { pathName, relativeTo } from "./project-file-helpers";
 
 /**
- * Folders whose files language-server edits never change: dependencies, Python environments kept
- * in the worktree (whose standard library copies live outside `site-packages`), git's own, and
- * other worktrees nested in this one (`wt`'s `.worktrees`).
+ * Folders whose files are not the worktree's own project, so language-server edits never change
+ * them and Go to Symbol ranks them last: dependencies, Python environments kept in the worktree
+ * (whose standard library copies live outside `site-packages`), git's own, and other worktrees
+ * nested in this one (`wt`'s `.worktrees`).
  */
 const PROTECTED_SEGMENTS = new Set([
   "node_modules",
@@ -137,15 +139,17 @@ export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
   };
 }
 
-/** The absolute path of a worktree file's uri (`file://` or `loxel://HEAD/`), checked lexically. */
+/** Whether a worktree-relative path is under one of the {@link PROTECTED_SEGMENTS} folders. */
+export function isInProtectedFolder(relativePath: string): boolean {
+  return relativePath.split("/").some((s) => PROTECTED_SEGMENTS.has(s));
+}
+
+/** The absolute path of a worktree file's editor URI (see `editorFilePath`), checked lexically. */
 function editablePath(uri: monaco.Uri, wtPath: string): string {
-  const isFileUri =
-    uri.scheme === "file" || (uri.scheme === "loxel" && uri.authority.toLowerCase() === "head");
-  if (!isFileUri || uri.query || uri.fragment) {
-    throw new Error(`${uri.toString(true)} is not a file of the worktree`);
-  }
-  assertWorktreeFile(uri.path, wtPath);
-  return uri.path;
+  const path = editorFilePath(uri);
+  if (path === null) throw new Error(`${uri.toString(true)} is not a file of the worktree`);
+  assertWorktreeFile(path, wtPath);
+  return path;
 }
 
 function assertWorktreeFile(path: string, root: string): void {
@@ -154,7 +158,7 @@ function assertWorktreeFile(path: string, root: string): void {
   if (!relative || segments.some((s) => s === "." || s === ".." || s === "")) {
     throw new Error(`${path} is outside the worktree`);
   }
-  if (segments.some((s) => PROTECTED_SEGMENTS.has(s))) {
+  if (isInProtectedFolder(relative)) {
     throw new Error(`${path} belongs to a dependency, an environment or git, so it is not changed`);
   }
 }

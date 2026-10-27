@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   type FileEvent,
+  existingFileChangeType,
   FileChangeType,
   splitWatchedFilesRegistration,
   WatchedFilesForwarder,
@@ -50,6 +51,13 @@ describe("withWatchedFilesCapability", () => {
       params: { textDocument: { text: '"initialize"' } },
     });
     expect(withWatchedFilesCapability(didOpen)).toBe(didOpen);
+    // A document whose text spells out an initialize request.
+    const didChange = JSON.stringify({
+      jsonrpc: "2.0",
+      method: "textDocument/didChange",
+      params: { contentChanges: [{ text: '{"method": "initialize", "params": {}}' }] },
+    });
+    expect(withWatchedFilesCapability(didChange)).toBe(didChange);
     expect(withWatchedFilesCapability("not json")).toBe("not json");
   });
 });
@@ -168,6 +176,26 @@ describe("WatchedFilesForwarder glob matching", () => {
   });
 });
 
+describe("existingFileChangeType", () => {
+  const at = (birthtimeMs: number, mtimeMs: number, ctimeMs = mtimeMs) => ({
+    birthtimeMs,
+    mtimeMs,
+    ctimeMs,
+  });
+
+  test("with birth times: written right after creation, or moved into place, is created", () => {
+    expect(existingFileChangeType(at(10_000, 10_200), true)).toBe(FileChangeType.Created);
+    expect(existingFileChangeType(at(10_000, 60_000), false)).toBe(FileChangeType.Changed);
+    expect(existingFileChangeType(at(10_000, 20_000, 60_000), true)).toBe(FileChangeType.Created);
+  });
+
+  test("without birth times: created when first seen, changed after", () => {
+    expect(existingFileChangeType(at(0, 60_000), false)).toBe(FileChangeType.Created);
+    expect(existingFileChangeType(at(0, 60_000), true)).toBe(FileChangeType.Changed);
+    expect(existingFileChangeType(at(0, 20_000, 60_000), true)).toBe(FileChangeType.Created);
+  });
+});
+
 describe("WatchedFilesForwarder batching", () => {
   let dir: string | undefined;
 
@@ -278,6 +306,16 @@ describe("WatchedFilesForwarder batching", () => {
     expect(uris.toSorted()).toEqual(
       ["a.ts", "late.ts", "tsconfig.json"].map((p) => pathToFileURL(join(root, p)).href).toSorted(),
     );
+  });
+
+  test("reports every file of a batch larger than the stat concurrency, in queue order", async () => {
+    const root = await tempTree();
+    const names = Array.from({ length: 150 }, (_, i) => `m${i}.py`);
+    const { promise, resolve } = Promise.withResolvers<FileEvent[]>();
+    const f = forwarder([{ globPattern: "**/*.py" }], resolve, root);
+    f.queue(names.map((n) => join(root, n)));
+    const changes = await promise;
+    expect(changes.map((e) => e.uri)).toEqual(names.map((n) => pathToFileURL(join(root, n)).href));
   });
 
   test("drops changes a watcher's kind excludes", async () => {

@@ -1,8 +1,12 @@
+import type { Stats } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+
+import { isRecord } from "@/lib/is-record";
 
 import { logger } from "./logger";
+import { fileUri } from "./lsp-file-uri";
 
 const log = logger.child("server");
 
@@ -39,6 +43,13 @@ const CREATED_WINDOW_MS = 1000;
 /** TypeScript registers lowercased paths on case-insensitive file systems. */
 const CASE_INSENSITIVE = process.platform === "darwin" || process.platform === "win32";
 const WATCHED_FILES_METHOD = "workspace/didChangeWatchedFiles";
+/**
+ * Pre-check for an `initialize` request, so other frames are not parsed. In a document's text
+ * (didOpen, didChange) the quotes are escaped, so it does not match there.
+ */
+const INITIALIZE_METHOD = /"method"\s*:\s*"initialize"/;
+/** Most `stat` calls a batch runs at once, so a checkout-wide change does not open every file. */
+const STAT_CONCURRENCY = 64;
 
 interface Watcher {
   glob: Bun.Glob;
@@ -56,7 +67,7 @@ interface Watcher {
  * other frame unchanged.
  */
 export function withWatchedFilesCapability(data: string): string {
-  if (!data.includes('"initialize"')) return data;
+  if (!INITIALIZE_METHOD.test(data)) return data;
   let parsed: unknown;
   try {
     parsed = JSON.parse(data);
@@ -123,7 +134,8 @@ export function splitWatchedFilesRegistration(body: string): WatchedFilesRegistr
  */
 export class WatchedFilesForwarder {
   private readonly registrations = new Map<string, Watcher[]>();
-  private readonly pending = new Set<string>();
+  /** Absolute path → the WatchKind bits wanted for it, as matched when it was queued. */
+  private readonly pending = new Map<string, number>();
   /**
    * Changes queued while no watcher was registered. Each registration takes the ones its watchers
    * want; the rest stay for a later one, since a server may register its watchers in several
@@ -136,6 +148,8 @@ export class WatchedFilesForwarder {
   /** Batches are sent in order, each after the previous one's stats finished. */
   private flushing: Promise<void> = Promise.resolve();
   private disposed = false;
+  /** Paths reported as existing, for file systems that record no birth time. */
+  private readonly seen = new Set<string>();
 
   constructor(
     /** Absolute worktree path; glob strings that are not absolute are matched relative to it. */
@@ -185,7 +199,8 @@ export class WatchedFilesForwarder {
     }
     const wasEmpty = this.pending.size === 0;
     for (const p of paths) {
-      if (this.kindsFor(p) !== 0) this.pending.add(p);
+      const kinds = this.kindsFor(p);
+      if (kinds !== 0) this.pending.set(p, kinds);
     }
     if (this.pending.size === 0) return;
     const now = Date.now();
@@ -211,6 +226,7 @@ export class WatchedFilesForwarder {
     this.timer = null;
     this.pending.clear();
     this.early.clear();
+    this.seen.clear();
     this.registrations.clear();
   }
 
@@ -229,20 +245,38 @@ export class WatchedFilesForwarder {
   }
 
   private async flush(): Promise<void> {
-    const paths = [...this.pending];
+    const batch = [...this.pending];
     this.pending.clear();
-    const events = await Promise.all(
-      paths.map(async (absPath): Promise<FileEvent | null> => {
-        const kinds = this.kindsFor(absPath);
-        if (kinds === 0) return null;
-        const type = await changeTypeOf(absPath);
-        if (!(kinds & WATCH_KIND_BIT[type])) return null;
-        return { uri: pathToFileURL(absPath).href, type };
-      }),
-    );
-    const changes = events.filter((e) => e !== null);
+    const changes: FileEvent[] = [];
+    for (let i = 0; i < batch.length; i += STAT_CONCURRENCY) {
+      const events = await Promise.all(
+        batch.slice(i, i + STAT_CONCURRENCY).map(async ([absPath, kinds]) => {
+          const type = await this.changeTypeOf(absPath);
+          return kinds & WATCH_KIND_BIT[type] ? { uri: fileUri(absPath), type } : null;
+        }),
+      );
+      for (const event of events) if (event) changes.push(event);
+    }
     if (this.disposed || changes.length === 0) return;
     this.send(changes);
+  }
+
+  /** What happened to a path the watcher reported, judged from what is on disk now. */
+  private async changeTypeOf(absPath: string): Promise<FileChangeTypeValue> {
+    let stats: Stats;
+    try {
+      stats = await stat(absPath);
+    } catch (err) {
+      const code = isRecord(err) ? err.code : undefined;
+      if (code !== "ENOENT" && code !== "ENOTDIR") return FileChangeType.Changed;
+      this.seen.delete(absPath);
+      return FileChangeType.Deleted;
+    }
+    // Only needed where the file system records no birth time.
+    if (stats.birthtimeMs !== 0) return existingFileChangeType(stats, false);
+    const seenBefore = this.seen.has(absPath);
+    this.seen.add(absPath);
+    return existingFileChangeType(stats, seenBefore);
   }
 
   private compileWatcher(raw: unknown): Watcher | null {
@@ -269,6 +303,21 @@ export class WatchedFilesForwarder {
   }
 }
 
+/**
+ * Whether an existing file reported by the watcher was created or changed (see
+ * {@link CREATED_WINDOW_MS}). Where the file system records no birth time (Linux, mostly), a file
+ * is created the first time this forwarder sees it, unless it was moved into place.
+ */
+export function existingFileChangeType(
+  stats: Pick<Stats, "birthtimeMs" | "mtimeMs" | "ctimeMs">,
+  seenBefore: boolean,
+): FileChangeTypeValue {
+  const isNew =
+    stats.birthtimeMs === 0 ? !seenBefore : stats.mtimeMs - stats.birthtimeMs < CREATED_WINDOW_MS;
+  const movedIntoPlace = stats.ctimeMs - stats.mtimeMs > CREATED_WINDOW_MS;
+  return isNew || movedIntoPlace ? FileChangeType.Created : FileChangeType.Changed;
+}
+
 function compiled(base: string, pattern: string, kind: number): Watcher {
   return { glob: new Bun.Glob(fold(pattern)), base, kind };
 }
@@ -283,30 +332,4 @@ function matchSubject(watcher: Watcher, absPath: string): string | null {
   if (relative === "" || path.isAbsolute(relative)) return null;
   if (relative === ".." || relative.startsWith(`..${path.sep}`)) return null;
   return relative.replaceAll(path.sep, "/");
-}
-
-/** What happened to a path the watcher reported, judged from what is on disk now. */
-async function changeTypeOf(absPath: string): Promise<FileChangeTypeValue> {
-  try {
-    const stats = await stat(absPath);
-    // A zero birth time means the platform does not record it. Report a creation then: servers
-    // refresh at least as much for one as for a change.
-    if (
-      stats.birthtimeMs === 0 ||
-      stats.mtimeMs - stats.birthtimeMs < CREATED_WINDOW_MS ||
-      stats.ctimeMs - stats.mtimeMs > CREATED_WINDOW_MS
-    ) {
-      return FileChangeType.Created;
-    }
-    return FileChangeType.Changed;
-  } catch (err) {
-    const code = isRecord(err) ? err.code : undefined;
-    return code === "ENOENT" || code === "ENOTDIR"
-      ? FileChangeType.Deleted
-      : FileChangeType.Changed;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -1,7 +1,6 @@
 import type * as monaco from "monaco-editor";
 
 import type {
-  Range,
   SymbolInformation,
   WorkspaceSymbol,
   WorkspaceSymbolRegistrationOptions,
@@ -10,6 +9,7 @@ import { api, capabilities, SymbolTag } from "../../types";
 import { Disposable } from "../../utils";
 import { untilCancelled } from "../LspCancellableRequests";
 import type { LspConnection } from "../LspConnection";
+import { toMonacoRange } from "../ranges";
 import { lspSymbolKindToMonacoSymbolKind, toMonacoSymbolKind, toMonacoSymbolTag } from "./common";
 
 /** A `workspace/symbol` result in Monaco terms. Monaco has no workspace symbol provider API. */
@@ -131,13 +131,4 @@ export class LspWorkspaceSymbolFeature extends Disposable {
     this._serverSymbols.set(item, symbol);
     return item;
   }
-}
-
-function toMonacoRange(range: Range): monaco.IRange {
-  return {
-    startLineNumber: range.start.line + 1,
-    startColumn: range.start.character + 1,
-    endLineNumber: range.end.line + 1,
-    endColumn: range.end.character + 1,
-  };
 }

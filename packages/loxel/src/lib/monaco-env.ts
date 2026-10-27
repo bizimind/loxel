@@ -12,11 +12,11 @@ import { useWorktreeStore } from "@/store/worktrees";
 
 import { connectAstroLsp, disconnectAstroLsp } from "./astro-lsp-client";
 import { connectDockerLsp, disconnectDockerLsp } from "./docker-lsp-client";
+import { createEditorOpener } from "./editor-opener";
 import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { getHighlighter } from "./highlighter";
 import { isLiveEditorModel } from "./live-editor-model";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
-import { dispatchOpenFile } from "./open-file";
 import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
 import { isWithin } from "./project-file-helpers";
 import { registerPythonLanguageConfiguration } from "./python-language-config";
@@ -33,13 +33,13 @@ self.MonacoEnvironment = {
     if (label === "json") return new jsonWorker();
     if (label === "css" || label === "scss" || label === "less") return new cssWorker();
     if (label === "html" || label === "handlebars" || label === "razor") return new htmlWorker();
-    // No TS worker — we use a server-backed HoverProvider instead.
+    // No TS worker — TS/JS language features come from the TypeScript LSP.
     // No YAML worker — we use yaml-language-server via LSP over WebSocket.
     return new editorWorker();
   },
 };
 
-// Disable ALL built-in TS/JS language features. We use server-backed hover and TypeScript diagnostics.
+// Disable ALL built-in TS/JS language features; the TypeScript LSP provides them.
 // This prevents Monaco from trying to load the TS worker module (which causes the toUrl error
 // since we return the generic editor worker instead of the TS worker).
 const disabledModeConfig: monaco.typescript.ModeConfiguration = {
@@ -317,32 +317,5 @@ initSchemaSync();
 // WebSocket at /ws/ts-lsp via packages/monaco-lsp-client. No providers are
 // registered here — doing so would compete with the LSP-backed providers.
 
-// Handle cross-file navigation from "go to definition" and document/hover links — opens the
-// target in a new editor tab. Servers answer with editor model URIs (file:// or loxel://HEAD, see
-// CodeEditorPanel) or file:// URIs of files outside every project (stdlib, installed packages),
-// which open as external files.
-monaco.editor.registerEditorOpener({
-  openCodeEditor(source, resource, selectionOrPosition) {
-    if (resource.scheme !== "loxel" && resource.scheme !== "file") return false;
-    // A target in the source's own model is revealed in place by Monaco; this also covers
-    // models that are not files on disk, such as the frontmatter editor's.
-    if (source.getModel()?.uri.toString() === resource.toString()) return false;
-
-    const filePath = resource.path;
-    let line = 1;
-    let column = 1;
-
-    if (selectionOrPosition) {
-      if ("startLineNumber" in selectionOrPosition) {
-        line = selectionOrPosition.startLineNumber;
-        column = selectionOrPosition.startColumn;
-      } else {
-        line = selectionOrPosition.lineNumber;
-        column = selectionOrPosition.column;
-      }
-    }
-
-    dispatchOpenFile(filePath, { line, column });
-    return true;
-  },
-});
+// Go to definition and links that lead to another file open it in an editor tab.
+monaco.editor.registerEditorOpener(createEditorOpener());

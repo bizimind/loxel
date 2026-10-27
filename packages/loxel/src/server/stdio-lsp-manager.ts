@@ -3,8 +3,10 @@ import path from "node:path";
 import type { FileSink, ServerWebSocket, Subprocess } from "bun";
 
 import type { LogCategory } from "@/api/log-entry-model";
+import { isRecord } from "@/lib/is-record";
 
 import { logger } from "./logger";
+import { fileUri } from "./lsp-file-uri";
 import {
   type FileEvent,
   splitWatchedFilesRegistration,
@@ -46,7 +48,7 @@ export interface SpawnOptions {
   env?: Record<string, string>;
 }
 
-export interface LspPosition {
+interface LspPosition {
   line: number;
   character: number;
 }
@@ -54,6 +56,11 @@ export interface LspPosition {
 interface LspRange {
   start: LspPosition;
   end: LspPosition;
+}
+
+interface LspContentChange {
+  range?: LspRange;
+  text: string;
 }
 
 /** The server capability that advertises each suppressible LSP feature statically. */
@@ -64,11 +71,6 @@ const SERVER_CAPABILITY_OF = {
 } as const;
 
 export type SuppressibleFeature = keyof typeof SERVER_CAPABILITY_OF;
-
-interface LspContentChange {
-  range?: LspRange;
-  text: string;
-}
 
 /**
  * Base class for language-server subprocess bridges. Handles the
@@ -297,8 +299,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
           }
           const workspace = this.getSessionWorkspace(session);
           if (workspace && msg.params) {
-            const rootUri = `file://${workspace}`;
-            if (!msg.params.rootUri) msg.params.rootUri = rootUri;
+            if (!msg.params.rootUri) msg.params.rootUri = fileUri(workspace);
             if (!msg.params.rootPath) msg.params.rootPath = workspace;
             if (!msg.params.workspaceFolders)
               msg.params.workspaceFolders = workspaceFolders(workspace);
@@ -899,6 +900,47 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 }
 
 /**
+ * Base for servers run one per worktree: started in the worktree, rooted at it (`rootUri`,
+ * `workspaceFolders`, watched files), and replaced when a newer connection asks for the same
+ * worktree. Subclasses supply what differs per server: the binary, its arguments and settings.
+ */
+export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
+  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
+    this.startSession(ws, { wtPath });
+  }
+
+  destroySession(ws: ServerWebSocket<unknown>): void {
+    this.detach(ws);
+  }
+
+  protected override spawnOptions(context: WtLspContext): SpawnOptions {
+    return { cwd: context.wtPath };
+  }
+
+  protected buildSession(
+    ws: ServerWebSocket<unknown>,
+    proc: Subprocess,
+    context: WtLspContext,
+  ): WtLspSession {
+    return {
+      ws,
+      proc,
+      wtPath: context.wtPath,
+      stdoutBuf: Buffer.alloc(0),
+      documentContents: new Map(),
+    };
+  }
+
+  protected override getSessionKey(context: WtLspContext): string {
+    return context.wtPath;
+  }
+
+  protected override getSessionWorkspace(session: WtLspSession): string {
+    return session.wtPath;
+  }
+}
+
+/**
  * Merge server-supplied `initializationOptions` into the client-supplied ones.
  * One level deep: nested plain objects are merged key-by-key, everything else
  * is replaced. The client's values win over the server's on shallow keys to
@@ -912,7 +954,7 @@ function mergeInitOptions(
   const out: Record<string, unknown> = { ...(existing ?? {}) };
   for (const [key, addValue] of Object.entries(add)) {
     const existingValue = out[key];
-    if (isPlainObject(existingValue) && isPlainObject(addValue)) {
+    if (isRecord(existingValue) && isRecord(addValue)) {
       out[key] = { ...addValue, ...existingValue };
     } else if (existingValue === undefined) {
       out[key] = addValue;
@@ -922,15 +964,11 @@ function mergeInitOptions(
 }
 
 /** The session's single workspace folder, as `initialize` and `workspace/workspaceFolders` carry it. */
-function workspaceFolders(workspace: string): { uri: string; name: string }[] {
-  return [{ uri: `file://${workspace}`, name: path.basename(workspace) || workspace }];
+export function workspaceFolders(workspace: string): { uri: string; name: string }[] {
+  return [{ uri: fileUri(workspace), name: path.basename(workspace) || workspace }];
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function buildLineOffsets(content: string): number[] {
+function buildLineOffsets(content: string): number[] {
   const offsets = [0];
   for (let i = 0; i < content.length; i++) {
     if (content[i] === "\n") offsets.push(i + 1);
@@ -938,7 +976,7 @@ export function buildLineOffsets(content: string): number[] {
   return offsets;
 }
 
-export function offsetAt(lineOffsets: number[], totalLength: number, pos: LspPosition): number {
+function offsetAt(lineOffsets: number[], totalLength: number, pos: LspPosition): number {
   const base = lineOffsets[pos.line];
   if (base === undefined) return totalLength;
   return Math.min(base + pos.character, totalLength);

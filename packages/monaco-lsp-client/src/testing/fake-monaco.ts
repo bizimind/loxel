@@ -7,6 +7,11 @@ import type { IDisposable } from "../utils";
 // process-wide in `bun test`, so every test file must install this same
 // module object and configure it through `fakeMonaco` rather than define its own.
 
+// Monaco's own URI class (`monaco.Uri`), which loads without a DOM, so encoding and decoding are
+// the real ones. The deep import has no type declarations.
+const uriModule: string = "monaco-editor/base/common/uri.js";
+const { URI } = (await import(uriModule)) as { URI: typeof monaco.Uri };
+
 type Listener<T> = (e: T) => void;
 
 export class FakeEmitter<T> {
@@ -66,24 +71,15 @@ const languagesNamespace: unknown = new Proxy(
   },
 );
 
-/** Enough of `monaco.Uri.parse` for lookups and messages: `scheme://authority/path`. */
-function parseUri(
-  value: string,
-): Pick<monaco.Uri, "scheme" | "authority" | "path" | "toString" | "with"> {
-  const match = /^([^:]+):\/\/([^/]*)(.*)$/.exec(value);
-  if (!match) throw new Error(`Not a uri: ${value}`);
-  const [, scheme = "", authority = "", path = ""] = match;
-  return {
-    scheme,
-    authority,
-    path: decodeURIComponent(path),
-    toString: () => value,
-    with: (change) => parseUri(`${scheme}://${authority}${change.path ?? path}`) as monaco.Uri,
-  };
-}
-
 export const fakeMonacoModule = {
-  Uri: { parse: parseUri },
+  Uri: URI,
+  Position: class {
+    constructor(
+      readonly lineNumber: number,
+      readonly column: number,
+    ) {}
+  },
+  Range: { lift: (range: monaco.IRange) => range },
   editor: {
     getModels: () => fakeMonaco.models,
     getEditors: () => fakeMonaco.editors,

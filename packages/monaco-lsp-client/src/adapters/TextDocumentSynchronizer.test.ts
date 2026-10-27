@@ -18,7 +18,7 @@ function createFakeModel(path: string, languageId = "typescript"): FakeModel {
   const contentChanged = new FakeEmitter<monaco.editor.IModelContentChangedEvent>();
   const willDispose = new FakeEmitter<void>();
   const model = {
-    uri: { toString: () => `file://${path}`, path },
+    uri: fakeMonacoModule.Uri.file(path),
     getLanguageId: () => languageId,
     getVersionId: () => 1,
     getValue: () => "",
@@ -34,12 +34,20 @@ const { TextDocumentSynchronizer } = await import("./TextDocumentSynchronizer");
 
 function createServer() {
   const calls: string[] = [];
+  /** The document uri of each notification. */
+  const uris: string[] = [];
+  const record =
+    (call: string) =>
+    ({ textDocument }: { textDocument: { uri: string } }) => {
+      calls.push(call);
+      uris.push(textDocument.uri);
+    };
   const server = {
-    textDocumentDidOpen: () => calls.push("open"),
-    textDocumentDidChange: () => calls.push("change"),
-    textDocumentDidClose: () => calls.push("close"),
+    textDocumentDidOpen: record("open"),
+    textDocumentDidChange: record("change"),
+    textDocumentDidClose: record("close"),
   } as unknown as typeof api.TServerInterface;
-  return { server, calls };
+  return { server, calls, uris };
 }
 
 function createRegistry() {
@@ -149,5 +157,32 @@ describe("TextDocumentSynchronizer", () => {
     fakeMonaco.didCreateModel.fire(lateDiff.model);
     expect(calls).toEqual(["open"]);
     expect(lateDiff.contentChanged.size).toBe(0);
+  });
+
+  test("sends percent-encoded uris and finds the model behind the server's, however encoded", () => {
+    const m = createFakeModel("/repo/a b/ü.py", "python");
+    fakeMonaco.models.push(m.model);
+    const { server, uris } = createServer();
+    const { registry, start } = createRegistry();
+
+    const sync = new TextDocumentSynchronizer(server, registry);
+    start();
+    m.contentChanged.fire(emptyChange);
+    const encoded = "file:///repo/a%20b/%C3%BC.py";
+    const position = { lineNumber: 1, column: 1 } as monaco.Position;
+    expect(uris).toEqual([encoded, encoded]);
+    expect(sync.translate(m.model, position).textDocument.uri).toBe(encoded);
+
+    // Only the synchronizer knows the model now, so the lookups go through its own map.
+    fakeMonaco.models.length = 0;
+    // Lowercase escapes (Rust's `url`), and no encoding at all (servers echoing the uri back).
+    for (const uri of [encoded, "file:///repo/a%20b/%c3%bc.py", "file:///repo/a b/ü.py"]) {
+      expect(sync.translateBack({ uri }, { line: 0, character: 0 }).textModel).toBe(m.model);
+    }
+    expect(
+      sync.translateBack({ uri: "file:///repo/other.py" }, { line: 0, character: 0 }).textModel,
+    ).not.toBe(m.model);
+    sync.dispose();
+    expect(uris.at(-1)).toBe(encoded);
   });
 });

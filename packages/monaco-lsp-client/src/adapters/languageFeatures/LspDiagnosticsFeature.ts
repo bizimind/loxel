@@ -20,17 +20,22 @@ import {
 let markerOwnerCount = 0;
 
 export class LspDiagnosticsFeature extends Disposable {
-  /** Per client, so servers sharing a model (basedpyright and ruff for Python) keep their own markers. */
-  private readonly _diagnosticsMarkerOwner = `lsp-${++markerOwnerCount}`;
   private readonly _pullDiagnosticProviders = new Map<
     monaco.editor.ITextModel,
     ModelDiagnosticProvider
   >();
 
-  constructor(private readonly _connection: LspConnection) {
+  /**
+   * @param _diagnosticsMarkerOwner Per client, so servers sharing a model (basedpyright and ruff for
+   * Python) keep their own markers.
+   */
+  constructor(
+    private readonly _connection: LspConnection,
+    private readonly _diagnosticsMarkerOwner = `lsp-${++markerOwnerCount}`,
+  ) {
     super();
 
-    // The next client gets a new owner, so this one's markers would otherwise outlive it.
+    // The client's markers must not outlive it.
     this._register({ dispose: () => monaco.editor.removeAllMarkers(this._diagnosticsMarkerOwner) });
 
     this._register(
@@ -147,6 +152,8 @@ export class LspDiagnosticsFeature extends Disposable {
  */
 class ModelDiagnosticProvider extends Disposable {
   private _updateHandle: number | undefined;
+  /** Set on dispose, so an answer arriving afterwards does not overwrite a later client's markers. */
+  private _disposed = false;
   private _previousResultId: string | undefined;
 
   constructor(
@@ -193,7 +200,7 @@ class ModelDiagnosticProvider extends Disposable {
         previousResultId: this._previousResultId,
       });
 
-      if (this._model.isDisposed()) {
+      if (this._disposed || this._model.isDisposed()) {
         return;
       }
 
@@ -251,6 +258,7 @@ class ModelDiagnosticProvider extends Disposable {
   }
 
   override dispose(): void {
+    this._disposed = true;
     if (this._updateHandle !== undefined) {
       clearTimeout(this._updateHandle);
       this._updateHandle = undefined;

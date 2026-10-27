@@ -10,6 +10,7 @@ import { capabilities, api } from "../../types";
 import { Disposable } from "../../utils";
 import { assertTargetTextModel } from "../ITextModelBridge";
 import { LspConnection } from "../LspConnection";
+import { toMonacoRange } from "../ranges";
 import { toMonacoLanguageSelector } from "./common";
 import { toMonacoInlayHintKind } from "./common";
 
@@ -211,12 +212,7 @@ function toLspInlayHintLabel(
     if (part.location) {
       monacoLabelPart.location = {
         uri: monaco.Uri.parse(part.location.uri),
-        range: new monaco.Range(
-          part.location.range.start.line + 1,
-          part.location.range.start.character + 1,
-          part.location.range.end.line + 1,
-          part.location.range.end.character + 1,
-        ),
+        range: toMonacoRange(part.location.range),
       };
     }
 

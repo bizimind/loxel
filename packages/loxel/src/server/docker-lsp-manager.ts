@@ -1,13 +1,6 @@
 import path from "node:path";
 
-import type { ServerWebSocket, Subprocess } from "bun";
-
-import {
-  type SpawnOptions,
-  StdioLspManager,
-  type WtLspContext,
-  type WtLspSession,
-} from "./stdio-lsp-manager";
+import { WorktreeLspManager, type WtLspSession } from "./stdio-lsp-manager";
 
 /**
  * Manages Docker's official `docker-language-server` binary (Dockerfile +
@@ -23,20 +16,12 @@ import {
  * Semantic tokens are disabled because its token ranges routinely exceed
  * line length and Monaco rejects them.
  */
-export class DockerLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
+export class DockerLspManager extends WorktreeLspManager {
   protected override readonly disableSemanticTokens = true;
   protected override readonly requiresFullTextSync = true;
 
   constructor() {
     super("docker-lsp");
-  }
-
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
-  }
-
-  destroySession(ws: ServerWebSocket<unknown>): void {
-    this.detach(ws);
   }
 
   protected resolveBinary(): string | null {
@@ -47,32 +32,6 @@ export class DockerLspManager extends StdioLspManager<WtLspSession, WtLspContext
 
   protected override spawnArgs(): readonly string[] {
     return ["start", "--stdio"];
-  }
-
-  protected override spawnOptions(context: WtLspContext): SpawnOptions {
-    return { cwd: context.wtPath };
-  }
-
-  protected buildSession(
-    ws: ServerWebSocket<unknown>,
-    proc: Subprocess,
-    context: WtLspContext,
-  ): WtLspSession {
-    return {
-      ws,
-      proc,
-      wtPath: context.wtPath,
-      stdoutBuf: Buffer.alloc(0),
-      documentContents: new Map(),
-    };
-  }
-
-  protected override getSessionKey(context: WtLspContext): string {
-    return context.wtPath;
-  }
-
-  protected override getSessionWorkspace(session: WtLspSession): string | null {
-    return session.wtPath;
   }
 
   protected override handleServerFrame(session: WtLspSession, body: string): void {

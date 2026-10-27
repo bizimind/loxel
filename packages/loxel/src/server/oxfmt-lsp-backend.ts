@@ -4,6 +4,7 @@ import type { FileSink, Subprocess } from "bun";
 
 import type { FormatterBackend } from "./formatter-backends";
 import { logger } from "./logger";
+import { fileUri } from "./lsp-file-uri";
 import { buildSpawnEnv } from "./shell-env";
 
 const log = logger.child("format");
@@ -34,7 +35,7 @@ export class OxfmtLspBackend implements FormatterBackend {
     const ready = await this.ensureInitialized();
     if (!ready) return null;
 
-    const uri = `file://${filePath}`;
+    const uri = fileUri(filePath);
     const languageId = this.inferLanguageId(filePath);
 
     try {
@@ -141,7 +142,7 @@ export class OxfmtLspBackend implements FormatterBackend {
       // Send initialize request
       const result = (await this.sendRequest("initialize", {
         processId: process.pid,
-        rootUri: `file://${this.worktreePath}`,
+        rootUri: fileUri(this.worktreePath),
         capabilities: {},
       })) as { capabilities?: { documentFormattingProvider?: boolean } } | null;
 
