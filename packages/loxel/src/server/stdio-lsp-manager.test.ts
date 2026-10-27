@@ -253,3 +253,13 @@ describe("StdioLspManager watched files", () => {
     ]);
   });
 });
+
+describe("StdioLspManager workspace folders", () => {
+  test("answers workspace/workspaceFolders with the session's worktree", async () => {
+    const { client, root } = await setup();
+    client.emit({ id: 9, method: "workspace/workspaceFolders" });
+    const answer = await client.serverReceived((f) => f.id === 9);
+    expect(answer.result).toEqual([{ uri: `file://${root}`, name: "wt" }]);
+    expect(client.toClient).toEqual([]);
+  });
+});

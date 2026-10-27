@@ -173,6 +173,7 @@ jobs:
           codesign -s - -f packages/loxel/build/terraform-ls
           codesign -s - -f packages/loxel/build/basedpyright-langserver
           codesign -s - -f packages/loxel/build/ruff
+          codesign -s - -f packages/loxel/build/tombi
           codesign -s - -f packages/loxel/build/astro-ls
           codesign -s - -f packages/loxel/build/lemminx/lemminx
           codesign -s - -f packages/loxel/build/typescript-lib/tsc
@@ -199,6 +200,7 @@ jobs:
           cp packages/loxel/build/terraform-ls staging/
           cp packages/loxel/build/basedpyright-langserver staging/
           cp packages/loxel/build/ruff staging/
+          cp packages/loxel/build/tombi staging/
           cp packages/loxel/build/astro-ls staging/
           cp packages/loxel/build/lemminx/lemminx staging/
           cp -r packages/loxel/build/typeshed-fallback staging/typeshed-fallback

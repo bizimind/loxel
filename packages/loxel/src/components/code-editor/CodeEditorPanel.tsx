@@ -296,7 +296,7 @@ export function CodeEditorPanel({
     const content = diskContent ?? "";
 
     // Files served by an LSP that cares about real disk paths use file://
-    // URIs (YAML/JSON for schemas, Dockerfile/Terraform for workspace indexing,
+    // URIs (YAML/JSON/TOML for schemas, Dockerfile/Terraform for workspace indexing,
     // Python for import resolution and cross-file references). Other files use
     // loxel://HEAD/<path>, which the TypeScript server bridge translates.
     const useFileScheme =
@@ -307,7 +307,8 @@ export function CodeEditorPanel({
       language === "terraform" ||
       language === "astro" ||
       language === "xml" ||
-      language === "python";
+      language === "python" ||
+      language === "toml";
     const uri = useFileScheme
       ? monaco.Uri.from({ scheme: "file", path: filePath })
       : monaco.Uri.from({ scheme: "loxel", authority: "HEAD", path: filePath });

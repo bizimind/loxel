@@ -350,7 +350,7 @@ export const selectEffectiveFileAssociations = createBuiltinMergeSelector(
 );
 
 // ---------------------------------------------------------------------------
-// JSON / YAML Schema Mappings
+// JSON / YAML / TOML Schema Mappings
 // ---------------------------------------------------------------------------
 
 export interface SchemaMapping {
@@ -394,12 +394,53 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     url: "https://json.schemastore.org/github-action",
     enabled: true,
   },
+  {
+    id: builtinId("**/pyproject.toml"),
+    glob: "**/pyproject.toml",
+    url: "https://json.schemastore.org/pyproject.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/Cargo.toml"),
+    glob: "**/Cargo.toml",
+    url: "https://json.schemastore.org/cargo.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/.cargo/config.toml"),
+    glob: "**/.cargo/config.toml",
+    url: "https://json.schemastore.org/cargo-config.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/{ruff,.ruff}.toml"),
+    glob: "**/{ruff,.ruff}.toml",
+    url: "https://json.schemastore.org/ruff.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/uv.toml"),
+    glob: "**/uv.toml",
+    url: "https://json.schemastore.org/uv.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/{rustfmt,.rustfmt}.toml"),
+    glob: "**/{rustfmt,.rustfmt}.toml",
+    url: "https://json.schemastore.org/rustfmt.json",
+    enabled: true,
+  },
 ];
 
+/**
+ * User entries first: Tombi applies the first schema matching a TOML file, so a user mapping
+ * overrides a built-in one for the same file. JSON and YAML combine every matching schema.
+ */
 export const selectEffectiveSchemas = createBuiltinMergeSelector(
   (s) => s.schemas,
   BUILTIN_SCHEMA_DEFAULTS,
   "builtin:",
+  true,
 );
 
 type SettingsSection =

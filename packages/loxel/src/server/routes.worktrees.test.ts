@@ -73,6 +73,7 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       shutdown: () => {},
       resolveSchema: async () => ({}),
       updateYamlSchemas: () => {},
+      updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       setTerminalCommand: () => {},
