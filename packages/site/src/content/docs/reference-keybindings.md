@@ -94,6 +94,14 @@ Back/forward work like a browser's history, across all projects. Worktree number
 
 ---
 
+## Editor
+
+| Action                     | Shortcut                                |
+| -------------------------- | --------------------------------------- |
+| Editor: Change Indentation | unbound — command palette or status bar |
+
+---
+
 ## Languages
 
 | Action                     | Shortcut                                |

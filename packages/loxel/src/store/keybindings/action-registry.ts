@@ -7,7 +7,9 @@ import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
+import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { canRenameActiveTab } from "@/lib/tab-rename";
+import { useEditorIndentationStore } from "@/store/editor-indentation";
 import { useWorktreeStore } from "@/store/worktrees";
 
 /**
@@ -91,6 +93,7 @@ export type ActionId =
   | "tree.toggleExpanded"
   | "tree.open"
   | "tree.rename"
+  | "editor.changeIndentation"
   | "python.selectInterpreter"
   | "app.settings";
 
@@ -121,6 +124,7 @@ export type ActionCategory =
   | "sidebar"
   | "worktree"
   | "tree"
+  | "editor"
   | "language"
   | "app";
 
@@ -134,6 +138,12 @@ export interface ActionDef {
    * key resolves as unbound and reaches the focused widget (terminal, editor, …).
    */
   isEnabled?: () => boolean;
+}
+
+/** Whether the active center panel is a code editor tab (one that publishes its indentation). */
+function isCodeEditorActive(): boolean {
+  const filePath = getActiveEditorFilePath();
+  return filePath !== null && useEditorIndentationStore.getState().byFile.has(filePath);
 }
 
 function hasActiveWorktree(): boolean {
@@ -292,6 +302,14 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "tree.toggleExpanded", label: "Tree: Toggle Folder", category: "tree", hidden: true },
   { id: "tree.open", label: "Tree: Open", category: "tree", hidden: true },
   { id: "tree.rename", label: "Tree: Rename", category: "tree", hidden: true },
+
+  // Editor
+  {
+    id: "editor.changeIndentation",
+    label: "Editor: Change Indentation",
+    category: "editor",
+    isEnabled: isCodeEditorActive,
+  },
 
   // Languages
   {

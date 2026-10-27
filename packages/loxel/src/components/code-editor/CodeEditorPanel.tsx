@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { DockviewPanelApi } from "dockview-react";
 import type { editor as monacoEditor } from "monaco-editor";
 import * as monaco from "monaco-editor";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
@@ -19,6 +19,7 @@ import {
 } from "@/hooks/use-disk-synced-content";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { computeLineEdits } from "@/lib/compute-line-edits";
+import { detectIndentation } from "@/lib/detect-indentation";
 import { applyEditorConfigOnSave } from "@/lib/editorconfig-save-actions";
 import { removeDollarSchema, setDollarSchema } from "@/lib/json-schema-registry";
 import { validateStrictJson } from "@/lib/json-strict-validator";
@@ -28,8 +29,10 @@ import { resolveLanguage } from "@/lib/resolve-language";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
 import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
+import { useEditorIndentationStore } from "@/store/editor-indentation";
 import { useEditorStateStore } from "@/store/editor-state";
 import {
+  type IndentationLayer,
   resolveIndentation,
   selectEffectiveFileAssociations,
   useSettingsStore,
@@ -41,6 +44,10 @@ type IStandaloneCodeEditor = monacoEditor.IStandaloneCodeEditor;
 const identity = (s: string) => s;
 
 const NO_EDITORCONFIG: EditorConfigProperties = {};
+
+function rulersFor(editorConfig: EditorConfigProperties): number[] {
+  return editorConfig.maxLineLength === undefined ? [] : [editorConfig.maxLineLength];
+}
 
 function normalizeHex(color: string): string {
   const c = color.toLowerCase().replace(/^#/, "");
@@ -232,13 +239,36 @@ export function CodeEditorPanel({
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
 
   // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
-  const { data: editorConfigData } = useQuery({
+  const { data: editorConfigData, isPending: editorConfigPending } = useQuery({
     queryKey: queryKeys.editorConfig(filePath, panelWorktreePath ?? undefined),
     queryFn: ({ signal }) => api.getEditorConfig(filePath, panelWorktreePath, signal),
   });
   const editorConfig = editorConfigData?.properties ?? NO_EDITORCONFIG;
   const editorConfigRef = useRef(editorConfig);
   editorConfigRef.current = editorConfig;
+  const editorConfigPendingRef = useRef(editorConfigPending);
+  editorConfigPendingRef.current = editorConfigPending;
+
+  // Detected from the disk content, not the live text, so typing does not shift it.
+  const detectedIndentation = useMemo(
+    () => (diskContent === null ? undefined : detectIndentation(diskContent)),
+    [diskContent],
+  );
+  // Chosen with Change Indentation; lasts while the tab is open.
+  const [fileIndentation, setFileIndentation] = useState<IndentationLayer | null>(null);
+  const indentation = useMemo(
+    () =>
+      resolveIndentation(editorSettings, filePath, {
+        language: resolvedLang,
+        editorConfig,
+        detected: detectedIndentation,
+        fileChoice: fileIndentation ?? undefined,
+      }),
+    [editorSettings, filePath, resolvedLang, editorConfig, detectedIndentation, fileIndentation],
+  );
+  const indentationRef = useRef(indentation);
+  indentationRef.current = indentation;
+  const [eol, setEol] = useState<"LF" | "CRLF">("LF");
 
   // Fetch project-wide diagnostics scoped to the panel's worktree (not the global active one),
   // only for files tsc can report on.
@@ -292,6 +322,9 @@ export function CodeEditorPanel({
     const editor = monaco.editor.create(container, {
       model,
       theme: getMonacoThemeName(darkMode),
+      // Until the `.editorconfig` is known, so the first edit already indents by it.
+      readOnly: editorConfigPendingRef.current,
+      rulers: rulersFor(editorConfigRef.current),
       // Editor-level tabSize/insertSpaces are global in standalone Monaco: setting them would reset
       // every open model's indentation. Indentation is set per model below; this constant flag only
       // keeps Monaco from overriding it.
@@ -333,14 +366,8 @@ export function CodeEditorPanel({
 
     editorRef.current = editor;
     // After `create`: the first editor flips the global `detectIndentation`, which resets models.
-    model.updateOptions(
-      resolveIndentation(
-        editorSettings,
-        filePath,
-        resolvedLangRef.current,
-        editorConfigRef.current,
-      ),
-    );
+    model.updateOptions(indentationRef.current.indentation);
+    setEol(model.getEOL() === "\r\n" ? "CRLF" : "LF");
 
     // TextMate scope inspector — shows real TextMate scope stack instead of
     // the lossy reverse-mapped scopes from shikiToMonaco.
@@ -447,6 +474,7 @@ export function CodeEditorPanel({
 
     // Listen for user edits (guarded against programmatic setValue)
     editor.onDidChangeModelContent((e) => {
+      setEol(e.eol === "\r\n" ? "CRLF" : "LF");
       if (isProgrammaticRef.current) return;
       lastChangeWasUndo = e.isUndoing || e.isRedoing;
       handleChange(editor.getModel()?.getValue() ?? "");
@@ -590,14 +618,41 @@ export function CodeEditorPanel({
     monaco.editor.setTheme(getMonacoThemeName(darkMode));
   }, [darkMode]);
 
-  // Apply indentation settings (live update when settings change)
+  // Apply indentation live, as its sources change.
   useEffect(() => {
+    editorRef.current?.getModel()?.updateOptions(indentation.indentation);
+  }, [indentation]);
+
+  useEffect(() => {
+    editorRef.current?.updateOptions({
+      readOnly: editorConfigPending,
+      rulers: rulersFor(editorConfig),
+    });
+  }, [editorConfigPending, editorConfig]);
+
+  const convertIndentation = useCallback((insertSpaces: boolean) => {
     const editor = editorRef.current;
     if (!editor) return;
-    const model = editor.getModel();
-    if (!model) return;
-    model.updateOptions(resolveIndentation(editorSettings, filePath, resolvedLang, editorConfig));
-  }, [editorSettings, filePath, resolvedLang, editorConfig]);
+    // Monaco's actions convert by the model's tab size, then set `insertSpaces` on the model.
+    const action = insertSpaces
+      ? "editor.action.indentationToSpaces"
+      : "editor.action.indentationToTabs";
+    void editor.getAction(action)?.run();
+    setFileIndentation((choice) => ({ ...choice, insertSpaces }));
+  }, []);
+
+  // Publish the indentation for the status bar while this is the file's tab.
+  useEffect(() => {
+    useEditorIndentationStore
+      .getState()
+      .publish(filePath, {
+        resolution: indentation,
+        eol,
+        setFileChoice: setFileIndentation,
+        convert: convertIndentation,
+      });
+  }, [filePath, indentation, eol, convertIndentation]);
+  useEffect(() => () => useEditorIndentationStore.getState().remove(filePath), [filePath]);
 
   // Apply TypeScript diagnostics as Monaco markers
   useEffect(() => {

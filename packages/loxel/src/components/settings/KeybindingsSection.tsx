@@ -24,6 +24,7 @@ const CATEGORY_LABELS: Record<ActionCategory, string> = {
   sidebar: "Sidebars",
   worktree: "Worktrees",
   tree: "Trees",
+  editor: "Editor",
   language: "Languages",
   app: "Application",
 };
@@ -35,6 +36,7 @@ const CATEGORY_ORDER: ActionCategory[] = [
   "nav",
   "worktree",
   "tree",
+  "editor",
   "language",
   "app",
 ];

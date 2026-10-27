@@ -204,6 +204,17 @@ describe("resolveEditorConfig", () => {
     });
   });
 
+  test("reads max_line_length, with off meaning none", async () => {
+    await write("repo/.editorconfig", [
+      "[*]",
+      "max_line_length = 100",
+      "[*.md]",
+      "max_line_length = off",
+    ]);
+    expect(await resolveEditorConfig(join(repo, "a.ts"), repo)).toEqual({ maxLineLength: 100 });
+    expect(await resolveEditorConfig(join(repo, "a.md"), repo)).toEqual({});
+  });
+
   test("ignores an oversized file", async () => {
     await write("repo/.editorconfig", ["[*]", "indent_size = 2", `# ${"x".repeat(70_000)}`]);
     expect(await resolveEditorConfig(join(repo, "a.ts"), repo)).toEqual({});

@@ -74,7 +74,18 @@ Python formatters are detected from the config closest to the file, so each proj
 
 ## Indentation
 
-Files indent with 2 spaces by default. Python and Rust use 4 spaces and Go uses tabs, matching their formatters. A project's [`.editorconfig`](#editorconfig) takes precedence over these defaults. In **Settings > Editor**, **Default Indentation** changes the default, and **Per-Extension Overrides** set the indentation for a file extension, taking precedence over everything else, `.editorconfig` included.
+Each file's indentation comes from the first of these that sets it:
+
+1. A choice made for the file with **Editor: Change Indentation**, for as long as its tab is open.
+2. The project's [`.editorconfig`](#editorconfig).
+3. A **Per-Extension Override** in **Settings > Editor**.
+4. The file's own content: an existing file keeps the style it's written in, so Enter and Tab don't mix 2-space indents into a 4-space file or spaces into a tab-indented one.
+5. The language's convention: Python and Rust use 4 spaces and Go uses tabs, matching their formatters.
+6. **Default Indentation** in **Settings > Editor**, 2 spaces unless you change it.
+
+Each property is looked up on its own, so an `.editorconfig` that only sets `indent_style = space` takes the size from the next source down. A project's `.editorconfig` wins over your per-extension overrides because it's the convention everyone working on the project, and its formatters, follow; your overrides apply wherever a project doesn't set one.
+
+While a code file is the active editor, the status bar shows its indentation (`Spaces: 4` or `Tab Size: 4`), where that came from, and its line endings (`LF` or `CRLF`). Hover it for details, including when the project's `.editorconfig` outranks one of your overrides. Click it, or run **Editor: Change Indentation** from the command palette, to indent the file with spaces or tabs at another size, convert its existing indentation to spaces or tabs, or go back to the automatic choice.
 
 ---
 
@@ -82,16 +93,17 @@ Files indent with 2 spaces by default. Python and Rust use 4 spaces and Go uses 
 
 Loxel follows your project's [`.editorconfig`](https://editorconfig.org) files. For each file it reads the `.editorconfig` in the file's folder and in every folder above it, up to the worktree root (or the root of an [other folder](#other-folders)), and stops early at one that sets `root = true`. When several set the same property, the closest file wins.
 
-| Property                                   | Effect                                                                     |
-| ------------------------------------------ | -------------------------------------------------------------------------- |
-| `indent_style`, `indent_size`, `tab_width` | Indentation as you type; a per-extension override in Settings still wins   |
-| `trim_trailing_whitespace`                 | Trailing spaces and tabs are removed on save                               |
-| `insert_final_newline`                     | A missing final newline is added on save; `false` leaves the file as it is |
-| `end_of_line`                              | Line endings are converted to `lf` or `crlf` on save                       |
+| Property                                   | Effect                                                                        |
+| ------------------------------------------ | ----------------------------------------------------------------------------- |
+| `indent_style`, `indent_size`, `tab_width` | Indentation as you type, over your settings (see [Indentation](#indentation)) |
+| `max_line_length`                          | A vertical ruler at that column                                               |
+| `trim_trailing_whitespace`                 | Trailing spaces and tabs are removed on save                                  |
+| `insert_final_newline`                     | A missing final newline is added on save; `false` leaves the file as it is    |
+| `end_of_line`                              | Line endings are converted to `lf` or `crlf` on save                          |
 
 Changes made on save are a separate step in the undo history, so `Cmd+Z` brings them back, and the autosave after an undo leaves the file as you restored it. On autosave, whitespace at the end of the lines you're typing on is kept, so a space you just typed doesn't vanish; it's removed by a later save. Edits to an `.editorconfig` apply to open files right away.
 
-`charset`, `max_line_length`, and `end_of_line = cr` aren't applied by the editor. When Prettier formats on save, it reads `.editorconfig` too, `max_line_length` included, just like the Prettier command line. Markdown files and drawings are saved in their editors' own formats and don't use `.editorconfig`, and neither do drafts or files opened from outside a project.
+A newly opened file can be edited once its `.editorconfig` has been read, so your first keystrokes already follow it. `charset` and `end_of_line = cr` aren't applied by the editor. When Prettier formats on save, it reads `.editorconfig` too, `max_line_length` included, just like the Prettier command line. Markdown files and drawings are saved in their editors' own formats and don't use `.editorconfig`, and neither do drafts or files opened from outside a project.
 
 ---
 

@@ -128,9 +128,9 @@ export function EditorSection() {
       <div className="space-y-1.5">
         <label className="text-muted-foreground text-xs">Per-Extension Overrides</label>
         <p className="text-muted-foreground text-[10px]">
-          Built-in language defaults ({BUILTIN_INDENTATION_SUMMARY}) take precedence over the
-          default above, and a project&apos;s .editorconfig over both. An override for a file&apos;s
-          extension takes precedence over all of them.
+          An override for a file&apos;s extension takes precedence over the indentation detected in
+          the file, built-in language defaults ({BUILTIN_INDENTATION_SUMMARY}) and the default
+          above. A project&apos;s .editorconfig takes precedence over all of them.
         </p>
 
         {overrides.length > 0 && (

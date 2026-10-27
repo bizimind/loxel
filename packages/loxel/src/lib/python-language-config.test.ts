@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 
 import * as monaco from "monaco-editor";
 
@@ -79,8 +79,16 @@ describe("Python editing in Monaco", () => {
   let container: HTMLElement;
   let editor: monaco.editor.IStandaloneCodeEditor;
 
+  /** Every Python configuration registered, in order: Monaco's built-in one and ours. */
+  const pythonConfigurations: monaco.languages.LanguageConfiguration[] = [];
+
   beforeAll(async () => {
-    registerPythonLanguageConfiguration();
+    const setConfiguration = monaco.languages.setLanguageConfiguration;
+    spyOn(monaco.languages, "setLanguageConfiguration").mockImplementation((id, configuration) => {
+      if (id === "python") pythonConfigurations.push(configuration);
+      return setConfiguration(id, configuration);
+    });
+    const registered = registerPythonLanguageConfiguration();
     monaco.languages.register({ id: "toml" }); // registered by monaco-env.ts in the app
     container = document.createElement("div");
     document.body.append(container);
@@ -93,8 +101,18 @@ describe("Python editing in Monaco", () => {
       minimap: { enabled: false },
       overviewRulerLanes: 0,
     });
-    // Monaco's built-in config loads asynchronously; ours is registered a task after it.
-    await Bun.sleep(50);
+    await registered;
+  });
+
+  // Each registration overrides the fields it sets, so a Monaco upgrade that registers its own
+  // configuration later (or no longer exposes it) would silently drop ours.
+  test("registers its configuration last, over Monaco's built-in one", () => {
+    expect(pythonConfigurations).toHaveLength(2);
+    const [builtin, ours] = pythonConfigurations;
+    expect(builtin?.autoClosingPairs?.some((p) => p.open === '"""')).toBe(false);
+    expect(ours?.autoClosingPairs?.some((p) => p.open === '"""')).toBe(true);
+    expect(ours?.onEnterRules?.at(-1)?.beforeText).toBe(PYTHON_DEDENT_AFTER);
+    expect(ours?.indentationRules).toEqual(builtin?.indentationRules);
   });
 
   afterAll(() => {

@@ -84,18 +84,24 @@ function overtypeTripleQuotes(editor: monaco.editor.ICodeEditor): void {
  * language configurations merge field by field with the last registration winning, so ours has
  * to land after it. Importing the same module resolves no earlier than Monaco's own loader, and
  * the timeout lets its remaining promise continuations (and its registration) run first.
+ *
+ * Resolves once ours is registered, or failed to (logged), after the first Python model.
  */
-export function registerPythonLanguageConfiguration(): void {
+export function registerPythonLanguageConfiguration(): Promise<void> {
   monaco.editor.onDidCreateEditor(overtypeTripleQuotes);
-  monaco.languages.onLanguageEncountered("python", () => {
-    import("monaco-editor/languages/definitions/python/python.js")
-      .then(({ conf }) => {
-        setTimeout(() => {
-          monaco.languages.setLanguageConfiguration("python", extendPythonConfiguration(conf));
-        }, 0);
-      })
-      .catch((error: unknown) => {
-        log.warn("Failed to load Monaco's Python language definition", { error });
-      });
+  return new Promise((resolve) => {
+    monaco.languages.onLanguageEncountered("python", () => {
+      import("monaco-editor/languages/definitions/python/python.js")
+        .then(({ conf }) => {
+          setTimeout(() => {
+            monaco.languages.setLanguageConfiguration("python", extendPythonConfiguration(conf));
+            resolve();
+          }, 0);
+        })
+        .catch((error: unknown) => {
+          log.warn("Failed to load Monaco's Python language definition", { error });
+          resolve();
+        });
+    });
   });
 }
