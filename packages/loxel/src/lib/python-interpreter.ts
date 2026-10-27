@@ -15,9 +15,11 @@ const AUTOMATIC_ID = "#automatic";
 const SOURCE_DESCRIPTIONS: Record<PythonEnvSource, string> = {
   override: "Chosen for this worktree",
   "virtual-env": "Detected from VIRTUAL_ENV",
+  conda: "Detected from CONDA_PREFIX",
   venv: "Detected virtual environment",
   pixi: "Detected Pixi environment",
   poetry: "Detected Poetry environment",
+  pipenv: "Detected Pipenv environment",
   system: "Detected on the login-shell PATH",
 };
 

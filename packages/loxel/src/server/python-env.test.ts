@@ -7,10 +7,14 @@ import { dirname, join } from "node:path";
 const stateDir = await mkdtemp(join(tmpdir(), "python-env-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const {
+  getPythonEnv,
+  isShippedByRepo,
+  refreshAllPythonEnvs,
   listPythonEnvs,
   normalizePythonOverride,
   pathOutsideWorktree,
   resolvePythonEnv,
+  subscribePythonEnv,
   watchPythonEnv,
 } = await import("./python-env");
 const { getPythonOverride, onPythonOverrideChange, setPythonOverride } =
@@ -377,6 +381,155 @@ describe("resolvePythonEnv", () => {
   });
 });
 
+describe("resolvePythonEnv discovery", () => {
+  test("uses CONDA_PREFIX only when it lies inside the worktree", async () => {
+    const { wt, outside, bin } = await makeRoot();
+    const inside = join(wt, ".conda");
+    const python = await writeExecutable(join(inside, "bin", "python"));
+    await mkdir(join(inside, "conda-meta"));
+    await writeExecutable(join(outside, "base", "bin", "python"));
+    const system = await writeExecutable(join(bin, "python3"));
+
+    expect(await resolvePythonEnv(wt, { env: { PATH: bin, CONDA_PREFIX: inside } })).toEqual({
+      source: "conda",
+      pythonPath: python,
+      envPath: inside,
+    });
+    const base = join(outside, "base");
+    const env = await resolvePythonEnv(wt, { env: { PATH: bin, CONDA_PREFIX: base } });
+    expect(env?.pythonPath).toBe(system);
+  });
+
+  test("prefers uv's UV_PROJECT_ENVIRONMENT over the usual venv names", async () => {
+    const { wt } = await makeRoot();
+    await makeVenv(join(wt, ".venv"));
+    const python = await makeVenv(join(wt, "build", "uv-env"));
+
+    const env = await resolvePythonEnv(wt, {
+      env: { PATH: "", UV_PROJECT_ENVIRONMENT: "build/uv-env" },
+    });
+    expect(env).toEqual({
+      source: "venv",
+      pythonPath: python,
+      envPath: join(wt, "build", "uv-env"),
+    });
+  });
+
+  test("asks Pipenv for its environment only when Pipfile.lock exists", async () => {
+    const { wt, outside, bin } = await makeRoot();
+    const pipenvVenv = join(outside, "virtualenvs", "wt-abc123");
+    const python = await makeVenv(pipenvVenv);
+    await writeExecutable(join(bin, "pipenv"), `#!/bin/sh\necho "${pipenvVenv}"\n`);
+
+    expect(await resolvePythonEnv(wt, { env: { PATH: bin } })).toBeNull();
+    await writeFile(join(wt, "Pipfile.lock"), "{}");
+    expect(await resolvePythonEnv(wt, { env: { PATH: bin } })).toEqual({
+      source: "pipenv",
+      pythonPath: python,
+      envPath: pipenvVenv,
+    });
+  });
+
+  test("picks a sub-project's venv when it is the only one and the root has none", async () => {
+    const { wt, bin } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    const system = await writeExecutable(join(bin, "python3"));
+    await mkdir(join(wt, "api"));
+    await writeFile(join(wt, "api", "pyproject.toml"), "");
+    const nested = await makeVenv(join(wt, "api", ".venv"));
+
+    expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(nested);
+
+    // With two, which one applies depends on the file, so neither is chosen.
+    await mkdir(join(wt, "worker"));
+    await writeFile(join(wt, "worker", "requirements.txt"), "");
+    await makeVenv(join(wt, "worker", "venv"));
+    expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
+  });
+
+  test("treats a path that cannot be checked as tracked instead of failing", async () => {
+    const { wt } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    expect(await isShippedByRepo(wt, join(wt, "gone", "python"))).toBe(true);
+  });
+});
+
+describe("shared resolution", () => {
+  // The shared resolution reads the process's environment; keep the developer's out of it.
+  for (const name of ["VIRTUAL_ENV", "CONDA_PREFIX", "UV_PROJECT_ENVIRONMENT"])
+    delete process.env[name];
+
+  test("is memoized while subscribed and re-resolved once git tracks the chosen environment", async () => {
+    const { wt } = await makeRoot();
+    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
+    const python = await makeVenv(join(wt, ".venv"));
+    const updates: Array<{ path: string | null; first: boolean; changed: boolean }> = [];
+    let notify = () => {};
+    const unsubscribe = subscribePythonEnv(wt, ({ env, first, changed }) => {
+      updates.push({ path: env?.pythonPath ?? null, first, changed });
+      notify();
+    });
+    try {
+      const first = await getPythonEnv(wt);
+      expect(first?.pythonPath).toBe(python);
+      // The same resolution, not a new one.
+      expect(await getPythonEnv(wt)).toBe(first);
+
+      const updated = new Promise<void>((resolve) => {
+        notify = resolve;
+      });
+      Bun.spawnSync(["git", "-C", wt, "add", "-f", ".venv/pyvenv.cfg"]);
+      expect((await getPythonEnv(wt))?.pythonPath).not.toBe(python);
+      await updated;
+      expect(updates.at(-1)).toMatchObject({ first: false, changed: true });
+      expect(updates[0]).toEqual({ path: python, first: true, changed: true });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  test("re-resolves subscribed worktrees when a relevant login-shell variable changed", async () => {
+    const { wt } = await makeRoot();
+    let resolutions = 0;
+    let notify = () => {};
+    const unsubscribe = subscribePythonEnv(wt, () => {
+      resolutions++;
+      notify();
+    });
+    try {
+      const first = new Promise<void>((resolve) => {
+        notify = resolve;
+      });
+      await getPythonEnv(wt);
+      await first;
+      refreshAllPythonEnvs(["STARSHIP_SESSION_KEY", "SSH_AUTH_SOCK"]);
+      const again = new Promise<void>((resolve) => {
+        notify = resolve;
+      });
+      refreshAllPythonEnvs(["SSH_AUTH_SOCK", "PATH"]);
+      await again;
+      // The irrelevant change started nothing, so the relevant one made the second resolution.
+      expect(resolutions).toBe(2);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  test("follows the worktree's override", async () => {
+    const { wt } = await makeRoot();
+    const picked = await makeVenv(join(root!, "picked"));
+    const unsubscribe = subscribePythonEnv(wt, () => {});
+    try {
+      await getPythonEnv(wt);
+      setPythonOverride(wt, picked);
+      expect((await getPythonEnv(wt))?.pythonPath).toBe(picked);
+    } finally {
+      setPythonOverride(wt, null);
+      unsubscribe();
+    }
+  });
+});
+
 describe("pathOutsideWorktree", () => {
   test("drops the worktree's own directories and keeps the rest in order", () => {
     expect(pathOutsideWorktree("/wt/bin:/usr/bin:/wt:/wt-other/bin:bin:/opt/bin", "/wt")).toBe(
@@ -489,6 +642,22 @@ describe("listPythonEnvs", () => {
     });
     expect(withOverride.automatic?.pythonPath).toBe(rootVenv);
     setPythonOverride(wt, null);
+  });
+
+  test("asks Poetry once", async () => {
+    const { wt, outside, bin } = await makeRoot();
+    const poetryVenv = join(outside, "poetry-venv");
+    await makeVenv(poetryVenv);
+    const runs = join(outside, "runs");
+    await writeExecutable(
+      join(bin, "poetry"),
+      `#!/bin/sh\necho x >> "${runs}"\necho "${poetryVenv}"\n`,
+    );
+    await writeFile(join(wt, "poetry.lock"), "");
+
+    const { automatic } = await listPythonEnvs(wt, { env: { PATH: bin } });
+    expect(automatic?.source).toBe("poetry");
+    expect((await Bun.file(runs).text()).trim().split("\n")).toHaveLength(1);
   });
 
   test("leaves out environments the repository tracks", async () => {

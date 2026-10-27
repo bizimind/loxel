@@ -1,10 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { logger } from "./logger";
-import { isEnvShippedByRepo } from "./python-env";
-
-const log = logger.child("format");
+import { envBinDir, getPythonEnvNow, isEnvShippedByRepo, VENV_DIR_NAMES } from "./python-env";
 
 export const PYTHON_FORMAT_EXTENSIONS: readonly string[] = ["py", "pyi"];
 
@@ -24,8 +21,6 @@ const BLACK: PythonFormatter = { command: "black", args: "--quiet --stdin-filena
 
 /** Ruff's own config file names, highest precedence first (as ruff resolves them). */
 const RUFF_CONFIG_FILES = [".ruff.toml", "ruff.toml"];
-
-const VENV_DIR_NAMES = [".venv", "venv"];
 
 /**
  * Pick the Python formatter for files under `startDir`, walking up to `wtRoot`; ruff and black
@@ -56,56 +51,57 @@ export function detectPythonFormatter(startDir: string, wtRoot: string): PythonF
 }
 
 /**
- * `bin` of the nearest virtual environment (`.venv` or `venv` holding a `pyvenv.cfg`) from
- * `startDir` up to `wtRoot` that has `command`, so a formatter pinned in the project's dev
- * dependencies wins over global installs. Environments the repository ships any part of are
- * skipped (`isEnvShippedByRepo`, the same rule the Python environment resolver applies).
+ * The directory holding `command` in the Python environment for files under `startDir`, so a
+ * formatter pinned in the project's dev dependencies wins over global installs: the nearest
+ * sub-project virtual environment (`.venv` / `venv` / `env` holding a `pyvenv.cfg`) between
+ * `startDir` and `wtRoot`, else the worktree's own environment from the shared resolution
+ * (override, activated environment, Pixi, Poetry, ...), else a virtual environment at `wtRoot`.
+ * Environments the repository ships any part of are skipped (`isEnvShippedByRepo`, the rule and
+ * cache every Python feature shares).
  */
 export async function findVenvBin(
   startDir: string,
   wtRoot: string,
   command: string,
 ): Promise<string | undefined> {
-  for (const dir of dirsUpToRoot(startDir, wtRoot)) {
-    for (const name of VENV_DIR_NAMES) {
-      const venv = join(dir, name);
-      const executable = join(venv, "bin", command);
-      if (!existsSync(join(venv, "pyvenv.cfg")) || !existsSync(executable)) continue;
-      if (await isShipped(wtRoot, venv, executable)) continue;
-      return join(venv, "bin");
-    }
+  const root = resolve(wtRoot);
+  const venvsIn = (dir: string) => VENV_DIR_NAMES.map((name) => join(dir, name));
+  const subprojectVenvs = dirsUpToRoot(startDir, root)
+    .filter((dir) => dir !== root)
+    .flatMap(venvsIn);
+  for (const venv of subprojectVenvs) {
+    const bin = await venvBinWith(root, venv, command);
+    if (bin) return bin;
+  }
+  // The last resolution: a save should not wait for a re-resolution after a `pip install`.
+  const env = await getPythonEnvNow(root);
+  if (env?.envPath) {
+    const bin = await binWith(root, env.envPath, dirname(env.pythonPath), command);
+    if (bin) return bin;
+  }
+  for (const venv of venvsIn(root)) {
+    const bin = await venvBinWith(root, venv, command);
+    if (bin) return bin;
   }
   return undefined;
 }
 
-/**
- * `isEnvShippedByRepo` per venv executable, kept until the worktree's formatter state is
- * invalidated (`forgetVenvTracking`): it rarely changes, and saves should not spawn git each time.
- */
-const shippedByExecutable = new Map<string, Promise<boolean>>();
-
-function isShipped(wtRoot: string, venv: string, executable: string): Promise<boolean> {
-  let shipped = shippedByExecutable.get(executable);
-  if (!shipped) {
-    shipped = isEnvShippedByRepo(wtRoot, venv, executable).catch((err: unknown) => {
-      // Fail closed: an environment that cannot be checked is not used.
-      log.warn("Skipping a venv for formatters: could not check whether git tracks it", {
-        venv,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return true;
-    });
-    shippedByExecutable.set(executable, shipped);
-  }
-  return shipped;
+/** {@link binWith} for a directory that is a virtual environment (has a `pyvenv.cfg`). */
+function venvBinWith(wtRoot: string, venv: string, command: string): Promise<string | undefined> {
+  if (!existsSync(join(venv, "pyvenv.cfg"))) return Promise.resolve(undefined);
+  return binWith(wtRoot, venv, envBinDir(venv), command);
 }
 
-/** Drop cached venv tracking state for venvs inside `wtRoot`. */
-export function forgetVenvTracking(wtRoot: string): void {
-  const prefix = resolve(wtRoot) + sep;
-  for (const executable of shippedByExecutable.keys()) {
-    if (executable.startsWith(prefix)) shippedByExecutable.delete(executable);
-  }
+/** `binDir` of the environment at `envPath` when it holds `command` and the repository ships none of it. */
+async function binWith(
+  wtRoot: string,
+  envPath: string,
+  binDir: string,
+  command: string,
+): Promise<string | undefined> {
+  const executable = Bun.which(command, { PATH: binDir });
+  if (!executable || (await isEnvShippedByRepo(wtRoot, envPath, executable))) return undefined;
+  return binDir;
 }
 
 /** `startDir` and its ancestors up to `wtRoot` (inclusive); just `wtRoot` when outside it. */

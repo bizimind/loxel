@@ -10,7 +10,6 @@ import { PrettierLibBackend } from "./prettier-lib-backend";
 import {
   detectPythonFormatter,
   findVenvBin,
-  forgetVenvTracking,
   PYTHON_FORMAT_EXTENSIONS,
   type PythonFormatter,
 } from "./python-formatter";
@@ -242,10 +241,9 @@ export class FormatService {
     return formatters.map((f) => ({ command: f.command, extensions: [...f.extensions] }));
   }
 
-  /** Invalidate the auto-detection and venv caches and destroy backends for a worktree. */
+  /** Invalidate the auto-detection cache and destroy backends for a worktree. */
   invalidateCache(worktreePath: string): void {
     this.cacheByWorktree.delete(worktreePath);
-    forgetVenvTracking(worktreePath);
     const prefix = worktreePath + "\0";
     for (const [key, backend] of this.backends) {
       if (key.startsWith(prefix)) {
@@ -387,15 +385,19 @@ export class FormatService {
       if (venvBin) env.PATH = prependPath(env.PATH, venvBin);
     }
 
+    let proc: ReturnType<typeof spawnFormatter>;
     try {
-      const proc = Bun.spawn(argv, {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        cwd: worktreePath ?? undefined,
-        env,
+      proc = spawnFormatter(argv, worktreePath, env);
+    } catch (err) {
+      log.warn("Formatter could not be started", {
+        command,
+        filePath,
+        error: err instanceof Error ? err.message : String(err),
       });
+      return { content: null, notice: spawnFailureNotice(command, err, env.PATH ?? "") };
+    }
 
+    try {
       // Write content to stdin
       proc.stdin.write(content);
       proc.stdin.end();
@@ -436,20 +438,42 @@ export class FormatService {
 
       return { content: formatted };
     } catch (err) {
-      log.warn("Formatter failed to execute", {
+      log.warn("Formatter failed", {
         command,
         filePath,
         error: err instanceof Error ? err.message : String(err),
       });
-      // Bun.spawn throws ENOENT both when the executable is not on PATH and when it is found but
-      // its interpreter is gone (e.g. a venv whose Python was upgraded away).
-      if (!(err instanceof Error && "code" in err && err.code === "ENOENT")) return UNFORMATTED;
-      const notice = Bun.which(command, { PATH: env.PATH ?? "" })
-        ? `Format on save skipped: "${command}" could not be started; its interpreter may be missing.`
-        : `Format on save skipped: "${command}" is not installed.`;
-      return { content: null, notice };
+      return UNFORMATTED;
     }
   }
+}
+
+function spawnFormatter(
+  argv: string[],
+  worktreePath: string | undefined,
+  env: Record<string, string | undefined>,
+) {
+  return Bun.spawn(argv, {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    cwd: worktreePath ?? undefined,
+    env,
+  });
+}
+
+/**
+ * Why a formatter could not be started, for the user: any spawn error is one they can fix.
+ * Bun.spawn throws ENOENT both when the executable is not on PATH and when it is found but its
+ * interpreter is gone (e.g. a venv whose Python was upgraded away).
+ */
+function spawnFailureNotice(command: string, err: unknown, PATH: string): string {
+  const code = err instanceof Error && "code" in err ? String(err.code) : null;
+  if (code === "ENOENT" && !Bun.which(command, { PATH })) {
+    return `Format on save skipped: "${command}" is not installed.`;
+  }
+  const detail = code === "ENOENT" ? "; its interpreter may be missing" : ` (${code ?? "error"})`;
+  return `Format on save skipped: "${command}" could not be started${detail}.`;
 }
 
 // ---------------------------------------------------------------------------
