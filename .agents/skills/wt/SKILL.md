@@ -1,8 +1,8 @@
 ---
 name: wt
 description: >-
-  How to use the `wt` git-worktree manager: creating/listing/viewing/renaming/removing
-  worktrees, the repo layout, where init.wt.sh / clean.wt.sh / rename.wt.sh hooks go and
+  How to use the `wt` git-worktree manager: setting up a repo for it (`wt init`, `wt doctor`),
+  creating/listing/viewing/renaming/removing worktrees, the repo layout, where init.wt.sh / clean.wt.sh / rename.wt.sh hooks go and
   what to put in them, the wt.sh shell helpers, and scripting wt with its JSON output. Use
   when setting up or working with git worktrees via `wt`, writing wt hook scripts, or
   parsing wt's output in a script.
@@ -22,12 +22,14 @@ wt list              # list worktrees                           (alias: ls)
 wt view [name]       # one worktree's branch, head, dirty count, upstream divergence
 wt mv [old] <new>    # rename a worktree + its branch, run rename.wt.sh (aliases: rename, move)
 wt remove [name]     # run clean.wt.sh, remove the worktree     (aliases: rm, delete)
+wt doctor            # check the repo's git setup, change nothing (exit 1 on a failed check)
+wt init [url] [dir]  # fix the setup checks you choose; with a URL, bare-clone set up for wt
 wt version | update
 ```
 
 Key flags: `-j` (JSON, all commands); `add -b <branch>` (check out an existing branch), `add --base <ref>` (start the new branch elsewhere); `mv --branch <b>` / `mv -B` (rename the branch to `<b>` / leave it alone), `mv -f` (locked worktree); `remove -f` (dirty worktree), `remove -d` / `-D` / `--keep-branch` (delete the branch if merged / even if unmerged / keep it without prompting). Run `wt <cmd> --help` for the rest.
 
-**Running unattended (agents, scripts).** Always pass the worktree name and every decision as flags. Without a terminal, a missing name or an undecided choice (existing branch, dirty removal) is an error, never a prompt, and `remove`/`view` never auto-pick a target. `mv` is the exception: with one name it renames the worktree you are in, so pass `wt mv <old> <new>` in scripts. Without `-d`/`-D`, a non-interactive `remove` keeps the branch.
+**Running unattended (agents, scripts).** Always pass the worktree name and every decision as flags. Without a terminal, a missing name or an undecided choice (existing branch, dirty removal) is an error, never a prompt, and `remove`/`view` never auto-pick a target. `mv` is the exception: with one name it renames the worktree you are in, so pass `wt mv <old> <new>` in scripts. Without `-d`/`-D`, a non-interactive `remove` keeps the branch. A non-interactive `wt init` with no flags changes nothing and lists the pending fixes with their flags (`--fetch-refspec`, `--set-origin-head`, `--main-worktree`, `--repair`, `--prune`, `--worktree-metadata on|off`); `--yes` applies the recommended ones.
 
 **Branches.** `wt add <name>` creates branch `<name>` from the remote default as of the last fetch (`origin/main`), or from `HEAD` when there is no `origin` default. It never fetches: run `git fetch` first for a newer base. The new branch tracks nothing. If branch `<name>` already exists, pass `-b <name>` to reuse it; if another worktree has it checked out, that is an error. `-d` deletes a branch only when it is merged into `HEAD` or the remote default.
 
@@ -51,15 +53,13 @@ myrepo/                  # the bare repo  ← $WT_ROOT
     feature-x/           # ← `wt add feature-x` lands here ($WT_PATH)
 ```
 
-A plain `git clone --bare` sets no fetch refspec, so add one to get `origin/*` branches:
+Set one up with `wt init <url>`: a bare clone plus what plain `git clone --bare` leaves out (the fetch refspec, so `origin/*` exists; `origin/HEAD`; the default branch checked out as `.worktrees/main`). For an existing repo, run `wt doctor`, then `wt init` to fix what it reports.
 
 ```sh
-git clone --bare git@github.com:you/myrepo.git myrepo
-cd myrepo
-git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
-git fetch origin
-wt add main -b main       # the default branch as the first worktree
+wt init git@github.com:you/myrepo.git    # → ./myrepo
 ```
+
+Per-worktree config (`git config --worktree`, needed for per-worktree metadata such as Loxel's worktree nesting) is off unless the user opts in with `wt init --worktree-metadata on`. Never turn on `extensions.worktreeConfig` by hand in a bare repo: `core.bare` must move into `config.worktree` first or every linked worktree breaks, which `wt init` does.
 
 In a regular (non-bare) repo, `$WT_ROOT` is the main worktree and added worktrees go in `<repo>/.worktrees/<name>` (wt adds it to `.git/info/exclude`). `WT_DIR` overrides the worktrees directory. Nested names work: `wt add feat/x` → `.worktrees/feat/x` on branch `feat/x`.
 

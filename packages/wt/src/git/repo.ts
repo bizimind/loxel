@@ -5,6 +5,7 @@ import { wrapError } from "@bizimind/cli-common";
 
 import { getCurrentBranch } from "./branch.ts";
 import { git, gitSucceeds, runGit } from "./run.ts";
+import { readWorktreeConfigState } from "./worktree-config.ts";
 import { canonicalWorktreesDir, isWorktreeDirty, pathExists } from "./worktree.ts";
 
 export type RepoType = "empty" | "bare" | "regular" | "worktree";
@@ -151,9 +152,23 @@ async function moveFilesToWorktree(
   await Promise.all(toMove.map((entry) => rename(join(cwd, entry), join(worktreePath, entry))));
 }
 
+/**
+ * Settings of the main checkout's own `config.worktree`, parked in the git dir while it is
+ * promoted: the checkout becomes a linked worktree, so they move to that worktree's admin dir.
+ */
+const PARKED_WORKTREE_CONFIG = "config.worktree.wt-checkout";
+
 /** Promote the contents of .git to the repository root and mark it bare. */
 async function convertToBareRepo(cwd: string, gitDir: string): Promise<void> {
-  await git(["config", "--bool", "core.bare", "true"], cwd);
+  if ((await readWorktreeConfigState(cwd)).enabled) {
+    // With per-worktree config on, core.bare = true in the shared config would make every
+    // linked worktree (the moved checkout included) bare too, so only the bare dir gets it.
+    const mainFile = join(gitDir, "config.worktree");
+    if (await pathExists(mainFile)) await rename(mainFile, join(gitDir, PARKED_WORKTREE_CONFIG));
+    await git(["config", "--file", mainFile, "core.bare", "true"], cwd);
+  } else {
+    await git(["config", "--bool", "core.bare", "true"], cwd);
+  }
 
   const gitEntries = await readdir(gitDir);
   await Promise.all(gitEntries.map((entry) => rename(join(gitDir, entry), join(cwd, entry))));
@@ -172,6 +187,8 @@ async function convertToBareRepo(cwd: string, gitDir: string): Promise<void> {
 async function registerWorktree(cwd: string, worktreePath: string, branch: string): Promise<void> {
   const trackingDir = await availableTrackingDir(cwd, basename(worktreePath));
   await mkdir(trackingDir, { recursive: true });
+  const parked = join(cwd, PARKED_WORKTREE_CONFIG);
+  if (await pathExists(parked)) await rename(parked, join(trackingDir, "config.worktree"));
 
   await Promise.all([
     Bun.write(join(worktreePath, ".git"), `gitdir: ${trackingDir}\n`),
