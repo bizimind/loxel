@@ -1,8 +1,9 @@
-import { createWorktreeLspClient } from "./lsp-client";
+import { createLspClient } from "./lsp-client";
 
-const { connect: connectRuffLsp, disconnect: disconnectRuffLsp } = createWorktreeLspClient(
-  "ws/ruff-lsp",
-  "python",
-);
+const { connect: connectRuffLsp, disconnect: disconnectRuffLsp } = createLspClient({
+  route: "ws/ruff-lsp",
+  name: "Ruff",
+  languageId: "python",
+});
 
 export { connectRuffLsp, disconnectRuffLsp };

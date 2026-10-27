@@ -3,6 +3,11 @@ import path from "node:path";
 import type { FileSink, ServerWebSocket, Subprocess } from "bun";
 
 import type { LogCategory } from "@/api/log-entry-model";
+import {
+  LSP_EXITED_CLOSE_CODE,
+  LSP_REPLACED_CLOSE_CODE,
+  LSP_START_FAILED_CLOSE_CODE,
+} from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
 import { logger } from "./logger";
@@ -549,7 +554,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       if (existingWs && existingWs !== ws) {
         this.detach(existingWs);
         try {
-          existingWs.close(4000, "Replaced by newer connection");
+          existingWs.close(LSP_REPLACED_CLOSE_CODE, "Replaced by newer connection");
         } catch (err) {
           this.log.debug("close() on replaced WebSocket threw (already closed)", { error: err });
         }
@@ -582,7 +587,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   /**
    * Spawn the server for `ws`, or, when it cannot start, release `ws`'s session and close it with
-   * 4001: nothing else would answer the client's `initialize`, so it fails visibly.
+   * {@link LSP_START_FAILED_CLOSE_CODE}: nothing else would answer the client's `initialize`, so it
+   * fails visibly.
    */
   private spawnSession(ws: ServerWebSocket<unknown>, context: TContext, bin: string | null): void {
     let reason: string;
@@ -601,7 +607,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       reason = `${this.name} binary not found — is it installed?`;
     }
     this.detach(ws);
-    ws.close(4001, reason);
+    ws.close(LSP_START_FAILED_CLOSE_CODE, reason);
   }
 
   private spawnProcess(ws: ServerWebSocket<unknown>, context: TContext, bin: string): void {
@@ -671,8 +677,17 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         });
       }
       this.releaseSession(session);
-      if (this.sessions.get(ws) === session) {
-        this.sessions.delete(ws);
+      // Still live: it exited on its own (crash, out of memory, killed outside Loxel), not through
+      // `detach` / `destroy`. The socket would otherwise stay open with nothing answering it, so
+      // release the session's key and close the socket, which tells the client to reconnect.
+      if (!this.isSessionLive(session)) return;
+      this.detach(ws);
+      try {
+        ws.close(LSP_EXITED_CLOSE_CODE, `${this.name} exited with code ${code}`);
+      } catch (err) {
+        this.log.debug("close() on an exited server's WebSocket threw (already closed)", {
+          error: err,
+        });
       }
     });
   }

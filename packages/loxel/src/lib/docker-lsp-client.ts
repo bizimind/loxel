@@ -1,8 +1,9 @@
-import { createWorktreeLspClient } from "./lsp-client";
+import { createLspClient } from "./lsp-client";
 
-const { connect: connectDockerLsp, disconnect: disconnectDockerLsp } = createWorktreeLspClient(
-  "ws/docker-lsp",
-  ["dockerfile", "dockerbake"],
-);
+const { connect: connectDockerLsp, disconnect: disconnectDockerLsp } = createLspClient({
+  route: "ws/docker-lsp",
+  name: "Docker",
+  languageId: ["dockerfile", "dockerbake"],
+});
 
 export { connectDockerLsp, disconnectDockerLsp };

@@ -107,6 +107,7 @@ Back/forward work like a browser's history, across all projects. Worktree number
 | Action                     | Shortcut                                |
 | -------------------------- | --------------------------------------- |
 | Python: Select Interpreter | unbound — command palette or status bar |
+| Restart Language Servers   | unbound — command palette               |
 
 ---
 

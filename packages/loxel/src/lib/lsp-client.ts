@@ -1,13 +1,23 @@
 import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client";
 
-import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
+import { useLspStatusStore } from "@/store/lsp-status";
 
 import { isLiveEditorModel } from "./live-editor-model";
+import {
+  createLspConnection,
+  type LspClose,
+  type LspConnection,
+  type LspConnectionState,
+  type LspLink,
+} from "./lsp-connection";
 import { createLspWorkspaceFiles } from "./lsp-workspace-files";
 
 /** Every connected worktree client, with the worktree it serves. */
 const connectedClients = new Map<MonacoLspClient, string>();
+
+/** Every client's connection, for restarting them. */
+const connections = new Set<LspConnection>();
 
 /**
  * The language-server clients connected for `wtPath` now: TypeScript for the active worktree,
@@ -17,101 +27,114 @@ export function getConnectedLspClients(wtPath: string): MonacoLspClient[] {
   return [...connectedClients].filter(([, path]) => path === wtPath).map(([client]) => client);
 }
 
-/**
- * Factory for worktree-scoped LSP client connections. Each call creates an
- * independent connect/disconnect pair backed by a single WebSocket transport.
- *
- * The connect function is idempotent per worktree path — calling it with the
- * same path while already connected is a no-op. Calling with a different path
- * disposes the old transport (killing the server-side subprocess) and opens a
- * new connection. Both the worktree switch and `disconnect()` dispose the
- * client (unregistering providers and closing synced documents) before the
- * transport. Only editor tabs' live models are synced to the server (see `isLiveEditorModel`).
- * Workspace edits (rename, code actions) also change the worktree's files that are not open
- * (see `createLspWorkspaceFiles`), and a toast says why when one fails. A socket the server closes
- * with `LSP_RESTART_CLOSE_CODE` (it restarts the language server) is reconnected, which
- * re-initializes the server and re-opens the synced documents.
- */
-export function createWorktreeLspClient(wsPath: string, languageId?: string | readonly string[]) {
-  let currentWtPath: string | null = null;
-  let currentTransport: WebSocketTransport | null = null;
-  let currentClient: MonacoLspClient | null = null;
-  let connecting = false;
-
-  function connect(wtPath: string): void {
-    // Guard against both an active connection and an in-flight connect to the
-    // same path — the latter prevents the double-spawn race where two rapid
-    // calls each open a WebSocket before the first resolves.
-    if (currentWtPath === wtPath && (currentClient || connecting)) return;
-    currentWtPath = wtPath;
-    teardown();
-    connecting = true;
-
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const address = `${proto}//${location.host}/${wsPath}?wt=${encodeURIComponent(wtPath)}`;
-
-    openSocket(address).then(
-      (socket) => {
-        const transport = WebSocketTransport.fromWebSocket(socket);
-        if (currentWtPath !== wtPath) {
-          transport.dispose();
-          return;
-        }
-        connecting = false;
-        currentTransport = transport;
-        currentClient = new MonacoLspClient(transport, {
-          languageId,
-          modelFilter: isLiveEditorModel,
-          // One client per route at a time: each takes over the markers' owner of the one before.
-          markerOwner: wsPath.replace(/^ws\//, ""),
-          workspaceFileSystem: createLspWorkspaceFiles(wtPath),
-          onWorkspaceEditFailure: (reason) => showToast(`Edit not applied: ${reason}`),
-        });
-        const client = currentClient;
-        connectedClients.set(client, wtPath);
-        // A socket the server closed (replaced by a newer connection) never answers again.
-        transport.state.onChange(({ state }) => {
-          if (state === "closed") connectedClients.delete(client);
-        });
-        socket.addEventListener("close", (event) => {
-          if (event.code !== LSP_RESTART_CLOSE_CODE || currentTransport !== transport) return;
-          teardown();
-          currentWtPath = null;
-          connect(wtPath);
-        });
-      },
-      () => {
-        if (currentWtPath === wtPath) {
-          connecting = false;
-          currentWtPath = null;
-        }
-      },
-    );
-  }
-
-  // Dispose the client before the transport so its `textDocument/didClose`
-  // notifications still go out over a live socket.
-  function teardown(): void {
-    if (currentClient) connectedClients.delete(currentClient);
-    currentClient?.dispose();
-    currentClient = null;
-    currentTransport?.dispose();
-    currentTransport = null;
-  }
-
-  function disconnect(): void {
-    teardown();
-    currentWtPath = null;
-    connecting = false;
-  }
-
-  return { connect, disconnect };
+/** Restart every language server Loxel is connected to (or trying to be), from scratch. */
+export function restartLanguageServers(): void {
+  for (const connection of connections) connection.restart();
 }
 
-function openSocket(address: string): Promise<WebSocket> {
+/** Restart the language servers that stopped (crashed, could not start, another window took them). */
+export function restartStoppedLanguageServers(): void {
+  for (const connection of connections) {
+    if (connection.state.state === "stopped") connection.restart();
+  }
+}
+
+/** Loxel's server is reachable again: reconnect the clients that lost it (see `LspConnection.resume`). */
+export function resumeLanguageServers(): void {
+  for (const connection of connections) connection.resume();
+}
+
+export interface LspClientOptions {
+  /** WebSocket route of the server, such as `ws/python-lsp`. Also the client's marker owner. */
+  route: string;
+  /** The server's name for notices, such as `basedpyright`. */
+  name: string;
+  languageId: string | readonly string[];
+}
+
+/**
+ * Factory for a language-server client connection. Each call creates an independent
+ * connect/disconnect pair backed by one WebSocket and one `MonacoLspClient` at a time.
+ *
+ * `connect(wtPath)` is idempotent per worktree path (null: a server not scoped to a worktree,
+ * YAML). Connecting to a different path disposes the old client and socket (killing the
+ * server-side subprocess) and opens a new connection. Both the worktree switch and `disconnect()`
+ * dispose the client (unregistering providers and closing synced documents) before the socket.
+ * Only editor tabs' live models are synced to the server (see `isLiveEditorModel`). Workspace edits
+ * (rename, code actions) also change the worktree's files that are not open (see
+ * `createLspWorkspaceFiles`), and a toast says why when one fails.
+ *
+ * When the socket closes on its own, `createLspConnection` decides whether and when to reconnect;
+ * a reconnect starts a new client, which re-initializes the server and re-opens the synced
+ * documents. A client that stops reconnecting is listed in `useLspStatusStore` for the status bar,
+ * with a toast when its server crashed or could not start.
+ */
+export function createLspClient({ route, name, languageId }: LspClientOptions) {
+  const markerOwner = route.replace(/^ws\//, "");
+
+  async function open(wtPath: string | null): Promise<LspLink> {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const query = wtPath === null ? "" : `?wt=${encodeURIComponent(wtPath)}`;
+    const { socket, closed } = await openSocket(`${proto}//${location.host}/${route}${query}`);
+    const transport = WebSocketTransport.fromWebSocket(socket);
+    let client: MonacoLspClient;
+    try {
+      client = new MonacoLspClient(transport, {
+        languageId,
+        modelFilter: isLiveEditorModel,
+        // One client per route at a time: each takes over the markers' owner of the one before.
+        markerOwner,
+        workspaceFileSystem: wtPath === null ? undefined : createLspWorkspaceFiles(wtPath),
+        onWorkspaceEditFailure: (reason) => showToast(`Edit not applied: ${reason}`),
+      });
+    } catch (err) {
+      transport.dispose();
+      throw err;
+    }
+    if (wtPath !== null) connectedClients.set(client, wtPath);
+    return {
+      closed,
+      // The client first, so its `textDocument/didClose` notifications still go out over a live
+      // socket.
+      dispose() {
+        connectedClients.delete(client);
+        client.dispose();
+        transport.dispose();
+      },
+    };
+  }
+
+  function onStateChange(state: LspConnectionState): void {
+    const { setStopped } = useLspStatusStore.getState();
+    if (state.state !== "stopped") {
+      setStopped(route, null);
+      return;
+    }
+    setStopped(route, { name, reason: state.reason, detail: state.detail });
+    if (state.reason === "crashed") {
+      showToast(`${name} kept crashing and was stopped. Click it in the status bar to restart it.`);
+    } else if (state.reason === "start-failed") {
+      showToast(`${name} could not start. Click it in the status bar to try again.`);
+    }
+  }
+
+  const connection = createLspConnection({ open, onStateChange });
+  connections.add(connection);
+  return { connect: connection.connect, disconnect: connection.disconnect };
+}
+
+/** Open a socket, listening for its close from the start so none is missed. */
+function openSocket(address: string): Promise<{ socket: WebSocket; closed: Promise<LspClose> }> {
   const socket = new WebSocket(address);
+  const closed = new Promise<LspClose>((resolve) => {
+    socket.addEventListener(
+      "close",
+      (event) => resolve({ code: event.code, reason: event.reason }),
+      { once: true },
+    );
+  });
   return new Promise((resolve, reject) => {
-    socket.addEventListener("open", () => resolve(socket), { once: true });
+    socket.addEventListener("open", () => resolve({ socket, closed }), { once: true });
     socket.addEventListener("error", reject, { once: true });
   });
 }
