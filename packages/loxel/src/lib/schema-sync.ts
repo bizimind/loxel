@@ -1,6 +1,6 @@
 /**
  * Orchestrates schema synchronization between the settings store,
- * Monaco's JSON language service, and the YAML language server.
+ * Monaco's JSON language service, and the YAML and TOML language servers.
  *
  * Called on initial load (after settings hydrate) and on settings save.
  */
@@ -15,7 +15,7 @@ const log = frontendLog.child("ui");
 let syncing = false;
 let pendingSync = false;
 
-/** Fetch all configured schemas from the server and apply to Monaco + YAML LSP. */
+/** Fetch all configured schemas from the server and apply to Monaco + the YAML and TOML LSPs. */
 export async function syncSchemas(): Promise<void> {
   if (syncing) {
     pendingSync = true;

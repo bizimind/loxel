@@ -223,7 +223,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * `rootUri` / `rootPath` / `workspaceFolders` injected into the
    * `initialize` request. Returns null by default (no injection).
    * Subclasses that carry `wtPath` on their session override this.
-   * It is also the root whose file changes reach the server when
+   * It is also the single folder the base answers `workspace/workspaceFolders`
+   * with, and the root whose file changes reach the server when
    * {@link forwardWatchedFiles} is set.
    */
   protected getSessionWorkspace(_session: TSession): string | null {
@@ -297,11 +298,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             const rootUri = `file://${workspace}`;
             if (!msg.params.rootUri) msg.params.rootUri = rootUri;
             if (!msg.params.rootPath) msg.params.rootPath = workspace;
-            if (!msg.params.workspaceFolders) {
-              msg.params.workspaceFolders = [
-                { uri: rootUri, name: path.basename(workspace) || workspace },
-              ];
-            }
+            if (!msg.params.workspaceFolders)
+              msg.params.workspaceFolders = workspaceFolders(workspace);
           }
           const initOpts = this.getInitializationOptions(session);
           if (initOpts) {
@@ -456,6 +454,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         Array.isArray(m.params?.items)
       ) {
         void this.answerWorkspaceConfiguration(session, m.id, m.params.items);
+        return;
+      }
+      // monaco-lsp-client does not implement this request either (Tombi sends it).
+      const workspace = this.getSessionWorkspace(session);
+      if (workspace && m.method === "workspace/workspaceFolders" && m.id !== undefined) {
+        this.writeToStdin(
+          session,
+          JSON.stringify({ jsonrpc: "2.0", id: m.id, result: workspaceFolders(workspace) }),
+        );
         return;
       }
       if (m.error && typeof m.error === "object") {
@@ -895,6 +902,11 @@ function mergeInitOptions(
     }
   }
   return out;
+}
+
+/** The session's single workspace folder, as `initialize` and `workspace/workspaceFolders` carry it. */
+function workspaceFolders(workspace: string): { uri: string; name: string }[] {
+  return [{ uri: `file://${workspace}`, name: path.basename(workspace) || workspace }];
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

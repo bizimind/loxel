@@ -17,6 +17,7 @@ export const LOG_CATEGORIES = [
   "ruff-lsp",
   "astro-lsp",
   "xml-lsp",
+  "toml-lsp",
   "schema-service",
   "update",
   "worktrees",
