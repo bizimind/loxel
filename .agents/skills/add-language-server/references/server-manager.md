@@ -24,7 +24,7 @@ monaco-lsp-client does not answer `workspace/configuration`, so the base does. D
 
 ## A second server for a language
 
-Python runs basedpyright and ruff on the same `python` models. Each server is a full integration of its own:
+Python runs basedpyright and ruff on the same `python` models. Each server is a full server-side integration of its own; the language's Monaco registration, highlighting, icons and URI scheme already exist:
 
 - Its own manager, route, `LOG_CATEGORIES` entry and client module, plus a second `createLazyLspConnector` with the same `languageIds`. The client syncs every model of those languages to both servers.
 - Diagnostics stay apart because each client's marker owner is its route (`python-lsp`, `ruff-lsp`); nothing to configure, as long as the route names differ.
@@ -32,4 +32,4 @@ Python runs basedpyright and ruff on the same `python` models. Each server is a 
 
 ## Project-provided binaries
 
-A server can run the project's own install so its pinned version and config apply (ruff from the worktree's Python environment). Make `resolveBinary` async and fall back to the bundled binary. Anything taken from the worktree or its environment must pass the environment trust rule in `python-env.ts` (`isEnvShippedByRepo` for an environment, `isShippedByRepo` for a single file; see "Environment trust rule" in LANGUAGE_SERVERS.md), since a binary the repository commits would run repository code. Re-pick when the environment changes (`subscribePythonEnv`), and when the pick differs, `detach` the session and close its socket with `LSP_RESTART_CLOSE_CODE`: the client reconnects and the new session spawns the new binary. Do not widen or bypass the trust rule.
+A server can run the project's own install so its pinned version and config apply (ruff from the worktree's Python environment). Make `resolveBinary` async and fall back to the bundled binary. Anything taken from the worktree or its environment must pass the environment trust rule in `python-env.ts` (`isEnvShippedByRepo` for an environment, `isShippedByRepo` for a single file; see "Environment trust rule" in LANGUAGE_SERVERS.md), since a binary the repository commits would run repository code. Re-pick when the environment changes (`subscribePythonEnv`), and when the pick differs, `detach` the session and close its socket with `LSP_RESTART_CLOSE_CODE`: the client reconnects and the new session spawns the new binary. Also pick again once the session is built, in case a re-resolution landed while it spawned (`spawnedRuff` in `ruff-lsp-manager.ts`), and probe a binary's version in the worktree, since version-manager shims pick by directory. Do not widen or bypass the trust rule.

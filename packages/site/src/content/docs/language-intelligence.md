@@ -137,7 +137,7 @@ venvPath = "."
 venv = ".venv-py313"
 ```
 
-The type checker only reads that environment's installed packages and never runs its interpreter; Ruff, format on save and terminals keep using the interpreter above.
+The type checker only reads that environment's installed packages and never runs its interpreter; Ruff, format on save and terminals are not affected by this setting.
 
 ### Python linting
 

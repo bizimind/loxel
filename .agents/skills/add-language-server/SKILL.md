@@ -31,7 +31,7 @@ Resolve these with the user before starting:
 
 All paths are under `packages/loxel/`.
 
-1. **Binary.** One of: `scripts/build-<name>.ts` bundles an NPM package with `Bun.build`, then `bun build --compile` into `build/` (`resolvePackage()` locates it; see the yaml-ls plugins and the basedpyright shims); `scripts/download-<name>.ts` downloads a release with per-platform SHA256 pins, hashed in memory before anything is written or extracted, extracting only the binary (a tarball or Windows zip needs only `downloadReleaseBinary` from `download-release-binary.ts`, as ruff and Tombi do); or a copy script (`copy-typescript.ts`). Add a `build:<name>` / `download:<name>` script and chain it in `build:server:standalone`.
+1. **Binary.** One of: `scripts/build-<name>.ts` bundles an NPM package with `Bun.build`, then `bun build --compile` into `build/` (add the package as a devDependency; `resolvePackage()` locates it; see the yaml-ls plugins and the basedpyright shims); `scripts/download-<name>.ts` downloads a release with per-platform SHA256 pins, hashed in memory before anything is written or extracted, extracting only the binary (a tarball or Windows zip needs only `downloadReleaseBinary` from `download-release-binary.ts`, as ruff and Tombi do); or a copy script (`copy-typescript.ts`). Add a `build:<name>` / `download:<name>` script and chain it in `build:server:standalone`.
 2. **Server manager.** `src/server/<name>-lsp-manager.ts`, from `astro-lsp-manager.ts` (the simplest): extend `WorktreeLspManager`, call `super("<name>-lsp")`, implement `resolveBinary` (usually `this.resolveBundledBinary("<binary>", devPath?)`). Everything else is an opt-in hook, see `references/server-manager.md`.
 3. **Registration.** `src/server/server-state.ts`: add `| WorktreeLspData<"<name>-lsp">` to `WsData`. `src/server/server.ts`: instantiate at module level, add to `worktreeLspManagers` and the `worktreeLspTypes` array (route `/ws/<name>-lsp?wt=`), wire `open`/`close`/`message`, `.destroy()` in `shutdown()`. `src/api/log-entry-model.ts`: add `"<name>-lsp"` to `LOG_CATEGORIES`.
 4. **Client.** `src/lib/<name>-lsp-client.ts`: `createWorktreeLspClient("ws/<name>-lsp", "<languageId>" | [...ids])`, exporting `connect<Name>Lsp` / `disconnect<Name>Lsp`. The route also names the client's diagnostics marker owner.
@@ -49,5 +49,5 @@ All paths are under `packages/loxel/`.
 - [ ] `highlighter.ts`, semantic token rules, file icons
 - [ ] `useFileScheme` in `CodeEditorPanel.tsx`
 - [ ] `electron-builder.yml` and release workflow
-- [ ] Rows in LANGUAGE_SERVERS.md and `references/existing-integrations.md`, the language on the site page `packages/site/src/content/docs/language-intelligence.md`
+- [ ] LANGUAGE_SERVERS.md (managers table, routes, client modules, registered languages), `references/existing-integrations.md`, the language on the site page `packages/site/src/content/docs/language-intelligence.md`
 - [ ] `pnpm install` and `pnpm -C packages/loxel run typecheck` pass

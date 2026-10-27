@@ -407,8 +407,8 @@ export interface PythonEnvChoices {
  * Every interpreter the user can choose for a worktree, without duplicates: the one automatic
  * detection picks first, then `.venv` / `venv` / `env` and Pixi environments at the root and in
  * Python project directories below it (those holding a `pyproject.toml`, `requirements.txt`, ...),
- * Poetry's environment, `python3` on the login-shell PATH, and last the chosen override when it
- * is none of those. Never throws.
+ * Poetry's environment, the interpreter on the login-shell PATH, and last the chosen override
+ * when it is none of those. Never throws.
  */
 export async function listPythonEnvs(
   worktreePath: string,
