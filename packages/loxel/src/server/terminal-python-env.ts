@@ -1,6 +1,6 @@
 /**
- * Python environment activation for terminal shells: environment variables only (what a venv's
- * `activate` script exports), plus a zsh startup shim that re-applies the PATH entry after the
+ * Python environment activation for terminal shells: the environment variables (see
+ * `python-env-activation.ts`), plus a zsh startup shim that re-applies the PATH entry after the
  * user's own startup files. See docs/TERMINALS.md.
  */
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
@@ -10,7 +10,7 @@ import type { PythonEnv } from "@/api/python-env-model";
 
 import { config } from "./config";
 import { logger } from "./logger";
-import { isShippedByRepo } from "./python-env";
+import { pythonEnvActivation, setPythonEnvVars } from "./python-env-activation";
 
 const log = logger.child("terminal");
 
@@ -97,9 +97,9 @@ function ensureZshShim(): string {
 
 /**
  * Activate `pythonEnv` in a terminal's spawn environment the way its `activate` script would:
- * its `bin` first on PATH (moved, not duplicated, when already there), `VIRTUAL_ENV` for a venv,
- * and no `PYTHONHOME`. An interpreter outside any environment changes nothing, and so does a `bin`
- * the shell could misread or that holds files git tracks in `worktreePath`. For zsh, also routes
+ * its `bin` first on PATH, `VIRTUAL_ENV` for a venv, and no `PYTHONHOME` (see
+ * {@link setPythonEnvVars}). An interpreter outside any environment changes nothing, and so does a
+ * `bin` the shell could misread or that holds files git tracks in `worktreePath`. For zsh, also routes
  * startup through the shim that keeps the entry first after the user's startup files; other shells
  * get the PATH entry without `VIRTUAL_ENV`, since their startup may move the entry back.
  */
@@ -117,28 +117,15 @@ export async function activatePythonEnv(
     });
     return;
   }
-  // The whole `bin`, not just the interpreter: first on PATH, a committed `bin/git` written into
-  // an ignored venv would shadow the real one.
-  if (await isShippedByRepo(worktreePath, binDir)) {
-    log.warn("Not activating a Python environment with files tracked by git", { binDir });
-    return;
-  }
+  const activation = await pythonEnvActivation(pythonEnv, worktreePath);
+  if (!activation) return;
   // Before any change, so a failed write leaves the environment untouched.
   const shimDir = path.basename(shell) === "zsh" ? ensureZshShim() : null;
 
-  const rest = (env.PATH ?? "").split(path.delimiter).filter((dir) => dir && dir !== binDir);
-  env.PATH = [binDir, ...rest].join(path.delimiter);
-  delete env.PYTHONHOME;
-  // An environment inherited from wherever Loxel was launched no longer applies.
-  delete env.VIRTUAL_ENV_PROMPT;
   // Only zsh gets the shim that keeps `bin` first. Other login shells can rebuild PATH with the
   // system directories ahead of it, and a VIRTUAL_ENV naming the venv (shown by prompts, honored
   // by uv and poetry) would then contradict the `python` and `pip` the shell runs.
-  if (shimDir && existsSync(path.join(pythonEnv.envPath, "pyvenv.cfg"))) {
-    env.VIRTUAL_ENV = pythonEnv.envPath;
-  } else {
-    delete env.VIRTUAL_ENV;
-  }
+  setPythonEnvVars(env, activation, { virtualEnv: shimDir !== null });
 
   if (!shimDir) return;
   // A ZDOTDIR that already is the shim (Loxel started from a shell mid-startup) would recurse.

@@ -1,6 +1,6 @@
 # Coding agent integration
 
-How loxel hosts `@bizimind/coding-agent` sessions in the Bun server and renders them in agent panels, from WebSocket wiring to rewind, fork, devtools, and model settings.
+How loxel hosts `@bizimind/coding-agent` sessions in the Bun server and renders them in agent panels, from WebSocket wiring and the tools' environment to rewind, fork, devtools, and model settings.
 
 The agent runtime, its tools, protocol, and on-disk session store are documented in [coding-agent README](../../coding-agent/README.md) and [SPEC.md](../../coding-agent/docs/SPEC.md). This doc only covers the loxel side. For the WebSocket server as a whole see [SHARED_SERVER.md](./SHARED_SERVER.md) and [ARCHITECTURE.md](./ARCHITECTURE.md); for panel hosting see [PANELS_AND_LAYOUT.md](./PANELS_AND_LAYOUT.md).
 
@@ -43,7 +43,13 @@ Server to client: `agent_event { id, seq, event }`, `agent_exit { id, exitCode }
 
 ### Session config and models
 
-`buildSessionConfig` passes `workspaceRoot`, `models`, `mode`, `profile`, and `declaredTools` from `sessionOptions`, a child logger, the handler table, and `env: buildSpawnEnv()` ([shell-env.ts](../src/server/shell-env.ts)), which is the server env with the login-shell environment applied (see [TERMINALS.md](TERMINALS.md#environment)) and `~/.local/bin` on `PATH`, plus `AI_AGENT=loxel`, the cross-agent marker that tells tools such as the `loxel` CLI an agent ran them (the CLI then opens without focus). That env is only used for tool subprocesses. `AgentSessionOptions` is `Pick<SessionConfig, "models" | "mode" | "profile" | "declaredTools">`.
+`buildSessionConfig` passes `workspaceRoot`, `models`, `mode`, `profile`, and `declaredTools` from `sessionOptions`, a child logger, the handler table, and `env`, the getter of the session's `AgentEnv` (see [Tool environment](#tool-environment)). `AgentSessionOptions` is `Pick<SessionConfig, "models" | "mode" | "profile" | "declaredTools">`.
+
+### Tool environment
+
+Each `AgentSession` owns an `AgentEnv` ([agent-env.ts](../src/server/agent-env.ts)) holding the environment of its tool subprocesses: `buildSpawnEnv()` ([shell-env.ts](../src/server/shell-env.ts)), the server env with the login-shell environment applied (see [TERMINALS.md](TERMINALS.md#environment)) and `~/.local/bin` on `PATH`, plus `AI_AGENT=loxel`, the cross-agent marker that tells tools such as the `loxel` CLI an agent ran them (the CLI then opens without focus), with the worktree's Python environment activated. `SessionConfig.env` is the getter `AgentEnv.get`, which the SDK calls at every Bash, Grep, background-task and completion-check spawn, so a change applies from the agent's next command without restarting the session.
+
+`AgentEnv` subscribes to the workspace root's shared Python resolution (see [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md#python-environment)). It does not delay session start: it begins without a Python environment, applies `getPythonEnvNow` when that answers (unless the subscription heard a resolution first), then every update with `changed` (a `uv sync` or `python -m venv` the agent or the user ran, once the environment watch's debounce has fired, or an interpreter picked in the status bar). Updates are applied one at a time in the order heard, each rebuilding the env from a fresh `buildSpawnEnv()`. Activation uses `pythonEnvActivation` and `setPythonEnvVars` from [python-env-activation.ts](../src/server/python-env-activation.ts), shared with terminals: the environment's `bin` first on `PATH`, `VIRTUAL_ENV` for a venv, no `PYTHONHOME` or `VIRTUAL_ENV_PROMPT`, and nothing for an interpreter outside any environment or a `bin` that fails the [environment trust rule](LANGUAGE_SERVERS.md#environment-trust-rule). Unlike a terminal's login shell, the agent's `$SHELL -c` leaves `PATH` in the order given, so a venv gets `VIRTUAL_ENV` in every shell and no zsh shim. A workspace root that is not an absolute path (`"."`, no worktree) gets no Python environment. `destroy`, and a failed create, dispose the `AgentEnv`, which unsubscribes it.
 
 ### Lifecycle
 
@@ -106,7 +112,7 @@ The SDK persists sessions as an append-only `events.jsonl` with branches and per
 
 [ModelsSection.tsx](../src/components/settings/ModelsSection.tsx) / [ModelFormDialog.tsx](../src/components/settings/ModelFormDialog.tsx) edit the `models` library (`ModelEntry`: OpenRouter `modelId` + `apiKey`). [CodingAgentSection.tsx](../src/components/settings/CodingAgentSection.tsx) edits `codingAgent`: `baseModelId`, per-function `functionOverrides` (`planner`, `executor`, `fallback`, `judge`, `websearch`, `websearchFallback`), and `defaultMode` / `defaultProfile`. Both live in [settings-store.ts](../src/store/settings-store.ts).
 
-`buildSessionOptions` resolves entry ids into `SessionConfig.models` (`base` plus one key per override, remapping `websearch` to `webSearch`), and adds `mode` / `profile`. Unset models fall back to the SDK model router's environment variables (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL_<PROFILE>`, `OPENROUTER_WEBSEARCH_MODEL`, ...; see the README "Configuration" table), read from the loxel server's `process.env`.
+`buildSessionOptions` resolves entry ids into `SessionConfig.models` (`base` plus one key per override, remapping `websearch` to `webSearch`), and adds `mode` / `profile`. Unset models fall back to the SDK model router's environment variables (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL_<PROFILE>`, `OPENROUTER_WEBSEARCH_MODEL`, ...; see the README "Configuration" table), read from the session's tool environment when the session starts, so variables exported by the user's shell profile apply even when Loxel was launched from Finder or the Dock.
 
 The renderer holds API keys in plaintext and sends them in `agent_create.sessionOptions`; a key that fails to decrypt arrives as `{ err }` (`ApiKeyError`) and the UI flags it. How keys are stored and encrypted is in [STATE_AND_STORAGE.md](./STATE_AND_STORAGE.md#secrets).
 
@@ -121,6 +127,7 @@ When touching the manager, check by hand: create → reattach replay with no dup
 ## Where to look
 
 - [src/server/agent-manager.ts](../src/server/agent-manager.ts): registry, `Session` bridge, buffer, request dispatch
+- [src/server/agent-env.ts](../src/server/agent-env.ts): the tool subprocesses' environment and its Python activation
 - [src/server/server.ts](../src/server/server.ts): `agent_*` handlers, `agentOwners`, `detachClientAgents`, idle shutdown
 - [src/api/ws-protocol.ts](../src/api/ws-protocol.ts): message shapes, `AgentSessionOptions`, `deriveAgentStatus`
 - [src/api/coding-agent-model.ts](../src/api/coding-agent-model.ts): pure event → timeline reducer

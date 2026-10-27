@@ -2,6 +2,7 @@ import type { ModelConfig } from "../orchestrator/model-router.ts";
 import type { PermissionStore } from "../permissions/store.ts";
 import type { SessionRecord } from "../session/model.ts";
 import type { SessionStore } from "../session/store.ts";
+import type { SpawnEnv } from "../utils/shell.ts";
 import type { ToolProfile } from "./profile.ts";
 import type { TaskManager } from "./task-manager.ts";
 import type { CanonicalToolName } from "./tool-names.ts";
@@ -37,8 +38,8 @@ export interface ToolRuntimeContext {
   declaredTools?: CanonicalToolName[];
   approvalOverrides?: Partial<Record<CanonicalToolName, "allow" | "deny">>;
   providerConfig?: { webSearch?: ModelConfig; webSearchFallback?: ModelConfig };
-  /** Environment variables passed to spawned subprocesses. When undefined, inherits process.env. */
-  env?: Record<string, string | undefined>;
+  /** The environment for a subprocess, read at each spawn; undefined inherits process.env. */
+  getEnv: () => SpawnEnv | undefined;
   /** Cancels work owned by the current model run. */
   abortSignal?: AbortSignal;
   emitEvent: (type: string, payload: Record<string, unknown>) => Promise<void>;

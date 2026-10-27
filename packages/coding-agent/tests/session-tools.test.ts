@@ -173,6 +173,37 @@ describe("Session tools", () => {
       expect(toolResults[0]!.isError).toBe(false);
     });
 
+    test("Bash reads an env function at each spawn", async () => {
+      let probe = "first";
+      // The host changes the environment between the two commands of one run.
+      const events = collectEvents({
+        "tool.call.result": (e) => {
+          events.all.push(e);
+          probe = "second";
+        },
+      });
+      session = await Session.create({
+        workspaceRoot: env.workspaceRoot,
+        env: () => ({ ...process.env, AGENT_ENV_PROBE: probe }),
+        handlers: events.handlers,
+      });
+      patchSessionModel(
+        session,
+        createMockModel([
+          toolCallStreamParts("Bash", { command: 'printf %s "$AGENT_ENV_PROBE"' }),
+          toolCallStreamParts("Bash", { command: 'printf %s "$AGENT_ENV_PROBE"' }),
+          textStreamParts("Commands executed"),
+        ]),
+      );
+
+      await session.send("run the probe twice");
+
+      const stdouts = events
+        .ofType("tool.call.result")
+        .map((e) => (e.output as { stdout: string }).stdout);
+      expect(stdouts).toEqual(["first", "second"]);
+    });
+
     test("TodoWrite + TodoRead roundtrip", async () => {
       const events = collectEvents();
       session = await Session.create({

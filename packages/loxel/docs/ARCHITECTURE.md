@@ -153,7 +153,7 @@ The same index as the [package README](../README.md#internal-docs), grouped the 
 - [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md) — language-server managers and routing (watched files, pulled configuration, on-disk workspace edits), the per-worktree Python environment, interpreter choice and environment trust rule, URI schemes, diagnostics, formatting, JSON/YAML/TOML schemas, highlighting and editing behavior
 - [TERMINALS.md](TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, login-shell environment capture, Python environment activation, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
 - [CODE_REVIEW.md](CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
-- [CODING_AGENT_INTEGRATION.md](CODING_AGENT_INTEGRATION.md) — hosting coding-agent sessions in the server, event buffering, rewind and fork, devtools, model settings
+- [CODING_AGENT_INTEGRATION.md](CODING_AGENT_INTEGRATION.md) — hosting coding-agent sessions in the server, their tools' environment (Python activation), event buffering, rewind and fork, devtools, model settings
 - [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md) — diff views: components shared by git diffs and file comparisons, synchronized scrolling, intra-line highlights, gutter connectors
 - [FILES_TREE.md](FILES_TREE.md) — the shared `FilesTree` component: path identity, expansion, focus, reveal
 - [PROJECT_EXPLORER.md](PROJECT_EXPLORER.md) — the Project Files panel: path model, Drafts and Others sections, reveal

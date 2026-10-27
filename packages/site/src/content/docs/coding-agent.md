@@ -17,7 +17,7 @@ The coding agent uses models from [OpenRouter](https://openrouter.ai/). Set it u
 
 Settings apply to newly created sessions. The same section sets the default session mode (execute or plan) and the default tool profile.
 
-Without settings, the agent falls back to environment variables from the environment Loxel starts in: `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL_PLANNER`, `OPENROUTER_MODEL_EXECUTOR`, `OPENROUTER_MODEL_FALLBACK`, `OPENROUTER_MODEL_JUDGE`, `OPENROUTER_WEBSEARCH_MODEL`, and `OPENROUTER_WEBSEARCH_FALLBACK_MODEL` for each function's model. Loxel launched from Finder or the Dock doesn't read your shell profile's variables, so prefer Settings.
+Without settings, the agent falls back to environment variables from your login shell, so variables exported in your shell profile work even when Loxel was launched from Finder or the Dock: `OPENROUTER_API_KEY`, and `OPENROUTER_MODEL_PLANNER`, `OPENROUTER_MODEL_EXECUTOR`, `OPENROUTER_MODEL_FALLBACK`, `OPENROUTER_MODEL_JUDGE`, `OPENROUTER_WEBSEARCH_MODEL`, and `OPENROUTER_WEBSEARCH_FALLBACK_MODEL` for each function's model. They are read when a session starts.
 
 ---
 
@@ -67,6 +67,12 @@ The agent can pause and ask for input. Two overlay types appear inline in the ti
 Edit, Write, MultiEdit, Bash, and TaskStop ask for approval; leaving plan mode asks you to approve the plan.
 
 ---
+
+## Commands the agent runs
+
+The agent's commands (its Bash tool, background tasks and searches) run in the session's worktree with your login shell's environment, like the tools Loxel starts for you, and `AI_AGENT=loxel` set so tools can tell they were run by an agent.
+
+When the worktree has a Python environment, the agent's commands run with it active, the same environment new terminals get: its `python`, `pip` and installed tools come first on `PATH`, and `VIRTUAL_ENV` is set for a virtual environment. Loxel finds it the same way as for the [Python language server](/docs/language-intelligence#python-environment), including the interpreter you chose for the worktree, and never activates an environment that is committed to the repository. The session follows changes: after `uv sync` or `python -m venv .venv` creates an environment (run by the agent or by you), or after you choose another interpreter, the agent's next commands use it without restarting the session. Without a Python environment, commands run with your shell's `PATH` as they are.
 
 ## Tool profiles
 

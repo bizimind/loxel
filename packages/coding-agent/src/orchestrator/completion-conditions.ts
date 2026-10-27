@@ -9,7 +9,7 @@ import type { LanguageModel } from "ai";
 import { generateObject } from "ai";
 import { z } from "zod";
 
-import { resolveShellBinary } from "../utils/shell.ts";
+import { resolveShellBinary, type SpawnEnv } from "../utils/shell.ts";
 
 /** Default timeout for shell commands in milliseconds. */
 const COMMAND_TIMEOUT_MS = 60_000;
@@ -72,7 +72,7 @@ export interface TaskStatus {
 export interface VerificationContext {
   workspaceRoot: string;
   listTasks?: () => Promise<TaskStatus[]>;
-  env?: Record<string, string | undefined>;
+  env?: SpawnEnv;
 }
 
 /**
@@ -82,7 +82,7 @@ async function runCommand(
   command: string,
   cwd: string,
   timeoutMs: number = COMMAND_TIMEOUT_MS,
-  env?: Record<string, string | undefined>,
+  env?: SpawnEnv,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const shell = resolveShellBinary();
   const proc = Bun.spawn([shell, "-c", command], {
