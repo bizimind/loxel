@@ -55,5 +55,6 @@ export {
   isWorktreeConfigBroken,
   isWorktreeConfigStranded,
   readWorktreeConfigState,
+  strandedWorktreeConfigKeys,
   type WorktreeConfigState,
 } from "./worktree-config.ts";

@@ -153,6 +153,15 @@ describe("worktree config left half-changed", () => {
     await git(["status"], linked);
   });
 
+  test("is not stranded when core.bare is in both files", async () => {
+    const { root } = await bareWithWorktree();
+    // An enable that stopped after its first step (the shared config was locked, say).
+    const [copy] = enableWorktreeConfigCommands(await readWorktreeConfigState(root));
+    await run([copy!], root);
+
+    expect(isWorktreeConfigStranded(await readWorktreeConfigState(root))).toBe(false);
+  });
+
   test("disables over a shared config holding several core.bare lines", async () => {
     const { root, linked } = await bareWithWorktree();
     await enable(root);

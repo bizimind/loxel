@@ -25,7 +25,7 @@ import { pathExists } from "./worktree.ts";
 
 /** Main-worktree settings that must live in the main `config.worktree` while the extension is on. */
 const MAIN_ONLY_KEYS = ["core.bare", "core.worktree"] as const;
-type MainOnlyKey = (typeof MAIN_ONLY_KEYS)[number];
+export type MainOnlyKey = (typeof MAIN_ONLY_KEYS)[number];
 
 export interface WorktreeConfigState {
   /** The repository's common git dir (absolute) */
@@ -98,7 +98,18 @@ export function isWorktreeConfigBroken(state: WorktreeConfigState): boolean {
  * `core.bare` may not.
  */
 export function isWorktreeConfigStranded(state: WorktreeConfigState): boolean {
-  return !state.enabled && disableWorktreeConfigCommands(state).length > 0;
+  return strandedWorktreeConfigKeys(state).length > 0;
+}
+
+/**
+ * The main-only settings stranded that way: in the main file but not the
+ * shared one. A key in both is fine, since git reads the shared copy.
+ */
+export function strandedWorktreeConfigKeys(state: WorktreeConfigState): MainOnlyKey[] {
+  if (state.enabled) return [];
+  return MAIN_ONLY_KEYS.filter(
+    (key) => state.main[key] !== undefined && state.shared[key] === undefined,
+  );
 }
 
 /**

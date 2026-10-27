@@ -24,6 +24,7 @@ import {
   pathExists,
   readWorktreeConfigState,
   resolveRemoteDefault,
+  strandedWorktreeConfigKeys,
   resolveRepoRoot,
   runGit,
   type Worktree,
@@ -367,7 +368,9 @@ function originHeadCheck(state: RepoState): Parameters<AddCheck> {
     return [{ ...base, status: "ok", summary: `origin/HEAD is ${state.originHead}`, affects: [] }];
   }
 
-  const steps = [...(state.hasOriginRefs ? [] : [gitStep("fetch", "origin")]), SET_ORIGIN_HEAD];
+  // `set-head --auto` needs origin's default branch fetched, not just some origin ref: a narrow
+  // fetch can leave only other branches. Without a known default, fetch everything first.
+  const steps = [...(state.remoteDefault ? [] : [gitStep("fetch", "origin")]), SET_ORIGIN_HEAD];
   const action = plannedAction(
     {
       id: "origin-head",
@@ -514,7 +517,7 @@ function addWorktreeMetadataCheck(root: string, config: WorktreeConfigState, add
   };
 
   if (isWorktreeConfigStranded(config)) {
-    const stranded = Object.keys(config.main).join(" and ");
+    const stranded = strandedWorktreeConfigKeys(config).join(" and ");
     add(
       {
         ...base,

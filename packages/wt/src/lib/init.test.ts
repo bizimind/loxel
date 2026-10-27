@@ -7,6 +7,7 @@ import {
   createTestDirectory,
   createTestRepo,
   enableOriginTracking,
+  seedPath,
   type TestRepo,
 } from "../test-repo.ts";
 import { executeAdd } from "./add.ts";
@@ -201,6 +202,25 @@ describe("executeInit", () => {
 
     const result = await executeInit(repo.root, { apply: ["origin-head"] });
     expect(result.outcomes[0]?.status).toBe("applied");
+    expect(statusOf(result.checks, "origin-head")).toBe("ok");
+  });
+
+  test("fetches before recording origin/HEAD when only other branches were fetched", async () => {
+    repo = await createTestRepo({ bare: true });
+    await git(["branch", "other"], seedPath(repo.root));
+    await git(["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], repo.root);
+    await git(
+      ["fetch", "--quiet", "origin", "+refs/heads/other:refs/remotes/origin/other"],
+      repo.root,
+    );
+    await git(["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"], repo.root).catch(() => "");
+    expect(statusOf((await diagnose(repo.root)).checks, "origin-head")).toBe("warn");
+
+    const result = await executeInit(repo.root, { apply: ["origin-head"] });
+    expect(result.outcomes[0]).toMatchObject({
+      status: "applied",
+      commands: ["git fetch origin", "git remote set-head origin --auto  # if origin has branches"],
+    });
     expect(statusOf(result.checks, "origin-head")).toBe("ok");
   });
 
