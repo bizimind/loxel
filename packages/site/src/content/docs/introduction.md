@@ -60,7 +60,7 @@ loxel https://example.com # open a URL in the browser panel
 - [Getting Started](/docs/getting-started) — add your first project, tour the layout, create a worktree
 
 - **Features** — detailed coverage of every panel and capability:
-  [Worktrees & Projects](/docs/worktrees-and-projects) · [Panel Layout](/docs/panel-layout) · [Git](/docs/git) · [Code Review](/docs/code-review) · [Coding Agent](/docs/coding-agent) · [Diff Viewer](/docs/diff-viewer) · [Editor](/docs/editor) · [Drafts](/docs/drafts) · [Terminals](/docs/terminals) · [TypeScript Intelligence](/docs/typescript-intelligence)
+  [Worktrees & Projects](/docs/worktrees-and-projects) · [Panel Layout](/docs/panel-layout) · [Git](/docs/git) · [Code Review](/docs/code-review) · [Coding Agent](/docs/coding-agent) · [Diff Viewer](/docs/diff-viewer) · [Editor](/docs/editor) · [Drafts](/docs/drafts) · [Terminals](/docs/terminals) · [Language Intelligence](/docs/language-intelligence)
 
 - **Reference** — [Keyboard Shortcuts](/docs/reference-keybindings) · [Env Vars / File Locations / CLI / Settings](/docs/reference-env-files-cli-settings)
 

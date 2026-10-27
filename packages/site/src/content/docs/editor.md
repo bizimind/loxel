@@ -68,7 +68,7 @@ Supported formatters:
 
 When a project has both Prettier and oxfmt, Prettier wins for the languages it supports.
 
-Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's Python environment when they're installed there (and the environment isn't committed to git), so the version pinned in your dev dependencies is the one used: a sub-project's own `.venv`, `venv` or `env` first, then the worktree's [Python environment](/docs/typescript-intelligence#python-environment), including an interpreter you chose, and files your ruff config excludes are left as they are. The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's Python environment when they're installed there (and the environment isn't committed to git), so the version pinned in your dev dependencies is the one used: a sub-project's own `.venv`, `venv` or `env` first, then the worktree's [Python environment](/docs/language-intelligence#python-environment), including an interpreter you chose, and files your ruff config excludes are left as they are. The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
 
 ---
 
@@ -109,7 +109,7 @@ A newly opened file can be edited once its `.editorconfig` has been read, at mos
 
 ## Python files
 
-Python source (`.py`), stub (`.pyi`), and `.pyw` files get highlighting and Python language features. Typing `"""` or `'''` adds the closing quotes, typing the closing quotes steps over them, and pressing Enter after `return`, `pass`, `break`, `continue`, or `raise` dedents the next line.
+Python source (`.py`), stub (`.pyi`), and `.pyw` files get highlighting and [Python language features](/docs/language-intelligence#python). Typing `"""` or `'''` adds the closing quotes, typing the closing quotes steps over them, and pressing Enter after `return`, `pass`, `break`, `continue`, or `raise` dedents the next line.
 
 Project files are recognized too: `pyproject.toml`, `uv.lock`, `poetry.lock`, and `Pipfile` are highlighted as TOML, `Pipfile.lock` as JSON, and `requirements*.txt`, `requirements*.in`, `requirements/*.txt`, and `constraints*.txt` as pip requirements. In the file tree, `.venv`, `venv`, `__pycache__`, and Python tool cache folders show a distinct folder icon. To treat other files as a given language, add a glob in **Settings > File Associations**.
 
@@ -208,12 +208,12 @@ An opened file or folder goes to the most recently focused Loxel window, launchi
 
 ## TypeScript diagnostics
 
-Real-time errors and warnings from TypeScript appear inline in the editor as you type — no manual run required. The full language server feature set (hover, go-to-definition, completions, rename, and more) is covered in [TypeScript Intelligence](/docs/typescript-intelligence).
+Real-time errors and warnings from TypeScript appear inline in the editor as you type — no manual run required. The full language server feature set (hover, go-to-definition, completions, rename, and more) is covered in [Language Intelligence](/docs/language-intelligence), along with the language servers for Python and other languages.
 
 ---
 
 ## See also
 
-- [TypeScript Intelligence](/docs/typescript-intelligence) — per-worktree language server, completions, hover, go-to-definition, and more
+- [Language Intelligence](/docs/language-intelligence) — per-worktree language servers, Python environments, completions, hover, go-to-definition, and more
 - [Drafts](/docs/drafts) — draft files autosave on the same schedule as the code editor
 - [Diff Viewer](/docs/diff-viewer) — viewing file changes in split or unified view

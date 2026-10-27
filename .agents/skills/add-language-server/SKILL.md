@@ -1,149 +1,53 @@
 ---
 name: add-language-server
-description: Add a new language server to loxel with full integration across all layers (build/download, server manager, server routing, client connection, Monaco registration, highlighting/icons, editor URI scheme, packaging). Use when adding support for a new programming language or file type that needs LSP features like completions, hover, diagnostics, or go-to-definition.
+description: Add a new language server to loxel with full integration across all layers (build/download, server manager, server routing, client connection, Monaco registration, highlighting/icons, editor URI scheme, packaging). Use when adding support for a new programming language or file type that needs LSP features like completions, hover, diagnostics, or go-to-definition, including a second server for a language that already has one.
 ---
 
 # Add Language Server
 
-Integrate a new language server into loxel. There are 7 layers to wire up plus packaging (layer 8). Read `references/existing-integrations.md` for per-LSP quirks and the integration matrix.
+Integrate a new language server into loxel: 7 layers plus packaging. Architecture: `packages/loxel/docs/LANGUAGE_SERVERS.md`. References:
 
-This skill covers LSP integration only. It does not cover formatters, TextMate grammars, or monaco-lsp-client internals.
+- `references/server-manager.md`: the manager's hooks, how a server gets its settings, project-provided binaries, and a second server for a language that already has one (basedpyright + ruff).
+- `references/existing-integrations.md`: integration matrix and per-server quirks.
+
+This skill covers LSP integration only, not formatters, TextMate grammars or monaco-lsp-client internals.
 
 ## Decision Points
 
 Resolve these with the user before starting:
 
-| Decision            | Default                                   | Alternatives                                                               |
-| ------------------- | ----------------------------------------- | -------------------------------------------------------------------------- |
-| **Scope**           | Worktree (one subprocess per worktree)    | Global (YAML model — single shared subprocess)                             |
-| **Connection**      | Lazy (spawned when matching models exist) | Eager (TypeScript model — always connected)                                |
-| **Binary source**   | Bun-built from NPM package                | Downloaded pre-built binary (Go/Rust servers)                              |
-| **Semantic tokens** | Enabled                                   | Disabled (`disableSemanticTokens = true`) if buggy                         |
-| **Text sync**       | Incremental                               | Full-text (`requiresFullTextSync = true`) if server mishandles incremental |
-| **URI scheme**      | `file://` (most LSPs)                     | `loxel://HEAD/` with server-side translation (TypeScript only)             |
-| **Language IDs**    | One language per server                   | Multiple (Docker serves `dockerfile` + `dockerbake`)                       |
-| **Spawn args**      | `["--stdio"]`                             | Varies: `["serve"]` (terraform-ls), `["start", "--stdio"]` (docker-ls)     |
+| Decision            | Default                                   | Alternatives                                                                                           |
+| ------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Scope**           | Worktree (one subprocess per worktree)    | Global (YAML: one shared subprocess)                                                                   |
+| **Connection**      | Lazy (spawned when matching models exist) | Eager (TypeScript: always connected)                                                                   |
+| **Binary source**   | Bun-built from NPM package                | Downloaded pre-built binary (Go/Rust servers); the project's own install (ruff)                        |
+| **Settings**        | None                                      | Init options, pushed after `initialized`, or pulled with `workspace/configuration`                     |
+| **Overlap**         | Only server for its languages             | A second server on the same languages (ruff next to basedpyright): suppress the features it duplicates |
+| **Semantic tokens** | Enabled                                   | Disabled (`disableSemanticTokens = true`) if buggy or TextMate is better                               |
+| **Text sync**       | Incremental                               | Full-text (`requiresFullTextSync = true`) if the server mishandles incremental                         |
+| **Spawn args**      | `["--stdio"]`                             | `["serve"]` (terraform-ls), `["start", "--stdio"]` (docker-ls), `["server"]` (ruff), `["lsp"]` (Tombi) |
 
-## Layer 1: Binary Sourcing
+## Layers
 
-**Three approaches — pick one:**
+All paths are under `packages/loxel/`.
 
-**A. Bun-built from NPM package** — `packages/loxel/scripts/build-<name>.ts`. Two-step: `Bun.build()` bundles the entry point, then `bun build --compile` produces a standalone binary in `build/`. Use `resolvePackage()` from `./resolve-package.ts` to locate the NPM package. Some servers need Bun.build plugins (see the yaml-ls build script) or runtime shims (see the basedpyright build script). Add the NPM package as a devDependency.
-
-**B. Downloaded pre-built binary** — `packages/loxel/scripts/download-<name>.ts`. For Go/Rust/GraalVM-native binaries. Pin SHA256 digests per platform. Hash the downloaded bytes _in memory before writing or extracting_ — never extract untrusted content before verification. For archives, pass the expected binary's member name to `unzip` or `tar` to restrict extraction to that single file. See docker-ls (raw binary), terraform-ls (zip), xml-lsp (zip with rename) download scripts; a binary in a tarball (or a zip on Windows) needs only `downloadReleaseBinary` from `download-release-binary.ts` (ruff, Tombi).
-
-**C. Copied from an installed package** — Simple copy script (TypeScript 7's `copy-typescript.ts` pattern).
-
-Add a `build:<name>` or `download:<name>` script in package.json and chain it in `build:server:standalone`.
-
-## Layer 2: Server-Side LSP Manager
-
-**File:** `packages/loxel/src/server/<name>-lsp-manager.ts`
-
-Use `astro-lsp-manager.ts` as the template — it's the simplest worktree-scoped integration. Extend `WorktreeLspManager` (from `stdio-lsp-manager.ts`) and call `super("<name>-lsp")` (the name is a `LogCategory`, see Layer 3). It supplies the worktree plumbing: `createSession(ws, wtPath)` / `destroySession(ws)` for `server.ts`, the session, one session per worktree, `cwd` and the worktree as `rootUri`/`workspaceFolders`. Extend `StdioLspManager` directly only when the session needs more state (Python, ruff), and implement that plumbing the way `WorktreeLspManager` does.
-
-### Required
-
-- **`resolveBinary(context)`** — Abstract. Usually `return this.resolveBundledBinary("<binary>")`, which checks execPath sibling → `node_modules/.bin` → PATH. Pass a `devPath` (absolute path under `build/`) for downloaded binaries; it replaces the `node_modules/.bin` check. May return a promise for a per-worktree lookup (ruff prefers the project environment's binary); the base holds client frames until it resolves.
-
-### Optional overrides
-
-- **`disableSemanticTokens` / `requiresFullTextSync`** — Readonly flags, see Decision Points.
-- **`suppressedFeatures`** — LSP features (formatting, semantic tokens) stripped from both the initialize response and dynamic registrations before Monaco sees them (ruff's formatting, owned by format on save).
-- **`spawnArgs()`** — Override if the server doesn't use `["--stdio"]`.
-- **`getInitializationOptions(session)`** — For config the server reads at startup (SDK paths, indexing settings).
-- **`onClientInitialized(session)`** — For push-based config via `workspace/didChangeConfiguration` after handshake (Docker's compose settings, YAML's schemas).
-- **`workspaceConfiguration(session, section)`** — For servers that pull config with `workspace/configuration` (basedpyright). Defining it advertises the capability and answers the requests server-side; call `notifyConfigurationChanged(session)` to make the server pull again.
-- **`forwardWatchedFiles`** — Readonly flag for servers that register file watchers to learn about changes to unopened files and config (basedpyright, TypeScript). The base answers the registrations and forwards matching worktree changes; needs `getSessionWorkspace` (`WorktreeLspManager` provides it).
-- **`onSessionClosed(session)`** — Release per-session resources (watchers); must be idempotent.
-- **`handleServerFrame(session, body)` / `handleClientData(session, data)`** — For intercepting/transforming messages. Only TypeScript and Docker use these.
-
-## Layer 3: Server Registration
-
-### `packages/loxel/src/server/server-state.ts`
-
-Add `| WorktreeLspData<"<name>-lsp">` to the `WsData` union.
-
-### `packages/loxel/src/server/server.ts`
-
-(`index.ts` is only the process entry point; the server lives in `server.ts`.)
-
-1. Import and instantiate the manager at module level, and add it to `worktreeLspManagers` if worktree-scoped
-2. Add `"<name>-lsp"` to the `worktreeLspTypes` array (WebSocket upgrade route `/ws/<name>-lsp?wt=<path>`)
-3. Add `open`/`close`/`message` handlers in the websocket block
-4. Call `.destroy()` in `shutdown()`
-
-### `packages/loxel/src/api/log-entry-model.ts`
-
-Add `"<name>-lsp"` to `LOG_CATEGORIES` (required — the manager constructor takes a `LogCategory`).
-
-## Layer 4: Client-Side LSP Connection
-
-**File:** `packages/loxel/src/lib/<name>-lsp-client.ts`
-
-```typescript
-import { createWorktreeLspClient } from "./lsp-client";
-
-// Example for a server named "foo"
-const { connect: connectFooLsp, disconnect: disconnectFooLsp } = createWorktreeLspClient(
-  "ws/foo-lsp",
-  "foo", // string for single language
-  // ["id1", "id2"], // array for multi-language servers (Docker, TypeScript)
-);
-
-export { connectFooLsp, disconnectFooLsp };
-```
-
-The `languageId` parameter filters which Monaco models get synced over the WebSocket.
-
-YAML is special — uses a custom client that doesn't use `createWorktreeLspClient`. See `yaml-lsp-client.ts`. TypeScript only exports `connect` (it is never disconnected).
-
-## Layer 5: Monaco Integration
-
-**File:** `packages/loxel/src/lib/monaco-env.ts`
-
-1. **Register the language** with `monaco.languages.register()` if Monaco doesn't ship it (common ones like json, xml, yaml, python, dockerfile are built in; `monaco-env.ts` already registers terraform, astro, tsx, jsx, dockerbake, toml).
-2. **Set language configuration** (brackets, comments, auto-closing pairs) via `monaco.languages.setLanguageConfiguration()`.
-3. **Wire the lazy connector:**
-
-```typescript
-createLazyLspConnector({
-  languageIds: ["<languageId>"], // array — list all language IDs for multi-language servers
-  connect: connectFooLsp,
-  disconnect: disconnectFooLsp,
-});
-```
-
-## Layer 6: Highlighting & Icons
-
-**`packages/loxel/src/lib/highlighter.ts`** — Add to `BUNDLED_LANGUAGES` (if Shiki supports it) and map in `EXT_TO_LANG` (or `FILENAME_TO_LANG` for extensionless names like `Dockerfile`). If the Shiki language ID differs from Monaco's, add a mapping in `monaco-theme.ts` `LANG_MAP`. If the server emits semantic tokens, give each token type in its legend a rule in `monaco-theme.ts` `DARK_SEMANTIC_RULES`; a type without one loses its TextMate color.
-
-**`packages/loxel/src/lib/file-icons.tsx`** — Add SVG to `public/icons/`, map extension in `EXT_MAP`, config filenames in `FILE_NAME_MAP`.
-
-## Layer 7: Editor URI Scheme
-
-**File:** `packages/loxel/src/components/code-editor/CodeEditorPanel.tsx`
-
-Add the language to the `useFileScheme` check. Most LSPs need `file://` URIs for import resolution. Languages not in the list get `loxel://HEAD/` URIs; only TypeScript translates those server-side (`ts-lsp-manager.ts`).
-
-## Layer 8: Packaging & Release
-
-- **`packages/loxel/electron-builder.yml`** — Add `from: build/<binary-name>` to `extraResources`
-- **`.github/workflows/release-loxel.yml`** — Add ad-hoc codesign (`codesign -s - -f packages/loxel/build/<binary>`) and staging copy (`cp ... staging/`) lines next to the existing LSP binaries
-- **`packages/loxel/src/electron/main.ts`** — If the server ships a resource directory (like `typeshed-fallback`), add it to `UPDATE_RESOURCE_DIRS` so in-place updates replace it instead of extracting over it
+1. **Binary.** One of: `scripts/build-<name>.ts` bundles an NPM package with `Bun.build`, then `bun build --compile` into `build/` (add the package as a devDependency; `resolvePackage()` locates it; see the yaml-ls plugins and the basedpyright shims); `scripts/download-<name>.ts` downloads a release with per-platform SHA256 pins, hashed in memory before anything is written or extracted, extracting only the binary (a tarball or Windows zip needs only `downloadReleaseBinary` from `download-release-binary.ts`, as ruff and Tombi do); or a copy script (`copy-typescript.ts`). Add a `build:<name>` / `download:<name>` script and chain it in `build:server:standalone`.
+2. **Server manager.** `src/server/<name>-lsp-manager.ts`, from `astro-lsp-manager.ts` (the simplest): extend `WorktreeLspManager`, call `super("<name>-lsp")`, implement `resolveBinary` (usually `this.resolveBundledBinary("<binary>", devPath?)`). Everything else is an opt-in hook, see `references/server-manager.md`.
+3. **Registration.** `src/server/server-state.ts`: add `| WorktreeLspData<"<name>-lsp">` to `WsData`. `src/server/server.ts`: instantiate at module level, add to `worktreeLspManagers` and the `worktreeLspTypes` array (route `/ws/<name>-lsp?wt=`), wire `open`/`close`/`message`, `.destroy()` in `shutdown()`. `src/api/log-entry-model.ts`: add `"<name>-lsp"` to `LOG_CATEGORIES`.
+4. **Client.** `src/lib/<name>-lsp-client.ts`: `createWorktreeLspClient("ws/<name>-lsp", "<languageId>" | [...ids])`, exporting `connect<Name>Lsp` / `disconnect<Name>Lsp`. The route also names the client's diagnostics marker owner.
+5. **Monaco.** `src/lib/monaco-env.ts`: register the language if Monaco lacks it (json, xml, yaml, python and dockerfile are built in; terraform, astro, tsx, jsx, dockerbake and toml are registered there), set its language configuration, and add `createLazyLspConnector({ languageIds, connect, disconnect })`.
+6. **Highlighting and icons.** `src/lib/highlighter.ts` `BUNDLED_LANGUAGES` plus `EXT_TO_LANG` / `FILENAME_TO_LANG`; a Shiki ID that differs from Monaco's goes in `monaco-theme.ts` `LANG_MAP`, and each semantic token type the server emits needs a `DARK_SEMANTIC_RULES` rule or it loses its TextMate color. `src/lib/file-icons.tsx`: SVG in `public/icons/`, `EXT_MAP` / `FILE_NAME_MAP`.
+7. **URI scheme.** `src/components/code-editor/CodeEditorPanel.tsx`: add the language to `useFileScheme`. Servers need `file://` URIs; only TypeScript translates `loxel://HEAD/` server-side.
+8. **Packaging.** `electron-builder.yml` `extraResources` (`from: build/<binary>`); `.github/workflows/release-loxel.yml` ad-hoc codesign and staging copy next to the other LSP binaries; a resource directory the server ships (`typeshed-fallback`) goes in `UPDATE_RESOURCE_DIRS` in `src/electron/main.ts`.
 
 ## Checklist
 
-- [ ] Binary sourced and script chained in `build:server:standalone`
-- [ ] LSP manager extends `WorktreeLspManager` with `resolveBinary` and correct flags
-- [ ] `server-state.ts` WsData union entry
-- [ ] `server.ts`: import, instantiate, route, handlers, destroy
-- [ ] `log-entry-model.ts` log category
-- [ ] Client module exports connect/disconnect with languageId filter
-- [ ] Monaco language registered (if not built-in) with language configuration
-- [ ] Lazy connector wired in `monaco-env.ts`
-- [ ] Extension/filename mapped in `highlighter.ts`
-- [ ] File icon SVG + mappings in `file-icons.tsx`
-- [ ] URI scheme set to `file://` in `CodeEditorPanel.tsx`
-- [ ] `electron-builder.yml` and release workflow updated
+- [ ] Binary script chained in `build:server:standalone`
+- [ ] Manager with `resolveBinary`, flags and settings hooks
+- [ ] `server-state.ts`, `server.ts` (instance, route, handlers, destroy), `log-entry-model.ts`
+- [ ] Client module and lazy connector; language registered and configured if not built in
+- [ ] `highlighter.ts`, semantic token rules, file icons
+- [ ] `useFileScheme` in `CodeEditorPanel.tsx`
+- [ ] `electron-builder.yml` and release workflow
+- [ ] LANGUAGE_SERVERS.md (managers table, routes, client modules, registered languages), `references/existing-integrations.md`, the language on the site page `packages/site/src/content/docs/language-intelligence.md`
 - [ ] `pnpm install` and `pnpm -C packages/loxel run typecheck` pass

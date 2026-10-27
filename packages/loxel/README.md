@@ -30,7 +30,7 @@ Loxel is built around these needs.
 - **Diff viewer** — side-by-side (JetBrains-style synchronized scrolling), split and unified Monaco diffs with intra-line highlights, for git changes and for comparing any two files with both sides editable. See [Diff Viewer](../site/src/content/docs/diff-viewer.md).
 - **Git** — commit graph, changes panel, branches, cherry-pick, revert, reset and discard changes from context menus and inline forms. There is no staging or commit UI. See [Git](../site/src/content/docs/git.md).
 - **Editor and file explorer** — Monaco with Quick Open, Go to Symbol across the language servers, find in files, command palette, autosave, format on save with auto-detected project formatters, and conflict detection when files change on disk. Folders and files outside every project open in the file tree's Others section. See [Editor](../site/src/content/docs/editor.md).
-- **Language intelligence** — TypeScript 7 (`tsc --lsp`) per worktree plus lazily started servers for other languages, proxied to Monaco over WebSockets. See [TypeScript Intelligence](../site/src/content/docs/typescript-intelligence.md); to add a language, follow the [add-language-server skill](../../.agents/skills/add-language-server/SKILL.md).
+- **Language intelligence** — TypeScript 7 (`tsc --lsp`) per worktree and a shared, always-running YAML server, plus lazily started servers for other languages (Python with basedpyright and Ruff, its environment detected per worktree or chosen in an interpreter picker; TOML, Docker, Terraform, Astro, XML), proxied to Monaco over WebSockets. See [Language Intelligence](../site/src/content/docs/language-intelligence.md); to add a language, follow the [add-language-server skill](../../.agents/skills/add-language-server/SKILL.md).
 - **Browser panels** — web pages in `<webview>` tabs, with a right-click menu, find in page, page dialogs (`alert`/`confirm`/`prompt`) shown in the panel, and Touch ID passkeys on macOS.
 - **macOS integration** — open files and folders from Finder or with `loxel <path>`, and Reveal in Finder / Open In from context menus.
 
@@ -119,9 +119,9 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 
 **Features**
 
-- [docs/EDITOR.md](docs/EDITOR.md) — Monaco and markdown editors, EditorConfig, disk sync and saving, file operations, drafts, Others files, localdb, search
-- [docs/LANGUAGE_SERVERS.md](docs/LANGUAGE_SERVERS.md) — language-server managers and routing, URI schemes, diagnostics, formatting, schemas, highlighting and editing behavior
-- [docs/TERMINALS.md](docs/TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
+- [docs/EDITOR.md](docs/EDITOR.md) — Monaco and markdown editors, EditorConfig, indentation and its status item, disk sync and saving, file operations, drafts, Others files, localdb, search
+- [docs/LANGUAGE_SERVERS.md](docs/LANGUAGE_SERVERS.md) — language-server managers and routing (watched files, pulled configuration, on-disk workspace edits), the per-worktree Python environment, interpreter choice and environment trust rule, URI schemes, diagnostics, formatting, JSON/YAML/TOML schemas, highlighting and editing behavior
+- [docs/TERMINALS.md](docs/TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, login-shell environment capture, Python environment activation, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
 - [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
 - [docs/CODING_AGENT_INTEGRATION.md](docs/CODING_AGENT_INTEGRATION.md) — hosting coding-agent sessions in the server, event buffering, rewind and fork, devtools, model settings
 - [docs/DIFF_VIEW_SPEC.md](docs/DIFF_VIEW_SPEC.md) — diff views: components shared by git diffs and file comparisons, synchronized scrolling, intra-line highlights, gutter connectors
