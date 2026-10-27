@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,8 +7,17 @@ import { $ } from "bun";
 
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
 
-import { FormatService } from "./format-service";
-import { findVenvBin } from "./python-formatter";
+// Python files reach the shared environment resolution, which reads interpreter overrides from
+// the store database; keep the tests' state out of the real one.
+const stateDir = await mkdtemp(join(tmpdir(), "format-service-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+const { FormatService } = await import("./format-service");
+const { findVenvBin } = await import("./python-formatter");
+type FormatService = import("./format-service").FormatService;
+
+afterAll(async () => {
+  await rm(stateDir, { recursive: true, force: true });
+});
 
 let root: string | undefined;
 

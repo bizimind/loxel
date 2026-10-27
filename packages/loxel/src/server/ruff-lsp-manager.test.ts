@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,8 +8,17 @@ import { $, type ServerWebSocket } from "bun";
 import type { PythonEnv } from "@/api/python-env-model";
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
-import { refreshPythonEnv, subscribePythonEnv } from "./python-env";
-import { pickRuffBinary, RuffLspManager } from "./ruff-lsp-manager";
+// The shared environment resolution reads interpreter overrides from the store database; keep
+// the tests' state out of the real one.
+const stateDir = await mkdtemp(join(tmpdir(), "ruff-lsp-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+const { refreshPythonEnv, subscribePythonEnv } = await import("./python-env");
+const { pickRuffBinary, RuffLspManager } = await import("./ruff-lsp-manager");
+type RuffLspManager = import("./ruff-lsp-manager").RuffLspManager;
+
+afterAll(async () => {
+  await rm(stateDir, { recursive: true, force: true });
+});
 
 const roots: string[] = [];
 let manager: RuffLspManager | undefined;
