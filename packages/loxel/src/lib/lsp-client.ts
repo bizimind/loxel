@@ -7,6 +7,7 @@ import { frontendLog } from "./frontend-logger";
 import { isLiveEditorModel } from "./live-editor-model";
 import {
   createLspConnection,
+  createStopToastFilter,
   type LspClose,
   type LspConnection,
   type LspConnectionState,
@@ -114,26 +115,22 @@ export function createLspClient({ route, name, languageId }: LspClientOptions) {
     };
   }
 
-  /** The stop last toasted, so a stop that keeps recurring (a missing binary) toasts once. */
-  let toasted: string | null = null;
+  const shouldToast = createStopToastFilter();
 
   function onStateChange(state: LspConnectionState): void {
     const { setStopped } = useLspStatusStore.getState();
-    if (state.state === "connected") toasted = null;
+    const toast = shouldToast(state);
     if (state.state !== "stopped") {
       setStopped(route, null);
       return;
     }
     setStopped(route, { name, reason: state.reason, detail: state.detail });
-    const stop = `${state.reason}\n${state.detail}`;
-    if (stop === toasted) return;
-    if (state.reason === "crashed") {
-      toasted = stop;
-      showToast(`${name} kept crashing and was stopped. Click it in the status bar to restart it.`);
-    } else if (state.reason === "start-failed") {
-      toasted = stop;
-      showToast(`${name} could not start. Click it in the status bar to try again.`);
-    }
+    if (!toast) return;
+    showToast(
+      state.reason === "crashed"
+        ? `${name} kept crashing and was stopped. Click it in the status bar to restart it.`
+        : `${name} could not start. Click it in the status bar to try again.`,
+    );
   }
 
   const connection = createLspConnection({ open, onStateChange });

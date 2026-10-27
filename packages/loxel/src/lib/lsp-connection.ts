@@ -216,3 +216,30 @@ export function createLspConnection(options: LspConnectionOptions): LspConnectio
     },
   };
 }
+
+/**
+ * Decides, from a connection's states in order, which stops deserve a toast: a crash or a failed
+ * start, unless it repeats the stop toasted last with no connection in between that stayed up
+ * {@link LSP_STABLE_CONNECTION_MS}. A socket that opens is not proof the server works (a missing
+ * binary closes it right after), so a stop that recurs on every reconnect toasts once, while the
+ * status bar keeps showing it.
+ */
+export function createStopToastFilter(): (state: LspConnectionState) => boolean {
+  let toasted: string | null = null;
+  let connectedAt: number | null = null;
+  return (state) => {
+    if (state.state === "connected") {
+      connectedAt = Date.now();
+      return false;
+    }
+    if (connectedAt !== null && Date.now() - connectedAt >= LSP_STABLE_CONNECTION_MS)
+      toasted = null;
+    connectedAt = null;
+    if (state.state !== "stopped") return false;
+    if (state.reason !== "crashed" && state.reason !== "start-failed") return false;
+    const stop = `${state.reason}\n${state.detail}`;
+    if (stop === toasted) return false;
+    toasted = stop;
+    return true;
+  };
+}

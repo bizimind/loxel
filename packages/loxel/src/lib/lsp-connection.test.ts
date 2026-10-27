@@ -9,6 +9,7 @@ import {
 
 import {
   createLspConnection,
+  createStopToastFilter,
   LSP_MAX_FAILURES,
   LSP_RECONNECT_BASE_DELAY_MS,
   LSP_STABLE_CONNECTION_MS,
@@ -303,5 +304,47 @@ describe("createLspConnection", () => {
     expect(server.opens).toHaveLength(3);
     await server.accept();
     expect(server.state).toEqual({ state: "connected" });
+  });
+});
+
+describe("createStopToastFilter", () => {
+  const connectedState: LspConnectionState = { state: "connected" };
+  const startFailed: LspConnectionState = {
+    state: "stopped",
+    reason: "start-failed",
+    detail: "ruff-lsp binary not found — is it installed?",
+  };
+
+  test("a start failure that recurs on every reconnect toasts once", () => {
+    const shouldToast = createStopToastFilter();
+    const toasts = [1, 2, 3].map(() => {
+      shouldToast({ state: "connecting" });
+      shouldToast(connectedState);
+      return shouldToast(startFailed);
+    });
+    expect(toasts).toEqual([true, false, false]);
+  });
+
+  test("a connection that stayed up lets the same stop toast again", () => {
+    const shouldToast = createStopToastFilter();
+    shouldToast(connectedState);
+    expect(shouldToast(startFailed)).toBe(true);
+
+    shouldToast(connectedState);
+    advance(LSP_STABLE_CONNECTION_MS);
+    expect(shouldToast({ state: "reconnecting", delayMs: LSP_RECONNECT_BASE_DELAY_MS })).toBe(
+      false,
+    );
+    expect(shouldToast(startFailed)).toBe(true);
+  });
+
+  test("a different stop toasts; replaced and unreachable never do", () => {
+    const shouldToast = createStopToastFilter();
+    expect(shouldToast(startFailed)).toBe(true);
+    expect(shouldToast({ state: "stopped", reason: "crashed", detail: "exited with code 1" })).toBe(
+      true,
+    );
+    expect(shouldToast({ state: "stopped", reason: "replaced", detail: "" })).toBe(false);
+    expect(shouldToast({ state: "stopped", reason: "unreachable", detail: "" })).toBe(false);
   });
 });
