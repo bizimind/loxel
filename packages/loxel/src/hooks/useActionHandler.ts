@@ -16,7 +16,7 @@ import {
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { selectPythonInterpreter } from "@/lib/python-interpreter";
-import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
+import { getActiveEditorFile, getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { renameActiveTab } from "@/lib/tab-rename";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
@@ -387,9 +387,13 @@ export function useActionHandler(): (actionId: ActionId) => void {
       }
 
       // -- Languages --
-      case "python.selectInterpreter":
-        void selectPythonInterpreter();
+      case "python.selectInterpreter": {
+        // The worktree of the file being edited, which the status bar item shows.
+        const wtPath =
+          getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
+        if (wtPath) void selectPythonInterpreter(wtPath);
         break;
+      }
 
       // -- App --
       case "app.settings":

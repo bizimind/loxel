@@ -224,6 +224,39 @@ describe("WorkspaceEditApplier", () => {
     expect(calls).toEqual([]);
   });
 
+  test("edits an open model the file system would refuse, as typing in it would", async () => {
+    const open = fakeModel("file:///others/x.py");
+    const { fs, refused } = fakeFileSystem({ "/others/x.py": "x" });
+    refused.add("/others/x.py");
+
+    const result = await applier(fs).apply({
+      changes: { "file:///others/x.py": [edit(0, 0, 1, "1")] },
+    });
+
+    expect(result).toEqual({ applied: true });
+    expect(open.calls).toEqual(["stop", "edit", "stop"]);
+  });
+
+  test("checks an open model edited earlier in the edit before a file operation on it", async () => {
+    const open = fakeModel("file:///others/x.py");
+    const { fs, calls, refused } = fakeFileSystem({ "/others/x.py": "x" });
+    refused.add("/others/x.py");
+
+    const result = await applier(fs).apply({
+      documentChanges: [
+        docEdit("file:///others/x.py", [edit(0, 0, 1, "1")]),
+        { kind: "rename", oldUri: "file:///others/x.py", newUri: "file:///others/y.py" },
+      ],
+    });
+
+    expect(result).toEqual({
+      applied: false,
+      failureReason: "/others/x.py is outside the workspace",
+    });
+    expect(open.calls).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
   test("refuses a versioned edit to a model that changed since the server computed it", async () => {
     const open = fakeModel("file:///w/a.py", 5);
     const { fs } = fakeFileSystem({ "/w/a.py": "x" });
@@ -468,6 +501,32 @@ describe("WorkspaceEditApplier", () => {
 
     expect(results).toEqual([{ applied: true }, { applied: true }]);
     expect(disk.get("/w/a.py")).toBe("X!");
+  });
+
+  test("once disposed, stops the edit being prepared and refuses the queued ones", async () => {
+    const { fs, calls } = fakeFileSystem({ "/w/a.py": "a", "/w/b.py": "b" });
+    const readFile = fs.readFile.bind(fs);
+    const { promise: reading, resolve: readStarted } = Promise.withResolvers<void>();
+    const { promise: released, resolve: release } = Promise.withResolvers<void>();
+    fs.readFile = async (uri) => {
+      readStarted();
+      await released;
+      return readFile(uri);
+    };
+    const failures: string[] = [];
+    const files = applier(fs, (reason) => failures.push(reason));
+
+    const first = files.apply({ changes: { "file:///w/a.py": [edit(0, 0, 1, "X")] } });
+    const queued = files.apply({ changes: { "file:///w/b.py": [edit(0, 0, 1, "Y")] } });
+    await reading;
+    files.dispose();
+    release();
+
+    const closed = { applied: false, failureReason: "The language server connection closed" };
+    expect(await first).toMatchObject(closed);
+    expect(await queued).toEqual(closed);
+    expect(failures).toEqual([closed.failureReason, closed.failureReason]);
+    expect(calls).toEqual([]);
   });
 
   test("delete honors ignoreIfNotExists and needs recursive for a folder", async () => {

@@ -43,13 +43,15 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
   /**
    * Applies the rename itself and hands Monaco an empty edit: Monaco's standalone bulk-edit
    * service can only edit open models, and a rename usually touches files that are not open.
+   * A failed edit is handed over empty too, not as a reject reason: the applier already reported
+   * it (`onWorkspaceEditFailure`), and Monaco would ask the next rename provider on a rejection.
    */
   async provideRenameEdits(
     model: monaco.editor.ITextModel,
     position: monaco.Position,
     newName: string,
     token: monaco.CancellationToken,
-  ): Promise<(monaco.languages.WorkspaceEdit & monaco.languages.Rejection) | null> {
+  ): Promise<monaco.languages.WorkspaceEdit | null> {
     if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, position);
 
@@ -64,8 +66,8 @@ class LspRenameProvider implements monaco.languages.RenameProvider {
       return null;
     }
 
-    const applied = await this._client.edits.apply(result);
-    return applied.applied ? { edits: [] } : { edits: [], rejectReason: applied.failureReason };
+    await this._client.edits.apply(result);
+    return { edits: [] };
   }
 
   async resolveRenameLocation(

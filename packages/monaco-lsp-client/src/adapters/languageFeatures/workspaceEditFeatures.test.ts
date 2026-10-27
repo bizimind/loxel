@@ -84,11 +84,11 @@ describe("LspRenameFeature", () => {
     expect(applied).toEqual([renameEdit]);
   });
 
-  test("passes a failure on as Monaco's reject reason", async () => {
+  test("leaves reporting a failure to the applier, and Monaco tries no other provider", async () => {
     const { provider } = renameProvider({ applied: false, failureReason: "outside" });
     const position = { lineNumber: 1, column: 1 } as monaco.Position;
     const result = await provider.provideRenameEdits(model, position, "y", cancellation());
-    expect(result).toEqual({ edits: [], rejectReason: "outside" });
+    expect(result).toEqual({ edits: [] });
   });
 
   test("applies nothing once Monaco cancelled the rename", async () => {
