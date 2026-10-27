@@ -1,0 +1,67 @@
+/**
+ * Language-server code actions of the focused code editor, as app actions (command palette and
+ * remappable keys): each runs Monaco's own command, which asks every server of the file for the
+ * kind and applies the only answer or lets the user pick when several servers answer.
+ */
+
+import * as monaco from "monaco-editor";
+
+import { isLiveEditorModel } from "./live-editor-model";
+import { getAllConnectedLspClients } from "./lsp-client";
+import { getYamlLspClient } from "./yaml-lsp-client";
+
+/**
+ * Each code action command: the Monaco command it runs and the code action kinds it lists (Quick
+ * Fix lists refactors too).
+ */
+export const EDITOR_CODE_ACTIONS = {
+  "codeAction.quickFix": {
+    monacoActionId: "editor.action.quickFix",
+    kinds: ["quickfix", "refactor"],
+  },
+  "codeAction.fixAll": { monacoActionId: "editor.action.fixAll", kinds: ["source.fixAll"] },
+  "codeAction.organizeImports": {
+    monacoActionId: "editor.action.organizeImports",
+    kinds: ["source.organizeImports"],
+  },
+  "codeAction.sourceAction": { monacoActionId: "editor.action.sourceAction", kinds: ["source"] },
+  "codeAction.refactor": { monacoActionId: "editor.action.refactor", kinds: ["refactor"] },
+} as const;
+
+export type EditorCodeActionId = keyof typeof EDITOR_CODE_ACTIONS;
+
+/** Whether one of the language servers syncing `model` may offer code actions of `kind`. */
+function hasCodeActionProvider(model: monaco.editor.ITextModel, kind: string): boolean {
+  return [...getAllConnectedLspClients(), getYamlLspClient()].some((client) =>
+    client?.supportsCodeActionKind(model, kind),
+  );
+}
+
+/** The editor tab's Monaco editor that holds focus (its text or one of its widgets), if any. */
+function focusedCodeEditor(): monaco.editor.ICodeEditor | undefined {
+  return monaco.editor.getEditors().find((editor) => {
+    const model = editor.getModel();
+    return model !== null && isLiveEditorModel(model) && editor.hasWidgetFocus();
+  });
+}
+
+/**
+ * Whether `id` applies in the focused editor: the file is writable and one of its language servers
+ * may offer one of its kinds.
+ */
+export function canRunEditorCodeAction(id: EditorCodeActionId): boolean {
+  const editor = focusedCodeEditor();
+  const model = editor?.getModel();
+  if (!editor || !model || editor.getOption(monaco.editor.EditorOption.readOnly)) return false;
+  return EDITOR_CODE_ACTIONS[id].kinds.some((kind) => hasCodeActionProvider(model, kind));
+}
+
+/** Run `id` in the focused editor (the command palette gives focus back to it when it closes). */
+export function runEditorCodeAction(id: EditorCodeActionId): void {
+  const editor = focusedCodeEditor();
+  if (!editor) return;
+  editor.focus();
+  // `trigger`, not `getAction`: Quick Fix is a command that `getAction` does not list. Bound to
+  // ⌘., Quick Fix takes the key from Monaco's paste-options widget, which also binds it.
+  editor.trigger("loxel", EDITOR_CODE_ACTIONS[id].monacoActionId, null);
+}

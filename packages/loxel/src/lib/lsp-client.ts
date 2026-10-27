@@ -17,6 +17,11 @@ export function getConnectedLspClients(wtPath: string): MonacoLspClient[] {
   return [...connectedClients].filter(([, path]) => path === wtPath).map(([client]) => client);
 }
 
+/** Every connected worktree client, whatever its worktree. */
+export function getAllConnectedLspClients(): MonacoLspClient[] {
+  return [...connectedClients.keys()];
+}
+
 /**
  * Factory for worktree-scoped LSP client connections. Each call creates an
  * independent connect/disconnect pair backed by a single WebSocket transport.

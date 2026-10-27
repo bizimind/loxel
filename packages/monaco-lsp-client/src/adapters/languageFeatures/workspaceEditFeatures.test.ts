@@ -121,7 +121,7 @@ describe("LspCodeActionFeature", () => {
       },
       result,
     );
-    const feature = new LspCodeActionFeature(ctx.connection);
+    const feature = new LspCodeActionFeature(ctx.connection, { diagnosticsForMarkers: () => [] });
     ctx.register(capabilities.textDocumentCodeAction, {
       documentSelector: null,
       resolveProvider: resolved !== undefined,

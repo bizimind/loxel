@@ -2,6 +2,7 @@ import * as monaco from "monaco-editor";
 
 import type {
   CodeAction,
+  CodeActionKind,
   CodeActionRegistrationOptions,
   Command,
   WorkspaceEdit,
@@ -10,13 +11,15 @@ import { capabilities } from "../../types";
 import { Disposable } from "../../utils";
 import { LspConnection } from "../LspConnection";
 import { isLspCommand } from "../LspServerCommands";
-import { toMonacoLanguageSelector } from "./common";
 import {
+  codeActionKindsIntersect,
   lspCodeActionKindToMonacoCodeActionKind,
+  matchesDocumentSelector,
   toMonacoCodeActionKind,
-  toLspDiagnosticSeverity,
   toLspCodeActionTriggerKind,
+  toMonacoLanguageSelector,
 } from "./common";
+import type { LspDiagnosticsFeature } from "./LspDiagnosticsFeature";
 
 let nextApplyCommandId = 0;
 
@@ -27,8 +30,13 @@ export class LspCodeActionFeature extends Disposable {
    * through the client's workspace-edit path, then runs the action's own command.
    */
   private readonly _applyCommandId = `monaco-lsp-client.applyCodeAction.${nextApplyCommandId++}`;
+  /** The server's live code action registrations (static or dynamic). */
+  private readonly _registrations = new Set<CodeActionRegistrationOptions>();
 
-  constructor(private readonly _connection: LspConnection) {
+  constructor(
+    private readonly _connection: LspConnection,
+    private readonly _diagnostics: Pick<LspDiagnosticsFeature, "diagnosticsForMarkers">,
+  ) {
     super();
 
     this._register(
@@ -62,21 +70,51 @@ export class LspCodeActionFeature extends Disposable {
         capabilities.textDocumentCodeAction,
         true,
         (capability) => {
-          return monaco.languages.registerCodeActionProvider(
+          this._registrations.add(capability);
+          const provider = monaco.languages.registerCodeActionProvider(
             toMonacoLanguageSelector(
               capability.documentSelector,
               this._connection.defaultLanguageIds,
             ),
-            new LspCodeActionProvider(this._connection, capability, (edit, command) =>
-              this._toMonacoCommand(edit, command),
+            new LspCodeActionProvider(
+              this._connection,
+              capability,
+              (edit, command) => this._toMonacoCommand(edit, command),
+              this._diagnostics,
             ),
             // Monaco enables kind-specific commands (Organize Imports, Fix All) only for providers
             // that declare the kind; LSP kinds are Monaco kinds (`source.organizeImports.ruff`
             // counts as `source.organizeImports`).
             { providedCodeActionKinds: capability.codeActionKinds },
           );
+          return {
+            dispose: () => {
+              this._registrations.delete(capability);
+              provider.dispose();
+            },
+          };
         },
       ),
+    );
+  }
+
+  /**
+   * Whether the server may offer code actions of `kind` (or of a kind inside it, or containing it)
+   * for `model`: a registration covers the model and declares such a kind, or declares no kinds.
+   */
+  supportsKind(model: monaco.editor.ITextModel, kind: string): boolean {
+    if (!this._connection.bridge.isSyncedModel(model)) return false;
+    return [...this._registrations].some(
+      (registration) =>
+        matchesDocumentSelector(
+          model,
+          registration.documentSelector,
+          this._connection.defaultLanguageIds,
+        ) &&
+        (!registration.codeActionKinds ||
+          registration.codeActionKinds.some((provided) =>
+            codeActionKindsIntersect(provided, kind),
+          )),
     );
   }
 
@@ -121,6 +159,7 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
       edit: WorkspaceEdit | undefined,
       command: Command | undefined,
     ) => monaco.languages.Command | undefined,
+    private readonly _diagnostics: Pick<LspDiagnosticsFeature, "diagnosticsForMarkers">,
   ) {
     if (_capabilities.resolveProvider) {
       // Monaco resolves an action without an `edit` (all of ours) on hover and before applying it.
@@ -154,11 +193,9 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
       textDocument: translated.textDocument,
       range: this._client.bridge.translateRange(model, range),
       context: {
-        diagnostics: context.markers.map((marker) => ({
-          range: this._client.bridge.translateRange(model, monaco.Range.lift(marker)),
-          message: marker.message,
-          severity: toLspDiagnosticSeverity(marker.severity),
-        })),
+        diagnostics: this._diagnostics.diagnosticsForMarkers(model, context.markers),
+        // Monaco's code action kinds are LSP's.
+        only: context.only === undefined ? undefined : [context.only as CodeActionKind],
         triggerKind: toLspCodeActionTriggerKind(context.trigger),
       },
     });

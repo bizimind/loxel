@@ -5,6 +5,8 @@
 
 import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
+import type { EditorCodeActionId } from "@/lib/editor-code-actions";
+import { canRunEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
@@ -95,6 +97,7 @@ export type ActionId =
   | "tree.rename"
   | "editor.changeIndentation"
   | "python.selectInterpreter"
+  | EditorCodeActionId
   | "app.settings";
 
 /**
@@ -318,6 +321,21 @@ export const ACTIONS: readonly ActionDef[] = [
     category: "language",
     isEnabled: hasActiveWorktree,
   },
+  // Code actions of the focused editor's language servers, enabled only where one offers the kind
+  ...(
+    [
+      ["codeAction.quickFix", "Quick Fix…"],
+      ["codeAction.fixAll", "Fix All"],
+      ["codeAction.organizeImports", "Organize Imports"],
+      ["codeAction.sourceAction", "Source Action…"],
+      ["codeAction.refactor", "Refactor…"],
+    ] as const
+  ).map(([id, label]): ActionDef => ({
+    id,
+    label,
+    category: "language",
+    isEnabled: () => canRunEditorCodeAction(id),
+  })),
 
   // App
   { id: "app.settings", label: "Open Settings", category: "app" },

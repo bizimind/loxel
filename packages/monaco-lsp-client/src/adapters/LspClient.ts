@@ -75,6 +75,8 @@ export class MonacoLspClient {
   private readonly _commands: LspServerCommands;
   private readonly _edits: WorkspaceEditApplier;
   private readonly _features: IDisposable;
+  private readonly _diagnostics: LspDiagnosticsFeature;
+  private readonly _codeActions: LspCodeActionFeature;
   private readonly _workspaceSymbols: LspWorkspaceSymbolFeature;
 
   private _initPromise: Promise<void>;
@@ -119,7 +121,10 @@ export class MonacoLspClient {
       this._edits,
       defaultLanguageIds,
     );
-    this._features = this.createFeatures(options?.markerOwner);
+    this._features = this.createFeatures();
+    // Code actions send back the diagnostics behind the client's markers.
+    this._diagnostics = new LspDiagnosticsFeature(this._connection, options?.markerOwner);
+    this._codeActions = new LspCodeActionFeature(this._connection, this._diagnostics);
     this._workspaceSymbols = new LspWorkspaceSymbolFeature(
       this._connection,
       () => this._initPromise,
@@ -132,6 +137,8 @@ export class MonacoLspClient {
 
   dispose(): void {
     this._features.dispose();
+    this._codeActions.dispose();
+    this._diagnostics.dispose();
     this._workspaceSymbols.dispose();
     this._commands.dispose();
     this._edits.dispose();
@@ -182,6 +189,15 @@ export class MonacoLspClient {
     return this._workspaceSymbols.resolveWorkspaceSymbol(symbol, token);
   }
 
+  /**
+   * Whether the server may offer code actions of `kind` for `model` (`quickfix`, `source.fixAll`,
+   * `refactor`, …): it syncs the model and registered code actions for it that declare a kind
+   * containing or inside `kind`, or no kinds at all. False until the server has initialized.
+   */
+  supportsCodeActionKind(model: monaco.editor.ITextModel, kind: string): boolean {
+    return this._codeActions.supportsKind(model, kind);
+  }
+
   /** Typed LSP server interface. Call any LSP method directly. */
   get server(): typeof api.TServerInterface {
     return this._connection.server;
@@ -198,7 +214,7 @@ export class MonacoLspClient {
     this._capabilitiesRegistry.setServerCapabilities(result.capabilities);
   }
 
-  protected createFeatures(markerOwner?: string): IDisposable {
+  protected createFeatures(): IDisposable {
     const store = new DisposableStore();
 
     store.add(new LspCompletionFeature(this._connection));
@@ -212,7 +228,6 @@ export class MonacoLspClient {
     store.add(new LspDocumentHighlightFeature(this._connection));
     store.add(new LspDocumentSymbolFeature(this._connection));
     store.add(new LspRenameFeature(this._connection));
-    store.add(new LspCodeActionFeature(this._connection));
     store.add(new LspCodeLensFeature(this._connection));
     store.add(new LspDocumentLinkFeature(this._connection));
     store.add(new LspFormattingFeature(this._connection));
@@ -222,7 +237,6 @@ export class MonacoLspClient {
     store.add(new LspSelectionRangeFeature(this._connection));
     store.add(new LspInlayHintsFeature(this._connection));
     store.add(new LspSemanticTokensFeature(this._connection));
-    store.add(new LspDiagnosticsFeature(this._connection, markerOwner));
     store.add(new LspLinkedEditingRangeFeature(this._connection));
     store.add(new LspInlineCompletionFeature(this._connection));
     store.add(new LspApplyEditFeature(this._connection));

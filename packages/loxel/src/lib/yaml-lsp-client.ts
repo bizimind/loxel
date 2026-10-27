@@ -3,6 +3,12 @@ import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client
 import { isLiveEditorModel } from "./live-editor-model";
 
 let connected = false;
+let yamlClient: MonacoLspClient | undefined;
+
+/** The YAML client while connected. */
+export function getYamlLspClient(): MonacoLspClient | undefined {
+  return yamlClient;
+}
 
 /**
  * Connect to the YAML language server via WebSocket.
@@ -18,12 +24,15 @@ export function connectYamlLsp(): void {
 
   WebSocketTransport.connectTo({ address }).then(
     (transport) => {
-      // TODO: consider returning the client instead of relying on self-registration in the constructor
-      // eslint-disable-next-line no-new
-      new MonacoLspClient(transport, {
+      const client = new MonacoLspClient(transport, {
         languageId: "yaml",
         modelFilter: isLiveEditorModel,
         markerOwner: "yaml-lsp",
+      });
+      yamlClient = client;
+      // A closed socket never answers again.
+      transport.state.onChange(({ state }) => {
+        if (state === "closed" && yamlClient === client) yamlClient = undefined;
       });
     },
     () => {
