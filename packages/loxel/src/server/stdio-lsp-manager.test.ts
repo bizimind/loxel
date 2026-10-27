@@ -200,7 +200,10 @@ describe("StdioLspManager watched files", () => {
     manager!.notifyWatchedFilesChanged(join(dir!, "other"), [join(dir!, "other", "x.py")]);
     const changed = await client.serverReceived((f) => f.method === WATCHED_FILES);
     expect(changed.params).toEqual({
-      changes: [{ uri: pathToFileURL(join(root, "main.py")).href, type: FileChangeType.Created }],
+      changes: [FileChangeType.Changed, FileChangeType.Created].map((type) => ({
+        uri: pathToFileURL(join(root, "main.py")).href,
+        type,
+      })),
     });
 
     client.emit({
@@ -237,7 +240,10 @@ describe("StdioLspManager watched files", () => {
     });
     const changed = await client.serverReceived((f) => f.method === WATCHED_FILES);
     expect(changed.params).toEqual({
-      changes: [{ uri: pathToFileURL(join(root, "early.py")).href, type: FileChangeType.Created }],
+      changes: [FileChangeType.Changed, FileChangeType.Created].map((type) => ({
+        uri: pathToFileURL(join(root, "early.py")).href,
+        type,
+      })),
     });
   });
 

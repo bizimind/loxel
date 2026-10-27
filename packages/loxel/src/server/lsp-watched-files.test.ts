@@ -220,23 +220,42 @@ describe("WatchedFilesForwarder batching", () => {
     const stats = await Bun.file(join(root, "old.py")).stat();
     const canTellCreation = stats.birthtimeMs !== 0 && stats.mtimeMs - stats.birthtimeMs >= 1000;
 
-    const batches: FileEvent[][] = [];
-    const f = forwarder([{ globPattern: "**/*.py" }], (changes) => batches.push(changes), root);
+    const { promise, resolve } = Promise.withResolvers<FileEvent[]>();
+    const f = forwarder([{ globPattern: "**/*.py" }], resolve, root);
     f.queue([join(root, "pkg", "new.py")]);
     f.queue([join(root, "old.py"), join(root, "gone.py"), join(root, "notes.txt")]);
-    await Bun.sleep(150);
 
-    expect(batches).toHaveLength(1);
     const uri = (p: string) => pathToFileURL(join(root, p)).href;
-    expect(batches[0]).toEqual([
-      { uri: uri("pkg/new.py"), type: FileChangeType.Created },
+    const created = (p: string) => [
+      { uri: uri(p), type: FileChangeType.Changed },
+      { uri: uri(p), type: FileChangeType.Created },
+    ];
+    expect(await promise).toEqual([
+      ...created("pkg/new.py"),
       // Only platforms that record birth times can tell a change from a creation.
-      {
-        uri: uri("old.py"),
-        type: canTellCreation ? FileChangeType.Changed : FileChangeType.Created,
-      },
+      ...(canTellCreation
+        ? [{ uri: uri("old.py"), type: FileChangeType.Changed }]
+        : created("old.py")),
       { uri: uri("gone.py"), type: FileChangeType.Deleted },
     ]);
+  });
+
+  test("reports a creation as a change first, so TypeScript reloads a file it already read", async () => {
+    const root = await tempTree();
+    await writeFile(join(root, "a.ts"), "export {};\n");
+    const { promise, resolve } = Promise.withResolvers<FileEvent[]>();
+    forwarder([{ globPattern: "**/*.ts" }], resolve, root).queue([join(root, "a.ts")]);
+    const types = (await promise).map((e) => e.type);
+    // TypeScript ignores Created for a loaded file, and keeps the old contents for [Created, Changed].
+    expect(types).toEqual([FileChangeType.Changed, FileChangeType.Created]);
+  });
+
+  test("reports only the creation to a watcher that wants creations only", async () => {
+    const root = await tempTree();
+    await writeFile(join(root, "a.ts"), "export {};\n");
+    const { promise, resolve } = Promise.withResolvers<FileEvent[]>();
+    forwarder([{ globPattern: "**/*.ts", kind: 1 }], resolve, root).queue([join(root, "a.ts")]);
+    expect((await promise).map((e) => e.type)).toEqual([FileChangeType.Created]);
   });
 
   test("reports a file moved into place as created", async () => {
@@ -249,11 +268,12 @@ describe("WatchedFilesForwarder batching", () => {
     const moved = join(root, "helpers.py");
     await rename(outside, moved);
 
-    const batches: FileEvent[][] = [];
-    const f = forwarder([{ globPattern: "**" }], (changes) => batches.push(changes), root);
-    f.queue([moved]);
-    await Bun.sleep(100);
-    expect(batches).toEqual([[{ uri: pathToFileURL(moved).href, type: FileChangeType.Created }]]);
+    const { promise, resolve } = Promise.withResolvers<FileEvent[]>();
+    forwarder([{ globPattern: "**" }], resolve, root).queue([moved]);
+    expect((await promise).map((e) => e.type)).toEqual([
+      FileChangeType.Changed,
+      FileChangeType.Created,
+    ]);
   }, 10_000);
 
   test("a continuously written file does not hold a batch back past the maximum wait", async () => {
@@ -274,15 +294,27 @@ describe("WatchedFilesForwarder batching", () => {
     const root = await tempTree();
     await writeFile(join(root, "early.py"), "x = 1\n");
     const batches: FileEvent[][] = [];
-    const f = new WatchedFilesForwarder(root, (changes) => batches.push(changes), 20);
+    const replayed = Promise.withResolvers<void>();
+    const f = new WatchedFilesForwarder(
+      root,
+      (changes) => {
+        batches.push(changes);
+        replayed.resolve();
+      },
+      20,
+    );
     f.queue([join(root, "early.py"), join(root, "early.txt")]);
     await Bun.sleep(60);
     expect(batches).toHaveLength(0);
 
     f.register("reg", { watchers: [{ globPattern: "**/*.py" }] });
-    await Bun.sleep(100);
+    await replayed.promise;
+    const uri = pathToFileURL(join(root, "early.py")).href;
     expect(batches).toEqual([
-      [{ uri: pathToFileURL(join(root, "early.py")).href, type: FileChangeType.Created }],
+      [
+        { uri, type: FileChangeType.Changed },
+        { uri, type: FileChangeType.Created },
+      ],
     ]);
   });
 
@@ -302,8 +334,8 @@ describe("WatchedFilesForwarder batching", () => {
     f.register("config", { watchers: [{ globPattern: "**/tsconfig.json" }] });
     await Bun.sleep(100);
 
-    const uris = batches.flat().map((e) => e.uri);
-    expect(uris.toSorted()).toEqual(
+    const uris = new Set(batches.flat().map((e) => e.uri));
+    expect([...uris].toSorted()).toEqual(
       ["a.ts", "late.ts", "tsconfig.json"].map((p) => pathToFileURL(join(root, p)).href).toSorted(),
     );
   });

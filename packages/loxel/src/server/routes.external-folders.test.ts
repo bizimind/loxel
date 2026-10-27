@@ -9,6 +9,7 @@ import type { WsMessage } from "@/api/ws-protocol";
 import { ExternalFilesService } from "./external-files-service";
 import { ExternalFolderRegistry, ExternalFoldersService } from "./external-folders-service";
 import { FileOperationsHistory, FileOperationsService } from "./file-operations-service";
+import { NodeModulesChanges } from "./node-modules-changes";
 import { ProjectFilesService } from "./project-files-service";
 import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
@@ -59,6 +60,7 @@ describe("Others folders routes", () => {
       projectPath: wt,
       worktreeWatcher: null,
       filesService,
+      nodeModulesChanges: new NodeModulesChanges(wt, () => {}),
       fileOpsService: new FileOperationsService(wt, { git: false, history: fileOpsHistory }),
       fileOpsHistory,
       detachedFilesService: {} as WorktreeResources["detachedFilesService"],
