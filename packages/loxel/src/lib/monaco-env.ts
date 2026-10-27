@@ -17,6 +17,7 @@ import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { getHighlighter } from "./highlighter";
 import { isLiveEditorModel } from "./live-editor-model";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
+import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
 import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
 import { isWithin } from "./project-file-helpers";
 import { registerPythonLanguageConfiguration } from "./python-language-config";
@@ -317,5 +318,9 @@ initSchemaSync();
 // WebSocket at /ws/ts-lsp via packages/monaco-lsp-client. No providers are
 // registered here — doing so would compete with the LSP-backed providers.
 
-// Go to definition and links that lead to another file open it in an editor tab.
+// Go to definition, peek picks and links that lead to another file open it in an editor tab.
 monaco.editor.registerEditorOpener(createEditorOpener());
+
+// Peek widgets show files no tab has open as read-only snapshots.
+installPeekModelResolver();
+monaco.editor.onDidCreateEditor(keepPreviewModelsReadOnly);

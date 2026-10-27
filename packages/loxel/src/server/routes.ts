@@ -203,6 +203,19 @@ function resolveFilePathWithHint(
   return ctx.resolveFilePath(filePath, worktreeHint);
 }
 
+/** `resolveFilePathWithHint` for a read that leaves no trace: an unknown file is not added. */
+function resolvePreviewPath(
+  ctx: RouteContext,
+  filePath: string,
+  worktreeHint: string | null,
+): ResolvedFilePath | null {
+  const resolved = ctx.resolveFilePath(filePath, worktreeHint ?? undefined);
+  if (resolved || !worktreeHint) return resolved;
+  const resources = ctx.getWorktreeResources(worktreeHint);
+  if (!resources) return null;
+  return { type: "external", wtPath: worktreeHint, resources, absolutePath: filePath };
+}
+
 function resolveProjectFromReq(
   req: Request,
   ctx: RouteContext,
@@ -477,7 +490,12 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
 
   // Absolute path mode: resolve via ctx.resolveFilePath
   if (path.startsWith("/")) {
-    const resolved = resolveFilePathWithHint(ctx, path, url.searchParams.get("wt"));
+    // `preview=1` is a look only (Monaco's peek widgets): the file is not tracked for renames, and
+    // a file outside every tree is read as the hint worktree's without joining its Others files.
+    const preview = url.searchParams.get("preview") === "1";
+    const resolved = preview
+      ? resolvePreviewPath(ctx, path, url.searchParams.get("wt"))
+      : resolveFilePathWithHint(ctx, path, url.searchParams.get("wt"));
     // No `code`: the path is not in a subscribed worktree (yet), which says nothing about the file.
     if (!resolved) return error("File not found in any active worktree", 404);
     if (resolved.type === "detached") {
@@ -493,7 +511,7 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
     return readFileContentResponse(async () => {
       const content = await Bun.file(join(resolved.tree.root, resolved.relativePath)).text();
       // An editor has this file open: follow it if it is renamed or moved.
-      void resolved.tree.filesService.trackFile(resolved.relativePath);
+      if (!preview) void resolved.tree.filesService.trackFile(resolved.relativePath);
       return content;
     });
   }

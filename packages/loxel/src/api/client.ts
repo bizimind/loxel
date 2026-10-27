@@ -230,6 +230,21 @@ export async function getFileContentByPath(
   return fetchJson<{ content: string }>(`/file-content?${params.toString()}`, { signal });
 }
 
+/**
+ * A file's content for a look only, such as a peek widget's: unlike `getFileContentByPath` it
+ * neither tracks the file for renames nor adds a file outside every tree to the worktree's Others.
+ */
+export async function getFilePreviewContent(
+  absolutePath: string,
+  worktreePath?: string | null,
+): Promise<{ content: string }> {
+  const params = new URLSearchParams();
+  params.set("path", absolutePath);
+  if (worktreePath) params.set("wt", worktreePath);
+  params.set("preview", "1");
+  return fetchJson<{ content: string }>(`/file-content?${params.toString()}`);
+}
+
 /** The `.editorconfig` properties that apply to a file (empty when none do). */
 export async function getEditorConfig(
   absolutePath: string,

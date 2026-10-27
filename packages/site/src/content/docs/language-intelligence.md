@@ -22,7 +22,7 @@ The TypeScript server provides all of these; the [other language servers](#other
 | ----------------- | ----------------------------------------------------------------------- |
 | Hover             | Type information and JSDoc for any symbol                               |
 | Go-to-definition  | Jump to the declaration of any symbol                                   |
-| Find references   | Jump to the usages of a symbol                                          |
+| Find references   | List the usages of a symbol across files                                |
 | Completions       | Context-aware autocompletion as you type                                |
 | Rename            | Rename a symbol and update all references                               |
 | Code actions      | Quick fixes, imports, and refactors                                     |
@@ -45,7 +45,9 @@ Files open in a tab can always be edited this way, wherever they are, as typing 
 
 ## Navigation
 
-`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. There is no inline peek; definitions always open as a full tab.
+`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. When a symbol has several definitions, a peek lists them instead.
+
+Press `Shift+F12` to find a symbol's references. A peek opens below the line, listing every usage grouped by file, with a preview of the selected one. `Alt+F12` peeks at a definition and `Cmd+Shift+F12` at implementations without leaving the file. Press `Enter` or double-click a usage to open it in a tab, which closes the peek; `Escape` closes it. Files that aren't open, including ones outside the project, are read-only in the preview; open the file to edit it. Files open in a tab can be edited right in the peek.
 
 ---
 
