@@ -34,10 +34,12 @@ const PROTECTED_SEGMENTS = new Set([
  * routes, unformatted; files are created, renamed, moved and deleted through the file-operation
  * routes, so open tabs follow, the files panel refreshes, and its undo covers those operations.
  *
- * Only files of the worktree itself are changed: never anything outside it (the standard library,
- * an environment elsewhere, Others folders, drafts), under a dependency folder (`node_modules`,
- * `site-packages`) or under `.git`. Lexical paths are checked first, then their real paths, so a
- * symlink cannot lead an edit out of the worktree.
+ * Only files of the worktree itself are changed through it: never anything outside it (the
+ * standard library, an environment elsewhere, Others folders, drafts), under a dependency folder
+ * (`node_modules`, `site-packages`) or under `.git`. Lexical paths are checked first, then their
+ * real paths, so a symlink cannot lead an edit out of the worktree. Files open in an editor are
+ * the exception: text edits change their model, wherever they are, as typing would, and never
+ * reach this file system.
  */
 export function createLspWorkspaceFiles(wtPath: string): WorkspaceFileSystem {
   let realRoot: Promise<string> | undefined;

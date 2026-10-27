@@ -15,7 +15,7 @@ Both registries live in [panels.tsx](../src/components/dockview/panels.tsx): `ou
 
 Imperative code never holds a `DockviewApi`. Module-level references live in [tools-bar.ts](../src/store/tools-bar.ts): `setDockviewApi` (outer, set by `setupOuterDockview`), `getCenterApi` / `subscribeCenterApi` / `getCenterApiWorktree` (center, set by `CenterHost`). The center API is replaced on every worktree switch, so always re-read it.
 
-Center panels that need their worktree get it from `params.worktreePath`, captured at creation, and expose it to descendants through [panel-context.ts](../src/components/dockview/panel-context.ts) (`usePanelWorktreePath`), so a panel keeps talking to the worktree it was created for.
+Center panels that need their worktree get it from `params.worktreePath`, captured at creation, and expose it to descendants through [panel-context.ts](../src/components/dockview/panel-context.ts) (`usePanelWorktreePath`; `getPanelWorktreePath(panel)` outside React), so a panel keeps talking to the worktree it was created for.
 
 Where to look:
 
@@ -69,7 +69,7 @@ Creation is decoupled through typed window events. [loxel-events.ts](../src/lib/
 ### Routing paths to panels
 
 - [open-file.ts](../src/lib/open-file.ts): `filePanelType` picks the panel by extension (`.md` → `editor`, `.excalidraw` → `excalidraw`, media extensions → `media`, else `codeEditor`); `dispatchOpenFile` fires the matching `loxel-open-*` event. Use it rather than choosing a panel type yourself.
-- [open-path.ts](../src/lib/open-path.ts): entry points for paths from outside the window (`loxel <path>`, Finder, terminal links). `openFile` and `openTerminal` resolve the owning worktree; if that worktree's center is not mounted yet (switch in progress, first mount) the request is queued in its [worktree-ui](../src/store/worktree-ui.ts) `pendingOpens`, and the next `CenterHost` for that worktree drains the queue in a microtask once its API is ready (`dispatchPendingOpen`). `openFolder` reveals the folder in `projectFiles`, using `showPanelAfterLayoutRestore` when it had to switch worktrees. `openPath` asks the server whether the path is a directory.
+- [open-path.ts](../src/lib/open-path.ts): entry points for paths from outside the window (`loxel <path>`, Finder, terminal links). `openFile` resolves the owning worktree and `openTerminal` takes the one the server picked; if that worktree's center is not mounted yet (switch in progress, first mount) the request is queued in its [worktree-ui](../src/store/worktree-ui.ts) `pendingOpens`, and the next `CenterHost` for that worktree drains the queue in a microtask once its API is ready (`dispatchPendingOpen`). `openFolder` reveals the folder in `projectFiles`, using `showPanelAfterLayoutRestore` when it had to switch worktrees. `openPath` asks the server whether the path is a directory.
 
 ### File and panel lifecycle
 

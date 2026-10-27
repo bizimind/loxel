@@ -187,11 +187,12 @@ export interface TerminalState {
 
 /**
  * A terminal panel the server asks a window to create (`loxel terminal`). The server has already
- * minted `terminalId` and holds the command to type into the shell, if any, until the panel
- * attaches; the renderer only places the panel and starts the shell in `cwd`.
+ * minted `terminalId` and started its shell in `cwd`, with the command typed in, so the renderer
+ * only places the panel in `worktreePath`, the worktree the session belongs to.
  */
 export type OpenTerminalPanel = Omit<OpenTerminalRequest, "command"> & {
   terminalId: string;
+  worktreePath: string;
 } & PanelOpenOptions;
 
 /** A terminal session and where its shell starts, as the panel sends it when attaching. */
@@ -227,14 +228,6 @@ export type WsClientMessage =
       rows: number;
       sinceEpoch?: string;
       sinceOffset?: number;
-    } & TerminalSpawnTarget)
-  | ({
-      /**
-       * Spawn a terminal session's shell with no xterm attached, unless it is already running:
-       * for a panel opened without focus (`loxel terminal --no-focus`), which may not mount for a
-       * while. The first `terminal_attach` binds the panel to it.
-       */
-      type: "terminal_spawn";
     } & TerminalSpawnTarget)
   /** Stop streaming output to this client; the session keeps running. Sent on unmount. */
   | { type: "terminal_detach"; id: string }

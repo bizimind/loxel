@@ -47,7 +47,7 @@ import { onPythonOverrideChange } from "./python-override-store";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
-import type { RouteContext } from "./routes";
+import type { ActiveWindow, RouteContext } from "./routes";
 import { handleRequest } from "./routes";
 import { RuffLspManager } from "./ruff-lsp-manager";
 import { SchemaService } from "./schema-service";
@@ -73,7 +73,7 @@ import { stress } from "./stress-detector";
 import type { TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
 import type { TerminalSink } from "./terminal-session";
-import { isNotificationSequenceEnabled } from "./terminal-settings";
+import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
 import { TerraformLspManager } from "./terraform-lsp-manager";
 import { TomlLspManager } from "./toml-lsp-manager";
 import { TsLspManager } from "./ts-lsp-manager";
@@ -213,8 +213,8 @@ function broadcastAll(message: WsMessage) {
 }
 
 /**
- * Where a terminal's shell starts and the `LOXEL_*` variables it gets, from a `terminal_attach` or
- * `terminal_spawn` request. Applied only when the session is spawned.
+ * Where a terminal's shell starts and the `LOXEL_*` variables it gets, from a `terminal_attach`
+ * request or a `loxel terminal` open. Applied only when the session is spawned.
  */
 function terminalSpawnTarget(
   msg: TerminalSpawnTarget,
@@ -249,18 +249,31 @@ function sendTo(ws: ServerWebSocket<WsData>, message: WsMessage) {
 let lastFocusedClient: ServerWebSocket<WsData> | null = null;
 
 /**
- * Deliver a request to the window the user is working in: the window `windowId` names (the CLI
- * ran in one of its terminals), otherwise the most recently focused window. Returns false when no
- * window can receive it.
+ * The sockets of the window the user is working in: the window `windowId` names (the CLI ran in
+ * one of its terminals), otherwise the most recently focused window. Empty when no window is
+ * connected.
  */
-function sendToActiveWindow(windowId: string | null, message: WsMessage): boolean {
+function activeWindowSockets(windowId: string | null): ServerWebSocket<WsData>[] {
   const named = windowId
     ? [...clients].filter(([, state]) => state.windowId === windowId).map(([ws]) => ws)
     : [];
   const fallback = lastFocusedClient ?? clients.keys().next().value;
-  const targets = named.length > 0 ? named : fallback ? [fallback] : [];
+  return named.length > 0 ? named : fallback ? [fallback] : [];
+}
+
+/** Deliver a request to the window the user is working in. Returns false when there is none. */
+function sendToActiveWindow(windowId: string | null, message: WsMessage): boolean {
+  const targets = activeWindowSockets(windowId);
   for (const ws of targets) sendTo(ws, message);
   return targets.length > 0;
+}
+
+/** The window {@link sendToActiveWindow} delivers to, or null when no window is connected. */
+function activeWindow(windowId: string | null): ActiveWindow | null {
+  const [ws] = activeWindowSockets(windowId);
+  const state = ws ? clients.get(ws) : undefined;
+  if (!state) return null;
+  return { windowId: state.windowId ?? null, worktreePath: state.shownWorktree ?? null };
 }
 
 /**
@@ -812,7 +825,9 @@ const worktreeLspManagers = [
 
 function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
   switch (msg.type) {
-    case "subscribe_worktree":
+    case "subscribe_worktree": {
+      const state = clients.get(ws);
+      if (state) state.shownWorktree = msg.worktreePath;
       subscribeWorktree(ws, msg.worktreePath).catch((err) => {
         log.error("Failed to subscribe to worktree", { wtPath: msg.worktreePath, error: err });
         sendTo(ws, {
@@ -821,10 +836,16 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
         });
       });
       break;
+    }
 
-    case "unsubscribe_worktree":
+    case "unsubscribe_worktree": {
+      // A switch subscribes to the new worktree before it drops the old one, so this clears the
+      // shown worktree only when the window leaves it for none (the worktree was removed).
+      const state = clients.get(ws);
+      if (state?.shownWorktree === msg.worktreePath) delete state.shownWorktree;
       unsubscribeWorktree(ws, msg.worktreePath);
       break;
+    }
 
     case "subscribe_logs":
       logSubscribers.add(ws);
@@ -897,21 +918,6 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
         });
       break;
     }
-
-    case "terminal_spawn":
-      terminalManager
-        .ensureSpawned(msg.id, {
-          ...terminalSpawnTarget(msg),
-          // The panel's first attach resizes the PTY to its xterm.
-          cols: 80,
-          rows: 24,
-          scrollbackLines: msg.scrollbackLines,
-        })
-        .catch((err: unknown) => {
-          log.error("Failed to spawn terminal", { terminalId: msg.id, error: err });
-          sendTo(ws, { type: "error", message: "Failed to start terminal" });
-        });
-      break;
 
     case "terminal_detach":
       if (terminalOwners.get(msg.id) === ws) {
@@ -1177,8 +1183,18 @@ const routeContext: RouteContext = {
   formatContent: (content, filePath, wtPath, settings) =>
     formatService.format(content, filePath, wtPath, settings),
   getDetectedFormatters: (wtPath) => formatService.getDetectedFormatters(wtPath),
-  setTerminalCommand: (terminalId, command) =>
-    terminalManager.setInitialCommand(terminalId, command),
+  activeWindow,
+  startTerminal: ({ command, ...target }) => {
+    const settings = terminalSpawnSettings();
+    return terminalManager.ensureSpawned(target.id, {
+      ...terminalSpawnTarget({ ...target, activatePythonEnv: settings.activatePythonEnv }),
+      // The panel's first attach resizes the PTY to its xterm.
+      cols: 80,
+      rows: 24,
+      scrollbackLines: settings.scrollbackLines,
+      command,
+    });
+  },
 };
 
 // Clients spawn language servers and terminals as soon as they connect, so let the login-shell PATH

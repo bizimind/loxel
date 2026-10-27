@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import type { PythonEnv } from "@/api/python-env-model";
 import type { TerminalState } from "@/api/ws-protocol";
+import { until } from "@/test/until";
 
 import { TerminalManager } from "./terminal-manager";
 import type { TerminalSink } from "./terminal-session";
@@ -22,48 +23,43 @@ function createRecordingSink() {
   return { sink, states, outputText: () => output.map((o) => textDecoder.decode(o)).join("") };
 }
 
-async function until(condition: () => boolean, timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
-    if (Date.now() > deadline) throw new Error("Timed out waiting for condition");
-    await Bun.sleep(10);
-  }
-}
-
 const managers: TerminalManager[] = [];
 afterEach(() => {
   for (const manager of managers.splice(0)) manager.destroyAll();
 });
 
 function createManager(
-  initialCommandTtlMs?: number,
   pythonEnvFor: (worktreePath: string) => Promise<PythonEnv | null> = async () => null,
 ): TerminalManager {
-  const manager = new TerminalManager(
-    { isSequenceEnabled: () => false, onNotification: () => {}, onExit: () => {}, pythonEnvFor },
-    initialCommandTtlMs,
-  );
+  const manager = new TerminalManager({
+    isSequenceEnabled: () => false,
+    onNotification: () => {},
+    onExit: () => {},
+    pythonEnvFor,
+  });
   managers.push(manager);
   return manager;
 }
 
 const attachOptions = { cols: 80, rows: 24, cwd: "/tmp" };
 
-describe("TerminalManager initial commands", () => {
+describe("TerminalManager commands", () => {
   // `/bin/sh -il` is what spawn() runs when SHELL points at it; a user's zsh would do the same.
   const originalShell = process.env.SHELL;
   afterEach(() => {
     process.env.SHELL = originalShell;
   });
 
-  test("types the command into the shell on first spawn only", async () => {
+  test("types the command into the shell it spawns, and a respawn gets a plain shell", async () => {
     process.env.SHELL = "/bin/sh";
     const manager = createManager();
     const id = crypto.randomUUID();
-    manager.setInitialCommand(id, "echo hello-from-$((40+2))");
 
     const first = createRecordingSink();
-    await manager.attach(id, first.sink, attachOptions);
+    await manager.attach(id, first.sink, {
+      ...attachOptions,
+      command: "echo hello-from-$((40+2))",
+    });
     await until(() => first.outputText().includes("hello-from-42"));
 
     // A respawn under the same ID (what a reload after a server restart does) gets a plain shell,
@@ -78,20 +74,6 @@ describe("TerminalManager initial commands", () => {
     manager.write(id, new TextEncoder().encode("echo done-$((1+1))\n"));
     await until(() => second.outputText().includes("done-2"));
     expect(second.outputText()).not.toContain("hello-from-42");
-  });
-
-  test("a command nobody attaches to in time is dropped", async () => {
-    process.env.SHELL = "/bin/sh";
-    const manager = createManager(50);
-    const id = crypto.randomUUID();
-    manager.setInitialCommand(id, "echo hello-from-$((40+2))");
-    await Bun.sleep(100);
-
-    const sink = createRecordingSink();
-    await manager.attach(id, sink.sink, attachOptions);
-    manager.write(id, new TextEncoder().encode("echo done-$((1+1))\n"));
-    await until(() => sink.outputText().includes("done-2"));
-    expect(sink.outputText()).not.toContain("hello-from-42");
   });
 
   test("the session keeps the panel's worktree apart from the shell's cwd", async () => {
@@ -111,9 +93,8 @@ describe("TerminalManager initial commands", () => {
     process.env.SHELL = "/bin/sh";
     const manager = createManager();
     const id = crypto.randomUUID();
-    manager.setInitialCommand(id, "echo hello-from-$((40+2))");
 
-    await manager.ensureSpawned(id, attachOptions);
+    await manager.ensureSpawned(id, { ...attachOptions, command: "echo hello-from-$((40+2))" });
     const session = manager.get(id);
     await manager.ensureSpawned(id, attachOptions);
     expect(manager.get(id)).toBe(session);
@@ -133,28 +114,16 @@ describe("TerminalManager initial commands", () => {
     try {
       const manager = createManager();
       const id = crypto.randomUUID();
-      manager.setInitialCommand(id, "echo agent-marker-[${CLAUDECODE-unset}]");
       const sink = createRecordingSink();
-      await manager.attach(id, sink.sink, attachOptions);
+      await manager.attach(id, sink.sink, {
+        ...attachOptions,
+        command: "echo agent-marker-[${CLAUDECODE-unset}]",
+      });
       await until(() => sink.outputText().includes("agent-marker-[unset]"));
     } finally {
       if (originalMarker === undefined) delete process.env.CLAUDECODE;
       else process.env.CLAUDECODE = originalMarker;
     }
-  });
-
-  test("a command can be cleared before the panel attaches", async () => {
-    process.env.SHELL = "/bin/sh";
-    const manager = createManager();
-    const id = crypto.randomUUID();
-    manager.setInitialCommand(id, "echo hello-from-$((40+2))");
-    manager.clearInitialCommand(id);
-
-    const sink = createRecordingSink();
-    await manager.attach(id, sink.sink, attachOptions);
-    manager.write(id, new TextEncoder().encode("echo done-$((1+1))\n"));
-    await until(() => sink.outputText().includes("done-2"));
-    expect(sink.outputText()).not.toContain("hello-from-42");
   });
 });
 
@@ -169,18 +138,18 @@ describe("TerminalManager Python environments", () => {
     const envPath = await mkdtemp(join(tmpdir(), "loxel-test-env-"));
     await mkdir(join(envPath, "bin"));
     const asked: string[] = [];
-    const manager = createManager(undefined, async (worktreePath) => {
+    const manager = createManager(async (worktreePath) => {
       asked.push(worktreePath);
       return { source: "pixi", pythonPath: `${envPath}/bin/python`, envPath };
     });
     const id = crypto.randomUUID();
-    // Only zsh keeps the entry first (macOS /etc/profile reorders PATH for sh), so check presence.
-    manager.setInitialCommand(
-      id,
-      `case ":$PATH:" in *:${envPath}/bin:*) echo env-on-$((1+1));; esac`,
-    );
     const sink = createRecordingSink();
-    await manager.attach(id, sink.sink, { ...attachOptions, worktreePath: "/" });
+    await manager.attach(id, sink.sink, {
+      ...attachOptions,
+      worktreePath: "/",
+      // Only zsh keeps the entry first (macOS /etc/profile reorders PATH for sh), so check presence.
+      command: `case ":$PATH:" in *:${envPath}/bin:*) echo env-on-$((1+1));; esac`,
+    });
     await until(() => sink.outputText().includes("env-on-2"));
     expect(asked).toEqual(["/"]);
 
@@ -200,7 +169,7 @@ describe("TerminalManager Python environments", () => {
     const gate = new Promise<null>((resolve) => {
       release = () => resolve(null);
     });
-    const manager = createManager(undefined, () => gate);
+    const manager = createManager(() => gate);
 
     const id = crypto.randomUUID();
     const first = manager.attach(id, createRecordingSink().sink, attachOptions);
@@ -216,13 +185,26 @@ describe("TerminalManager Python environments", () => {
   });
 
   /** A manager whose environment lookup waits until `release()`. */
-  function gatedManager(initialCommandTtlMs?: number) {
+  function gatedManager() {
     let release = () => {};
     const gate = new Promise<null>((resolve) => {
       release = () => resolve(null);
     });
-    return { manager: createManager(initialCommandTtlMs, () => gate), release };
+    return { manager: createManager(() => gate), release };
   }
+
+  test("a panel attaching while a command's shell starts gets that shell, command included", async () => {
+    process.env.SHELL = "/bin/sh";
+    const { manager, release } = gatedManager();
+    const id = crypto.randomUUID();
+    const spawned = manager.ensureSpawned(id, { ...attachOptions, command: "echo first-$((1+1))" });
+    const sink = createRecordingSink();
+    const attached = manager.attach(id, sink.sink, attachOptions);
+    release();
+    await Promise.all([spawned, attached]);
+    await until(() => sink.outputText().includes("first-2"));
+    expect(manager.get(id)?.attached).toBe(true);
+  });
 
   test("a client that detaches while the shell starts is not bound to it", async () => {
     process.env.SHELL = "/bin/sh";
@@ -236,17 +218,17 @@ describe("TerminalManager Python environments", () => {
     expect(manager.hasOrphanSessions()).toBe(true);
   });
 
-  test("input, a resize and the initial command sent while the shell starts all reach it", async () => {
+  test("input, a resize and the command sent while the shell starts all reach it", async () => {
     process.env.SHELL = "/bin/sh";
-    // The command's TTL runs out before the environment does, but it was claimed at attach.
-    const { manager, release } = gatedManager(50);
+    const { manager, release } = gatedManager();
     const id = crypto.randomUUID();
-    manager.setInitialCommand(id, "echo first-$((1+1))");
     const sink = createRecordingSink();
-    const attached = manager.attach(id, sink.sink, attachOptions);
+    const attached = manager.attach(id, sink.sink, {
+      ...attachOptions,
+      command: "echo first-$((1+1))",
+    });
     manager.write(id, new TextEncoder().encode("echo second-$((2+2))\n"));
     manager.resize(id, 100, 30);
-    await Bun.sleep(100);
     release();
     await attached;
     await until(() => sink.outputText().includes("second-4"));

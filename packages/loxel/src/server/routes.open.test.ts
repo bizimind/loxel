@@ -1,34 +1,44 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { realpathSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { WsMessage } from "@/api/ws-protocol";
+import { until } from "@/test/until";
 
-import type { RouteContext } from "./routes";
+import type { ActiveWindow, RouteContext } from "./routes";
 import { handleRequest } from "./routes";
+import { TerminalManager } from "./terminal-manager";
+
+type StartedTerminal = Parameters<RouteContext["startTerminal"]>[0];
+
+function git(cwd: string, ...args: string[]): void {
+  const result = Bun.spawnSync(["git", ...args], { cwd, stdout: "ignore", stderr: "pipe" });
+  if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr.toString()}`);
+}
 
 describe("POST /api/open terminals and placement", () => {
   let root: string;
   let ctx: RouteContext;
   let sent: Array<{ windowId: string | null; msg: WsMessage }>;
-  let commands: Array<{ terminalId: string; command: string }>;
-  let windowConnected: boolean;
+  let started: StartedTerminal[];
+  let window: ActiveWindow | null;
 
   beforeEach(async () => {
     root = realpathSync(await mkdtemp(join(tmpdir(), "loxel-open-")));
     await writeFile(join(root, "file.txt"), "x");
     sent = [];
-    commands = [];
-    windowConnected = true;
+    started = [];
+    window = { windowId: "w1", worktreePath: "/projects/app" };
     ctx = {
       broadcastToSubscribers: () => {},
       broadcastToProject: () => {},
       broadcastAll: () => {},
       sendToActiveWindow: (windowId, msg) => {
+        if (!window) return false;
         sent.push({ windowId, msg });
-        return windowConnected;
+        return true;
       },
       sendToWorktreeWindows: () => {},
       externalFolderConflict: () => null,
@@ -46,7 +56,10 @@ describe("POST /api/open terminals and placement", () => {
       updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
-      setTerminalCommand: (terminalId, command) => commands.push({ terminalId, command }),
+      activeWindow: () => window,
+      startTerminal: async (target) => {
+        started.push(target);
+      },
     };
   });
 
@@ -69,7 +82,7 @@ describe("POST /api/open terminals and placement", () => {
     return msg.data;
   }
 
-  test("sends the window a terminal to create and holds the command for the attach", async () => {
+  test("sends the window a terminal to create and starts its shell with the command", async () => {
     const res = await open({
       terminal: { cwd: root, command: "claude 'do it'", title: "claude" },
       windowId: "w1",
@@ -78,18 +91,24 @@ describe("POST /api/open terminals and placement", () => {
     expect(res.status).toBe(200);
     const data = sentTerminal();
     expect(sent[0]!.windowId).toBe("w1");
-    expect(data).toEqual({ terminalId: data.terminalId, cwd: root, title: "claude" });
-    expect(commands).toEqual([{ terminalId: data.terminalId, command: "claude 'do it'" }]);
+    // Outside every project, the terminal belongs to the worktree the window shows.
+    const worktreePath = "/projects/app";
+    expect(data).toEqual({ terminalId: data.terminalId, cwd: root, worktreePath, title: "claude" });
+    expect(started).toEqual([
+      { id: data.terminalId, cwd: root, worktreePath, windowId: "w1", command: "claude 'do it'" },
+    ]);
     expect(await res.json()).toEqual({ ok: true, terminalId: data.terminalId });
   });
 
-  test("a terminal without a command registers nothing and carries no title", async () => {
+  test("a terminal without a command starts a plain shell and carries no title", async () => {
+    window = { windowId: null, worktreePath: "/projects/app" };
     const res = await open({ terminal: { cwd: root } });
 
     expect(res.status).toBe(200);
-    expect(sentTerminal()).toEqual({ terminalId: sentTerminal().terminalId, cwd: root });
+    const { terminalId } = sentTerminal();
+    expect(sentTerminal()).toEqual({ terminalId, cwd: root, worktreePath: "/projects/app" });
     expect(sent[0]!.windowId).toBeNull();
-    expect(commands).toEqual([]);
+    expect(started).toEqual([{ id: terminalId, cwd: root, worktreePath: "/projects/app" }]);
   });
 
   test("canonicalizes the directory", async () => {
@@ -103,7 +122,7 @@ describe("POST /api/open terminals and placement", () => {
     expect((await open({ terminal: { cwd: join(root, "nope") } })).status).toBe(404);
     expect((await open({ terminal: { cwd: join(root, "file.txt") } })).status).toBe(400);
     expect(sent).toEqual([]);
-    expect(commands).toEqual([]);
+    expect(started).toEqual([]);
   });
 
   test("rejects malformed terminal bodies", async () => {
@@ -114,13 +133,91 @@ describe("POST /api/open terminals and placement", () => {
     expect(sent).toEqual([]);
   });
 
-  test("does not hold the command while no window can take the terminal", async () => {
-    windowConnected = false;
+  test("starts no shell while no window can take the terminal", async () => {
+    window = null;
 
     const res = await open({ terminal: { cwd: root, command: "ls" } });
 
     expect(res.status).toBe(503);
-    expect(commands).toEqual([]);
+    expect(started).toEqual([]);
+  });
+
+  test("waits like for a window while the window shows no worktree and cwd is in none", async () => {
+    window = { windowId: "w1", worktreePath: null };
+
+    const res = await open({ terminal: { cwd: root, command: "ls" } });
+
+    // 503, which the CLI retries: a launching window shows its worktree in a moment.
+    expect(res.status).toBe(503);
+    expect(sent).toEqual([]);
+    expect(started).toEqual([]);
+  });
+
+  test("reports a shell that fails to start", async () => {
+    ctx.startTerminal = async () => {
+      throw new Error("no pty");
+    };
+
+    const res = await open({ terminal: { cwd: root, command: "ls" } });
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Failed to start the terminal" });
+  });
+
+  // Regression: an agent ran `wt add` and then `loxel terminal --cwd <new worktree> '<command>'`
+  // while the user was on another worktree. The command waited for the panel to attach, which
+  // never happened in time, and was dropped. It must run whether or not a panel ever shows up.
+  test("runs the command for a worktree created a moment ago, with no panel attached", async () => {
+    const originalShell = process.env.SHELL;
+    process.env.SHELL = "/bin/sh";
+    const manager = new TerminalManager({
+      isSequenceEnabled: () => false,
+      onNotification: () => {},
+      onExit: () => {},
+      pythonEnvFor: async () => null,
+    });
+    try {
+      // The `wt` layout: a bare repository with its worktrees under `.worktrees`.
+      const seed = join(root, "seed");
+      await mkdir(seed);
+      git(seed, "init", "-q", "-b", "main");
+      git(
+        seed,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "x",
+      );
+      const repo = join(root, "repo");
+      git(root, "clone", "-q", "--bare", seed, repo);
+      git(repo, "worktree", "add", "-q", join(repo, ".worktrees", "main"), "main");
+      ctx.findProjectForPath = () => ({ cwd: repo, isBare: true }) as never;
+      window = { windowId: "w1", worktreePath: join(repo, ".worktrees", "main") };
+      ctx.startTerminal = ({ command, ...target }) =>
+        manager.ensureSpawned(target.id, { ...target, cols: 80, rows: 24, command });
+
+      const fresh = join(repo, ".worktrees", "feat", "new");
+      git(repo, "worktree", "add", "-q", "-b", "feat/new", fresh);
+      const marker = join(root, "marker");
+      const res = await open({
+        terminal: { cwd: fresh, command: `echo ran-$((1+1)) > ${marker}` },
+        focus: false,
+      });
+
+      expect(res.status).toBe(200);
+      const { terminalId, worktreePath } = sentTerminal();
+      expect(worktreePath).toBe(fresh);
+      expect(manager.get(terminalId)?.attached).toBe(false);
+      await until(() => existsSync(marker) && readFileSync(marker, "utf8").includes("ran-2"));
+    } finally {
+      manager.destroyAll();
+      process.env.SHELL = originalShell;
+    }
   });
 
   test("forwards a terminal's placement, canonicalizing the group tab's path", async () => {

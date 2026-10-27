@@ -2,10 +2,9 @@ import * as api from "@/api/client";
 import type { PythonEnv, PythonEnvSource, PythonInterpreter } from "@/api/python-env-model";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
-import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
 import { type QuickPickItem, requestQuickPick, requestTextInput } from "@/store/command-palette";
-import { useProjectStore } from "@/store/projects";
+import { deriveProject, useProjectStore } from "@/store/projects";
 
 import { abbreviateHomePath } from "./home-path";
 
@@ -58,15 +57,12 @@ export function pythonEnvSourceDescription(source: PythonEnvSource): string {
 }
 
 /**
- * Let the user choose the active worktree's Python interpreter in the command palette: a
- * discovered environment, a path they enter, or automatic detection. The choice is saved per
- * worktree on the server, which hands it to the language server and everything else that
- * resolves the worktree's Python.
+ * Let the user choose worktree `wtPath`'s Python interpreter in the command palette: a discovered
+ * environment, a path they enter, or automatic detection. The choice is saved per worktree on the
+ * server, which hands it to the language server and everything else that resolves the worktree's
+ * Python.
  */
-export async function selectPythonInterpreter(): Promise<void> {
-  const { activeProjectPath, activeWorktreePath: wtPath } = getQueryScope();
-  if (!wtPath) return;
-
+export async function selectPythonInterpreter(wtPath: string): Promise<void> {
   const { homeDir } = useProjectStore.getState();
   const state = api.getPythonEnvCandidates(wtPath);
   const items = state.then(({ candidates, automaticPath, overridePath }) => {
@@ -104,7 +100,8 @@ export async function selectPythonInterpreter(): Promise<void> {
 
   try {
     const response = await api.setPythonOverride({ worktreePath: wtPath, pythonPath });
-    queryClient.setQueryData(queryKeys.pythonEnv(activeProjectPath, wtPath), response);
+    const projectPath = deriveProject(wtPath, useProjectStore.getState().projects)?.path ?? null;
+    queryClient.setQueryData(queryKeys.pythonEnv(projectPath, wtPath), response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the Python interpreter");
   }

@@ -82,6 +82,7 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
 class FakeClient {
   readonly toClient: Frame[] = [];
   readonly toServer: Frame[] = [];
+  readonly closes: Array<[number | undefined, string | undefined]> = [];
   readonly ws: ServerWebSocket<unknown>;
   private waiters: Array<() => void> = [];
 
@@ -94,7 +95,9 @@ class FakeClient {
         for (const wake of this.waiters.splice(0)) wake();
         return data.length;
       },
-      close: () => {},
+      close: (code?: number, reason?: string) => {
+        this.closes.push([code, reason]);
+      },
     };
     this.ws = ws as unknown as ServerWebSocket<unknown>;
   }
@@ -261,5 +264,37 @@ describe("StdioLspManager workspace folders", () => {
     const answer = await client.serverReceived((f) => f.id === 9);
     expect(answer.result).toEqual([{ uri: `file://${root}`, name: "wt" }]);
     expect(client.toClient).toEqual([]);
+  });
+});
+
+describe("StdioLspManager spawn failures", () => {
+  /** A server keyed by worktree whose binary lost its execute bit, so `Bun.spawn` throws. */
+  class UnexecutableLspManager extends FakeLspManager {
+    constructor(private readonly bin: string) {
+      super(bin);
+    }
+
+    protected override resolveBinary(): string {
+      return this.bin;
+    }
+
+    protected override getSessionKey(context: WtLspContext): string {
+      return context.wtPath;
+    }
+  }
+
+  test("a binary that cannot run closes the socket and frees the worktree's session", async () => {
+    dir = await realpath(await mkdtemp(join(tmpdir(), "stdio-lsp-manager-")));
+    const bin = join(dir, "server");
+    await writeFile(bin, "#!/bin/sh\n", { mode: 0o644 });
+    manager = new UnexecutableLspManager(bin);
+    const first = new FakeClient(manager);
+
+    manager.start(first.ws, dir);
+    expect(first.closes).toEqual([[4001, "python-lsp failed to start"]]);
+
+    // The next connection for the worktree finds no session left to replace.
+    manager.start(new FakeClient(manager).ws, dir);
+    expect(first.closes).toHaveLength(1);
   });
 });

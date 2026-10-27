@@ -105,7 +105,8 @@ describe("Others folders routes", () => {
       updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
-      setTerminalCommand: () => {},
+      activeWindow: () => null,
+      startTerminal: async () => {},
     };
   });
 

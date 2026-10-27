@@ -95,7 +95,8 @@ describe("project conversion preflight", () => {
       updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
-      setTerminalCommand: () => {},
+      activeWindow: () => null,
+      startTerminal: async () => {},
     };
   }
 

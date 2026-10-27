@@ -130,6 +130,11 @@ export interface ClientState {
   subscribedWorktrees: Set<string>;
   /** The window this socket belongs to (its terminals carry it as `LOXEL_WINDOW_ID`). */
   windowId?: string;
+  /**
+   * The worktree the window shows: the one it subscribed to last, set when the request arrives
+   * (the subscription itself completes later) and cleared when it unsubscribes from it.
+   */
+  shownWorktree?: string;
 }
 
 /** WS data tag for routing app vs language-server connections. */
