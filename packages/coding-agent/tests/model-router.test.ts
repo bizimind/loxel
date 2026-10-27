@@ -47,6 +47,18 @@ describe("ModelRouter env fallbacks", () => {
     }
   });
 
+  test("the WebSearch fallback from the env uses the WebSearch model's key without a base key", () => {
+    const router = new ModelRouter(
+      { webSearch: { modelId: "settings/search", apiKey: "search-key" } },
+      undefined,
+      { OPENROUTER_WEBSEARCH_FALLBACK_MODEL: "env/search-fallback" },
+    );
+    expect(router.getWebSearchFallbackConfig()).toEqual({
+      modelId: "env/search-fallback",
+      apiKey: "search-key",
+    });
+  });
+
   test("explicit models win over the env", () => {
     const router = new ModelRouter(
       {

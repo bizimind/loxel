@@ -12,6 +12,7 @@ process.env.LOXEL_STATE_DIR = join(root, "state");
 for (const name of ["VIRTUAL_ENV", "CONDA_PREFIX", "UV_PROJECT_ENVIRONMENT"])
   delete process.env[name];
 const { AgentEnv, buildAgentEnv } = await import("./agent-env");
+const { pythonEnvActivation } = await import("./python-env-activation");
 const { refreshPythonEnv, subscribePythonEnv } = await import("./python-env");
 const { setPythonOverride } = await import("./python-override-store");
 
@@ -59,11 +60,19 @@ function resolvedTo(wt: string, pythonPath: string): Promise<void> {
   });
 }
 
+/** The agent env for `pythonEnv`, as an `AgentEnv` builds it once the resolution lands. */
+async function agentEnvFor(
+  wt: string,
+  pythonEnv: PythonEnv,
+): Promise<Record<string, string | undefined>> {
+  return buildAgentEnv(await pythonEnvActivation(pythonEnv, wt));
+}
+
 describe("buildAgentEnv", () => {
   test("marks the env as an agent's and activates a venv, VIRTUAL_ENV included", async () => {
     const wt = await makeWorktree();
     const venv = await makeVenv(join(wt, ".venv"));
-    const env = await buildAgentEnv(wt, venv);
+    const env = await agentEnvFor(wt, venv);
     expect(env.AI_AGENT).toBe("loxel");
     expect(firstOnPath(env)).toBe(join(wt, ".venv", "bin"));
     expect(env.VIRTUAL_ENV).toBe(join(wt, ".venv"));
@@ -73,7 +82,7 @@ describe("buildAgentEnv", () => {
     const wt = await makeWorktree();
     const pixiPath = join(wt, ".pixi", "envs", "default");
     await mkdir(join(pixiPath, "bin"), { recursive: true });
-    const env = await buildAgentEnv(wt, {
+    const env = await agentEnvFor(wt, {
       source: "pixi",
       pythonPath: join(pixiPath, "bin", "python"),
       envPath: pixiPath,
@@ -85,11 +94,11 @@ describe("buildAgentEnv", () => {
   test("leaves the env as it is without an environment or for one git tracks", async () => {
     const wt = await makeWorktree();
     const venv = await makeVenv(join(wt, ".venv"));
-    const plain = await buildAgentEnv(wt, null);
+    const plain = buildAgentEnv(null);
     expect(plain.AI_AGENT).toBe("loxel");
 
     git(wt, "add", "-f", ".venv/bin/python");
-    const tracked = await buildAgentEnv(wt, venv);
+    const tracked = await agentEnvFor(wt, venv);
     expect(tracked.PATH).toBe(plain.PATH);
     expect(tracked.VIRTUAL_ENV).toBeUndefined();
   });
@@ -133,6 +142,21 @@ describe("AgentEnv", () => {
       await agentEnv.settled();
       expect(firstOnPath(agentEnv.get())).toBe(join(wt, ".venv", "bin"));
     } finally {
+      agentEnv.dispose();
+    }
+  });
+
+  test("builds the env at each call, so later login-shell variables apply", async () => {
+    const wt = await makeWorktree();
+    await makeVenv(join(wt, ".venv"));
+    const agentEnv = new AgentEnv(wt);
+    try {
+      await agentEnv.settled();
+      process.env.AGENT_ENV_TEST_LATE = "1";
+      expect(agentEnv.get().AGENT_ENV_TEST_LATE).toBe("1");
+      expect(firstOnPath(agentEnv.get())).toBe(join(wt, ".venv", "bin"));
+    } finally {
+      delete process.env.AGENT_ENV_TEST_LATE;
       agentEnv.dispose();
     }
   });

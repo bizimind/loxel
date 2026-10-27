@@ -62,7 +62,10 @@ export class ModelRouter {
       options.webSearch ?? this.configFromEnv(env.OPENROUTER_WEBSEARCH_MODEL, baseApiKey);
     this.webSearchFallbackConfig =
       options.webSearchFallback ??
-      this.configFromEnv(env.OPENROUTER_WEBSEARCH_FALLBACK_MODEL, baseApiKey);
+      this.configFromEnv(
+        env.OPENROUTER_WEBSEARCH_FALLBACK_MODEL,
+        options.webSearch?.apiKey ?? baseApiKey,
+      );
 
     this.logger.info("Model router configured", {
       plannerModel: this.configs.planner?.modelId,

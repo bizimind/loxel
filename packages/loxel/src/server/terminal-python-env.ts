@@ -98,8 +98,8 @@ function ensureZshShim(): string {
 /**
  * Activate `pythonEnv` in a terminal's spawn environment the way its `activate` script would:
  * its `bin` first on PATH, `VIRTUAL_ENV` for a venv, and no `PYTHONHOME` (see
- * {@link setPythonEnvVars}). An interpreter outside any environment changes nothing, and so does a
- * `bin` the shell could misread or that holds files git tracks in `worktreePath`. For zsh, also routes
+ * {@link setPythonEnvVars}). An interpreter outside any environment changes nothing, and so does
+ * a `bin` the shell could misread or that holds files git tracks in `worktreePath`. For zsh, routes
  * startup through the shim that keeps the entry first after the user's startup files; other shells
  * get the PATH entry without `VIRTUAL_ENV`, since their startup may move the entry back.
  */
