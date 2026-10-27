@@ -618,6 +618,7 @@ export async function convertProject(req: ConvertProjectRequest) {
 export interface SchemaSyncResult {
   json: Array<{ glob: string; url: string; schema: unknown }>;
   yaml: { synced: boolean };
+  toml: { synced: boolean };
 }
 
 export async function syncSchemas(

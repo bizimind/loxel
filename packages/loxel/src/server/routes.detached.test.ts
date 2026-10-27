@@ -46,6 +46,7 @@ describe("detached file project destinations", () => {
       shutdown: () => {},
       resolveSchema: async () => ({}),
       updateYamlSchemas: () => {},
+      updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
       setTerminalCommand: () => {},

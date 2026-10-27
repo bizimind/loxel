@@ -75,6 +75,7 @@ describe("GET /api/stores/settings", () => {
     shutdown: () => {},
     resolveSchema: async () => ({}),
     updateYamlSchemas: () => {},
+    updateTomlSchemas: () => {},
     formatContent: async () => ({ content: null }),
     getDetectedFormatters: () => [],
     setTerminalCommand: () => {},
