@@ -36,7 +36,8 @@ describe("POST /api/schemas/sync", () => {
       },
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
-      setTerminalCommand: () => {},
+      activeWindow: () => null,
+      startTerminal: async () => {},
     };
 
     const pyproject = "https://json.schemastore.org/pyproject.json";

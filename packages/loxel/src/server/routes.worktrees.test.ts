@@ -76,7 +76,8 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),
       getDetectedFormatters: () => [],
-      setTerminalCommand: () => {},
+      activeWindow: () => null,
+      startTerminal: async () => {},
     };
   });
 

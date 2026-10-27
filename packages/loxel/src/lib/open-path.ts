@@ -1,12 +1,10 @@
 import * as api from "@/api/client";
-import { wsClient } from "@/api/client";
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
 import type { OpenTerminalPanel } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
 import { deriveProject, useProjectStore, whenProjectsLoaded } from "@/store/projects";
-import { useSettingsStore } from "@/store/settings-store";
 import { getCenterApiWorktree, showPanel, showPanelAfterLayoutRestore } from "@/store/tools-bar";
 import type { PendingOpen } from "@/store/worktree-ui";
 import { getCurrentWorktreeUI, getWorktreeUI } from "@/store/worktree-ui";
@@ -16,7 +14,6 @@ import { frontendLog } from "./frontend-logger";
 import { dispatchLoxelEvent } from "./loxel-events";
 import type { FileLocation } from "./open-file";
 import { dispatchOpenFile } from "./open-file";
-import { WINDOW_ID } from "./window-id";
 
 const log = frontendLog.child("files");
 
@@ -89,42 +86,19 @@ export async function openFile(path: string, options: PanelOpenOptions = {}): Pr
 }
 
 /**
- * Open a terminal sent from outside the window (`loxel terminal`). The shell starts in `cwd`; the
- * panel goes to the worktree containing `cwd`, switching to it if needed, else to the active one.
- * A worktree created moments ago (`wt add` from a shell) may not be listed yet, so the owning
- * project's worktrees are refreshed before giving up on finding an owner.
+ * Open a terminal sent from outside the window (`loxel terminal`). The server has already started
+ * its shell and picked its worktree; the panel goes there, switching to it if the open has focus.
+ * A worktree created moments ago (`wt add` from a shell) may not be listed yet, so its project's
+ * worktrees are refreshed first.
  */
 export async function openTerminal(terminal: OpenTerminalPanel): Promise<void> {
   await whenProjectsLoaded();
   const { projects } = useProjectStore.getState();
-  const { activeWorktreePath, byProject, refreshProjectWorktrees } = useWorktreeStore.getState();
-
-  let owner = deriveOwningWorktree(terminal.cwd, projects, byProject);
-  if (!owner) {
-    const project = deriveProject(terminal.cwd, projects);
-    if (project) {
-      await refreshProjectWorktrees(project.path);
-      owner = deriveOwningWorktree(terminal.cwd, projects, useWorktreeStore.getState().byProject);
-    }
-  }
-
-  const target = owner ?? activeWorktreePath;
-  if (!target) {
-    showToast("Open a project before opening terminals");
-    return;
-  }
-  // Without focus the panel may not mount for a while (a background tab, or a worktree the user is
-  // not on), but its command must run now, so the shell is started without it.
-  if (terminal.focus === false) {
-    wsClient.send({
-      type: "terminal_spawn",
-      id: terminal.terminalId,
-      cwd: terminal.cwd,
-      worktreePath: target,
-      scrollbackLines: useSettingsStore.getState().terminal.scrollbackLines,
-      activatePythonEnv: useSettingsStore.getState().terminal.activatePythonEnv,
-      windowId: WINDOW_ID,
-    });
+  const { byProject, refreshProjectWorktrees } = useWorktreeStore.getState();
+  const target = terminal.worktreePath;
+  if (deriveOwningWorktree(target, projects, byProject) !== target) {
+    const project = deriveProject(target, projects);
+    if (project) await refreshProjectWorktrees(project.path);
   }
   await openInWorktree(target, { kind: "terminal", terminal });
 }

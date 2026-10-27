@@ -78,7 +78,8 @@ describe("GET /api/stores/settings", () => {
     updateTomlSchemas: () => {},
     formatContent: async () => ({ content: null }),
     getDetectedFormatters: () => [],
-    setTerminalCommand: () => {},
+    activeWindow: () => null,
+    startTerminal: async () => {},
   } as RouteContext;
 
   test("migrates a plaintext row to encrypted at rest and returns plaintext", async () => {

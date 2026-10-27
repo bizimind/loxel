@@ -45,11 +45,11 @@ import type {
   PythonInterpreter,
 } from "@/api/python-env-model";
 import type { SearchMatch } from "@/api/search-model";
-import type { WsMessage } from "@/api/ws-protocol";
+import type { TerminalSpawnTarget, WsMessage } from "@/api/ws-protocol";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 import { getMediaType } from "@/lib/media-extensions";
-import { isWithin } from "@/lib/project-file-helpers";
+import { findTreeRoot, isWithin } from "@/lib/project-file-helpers";
 import { classifySchemaGlob } from "@/lib/schema-glob";
 import { isHttpUrl } from "@/url-utils";
 
@@ -97,11 +97,19 @@ import { worktreesChangedMessage } from "./ws-messages";
 const wtLog = logger.child("worktrees");
 const searchLog = logger.child("search");
 const openInLog = logger.child("launch-services");
+const terminalLog = logger.child("terminal");
 
 const wtProgress: ProgressHandler = {
   log: (msg) => wtLog.info(msg),
   warn: (msg) => wtLog.warn(msg),
 };
+
+/** The window the user is working in: the one `sendToActiveWindow` delivers to. */
+export interface ActiveWindow {
+  windowId: string | null;
+  /** The worktree the window shows; null while it is launching or has no project open. */
+  worktreePath: string | null;
+}
 
 export interface RouteContext {
   broadcastToSubscribers: (wtPath: string, msg: WsMessage) => void;
@@ -155,8 +163,17 @@ export interface RouteContext {
   ) => Promise<FormatResult>;
   /** Return detected formatters for a worktree. */
   getDetectedFormatters: (worktreePath: string) => { command: string; extensions: string[] }[];
-  /** Type `command` into terminal `terminalId` when its panel attaches and the shell spawns. */
-  setTerminalCommand: (terminalId: string, command: string) => void;
+  /** The window `sendToActiveWindow` delivers to, or null when no window is connected. */
+  activeWindow: (windowId: string | null) => ActiveWindow | null;
+  /**
+   * Start a terminal's shell with no panel attached, typing `command` into it; the panel's first
+   * attach binds to the running session. Resolves once the shell is running.
+   */
+  startTerminal: (
+    target: Pick<TerminalSpawnTarget, "id" | "cwd" | "worktreePath" | "windowId"> & {
+      command?: string;
+    },
+  ) => Promise<void>;
 }
 
 type RouteHandler = (req: Request, ctx: RouteContext) => Promise<Response> | Response;
@@ -2595,6 +2612,26 @@ async function canonicalPlacement(
   return { ...placement, group: { ...group, ...(path ? { path } : {}) } };
 }
 
+/**
+ * The worktree holding `dir`, from its project's current worktree list (so one `wt add` created a
+ * moment ago counts), or null when `dir` is in no project's worktree or the list is unavailable.
+ */
+async function owningWorktree(ctx: RouteContext, dir: string): Promise<string | null> {
+  const project = ctx.findProjectForPath(dir);
+  if (!project) return null;
+  let worktrees: string[];
+  try {
+    worktrees = (await listProjectWorktrees(project.cwd)).map((wt) => wt.path);
+  } catch (err) {
+    terminalLog.warn("Could not list worktrees for a terminal", {
+      project: project.cwd,
+      error: err,
+    });
+    return null;
+  }
+  return findTreeRoot(dir, project.isBare ? worktrees : [...worktrees, project.cwd]);
+}
+
 // POST /api/open — open a file, folder, URL or terminal in the appropriate panel (triggered by the
 // `loxel` CLI and by files and folders macOS hands to the app)
 async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
@@ -2613,9 +2650,9 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   const unfocused = body.focus === false ? { focus: false } : {};
   const placed = { ...(placement ? { placement } : {}), ...unfocused };
 
-  // Terminal mode: a new terminal panel in the window in use, its shell started in `cwd`, with an
-  // optional command typed into it. The command stays on the server until the panel attaches, so
-  // it is never persisted with the layout and cannot run twice.
+  // Terminal mode: a new terminal panel in the window in use, its shell started in `cwd` by the
+  // server right away, with an optional command typed into it. The command goes to that one spawn
+  // only, so it is never persisted with the layout and cannot run twice.
   if (body.terminal !== undefined) {
     const terminal = body.terminal;
     if (typeof terminal !== "object" || terminal === null || Array.isArray(terminal)) {
@@ -2634,14 +2671,36 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     if (!cwd || !cwdStats) return error("Directory not found", 404);
     if (!cwdStats.isDirectory()) return error("Not a directory", 400);
 
+    // The panel belongs to the worktree holding `cwd`, else to the one the window shows.
+    const owner = await owningWorktree(ctx, cwd);
+    const window = ctx.activeWindow(windowId);
+    if (!window) return error("No Loxel window is open", 503);
+    const worktreePath = owner ?? window.worktreePath;
+    // 503 like no window at all: a window that is still launching shows its worktree in a moment,
+    // and the CLI retries a 503 for a while.
+    if (!worktreePath) return error("Open a project in Loxel before opening terminals", 503);
+
     const terminalId = crypto.randomUUID();
     const sent = ctx.sendToActiveWindow(windowId, {
       type: "open_terminal",
-      data: { terminalId, cwd, ...(title ? { title } : {}), ...placed },
+      data: { terminalId, cwd, worktreePath, ...(title ? { title } : {}), ...placed },
     });
     if (!sent) return error("No Loxel window is open", 503);
-    // Registered only once a window has the request: the attach arrives later over the socket.
-    if (command) ctx.setTerminalCommand(terminalId, command);
+    // Started here, not by the panel's attach: the panel may not mount for hours (a background
+    // tab, a worktree the user is not on, a window that is not painting), and the command must
+    // run now. Started in the same tick as the send, so the panel's attach finds it.
+    try {
+      await ctx.startTerminal({
+        id: terminalId,
+        cwd,
+        worktreePath,
+        ...(window.windowId ? { windowId: window.windowId } : {}),
+        ...(command ? { command } : {}),
+      });
+    } catch (err) {
+      terminalLog.error("Failed to start terminal", { terminalId, error: err });
+      return error("Failed to start the terminal", 500);
+    }
     return json({ ok: true, terminalId });
   }
 
