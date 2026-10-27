@@ -19,6 +19,8 @@ export interface Worktree {
   bare: boolean;
   /** Whether the worktree is locked */
   locked: boolean;
+  /** Whether git would prune it (its checkout is gone and it is not locked) */
+  prunable: boolean;
 }
 
 /**
@@ -51,6 +53,7 @@ export function parseWorktreeList(output: string): Worktree[] {
         branch: null,
         bare: false,
         locked: false,
+        prunable: false,
       };
       continue;
     }
@@ -64,6 +67,8 @@ export function parseWorktreeList(output: string): Worktree[] {
       current.bare = true;
     } else if (line === "locked" || line.startsWith("locked ")) {
       current.locked = true;
+    } else if (line === "prunable" || line.startsWith("prunable ")) {
+      current.prunable = true;
     } else if (line === "detached") {
       current.branch = null;
     }

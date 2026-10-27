@@ -74,6 +74,36 @@ program
     await removeCommand(name, opts);
   });
 
+program
+  .command("init [url] [dir]")
+  .description(
+    "Check the repo's git setup and fix what you choose, or bare-clone <url> set up for wt",
+  )
+  .option("--fetch-refspec", "Add origin's fetch refspec, fetch, and record origin/HEAD")
+  .option("--no-fetch-refspec", "Leave the fetch refspec alone")
+  .option("--set-origin-head", "Ask origin for its default branch and record origin/HEAD")
+  .option("--no-set-origin-head", "Leave origin/HEAD alone")
+  .option("--prune", "Prune worktrees whose directory is gone")
+  .option("--no-prune", "Keep stale worktrees")
+  .option("--worktree-metadata <on|off>", "Turn per-worktree config (git config --worktree) on/off")
+  .option("--main-worktree", "Check out the default branch as a worktree (bare repos)")
+  .option("--no-main-worktree", "Don't create the default branch's worktree")
+  .option("-y, --yes", "Apply every recommended fix without asking")
+  .option("-j, --json", "Output as JSON")
+  .action(async (url: string | undefined, dir: string | undefined, opts) => {
+    const { initCommand } = await import("./commands/init.ts");
+    await initCommand(url, dir, opts);
+  });
+
+program
+  .command("doctor")
+  .description("Check the repo's git setup for wt, changing nothing (exits 1 if a check fails)")
+  .option("-j, --json", "Output as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const { doctorCommand } = await import("./commands/doctor.ts");
+    await doctorCommand(opts);
+  });
+
 const updateConfig: UpdateConfig = { packageName: "wt", getCurrentVersion, cacheEnabled: true };
 
 // Version and update commands use cli-common factories for consistent runAction pattern

@@ -36,11 +36,12 @@ const wt = (path: string, extra: Partial<Worktree> = {}): Worktree => ({
   branch: null,
   bare: false,
   locked: false,
+  prunable: false,
   ...extra,
 });
 
 describe("parseWorktreeList", () => {
-  test("parses branches, detached heads, bare and locked entries", () => {
+  test("parses branches, detached heads, bare, locked and prunable entries", () => {
     const output = [
       "worktree /repo",
       "bare",
@@ -54,16 +55,22 @@ describe("parseWorktreeList", () => {
       "detached",
       "locked reason goes here",
       "",
+      "worktree /repo/.worktrees/gone",
+      "HEAD 3333333333333333333333333333333333333333",
+      "branch refs/heads/gone",
+      "prunable gitdir file points to non-existent location",
+      "",
     ].join("\n");
 
     expect(parseWorktreeList(output)).toEqual([
-      { path: "/repo", head: "", branch: null, bare: true, locked: false },
+      { path: "/repo", head: "", branch: null, bare: true, locked: false, prunable: false },
       {
         path: "/repo/.worktrees/feat/foo",
         head: "1111111111111111111111111111111111111111",
         branch: "feat/foo",
         bare: false,
         locked: false,
+        prunable: false,
       },
       {
         path: "/repo/.worktrees/loose",
@@ -71,6 +78,15 @@ describe("parseWorktreeList", () => {
         branch: null,
         bare: false,
         locked: true,
+        prunable: false,
+      },
+      {
+        path: "/repo/.worktrees/gone",
+        head: "3333333333333333333333333333333333333333",
+        branch: "gone",
+        bare: false,
+        locked: false,
+        prunable: true,
       },
     ]);
   });

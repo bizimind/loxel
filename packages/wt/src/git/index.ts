@@ -49,3 +49,10 @@ export {
   worktreesDir,
   type Worktree,
 } from "./worktree.ts";
+export {
+  disableWorktreeConfigCommands,
+  enableWorktreeConfigCommands,
+  isWorktreeConfigBroken,
+  readWorktreeConfigState,
+  type WorktreeConfigState,
+} from "./worktree-config.ts";
