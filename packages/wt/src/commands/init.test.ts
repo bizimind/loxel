@@ -4,35 +4,12 @@ import { join } from "node:path";
 
 import { git, gitSucceeds } from "../git/index.ts";
 import { planInit } from "../lib/index.ts";
-import { createTestRepo, type TestRepo } from "../test-repo.ts";
+import { createTestRepo, runCli, type TestRepo } from "../test-repo.ts";
 import { parseFlags, resolveDecisions, type InitOptions } from "./init.ts";
 
 let repo: TestRepo;
 
 afterEach(() => repo.cleanup());
-
-const CLI = join(import.meta.dir, "..", "cli.ts");
-
-/** Run the CLI with no terminal on stdin, as an agent or script would. */
-async function runCli(
-  args: string[],
-  cwd: string,
-  env: Record<string, string | undefined> = process.env,
-): Promise<{ exitCode: number; json: unknown }> {
-  const proc = Bun.spawn([process.execPath, CLI, ...args], {
-    cwd,
-    env,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, , exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { exitCode, json: JSON.parse(stdout) };
-}
 
 async function decide(options: InitOptions) {
   const plan = await planInit(repo.root);

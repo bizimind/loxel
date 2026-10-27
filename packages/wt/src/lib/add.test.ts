@@ -93,6 +93,7 @@ describe("executeAdd", () => {
       base: "HEAD",
       created: true,
       hookRan: false,
+      meta: {},
     });
     expect(await Bun.file(join(result.path, "README.md")).exists()).toBe(true);
     expect(await git(["rev-parse", "--abbrev-ref", "HEAD"], result.path)).toBe("feat/foo");
