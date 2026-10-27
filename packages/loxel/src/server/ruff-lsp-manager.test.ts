@@ -14,14 +14,13 @@ const stateDir = await mkdtemp(join(tmpdir(), "ruff-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { refreshPythonEnv, subscribePythonEnv } = await import("./python-env");
 const { pickRuffBinary, RuffLspManager } = await import("./ruff-lsp-manager");
-type RuffLspManager = import("./ruff-lsp-manager").RuffLspManager;
 
 afterAll(async () => {
   await rm(stateDir, { recursive: true, force: true });
 });
 
 const roots: string[] = [];
-let manager: RuffLspManager | undefined;
+let manager: InstanceType<typeof RuffLspManager> | undefined;
 
 afterEach(async () => {
   manager?.destroy();
@@ -115,7 +114,7 @@ class FakeClient {
   private nextId = 1;
   private readonly responses = new Map<number, (result: unknown) => void>();
 
-  constructor(private readonly manager: RuffLspManager) {
+  constructor(private readonly manager: InstanceType<typeof RuffLspManager>) {
     let onClose: (code: number) => void = () => {};
     this.closed = new Promise((resolve) => {
       onClose = resolve;

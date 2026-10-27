@@ -13,7 +13,6 @@ const stateDir = await mkdtemp(join(tmpdir(), "format-service-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { FormatService } = await import("./format-service");
 const { findVenvBin } = await import("./python-formatter");
-type FormatService = import("./format-service").FormatService;
 
 afterAll(async () => {
   await rm(stateDir, { recursive: true, force: true });
@@ -56,7 +55,7 @@ async function makeFakeVenv(
 
 const AUTO_DETECT: FormattingSettings = DEFAULT_FORMATTING_SETTINGS;
 
-function findFormatter(service: FormatService, wt: string, command: string) {
+function findFormatter(service: InstanceType<typeof FormatService>, wt: string, command: string) {
   return service.getDetectedFormatters(wt).find((f) => f.command === command);
 }
 
