@@ -23,6 +23,7 @@ const project: EnrichedProject = {
   addedAt: "2026-01-01T00:00:00.000Z",
   isBare: false,
   worktreesDir: "/repo/.worktrees",
+  worktreeMetadata: false,
   worktrees: [
     {
       path: "/repo/.worktrees/topic",
@@ -186,6 +187,143 @@ describe("Sidebar worktree context menu", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Hide worktree" }));
 
     await waitFor(() => expect(icon()).toBeNull());
+  });
+});
+
+describe("Sidebar worktree nesting", () => {
+  const parent: WorktreeEntry = {
+    ...project.worktrees[0]!,
+    path: "/repo/.worktrees/parent",
+    wtName: "parent",
+    wtId: "id-parent",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+  const child: WorktreeEntry = {
+    ...project.worktrees[0]!,
+    path: "/repo/.worktrees/child",
+    wtName: "child",
+    wtId: "id-child",
+    parentWtId: "id-parent",
+    displayName: "Child task",
+    createdAt: "2026-01-02T00:00:00.000Z",
+  };
+
+  // Tests stub these actions; reset() restores state, not actions.
+  const { createWorktree, renameWorktree, setWorktreeParent } = useWorktreeStore.getState();
+  afterEach(() => useWorktreeStore.setState({ createWorktree, renameWorktree, setWorktreeParent }));
+
+  function setNesting(worktreeMetadata: boolean, worktrees = [parent, child]) {
+    useWorktreeStore.setState({
+      byProject: {
+        [project.path]: { worktrees, worktreesDir: project.worktreesDir, worktreeMetadata },
+      },
+    });
+  }
+
+  async function menuItems(rowText: string): Promise<string[]> {
+    fireEvent.contextMenu(screen.getByText(rowText));
+    const items = await screen.findAllByRole("menuitem");
+    return items.map((item) => item.textContent ?? "");
+  }
+
+  test("shows a child under its parent with its display name, and folds it away", () => {
+    setNesting(true);
+    render(<Sidebar />);
+
+    expect(screen.getByText("Child task")).toBeDefined();
+    expect(screen.queryByText("child")).toBeNull();
+    fireEvent.click(screen.getByTitle("Collapse nested worktrees"));
+
+    expect(screen.queryByText("Child task")).toBeNull();
+    expect(useWorktreeStore.getState().byProject[project.path]?.collapsedPaths).toEqual([
+      parent.path,
+    ]);
+  });
+
+  test("shows a child whose parent is gone at the top level", () => {
+    setNesting(true, [child]);
+    render(<Sidebar />);
+
+    expect(screen.getByText("Child task")).toBeDefined();
+    expect(screen.queryByTitle("Collapse nested worktrees")).toBeNull();
+  });
+
+  test("the collapsed rail shows only top-level worktrees, with their nested count", () => {
+    setNesting(true);
+    useProjectStore.setState({ sidebarExpanded: false });
+    const { container } = render(<Sidebar />);
+
+    const icons = container.querySelectorAll(`[aria-roledescription="sortable"]`);
+    expect(icons).toHaveLength(1);
+    expect(screen.getByLabelText("1 nested worktree")).toBeDefined();
+  });
+
+  test("offers to enable nesting while metadata is off", async () => {
+    setNesting(false, [parent]);
+    render(<Sidebar />);
+
+    const items = await menuItems("parent");
+    expect(items).toContain("Enable worktree nesting…");
+    expect(items).not.toContain("New child worktree");
+  });
+
+  test("offers nesting actions while metadata is on", async () => {
+    setNesting(true);
+    render(<Sidebar />);
+
+    expect(await menuItems("parent")).toEqual(
+      expect.arrayContaining(["New child worktree", "Rename"]),
+    );
+    expect(await menuItems("parent")).not.toContain("Move to top level");
+    expect(await menuItems("Child task")).toContain("Move to top level");
+  });
+
+  test("move to top level clears the parent", async () => {
+    const setWorktreeParent = mock(() => Promise.resolve());
+    setNesting(true);
+    useWorktreeStore.setState({ setWorktreeParent });
+    render(<Sidebar />);
+
+    fireEvent.contextMenu(screen.getByText("Child task"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Move to top level" }));
+
+    expect(setWorktreeParent).toHaveBeenCalledWith(project.path, child.path, null);
+  });
+
+  test("new child worktree creates the worktree under its parent", async () => {
+    const createWorktree = mock(() => Promise.resolve());
+    setNesting(true);
+    useWorktreeStore.setState({ createWorktree });
+    render(<Sidebar />);
+
+    fireEvent.contextMenu(screen.getByText("parent"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New child worktree" }));
+    const input = screen.getByPlaceholderText("child worktree name");
+    fireEvent.change(input, { target: { value: "sub task" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(createWorktree).toHaveBeenCalledWith(project.path, "sub-task", {
+        parentPath: parent.path,
+      }),
+    );
+  });
+
+  test("rename writes the display name", async () => {
+    const renameWorktree = mock(() => Promise.resolve());
+    setNesting(true);
+    useWorktreeStore.setState({ renameWorktree });
+    render(<Sidebar />);
+
+    fireEvent.contextMenu(screen.getByText("parent"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByDisplayValue("parent");
+    fireEvent.change(input, { target: { value: "Parent work" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(renameWorktree).toHaveBeenCalledWith(project.path, parent.path, "Parent work"),
+    );
   });
 });
 

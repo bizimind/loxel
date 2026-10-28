@@ -10,7 +10,6 @@ import type {
   GraphData,
   RefInfo,
   StatusInfo,
-  WorktreeEntry,
   WorktreeStatusInfo,
 } from "./git-models";
 import type { LogEntry } from "./log-entry-model";
@@ -25,6 +24,7 @@ import type {
   InitProjectRequest,
   Project,
   ProjectsResponse,
+  ProjectWorktreesResponse,
   ScanSuggestionsResult,
 } from "./project-model";
 import type {
@@ -42,6 +42,7 @@ import type {
   Review,
 } from "./review-model";
 import type { UpdateState } from "./update-model";
+import type { NestedRemoval, WorktreeRemovePlan } from "./worktree-removal-model";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
 import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./ws-protocol";
 
@@ -644,12 +645,12 @@ export async function resolveSchema(url: string, baseDir?: string): Promise<unkn
 
 export type { AddPlan as AddWorktreePlan, AddResult as AddWorktreeResult } from "@bizimind/wt/lib";
 export type {
-  RemovePlan as RemoveWorktreePlan,
+  InitAction as WorktreeMetadataAction,
   RemoveResult as RemoveWorktreeResult,
 } from "@bizimind/wt/lib";
 
 export async function getProjectWorktrees(projectId: string) {
-  return fetchJson<{ worktrees: WorktreeEntry[] }>(
+  return fetchJson<ProjectWorktreesResponse>(
     `/projects/${encodeURIComponent(projectId)}/worktrees`,
   );
 }
@@ -661,10 +662,17 @@ export async function planAddWorktree(projectPath: string, name: string) {
   });
 }
 
+export interface CreateWorktreeOptions {
+  branch?: string;
+  branchResolution?: "use-existing" | "delete-and-create";
+  /** Create a child of this worktree: branched from its current commit and nested under it */
+  parentPath?: string;
+}
+
 export async function createWorktree(
   projectPath: string,
   name: string,
-  options?: { branch?: string; branchResolution?: "use-existing" | "delete-and-create" },
+  options?: CreateWorktreeOptions,
 ) {
   return fetchJson<import("@bizimind/wt/lib").AddResult>("/worktree/create", {
     method: "POST",
@@ -672,8 +680,35 @@ export async function createWorktree(
   });
 }
 
+/** Nest a worktree under another or move it to the top level (`parentPath: null`), or rename it. */
+export async function updateWorktreeMeta(
+  projectPath: string,
+  wtPath: string,
+  update: { parentPath?: string | null; displayName?: string | null },
+) {
+  return fetchJson<{ success: true }>("/worktree/meta", {
+    method: "POST",
+    body: JSON.stringify({ projectPath, path: wtPath, ...update }),
+  });
+}
+
+/** The `wt init` action that turns on worktree metadata; null when there is nothing to do. */
+export async function planEnableWorktreeMetadata(projectPath: string) {
+  return fetchJson<{ action: import("@bizimind/wt/lib").InitAction | null }>(
+    "/worktree/plan-enable-metadata",
+    { method: "POST", body: JSON.stringify({ projectPath }) },
+  );
+}
+
+export async function enableWorktreeMetadata(projectPath: string) {
+  return fetchJson<{ status: "applied" | "not-needed" }>("/worktree/enable-metadata", {
+    method: "POST",
+    body: JSON.stringify({ projectPath }),
+  });
+}
+
 export async function planRemoveWorktree(projectPath: string, wtPath: string) {
-  return fetchJson<import("@bizimind/wt/lib").RemovePlan>("/worktree/plan-remove", {
+  return fetchJson<WorktreeRemovePlan>("/worktree/plan-remove", {
     method: "POST",
     body: JSON.stringify({ projectPath, path: wtPath }),
   });
@@ -682,16 +717,11 @@ export async function planRemoveWorktree(projectPath: string, wtPath: string) {
 export async function removeWorktreeByWtPath(
   projectPath: string,
   wtPath: string,
-  options: { deleteBranch: boolean; force: boolean },
+  options: { deleteBranch: boolean; force: boolean; nested?: NestedRemoval },
 ) {
   return fetchJson<import("@bizimind/wt/lib").RemoveResult>("/worktree/remove", {
     method: "POST",
-    body: JSON.stringify({
-      projectPath,
-      path: wtPath,
-      deleteBranch: options.deleteBranch,
-      force: options.force,
-    }),
+    body: JSON.stringify({ projectPath, path: wtPath, ...options }),
   });
 }
 

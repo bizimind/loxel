@@ -41,6 +41,7 @@ import { logger } from "./logger";
 import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
+import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
 import {
   getPythonEnv,
   refreshAllPythonEnvs,
@@ -710,15 +711,8 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
   const localDb = openDatabase(join(config.stateDir, "localdb", hash12(cwd), "localdb.db"));
 
   const filteredWorktrees: WorktreeEntry[] = managed
-    .filter((wt) => !basename(wt.path).startsWith(INTERNAL_WORKTREE_PREFIX))
-    .map((wt) => ({
-      path: wt.path,
-      branch: wt.branch,
-      commit: wt.head,
-      isMain: false,
-      createdAt: null,
-      wtName: wt.name,
-    }));
+    .filter(isListedWorktree)
+    .map((wt) => toWorktreeEntry(wt, null));
 
   const project: ProjectState = {
     cwd,
