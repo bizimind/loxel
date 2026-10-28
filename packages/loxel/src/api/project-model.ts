@@ -20,6 +20,14 @@ export interface EnrichedProject extends Project {
   worktrees: WorktreeEntry[];
   /** Absolute path to the repo's worktrees directory (null when not yet initialized). */
   worktreesDir: string | null;
+  /** Worktree metadata (`wt init --worktree-metadata on`) is on, so worktrees can nest. */
+  worktreeMetadata: boolean;
+}
+
+/** Response of GET /api/projects/:id/worktrees. */
+export interface ProjectWorktreesResponse {
+  worktrees: WorktreeEntry[];
+  worktreeMetadata: boolean;
 }
 
 /** Response of GET /api/projects. */

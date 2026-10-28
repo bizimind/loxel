@@ -26,15 +26,16 @@ Nothing Loxel runs to read state may write under the Git directory, `objects/` i
 
 Important classifications:
 
-| Path                                                    | Refreshes             |
-| ------------------------------------------------------- | --------------------- |
-| `index` / `index.lock`                                  | status                |
-| root `HEAD`, branch/tag refs and reflogs                | refs and log          |
-| root operation heads such as `MERGE_HEAD`               | status and refs       |
-| loose objects                                           | status, refs, and log |
-| `worktrees/<name>/gitdir` or `commondir`                | worktree lifecycle    |
-| per-worktree metadata seen through the common directory | none                  |
-| `.worktrees/<name>/...` source paths in a bare repo     | none                  |
+| Path                                                            | Refreshes                |
+| --------------------------------------------------------------- | ------------------------ |
+| `index` / `index.lock`                                          | status                   |
+| root `HEAD`, branch/tag refs and reflogs                        | refs and log             |
+| root operation heads such as `MERGE_HEAD`                       | status and refs          |
+| loose objects                                                   | status, refs, and log    |
+| `worktrees/<name>/gitdir` or `commondir`                        | worktree lifecycle       |
+| `config`, `config.worktree`, `worktrees/<name>/config.worktree` | worktree list (metadata) |
+| `worktrees/<name>/HEAD`, `index` or `logs/` churn               | none                     |
+| `.worktrees/<name>/...` source paths in a bare repo             | none                     |
 
 The project watcher owns project-scoped events. A per-worktree watcher accepts only `status`; it must not recursively watch the common directory once per worktree for events the project watcher already handles.
 

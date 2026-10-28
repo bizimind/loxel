@@ -82,7 +82,7 @@ git -C ~/code/app worktree add --no-track -b fix/flaky-test ~/code/app/.worktree
 loxel terminal --cwd ~/code/app/.worktrees/fix/flaky-test --title claude -- claude "Fix the flaky upload test"
 ```
 
-Create worktrees the way the project already does. If it uses `wt`, `wt add <name>` creates `.worktrees/<name>` and runs the repo's setup hook, which a bare `git worktree add` skips.
+Create worktrees the way the project already does. If it uses `wt`, `wt add <name>` creates `.worktrees/<name>` and runs the repo's setup hook, which a bare `git worktree add` skips. To show the new worktree nested under yours in Loxel's sidebar, add `--meta loxel-parent-wt=<id>` with your worktree's id from `wt meta get wt-id`. This needs worktree metadata on (`wt init --worktree-metadata on`), and a worktree created before it was turned on has no id until its metadata is first written.
 
 ### Layout flags
 
