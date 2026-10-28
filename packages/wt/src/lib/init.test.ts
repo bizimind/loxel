@@ -13,6 +13,7 @@ import {
 import { executeAdd } from "./add.ts";
 import { evaluate, inspectRepo, type CheckId } from "./checks.ts";
 import { cloneBareRepo, diagnose, executeInit, planInit } from "./init.ts";
+import { getWorktreeMeta, setWorktreeMeta } from "./meta.ts";
 
 let repo: TestRepo;
 const previousWtDir = process.env.WT_DIR;
@@ -22,6 +23,10 @@ afterEach(async () => {
   else process.env.WT_DIR = previousWtDir;
   await repo.cleanup();
 });
+
+async function idOf(path: string): Promise<string | undefined> {
+  return (await getWorktreeMeta({ path, repoPath: repo.root })).meta["wt-id"];
+}
 
 function statusOf(checks: Array<{ id: CheckId; status: string }>, id: CheckId): string | undefined {
   return checks.find((check) => check.id === id)?.status;
@@ -98,6 +103,22 @@ describe("diagnose", () => {
     });
   });
 
+  test("reports worktrees without a wt-id, only while metadata is on", async () => {
+    repo = await createTestRepo();
+    expect(statusOf((await diagnose(repo.root)).checks, "worktree-ids")).toBeUndefined();
+
+    await executeInit(repo.root, { apply: ["worktree-metadata-on"] });
+    expect(statusOf((await diagnose(repo.root)).checks, "worktree-ids")).toBe("ok");
+
+    // Claude Code's worktrees: plain git, outside the worktrees directory.
+    const plain = join(repo.root, ".claude", "worktrees", "x");
+    await git(["worktree", "add", "-b", "x", plain], repo.root);
+    const check = (await diagnose(repo.root)).checks.find((c) => c.id === "worktree-ids");
+    expect(check).toMatchObject({ status: "warn", fixable: true });
+    expect(check?.summary).toContain(plain);
+    expect(check?.summary).not.toContain(`${repo.root},`);
+  });
+
   test("fails on a git older than wt supports", async () => {
     repo = await createTestRepo();
     const state = await inspectRepo(repo.root);
@@ -140,6 +161,16 @@ describe("planInit", () => {
       "git config --file config extensions.worktreeConfig true",
     ]);
     expect(plan.actions.some((action) => action.id === "worktree-metadata-off")).toBe(false);
+  });
+
+  test("turning per-worktree config on also gives every worktree a wt-id", async () => {
+    repo = await createTestRepo({ bare: true });
+    const linked = await executeAdd({ name: "feat", repoPath: repo.root });
+    const plan = await planInit(repo.root);
+
+    const metadata = plan.actions.find((action) => action.id === "worktree-metadata-on");
+    expect(metadata?.commands.at(-1)).toBe(`# give ${linked.path} a wt-id`);
+    expect(plan.checks.some((check) => check.id === "worktree-ids")).toBe(false);
   });
 
   test("offers both repairs, recommending to keep it on, when the config is broken", async () => {
@@ -334,6 +365,51 @@ describe("executeInit", () => {
     expect(statusOf(disabled.checks, "worktree-metadata")).toBe("info");
     expect(await git(["rev-parse", "--is-bare-repository"], repo.root)).toBe("true");
     await git(["status"], linked.path);
+  });
+
+  test("turning metadata on gives every existing worktree a wt-id", async () => {
+    repo = await createTestRepo();
+    const linked = await executeAdd({ name: "feat", repoPath: repo.root });
+
+    const on = await executeInit(repo.root, { apply: ["worktree-metadata-on"] });
+    expect(on.outcomes[0]?.commands.slice(-2)).toEqual([
+      `# give ${repo.root} a wt-id`,
+      `# give ${linked.path} a wt-id`,
+    ]);
+    expect(statusOf(on.checks, "worktree-ids")).toBe("ok");
+    const ids = [await idOf(repo.root), await idOf(linked.path)];
+    expect(ids.every(Boolean)).toBe(true);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  test("backfills missing ids alongside concurrent metadata writes, keeping existing ones", async () => {
+    repo = await createTestRepo({ bare: true });
+    await executeInit(repo.root, { apply: ["worktree-metadata-on"] });
+    const kept = await executeAdd({ name: "kept", repoPath: repo.root });
+    const plain = join(repo.root, ".worktrees", "plain");
+    // Copies kept's config file, metadata included, which must not pass for plain's own.
+    await git(["worktree", "add", "-b", "plain", plain], kept.path);
+
+    const keys = ["k1", "k2", "k3", "k4"];
+    const [result, writes] = await Promise.all([
+      executeInit(repo.root, { apply: ["worktree-ids"] }),
+      Promise.all(
+        keys.map((key) =>
+          setWorktreeMeta({ path: plain, repoPath: repo.root, values: { [key]: key } }),
+        ),
+      ),
+    ]);
+
+    // Whether the backfill or a write assigns plain's id first is up to the race; either is fine.
+    expect(result.outcomes[0]?.status).not.toBe("failed");
+    expect(statusOf(result.checks, "worktree-ids")).toBe("ok");
+    const id = await idOf(plain);
+    expect(new Set(writes.map((write) => write.meta["wt-id"]))).toEqual(new Set([id]));
+    expect((await getWorktreeMeta({ path: plain, repoPath: repo.root })).meta).toMatchObject(
+      Object.fromEntries(keys.map((key) => [key, key])),
+    );
+    expect(await idOf(kept.path)).toBe(kept.meta["wt-id"]);
+    expect(id).not.toBe(kept.meta["wt-id"]);
   });
 
   test("repairs the broken state", async () => {

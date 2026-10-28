@@ -30,6 +30,11 @@ async function enableMetadata(root: string): Promise<void> {
   expect(result.outcomes.map((outcome) => outcome.status)).toEqual(["applied"]);
 }
 
+/** A worktree with no `wt-id`: plain `git worktree add` gives it none, and copies no usable one. */
+async function addWithoutId(name: string): Promise<void> {
+  await git(["worktree", "add", "-b", name, join(repo.root, ".worktrees", name)], repo.root);
+}
+
 async function metaOf(name: string) {
   return (await getWorktreeMeta({ name, repoPath: repo.root })).meta;
 }
@@ -106,10 +111,18 @@ for (const bare of [true, false]) {
         );
       });
 
-      test("an older worktree gets a wt-id when its metadata is first written, not when read", async () => {
+      test("turning metadata on gives existing worktrees a wt-id", async () => {
         repo = await createTestRepo({ bare });
         await executeAdd({ name: "old", repoPath: repo.root });
         await enableMetadata(repo.root);
+
+        expect(await metaOf("old")).toEqual({ "wt-id": expect.stringMatching(UUID) });
+      });
+
+      test("a worktree without a wt-id gets one when its metadata is first written, not when read", async () => {
+        repo = await createTestRepo({ bare });
+        await enableMetadata(repo.root);
+        await addWithoutId("old");
 
         expect(await metaOf("old")).toEqual({});
         const set = await setWorktreeMeta({ name: "old", repoPath: repo.root, values: { k: "v" } });
@@ -124,8 +137,8 @@ for (const bare of [true, false]) {
 
       test("ensureWorktreeId assigns an id once", async () => {
         repo = await createTestRepo({ bare });
-        await executeAdd({ name: "old", repoPath: repo.root });
         await enableMetadata(repo.root);
+        await addWithoutId("old");
 
         const id = await ensureWorktreeId({ name: "old", repoPath: repo.root });
         expect(id).toMatch(UUID);
@@ -222,8 +235,8 @@ for (const bare of [true, false]) {
 
       test("concurrent writes to one worktree all land and agree on one wt-id", async () => {
         repo = await createTestRepo({ bare });
-        await executeAdd({ name: "old", repoPath: repo.root });
         await enableMetadata(repo.root);
+        await addWithoutId("old");
         const params = { name: "old", repoPath: repo.root };
 
         const keys = ["k1", "k2", "k3", "k4", "k5", "k6"];

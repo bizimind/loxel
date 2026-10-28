@@ -14,6 +14,7 @@ import {
   type InitActionId,
   type InitStep,
 } from "./checks.ts";
+import { ensureWorktreeId } from "./meta.ts";
 import { shellArg } from "./shell-quote.ts";
 
 /** The checks for one repository, as `wt doctor` reports them. */
@@ -208,6 +209,10 @@ async function runStep(
 ): Promise<void> {
   if (step.kind === "add-worktree") {
     await executeAdd({ name: step.name, repoPath: root, branch: step.branch, hookEnv }, progress);
+    return;
+  }
+  if (step.kind === "assign-worktree-id") {
+    progress.log(`    ${await ensureWorktreeId({ repoPath: root, path: step.path })}`);
     return;
   }
   if (step.onlyWithOriginRefs && !(await hasOriginRefs(root))) {
