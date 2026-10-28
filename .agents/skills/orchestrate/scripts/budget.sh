@@ -84,7 +84,7 @@ snapshot() {
                       else $slots end),
         advice: (if $mode == "exhausted" then "A window is at its limit: let workers reach a commit point, run budget.sh --until-reset in the background, then resume one worker at a time."
                  elif $mode == "single" then "Run one worker on the most important task, one push and review at a time; the others wait. Keep going until the window is exhausted."
-                 elif $slots == 0 then "Wait for the in-flight review to finish before the next push."
+                 elif $slots == 0 and $inFlight > 0 then "Wait for the in-flight reviews to finish before the next push."
                  else {
                    free: "Work freely; check again at milestones.",
                    watch: "Check before each push batch; prefer finishing PRs over starting new ones.",
