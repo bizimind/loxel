@@ -20,7 +20,7 @@
  * owner is another entry is a copy: reads ignore it and the first write
  * replaces it.
  */
-import { readdir } from "node:fs/promises";
+import { open, readdir, rm } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 
 import { gitFailure, runGit, type GitResult } from "./run.ts";
@@ -137,15 +137,6 @@ export async function writeMeta(commonDir: string, file: string, values: Worktre
   }
 }
 
-/**
- * Append a value for a normalized key, keeping any existing ones. Since
- * `readMeta` reports the first value, concurrent callers that each add one
- * and then read back all see the value that landed first.
- */
-export async function addMetaValue(commonDir: string, file: string, key: string, value: string) {
-  await configWrite(["--add", `${META_SECTION}.${key}`, value], file, commonDir);
-}
-
 /** Remove normalized keys from one worktree config file; missing keys are fine. */
 export async function unsetMeta(commonDir: string, file: string, keys: string[]) {
   for (const key of keys) {
@@ -156,6 +147,39 @@ export async function unsetMeta(commonDir: string, file: string, keys: string[])
       commonDir,
       (result) => result.exitCode === 5,
     );
+  }
+}
+
+/**
+ * Run `action` holding wt's lock on one worktree's metadata, so concurrent
+ * read-then-write sequences (claiming a copied section, assigning a `wt-id`)
+ * cannot interleave and undo each other. Git's own `<file>.lock` cannot serve:
+ * it is held only for one `git config` call, and taking it here would block
+ * the calls `action` makes.
+ */
+export async function withMetaLock<T>(file: string, action: () => Promise<T>): Promise<T> {
+  const lock = `${file}.wt-lock`;
+  const deadline = Date.now() + LOCK_DEADLINE_MS;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await (await open(lock, "wx")).close();
+      break;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? error.code : undefined;
+      if (code !== "EEXIST") throw error;
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Worktree metadata at ${file} is locked (if no wt process is running, delete ${lock})`,
+          { cause: error },
+        );
+      }
+      await backoff(attempt);
+    }
+  }
+  try {
+    return await action();
+  } finally {
+    await rm(lock, { force: true });
   }
 }
 
@@ -179,7 +203,7 @@ async function readSection(commonDir: string, file: string): Promise<WorktreeMet
     const name = newline === -1 ? record : record.slice(0, newline);
     // A key written without `= value` is a boolean true to git.
     const value = newline === -1 ? "true" : record.slice(newline + 1);
-    // The first value wins: `addMetaValue` relies on it to settle concurrent id assignments.
+    // A key set more than once (by hand) reads as its first value.
     const key = name.slice(META_SECTION.length + 1);
     if (!(key in meta)) meta[key] = value;
   }
@@ -195,15 +219,21 @@ const NO_SUCH_SECTION = (result: GitResult) => /no such section/i.test(result.st
 
 const LOCK_CONFLICT = /could not lock config file/i;
 /**
- * How long to keep retrying a locked config file. A write holds the lock for
- * milliseconds, so this only runs out on a lock left behind by a crashed git.
+ * How long to keep retrying a locked file. Writers hold a lock for
+ * milliseconds, so this only runs out on a lock left behind by a crash.
  */
 const LOCK_DEADLINE_MS = 30_000;
 
+/** Wait before retry `attempt` of a locked file, a little longer each time. */
+function backoff(attempt: number): Promise<void> {
+  return Bun.sleep(Math.min(10 * attempt, 200) + Math.random() * 10);
+}
+
 /**
  * Run `git config --file <file> ...args`, retrying while another writer holds
- * the file's lock: git fails at once instead of waiting, so two writes to the
- * same worktree at the same moment would otherwise lose one.
+ * the file's lock: git fails at once instead of waiting, so a write racing
+ * another git process (a hand-run `git config --worktree`, say) would
+ * otherwise fail.
  *
  * @param tolerated - Failures that count as success (e.g. unsetting a missing key)
  */
@@ -224,6 +254,6 @@ async function configWrite(
       const hint = locked ? ` (if no git process is running, delete ${file}.lock)` : "";
       throw new Error(`git ${full.join(" ")}: ${gitFailure(result)}${hint}`);
     }
-    await Bun.sleep(Math.min(10 * attempt, 200) + Math.random() * 10);
+    await backoff(attempt);
   }
 }

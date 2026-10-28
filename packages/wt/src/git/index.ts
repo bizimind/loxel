@@ -61,7 +61,6 @@ export {
   type WorktreeConfigState,
 } from "./worktree-config.ts";
 export {
-  addMetaValue,
   claimMeta,
   isReservedMetaKey,
   META_SECTION,
@@ -72,6 +71,7 @@ export {
   resetMeta,
   unsetMeta,
   worktreeConfigFiles,
+  withMetaLock,
   WORKTREE_ID_KEY,
   writeMeta,
   type WorktreeMeta,

@@ -277,6 +277,31 @@ for (const bare of [true, false]) {
         expect(await metaOf("parent")).toEqual(parent.meta);
       });
 
+      test("concurrent first writes to a copied section agree on one wt-id and all land", async () => {
+        repo = await createTestRepo({ bare });
+        await enableMetadata(repo.root);
+        const parent = await executeAdd({ name: "parent", repoPath: repo.root, meta: { k: "v" } });
+        await git(
+          ["worktree", "add", "-b", "copy", join(repo.root, ".worktrees", "copy")],
+          parent.path,
+        );
+        const params = { name: "copy", repoPath: repo.root };
+
+        const keys = ["k1", "k2", "k3", "k4", "k5", "k6"];
+        const [ids] = await Promise.all([
+          Promise.all(keys.map(() => ensureWorktreeId(params))),
+          Promise.all(keys.map((key) => setWorktreeMeta({ ...params, values: { [key]: key } }))),
+        ]);
+
+        const meta = await metaOf("copy");
+        expect(new Set(ids)).toEqual(new Set([meta["wt-id"] ?? "missing"]));
+        expect(meta["wt-id"]).not.toBe(parent.meta["wt-id"]);
+        expect(meta).toEqual({
+          "wt-id": expect.stringMatching(UUID),
+          ...Object.fromEntries(keys.map((key) => [key, key])),
+        });
+      });
+
       test("one unreadable config file does not hide the others' metadata", async () => {
         repo = await createTestRepo({ bare });
         await enableMetadata(repo.root);

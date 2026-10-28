@@ -15,7 +15,6 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  addMetaValue,
   canonicalWorktreesDir,
   claimMeta,
   findWorktree,
@@ -30,6 +29,7 @@ import {
   resolveRepoRoot,
   unsetMeta,
   worktreeConfigFiles,
+  withMetaLock,
   WORKTREE_ID_KEY,
   writeMeta,
   type Worktree,
@@ -151,13 +151,15 @@ export async function setWorktreeMeta(
 ): Promise<WorktreeMetaResult> {
   const values = writableMeta(params.values);
   const target = await locateWritableTarget(params);
-  await assignIdIfMissing(target);
-  await writeMeta(target.commonDir, target.file, values);
-  return {
-    name: target.name,
-    path: target.path,
-    meta: await readMeta(target.commonDir, target.file),
-  };
+  return withMetaLock(target.file, async () => {
+    await assignIdIfMissing(target);
+    await writeMeta(target.commonDir, target.file, values);
+    return {
+      name: target.name,
+      path: target.path,
+      meta: await readMeta(target.commonDir, target.file),
+    };
+  });
 }
 
 /** Remove keys from a worktree (missing ones are fine), giving it a `wt-id` first if it has none. */
@@ -166,13 +168,15 @@ export async function unsetWorktreeMeta(
 ): Promise<WorktreeMetaResult> {
   const keys = params.keys.map(writableMetaKey);
   const target = await locateWritableTarget(params);
-  await assignIdIfMissing(target);
-  await unsetMeta(target.commonDir, target.file, keys);
-  return {
-    name: target.name,
-    path: target.path,
-    meta: await readMeta(target.commonDir, target.file),
-  };
+  return withMetaLock(target.file, async () => {
+    await assignIdIfMissing(target);
+    await unsetMeta(target.commonDir, target.file, keys);
+    return {
+      name: target.name,
+      path: target.path,
+      meta: await readMeta(target.commonDir, target.file),
+    };
+  });
 }
 
 /**
@@ -180,7 +184,8 @@ export async function unsetWorktreeMeta(
  * a worktree created before metadata was turned on.
  */
 export async function ensureWorktreeId(params: MetaParams): Promise<string> {
-  return assignIdIfMissing(await locateWritableTarget(params));
+  const target = await locateWritableTarget(params);
+  return withMetaLock(target.file, () => assignIdIfMissing(target));
 }
 
 /**
@@ -200,9 +205,11 @@ export async function initWorktreeMeta(
 
   const file = (await worktreeConfigFiles(commonDir, await listWorktrees(root))).get(worktreePath);
   if (!file) throw new Error(`Cannot find the config file of the worktree at ${worktreePath}`);
-  await resetMeta(commonDir, file);
-  await writeMeta(commonDir, file, { [WORKTREE_ID_KEY]: randomUUID(), ...values });
-  return readMeta(commonDir, file);
+  return withMetaLock(file, async () => {
+    await resetMeta(commonDir, file);
+    await writeMeta(commonDir, file, { [WORKTREE_ID_KEY]: randomUUID(), ...values });
+    return readMeta(commonDir, file);
+  });
 }
 
 /** A worktree resolved for metadata access. */
@@ -256,20 +263,16 @@ async function locateWritableTarget(params: MetaParams): Promise<MetaTarget> {
 }
 
 /**
- * The worktree's `wt-id`, written first if it has none. Concurrent callers
- * agree on one id: each appends its candidate and reads back the first value,
- * which no later append can displace.
+ * The worktree's `wt-id`, written first if it has none, after claiming a
+ * section git copied from another worktree. Call it holding `withMetaLock`,
+ * which keeps concurrent callers from each assigning their own id.
  */
 async function assignIdIfMissing(target: MetaTarget): Promise<string> {
   await claimMeta(target.commonDir, target.file);
   const id = (await readMeta(target.commonDir, target.file))[WORKTREE_ID_KEY];
   if (id) return id;
 
-  await addMetaValue(target.commonDir, target.file, WORKTREE_ID_KEY, randomUUID());
-  const assigned = (await readMeta(target.commonDir, target.file))[WORKTREE_ID_KEY];
-  if (!assigned) throw new Error(`Cannot assign a ${WORKTREE_ID_KEY} to ${target.path}`);
-  // Collapse the candidates to the winner, so git's own `--get` (which reports the last value,
-  // as a hook would use it) agrees. Every racer writes the same winner, so this is idempotent.
+  const assigned = randomUUID();
   await writeMeta(target.commonDir, target.file, { [WORKTREE_ID_KEY]: assigned });
   return assigned;
 }
