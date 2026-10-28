@@ -15,7 +15,7 @@ From the worktree you run in:
 .agents/skills/child-pr/scripts/wt-id.sh   # prints the current worktree's wt-id
 ```
 
-It gives a worktree that predates metadata its id on first use. It fails with wt's reason when there is nothing to nest under: worktree metadata is off for the repo, or you are not in a worktree.
+It fails with the reason when there is nothing to nest under: you are not in a worktree, or the worktree has no id (metadata is off, or its id was never filled in).
 
 ## In `/quick-pr` step 2: pass the id to `wt add`
 
@@ -25,7 +25,7 @@ wt add fix/terminal-title-after-rename --meta loxel-parent-wt=<id> -j
 
 ## When the script fails
 
-Continue with `/quick-pr` unchanged (a flat worktree, no `--meta`) and add a note to your report: the worktree is not nested, with the script's reason. When the reason is that metadata is off, add that `wt init --worktree-metadata on` turns it on, but do not run it yourself: it changes the repo's git config.
+Continue with `/quick-pr` unchanged (a flat worktree, no `--meta`) and add a note to your report: the worktree is not nested, with the script's reason. Do not run the `wt init` it suggests yourself: it changes the repo's git config.
 
 ## Listing children
 
