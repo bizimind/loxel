@@ -3,20 +3,24 @@
 #
 #   budget.sh                  snapshot now
 #   budget.sh --alarm          poll every 5 min, print once the mode changes (e.g. watch -> throttle)
-#   budget.sh --until-reset    sleep until the window that is holding work resets, then snapshot
+#   budget.sh --until-reset    sleep until the exhausted window resets, then snapshot
 #
 # Both background modes return within an hour (background commands get killed after longer), printing
-# the current snapshot; if it still says hold, run them again.
+# the current snapshot; if it still says exhausted, run them again.
+#
+# Low budget narrows concurrency, down to one task with one review at a time ("single"), but never
+# stops work: the budget is there to be used up by the reset. Only a window at its limit
+# ("exhausted") pauses work until it resets.
 #
 # Local agents and the CI reviewer share the subscription. `reviewSlots` is how many more review
-# runs (pushes to PRs) fit before the hold line, counting the ones already in flight.
+# runs (pushes to PRs) to start now, counting the ones already in flight.
 # Background modes exit non-zero after repeated endpoint failures (e.g. an expired login) instead of
 # looping silently, so the orchestrator always gets a notification.
 set -euo pipefail
 
-# Hold lines: stop starting work here so the orchestrator keeps a reserve to recover after reset.
-hold_5h=90
-hold_7d=95
+# Single lines: from here on, run one task and one review at a time.
+single_5h=90
+single_7d=95
 here="$(cd "$(dirname "$0")" && pwd)"
 
 fetch_usage() {
@@ -40,7 +44,7 @@ snapshot() {
   in_flight="$(gh run list --workflow claude-code-review.yml --limit 30 --json status \
     --jq 'map(select(.status != "completed")) | length')" || { echo "budget.sh: could not list review runs" >&2; return 1; }
   jq -n --argjson u "$usage" --argjson r "$reviews" --argjson inFlight "$in_flight" \
-    --argjson hold5 "$hold_5h" --argjson hold7 "$hold_7d" '
+    --argjson single5 "$single_5h" --argjson single7 "$single_7d" '
     def epoch: if type == "string" then sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601 else null end;
     # A window that has not started yet (nothing used since the last reset) has no reset time.
     def window: {pct: (.utilization // 0), resetsAt: .resets_at,
@@ -56,11 +60,12 @@ snapshot() {
     | ($d7.pct + $inFlight * $cost.d7) as $projected7
     # Weekly pace: points used beyond an even spread over the 7 days.
     | (if $d7.minutesToReset then ($d7.pct - (100 * (1 - $d7.minutesToReset / (7 * 24 * 60))) | round) else 0 end) as $aheadOfPace
-    # Reviews that fit at median cost, keeping one p95 overrun of margin below each hold line.
-    | ([(($hold5 - $projected - ($cost.h5p95 - $cost.h5)) / ([$cost.h5, 1] | max) | floor),
-        (($hold7 - $projected7 - ($cost.d7p95 - $cost.d7)) / ([$cost.d7, 1] | max) | floor)]
+    # Reviews that fit at median cost, keeping one p95 overrun of margin below each single line.
+    | ([(($single5 - $projected - ($cost.h5p95 - $cost.h5)) / ([$cost.h5, 1] | max) | floor),
+        (($single7 - $projected7 - ($cost.d7p95 - $cost.d7)) / ([$cost.d7, 1] | max) | floor)]
        | min | [., 0] | max) as $slots
-    | (if $h5.pct >= $hold5 or $d7.pct >= $hold7 then "hold"
+    | (if $h5.pct >= 100 or $d7.pct >= 100 then "exhausted"
+       elif $h5.pct >= $single5 or $d7.pct >= $single7 then "single"
        elif $projected >= 70 or $projected7 >= 85 then "throttle"
        elif $projected >= 50 or $aheadOfPace > 15 then "watch"
        else "free" end) as $mode
@@ -73,9 +78,13 @@ snapshot() {
                       | {kind, group, pct: .percent, resetsAt: .resets_at}],
         reviewsInFlight: $inFlight,
         reviewCost: $cost,
-        reviewSlots: (if $mode == "hold" then 0 else $slots end),
-        advice: (if $mode == "hold" then "No new pushes or workers. Let running workers reach a commit point and stop, then run budget.sh --until-reset in the background."
-                 elif $slots == 0 then "No review slots: wait for in-flight reviews to finish, or for the 5h reset if none are running."
+        # A single review at a time always runs, so low budget slows work down but never stops it.
+        reviewSlots: (if $mode == "exhausted" then 0
+                      elif $mode == "single" or $slots == 0 then (if $inFlight == 0 then 1 else 0 end)
+                      else $slots end),
+        advice: (if $mode == "exhausted" then "A window is at its limit: let workers reach a commit point, run budget.sh --until-reset in the background, then resume one worker at a time."
+                 elif $mode == "single" then "Run one worker on the most important task, one push and review at a time; the others wait. Keep going until the window is exhausted."
+                 elif $slots == 0 then "Wait for the in-flight review to finish before the next push."
                  else {
                    free: "Work freely; check again at milestones.",
                    watch: "Check before each push batch; prefer finishing PRs over starting new ones.",
@@ -115,8 +124,7 @@ case "${1:-}" in
     ;;
   --until-reset)
     state="$(snapshot_retry)" || exit 1
-    minutes="$(jq -r --argjson hold7 "$hold_7d" \
-      'if .sevenDay.pct >= $hold7 then .sevenDay.minutesToReset else .fiveHour.minutesToReset end // 0' <<<"$state")"
+    minutes="$(jq -r 'if .sevenDay.pct >= 100 then .sevenDay.minutesToReset else .fiveHour.minutesToReset end // 0' <<<"$state")"
     target=$(( $(date +%s) + (minutes + 2) * 60 ))
     if (( target > deadline )); then
       # The reset is past this command's deadline: wake anyway and say so, so it gets run again.
