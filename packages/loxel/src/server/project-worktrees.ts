@@ -99,7 +99,7 @@ function requireListed(worktrees: readonly ProjectWorktree[], path: string): Pro
   return found;
 }
 
-/** `parent`'s `wt-id`, assigning one if it has none yet (a worktree from before metadata was on). */
+/** `parent`'s `wt-id`, assigning one if it has none yet (a worktree added outside wt). */
 async function parentId(projectPath: string, parent: ProjectWorktree): Promise<string> {
   return parent.wtId ?? ensureWorktreeId({ repoPath: projectPath, path: parent.path });
 }

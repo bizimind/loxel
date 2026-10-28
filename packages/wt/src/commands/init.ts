@@ -37,6 +37,8 @@ export const ACTION_FLAGS: Record<InitActionId, string> = {
   "prune-worktrees": "--prune",
   "worktree-metadata-on": "--worktree-metadata on",
   "worktree-metadata-off": "--worktree-metadata off",
+  // Turning metadata on gives every worktree an id, so the same flag backfills them later.
+  "worktree-ids": "--worktree-metadata on",
   "main-worktree": "--main-worktree",
 };
 
@@ -138,6 +140,7 @@ export function parseFlags(options: InitOptions): FlagDecisions {
   if (metadata) {
     flags["worktree-metadata-on"] = metadata === "on";
     flags["worktree-metadata-off"] = metadata === "off";
+    flags["worktree-ids"] = metadata === "on";
   }
   return flags;
 }
