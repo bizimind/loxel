@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 
-import { git, gitSucceeds } from "../git/index.ts";
+import { git, gitSucceeds, transformToBare } from "../git/index.ts";
 import { createTestRepo, writeHook, type TestRepo } from "../test-repo.ts";
 import { executeAdd } from "./add.ts";
 import { executeInit } from "./init.ts";
@@ -359,6 +359,22 @@ test("the main worktree of a regular repo has metadata of its own", async () => 
   });
   expect(linked.meta.k).toBeUndefined();
   expect((await metaOf("a")).k).toBeUndefined();
+});
+
+test("converting a regular repo to bare keeps the main worktree's metadata and id", async () => {
+  repo = await createTestRepo();
+  await enableMetadata(repo.root);
+  const main = repo.root.split("/").at(-1) ?? "";
+  const before = await setWorktreeMeta({ name: main, repoPath: repo.root, values: { k: "v" } });
+
+  const worktreePath = await transformToBare(repo.root, "main");
+
+  expect(await metaOf("main")).toEqual(before.meta);
+  expect(await findWorktreeById(before.meta["wt-id"] ?? "missing", repo.root)).toMatchObject({
+    path: worktreePath,
+  });
+  const after = await setWorktreeMeta({ name: "main", repoPath: repo.root, values: { x: "1" } });
+  expect(after.meta).toEqual({ ...before.meta, x: "1" });
 });
 
 describe("parseMetaAssignments", () => {

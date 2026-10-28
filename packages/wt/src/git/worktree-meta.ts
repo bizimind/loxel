@@ -122,6 +122,17 @@ export async function claimMeta(commonDir: string, file: string): Promise<void> 
   await resetMeta(commonDir, file);
 }
 
+/**
+ * Record `file` as its section's owner after wt itself moved the file to
+ * another admin entry (`transformToBare` turning the main checkout into a
+ * linked worktree): the same worktree's metadata, not a copy.
+ */
+export async function reownMeta(commonDir: string, file: string): Promise<void> {
+  const owner = (await readSection(commonDir, file))[OWNER_KEY];
+  if (owner === undefined || owner === ownerOf(commonDir, file)) return;
+  await writeMeta(commonDir, file, { [OWNER_KEY]: ownerOf(commonDir, file) });
+}
+
 /** Replace the section in `file` with an empty one owned by it, for a worktree wt just created. */
 export async function resetMeta(commonDir: string, file: string): Promise<void> {
   await configWrite(["--remove-section", META_SECTION], file, commonDir, NO_SUCH_SECTION);
