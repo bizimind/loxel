@@ -6,6 +6,7 @@ import { wrapError } from "@bizimind/cli-common";
 import { getCurrentBranch } from "./branch.ts";
 import { git, gitSucceeds, runGit } from "./run.ts";
 import { readWorktreeConfigState } from "./worktree-config.ts";
+import { reownMeta } from "./worktree-meta.ts";
 import { canonicalWorktreesDir, isWorktreeDirty, pathExists } from "./worktree.ts";
 
 export type RepoType = "empty" | "bare" | "regular" | "worktree";
@@ -188,7 +189,12 @@ async function registerWorktree(cwd: string, worktreePath: string, branch: strin
   const trackingDir = await availableTrackingDir(cwd, basename(worktreePath));
   await mkdir(trackingDir, { recursive: true });
   const parked = join(cwd, PARKED_WORKTREE_CONFIG);
-  if (await pathExists(parked)) await rename(parked, join(trackingDir, "config.worktree"));
+  if (await pathExists(parked)) {
+    const file = join(trackingDir, "config.worktree");
+    await rename(parked, file);
+    // Its metadata still names the main worktree as owner; it is the same checkout, moved.
+    await reownMeta(cwd, file);
+  }
 
   await Promise.all([
     Bun.write(join(worktreePath, ".git"), `gitdir: ${trackingDir}\n`),

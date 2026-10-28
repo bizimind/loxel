@@ -2,7 +2,7 @@
 name: wt
 description: >-
   How to use the `wt` git-worktree manager: setting up a repo for it (`wt init`, `wt doctor`),
-  creating/listing/viewing/renaming/removing worktrees, the repo layout, where init.wt.sh / clean.wt.sh / rename.wt.sh hooks go and
+  creating/listing/viewing/renaming/removing worktrees, per-worktree metadata (`wt meta`), the repo layout, where init.wt.sh / clean.wt.sh / rename.wt.sh hooks go and
   what to put in them, the wt.sh shell helpers, and scripting wt with its JSON output. Use
   when setting up or working with git worktrees via `wt`, writing wt hook scripts, or
   parsing wt's output in a script.
@@ -22,18 +22,21 @@ wt list              # list worktrees                           (alias: ls)
 wt view [name]       # one worktree's branch, head, dirty count, upstream divergence
 wt mv [old] <new>    # rename a worktree + its branch, run rename.wt.sh (aliases: rename, move)
 wt remove [name]     # run clean.wt.sh, remove the worktree     (aliases: rm, delete)
+wt meta get|set|unset [name] ...  # per-worktree key=value metadata (needs metadata on)
 wt doctor            # check the repo's git setup, change nothing (exit 1 on a failed check)
 wt init [url] [dir]  # fix the setup checks you choose; with a URL, bare-clone set up for wt
 wt version | update
 ```
 
-Key flags: `-j` (JSON, all commands); `add -b <branch>` (check out an existing branch), `add --base <ref>` (start the new branch elsewhere); `mv --branch <b>` / `mv -B` (rename the branch to `<b>` / leave it alone), `mv -f` (locked worktree); `remove -f` (dirty worktree), `remove -d` / `-D` / `--keep-branch` (delete the branch if merged / even if unmerged / keep it without prompting). Run `wt <cmd> --help` for the rest.
+Key flags: `-j` (JSON, all commands); `add -b <branch>` (check out an existing branch), `add --base <ref>` (start the new branch elsewhere), `add --meta key=value` (store metadata, repeatable); `mv --branch <b>` / `mv -B` (rename the branch to `<b>` / leave it alone), `mv -f` (locked worktree); `remove -f` (dirty worktree), `remove -d` / `-D` / `--keep-branch` (delete the branch if merged / even if unmerged / keep it without prompting). Run `wt <cmd> --help` for the rest.
 
 **Running unattended (agents, scripts).** Always pass the worktree name and every decision as flags. Without a terminal, a missing name or an undecided choice (existing branch, dirty removal) is an error, never a prompt, and `remove`/`view` never auto-pick a target. `mv` is the exception: with one name it renames the worktree you are in, so pass `wt mv <old> <new>` in scripts. Without `-d`/`-D`, a non-interactive `remove` keeps the branch. A non-interactive `wt init` with no flags changes nothing and lists the pending fixes with their flags (`--fetch-refspec`, `--set-origin-head`, `--main-worktree`, `--repair`, `--prune`, `--worktree-metadata on|off`); `--yes` applies the recommended ones.
 
 **Branches.** `wt add <name>` creates branch `<name>` from the remote default as of the last fetch (`origin/main`), or from `HEAD` when there is no `origin` default. It never fetches: run `git fetch` first for a newer base. The new branch tracks nothing. If branch `<name>` already exists, pass `-b <name>` to reuse it; if another worktree has it checked out, that is an error. `-d` deletes a branch only when it is merged into `HEAD` or the remote default.
 
 **Renaming.** `wt mv <new>` renames the worktree you are in; `wt mv <old> <new>` renames another. The branch is renamed too only while it still matches the worktree name. A shell sitting in the renamed worktree is left on a dead path: `cd` to the reported `.path`.
+
+**Metadata.** With metadata on (`wt init --worktree-metadata on`), each worktree carries `key=value` pairs in its own git config (`wt-meta.<key>`): `wt meta set [name] k=v...`, `wt meta get [name] [key]`, `wt meta unset [name] k...`, without a name acting on the worktree you are in (scripts: always pass it). They survive `wt mv` and detached HEADs and go with `wt remove`. Keys are letters, digits and `-`, stored lowercase; `wt-*` is reserved for wt, `loxel-*` is Loxel's. Every worktree wt creates gets a `wt-id` UUID (older ones on their first metadata write): reference worktrees by id, never by name. With metadata off, writes fail and reads are empty. `list -j` and `view -j` include `meta`.
 
 **Removing.** A worktree with anything in `git status` needs `-f`. The main worktree of a non-bare repo cannot be renamed or removed; in the bare layout below, `.worktrees/main` is an ordinary worktree and can be.
 
@@ -92,4 +95,4 @@ cd "$(wt add feature-x -j | jq -r .path)"
 wt remove feature-x -j -d | jq .branchDeleted
 ```
 
-`add`, `view` and `mv` report the worktree's absolute `.path`; `mv` also reports `oldPath` and `branchRenamed`, `remove` reports `branchDeleted`. `branch` is `(detached)` for a detached worktree. For humans, `wt.sh` (sourced from the shell rc) provides `wta`/`wtv`/`wtm`, which cd into the result, and `wtr`.
+`add`, `view` and `mv` report the worktree's absolute `.path`, and `add`, `view` and `list` its `.meta`; `mv` also reports `oldPath` and `branchRenamed`, `remove` reports `branchDeleted`. `branch` is `(detached)` for a detached worktree. For humans, `wt.sh` (sourced from the shell rc) provides `wta`/`wtv`/`wtm`, which cd into the result, and `wtr`.

@@ -8,8 +8,11 @@ import {
   resolveRepoRoot,
   upstreamDivergence,
   worktreeStatus,
+  type WorktreeMeta,
 } from "../git/index.ts";
+import { readWorktreesMeta } from "../lib/index.ts";
 import { runCommand } from "./aborted.ts";
+import { formatMeta } from "./meta.ts";
 import { resolveWorktreeName } from "./select.ts";
 
 interface ViewOptions {
@@ -30,6 +33,8 @@ export interface ViewResult {
   ahead: number | null;
   /** Commits behind upstream, or null when there is no upstream */
   behind: number | null;
+  /** Worktree metadata, `wt-id` included; empty while metadata is off */
+  meta: WorktreeMeta;
 }
 
 /** Show one worktree's details. */
@@ -40,14 +45,16 @@ export async function viewCommand(name?: string, options: ViewOptions = {}): Pro
 
     const root = await resolveRepoRoot(repoPath);
     const dir = await canonicalWorktreesDir(root);
-    const worktree = findWorktree(await listWorktrees(root), dir, selected);
+    const worktrees = await listWorktrees(root);
+    const worktree = findWorktree(worktrees, dir, selected);
     if (!worktree) {
       throw new Error(`Worktree '${selected}' not found.`);
     }
 
-    const [status, divergence] = await Promise.all([
+    const [status, divergence, meta] = await Promise.all([
       worktreeStatus(worktree.path),
       upstreamDivergence(worktree.path),
+      readWorktreesMeta(root, worktrees, ctx.warn),
     ]);
     if (!status.ok) ctx.warn(`Could not read the status of ${worktree.path}: ${status.reason}`);
 
@@ -61,6 +68,7 @@ export async function viewCommand(name?: string, options: ViewOptions = {}): Pro
       dirty: status.ok ? status.value.length : null,
       ahead: divergence?.ahead ?? null,
       behind: divergence?.behind ?? null,
+      meta: meta.get(worktree.path) ?? {},
     };
 
     return createResult(result, formatViewResult);
@@ -80,5 +88,7 @@ function formatViewResult(result: ViewResult): string {
     info.upstream = `+${result.ahead} / -${result.behind}`;
   }
 
-  return `Worktree: ${result.name}\n\n${formatKeyValue(info)}`;
+  const details = `Worktree: ${result.name}\n\n${formatKeyValue(info)}`;
+  if (Object.keys(result.meta).length === 0) return details;
+  return `${details}\n\nMetadata:\n\n${formatMeta(result.meta)}`;
 }
