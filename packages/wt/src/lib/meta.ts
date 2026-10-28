@@ -181,8 +181,8 @@ export async function unsetWorktreeMeta(
 }
 
 /**
- * A worktree's `wt-id`, assigning one if it has none yet. Use it to reference
- * a worktree created before metadata was turned on.
+ * A worktree's `wt-id`, assigning one if it has none yet (one created outside
+ * wt, say). Use it to reference a worktree that may not have been backfilled.
  */
 export async function ensureWorktreeId(params: MetaParams): Promise<string> {
   const target = await locateWritableTarget(params);

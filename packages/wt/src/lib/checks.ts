@@ -113,8 +113,8 @@ export type InitStep =
   /** `onlyWithOriginRefs`: skipped when no `refs/remotes/origin/*` exists (origin has no branches) */
   | { kind: "git"; args: string[]; onlyWithOriginRefs?: true }
   | { kind: "add-worktree"; name: string; branch: string }
-  /** Give the worktree at `path` a `wt-id` if it has none, under wt's metadata lock */
-  | { kind: "assign-worktree-id"; path: string };
+  /** Give each worktree at `paths` a `wt-id` if it has none, under wt's metadata lock */
+  | { kind: "assign-worktree-ids"; paths: string[] };
 
 /** An action together with the steps behind its `commands`. */
 export interface PlannedAction extends InitAction {
@@ -266,7 +266,9 @@ export function evaluate(state: RepoState): { checks: Check[]; actions: PlannedA
 
 /** Render a step as the command a user would type in the repository root. */
 export function describeStep(step: InitStep): string {
-  if (step.kind === "assign-worktree-id") return `# give ${step.path} a wt-id`;
+  if (step.kind === "assign-worktree-ids") {
+    return `# give these worktrees a wt-id: ${step.paths.map(shellArg).join(" ")}`;
+  }
   if (step.kind === "add-worktree") {
     return `wt add ${shellArg(step.name)} -b ${shellArg(step.branch)}`;
   }
@@ -511,14 +513,14 @@ function addWorktreeMetadataCheck(state: RepoState, add: AddCheck): void {
               ]
             : []),
           ...(state.withoutId.length > 0
-            ? [`Gives each worktree without one a wt-id: ${state.withoutId.join(", ")}`]
+            ? [`Gives the ${state.withoutId.length} existing worktree(s) without one a wt-id`]
             : []),
           "Undo with: wt init --worktree-metadata off",
         ],
       },
       // Backfilled here so that turning metadata on, by flag or in the walkthrough, always
       // leaves every worktree with an id; `worktree-ids` covers repositories where it is on.
-      [...toSteps(enableWorktreeConfigCommands(config)), ...assignIdSteps(state.withoutId)],
+      [...toSteps(enableWorktreeConfigCommands(config)), ...assignIdsStep(state.withoutId)],
     );
   const disable = (recommendation: string) => {
     const keys = config.worktreeKeys.flatMap((entry) => entry.keys);
@@ -604,7 +606,8 @@ function addWorktreeMetadataCheck(state: RepoState, add: AddCheck): void {
 }
 
 function addWorktreeIdsCheck(state: RepoState, add: AddCheck): void {
-  if (!state.worktreeConfig.enabled) return;
+  // While the config is broken, its repair (`worktree-metadata-on`) gives the ids as well.
+  if (!state.worktreeConfig.enabled || isWorktreeConfigBroken(state.worktreeConfig)) return;
   const base = { id: "worktree-ids", title: "Worktree ids" } as const;
   if (state.withoutId.length === 0) {
     add({ ...base, status: "ok", summary: "Every worktree has a wt-id", affects: [] });
@@ -628,13 +631,13 @@ function addWorktreeIdsCheck(state: RepoState, add: AddCheck): void {
         recommendation: "Every worktree then has the stable id tools reference it by",
         tradeoffs: ["Writes only wt-meta.wt-id into each worktree's own config"],
       },
-      assignIdSteps(state.withoutId),
+      assignIdsStep(state.withoutId),
     ),
   );
 }
 
-function assignIdSteps(paths: string[]): InitStep[] {
-  return paths.map((path) => ({ kind: "assign-worktree-id", path }));
+function assignIdsStep(paths: string[]): InitStep[] {
+  return paths.length > 0 ? [{ kind: "assign-worktree-ids", paths }] : [];
 }
 
 function addWorktreeListChecks(state: RepoState, add: AddCheck): void {

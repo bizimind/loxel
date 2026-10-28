@@ -137,7 +137,7 @@ A matching `clean.wt.sh` would remove that container before `wt remove` deletes 
 
 ## Checking the Setup
 
-`wt doctor` checks the repository's git setup and changes nothing; it exits 1 when a check fails. `wt init` runs the same checks and walks through each one that is not ok: what it affects, the recommended fix, the exact commands it would run, and then apply, skip or explain. Every fix is idempotent and prints each command before running it. Neither writes a wt config file: all they touch is git's own setup.
+`wt doctor` checks the repository's git setup and changes nothing; it exits 1 when a check fails. `wt init` runs the same checks and walks through each one that is not ok: what it affects, the recommended fix, the exact commands it would run (a step wt does itself, such as giving worktrees a `wt-id`, shows as a `#` comment), and then apply, skip or explain. Every fix is idempotent and prints each command before running it. Neither writes a wt config file: all they touch is git's own setup.
 
 | Check                   | Looks at                                                                                                     | Fix offered by `wt init`            |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------- |

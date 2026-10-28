@@ -169,7 +169,7 @@ describe("planInit", () => {
     const plan = await planInit(repo.root);
 
     const metadata = plan.actions.find((action) => action.id === "worktree-metadata-on");
-    expect(metadata?.commands.at(-1)).toBe(`# give ${linked.path} a wt-id`);
+    expect(metadata?.commands.at(-1)).toBe(`# give these worktrees a wt-id: ${linked.path}`);
     expect(plan.checks.some((check) => check.id === "worktree-ids")).toBe(false);
   });
 
@@ -372,14 +372,27 @@ describe("executeInit", () => {
     const linked = await executeAdd({ name: "feat", repoPath: repo.root });
 
     const on = await executeInit(repo.root, { apply: ["worktree-metadata-on"] });
-    expect(on.outcomes[0]?.commands.slice(-2)).toEqual([
-      `# give ${repo.root} a wt-id`,
-      `# give ${linked.path} a wt-id`,
-    ]);
+    expect(on.outcomes[0]?.commands.at(-1)).toBe(
+      `# give these worktrees a wt-id: ${repo.root} ${linked.path}`,
+    );
     expect(statusOf(on.checks, "worktree-ids")).toBe("ok");
     const ids = [await idOf(repo.root), await idOf(linked.path)];
     expect(ids.every(Boolean)).toBe(true);
     expect(new Set(ids).size).toBe(2);
+  });
+
+  test("one worktree's unreadable config does not keep the others from getting an id", async () => {
+    repo = await createTestRepo();
+    const broken = await executeAdd({ name: "broken", repoPath: repo.root });
+    const fine = await executeAdd({ name: "fine", repoPath: repo.root });
+    await Bun.write(join(repo.root, ".git", "worktrees", "broken", "config.worktree"), "[broken\n");
+
+    const on = await executeInit(repo.root, { apply: ["worktree-metadata-on"] });
+    expect(on.outcomes[0]?.status).toBe("failed");
+    expect(on.outcomes[0]?.error).toContain(broken.path);
+    expect(await git(["config", "--get", "extensions.worktreeConfig"], repo.root)).toBe("true");
+    expect(await idOf(repo.root)).toBeString();
+    expect(await idOf(fine.path)).toBeString();
   });
 
   test("backfills missing ids alongside concurrent metadata writes, keeping existing ones", async () => {

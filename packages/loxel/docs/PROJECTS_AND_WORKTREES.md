@@ -110,7 +110,7 @@ Writes go through the server, which resolves paths to ids:
 
 - `POST /api/worktree/meta` takes `parentPath` (a path, or null for the top level) and `displayName` (null or empty clears it). It refuses to nest a worktree under itself or its own subtree.
 - `POST /api/worktree/create` with `parentPath` branches from the parent's HEAD commit (`base`) and passes `loxel-parent-wt` as the new worktree's `meta`.
-- Both give the parent a `wt-id` first (`ensureWorktreeId`) when it has none: turning metadata on gives every existing worktree one, but a worktree added later outside wt (plain `git worktree add`) has none until its first metadata write or the next `wt init`.
+- Both give the parent a `wt-id` first (`ensureWorktreeId`) when it has none: turning metadata on gives every existing worktree one, but a worktree added later outside wt (plain `git worktree add`) has none until its first metadata write or `wt init --worktree-metadata on`.
 
 Metadata needs per-worktree config (`extensions.worktreeConfig`). `POST /api/worktree/plan-enable-metadata` returns the `worktree-metadata-on` action from `planInit` (its commands and tradeoffs, which the dialog shows), or null when there is nothing to do, and `POST /api/worktree/enable-metadata` runs `executeInit` with only that action. While metadata is off the server lists no metadata fields, so the sidebar is flat. Metadata written outside Loxel (`wt meta set`, `wt init`) refreshes the list through the project watcher, which maps `config` and `config.worktree` files to the `worktrees` event (see [WATCHERS.md](WATCHERS.md)).
 

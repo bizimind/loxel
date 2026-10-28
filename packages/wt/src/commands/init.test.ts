@@ -3,7 +3,7 @@ import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 
 import { git, gitSucceeds } from "../git/index.ts";
-import { planInit } from "../lib/index.ts";
+import { executeInit, planInit } from "../lib/index.ts";
 import { createTestRepo, runCli, type TestRepo } from "../test-repo.ts";
 import { parseFlags, resolveDecisions, type InitOptions } from "./init.ts";
 
@@ -100,7 +100,7 @@ describe("wt init without a terminal", () => {
 
   test("--worktree-metadata on backfills ids once metadata is already on", async () => {
     repo = await createTestRepo();
-    expect((await runCli(["init", "-j", "--worktree-metadata", "on"], repo.root)).exitCode).toBe(0);
+    await executeInit(repo.root, { apply: ["worktree-metadata-on"] });
     const plain = join(repo.root, ".claude", "worktrees", "x");
     await git(["worktree", "add", "-b", "x", plain], repo.root);
 

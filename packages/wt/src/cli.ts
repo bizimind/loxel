@@ -127,7 +127,10 @@ program
   .option("--no-repair", "Leave moved worktrees alone")
   .option("--prune", "Prune worktrees whose directory is gone")
   .option("--no-prune", "Keep stale worktrees")
-  .option("--worktree-metadata <on|off>", "Turn per-worktree config (git config --worktree) on/off")
+  .option(
+    "--worktree-metadata <on|off>",
+    "Turn per-worktree config (git config --worktree) on/off; on also gives every worktree a wt-id",
+  )
   .option("--main-worktree", "Check out the default branch as a worktree (bare repos)")
   .option("--no-main-worktree", "Don't create the default branch's worktree")
   .option("-y, --yes", "Apply every recommended fix without asking")

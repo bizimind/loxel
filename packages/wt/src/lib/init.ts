@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-import { git, resolveRepoRoot } from "../git/index.ts";
+import { git, listWorktrees, resolveRepoRoot } from "../git/index.ts";
 import type { HookContext } from "../hooks/run.ts";
 import { silentProgress, type ProgressHandler } from "../progress.ts";
 import { executeAdd } from "./add.ts";
@@ -211,8 +211,8 @@ async function runStep(
     await executeAdd({ name: step.name, repoPath: root, branch: step.branch, hookEnv }, progress);
     return;
   }
-  if (step.kind === "assign-worktree-id") {
-    progress.log(`    ${await ensureWorktreeId({ repoPath: root, path: step.path })}`);
+  if (step.kind === "assign-worktree-ids") {
+    await assignWorktreeIds(step.paths, root, progress);
     return;
   }
   if (step.onlyWithOriginRefs && !(await hasOriginRefs(root))) {
@@ -221,6 +221,36 @@ async function runStep(
   }
   const output = await git(step.args, root);
   for (const line of output.split("\n")) if (line.trim()) progress.log(`    ${line}`);
+}
+
+/**
+ * Give each worktree an id. One that is gone by now (a tool removed it since the plan) is
+ * skipped, and one failure does not keep the others from getting theirs: the failures are
+ * thrown together at the end.
+ */
+async function assignWorktreeIds(
+  paths: string[],
+  root: string,
+  progress: ProgressHandler,
+): Promise<void> {
+  const live = new Set(
+    (await listWorktrees(root)).filter((wt) => !wt.bare && !wt.prunable).map((wt) => wt.path),
+  );
+  const failures: string[] = [];
+  for (const path of paths) {
+    if (!live.has(path)) {
+      progress.log(`    ${path}: skipped, the worktree is gone`);
+      continue;
+    }
+    try {
+      progress.log(`    ${path}: ${await ensureWorktreeId({ repoPath: root, path })}`);
+    } catch (error) {
+      failures.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`Could not give every worktree a wt-id:\n  ${failures.join("\n  ")}`);
+  }
 }
 
 async function hasOriginRefs(root: string): Promise<boolean> {
