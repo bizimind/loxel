@@ -34,7 +34,7 @@ Important classifications:
 | loose objects                                                   | status, refs, and log    |
 | `worktrees/<name>/gitdir` or `commondir`                        | worktree lifecycle       |
 | `config`, `config.worktree`, `worktrees/<name>/config.worktree` | worktree list (metadata) |
-| per-worktree metadata seen through the common directory         | none                     |
+| `worktrees/<name>/HEAD`, `index` or `logs/` churn               | none                     |
 | `.worktrees/<name>/...` source paths in a bare repo             | none                     |
 
 The project watcher owns project-scoped events. A per-worktree watcher accepts only `status`; it must not recursively watch the common directory once per worktree for events the project watcher already handles.
