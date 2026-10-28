@@ -73,4 +73,4 @@ The Loxel server spawns the terminal shell from its own environment, so nothing 
 
 ## Not covered
 
-Reviewing or merging the resulting PR (the spawned session babysits it; this session does not); creating worktrees for anything other than a Claude-driven PR; starting `claude` outside a Loxel terminal.
+Nesting the new worktree under the current one in Loxel's sidebar (use `/child-pr`); reviewing or merging the resulting PR (the spawned session babysits it; this session does not); creating worktrees for anything other than a Claude-driven PR; starting `claude` outside a Loxel terminal.
