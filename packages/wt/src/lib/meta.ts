@@ -3,8 +3,9 @@
  * tools to interpret (see `../git/worktree-meta.ts` for where they live).
  *
  * Keys starting with `wt-` are wt's own: `wt-id` is a UUID given to every
- * worktree wt creates while metadata is on, and lazily to an older one the
- * first time its metadata is written. Tools reference worktrees by that id,
+ * worktree wt creates while metadata is on, to the existing ones when `wt init`
+ * turns metadata on or backfills them (`worktree-ids`), and lazily to any other
+ * the first time its metadata is written. Tools reference worktrees by that id,
  * never by name, so a rename cannot break a reference. Callers cannot set or
  * unset `wt-*` keys.
  *
@@ -180,8 +181,8 @@ export async function unsetWorktreeMeta(
 }
 
 /**
- * A worktree's `wt-id`, assigning one if it has none yet. Use it to reference
- * a worktree created before metadata was turned on.
+ * A worktree's `wt-id`, assigning one if it has none yet (one created outside
+ * wt, say). Use it to reference a worktree that may not have been backfilled.
  */
 export async function ensureWorktreeId(params: MetaParams): Promise<string> {
   const target = await locateWritableTarget(params);

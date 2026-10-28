@@ -36,7 +36,7 @@ import { useSettingsStore } from "@/store/settings-store";
 import { useSymbolSearchStore } from "@/store/symbol-search";
 import { getCenterApi, showPanel } from "@/store/tools-bar";
 import { goBackWorktree, goForwardWorktree } from "@/store/worktree-history";
-import { getOrderedWorktrees, useWorktreeStore } from "@/store/worktrees";
+import { getNumberedWorktrees, useWorktreeStore } from "@/store/worktrees";
 
 type SplitActionId = Extract<ActionId, `panel.split.${string}`>;
 
@@ -335,12 +335,9 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "worktree.focus.9": {
         const ctx = getActiveProjectWorktrees();
         if (!ctx?.ps) break;
-        // Numbering skips hidden worktrees whether or not the sidebar is expanded, so a digit
-        // always means the same worktree (the collapsed rail's order).
-        const hidden = new Set(ctx.ps.hiddenPaths);
-        const ordered = getOrderedWorktrees(ctx.ps.worktrees, ctx.ps.customOrder).filter(
-          (wt) => !wt.pending && !hidden.has(wt.path),
-        );
+        // Numbering follows the sidebar's visible order whether or not it is expanded, so a digit
+        // always means the same worktree.
+        const ordered = getNumberedWorktrees(ctx.ps);
         if (ordered.length === 0) break;
 
         const digit = Number(actionId.split(".")[2]);

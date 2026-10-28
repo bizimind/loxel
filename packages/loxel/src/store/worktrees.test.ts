@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-import type { RemoveWorktreePlan } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
+import type { WorktreeRemovePlan } from "@/api/worktree-removal-model";
 
 const PROJECT = "/repo";
 const WT_PATH = "/repo/.worktrees/feat-x";
 
-let plan: RemoveWorktreePlan;
-let removeCalls: { wtPath: string; options: { deleteBranch: boolean; force: boolean } }[] = [];
+let plan: WorktreeRemovePlan;
+let removeCalls: {
+  wtPath: string;
+  options: { deleteBranch: boolean; force: boolean; nested?: string };
+}[] = [];
 let planRemoveCalls: string[] = [];
 let branchDeleteSucceeds = true;
 let listResult: { worktrees: WorktreeEntry[] } = { worktrees: [] };
@@ -28,7 +31,7 @@ mock.module("@/api/client", () => ({
   removeWorktreeByWtPath: (
     _projectPath: string,
     wtPath: string,
-    options: { deleteBranch: boolean; force: boolean },
+    options: { deleteBranch: boolean; force: boolean; nested?: string },
   ) => {
     removeCalls.push({ wtPath, options });
     return (removeGate ?? Promise.resolve()).then(() => ({
@@ -42,7 +45,13 @@ mock.module("@/api/client", () => ({
   getProjectWorktrees: () => listResponses.shift() ?? Promise.resolve(listResult),
 }));
 
-const { deriveOwningWorktree, useWorktreeStore } = await import("./worktrees");
+const {
+  deriveOwningWorktree,
+  getNumberedWorktrees,
+  mergePersistedProjectStates,
+  persistedProjectStates,
+  useWorktreeStore,
+} = await import("./worktrees");
 const { useProjectStore } = await import("./projects");
 
 const worktree: WorktreeEntry = {
@@ -68,6 +77,7 @@ beforeEach(() => {
     dirty: true,
     isMain: false,
     locked: false,
+    nested: [],
   };
   useWorktreeStore.setState({
     byProject: { [PROJECT]: { worktrees: [worktree] } },
@@ -94,6 +104,7 @@ describe("refreshProjectWorktrees", () => {
           addedAt: "",
           isBare: true,
           worktreesDir: "/repo/.worktrees",
+          worktreeMetadata: false,
           worktrees: [worktree, other],
         },
       ],
@@ -116,6 +127,7 @@ describe("refreshProjectWorktrees", () => {
           addedAt: "",
           isBare: false,
           worktreesDir: "/repo/.worktrees",
+          worktreeMetadata: false,
           worktrees: [worktree],
         },
       ],
@@ -137,6 +149,7 @@ describe("refreshProjectWorktrees", () => {
           addedAt: "",
           isBare: false,
           worktreesDir: "/repo/.worktrees",
+          worktreeMetadata: false,
           worktrees: [],
         },
       ],
@@ -159,6 +172,7 @@ describe("refreshProjectWorktrees", () => {
           addedAt: "",
           isBare: true,
           worktreesDir: "/repo/.worktrees",
+          worktreeMetadata: false,
           worktrees: [worktree],
         },
         {
@@ -168,6 +182,7 @@ describe("refreshProjectWorktrees", () => {
           addedAt: "",
           isBare: true,
           worktreesDir: "/repo-other/.worktrees",
+          worktreeMetadata: false,
           worktrees: [{ ...other, path: active }],
         },
       ],
@@ -190,6 +205,7 @@ describe("refreshProjectWorktrees", () => {
           addedAt: "",
           isBare: true,
           worktreesDir: "/external/worktrees",
+          worktreeMetadata: false,
           // Deliberately stale: the single-project refresh does not update this snapshot.
           worktrees: [],
         },
@@ -225,6 +241,7 @@ describe("refreshProjectWorktrees", () => {
           addedAt: "",
           isBare: true,
           worktreesDir: "/repo/.worktrees",
+          worktreeMetadata: false,
           worktrees: [worktree, other],
         },
       ],
@@ -262,6 +279,7 @@ describe("refreshProjectWorktrees", () => {
           addedAt: "",
           isBare: true,
           worktreesDir: "/repo/.worktrees",
+          worktreeMetadata: false,
           worktrees: [other],
         },
       ],
@@ -293,6 +311,7 @@ describe("applyEnrichedProjects", () => {
     addedAt: "",
     isBare: true,
     worktreesDir: "/repo/.worktrees",
+    worktreeMetadata: false,
   };
 
   test("keeps persisted order and hidden lists when the server returns no worktrees", () => {
@@ -352,6 +371,7 @@ describe("confirmRemoveWorktree", () => {
           addedAt: "",
           isBare: true,
           worktreesDir: "/repo/.worktrees",
+          worktreeMetadata: false,
           worktrees: [worktree],
         },
       ],
@@ -390,7 +410,7 @@ describe("confirmRemoveWorktree", () => {
     await useWorktreeStore.getState().confirmRemoveWorktree({ deleteBranch: true, force: true });
 
     expect(removeCalls).toEqual([
-      { wtPath: WT_PATH, options: { deleteBranch: true, force: true } },
+      { wtPath: WT_PATH, options: { deleteBranch: true, force: true, nested: "move-up" } },
     ]);
     expect(useWorktreeStore.getState().pendingRemovePlan).toBeNull();
     expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([]);
@@ -411,7 +431,32 @@ describe("confirmRemoveWorktree", () => {
     await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
     await useWorktreeStore.getState().confirmRemoveWorktree({ deleteBranch: false, force: false });
 
-    expect(removeCalls[0]!.options).toEqual({ deleteBranch: false, force: false });
+    expect(removeCalls[0]!.options).toEqual({
+      deleteBranch: false,
+      force: false,
+      nested: "move-up",
+    });
+  });
+
+  test("marks the nested worktrees removing too when they are removed with it", async () => {
+    const child: WorktreeEntry = { ...worktree, path: `${WT_PATH}-child`, wtName: "feat-x-child" };
+    useWorktreeStore.setState({ byProject: { [PROJECT]: { worktrees: [worktree, child] } } });
+    plan = { ...plan, nested: [{ path: child.path, dirty: false }] };
+    let release: () => void = () => {};
+    removeGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    await useWorktreeStore.getState().requestRemoveWorktree(PROJECT, worktree);
+
+    const done = useWorktreeStore
+      .getState()
+      .confirmRemoveWorktree({ deleteBranch: false, force: false, nested: "remove" });
+    expect(
+      useWorktreeStore.getState().byProject[PROJECT]?.worktrees.map((wt) => wt.pending),
+    ).toEqual(["removing", "removing"]);
+    release();
+    await done;
+    expect(removeCalls[0]!.options.nested).toBe("remove");
   });
 
   test("is a no-op without a pending plan", async () => {
@@ -469,5 +514,53 @@ describe("deriveOwningWorktree", () => {
 
     expect(deriveOwningWorktree("/notes", projects, {})).toBeNull();
     expect(deriveOwningWorktree("/repos/app-other", projects, {})).toBeNull();
+  });
+});
+
+describe("worktree nesting", () => {
+  const parent: WorktreeEntry = { ...worktree, wtId: "id-parent" };
+  const child: WorktreeEntry = {
+    ...worktree,
+    path: "/repo/.worktrees/child",
+    wtName: "child",
+    wtId: "id-child",
+    parentWtId: "id-parent",
+  };
+  const loose: WorktreeEntry = { ...worktree, path: "/repo/.worktrees/loose", wtName: "loose" };
+
+  test("numbers worktrees in visible order, skipping hidden and collapsed subtrees", () => {
+    const ps = { worktrees: [parent, child, loose], customOrder: [WT_PATH, loose.path] };
+    expect(getNumberedWorktrees(ps).map((wt) => wt.path)).toEqual([
+      WT_PATH,
+      child.path,
+      loose.path,
+    ]);
+    expect(getNumberedWorktrees({ ...ps, collapsedPaths: [WT_PATH] }).map((wt) => wt.path)).toEqual(
+      [WT_PATH, loose.path],
+    );
+    expect(getNumberedWorktrees({ ...ps, hiddenPaths: [WT_PATH] }).map((wt) => wt.path)).toEqual([
+      loose.path,
+    ]);
+  });
+
+  test("persists and merges collapsed worktrees with the other lists", () => {
+    const persisted = persistedProjectStates({
+      [PROJECT]: { worktrees: [parent], collapsedPaths: [WT_PATH] },
+      "/empty": { worktrees: [] },
+    });
+    expect(persisted).toEqual({ [PROJECT]: { collapsedPaths: [WT_PATH] } });
+
+    const merged = mergePersistedProjectStates(
+      { [PROJECT]: { worktrees: [parent] } },
+      { [PROJECT]: { collapsedPaths: [WT_PATH, 3], hiddenPaths: "bad" } },
+    );
+    expect(merged[PROJECT]).toEqual({ worktrees: [parent], collapsedPaths: [WT_PATH] });
+  });
+
+  test("toggleCollapsed folds and unfolds a worktree", () => {
+    useWorktreeStore.getState().toggleCollapsed(PROJECT, WT_PATH);
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.collapsedPaths).toEqual([WT_PATH]);
+    useWorktreeStore.getState().toggleCollapsed(PROJECT, WT_PATH);
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.collapsedPaths).toEqual([]);
   });
 });

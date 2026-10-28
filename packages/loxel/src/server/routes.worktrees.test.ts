@@ -4,8 +4,9 @@ import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { listProjectWorktrees, projectWorktreesResponse } from "./project-worktrees";
 import type { RouteContext } from "./routes";
-import { handleRequest, listProjectWorktrees } from "./routes";
+import { handleRequest } from "./routes";
 import type { ProjectState } from "./server-state";
 
 /** Run a git command in `cwd`, throwing with stderr on failure. */
@@ -194,5 +195,120 @@ describe("worktree routes on a regular (non-bare) repo", () => {
     expect(removed.status).not.toBe(200);
     expect(existsSync(managedPath)).toBe(true);
     expect(existsSync(externalPath)).toBe(true);
+  });
+
+  test("enabling worktree metadata is planned, applied once, then no longer offered", async () => {
+    const planned = async () => {
+      const res = await post("/api/worktree/plan-enable-metadata", { projectPath: repo });
+      return ((await res.json()) as { action: { id: string } | null }).action;
+    };
+    expect((await planned())?.id).toBe("worktree-metadata-on");
+    expect((await projectWorktreesResponse(repo)).worktreeMetadata).toBe(false);
+
+    expect((await post("/api/worktree/enable-metadata", { projectPath: repo })).status).toBe(200);
+
+    expect(await planned()).toBeNull();
+    expect((await projectWorktreesResponse(repo)).worktreeMetadata).toBe(true);
+  });
+
+  describe("nesting", () => {
+    const wtPath = (name: string) => join(repo, ".worktrees", name);
+
+    async function byName() {
+      const worktrees = await listProjectWorktrees(repo);
+      return Object.fromEntries(worktrees.map((wt) => [wt.wtName, wt]));
+    }
+
+    async function meta(path: string, update: Record<string, unknown>): Promise<Response> {
+      return post("/api/worktree/meta", { projectPath: repo, path, ...update });
+    }
+
+    beforeEach(async () => {
+      expect((await post("/api/worktree/enable-metadata", { projectPath: repo })).status).toBe(200);
+    });
+
+    test("a child branches from its parent's commit and is nested under it", async () => {
+      expect((await create("parent")).status).toBe(200);
+      await writeFile(join(wtPath("parent"), "work.txt"), "work\n");
+      await git(wtPath("parent"), "add", ".");
+      await git(wtPath("parent"), "commit", "-m", "parent work");
+
+      expect((await create("child", { parentPath: wtPath("parent") })).status).toBe(200);
+
+      const { parent, child } = await byName();
+      expect(parent?.wtId).toBeString();
+      expect(child?.parentWtId).toBe(parent!.wtId!);
+      expect(child?.commit).toBe(parent!.commit);
+    });
+
+    test("nests, un-nests and renames, and refuses to nest under a descendant", async () => {
+      await create("a");
+      await create("b");
+      expect((await meta(wtPath("b"), { parentPath: wtPath("a") })).status).toBe(200);
+      expect((await byName()).b?.parentWtId).toBe((await byName()).a!.wtId!);
+
+      const cycle = await meta(wtPath("a"), { parentPath: wtPath("b") });
+      expect(cycle.status).toBe(400);
+      expect(((await cycle.json()) as { error: string }).error).toContain("cannot be nested");
+
+      expect((await meta(wtPath("b"), { parentPath: null, displayName: " Bee " })).status).toBe(
+        200,
+      );
+      expect((await byName()).b?.parentWtId).toBeUndefined();
+      expect((await byName()).b?.displayName).toBe("Bee");
+
+      expect((await meta(wtPath("b"), { displayName: "" })).status).toBe(200);
+      expect((await byName()).b?.displayName).toBeUndefined();
+    });
+
+    test("removing a parent moves its children up to its own parent", async () => {
+      await create("top");
+      await create("mid", { parentPath: wtPath("top") });
+      await create("leaf", { parentPath: wtPath("mid") });
+
+      const plan = await post("/api/worktree/plan-remove", {
+        projectPath: repo,
+        path: wtPath("mid"),
+      });
+      expect(
+        ((await plan.json()) as { nested: { path: string; dirty: boolean }[] }).nested,
+      ).toEqual([{ path: wtPath("leaf"), dirty: false }]);
+
+      const res = await post("/api/worktree/remove", { projectPath: repo, path: wtPath("mid") });
+      expect(res.status).toBe(200);
+      const { top, mid, leaf } = await byName();
+      expect(mid).toBeUndefined();
+      expect(leaf?.parentWtId).toBe(top!.wtId!);
+    });
+
+    test("removing a parent with its nested worktrees removes the whole subtree", async () => {
+      await create("top");
+      await create("mid", { parentPath: wtPath("top") });
+      await create("leaf", { parentPath: wtPath("mid") });
+
+      const res = await post("/api/worktree/remove", {
+        projectPath: repo,
+        path: wtPath("top"),
+        nested: "remove",
+        nestedPaths: [wtPath("mid"), wtPath("leaf")],
+      });
+      expect(res.status).toBe(200);
+      expect(Object.keys(await byName())).toEqual([]);
+    });
+
+    test("removing a subtree leaves a nested worktree the user did not confirm", async () => {
+      await create("top");
+      await create("seen", { parentPath: wtPath("top") });
+      await create("late", { parentPath: wtPath("top") });
+
+      const res = await post("/api/worktree/remove", {
+        projectPath: repo,
+        path: wtPath("top"),
+        nested: "remove",
+        nestedPaths: [wtPath("seen")],
+      });
+      expect(res.status).toBe(200);
+      expect(Object.keys(await byName())).toEqual(["late"]);
+    });
   });
 });
