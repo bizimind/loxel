@@ -8,18 +8,15 @@
 # the id. Switch to `wt meta id` once #769 lands.
 set -euo pipefail
 
-# Name the worktree, so wt never mistakes the key for a worktree name.
-top=$(git rev-parse --show-toplevel 2>/dev/null) || {
+# wt's own error for a bare repo root would name the key as a missing worktree.
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
   echo "Not inside a worktree, so there is nothing to nest under." >&2
-  exit 1
-}
-name=$(wt list -j </dev/null | jq -r --arg top "$top" '.worktrees[] | select(.path == $top) | .name')
-if [[ -z "$name" ]]; then
-  echo "wt does not list the worktree at $top." >&2
   exit 1
 fi
 
-if ! out=$(wt meta unset "$name" child-pr-assign-id -j </dev/null); then
+# No name: wt resolves the worktree by the cwd's path, which a name could not do for an
+# unmanaged worktree (the main one) whose directory name matches a managed worktree's.
+if ! out=$(wt meta unset child-pr-assign-id -j </dev/null); then
   jq -r '.message // .' <<<"$out" >&2
   exit 1
 fi
