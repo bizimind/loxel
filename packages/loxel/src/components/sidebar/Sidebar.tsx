@@ -1007,6 +1007,7 @@ function WorktreeList({ project }: { project: Project }) {
   const clearCreateWorktreeRequest = useWorktreeStore((s) => s.clearCreateWorktreeRequest);
 
   const menu = useWorktreeContextMenu(project.path);
+  const { handleSetParent, setError: setMenuError } = menu;
 
   const rows = useMemo(() => getWorktreeRows(ps), [ps]);
   /** Every row, collapsed subtrees included, for checks that span hidden levels. */
@@ -1062,10 +1063,10 @@ function WorktreeList({ project }: { project: Project }) {
         // Renaming back to the worktree's own name clears the display name.
         await renameWorktree(project.path, wt.path, value === worktreeName(wt) ? "" : value);
       } catch (err) {
-        menu.setError(err instanceof Error ? err.message : "Failed to rename worktree");
+        setMenuError(err instanceof Error ? err.message : "Failed to rename worktree");
       }
     },
-    [renameWorktree, project.path, menu],
+    [renameWorktree, project.path, setMenuError],
   );
 
   // --- @dnd-kit: drop onto a row to nest, between rows to reorder siblings ---
@@ -1122,13 +1123,20 @@ function WorktreeList({ project }: { project: Project }) {
       if (!target) return;
       const moved = String(event.active.id);
       if (target.zone === "inside") {
-        void menu.handleSetParent(moved, target.path);
+        void handleSetParent(moved, target.path);
         return;
       }
       const orderedPaths = getOrderedWorktrees(ps.worktrees, ps.customOrder).map((wt) => wt.path);
       setCustomOrder(project.path, moveInOrder(orderedPaths, moved, target.path, target.zone));
     },
-    [resolveDropTarget, menu, ps.worktrees, ps.customOrder, setCustomOrder, project.path],
+    [
+      resolveDropTarget,
+      handleSetParent,
+      ps.worktrees,
+      ps.customOrder,
+      setCustomOrder,
+      project.path,
+    ],
   );
 
   const handleDragCancel = useCallback(() => {
@@ -1240,6 +1248,8 @@ function WorktreeList({ project }: { project: Project }) {
                   isActive={wt.path === activeWorktreePath}
                   isOwnHidden={hiddenSet.has(wt.path)}
                   isDragging={wt.path === activeDragId}
+                  // A folded worktree also shows its hidden nested worktrees' notifications.
+                  notifyPaths={row.collapsed ? subtreePaths(wt.path, fullRows) : [wt.path]}
                   dropZone={dropTarget?.path === wt.path ? dropTarget.zone : null}
                   isRenaming={renamingPath === wt.path}
                   onRenameFinish={(value) => handleRenameFinish(wt, value)}
@@ -1322,6 +1332,8 @@ interface WorktreeItemViewProps {
   isOwnHidden: boolean;
   isDragOverlay?: boolean;
   isDragging?: boolean;
+  /** Worktrees whose notifications the row shows; just its own by default */
+  notifyPaths?: readonly string[];
   dropZone?: DropZone | null;
   /** Shows the inline display-name input */
   isRenaming?: boolean;
@@ -1364,6 +1376,7 @@ function WorktreeItemView({
   isOwnHidden,
   isDragOverlay = false,
   isDragging = false,
+  notifyPaths,
   dropZone = null,
   isRenaming = false,
   onRenameFinish,
@@ -1376,7 +1389,9 @@ function WorktreeItemView({
   rootProps,
 }: WorktreeItemViewProps) {
   const { wt, depth, descendantCount, collapsed, hidden } = row;
-  const hasNotification = usePanelNotificationStore((s) => hasWorktreeNotification(s, wt.path));
+  const hasNotification = usePanelNotificationStore((s) =>
+    (notifyPaths ?? [wt.path]).some((path) => hasWorktreeNotification(s, path)),
+  );
   const homeDir = useProjectStore((s) => s.homeDir);
   const label = worktreeLabel(wt);
   const subtitle = worktreeSubtitle(wt, homeDir);
@@ -1504,6 +1519,7 @@ function RemoveWorktreeDialog({
   const needsForce = plan.dirty || dirtyNested > 0;
   const blocked = needsForce && !force;
   const removeLabel = removingNested ? `Remove ${nestedCount + 1} worktrees` : "Remove worktree";
+  const deleteOffered = branch !== null || removingNested;
 
   return (
     <DialogShell open onCancel={onCancel} className="w-96">
@@ -1587,7 +1603,7 @@ function RemoveWorktreeDialog({
               Discard local changes (force remove)
             </label>
           )}
-          {(branch || removingNested) && (
+          {deleteOffered && (
             <label className="text-muted-foreground flex items-center gap-2 text-[11px]">
               <input
                 type="checkbox"
@@ -1613,9 +1629,10 @@ function RemoveWorktreeDialog({
           size="xs"
           className="w-full"
           disabled={blocked}
-          onClick={() => onConfirm({ deleteBranch, force, nested })}
+          // A detached worktree's checkbox goes away when "Remove them too" is unpicked.
+          onClick={() => onConfirm({ deleteBranch: deleteOffered && deleteBranch, force, nested })}
         >
-          {deleteBranch
+          {deleteOffered && deleteBranch
             ? `${removeLabel} and ${removingNested ? "branches" : "branch"}`
             : removeLabel}
         </Button>

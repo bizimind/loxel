@@ -1,4 +1,4 @@
-import type { RemovePlan } from "@bizimind/wt/lib";
+import type { RemovePlan, RemoveResult } from "@bizimind/wt/lib";
 
 /** A worktree nested below the one being removed. */
 export interface NestedWorktreePlan {
@@ -18,3 +18,9 @@ export interface WorktreeRemovePlan extends RemovePlan {
  * under its own parent (or the top level), `remove` removes them all with it.
  */
 export type NestedRemoval = "move-up" | "remove";
+
+/** Response of POST /api/worktree/remove. */
+export interface WorktreeRemoveResult extends RemoveResult {
+  /** Set when the worktree was removed but some of its children could not be moved up */
+  warning?: string;
+}

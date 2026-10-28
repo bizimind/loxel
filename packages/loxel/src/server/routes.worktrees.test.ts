@@ -290,9 +290,25 @@ describe("worktree routes on a regular (non-bare) repo", () => {
         projectPath: repo,
         path: wtPath("top"),
         nested: "remove",
+        nestedPaths: [wtPath("mid"), wtPath("leaf")],
       });
       expect(res.status).toBe(200);
       expect(Object.keys(await byName())).toEqual([]);
+    });
+
+    test("removing a subtree leaves a nested worktree the user did not confirm", async () => {
+      await create("top");
+      await create("seen", { parentPath: wtPath("top") });
+      await create("late", { parentPath: wtPath("top") });
+
+      const res = await post("/api/worktree/remove", {
+        projectPath: repo,
+        path: wtPath("top"),
+        nested: "remove",
+        nestedPaths: [wtPath("seen")],
+      });
+      expect(res.status).toBe(200);
+      expect(Object.keys(await byName())).toEqual(["late"]);
     });
   });
 });

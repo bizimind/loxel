@@ -334,9 +334,7 @@ export const useWorktreeStore = create<WorktreeState>()(
             activeProject?.id === project.id;
           if (!active || !belongedToProject || validPaths.has(active)) return;
 
-          purgeWorktreeStores(active);
-          purgeWorktreeCache(active);
-          wsClient.unsubscribeWorktree(active);
+          releaseWorktree(active);
 
           const fallback = project.isBare ? (data.worktrees[0]?.path ?? null) : project.path;
           set({ activeWorktreePath: fallback });
@@ -411,10 +409,9 @@ export const useWorktreeStore = create<WorktreeState>()(
 
           const { wtPath, worktreePath, projectPath } = pendingRemovePlan;
           set({ pendingRemovePlan: null });
-          const removed = [
-            worktreePath,
-            ...(nested === "remove" ? pendingRemovePlan.nested.map((wt) => wt.path) : []),
-          ];
+          const nestedPaths =
+            nested === "remove" ? pendingRemovePlan.nested.map((wt) => wt.path) : [];
+          const removed = [worktreePath, ...nestedPaths];
 
           // Not removed optimistically: the entries stay, marked pending, until the server has
           // unregistered the worktrees (their files are deleted afterwards, in the background).
@@ -428,19 +425,23 @@ export const useWorktreeStore = create<WorktreeState>()(
               deleteBranch,
               force,
               nested,
+              ...(nested === "remove" ? { nestedPaths } : {}),
             });
           } catch (err) {
             for (const path of removed) removingPaths.delete(path);
             await get().refreshProjectWorktrees(projectPath);
+            // Removing a subtree can fail partway: release whatever is gone all the same.
+            const listed = new Set(getProject(get(), projectPath).worktrees.map((wt) => wt.path));
+            for (const path of removed) if (!listed.has(path)) releaseWorktree(path);
             throw err;
           }
           for (const path of removed) {
             removingPaths.delete(path);
-            purgeWorktreeStores(path);
-            purgeWorktreeCache(path);
-            wsClient.unsubscribeWorktree(path);
+            releaseWorktree(path);
           }
           await get().refreshProjectWorktrees(projectPath);
+
+          if (result.warning) throw new Error(result.warning);
 
           if (deleteBranch && !result.branchDeleted) {
             throw new Error(
@@ -558,6 +559,13 @@ useWorktreeStore.subscribe(
     }
   },
 );
+
+/** Drop the client state of a removed worktree and stop listening to it. */
+function releaseWorktree(path: string): void {
+  purgeWorktreeStores(path);
+  purgeWorktreeCache(path);
+  wsClient.unsubscribeWorktree(path);
+}
 
 // ── Optimistic update helpers ──────────────────────────────────────────
 

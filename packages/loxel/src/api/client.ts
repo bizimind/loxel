@@ -42,7 +42,11 @@ import type {
   Review,
 } from "./review-model";
 import type { UpdateState } from "./update-model";
-import type { NestedRemoval, WorktreeRemovePlan } from "./worktree-removal-model";
+import type {
+  NestedRemoval,
+  WorktreeRemovePlan,
+  WorktreeRemoveResult,
+} from "./worktree-removal-model";
 import type { WsClientMessage, WsMessage } from "./ws-protocol";
 import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./ws-protocol";
 
@@ -717,9 +721,15 @@ export async function planRemoveWorktree(projectPath: string, wtPath: string) {
 export async function removeWorktreeByWtPath(
   projectPath: string,
   wtPath: string,
-  options: { deleteBranch: boolean; force: boolean; nested?: NestedRemoval },
+  options: {
+    deleteBranch: boolean;
+    force: boolean;
+    nested?: NestedRemoval;
+    /** With `nested: "remove"`: the nested worktrees the user confirmed removing */
+    nestedPaths?: string[];
+  },
 ) {
-  return fetchJson<import("@bizimind/wt/lib").RemoveResult>("/worktree/remove", {
+  return fetchJson<WorktreeRemoveResult>("/worktree/remove", {
     method: "POST",
     body: JSON.stringify({ projectPath, path: wtPath, ...options }),
   });

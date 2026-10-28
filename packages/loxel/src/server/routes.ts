@@ -53,6 +53,7 @@ import type {
   NestedRemoval,
   NestedWorktreePlan,
   WorktreeRemovePlan,
+  WorktreeRemoveResult,
 } from "@/api/worktree-removal-model";
 import type { TerminalSpawnTarget, WsMessage } from "@/api/ws-protocol";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
@@ -2393,7 +2394,7 @@ async function handlePlanRemoveWorktree(req: Request, ctx: RouteContext): Promis
     if (resolve(plan.worktreePath) !== resolve(wtPath)) {
       return error("Worktree path did not resolve to the requested worktree", 400);
     }
-    const { descendants } = nestedBelow(await listProjectWorktrees(project.cwd), wtPath);
+    const { descendants } = nestedBelow(await listProjectWorktrees(project.cwd), plan.worktreePath);
     const nested: NestedWorktreePlan[] = await Promise.all(
       descendants.map(async (wt) => ({
         path: wt.path,
@@ -2470,9 +2471,14 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
     force: typeof body.force === "boolean" ? body.force : false,
   };
   const nestedRemoval: NestedRemoval = body.nested === "remove" ? "remove" : "move-up";
+  // The nested worktrees the user saw in the plan: one nested since then is not removed
+  // with `force` it was never confirmed for (it shows at the top level once its parent is gone).
+  const confirmedNested = new Set(
+    nestedRemoval === "remove" ? requireStringArray(body, "nestedPaths") : [],
+  );
   const { parent, children, descendants } = nestedBelow(
     await listProjectWorktrees(project.cwd),
-    wtPath,
+    resolve(wtPath),
   );
 
   let branchesDeleted = true;
@@ -2480,13 +2486,25 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
     if (nestedRemoval === "remove") {
       // Deepest first, so no worktree is ever left nested under one that is gone.
       for (const wt of descendants.toReversed()) {
+        if (!confirmedNested.has(wt.path)) continue;
         const result = await removeOneWorktree(ctx, project, wt.path, options);
         branchesDeleted &&= result.branchDeleted;
       }
     }
     const result = await removeOneWorktree(ctx, project, wtPath, options);
-    if (nestedRemoval === "move-up") await moveChildrenUp(project.cwd, children, parent);
-    return json({ ...result, branchDeleted: result.branchDeleted && branchesDeleted });
+    const branchDeleted = result.branchDeleted && branchesDeleted;
+    const unmoved =
+      nestedRemoval === "move-up" ? await moveChildrenUp(project.cwd, children, parent) : [];
+    const response: WorktreeRemoveResult = {
+      ...result,
+      branchDeleted,
+      ...(unmoved.length > 0
+        ? {
+            warning: `The worktree was removed, but ${unmoved.join(", ")} could not be moved up and now ${unmoved.length === 1 ? "shows" : "show"} at the top level.`,
+          }
+        : {}),
+    };
+    return json(response);
   } catch (err) {
     return error(describeError(err, "Failed to remove worktree"));
   } finally {
@@ -2497,19 +2515,23 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
 /**
  * Nest the children of a removed worktree under its parent. Without one they are already shown
  * at the top level (their parent id matches no worktree), but the stale link is cleared too.
+ * Returns the names of the children that could not be moved.
  */
 async function moveChildrenUp(
   projectPath: string,
   children: readonly ProjectWorktree[],
   parent: ProjectWorktree | null,
-): Promise<void> {
+): Promise<string[]> {
+  const failed: string[] = [];
   for (const child of children) {
     try {
       await updateWorktreeMeta(projectPath, child.path, { parentPath: parent?.path ?? null });
     } catch (err) {
       wtLog.warn("Failed to move a nested worktree up", { path: child.path, error: err });
+      failed.push(child.wtName);
     }
   }
+  return failed;
 }
 
 // ---------------------------------------------------------------------------

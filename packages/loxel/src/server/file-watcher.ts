@@ -144,12 +144,20 @@ export function classifyGitChange(filename: string): WatchEvent[] {
   // only a subset of the new directory's entries: in practice `commondir` is the one reported
   // and `gitdir` almost never is. Removal surfaces nothing usable here at all, which is why
   // FileWatcher additionally watches the `worktrees/` directory itself (see start()).
+  //
+  // `config.worktree` holds a worktree's metadata (`wt meta set`, which nests or renames it in
+  // the sidebar), and the shared `config` holds whether metadata is on at all, so both refresh
+  // the worktree list. Neither is written by everyday git operations.
   if (file.startsWith("worktrees/")) {
     const segments = file.split("/");
     const base = segments[3] === undefined ? segments[2] : undefined;
-    if (base === "gitdir" || base === "commondir") {
+    if (base === "gitdir" || base === "commondir" || base === "config.worktree") {
       events.push("worktrees");
     }
+  }
+
+  if (file === "config" || file === "config.worktree") {
+    events.push("worktrees");
   }
 
   return events;
