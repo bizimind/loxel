@@ -144,7 +144,7 @@ function SidebarToggle() {
   const expanded = useProjectStore((s) => s.sidebarExpanded);
   return (
     <button
-      className="text-muted-foreground hover:text-foreground hover:bg-muted -ml-1 shrink-0 rounded p-1 transition-colors"
+      className="text-muted-foreground hover:text-foreground hover:bg-muted ml-1.5 shrink-0 rounded p-1 transition-colors"
       onClick={toggleWorktreeSidebar}
       title={expanded ? "Collapse sidebar" : "Expand sidebar"}
       aria-expanded={expanded}
