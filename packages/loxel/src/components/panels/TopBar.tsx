@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { PanelLeftIcon, SettingsIcon } from "lucide-react";
+import { PanelLeftCloseIcon, PanelLeftOpenIcon, SettingsIcon } from "lucide-react";
 
 import * as api from "@/api/client";
 import type { UpdateState } from "@/api/update-model";
@@ -150,7 +150,11 @@ function SidebarToggle() {
       aria-expanded={expanded}
       style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
     >
-      <PanelLeftIcon className="size-4" />
+      {expanded ? (
+        <PanelLeftCloseIcon className="size-4" />
+      ) : (
+        <PanelLeftOpenIcon className="size-4" />
+      )}
     </button>
   );
 }
