@@ -192,10 +192,16 @@ export class MonacoLspClient {
   /**
    * Whether the server may offer code actions of `kind` for `model` (`quickfix`, `source.fixAll`,
    * `refactor`, …): it syncs the model and registered code actions for it that declare a kind
-   * containing or inside `kind`, or no kinds at all. False until the server has initialized.
+   * containing or inside `kind`, or no kinds at all. With `declared`, only a declared kind equal to
+   * or inside `kind` counts, which is what Monaco's Fix All and Organize Imports require. False
+   * until the server has initialized.
    */
-  supportsCodeActionKind(model: monaco.editor.ITextModel, kind: string): boolean {
-    return this._codeActions.supportsKind(model, kind);
+  supportsCodeActionKind(
+    model: monaco.editor.ITextModel,
+    kind: string,
+    options?: { declared?: boolean },
+  ): boolean {
+    return this._codeActions.supportsKind(model, kind, options);
   }
 
   /** Typed LSP server interface. Call any LSP method directly. */

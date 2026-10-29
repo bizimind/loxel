@@ -12,17 +12,23 @@ import { getYamlLspClient } from "./yaml-lsp-client";
 
 /**
  * Each code action command: the Monaco command it runs and the code action kinds it lists (Quick
- * Fix lists refactors too).
+ * Fix lists refactors too). Monaco runs Fix All and Organize Imports only for a server that
+ * declares their kind, hence `declared`.
  */
 export const EDITOR_CODE_ACTIONS = {
   "codeAction.quickFix": {
     monacoActionId: "editor.action.quickFix",
     kinds: ["quickfix", "refactor"],
   },
-  "codeAction.fixAll": { monacoActionId: "editor.action.fixAll", kinds: ["source.fixAll"] },
+  "codeAction.fixAll": {
+    monacoActionId: "editor.action.fixAll",
+    kinds: ["source.fixAll"],
+    declared: true,
+  },
   "codeAction.organizeImports": {
     monacoActionId: "editor.action.organizeImports",
     kinds: ["source.organizeImports"],
+    declared: true,
   },
   "codeAction.sourceAction": { monacoActionId: "editor.action.sourceAction", kinds: ["source"] },
   "codeAction.refactor": { monacoActionId: "editor.action.refactor", kinds: ["refactor"] },
@@ -31,9 +37,13 @@ export const EDITOR_CODE_ACTIONS = {
 export type EditorCodeActionId = keyof typeof EDITOR_CODE_ACTIONS;
 
 /** Whether one of the language servers syncing `model` may offer code actions of `kind`. */
-function hasCodeActionProvider(model: monaco.editor.ITextModel, kind: string): boolean {
+function hasCodeActionProvider(
+  model: monaco.editor.ITextModel,
+  kind: string,
+  declared: boolean,
+): boolean {
   return [...getAllConnectedLspClients(), getYamlLspClient()].some((client) =>
-    client?.supportsCodeActionKind(model, kind),
+    client?.supportsCodeActionKind(model, kind, { declared }),
   );
 }
 
@@ -53,7 +63,8 @@ export function canRunEditorCodeAction(id: EditorCodeActionId): boolean {
   const editor = focusedCodeEditor();
   const model = editor?.getModel();
   if (!editor || !model || editor.getOption(monaco.editor.EditorOption.readOnly)) return false;
-  return EDITOR_CODE_ACTIONS[id].kinds.some((kind) => hasCodeActionProvider(model, kind));
+  const action: { kinds: readonly string[]; declared?: boolean } = EDITOR_CODE_ACTIONS[id];
+  return action.kinds.some((kind) => hasCodeActionProvider(model, kind, action.declared ?? false));
 }
 
 /** Run `id` in the focused editor (the command palette gives focus back to it when it closes). */

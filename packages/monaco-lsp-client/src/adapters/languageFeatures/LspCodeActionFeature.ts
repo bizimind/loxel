@@ -99,23 +99,29 @@ export class LspCodeActionFeature extends Disposable {
   }
 
   /**
-   * Whether the server may offer code actions of `kind` (or of a kind inside it, or containing it)
-   * for `model`: a registration covers the model and declares such a kind, or declares no kinds.
+   * Whether the server may offer code actions of `kind` for `model`: a registration covers the
+   * model and declares a kind inside or containing `kind`, or declares no kinds. With `declared`,
+   * only a declared kind equal to or inside `kind` counts, the test Monaco applies before running
+   * Fix All and Organize Imports (they do nothing for a server that declares no kinds).
    */
-  supportsKind(model: monaco.editor.ITextModel, kind: string): boolean {
+  supportsKind(
+    model: monaco.editor.ITextModel,
+    kind: string,
+    { declared = false }: { declared?: boolean } = {},
+  ): boolean {
     if (!this._connection.bridge.isSyncedModel(model)) return false;
-    return [...this._registrations].some(
-      (registration) =>
-        matchesDocumentSelector(
-          model,
-          registration.documentSelector,
-          this._connection.defaultLanguageIds,
-        ) &&
-        (!registration.codeActionKinds ||
-          registration.codeActionKinds.some((provided) =>
-            codeActionKindsIntersect(provided, kind),
-          )),
-    );
+    return [...this._registrations].some((registration) => {
+      const covers = matchesDocumentSelector(
+        model,
+        registration.documentSelector,
+        this._connection.defaultLanguageIds,
+      );
+      if (!covers) return false;
+      // LSP kinds are open-ended strings; the enum lists only the predefined ones.
+      const provided: readonly string[] | undefined = registration.codeActionKinds;
+      if (declared) return provided?.some((p) => p === kind || p.startsWith(`${kind}.`)) ?? false;
+      return !provided || provided.some((p) => codeActionKindsIntersect(p, kind));
+    });
   }
 
   private _toMonacoCommand(

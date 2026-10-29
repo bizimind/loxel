@@ -214,6 +214,17 @@ describe("LspCodeActionFeature", () => {
     expect(codeActions.supportsKind(model, "source.fixAllish")).toBe(false);
   });
 
+  test("declared kinds only: a kind equal to or inside the requested one, as Monaco gates Fix All", () => {
+    const ruff = client("ruff-lsp", { codeActionKinds: ["source.fixAll.ruff", "source"] });
+    expect(ruff.codeActions.supportsKind(model, "source.fixAll", { declared: true })).toBe(true);
+    expect(ruff.codeActions.supportsKind(model, "source.organizeImports", { declared: true })).toBe(
+      false,
+    );
+    const yaml = client("yaml-lsp");
+    expect(yaml.codeActions.supportsKind(model, "source.fixAll")).toBe(true);
+    expect(yaml.codeActions.supportsKind(model, "source.fixAll", { declared: true })).toBe(false);
+  });
+
   test("a registration without kinds may offer any kind, and none is left once it goes", () => {
     const { codeActions, registered } = client("python-lsp");
     expect(codeActions.supportsKind(model, "refactor")).toBe(true);

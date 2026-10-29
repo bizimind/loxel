@@ -4,9 +4,18 @@ import * as monaco from "monaco-editor";
 
 /** Code action kinds the fake language servers offer, by model URI. */
 const offered = new Map<string, string[]>();
+/** Kinds offered without declaring them (a server registered with no kinds), by model URI. */
+const undeclared = new Set<string>();
 const fakeClient = {
-  supportsCodeActionKind: (model: monaco.editor.ITextModel, kind: string) =>
-    offered.get(model.uri.toString())?.includes(kind) ?? false,
+  supportsCodeActionKind: (
+    model: monaco.editor.ITextModel,
+    kind: string,
+    options?: { declared?: boolean },
+  ) => {
+    const uri = model.uri.toString();
+    if (!options?.declared && undeclared.has(uri)) return true;
+    return offered.get(uri)?.includes(kind) ?? false;
+  },
 };
 mock.module("./lsp-client", () => ({ getAllConnectedLspClients: () => [fakeClient] }));
 mock.module("./yaml-lsp-client", () => ({ getYamlLspClient: () => undefined }));
@@ -30,6 +39,7 @@ let editors: ReturnType<typeof fakeEditor>["editor"][] = [];
 beforeEach(() => {
   editors = [];
   offered.clear();
+  undeclared.clear();
   spyOn(monaco.editor, "getEditors").mockImplementation(
     () => editors as unknown as monaco.editor.ICodeEditor[],
   );
@@ -64,6 +74,14 @@ describe("editor code actions", () => {
 
     editors.push(fakeEditor("loxel://HEAD/wt/app.py#new").editor);
     expect(canRunEditorCodeAction("codeAction.quickFix")).toBe(false);
+  });
+
+  test("Fix All and Organize Imports need a server that declares their kind", () => {
+    editors.push(fakeEditor("file:///wt/app.yaml").editor);
+    undeclared.add("file:///wt/app.yaml");
+    expect(canRunEditorCodeAction("codeAction.quickFix")).toBe(true);
+    expect(canRunEditorCodeAction("codeAction.fixAll")).toBe(false);
+    expect(canRunEditorCodeAction("codeAction.organizeImports")).toBe(false);
   });
 
   test("do not apply in a read-only editor", () => {
