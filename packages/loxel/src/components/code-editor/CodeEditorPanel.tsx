@@ -360,19 +360,9 @@ export function CodeEditorPanel({
       scrollbar: { vertical: "auto", horizontal: "auto" },
       overviewRulerLanes: 3,
       padding: { top: 4 },
-      // Cmd-click "go to definition" navigates to a new editor tab (handled
-      // by our registerEditorOpener in monaco-env.ts). Without these options
-      // Monaco opens its inline "peek" widget, which loads content through
-      // ITextModelService — a path that does not consult registerEditorOpener
-      // and fails with "Model not found" for loxel:// URIs.
-      gotoLocation: {
-        multiple: "goto",
-        multipleDefinitions: "goto",
-        multipleDeclarations: "goto",
-        multipleImplementations: "goto",
-        multipleTypeDefinitions: "goto",
-        multipleReferences: "goto",
-      },
+      // `gotoLocation` keeps Monaco's defaults: several targets open a peek widget, which shows
+      // files no tab has open through peek-text-models.ts; a single one opens a tab through the
+      // editor opener (editor-opener.ts).
     });
 
     editorRef.current = editor;

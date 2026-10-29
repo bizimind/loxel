@@ -22,6 +22,13 @@ window.addEventListener("error", (event) => {
 });
 
 window.addEventListener("unhandledrejection", (event) => {
+  // Monaco cancels work it never awaits, such as the references peek's list refresh when the peek
+  // closes. Like VS Code, which ignores them, a cancellation is not an error.
+  const { reason } = event;
+  if (reason instanceof Error && reason.name === "Canceled" && reason.message === "Canceled") {
+    event.preventDefault();
+    return;
+  }
   log.error("Unhandled promise rejection", {
     error: event.reason instanceof Error ? event.reason : undefined,
     message: event.reason instanceof Error ? undefined : String(event.reason),
