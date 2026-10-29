@@ -730,7 +730,7 @@ function TreeRow({
         </div>
         {expanded && !pending && (
           <button
-            className="text-muted-foreground hover:text-foreground relative shrink-0 cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"
+            className="text-muted-foreground hover:text-foreground relative mr-1.5 shrink-0 cursor-pointer opacity-0 transition-opacity group-hover:opacity-100"
             onClick={(e) => {
               e.stopPropagation();
               onToggleArchived();

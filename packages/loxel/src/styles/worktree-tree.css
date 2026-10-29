@@ -14,7 +14,8 @@
 .wt-tree {
   --wt-ease: 150ms ease-out;
   --wt-row-gap: 3px;
-  --wt-row-expanded-height: 2rem;
+  /* Two text lines, with room for the highlight around the icon */
+  --wt-row-expanded-height: 2.25rem;
   --wt-knob: 18px;
   --wt-border: 1.5px;
 }
