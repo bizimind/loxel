@@ -38,9 +38,11 @@ import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
 import { logger } from "./logger";
+import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
+import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
 import {
   getPythonEnv,
   refreshAllPythonEnvs,
@@ -420,7 +422,14 @@ function createDetachedFilesService(cwd: string, wtPath: string): DetachedFilesS
   );
 }
 
-function createFilesService(wtPath: string): ProjectFilesService {
+function notifyLspWatchedFiles(wtPath: string, paths: string[]): void {
+  for (const manager of worktreeLspManagers) manager.notifyWatchedFilesChanged(wtPath, paths);
+}
+
+function createFilesService(
+  wtPath: string,
+  nodeModulesChanges: NodeModulesChanges,
+): ProjectFilesService {
   const service: ProjectFilesService = new ProjectFilesService(
     wtPath,
     (dir, entries) => broadcastDirChanged(wtPath, dir, entries),
@@ -429,9 +438,8 @@ function createFilesService(wtPath: string): ProjectFilesService {
     {
       onFileMoved: (oldPath, newPath, source) =>
         broadcastFileMoved(wtPath, oldPath, newPath, source),
-      onPathsChanged: (paths) => {
-        for (const manager of worktreeLspManagers) manager.notifyWatchedFilesChanged(wtPath, paths);
-      },
+      onPathsChanged: (paths) => notifyLspWatchedFiles(wtPath, paths),
+      onIgnoredPathChanged: (relPath) => nodeModulesChanges.add(relPath),
     },
   );
   return service;
@@ -471,7 +479,10 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     await worktreeWatcher.start();
   }
 
-  const filesService = createFilesService(wtPath);
+  const nodeModulesChanges = new NodeModulesChanges(wtPath, (paths) =>
+    notifyLspWatchedFiles(wtPath, paths),
+  );
+  const filesService = createFilesService(wtPath, nodeModulesChanges);
   await filesService.start();
 
   const detachedFilesService = createDetachedFilesService(project.cwd, wtPath);
@@ -503,6 +514,7 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     projectPath: project.cwd,
     worktreeWatcher,
     filesService,
+    nodeModulesChanges,
     fileOpsService,
     fileOpsHistory,
     detachedFilesService,
@@ -565,6 +577,7 @@ function teardownWorktreeResources(wtPath: string, resources: WorktreeResources)
   suspendedWorktrees.delete(wtPath);
   resources.worktreeWatcher?.stop();
   resources.filesService.stop();
+  resources.nodeModulesChanges.dispose();
   resources.fileOpsService.dispose();
   resources.detachedFilesService.stop();
   resources.externalFilesService.stop();
@@ -710,15 +723,8 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
   const localDb = openDatabase(join(config.stateDir, "localdb", hash12(cwd), "localdb.db"));
 
   const filteredWorktrees: WorktreeEntry[] = managed
-    .filter((wt) => !basename(wt.path).startsWith(INTERNAL_WORKTREE_PREFIX))
-    .map((wt) => ({
-      path: wt.path,
-      branch: wt.branch,
-      commit: wt.head,
-      isMain: false,
-      createdAt: null,
-      wtName: wt.name,
-    }));
+    .filter(isListedWorktree)
+    .map((wt) => toWorktreeEntry(wt, null));
 
   const project: ProjectState = {
     cwd,

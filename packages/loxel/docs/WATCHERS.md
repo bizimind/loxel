@@ -26,15 +26,16 @@ Nothing Loxel runs to read state may write under the Git directory, `objects/` i
 
 Important classifications:
 
-| Path                                                    | Refreshes             |
-| ------------------------------------------------------- | --------------------- |
-| `index` / `index.lock`                                  | status                |
-| root `HEAD`, branch/tag refs and reflogs                | refs and log          |
-| root operation heads such as `MERGE_HEAD`               | status and refs       |
-| loose objects                                           | status, refs, and log |
-| `worktrees/<name>/gitdir` or `commondir`                | worktree lifecycle    |
-| per-worktree metadata seen through the common directory | none                  |
-| `.worktrees/<name>/...` source paths in a bare repo     | none                  |
+| Path                                                            | Refreshes                |
+| --------------------------------------------------------------- | ------------------------ |
+| `index` / `index.lock`                                          | status                   |
+| root `HEAD`, branch/tag refs and reflogs                        | refs and log             |
+| root operation heads such as `MERGE_HEAD`                       | status and refs          |
+| loose objects                                                   | status, refs, and log    |
+| `worktrees/<name>/gitdir` or `commondir`                        | worktree lifecycle       |
+| `config`, `config.worktree`, `worktrees/<name>/config.worktree` | worktree list (metadata) |
+| `worktrees/<name>/HEAD`, `index` or `logs/` churn               | none                     |
+| `.worktrees/<name>/...` source paths in a bare repo             | none                     |
 
 The project watcher owns project-scoped events. A per-worktree watcher accepts only `status`; it must not recursively watch the common directory once per worktree for events the project watcher already handles.
 
@@ -61,7 +62,7 @@ The client refetches only working-tree diffs (staged, unstaged, uncommitted) on 
 - Write nonces annotate the resulting event so the originating editor can suppress its echo.
 - `pause()` closes active watch handles but deliberately keeps caches, tracked files, queued changes, and nonce state. It waits for an in-flight flush to finish before removal starts. `resume()` recreates those handles, requests a conservative directory rescan, and emits a catch-up notification for every individually watched file because `fs.watch` cannot replay the paused interval. `stop()` is permanent teardown and clears state.
 
-A worktree's `ProjectFilesService` also hands each batch's absolute paths to `onPathsChanged` before its refresh pass, which `server.ts` forwards to the worktree's language servers as `workspace/didChangeWatchedFiles` (see "Watched files" in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)). Language servers therefore add no watcher of their own: they see each named-path batch the file tree sees, git-ignored directories excluded. Rescans without named paths (a null-filename event, the conservative rescan after `resume()`) reach no language server.
+A worktree's `ProjectFilesService` also hands each batch's absolute paths to `onPathsChanged` before its refresh pass, which `server.ts` forwards to the worktree's language servers as `workspace/didChangeWatchedFiles` (see "Watched files" in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)). Language servers therefore add no watcher of their own: they see each named-path batch the file tree sees, git-ignored directories excluded. The events the filter drops for being inside a git-ignored directory go one by one to `onIgnoredPathChanged`, which `server.ts` hands to the worktree's `NodeModulesChanges`, so dependency installs under `node_modules` still reach the language servers (see "Dependency installs" in [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)). Rescans without named paths (a null-filename event, the conservative rescan after `resume()`) reach no language server.
 
 `ProjectFilesService` (worktree trees and Others folders) also recognizes renames and moves of files editors have open, through [file-move-detector.ts](../src/server/file-move-detector.ts). Routes track a file's identity (device, inode and birth time, from `lstat` so symlinks are never followed) when an editor reads or writes it, up to 1,000 per tree with the least recently used dropped. Each pass stats only the tracked files whose path or an ancestor directory changed. Only when one of them vanished does it look for where it went: a tracked path that now holds its identity (renamed onto another open file), or among the pass's other changed paths, capped at 200 stats, a file with the same identity or the same relative path under a directory that appeared. A vanished file stays matchable for 2 s, which covers a move whose new path is reported in a later pass than the old one, not the reverse order. Matches are broadcast as `file_moved { oldPath, newPath, source }` before the pass's `file_content_changed` events, which still include the old path (the diff view needs it; editors ignore it once the move is applied). `FileOperationsService` brackets every operation with the tree's `beginOperation`, and each change is stamped when it is queued rather than when its pass runs, so changes queued during an operation or within 1 s after it make the pass's moves `loxel`; anything else is `external`. Drafts and individually opened external files are not covered, and a move across volumes is a copy plus a delete.
 

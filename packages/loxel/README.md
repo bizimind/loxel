@@ -112,7 +112,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 
 **Workspace**
 
-- [docs/PROJECTS_AND_WORKTREES.md](docs/PROJECTS_AND_WORKTREES.md) — project and worktree models, setup flows, `wt` integration, context switching, Others folders
+- [docs/PROJECTS_AND_WORKTREES.md](docs/PROJECTS_AND_WORKTREES.md) — project and worktree models, worktree nesting, setup flows, `wt` integration, context switching, Others folders
 - [docs/GIT.md](docs/GIT.md) — git command and parser layer, status pipeline, diff selection and base resolution, commit graph, mutations
 - [docs/PANELS_AND_LAYOUT.md](docs/PANELS_AND_LAYOUT.md) — dockview zones, panel registry and identity, opening and focus, tools bars, layout persistence per worktree
 - [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md) — action registry, chords, focus navigation, find in panel, shortcuts inside webviews
