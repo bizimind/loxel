@@ -47,25 +47,21 @@ describe("installPeekModelResolver", () => {
     ref.dispose();
   });
 
-  test("shares one snapshot per file and disposes it with the last reference", async () => {
-    const [first, second] = await Promise.all([
-      resolve("loxel://HEAD/repo/a.py"),
-      resolve("loxel://HEAD/repo/a.py"),
-    ]);
+  test("reads each reference its own snapshot, disposed with it", async () => {
+    files.set("/repo/c.py", "def c(): ...\n");
+    const first = await resolve("loxel://HEAD/repo/c.py");
+    files.set("/repo/c.py", "def c(): return 1\n");
+    const second = await resolve("loxel://HEAD/repo/c.py");
     const model = first.object.textEditorModel;
 
-    expect(second.object.textEditorModel).toBe(model);
-    expect(readFile).toHaveBeenCalledTimes(1);
+    // A reference some consumer never disposes can't pin an old read for later peeks.
+    expect(second.object.textEditorModel.getValue()).toBe("def c(): return 1\n");
+    expect(model.getValue()).toBe("def c(): ...\n");
     first.dispose();
     first.dispose();
-    expect(model.isDisposed()).toBe(false);
-    second.dispose();
     expect(model.isDisposed()).toBe(true);
-
-    const again = await resolve("loxel://HEAD/repo/a.py");
-    expect(again.object.textEditorModel).not.toBe(model);
-    expect(readFile).toHaveBeenCalledTimes(2);
-    again.dispose();
+    expect(second.object.textEditorModel.isDisposed()).toBe(false);
+    second.dispose();
   });
 
   test("hands out an open tab's own model, which outlives the reference", async () => {
