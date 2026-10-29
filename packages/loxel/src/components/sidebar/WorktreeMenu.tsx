@@ -112,8 +112,8 @@ export function useWorktreeContextMenu(projectPath: string) {
 
 /**
  * Renders the worktree context menu (copy, nesting, archive, remove) + removal dialogs.
- * `onNewChild` and `onEditTitle` need the expanded list's inline inputs; without them the items
- * are left out.
+ * `onNewChild` opens the New worktree dialog and `onEditTitle` the expanded list's inline input;
+ * without them the items are left out.
  */
 export function WorktreeContextMenu({
   menu,

@@ -584,6 +584,8 @@ describe("worktree nesting", () => {
     expect(toggleArchivedPaths(worktrees, [WT_PATH], loose.path)).toEqual([WT_PATH, loose.path]);
     // A worktree archived in its own right inside an archived one comes back with it.
     expect(toggleArchivedPaths(worktrees, [WT_PATH, child.path], WT_PATH)).toEqual([]);
+    // ...and so does bringing back the inner one: it would stay covered by the outer one.
+    expect(toggleArchivedPaths(worktrees, [WT_PATH, child.path], child.path)).toEqual([]);
   });
 
   test("markArchived archives a worktree in its own right, once", () => {

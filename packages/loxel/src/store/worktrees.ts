@@ -648,7 +648,8 @@ export function toggleArchivedPaths(
     return chain;
   };
   const current = new Set(archivedPaths);
-  const root = [path, ...ancestorsOf(path)].find((p) => current.has(p));
+  // The outermost archived root: bringing back an inner one alone would leave it covered.
+  const root = [path, ...ancestorsOf(path)].filter((p) => current.has(p)).at(-1);
   if (root) return archivedPaths.filter((p) => p !== root && !ancestorsOf(p).includes(root));
   return [...archivedPaths.filter((p) => !ancestorsOf(p).includes(path)), path];
 }

@@ -486,7 +486,8 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
 
           {renderNodes(trees.listed, 0, project.path)}
 
-          {archivedCount > 0 && (
+          {/* While dragging, an empty Archive shows too, so the first worktree can be dropped in. */}
+          {(archivedCount > 0 || activeDragId !== null) && (
             <div className="wt-group" style={groupStyle("var(--muted-foreground)", 0, true)}>
               <ArchiveRow
                 id={archiveEntry}
@@ -799,7 +800,12 @@ function ArchiveRow({
     foldedPaths.some((path) => hasWorktreeNotification(s, path)),
   );
   const tooltip = useRailTooltip(expanded);
-  const countLabel = count === 1 ? "1 archived worktree" : `${count} archived worktrees`;
+  const countLabel =
+    count === 0
+      ? "Drop to archive"
+      : count === 1
+        ? "1 archived worktree"
+        : `${count} archived worktrees`;
 
   return (
     <>
@@ -830,12 +836,14 @@ function ArchiveRow({
           <ArchiveIcon className="size-3.5" />
           {hasNotification && <NotificationDot />}
         </div>
-        <Knob
-          open={open}
-          count={count}
-          title={open ? "Close the archive" : "Open the archive"}
-          onToggle={onToggle}
-        />
+        {count > 0 && (
+          <Knob
+            open={open}
+            count={count}
+            title={open ? "Close the archive" : "Open the archive"}
+            onToggle={onToggle}
+          />
+        )}
         <div className="wt-row-label">
           <div className="text-foreground truncate text-xs leading-4 font-medium">Archive</div>
           <div className="text-muted-foreground truncate text-[10px] leading-3.5">{countLabel}</div>

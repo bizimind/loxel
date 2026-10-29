@@ -344,6 +344,49 @@ describe("Sidebar worktree nesting", () => {
     expect(setWorktreeParent).toHaveBeenCalledWith(project.path, child.path, null);
   });
 
+  test("new child worktree works on a worktree with nothing nested below it yet", async () => {
+    setNesting(true, [parent]);
+    render(<Sidebar />);
+
+    fireEvent.contextMenu(screen.getByText("parent"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New child worktree" }));
+    expect(screen.getByText("Nested under")).toBeDefined();
+    expect(screen.getByPlaceholderText("worktree-name")).toBeDefined();
+  });
+
+  test("closing the dialog mid-create drops a branch conflict instead of leaving it for the next one", async () => {
+    let finish = () => {};
+    const createWorktree = mock(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = () => {
+            // What the store does when the branch already exists.
+            useWorktreeStore.setState({
+              pendingAddPlan: {
+                projectPath: project.path,
+                name: "taken",
+                branch: "taken",
+                worktreePath: "/repo/.worktrees/taken",
+                branchConflict: { kind: "exists" },
+              },
+            });
+            resolve();
+          };
+        }),
+    );
+    setNesting(true);
+    useWorktreeStore.setState({ createWorktree });
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Add worktree"));
+    fireEvent.change(screen.getByPlaceholderText("worktree-name"), { target: { value: "taken" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(async () => finish());
+
+    expect(useWorktreeStore.getState().pendingAddPlan).toBeNull();
+  });
+
   test("new child worktree opens the dialog, whose name follows the title", async () => {
     const createWorktree = mock(() => Promise.resolve());
     setNesting(true);

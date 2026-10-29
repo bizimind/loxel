@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { WorktreeEntry } from "@/api/git-models";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,11 @@ export function NewWorktreeDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  /** Set when the dialog is closed while a create is still in flight. */
+  const abandoned = useRef(false);
+
   const cancel = () => {
+    if (busy) abandoned.current = true;
     if (conflict) dismissPendingPlan();
     onClose();
   };
@@ -58,9 +62,15 @@ export function NewWorktreeDialog({
       await action();
       // A branch conflict keeps the dialog open to ask how to resolve it.
       const pending = useWorktreeStore.getState().pendingAddPlan;
-      if (pending?.projectPath !== projectPath || pending.branchConflict?.kind !== "exists") {
-        onClose();
+      const conflicted =
+        pending?.projectPath === projectPath && pending.branchConflict?.kind === "exists";
+      // Closed meanwhile: nobody is left to answer the conflict, and its plan would take over
+      // the next New worktree dialog.
+      if (abandoned.current) {
+        if (conflicted) dismissPendingPlan();
+        return;
       }
+      if (!conflicted) onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create worktree");
     } finally {
