@@ -189,7 +189,9 @@ export interface WorktreeState {
   activeWorktreePath: string | null;
 
   /** Pending add plan that needs user resolution (branch conflict). */
-  pendingAddPlan: (AddWorktreePlan & { projectPath: string; parentPath?: string }) | null;
+  pendingAddPlan:
+    | (AddWorktreePlan & { projectPath: string; parentPath?: string; title?: string })
+    | null;
   /** Pending remove plan that needs user confirmation (dirty state). */
   pendingRemovePlan: (WorktreeRemovePlan & { wtPath: string; projectPath: string }) | null;
 
@@ -211,11 +213,14 @@ export interface WorktreeState {
    */
   switchWorktree: (path: string) => Promise<void>;
 
-  /** Create a worktree; with `parentPath`, a child branched from that worktree's commit. */
+  /**
+   * Create a worktree; with `parentPath`, a child branched from that worktree's commit, and with
+   * `title`, shown by that title.
+   */
   createWorktree: (
     projectPath: string,
     name: string,
-    options?: Pick<CreateWorktreeOptions, "branch" | "parentPath">,
+    options?: Pick<CreateWorktreeOptions, "branch" | "parentPath" | "title">,
   ) => Promise<void>;
   requestRemoveWorktree: (projectPath: string, wt: WorktreeEntry) => Promise<void>;
   confirmRemoveWorktree: (options: {
@@ -395,6 +400,7 @@ export const useWorktreeStore = create<WorktreeState>()(
         createWorktree: async (projectPath, name, options) => {
           const plan = await api.planAddWorktree(projectPath, name);
           const parentPath = options?.parentPath;
+          const title = options?.title;
 
           if (plan.branchConflict) {
             if (plan.branchConflict.kind === "used-by-worktree") {
@@ -402,14 +408,18 @@ export const useWorktreeStore = create<WorktreeState>()(
                 `A worktree already exists for branch '${plan.branch}' at: ${plan.branchConflict.worktreePath}`,
               );
             }
-            set({ pendingAddPlan: { ...plan, projectPath, parentPath } });
+            set({ pendingAddPlan: { ...plan, projectPath, parentPath, title } });
             return;
           }
 
-          addOptimisticEntry(set, projectPath, plan.worktreePath, name, parentPath);
+          addOptimisticEntry(set, projectPath, plan.worktreePath, name, { parentPath, title });
 
           try {
-            await api.createWorktree(projectPath, name, { branch: options?.branch, parentPath });
+            await api.createWorktree(projectPath, name, {
+              branch: options?.branch,
+              parentPath,
+              title,
+            });
           } catch (err) {
             removeOptimisticEntry(set, projectPath, plan.worktreePath);
             throw err;
@@ -422,13 +432,13 @@ export const useWorktreeStore = create<WorktreeState>()(
           const { pendingAddPlan } = get();
           if (!pendingAddPlan) return;
 
-          const { name, worktreePath, projectPath, parentPath } = pendingAddPlan;
+          const { name, worktreePath, projectPath, parentPath, title } = pendingAddPlan;
           set({ pendingAddPlan: null });
 
-          addOptimisticEntry(set, projectPath, worktreePath, name, parentPath);
+          addOptimisticEntry(set, projectPath, worktreePath, name, { parentPath, title });
 
           try {
-            await api.createWorktree(projectPath, name, { branchResolution, parentPath });
+            await api.createWorktree(projectPath, name, { branchResolution, parentPath, title });
           } catch (err) {
             removeOptimisticEntry(set, projectPath, worktreePath);
             throw err;
@@ -654,7 +664,7 @@ function addOptimisticEntry(
   projectPath: string,
   worktreePath: string,
   name: string,
-  parentPath: string | undefined,
+  { parentPath, title }: { parentPath?: string; title?: string },
 ): void {
   const project = useWorktreeStore.getState().byProject[projectPath];
   const parentWtId = parentPath
@@ -668,6 +678,7 @@ function addOptimisticEntry(
     createdAt: new Date().toISOString(),
     wtName: name,
     ...(parentWtId ? { parentWtId } : {}),
+    ...(title ? { title } : {}),
     pending: "creating",
   };
   if (parentPath) expand(set, projectPath, parentPath);

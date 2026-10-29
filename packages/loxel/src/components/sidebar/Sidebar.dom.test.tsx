@@ -342,7 +342,7 @@ describe("Sidebar worktree nesting", () => {
     expect(setWorktreeParent).toHaveBeenCalledWith(project.path, child.path, null);
   });
 
-  test("new child worktree creates the worktree under its parent", async () => {
+  test("new child worktree opens the dialog, whose name follows the title", async () => {
     const createWorktree = mock(() => Promise.resolve());
     setNesting(true);
     useWorktreeStore.setState({ createWorktree });
@@ -350,15 +350,46 @@ describe("Sidebar worktree nesting", () => {
 
     fireEvent.contextMenu(screen.getByText("parent"));
     fireEvent.click(await screen.findByRole("menuitem", { name: "New child worktree" }));
-    const input = screen.getByPlaceholderText("child worktree name");
-    fireEvent.change(input, { target: { value: "sub task" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("Nested under")).toBeDefined();
+    fireEvent.change(screen.getByPlaceholderText("What this worktree is for"), {
+      target: { value: "Sub task: part 2" },
+    });
+    const name = screen.getByPlaceholderText("worktree-name");
+    expect(name).toHaveValue("sub-task-part-2");
+    fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
 
     await waitFor(() =>
-      expect(createWorktree).toHaveBeenCalledWith(project.path, "sub-task", {
+      expect(createWorktree).toHaveBeenCalledWith(project.path, "sub-task-part-2", {
         parentPath: parent.path,
+        title: "Sub task: part 2",
       }),
     );
+  });
+
+  test("a name typed in directly stops following the title, until it is cleared", async () => {
+    setNesting(true);
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Add worktree"));
+    const title = screen.getByPlaceholderText("What this worktree is for");
+    const name = screen.getByPlaceholderText("worktree-name");
+    fireEvent.change(name, { target: { value: "My Name" } });
+    expect(name).toHaveValue("my-name");
+    fireEvent.change(title, { target: { value: "Something else" } });
+    expect(name).toHaveValue("my-name");
+
+    fireEvent.change(name, { target: { value: "" } });
+    fireEvent.change(title, { target: { value: "Something else again" } });
+    expect(name).toHaveValue("something-else-again");
+  });
+
+  test("without metadata, the dialog asks only for a name", () => {
+    setNesting(false, [parent]);
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Add worktree"));
+    expect(screen.queryByPlaceholderText("What this worktree is for")).toBeNull();
+    expect(screen.getByPlaceholderText("worktree-name")).toBeDefined();
   });
 
   test("rename writes the title", async () => {

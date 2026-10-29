@@ -2,8 +2,9 @@
  * A project's worktrees in the sidebar, nested under their parents, for both sidebar states: the
  * collapsed rail and the expanded list render the same elements, so expanding the sidebar
  * animates between them (styles in `src/styles/worktree-tree.css`). A worktree with nested ones
- * is a group: a faint bracket on the rail, a tree line when expanded, and a tab under the parent
- * icon that folds it. Archived worktrees live in the project's Archive group at the bottom.
+ * is a group: a knob on the parent icon's bottom-left corner folds it, and a line runs down from
+ * the knob, a faint bracket on the rail and a tree line when expanded. Archived worktrees live in
+ * the project's Archive group at the bottom.
  */
 import type { DragEndEvent, DragMoveEvent, DragStartEvent, Modifier } from "@dnd-kit/core";
 import {
@@ -17,20 +18,13 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import {
-  ArchiveIcon,
-  ArchiveRestoreIcon,
-  ChevronUpIcon,
-  GitBranchPlusIcon,
-  PlusIcon,
-  XIcon,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArchiveIcon, ArchiveRestoreIcon, ChevronUpIcon, GitBranchPlusIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { WorktreeEntry } from "@/api/git-models";
 import type { Project } from "@/api/project-model";
-import { InlineRenameInput, TREE_INDENT_STEP } from "@/components/tree";
+import { InlineRenameInput } from "@/components/tree";
 import { NotificationDot } from "@/components/ui/notification-dot";
 import { getTreeActionForEvent } from "@/hooks/useTreeKeyboardNav";
 import { focusSidebarEntryForPath } from "@/lib/focus-navigation";
@@ -56,33 +50,17 @@ import {
   type ProjectState,
 } from "@/store/worktrees";
 
-import { WorktreeIcon, type WorktreeIconSize } from "../worktrees/WorktreeIcon";
+import { WorktreeIcon } from "../worktrees/WorktreeIcon";
+import { NewWorktreeDialog } from "./NewWorktreeDialog";
+import {
+  ICON_PX,
+  KNOB_INSET,
+  iconLeft,
+  iconLeftExpanded,
+  railShowsBelow,
+} from "./worktree-geometry";
 import { worktreeLabel, worktreeName, worktreeSubtitle } from "./worktree-labels";
-import { BranchConflictDialog, WorktreeContextMenu, useWorktreeContextMenu } from "./WorktreeMenu";
-
-// ── Geometry ────────────────────────────────────────────────────────────
-
-/** Icon size per nesting level; deeper levels use the last. */
-const LEVEL_ICONS: readonly { size: WorktreeIconSize; px: number }[] = [
-  { size: "sm", px: 24 },
-  { size: "xs", px: 20 },
-  { size: "2xs", px: 18 },
-];
-/** Icons right-align on this x in the rail, so smaller nested icons step right. */
-const RAIL_ICON_RIGHT = 37.5;
-/** How far the expanded list shifts a top-level icon right of its rail position. */
-const EXPANDED_SHIFT = 22.5;
-/** The rail shows this many nesting levels; deeper worktrees fold into their ancestor's count. */
-const RAIL_LEVELS = 3;
-/** Group insets: a top-level group's margin, a nested group's margin, and the bracket width (passed to the CSS). */
-const GROUP_MARGIN = 5;
-const NESTED_GROUP_MARGIN = 3;
-const GROUP_BORDER = 1.5;
-
-const levelIcon = (level: number) => LEVEL_ICONS[Math.min(level, LEVEL_ICONS.length - 1)]!;
-const iconLeft = (px: number) => RAIL_ICON_RIGHT - px;
-const iconLeftExpanded = (px: number, level: number) =>
-  iconLeft(px) + EXPANDED_SHIFT + level * TREE_INDENT_STEP;
+import { WorktreeContextMenu, useWorktreeContextMenu } from "./WorktreeMenu";
 
 /** The Archive group's drop target and sidebar entry. */
 function archiveId(projectPath: string): string {
@@ -104,11 +82,6 @@ const shiftOverlayRight: Modifier = ({ transform }) => ({ ...transform, x: trans
 
 // ── Tree ────────────────────────────────────────────────────────────────
 
-/** The inline "new worktree" input: at the bottom, or under the worktree it nests the new one in. */
-interface AddingState {
-  parentPath?: string;
-}
-
 /**
  * Where a dragged worktree lands: into the Archive group, or placed by the row drop rules among
  * the listed worktrees, among the archived ones, or from the Archive back into the list.
@@ -122,13 +95,7 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
   const nesting = ps.worktreeMetadata ?? false;
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
-  const createWorktree = useWorktreeStore((s) => s.createWorktree);
-  const confirmCreateWorktree = useWorktreeStore((s) => s.confirmCreateWorktree);
   const renameWorktree = useWorktreeStore((s) => s.renameWorktree);
-  const dismissPendingPlan = useWorktreeStore((s) => s.dismissPendingPlan);
-  const pendingAddPlan = useWorktreeStore((s) =>
-    s.pendingAddPlan?.projectPath === project.path ? s.pendingAddPlan : null,
-  );
   const setCustomOrder = useWorktreeStore((s) => s.setCustomOrder);
   const toggleArchived = useWorktreeStore((s) => s.toggleArchived);
   const markArchived = useWorktreeStore((s) => s.markArchived);
@@ -158,7 +125,7 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
     (node: WorktreeNode<WorktreeEntry>, level: number) =>
       node.children.length > 0 &&
       !collapsedSet.has(node.wt.path) &&
-      (expanded || level < RAIL_LEVELS - 1),
+      (expanded || railShowsBelow(level)),
     [collapsedSet, expanded],
   );
   const listedRows = useMemo(
@@ -172,36 +139,9 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
     [archiveOpen, trees.archived, isOpen],
   );
 
-  const [adding, setAdding] = useState<AddingState | null>(null);
-  const [addName, setAddName] = useState("");
-  const [addError, setAddError] = useState<string | null>(null);
+  /** The New worktree dialog, open with the worktree it nests the new one under, if any. */
+  const [newWorktree, setNewWorktree] = useState<{ parent?: WorktreeEntry } | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
-  const addInputRef = useRef<HTMLInputElement>(null);
-
-  // Focus on the next tick: a context menu that opened the input returns focus to where it was
-  // when it closes, after this render.
-  useEffect(() => {
-    if (!adding || !expanded) return;
-    const timeout = window.setTimeout(() => addInputRef.current?.focus(), 0);
-    return () => window.clearTimeout(timeout);
-  }, [adding, expanded]);
-
-  const cancelAdding = useCallback(() => {
-    setAdding(null);
-    setAddName("");
-    setAddError(null);
-  }, []);
-
-  /** Open the inline input; the rail has no room for it, so the sidebar expands first. */
-  const startAdding = useCallback(
-    (state: AddingState) => {
-      if (!expanded) toggleSidebar();
-      setAddName("");
-      setAddError(null);
-      setAdding(state);
-    },
-    [expanded, toggleSidebar],
-  );
 
   // Respond to keybinding-triggered create request
   useEffect(() => {
@@ -209,14 +149,8 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
     const activeProject = deriveProject(activeWorktreePath, useProjectStore.getState().projects);
     if (activeProject?.path !== project.path) return;
     clearCreateWorktreeRequest();
-    startAdding({});
-  }, [
-    createWorktreeRequested,
-    clearCreateWorktreeRequest,
-    activeWorktreePath,
-    project.path,
-    startAdding,
-  ]);
+    setNewWorktree({});
+  }, [createWorktreeRequested, clearCreateWorktreeRequest, activeWorktreePath, project.path]);
 
   const expandGroup = useCallback(
     (path: string) => {
@@ -237,9 +171,9 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
   const handleNewChild = useCallback(
     (wt: WorktreeEntry) => {
       expandGroup(wt.path);
-      startAdding({ parentPath: wt.path });
+      setNewWorktree({ parent: wt });
     },
-    [expandGroup, startAdding],
+    [expandGroup],
   );
 
   const handleRenameStart = useCallback(
@@ -412,70 +346,6 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
     setDropTarget(null);
   }, []);
 
-  const handleAddSubmit = useCallback(async () => {
-    const name = addName.trim();
-    if (!name) return;
-    setAddError(null);
-    try {
-      await createWorktree(project.path, name, { parentPath: adding?.parentPath });
-      cancelAdding();
-    } catch (err) {
-      setAddError(err instanceof Error ? err.message : "Failed to create worktree");
-    }
-  }, [addName, createWorktree, project.path, adding, cancelAdding]);
-
-  const handleBranchConflictResolve = useCallback(
-    async (resolution: "use-existing" | "delete-and-create") => {
-      setAddError(null);
-      try {
-        await confirmCreateWorktree(resolution);
-        cancelAdding();
-      } catch (err) {
-        setAddError(err instanceof Error ? err.message : "Failed to create worktree");
-      }
-    },
-    [confirmCreateWorktree, cancelAdding],
-  );
-
-  const addInput = (level: number, offset: number) => (
-    <div
-      className="flex items-center gap-1 py-1 pr-2"
-      style={{ paddingLeft: `${Math.max(0, iconLeftExpanded(24, level) - 18 - offset)}px` }}
-    >
-      <button
-        className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-        onClick={cancelAdding}
-        title="Cancel"
-      >
-        <XIcon className="size-3.5" />
-      </button>
-      <div className="min-w-0 flex-1">
-        <input
-          ref={addInputRef}
-          value={addName}
-          onChange={(e) => {
-            setAddName(e.target.value.toLowerCase().replace(/\s/g, "-"));
-            setAddError(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleAddSubmit();
-            if (e.key === "Escape") cancelAdding();
-          }}
-          placeholder={adding?.parentPath ? "child worktree name" : "worktree name"}
-          className="bg-background border-border text-foreground placeholder:text-muted-foreground w-full rounded border px-2 py-1 text-xs outline-none"
-        />
-        {addError && <div className="text-destructive mt-1 text-[10px]">{addError}</div>}
-      </div>
-      <button
-        className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-        onClick={handleAddSubmit}
-        title="Create worktree"
-      >
-        <PlusIcon className="size-3.5" />
-      </button>
-    </div>
-  );
-
   /**
    * The tree's expand and collapse actions (Right and Left by default), as in the project
    * explorer: fold or unfold a group, else step to its parent or first child.
@@ -509,93 +379,76 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
   const renderNodes = (
     nodes: readonly WorktreeNode<WorktreeEntry>[],
     level: number,
-    offset: number,
     parentEntry: string,
-  ) => nodes.map((node) => renderNode(node, level, offset, parentEntry));
+  ) => nodes.map((node) => renderNode(node, level, parentEntry));
 
-  const renderNode = (
-    node: WorktreeNode<WorktreeEntry>,
-    level: number,
-    offset: number,
-    parentEntry: string,
-  ) => {
+  const renderNode = (node: WorktreeNode<WorktreeEntry>, level: number, parentEntry: string) => {
     const { wt } = node;
-    const icon = levelIcon(level);
     const hasChildren = node.children.length > 0;
     const open = isOpen(node, level);
     // The rail folds groups below its last level; only the expanded sidebar can unfold them.
-    const railFolded = hasChildren && !expanded && level >= RAIL_LEVELS - 1;
-    const isAddingChild = expanded && adding?.parentPath === wt.path;
+    const railFolded = hasChildren && !expanded && !railShowsBelow(level);
+    const toggleOpen = () =>
+      railFolded ? expandFromRail(wt.path) : toggleCollapsed(project.path, wt.path);
 
-    const rowProps = (rowOffset: number): TreeRowProps => ({
-      wt,
-      icon,
-      pad: Math.max(0, iconLeft(icon.px) - rowOffset),
-      padExpanded: Math.max(0, iconLeftExpanded(icon.px, level) - rowOffset),
-      expanded,
-      isActive: wt.path === activeWorktreePath,
-      foldedPaths: open ? [] : descendantPaths(node),
-      activeWorktreePath,
-      archived: archived.has(wt.path),
-      isDragging: wt.path === activeDragId,
-      dropZone: dropTarget?.path === wt.path ? dropTarget.zone : null,
-      isRenaming: renamingPath === wt.path,
-      homeDir,
-      onRenameFinish: (value) => handleRenameFinish(wt, value),
-      onRenameCancel: () => setRenamingPath(null),
-      onSelect: () => !wt.pending && switchWorktree(wt.path),
-      onContextMenu: (e) => !wt.pending && menu.handleContextMenu(e, wt),
-      onToggleArchived: () => toggleArchived(project.path, wt.path),
-      onToggleOpen: hasChildren
-        ? () => (railFolded ? expandFromRail(wt.path) : toggleCollapsed(project.path, wt.path))
-        : undefined,
-      onKeyDown: (e) =>
-        handleTreeKey(e, {
-          open,
-          expandable: hasChildren,
-          expand: () => (railFolded ? expandFromRail(wt.path) : expandGroup(wt.path)),
-          collapse: () => toggleCollapsed(project.path, wt.path),
-          parentEntry,
-          firstChildEntry: node.children[0]?.wt.path,
-        }),
-    });
-
-    if (!hasChildren) return <TreeRow key={wt.path} {...rowProps(offset)} />;
-
-    const margin = offset === 0 ? GROUP_MARGIN : NESTED_GROUP_MARGIN;
-    const inner = offset + margin + GROUP_BORDER;
-    const center = iconLeft(icon.px) + icon.px / 2;
-    const groupStyle = {
-      "--wt-group-color": idToColor(worktreeName(wt)).bg,
-      "--wt-head-size": `${icon.px}px`,
-      "--wt-tab-x": `${center - offset - margin}px`,
-      "--wt-line-x": `${iconLeftExpanded(icon.px, level) + icon.px / 2 - offset - margin}px`,
-    } as React.CSSProperties;
+    const row = (
+      <TreeRow
+        key={hasChildren ? undefined : wt.path}
+        wt={wt}
+        pad={iconLeft(level)}
+        padExpanded={iconLeftExpanded(level)}
+        expanded={expanded}
+        isActive={wt.path === activeWorktreePath}
+        foldedPaths={open ? [] : descendantPaths(node)}
+        activeWorktreePath={activeWorktreePath}
+        archived={archived.has(wt.path)}
+        isDragging={wt.path === activeDragId}
+        dropZone={dropTarget?.path === wt.path ? dropTarget.zone : null}
+        isRenaming={renamingPath === wt.path}
+        homeDir={homeDir}
+        knob={
+          hasChildren
+            ? {
+                open,
+                count: node.descendantCount,
+                title: open ? "Collapse nested worktrees" : "Expand nested worktrees",
+                onToggle: toggleOpen,
+              }
+            : undefined
+        }
+        onRenameFinish={(value) => handleRenameFinish(wt, value)}
+        onRenameCancel={() => setRenamingPath(null)}
+        onSelect={() => !wt.pending && switchWorktree(wt.path)}
+        onContextMenu={(e) => !wt.pending && menu.handleContextMenu(e, wt)}
+        onToggleArchived={() => toggleArchived(project.path, wt.path)}
+        onToggleOpen={hasChildren ? toggleOpen : undefined}
+        onKeyDown={(e) =>
+          handleTreeKey(e, {
+            open,
+            expandable: hasChildren,
+            expand: () => (railFolded ? expandFromRail(wt.path) : expandGroup(wt.path)),
+            collapse: () => toggleCollapsed(project.path, wt.path),
+            parentEntry,
+            firstChildEntry: node.children[0]?.wt.path,
+          })
+        }
+      />
+    );
+    if (!hasChildren) return row;
 
     return (
-      <div key={wt.path} className="wt-group" style={groupStyle}>
-        <TreeRow {...rowProps(inner)} />
-        {open && renderNodes(node.children, level + 1, inner, wt.path)}
-        {isAddingChild && addInput(level + 1, inner)}
-        <button
-          className="wt-group-tab"
-          title={open ? "Collapse nested worktrees" : "Expand nested worktrees"}
-          onClick={() =>
-            railFolded ? expandFromRail(wt.path) : toggleCollapsed(project.path, wt.path)
-          }
-          // Keep the tab from starting a drag of the row above it.
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          {open ? <ChevronUpIcon className="size-2.5" strokeWidth={3} /> : node.descendantCount}
-        </button>
+      <div
+        key={wt.path}
+        className="wt-group"
+        style={groupStyle(idToColor(worktreeName(wt)).bg, level)}
+      >
+        {row}
+        {open && renderNodes(node.children, level + 1, wt.path)}
       </div>
     );
   };
 
   const archivedCount = trees.archived.reduce((sum, node) => sum + 1 + node.descendantCount, 0);
-  const archiveIcon = levelIcon(0);
-  const archiveCenter = iconLeft(archiveIcon.px) + archiveIcon.px / 2;
-  const archiveInner = GROUP_MARGIN + GROUP_BORDER;
 
   return (
     <>
@@ -610,13 +463,7 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
       >
         <div
           className={cn("wt-tree pb-0.5", expanded && "wt-tree-expanded")}
-          style={
-            {
-              "--wt-group-margin": `${GROUP_MARGIN}px`,
-              "--wt-nested-group-margin": `${NESTED_GROUP_MARGIN}px`,
-              "--wt-border": `${GROUP_BORDER}px`,
-            } as React.CSSProperties
-          }
+          style={{ "--wt-knob-inset": `${KNOB_INSET}px` } as React.CSSProperties}
         >
           {/* A bare repo's list is empty until its worktrees are fetched; a regular repo's
               main checkout is never listed, so for it an empty list is the normal state and
@@ -624,35 +471,24 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
           {expanded && project.isBare && ps.worktrees.length === 0 && (
             <div
               className="text-muted-foreground cursor-pointer py-1.5 text-[11px] italic hover:underline"
-              style={{ paddingLeft: `${iconLeftExpanded(24, 0)}px` }}
+              style={{ paddingLeft: `${iconLeftExpanded(0)}px` }}
               onClick={() => switchWorktree(project.path)}
             >
               Click to load worktrees
             </div>
           )}
 
-          {renderNodes(trees.listed, 0, 0, project.path)}
+          {renderNodes(trees.listed, 0, project.path)}
 
           {archivedCount > 0 && (
-            <div
-              className="wt-group"
-              style={
-                {
-                  "--wt-group-color": "var(--muted-foreground)",
-                  "--wt-tab-text": "var(--background)",
-                  "--wt-head-size": `${archiveIcon.px}px`,
-                  "--wt-tab-x": `${archiveCenter - GROUP_MARGIN}px`,
-                  "--wt-line-x": `${iconLeftExpanded(archiveIcon.px, 0) + archiveIcon.px / 2 - GROUP_MARGIN}px`,
-                } as React.CSSProperties
-              }
-            >
+            <div className="wt-group" style={groupStyle("var(--muted-foreground)", 0, true)}>
               <ArchiveRow
                 id={archiveEntry}
                 count={archivedCount}
                 open={archiveOpen}
                 expanded={expanded}
-                pad={iconLeft(archiveIcon.px) - archiveInner}
-                padExpanded={iconLeftExpanded(archiveIcon.px, 0) - archiveInner}
+                pad={iconLeft(0)}
+                padExpanded={iconLeftExpanded(0)}
                 foldedPaths={archiveOpen ? [] : [...archived]}
                 activeInside={
                   !archiveOpen && activeWorktreePath !== null && archived.has(activeWorktreePath)
@@ -670,31 +506,16 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
                   })
                 }
               />
-              {archiveOpen && renderNodes(trees.archived, 1, archiveInner, archiveEntry)}
-              <button
-                className="wt-group-tab"
-                title={archiveOpen ? "Close the archive" : "Open the archive"}
-                onClick={() => toggleArchiveOpen(project.path)}
-              >
-                {archiveOpen ? (
-                  <ChevronUpIcon className="size-2.5" strokeWidth={3} />
-                ) : (
-                  archivedCount
-                )}
-              </button>
+              {archiveOpen && renderNodes(trees.archived, 1, archiveEntry)}
             </div>
           )}
 
-          {expanded && adding && adding.parentPath === undefined ? (
-            addInput(0, 0)
-          ) : (
-            <AddWorktreeRow
-              id={endEntry}
-              expanded={expanded}
-              showDropLine={dropTarget?.path === endEntry}
-              onClick={() => startAdding({})}
-            />
-          )}
+          <AddWorktreeRow
+            id={endEntry}
+            expanded={expanded}
+            showDropLine={dropTarget?.path === endEntry}
+            onClick={() => setNewWorktree({})}
+          />
         </div>
 
         {/* Drag overlay */}
@@ -720,20 +541,29 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
 
       <WorktreeContextMenu menu={menu} onNewChild={handleNewChild} onRename={handleRenameStart} />
 
-      {/* Branch conflict resolution dialog */}
-      {pendingAddPlan?.branchConflict?.kind === "exists" && (
-        <BranchConflictDialog
-          branchName={pendingAddPlan.branch}
-          error={addError}
-          onResolve={handleBranchConflictResolve}
-          onCancel={() => {
-            dismissPendingPlan();
-            setAddError(null);
-          }}
+      {newWorktree && (
+        <NewWorktreeDialog
+          projectPath={project.path}
+          parent={newWorktree.parent}
+          titles={nesting}
+          onClose={() => setNewWorktree(null)}
         />
       )}
     </>
   );
+}
+
+/**
+ * A group's custom properties: its color, and where the line from its knob runs on the rail and
+ * in the expanded list. The Archive's knob text uses the background, for contrast on gray.
+ */
+function groupStyle(color: string, level: number, archive = false): React.CSSProperties {
+  return {
+    "--wt-group-color": color,
+    "--wt-line-x": `${iconLeft(level) + KNOB_INSET}px`,
+    "--wt-line-x-expanded": `${iconLeftExpanded(level) + KNOB_INSET}px`,
+    ...(archive ? { "--wt-knob-text": "var(--background)" } : {}),
+  } as React.CSSProperties;
 }
 
 /** Every worktree below `node`. */
@@ -743,10 +573,38 @@ function descendantPaths(node: WorktreeNode<WorktreeEntry>): string[] {
 
 // ── Rows ────────────────────────────────────────────────────────────────
 
+/** The knob that folds a group, on its parent row's icon. */
+interface KnobProps {
+  open: boolean;
+  /** Shown while folded: the worktrees it holds */
+  count: number;
+  title: string;
+  onToggle: () => void;
+}
+
+/** A group's knob: the folded count, or a chevron that folds it while open. */
+function Knob({ open, count, title, onToggle }: KnobProps) {
+  return (
+    <button
+      className="wt-knob"
+      title={title}
+      aria-expanded={open}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      // Keep the knob from selecting, dragging or double-click folding the row it sits on.
+      onDoubleClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      {open ? <ChevronUpIcon className="size-3" strokeWidth={3} /> : count}
+    </button>
+  );
+}
+
 interface TreeRowProps {
   wt: WorktreeEntry;
-  icon: { size: WorktreeIconSize; px: number };
-  /** Left padding on the rail and in the expanded list, inside the groups around the row */
+  /** The icon's left edge on the rail and in the expanded list */
   pad: number;
   padExpanded: number;
   expanded: boolean;
@@ -764,6 +622,8 @@ interface TreeRowProps {
   onSelect: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onToggleArchived: () => void;
+  /** The knob of the group it heads; absent without nested worktrees */
+  knob?: KnobProps;
   /** Fold or unfold its nested worktrees; absent without any */
   onToggleOpen?: () => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
@@ -772,7 +632,6 @@ interface TreeRowProps {
 /** A worktree row that can be dragged, and dropped onto or next to. */
 function TreeRow({
   wt,
-  icon,
   pad,
   padExpanded,
   expanded,
@@ -789,6 +648,7 @@ function TreeRow({
   onSelect,
   onContextMenu,
   onToggleArchived,
+  knob,
   onToggleOpen,
   onKeyDown,
 }: TreeRowProps) {
@@ -818,7 +678,7 @@ function TreeRow({
         className={cn("wt-row group", pending && "opacity-50", isDragging && "opacity-30")}
         style={
           {
-            "--wt-icon-size": `${icon.px}px`,
+            "--wt-icon-size": `${ICON_PX}px`,
             "--wt-pad": `${pad}px`,
             "--wt-pad-expanded": `${padExpanded}px`,
           } as React.CSSProperties
@@ -839,8 +699,9 @@ function TreeRow({
         {(dropZone === "before" || dropZone === "after") && (
           <div className="wt-drop-line" data-zone={dropZone} />
         )}
+        {knob && <Knob {...knob} />}
         <div className="wt-row-icon" data-active-inside={activeInside || undefined}>
-          <WorktreeIcon name={worktreeName(wt)} size={icon.size} active={isActive && !expanded} />
+          <WorktreeIcon name={worktreeName(wt)} size="sm" active={isActive && !expanded} />
           {hasNotification && !isActive && <NotificationDot />}
         </div>
         <div className="wt-row-label">
@@ -939,7 +800,7 @@ function ArchiveRow({
         className="wt-row"
         style={
           {
-            "--wt-icon-size": "24px",
+            "--wt-icon-size": `${ICON_PX}px`,
             "--wt-pad": `${pad}px`,
             "--wt-pad-expanded": `${padExpanded}px`,
           } as React.CSSProperties
@@ -959,6 +820,12 @@ function ArchiveRow({
           <ArchiveIcon className="size-3.5" />
           {hasNotification && <NotificationDot />}
         </div>
+        <Knob
+          open={open}
+          count={count}
+          title={open ? "Close the archive" : "Open the archive"}
+          onToggle={onToggle}
+        />
         <div className="wt-row-label">
           <div className="text-foreground truncate text-xs leading-4 font-medium">Archive</div>
           <div className="text-muted-foreground truncate text-[10px] leading-3.5">{countLabel}</div>
@@ -993,9 +860,9 @@ function AddWorktreeRow({
       className="wt-row text-muted-foreground hover:text-foreground w-full text-left"
       style={
         {
-          "--wt-icon-size": "24px",
-          "--wt-pad": `${iconLeft(24)}px`,
-          "--wt-pad-expanded": `${iconLeftExpanded(24, 0)}px`,
+          "--wt-icon-size": `${ICON_PX}px`,
+          "--wt-pad": `${iconLeft(0)}px`,
+          "--wt-pad-expanded": `${iconLeftExpanded(0)}px`,
         } as React.CSSProperties
       }
       title={expanded ? undefined : "Add worktree"}

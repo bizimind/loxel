@@ -19,3 +19,17 @@ export function worktreeSubtitle(wt: WorktreeEntry, homeDir: string | null): str
   if (wt.createdAt) return dayjs(wt.createdAt).fromNow();
   return abbreviateHomePath(wt.path, homeDir);
 }
+
+/**
+ * The worktree name a title suggests: lowercase, whitespace as single dashes, and only the
+ * characters a branch name can safely use (letters, digits, `.`, `_`, `-` and `/`).
+ */
+export function worktreeNameFromTitle(title: string): string {
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._/-]/g, "")
+    .replace(/-{2,}/g, "-")
+    .replace(/^[-/.]+|[-/.]+$/g, "");
+}

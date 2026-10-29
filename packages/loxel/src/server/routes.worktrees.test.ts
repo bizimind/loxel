@@ -261,6 +261,16 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       expect((await byName()).b?.title).toBeUndefined();
     });
 
+    test("creates a worktree with a title, nested under its parent", async () => {
+      await create("parent");
+      expect(
+        (await create("titled", { parentPath: wtPath("parent"), title: " My task " })).status,
+      ).toBe(200);
+      const { parent, titled } = await byName();
+      expect(titled?.title).toBe("My task");
+      expect(titled?.parentWtId).toBe(parent!.wtId!);
+    });
+
     test("reads a title stored under the old key, and clears it when the title changes", async () => {
       await create("old");
       await setWorktreeMeta({

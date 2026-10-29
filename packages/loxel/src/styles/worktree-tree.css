@@ -3,16 +3,20 @@
  * expanded list are the same elements: `.wt-tree-expanded` switches the geometry and the
  * transitions animate between the two, in step with the sidebar's width transition.
  *
- * Geometry comes from inline custom properties set by the component:
- *   tree:  --wt-group-margin, --wt-nested-group-margin, --wt-border (group insets)
- *   row:   --wt-icon-size, --wt-pad (collapsed left padding), --wt-pad-expanded
- *   group: --wt-group-color, --wt-head-size (parent icon size), --wt-tab-x, --wt-line-x,
- *          and optionally --wt-tab-text
+ * Positions are rail coordinates: groups have no horizontal insets, so a row's padding is its
+ * icon's x. Custom properties set by the component:
+ *   tree:  --wt-knob-inset (how far inside the parent icon's corner the knob sits)
+ *   row:   --wt-icon-size, --wt-pad (icon x on the rail), --wt-pad-expanded
+ *   group: --wt-group-color, --wt-line-x and --wt-line-x-expanded (where the knob's line runs),
+ *          and optionally --wt-knob-text
  */
 
 .wt-tree {
   --wt-ease: 150ms ease-out;
+  --wt-row-gap: 3px;
   --wt-row-expanded-height: 2rem;
+  --wt-knob: 18px;
+  --wt-border: 1.5px;
 }
 
 /* ── Rows ── */
@@ -22,7 +26,7 @@
   display: flex;
   align-items: center;
   gap: 0.625rem;
-  height: calc(var(--wt-icon-size) + 4px);
+  height: calc(var(--wt-icon-size) + 2 * var(--wt-row-gap));
   padding: 0 0.5rem 0 var(--wt-pad);
   outline: none;
   cursor: pointer;
@@ -126,101 +130,100 @@
   bottom: 0;
 }
 
+/* ── The knob: folds a group, on the parent icon's bottom-left corner ── */
+
+.wt-knob {
+  position: absolute;
+  z-index: 2;
+  /* Centered --wt-knob-inset inside the icon's bottom-left corner */
+  left: calc(var(--wt-pad) + var(--wt-knob-inset) - var(--wt-knob) / 2);
+  top: calc(var(--wt-row-gap) + var(--wt-icon-size) - var(--wt-knob-inset) - var(--wt-knob) / 2);
+  display: grid;
+  place-items: center;
+  min-width: var(--wt-knob);
+  height: var(--wt-knob);
+  padding: 0 3px;
+  border: 1.5px solid var(--card);
+  border-radius: 9999px;
+  background-color: var(--wt-group-color);
+  color: var(--wt-knob-text, #fff);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: none;
+  transition:
+    left var(--wt-ease),
+    top var(--wt-ease),
+    filter 100ms;
+}
+/* A larger click target than the knob itself. */
+.wt-knob::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 9999px;
+}
+.wt-knob:hover {
+  filter: brightness(1.15);
+}
+.wt-tree-expanded .wt-knob {
+  left: calc(var(--wt-pad-expanded) + var(--wt-knob-inset) - var(--wt-knob) / 2);
+  top: calc(
+    (var(--wt-row-expanded-height) + var(--wt-icon-size)) / 2 - var(--wt-knob-inset) -
+      var(--wt-knob) / 2
+  );
+}
+
 /* ── Groups: a worktree with the worktrees nested below it ── */
 
 .wt-group {
   /* Faint: the group color at about half strength */
   --wt-group-stroke: color-mix(in oklch, var(--wt-group-color) 52%, transparent);
   position: relative;
-  margin: 2px var(--wt-group-margin) 9px;
-  padding: 2px var(--wt-border) 6px;
-  border-radius: 2px 2px 12px 12px;
-  corner-bottom-left-shape: bevel;
-  corner-bottom-right-shape: bevel;
-  transition: border-radius var(--wt-ease);
-}
-.wt-group .wt-group {
-  margin: 2px var(--wt-nested-group-margin) 9px;
-  border-radius: 0 0 10px 10px;
+  padding-bottom: 3px;
 }
 
 /*
- * The bracket: a dashed outline that starts level with the middle of the parent row, so it reads
- * as coming out of the parent icon, and fades out to the right.
+ * On the rail, a bracket runs down from the knob and turns along the bottom of the group, fading
+ * out to the right.
  */
 .wt-group::before {
   content: "";
   position: absolute;
-  inset: 0;
-  top: calc(2px + (var(--wt-head-size) + 4px) / 2 - var(--wt-border) / 2);
-  border: var(--wt-border) dashed var(--wt-group-stroke);
-  border-radius: inherit;
-  corner-bottom-left-shape: inherit;
-  corner-bottom-right-shape: inherit;
+  left: calc(var(--wt-line-x) - var(--wt-border) / 2);
+  top: calc(var(--wt-row-gap) + var(--wt-icon-size) - var(--wt-knob-inset));
+  right: 0;
+  bottom: 1px;
+  border-left: var(--wt-border) solid var(--wt-group-stroke);
+  border-bottom: var(--wt-border) solid var(--wt-group-stroke);
+  border-bottom-left-radius: 12px;
+  corner-bottom-left-shape: squircle;
   mask: linear-gradient(90deg, #000, rgb(0 0 0 / 0.47) 16px, transparent 30px);
   pointer-events: none;
   transition: opacity var(--wt-ease);
 }
 
-/* The tree line: tucked into the bracket while collapsed, it slides under the parent icon when expanded. */
+/* Expanded, a tree line runs down from the knob instead; it slides there from the bracket's line. */
 .wt-group::after {
-  --wt-line-color: var(--wt-group-stroke);
   content: "";
   position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 12px;
-  width: var(--wt-border);
-  background: repeating-linear-gradient(180deg, var(--wt-line-color) 0 4px, transparent 4px 7px);
+  left: calc(var(--wt-line-x) - 0.5px);
+  top: calc(var(--wt-row-gap) + var(--wt-icon-size) - var(--wt-knob-inset));
+  bottom: 4px;
+  width: 1px;
+  background-color: color-mix(in oklch, var(--foreground) 20%, transparent);
   opacity: 0;
   pointer-events: none;
   transition:
     left var(--wt-ease),
     top var(--wt-ease),
-    width var(--wt-ease),
     opacity var(--wt-ease);
-}
-
-.wt-tree-expanded .wt-group {
-  border-radius: 0;
 }
 .wt-tree-expanded .wt-group::before {
   opacity: 0;
 }
 .wt-tree-expanded .wt-group::after {
-  --wt-line-color: color-mix(in oklch, var(--foreground) 20%, transparent);
-  left: calc(var(--wt-line-x) - 0.5px);
-  top: calc(var(--wt-row-expanded-height) + 2px);
-  width: 1px;
+  left: calc(var(--wt-line-x-expanded) - 0.5px);
+  top: calc((var(--wt-row-expanded-height) + var(--wt-icon-size)) / 2 - var(--wt-knob-inset));
   opacity: 1;
-}
-
-/* The group's toggle: under the parent icon, the hidden count while folded, a chevron while open. */
-.wt-group-tab {
-  position: absolute;
-  z-index: 1;
-  left: var(--wt-tab-x);
-  bottom: -7px;
-  transform: translateX(-50%);
-  display: grid;
-  place-items: center;
-  height: 12px;
-  min-width: 16px;
-  padding: 0 3px;
-  border-radius: 9999px;
-  background-color: var(--wt-group-color);
-  color: var(--wt-tab-text, #fff);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-  text-shadow: none;
-  transition:
-    left var(--wt-ease),
-    filter 100ms;
-}
-.wt-group-tab:hover {
-  filter: brightness(1.15);
-}
-.wt-tree-expanded .wt-group-tab {
-  left: var(--wt-line-x);
 }

@@ -90,11 +90,11 @@ Archive worktrees you are not working on to keep the list short: right-click and
 
 ### Nesting worktrees
 
-Worktrees can be nested under the worktree they belong to, such as the worktrees a coding agent starts for parts of its task. A worktree and the worktrees nested below it form a group: on the collapsed rail a faint bracket runs from the parent icon down past its nested worktrees, and in the expanded sidebar they are indented under it along a line. The tab under the parent icon folds the group away and then shows how many worktrees it holds; double-clicking the parent does the same, and Loxel remembers which worktrees you folded. A folded worktree shows its nested worktrees' notifications, and a dashed outline when the worktree you are in is folded inside it. The collapsed rail shows up to three levels of nesting; deeper worktrees are counted on their ancestor's tab, which expands the sidebar to show them. Nested worktrees are listed oldest first.
+Worktrees can be nested under the worktree they belong to, such as the worktrees a coding agent starts for parts of its task. A worktree and the worktrees nested below it form a group, indented under the parent. The knob on the parent icon's bottom-left corner folds the group away and then shows how many worktrees it holds; double-clicking the parent does the same, and Loxel remembers which worktrees you folded. A line runs down from the knob along the group: a faint bracket in the parent's color on the collapsed rail, a tree line in the expanded sidebar. A folded worktree shows its nested worktrees' notifications, and a dashed outline when the worktree you are in is folded inside it. The collapsed rail shows up to three levels of nesting and widens to fit the deepest level it shows; deeper worktrees are counted on their ancestor's knob, which expands the sidebar to show them. Nested worktrees are listed oldest first.
 
 With nesting on, the worktree menu has:
 
-- **New child worktree**: creates a worktree whose branch starts at the parent's current commit, nested under it.
+- **New child worktree**: opens the New worktree dialog for a worktree whose branch starts at the parent's current commit, nested under it.
 - **Rename**: gives the worktree a title, shown instead of its name. Renaming it back to its worktree name removes the title. The worktree's directory and branch keep their names.
 - **Move to top level**: un-nests a nested worktree.
 
@@ -124,7 +124,7 @@ Each window keeps its own layout for every worktree, saved as you work, so two w
 
 ## Switching worktrees
 
-Click a worktree in the sidebar to switch to it. Use `Ctrl+Alt+[` and `Ctrl+Alt+]` to go back and forward through the worktrees you visited (across all projects), or `Ctrl+Alt+1`–`8` to jump to one of the active project's worktrees by its position in the sidebar, counting nested worktrees except those you folded away (`Ctrl+Alt+9` is the last one, `Ctrl+Alt+0` the tenth; archived worktrees are skipped). `Ctrl+Alt+N` starts a new worktree: type its name in the sidebar and press `Enter`.
+Click a worktree in the sidebar to switch to it. Use `Ctrl+Alt+[` and `Ctrl+Alt+]` to go back and forward through the worktrees you visited (across all projects), or `Ctrl+Alt+1`–`8` to jump to one of the active project's worktrees by its position in the sidebar, counting nested worktrees except those you folded away (`Ctrl+Alt+9` is the last one, `Ctrl+Alt+0` the tenth; archived worktrees are skipped). `Ctrl+Alt+N`, or **Add worktree** at the end of a project's worktrees, opens the New worktree dialog. Type a title and the name (the worktree's directory and branch) follows it, in lowercase with dashes; edit the name directly to set it yourself. The title is shown in the sidebar instead of the name, and needs worktree nesting on (see above); without it the dialog asks only for a name. If the branch already exists, the dialog asks whether to use it or recreate it.
 
 The switch is immediate: Loxel saves the outgoing worktree's layout and restores the incoming one.
 

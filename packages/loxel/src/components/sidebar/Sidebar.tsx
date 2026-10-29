@@ -34,6 +34,7 @@ import { AddProjectWizard } from "../projects/AddProjectWizard";
 import { ProjectIcon } from "../projects/ProjectIcon";
 import { EnableNestingDialog } from "./EnableNestingDialog";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
+import { RAIL_PADDING, railDepth, railWidth } from "./worktree-geometry";
 import { WorktreeTree } from "./WorktreeTree";
 
 // ── Project icon with folder badge ──────────────────────────────────────
@@ -62,7 +63,8 @@ function ProjectIconWithBadge({
   );
 }
 
-const COLLAPSED_WIDTH = 48;
+/** Collapsed-rail tiles (32px) line up with the top-level worktree icons (24px). */
+const RAIL_TILE_LEFT = RAIL_PADDING - 4;
 /** Keyboard cursor ring for the collapsed rail's icon buttons. */
 const ENTRY_FOCUS_RING =
   "focus-visible:ring-ring focus-visible:ring-offset-card outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
@@ -135,6 +137,20 @@ export function Sidebar() {
   } | null>(null);
 
   const expandedSet = useMemo(() => new Set(expandedProjectIds), [expandedProjectIds]);
+  // The rail is as wide as the deepest nesting it shows, across the expanded projects.
+  const collapsedWidth = useWorktreeStore((s) =>
+    railWidth(
+      Math.max(
+        0,
+        ...projects
+          .filter((p) => expandedSet.has(p.id))
+          .map((p) => {
+            const ps = s.byProject[p.path];
+            return ps ? railDepth(ps, s.openArchives.includes(p.path)) : 0;
+          }),
+      ),
+    ),
+  );
   // Explicitly false: unknown until the project's worktrees have loaded.
   const menuProjectNestingOff = useWorktreeStore(
     (s) =>
@@ -256,7 +272,7 @@ export function Sidebar() {
         // Animate expand/collapse, but track the pointer directly while resizing
         dragWidth === null && "transition-[width] duration-150 ease-out",
       )}
-      style={{ width: sidebarExpanded ? expandedWidth : COLLAPSED_WIDTH }}
+      style={{ width: sidebarExpanded ? expandedWidth : collapsedWidth }}
       {...focusAreaProps("worktrees")}
     >
       {sidebarExpanded && (
@@ -270,7 +286,7 @@ export function Sidebar() {
       {/* Toggle button */}
       <button
         onClick={toggleSidebar}
-        className="text-muted-foreground hover:text-foreground flex h-8 shrink-0 cursor-pointer items-center justify-center transition-colors"
+        className="text-muted-foreground hover:text-foreground border-border flex h-8 shrink-0 cursor-pointer items-center justify-center border-b transition-colors"
         title={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
       >
         {sidebarExpanded ? (
@@ -282,10 +298,10 @@ export function Sidebar() {
 
       {/* Project + worktree list */}
       <div
-        className="flex-1 overflow-x-hidden overflow-y-auto"
+        className="flex-1 overflow-x-hidden overflow-y-auto pt-1"
         onKeyDown={handleSidebarEntryKeyDown}
       >
-        {projects.map((project) => {
+        {projects.map((project, index) => {
           const isRootActive = activeWorktreePath === project.path;
           const isExpanded = expandedSet.has(project.id);
           const isRenaming = project.id === renamingId;
@@ -294,7 +310,12 @@ export function Sidebar() {
 
           // The worktree tree stays mounted across both sidebar states, so expanding animates it.
           return (
-            <div key={project.id} data-sidebar-project>
+            <div
+              key={project.id}
+              // A full-width line between projects
+              className={cn(index > 0 && "border-border mt-1 border-t pt-1")}
+              data-sidebar-project
+            >
               {sidebarExpanded ? (
                 <div
                   className={cn(
@@ -356,7 +377,7 @@ export function Sidebar() {
                   </div>
                 </div>
               ) : (
-                <div className="flex justify-center py-1.5" style={{ paddingLeft: "3px" }}>
+                <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_TILE_LEFT}px` }}>
                   <button
                     className={cn("cursor-pointer rounded-md", ENTRY_FOCUS_RING)}
                     onClick={() => handleProjectClick(project)}
@@ -379,29 +400,31 @@ export function Sidebar() {
           );
         })}
 
-        {/* Add project button */}
-        {sidebarExpanded ? (
-          <div
-            className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2.5 px-2.5 py-2 transition-colors"
-            style={{ paddingLeft: "13px" }}
-            onClick={handleAddProject}
-          >
-            <div className="flex size-6 shrink-0 items-center justify-center">
-              <FolderPlusIcon className="size-4" />
-            </div>
-            <span className="text-xs">Add project</span>
-          </div>
-        ) : (
-          <div className="flex justify-center py-1.5" style={{ paddingLeft: "3px" }}>
-            <button
-              className="text-muted-foreground hover:text-foreground flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors"
+        {/* Add project button, set off from the projects like they are from each other */}
+        <div className={cn(projects.length > 0 && "border-border mt-1 border-t pt-1")}>
+          {sidebarExpanded ? (
+            <div
+              className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2.5 px-2.5 py-2 transition-colors"
+              style={{ paddingLeft: "13px" }}
               onClick={handleAddProject}
-              title="Add project"
             >
-              <FolderPlusIcon className="size-5" />
-            </button>
-          </div>
-        )}
+              <div className="flex size-6 shrink-0 items-center justify-center">
+                <FolderPlusIcon className="size-4" />
+              </div>
+              <span className="text-xs">Add project</span>
+            </div>
+          ) : (
+            <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_TILE_LEFT}px` }}>
+              <button
+                className="text-muted-foreground hover:text-foreground flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors"
+                onClick={handleAddProject}
+                title="Add project"
+              >
+                <FolderPlusIcon className="size-5" />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <AddProjectWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />

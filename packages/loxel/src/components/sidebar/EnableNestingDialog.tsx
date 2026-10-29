@@ -55,8 +55,8 @@ export function EnableNestingDialog({
         <h3 className="text-foreground text-sm font-medium">Enable worktree nesting</h3>
         <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
           Nesting shows worktrees under the worktree they belong to, and lets you give a worktree a
-          display name. Loxel stores both in each worktree&rsquo;s own git config, which needs
-          git&rsquo;s per-worktree config turned on for this repository.
+          title. Loxel stores both in each worktree&rsquo;s own git config, which needs git&rsquo;s
+          per-worktree config turned on for this repository.
         </p>
 
         {action && (

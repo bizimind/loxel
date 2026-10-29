@@ -116,6 +116,12 @@ export async function childWorktreeOptions(
   return { base: parent.commit, meta: { [PARENT_KEY]: await parentId(projectPath, parent) } };
 }
 
+/** The metadata that gives a new worktree `title`; none when it is empty. */
+export function titleMeta(title: string | undefined): WorktreeMeta {
+  const trimmed = title?.trim();
+  return trimmed ? { [TITLE_KEY]: trimmed } : {};
+}
+
 /** The changes `updateWorktreeMeta` applies; `null` clears a value, an absent field keeps it. */
 export interface WorktreeMetaUpdate {
   /** Nest under the worktree at this path, or move to the top level */
