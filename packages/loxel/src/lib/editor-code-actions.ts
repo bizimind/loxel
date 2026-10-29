@@ -46,12 +46,17 @@ function hasCodeActionProvider(
   );
 }
 
-/** The editor tab's Monaco editor that holds focus (its text or one of its widgets), if any. */
+/**
+ * The focused Monaco editor, picked as Monaco picks it for its own commands: the one with text
+ * focus, else one with widget focus (its find or suggest widget). A peek preview inside an editor
+ * tab has the text focus while the tab's editor still has widget focus. Undefined unless the pick
+ * shows an editor tab's live model (a peek of a file no tab has open shows a read-only snapshot).
+ */
 function focusedCodeEditor(): monaco.editor.ICodeEditor | undefined {
-  return monaco.editor.getEditors().find((editor) => {
-    const model = editor.getModel();
-    return model !== null && isLiveEditorModel(model) && editor.hasWidgetFocus();
-  });
+  const editors = monaco.editor.getEditors();
+  const editor = editors.find((e) => e.hasTextFocus()) ?? editors.find((e) => e.hasWidgetFocus());
+  const model = editor?.getModel();
+  return model && isLiveEditorModel(model) ? editor : undefined;
 }
 
 /**
