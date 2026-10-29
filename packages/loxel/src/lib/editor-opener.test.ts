@@ -4,8 +4,11 @@ import * as monaco from "monaco-editor";
 
 import { createEditorOpener } from "./editor-opener";
 
-const sourceAt = (uri: string) =>
-  ({ getModel: () => ({ uri: monaco.Uri.parse(uri) }) }) as unknown as monaco.editor.ICodeEditor;
+const sourceAt = (uri: string, peek: object | null = null) =>
+  ({
+    getModel: () => ({ uri: monaco.Uri.parse(uri) }),
+    getContribution: (id: string) => (id === "editor.contrib.referencesController" ? peek : null),
+  }) as unknown as monaco.editor.ICodeEditor;
 
 function open(resource: string, source = sourceAt("loxel://HEAD/repo/main.ts")) {
   const openFile = mock();
@@ -39,6 +42,17 @@ describe("createEditorOpener", () => {
       ["/repo/b.py", { line: 7, column: 2 }],
       ["/repo/c.py", { line: 1, column: 1 }],
     ]);
+  });
+
+  test("closes the source's peek widget when its pick opens in another tab", () => {
+    const closeWidget = mock();
+    const source = sourceAt("file:///repo/main.py", { closeWidget });
+
+    expect(open("file:///repo/b.py", source).handled).toBe(true);
+    expect(closeWidget.mock.calls).toEqual([[false]]);
+    // A pick in the source's own file is revealed in the peek by Monaco.
+    expect(open("file:///repo/main.py", source).handled).toBe(false);
+    expect(closeWidget).toHaveBeenCalledTimes(1);
   });
 
   test("leaves a target in the source's own model to Monaco", () => {

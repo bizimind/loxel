@@ -9,6 +9,7 @@ import { isPathWithin } from "../utils/path.ts";
 import {
   resolveShellBinary,
   SHELL_PROCESS_GROUP_SPAWN_OPTIONS,
+  type SpawnEnv,
   terminateProcessGroup,
 } from "../utils/shell.ts";
 
@@ -69,7 +70,8 @@ export class TaskManager {
 
   constructor(
     private readonly artifactDir: string,
-    private readonly spawnEnv?: Record<string, string | undefined>,
+    /** Read at every spawn; undefined inherits process.env. */
+    private readonly getSpawnEnv: () => SpawnEnv | undefined = () => undefined,
   ) {}
 
   private resolveTaskArtifactPath(taskId: string, suffix: ".json" | ".output.txt"): string | null {
@@ -144,7 +146,7 @@ export class TaskManager {
       stderr: "pipe",
       stdin: "ignore",
       cwd: cwd ?? globalThis.process.cwd(),
-      env: this.spawnEnv,
+      env: this.getSpawnEnv(),
     });
 
     const onTimeout = setTimeout(() => {

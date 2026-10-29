@@ -15,8 +15,8 @@ import {
 import type { AgentEventPayload, AgentSessionOptions, AgentStatus } from "@/api/ws-protocol";
 import { deriveAgentStatus } from "@/api/ws-protocol";
 
+import { AgentEnv } from "./agent-env";
 import { logger } from "./logger";
-import { buildSpawnEnv } from "./shell-env";
 import { stress } from "./stress-detector";
 
 const log = logger.child("agent");
@@ -45,6 +45,8 @@ interface AgentSession {
   eventSeq: number;
   status: AgentStatus;
   workspaceRoot: string;
+  /** The tool subprocesses' environment, following the workspace's Python environment. */
+  env: AgentEnv;
   hasError: boolean;
   /** Mutable callback — updated on reattach, cleared on detach. */
   onEvent: EventCallback | null;
@@ -79,9 +81,9 @@ export class AgentManager {
     onEvent: EventCallback,
     onExit: ExitCallback,
   ): void {
-    const config = this.buildSessionConfig(id, options);
-    const readyPromise = Session.create(config);
-    const agentSession = this.registerSession(id, options, readyPromise, onEvent, onExit);
+    const env = new AgentEnv(options.workspaceRoot);
+    const readyPromise = Session.create(this.buildSessionConfig(id, options, env));
+    const agentSession = this.registerSession(id, options, env, readyPromise, onEvent, onExit);
 
     readyPromise
       .then((session) => {
@@ -92,6 +94,7 @@ export class AgentManager {
         log.error(`Failed to create agent session ${id.slice(0, 8)}`, { error: err });
         agentSession.hasError = true;
         agentSession.status = "exited";
+        agentSession.env.dispose();
         agentSession.onExit?.(id, 1);
       });
   }
@@ -109,7 +112,8 @@ export class AgentManager {
     onEvent: EventCallback,
     onExit: ExitCallback,
   ): void {
-    const config = this.buildSessionConfig(id, options);
+    const env = new AgentEnv(options.workspaceRoot);
+    const config = this.buildSessionConfig(id, options, env);
     const readyPromise = Session.resume(options.forkedSessionId, config).then(async (session) => {
       if (options.forkPointMessageId) {
         await session.rewind(options.forkPointMessageId);
@@ -119,6 +123,7 @@ export class AgentManager {
     const agentSession = this.registerSession(
       id,
       { ...options, codingAgentSessionId: options.forkedSessionId },
+      env,
       readyPromise,
       onEvent,
       onExit,
@@ -133,6 +138,7 @@ export class AgentManager {
         log.error(`Failed to resume forked session ${id.slice(0, 8)}`, { error: err });
         agentSession.hasError = true;
         agentSession.status = "exited";
+        agentSession.env.dispose();
         agentSession.onExit?.(id, 1);
       });
   }
@@ -345,6 +351,7 @@ export class AgentManager {
 
     // Clear pending callbacks
     agentSession.respondCallbacks.clear();
+    agentSession.env.dispose();
 
     // Destroy the Session
     if (agentSession.session) {
@@ -378,6 +385,7 @@ export class AgentManager {
   private buildSessionConfig(
     id: string,
     options: { workspaceRoot: string; sessionOptions?: AgentSessionOptions },
+    env: AgentEnv,
   ): SessionConfig {
     const handlers = this.buildHandlers(id);
 
@@ -385,9 +393,8 @@ export class AgentManager {
       workspaceRoot: options.workspaceRoot,
       models: options.sessionOptions?.models,
       logger: log.with({ sessionId: id.slice(0, 8) }),
-      // Marks the agent's commands as an agent's (the cross-agent `AI_AGENT` convention), so tools
-      // such as the `loxel` CLI can tell them from the user's.
-      env: { ...buildSpawnEnv(), AI_AGENT: "loxel" },
+      // Read at every spawn, so the agent's next command follows a re-resolved Python environment.
+      env: env.get,
       mode: options.sessionOptions?.mode,
       profile: options.sessionOptions?.profile,
       declaredTools: options.sessionOptions?.declaredTools,
@@ -613,6 +620,7 @@ export class AgentManager {
   private registerSession(
     id: string,
     options: { workspaceRoot: string; scopeKey: string; codingAgentSessionId?: string },
+    env: AgentEnv,
     sessionReady: Promise<Session>,
     onEvent: EventCallback,
     onExit: ExitCallback,
@@ -631,6 +639,7 @@ export class AgentManager {
       eventSeq: 0,
       status: "starting",
       workspaceRoot: options.workspaceRoot,
+      env,
       hasError: false,
       onEvent,
       onExit,
