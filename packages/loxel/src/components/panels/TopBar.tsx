@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { SettingsIcon } from "lucide-react";
+import { PanelLeftIcon, SettingsIcon } from "lucide-react";
 
 import * as api from "@/api/client";
 import type { UpdateState } from "@/api/update-model";
@@ -7,6 +7,7 @@ import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useWindowFocused } from "@/hooks/useWindowFocused";
 import { useWindowFullScreen } from "@/hooks/useWindowFullScreen";
 import { useZoomFactor } from "@/hooks/useZoomFactor";
+import { toggleWorktreeSidebar } from "@/lib/focus-navigation";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/queries/query-keys";
 import { deriveProject, useProjectStore } from "@/store/projects";
@@ -86,6 +87,9 @@ export function TopBar() {
           <div className="size-3 rounded-full bg-[#5FC038]" />
         </div>
       )}
+      {/* Worktree sidebar toggle: first in the bar, so it stays put whichever way it goes */}
+      <SidebarToggle />
+
       {/* Logo + brand */}
       <LoxelLogo
         className="text-foreground shrink-0"
@@ -133,6 +137,21 @@ export function TopBar() {
         </button>
       </div>
     </div>
+  );
+}
+
+function SidebarToggle() {
+  const expanded = useProjectStore((s) => s.sidebarExpanded);
+  return (
+    <button
+      className="text-muted-foreground hover:text-foreground hover:bg-muted -ml-1 shrink-0 rounded p-1 transition-colors"
+      onClick={toggleWorktreeSidebar}
+      title={expanded ? "Collapse sidebar" : "Expand sidebar"}
+      aria-expanded={expanded}
+      style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
+    >
+      <PanelLeftIcon className="size-4" />
+    </button>
   );
 }
 

@@ -5,8 +5,6 @@
  * Replaces the separate ProjectSidebar and WorktreeSidebar components.
  */
 import {
-  ChevronsLeftIcon,
-  ChevronsRightIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   FolderPlusIcon,
@@ -78,7 +76,6 @@ export function Sidebar() {
   const sidebarWidth = useProjectStore((s) => s.sidebarWidth);
   const setSidebarWidth = useProjectStore((s) => s.setSidebarWidth);
   const expandedProjectIds = useProjectStore((s) => s.expandedProjectIds);
-  const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
   const toggleProjectExpanded = useProjectStore((s) => s.toggleProjectExpanded);
   const addProject = useProjectStore((s) => s.addProject);
   const removeProject = useProjectStore((s) => s.removeProject);
@@ -283,19 +280,6 @@ export function Sidebar() {
           onReset={handleResizeReset}
         />
       )}
-      {/* Toggle button */}
-      <button
-        onClick={toggleSidebar}
-        className="text-muted-foreground hover:text-foreground border-border flex h-8 shrink-0 cursor-pointer items-center justify-center border-b transition-colors"
-        title={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
-      >
-        {sidebarExpanded ? (
-          <ChevronsLeftIcon className="size-3.5" />
-        ) : (
-          <ChevronsRightIcon className="size-3.5" />
-        )}
-      </button>
-
       {/* Project + worktree list */}
       <div
         className="flex-1 overflow-x-hidden overflow-y-auto pt-1"

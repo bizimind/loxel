@@ -29,7 +29,7 @@ Every tool panel has an icon in the tool bars at the window's left and right edg
 | Fork Tree        | `Ctrl+Shift+K` |
 | Worktree sidebar | `Ctrl+Alt+B`   |
 
-The **worktree sidebar** to the far left lists your projects and their worktrees. Collapsed, it is a narrow rail of worktree icons; expanded, drag its right edge to resize it (double-click the edge to reset the width).
+The **worktree sidebar** to the far left lists your projects and their worktrees. Collapse or expand it with the sidebar button at the left of the top bar, or `Ctrl+Alt+B`. Collapsed, it is a narrow rail of worktree icons; expanded, drag its right edge to resize it (double-click the edge to reset the width).
 
 **Settings > Layout** sets which panels each zone holds and opens by default, and the zones' sizes, for new worktree layouts.
 

@@ -89,7 +89,7 @@ Title source differs by kind. File-backed tabs ([editor-tab.tsx](../src/componen
 
 - [usePanelActive.ts](../src/hooks/usePanelActive.ts): whether the panel is its group's active tab (defaults to `true` when given no API).
 - [usePanelActivationFocus.ts](../src/hooks/usePanelActivationFocus.ts): calls the panel's focus function when the panel is both active in its group and in the active group (dockview's `setActive` does not move DOM focus), including after moves, and registers it in [panel-focus.ts](../src/lib/panel-focus.ts) so keyboard navigation can re-focus an already-active panel. Used by the code, markdown and drawing editors, terminal, browser and agent panels; `ProjectFilesPanel` registers with `registerPanelFocus` directly.
-- [useZoomFactor.ts](../src/hooks/useZoomFactor.ts): Electron page zoom factor, used by [TopBar.tsx](../src/components/panels/TopBar.tsx) to keep the traffic-light inset fixed.
+- [useZoomFactor.ts](../src/hooks/useZoomFactor.ts): Electron page zoom factor, used by [TopBar.tsx](../src/components/panels/TopBar.tsx) to keep the traffic-light inset fixed. The top bar's first button toggles the worktree sidebar (`toggleWorktreeSidebar`), so it stays in place whichever state the sidebar is in.
 - [useWindowFullScreen.ts](../src/hooks/useWindowFullScreen.ts): whether the window is in macOS native fullscreen (main forwards `enter-full-screen` / `leave-full-screen`; the initial state is a sync IPC read). [TopBar.tsx](../src/components/panels/TopBar.tsx) drops the traffic-light inset while fullscreen, since macOS hides the traffic lights there.
 
 Spatial navigation, focus targets and find are covered in [KEYBINDINGS.md](KEYBINDINGS.md).
