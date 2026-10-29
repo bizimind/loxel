@@ -49,15 +49,11 @@ export interface WorktreeConfigState {
 
 /** Read where the extension and the main-only settings stand. Read-only. */
 export async function readWorktreeConfigState(repoPath: string): Promise<WorktreeConfigState> {
-  const commonDir = await git(
-    ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    repoPath,
-  );
+  const commonDir = await gitCommonDir(repoPath);
   const sharedFile = join(commonDir, "config");
   const mainFile = join(commonDir, "config.worktree");
 
-  const enabled =
-    (await readConfig(commonDir, sharedFile, "extensions.worktreeConfig", "bool")) === "true";
+  const enabled = await isWorktreeConfigEnabled(commonDir);
 
   const shared: WorktreeConfigState["shared"] = {};
   if ((await readConfig(commonDir, sharedFile, "core.bare", "bool")) === "true") {
@@ -81,6 +77,17 @@ export async function readWorktreeConfigState(repoPath: string): Promise<Worktre
     main,
     worktreeKeys: await readWorktreeKeys(commonDir, mainFile),
   };
+}
+
+/** The repository's common git dir (absolute), from any path inside it. */
+export function gitCommonDir(repoPath: string): Promise<string> {
+  return git(["rev-parse", "--path-format=absolute", "--git-common-dir"], repoPath);
+}
+
+/** Whether `extensions.worktreeConfig` is on. Reads only the shared config, one git call. */
+export async function isWorktreeConfigEnabled(commonDir: string): Promise<boolean> {
+  const sharedFile = join(commonDir, "config");
+  return (await readConfig(commonDir, sharedFile, "extensions.worktreeConfig", "bool")) === "true";
 }
 
 /**

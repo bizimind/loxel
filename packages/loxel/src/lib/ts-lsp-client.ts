@@ -1,10 +1,7 @@
-import { createWorktreeLspClient } from "./lsp-client";
+import { createLspClient } from "./lsp-client";
 
-export const { connect: connectTsLsp } = createWorktreeLspClient("ws/ts-lsp", [
-  "typescript",
-  "javascript",
-  "tsx",
-  "jsx",
-  "json",
-  "jsonc",
-]);
+export const { connect: connectTsLsp } = createLspClient({
+  route: "ws/ts-lsp",
+  name: "TypeScript",
+  languageId: ["typescript", "javascript", "tsx", "jsx", "json", "jsonc"],
+});

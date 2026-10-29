@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { SettingsIcon } from "lucide-react";
+import { PanelLeftCloseIcon, PanelLeftOpenIcon, SettingsIcon } from "lucide-react";
 
 import * as api from "@/api/client";
 import type { UpdateState } from "@/api/update-model";
@@ -7,6 +7,7 @@ import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useWindowFocused } from "@/hooks/useWindowFocused";
 import { useWindowFullScreen } from "@/hooks/useWindowFullScreen";
 import { useZoomFactor } from "@/hooks/useZoomFactor";
+import { toggleWorktreeSidebar } from "@/lib/focus-navigation";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/queries/query-keys";
 import { deriveProject, useProjectStore } from "@/store/projects";
@@ -86,6 +87,9 @@ export function TopBar() {
           <div className="size-3 rounded-full bg-[#5FC038]" />
         </div>
       )}
+      {/* Worktree sidebar toggle: first in the bar, so it stays put whichever way it goes */}
+      <SidebarToggle />
+
       {/* Logo + brand */}
       <LoxelLogo
         className="text-foreground shrink-0"
@@ -121,7 +125,7 @@ export function TopBar() {
       )}
 
       {/* Right side — notifications + settings */}
-      <div className="ml-auto flex items-center">
+      <div className="ml-auto flex items-center gap-1.5">
         <UpdateIndicator />
         <NotificationBell />
         <button
@@ -129,10 +133,29 @@ export function TopBar() {
           onClick={() => useSettingsStore.getState().openSettings()}
           style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
         >
-          <SettingsIcon className="size-3.5" />
+          <SettingsIcon className="size-4" />
         </button>
       </div>
     </div>
+  );
+}
+
+function SidebarToggle() {
+  const expanded = useProjectStore((s) => s.sidebarExpanded);
+  return (
+    <button
+      className="text-muted-foreground hover:text-foreground hover:bg-muted ml-1.5 shrink-0 rounded p-1 transition-colors"
+      onClick={toggleWorktreeSidebar}
+      title={expanded ? "Collapse sidebar" : "Expand sidebar"}
+      aria-expanded={expanded}
+      style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
+    >
+      {expanded ? (
+        <PanelLeftCloseIcon className="size-4.5" />
+      ) : (
+        <PanelLeftOpenIcon className="size-4.5" />
+      )}
+    </button>
   );
 }
 

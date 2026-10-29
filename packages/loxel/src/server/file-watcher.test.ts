@@ -80,6 +80,16 @@ describe("classifyGitChange", () => {
     expect(classifyGitChange("worktrees/my-worktree/commondir")).toEqual(["worktrees"]);
   });
 
+  test.each([
+    "worktrees/my-worktree/config.worktree",
+    "worktrees/my-worktree/config.worktree.lock",
+    "config",
+    "config.lock",
+    "config.worktree",
+  ])("worktree metadata file %s emits worktrees", (file) => {
+    expect(classifyGitChange(file)).toEqual(["worktrees"]);
+  });
+
   test("worktree lock file emits nothing", () => {
     expect(classifyGitChange("worktrees/my-worktree/index.lock")).toEqual([]);
   });
@@ -127,7 +137,6 @@ describe("classifyGitChange", () => {
   );
 
   test.each([
-    "config",
     "hooks/pre-commit",
     "info/exclude",
     "description",

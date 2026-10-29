@@ -4,72 +4,36 @@
  * header remains the switch target for its root checkout.
  * Replaces the separate ProjectSidebar and WorktreeSidebar components.
  */
-import type { DragEndEvent, DragStartEvent, UniqueIdentifier } from "@dnd-kit/core";
 import {
-  closestCenter,
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import {
-  arrayMove,
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import {
-  ChevronsLeftIcon,
-  ChevronsRightIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  CopyIcon,
-  EyeIcon,
-  EyeOffIcon,
-  FolderIcon,
   FolderPlusIcon,
-  GitBranchIcon,
-  GitBranchPlusIcon,
+  ListTreeIcon,
   PencilIcon,
-  PlusIcon,
   TrashIcon,
   XIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
-import type { WorktreeEntry } from "@/api/git-models";
 import type { Project } from "@/api/project-model";
-import { OpenInMenuItems, isOpenInSupported } from "@/components/menus/OpenInMenuItems";
-import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
-import { DialogShell } from "@/components/ui/dialog-shell";
-import { NotificationDot } from "@/components/ui/notification-dot";
-import { copyToClipboard } from "@/lib/clipboard";
-import { dayjs } from "@/lib/dayjs";
+import { getTreeActionForEvent } from "@/hooks/useTreeKeyboardNav";
 import { FileTypeIcon } from "@/lib/file-icons";
-import { handleSidebarEntryKeyDown } from "@/lib/focus-navigation";
-import { focusAreaProps, sidebarEntryProps } from "@/lib/focus-targets";
+import { focusSidebarEntryForPath, handleSidebarEntryKeyDown } from "@/lib/focus-navigation";
+import { focusAreaProps, SIDEBAR_ENTRY_ATTR, sidebarEntryProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { abbreviateHomePath } from "@/lib/home-path";
 import { cn } from "@/lib/utils";
-import { hasWorktreeNotification, usePanelNotificationStore } from "@/store/panel-notifications";
-import {
-  clampSidebarWidth,
-  deriveProject,
-  SIDEBAR_DEFAULT_WIDTH,
-  useProjectStore,
-} from "@/store/projects";
-import { getOrderedWorktrees, useWorktreeStore } from "@/store/worktrees";
+import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH, useProjectStore } from "@/store/projects";
+import { useWorktreeStore } from "@/store/worktrees";
 
 import { AddProjectWizard } from "../projects/AddProjectWizard";
 import { ProjectIcon } from "../projects/ProjectIcon";
-import { WorktreeIcon } from "../worktrees/WorktreeIcon";
+import { EnableNestingDialog } from "./EnableNestingDialog";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
+import { RAIL_PADDING, railDepth, railWidth } from "./worktree-geometry";
+import { WorktreeTree } from "./WorktreeTree";
 
 // ── Project icon with folder badge ──────────────────────────────────────
 
@@ -97,155 +61,11 @@ function ProjectIconWithBadge({
   );
 }
 
-const COLLAPSED_WIDTH = 48;
+/** Collapsed-rail tiles (32px) line up with the top-level worktree icons (24px). */
+const RAIL_TILE_LEFT = RAIL_PADDING - 4;
 /** Keyboard cursor ring for the collapsed rail's icon buttons. */
 const ENTRY_FOCUS_RING =
   "focus-visible:ring-ring focus-visible:ring-offset-card outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
-const EMPTY_STRINGS: string[] = [];
-const EMPTY_WORKTREES: WorktreeEntry[] = [];
-
-// ── Shared worktree context menu hook ───────────────────────────────────
-
-function useWorktreeContextMenu(projectPath: string) {
-  const requestRemoveWorktree = useWorktreeStore((s) => s.requestRemoveWorktree);
-  const confirmRemoveWorktree = useWorktreeStore((s) => s.confirmRemoveWorktree);
-  const dismissPendingPlan = useWorktreeStore((s) => s.dismissPendingPlan);
-  const pendingRemovePlan = useWorktreeStore((s) =>
-    s.pendingRemovePlan?.projectPath === projectPath ? s.pendingRemovePlan : null,
-  );
-
-  const [contextMenu, setContextMenu] = useState<{
-    open: boolean;
-    position: { x: number; y: number };
-    worktree: WorktreeEntry;
-  } | null>(null);
-  const [removeError, setRemoveError] = useState<string | null>(null);
-
-  const handleContextMenu = useCallback((e: React.MouseEvent, wt: WorktreeEntry) => {
-    e.preventDefault();
-    setContextMenu({ open: true, position: { x: e.clientX, y: e.clientY }, worktree: wt });
-  }, []);
-
-  const handleRemoveRequest = useCallback(
-    async (wt: WorktreeEntry) => {
-      setContextMenu(null);
-      setRemoveError(null);
-      try {
-        await requestRemoveWorktree(projectPath, wt);
-      } catch (err) {
-        setRemoveError(err instanceof Error ? err.message : "Failed to inspect worktree");
-      }
-    },
-    [requestRemoveWorktree, projectPath],
-  );
-
-  const handlePlanRemoveConfirm = useCallback(
-    async (options: { deleteBranch: boolean; force: boolean }) => {
-      setRemoveError(null);
-      try {
-        await confirmRemoveWorktree(options);
-      } catch (err) {
-        setRemoveError(err instanceof Error ? err.message : "Failed to remove worktree");
-      }
-    },
-    [confirmRemoveWorktree],
-  );
-
-  return {
-    projectPath,
-    contextMenu,
-    setContextMenu,
-    removeError,
-    setRemoveError,
-    pendingRemovePlan,
-    dismissPendingPlan,
-    handleContextMenu,
-    handleRemoveRequest,
-    handlePlanRemoveConfirm,
-  };
-}
-
-/** Renders the worktree context menu (copy, hide/show, remove) + removal dialogs. */
-function WorktreeContextMenu({ menu }: { menu: ReturnType<typeof useWorktreeContextMenu> }) {
-  const toggleVisibility = useWorktreeStore((s) => s.toggleVisibility);
-  const wt = menu.contextMenu?.worktree;
-  const isHidden = useWorktreeStore(
-    (s) =>
-      wt !== undefined && (s.byProject[menu.projectPath]?.hiddenPaths?.includes(wt.path) ?? false),
-  );
-
-  return (
-    <>
-      {/* Worktree context menu */}
-      {menu.contextMenu && wt && (
-        <ContextMenu
-          open={menu.contextMenu.open}
-          onOpenChange={(open) => !open && menu.setContextMenu(null)}
-          position={menu.contextMenu.position}
-        >
-          <ContextMenuItem onClick={() => copyToClipboard(worktreeName(wt), "worktree name")}>
-            <CopyIcon className="size-3.5" />
-            Copy worktree name
-          </ContextMenuItem>
-          <ContextMenuItem
-            disabled={!wt.branch}
-            onClick={() => wt.branch && copyToClipboard(wt.branch, "branch name")}
-          >
-            <GitBranchIcon className="size-3.5" />
-            Copy branch name
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => copyToClipboard(wt.path, "worktree path")}>
-            <FolderIcon className="size-3.5" />
-            Copy absolute path
-          </ContextMenuItem>
-          {isOpenInSupported && <ContextMenuSeparator />}
-          <OpenInMenuItems path={wt.path} />
-          <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => toggleVisibility(menu.projectPath, wt.path)}>
-            {isHidden ? <EyeIcon className="size-3.5" /> : <EyeOffIcon className="size-3.5" />}
-            {isHidden ? "Show worktree" : "Hide worktree"}
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onClick={() => menu.handleRemoveRequest(wt)}>
-            <TrashIcon className="size-3.5" />
-            Remove worktree
-          </ContextMenuItem>
-        </ContextMenu>
-      )}
-
-      {/* Remove dialog (wt library plan) */}
-      {menu.pendingRemovePlan && (
-        <RemoveWorktreeDialog
-          plan={menu.pendingRemovePlan}
-          error={menu.removeError}
-          onConfirm={menu.handlePlanRemoveConfirm}
-          onCancel={() => {
-            menu.dismissPendingPlan();
-            menu.setRemoveError(null);
-          }}
-        />
-      )}
-
-      {/* Global remove error toast */}
-      {menu.removeError && !menu.pendingRemovePlan && (
-        <div className="text-destructive absolute right-2 bottom-2 left-2 text-[10px]">
-          {menu.removeError}
-        </div>
-      )}
-    </>
-  );
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────
-
-function worktreeName(wt: WorktreeEntry): string {
-  return wt.wtName ?? wt.branch ?? wt.path.split("/").pop() ?? "worktree";
-}
-
-function worktreeSubtitle(wt: WorktreeEntry, homeDir: string | null): string {
-  if (wt.createdAt) return dayjs(wt.createdAt).fromNow();
-  return abbreviateHomePath(wt.path, homeDir);
-}
 
 // ── Main Sidebar ────────────────────────────────────────────────────────
 
@@ -256,7 +76,6 @@ export function Sidebar() {
   const sidebarWidth = useProjectStore((s) => s.sidebarWidth);
   const setSidebarWidth = useProjectStore((s) => s.setSidebarWidth);
   const expandedProjectIds = useProjectStore((s) => s.expandedProjectIds);
-  const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
   const toggleProjectExpanded = useProjectStore((s) => s.toggleProjectExpanded);
   const addProject = useProjectStore((s) => s.addProject);
   const removeProject = useProjectStore((s) => s.removeProject);
@@ -315,6 +134,26 @@ export function Sidebar() {
   } | null>(null);
 
   const expandedSet = useMemo(() => new Set(expandedProjectIds), [expandedProjectIds]);
+  // The rail is as wide as the deepest nesting it shows, across the expanded projects.
+  const collapsedWidth = useWorktreeStore((s) =>
+    railWidth(
+      Math.max(
+        0,
+        ...projects
+          .filter((p) => expandedSet.has(p.id))
+          .map((p) => {
+            const ps = s.byProject[p.path];
+            return ps ? railDepth(ps, s.openArchives.includes(p.path)) : 0;
+          }),
+      ),
+    ),
+  );
+  // Explicitly false: unknown until the project's worktrees have loaded.
+  const menuProjectNestingOff = useWorktreeStore(
+    (s) =>
+      contextMenu !== null && s.byProject[contextMenu.project.path]?.worktreeMetadata === false,
+  );
+  const [nestingProjectPath, setNestingProjectPath] = useState<string | null>(null);
 
   const handleAddProject = useCallback(async () => {
     if (window.electronAPI?.openFolderDialog) {
@@ -383,6 +222,30 @@ export function Sidebar() {
     }
   }, [deletingProject, deleteProject]);
 
+  /** The tree's expand and collapse actions on a project row: fold or unfold its worktrees, or step into the first one. */
+  const handleProjectKeyDown = useCallback(
+    (e: React.KeyboardEvent, project: Project, isExpanded: boolean) => {
+      const action = getTreeActionForEvent(e);
+      if (action !== "tree.expandOrFocusChild" && action !== "tree.collapseOrFocusParent") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (action === "tree.collapseOrFocusParent") {
+        if (isExpanded) toggleProjectExpanded(project.id);
+        return;
+      }
+      if (!isExpanded) {
+        toggleProjectExpanded(project.id);
+        return;
+      }
+      // The first worktree entry after this project's own entry, inside the project's block.
+      const block = e.currentTarget.closest("[data-sidebar-project]");
+      const first = block?.querySelectorAll(`[${SIDEBAR_ENTRY_ATTR}]`)[1];
+      const path = first?.getAttribute(SIDEBAR_ENTRY_ATTR);
+      if (path) focusSidebarEntryForPath(path);
+    },
+    [toggleProjectExpanded],
+  );
+
   /** Click a project row: regular repos switch to their root; bare repos toggle expansion. */
   const handleProjectClick = useCallback(
     (project: Project) => {
@@ -406,7 +269,7 @@ export function Sidebar() {
         // Animate expand/collapse, but track the pointer directly while resizing
         dragWidth === null && "transition-[width] duration-150 ease-out",
       )}
-      style={{ width: sidebarExpanded ? expandedWidth : COLLAPSED_WIDTH }}
+      style={{ width: sidebarExpanded ? expandedWidth : collapsedWidth }}
       {...focusAreaProps("worktrees")}
     >
       {sidebarExpanded && (
@@ -417,33 +280,27 @@ export function Sidebar() {
           onReset={handleResizeReset}
         />
       )}
-      {/* Toggle button */}
-      <button
-        onClick={toggleSidebar}
-        className="text-muted-foreground hover:text-foreground flex h-8 shrink-0 cursor-pointer items-center justify-center transition-colors"
-        title={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
-      >
-        {sidebarExpanded ? (
-          <ChevronsLeftIcon className="size-3.5" />
-        ) : (
-          <ChevronsRightIcon className="size-3.5" />
-        )}
-      </button>
-
       {/* Project + worktree list */}
       <div
-        className="flex-1 overflow-x-hidden overflow-y-auto"
+        className="flex-1 overflow-x-hidden overflow-y-auto pt-1"
         onKeyDown={handleSidebarEntryKeyDown}
       >
-        {projects.map((project) => {
+        {projects.map((project, index) => {
           const isRootActive = activeWorktreePath === project.path;
           const isExpanded = expandedSet.has(project.id);
           const isRenaming = project.id === renamingId;
+          const onProjectKeyDown = (e: React.KeyboardEvent) =>
+            handleProjectKeyDown(e, project, isExpanded);
 
-          if (sidebarExpanded) {
-            return (
-              <div key={project.id}>
-                {/* Project header row */}
+          // The worktree tree stays mounted across both sidebar states, so expanding animates it.
+          return (
+            <div
+              key={project.id}
+              // A full-width line between projects
+              className={cn(index > 0 && "border-border mt-1 border-t pt-1")}
+              data-sidebar-project
+            >
+              {sidebarExpanded ? (
                 <div
                   className={cn(
                     "hover:bg-primary/50 group focus-visible:ring-ring relative flex cursor-pointer items-center gap-2 px-2.5 py-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
@@ -454,6 +311,7 @@ export function Sidebar() {
                   {...sidebarEntryProps(project.path)}
                   onClick={() => !isRenaming && handleProjectClick(project)}
                   onContextMenu={(e) => handleProjectContextMenu(e, project)}
+                  onKeyDown={onProjectKeyDown}
                 >
                   <button
                     className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
@@ -480,6 +338,7 @@ export function Sidebar() {
                         onChange={(e) => setRenameValue(e.target.value)}
                         onBlur={handleRenameSubmit}
                         onKeyDown={(e) => {
+                          e.stopPropagation();
                           if (e.key === "Enter") e.currentTarget.blur();
                           if (e.key === "Escape") setRenamingId(null);
                         }}
@@ -501,61 +360,55 @@ export function Sidebar() {
                     )}
                   </div>
                 </div>
-
-                {isExpanded && <WorktreeList project={project} />}
-              </div>
-            );
-          }
-
-          // Collapsed mode — show project icon, with worktree icons underneath if expanded
-          return (
-            <div key={project.id}>
-              <div className="flex justify-center py-1.5" style={{ paddingLeft: "3px" }}>
-                <button
-                  className={cn("cursor-pointer rounded-md", ENTRY_FOCUS_RING)}
-                  onClick={() => handleProjectClick(project)}
-                  {...sidebarEntryProps(project.path)}
-                  onContextMenu={(e) => handleProjectContextMenu(e, project)}
-                  title={`${project.name}\n${project.path}`}
-                >
-                  <ProjectIconWithBadge
-                    id={project.id}
-                    name={project.name}
-                    size="md"
-                    active={isRootActive}
-                  />
-                </button>
-              </div>
-              {isExpanded && (
-                <CollapsedWorktreeList project={project} activeWorktreePath={activeWorktreePath} />
+              ) : (
+                <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_TILE_LEFT}px` }}>
+                  <button
+                    className={cn("cursor-pointer rounded-md", ENTRY_FOCUS_RING)}
+                    onClick={() => handleProjectClick(project)}
+                    {...sidebarEntryProps(project.path)}
+                    onContextMenu={(e) => handleProjectContextMenu(e, project)}
+                    onKeyDown={onProjectKeyDown}
+                    title={`${project.name}\n${project.path}`}
+                  >
+                    <ProjectIconWithBadge
+                      id={project.id}
+                      name={project.name}
+                      size="md"
+                      active={isRootActive}
+                    />
+                  </button>
+                </div>
               )}
+              {isExpanded && <WorktreeTree project={project} expanded={sidebarExpanded} />}
             </div>
           );
         })}
 
-        {/* Add project button */}
-        {sidebarExpanded ? (
-          <div
-            className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2.5 px-2.5 py-2 transition-colors"
-            style={{ paddingLeft: "13px" }}
-            onClick={handleAddProject}
-          >
-            <div className="flex size-6 shrink-0 items-center justify-center">
-              <FolderPlusIcon className="size-4" />
-            </div>
-            <span className="text-xs">Add project</span>
-          </div>
-        ) : (
-          <div className="flex justify-center py-1.5" style={{ paddingLeft: "3px" }}>
-            <button
-              className="text-muted-foreground hover:text-foreground flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors"
+        {/* Add project button, set off from the projects like they are from each other */}
+        <div className={cn(projects.length > 0 && "border-border mt-1 border-t pt-1")}>
+          {sidebarExpanded ? (
+            <div
+              className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2.5 px-2.5 py-2 transition-colors"
+              style={{ paddingLeft: "13px" }}
               onClick={handleAddProject}
-              title="Add project"
             >
-              <FolderPlusIcon className="size-5" />
-            </button>
-          </div>
-        )}
+              <div className="flex size-6 shrink-0 items-center justify-center">
+                <FolderPlusIcon className="size-4" />
+              </div>
+              <span className="text-xs">Add project</span>
+            </div>
+          ) : (
+            <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_TILE_LEFT}px` }}>
+              <button
+                className="text-muted-foreground hover:text-foreground flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors"
+                onClick={handleAddProject}
+                title="Add project"
+              >
+                <FolderPlusIcon className="size-5" />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <AddProjectWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
@@ -571,6 +424,17 @@ export function Sidebar() {
             <PencilIcon className="size-3.5" />
             Rename
           </ContextMenuItem>
+          {menuProjectNestingOff && (
+            <ContextMenuItem
+              onClick={() => {
+                setContextMenu(null);
+                setNestingProjectPath(contextMenu.project.path);
+              }}
+            >
+              <ListTreeIcon className="size-3.5" />
+              Enable worktree nesting…
+            </ContextMenuItem>
+          )}
           <ContextMenuSeparator />
           <ContextMenuItem onClick={() => handleRemoveRequest(contextMenu.project)}>
             <XIcon className="size-3.5" />
@@ -584,6 +448,13 @@ export function Sidebar() {
             Delete from disk
           </ContextMenuItem>
         </ContextMenu>
+      )}
+
+      {nestingProjectPath && (
+        <EnableNestingDialog
+          projectPath={nestingProjectPath}
+          onClose={() => setNestingProjectPath(null)}
+        />
       )}
 
       {/* Remove project confirmation dialog */}
@@ -616,683 +487,5 @@ export function Sidebar() {
         onCancel={() => setDeletingProject(null)}
       />
     </div>
-  );
-}
-
-// ── Collapsed Worktree List ──────────────────────────────────────────────
-
-function CollapsedWorktreeList({
-  project,
-  activeWorktreePath,
-}: {
-  project: Project;
-  activeWorktreePath: string | null;
-}) {
-  const ps = useWorktreeStore((s) => s.byProject[project.path]);
-  const worktrees = ps?.worktrees ?? EMPTY_WORKTREES;
-  const customOrder = ps?.customOrder;
-  const hiddenPaths = ps?.hiddenPaths ?? EMPTY_STRINGS;
-  const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
-  const setCustomOrder = useWorktreeStore((s) => s.setCustomOrder);
-  const toggleSidebar = useProjectStore((s) => s.toggleSidebar);
-
-  const menu = useWorktreeContextMenu(project.path);
-
-  const orderedWorktrees = useMemo(
-    () => getOrderedWorktrees(worktrees, customOrder),
-    [worktrees, customOrder],
-  );
-  const hiddenSet = useMemo(() => new Set(hiddenPaths), [hiddenPaths]);
-  const visibleWorktrees = useMemo(
-    () => orderedWorktrees.filter((wt) => !hiddenSet.has(wt.path)),
-    [orderedWorktrees, hiddenSet],
-  );
-  const displayedIds = useMemo(() => visibleWorktrees.map((wt) => wt.path), [visibleWorktrees]);
-
-  const [activeDragId, setActiveDragId] = useState<UniqueIdentifier | null>(null);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      setActiveDragId(null);
-      const { active, over } = event;
-      if (!over || active.id === over.id) return;
-      const oldIndex = visibleWorktrees.findIndex((wt) => wt.path === active.id);
-      const newIndex = visibleWorktrees.findIndex((wt) => wt.path === over.id);
-      if (oldIndex === -1 || newIndex === -1) return;
-      const reordered = arrayMove(visibleWorktrees, oldIndex, newIndex);
-      setCustomOrder(
-        project.path,
-        reordered.map((wt) => wt.path),
-      );
-    },
-    [visibleWorktrees, setCustomOrder, project.path],
-  );
-
-  return (
-    <>
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        modifiers={[restrictToVerticalAxis]}
-        onDragStart={(e) => setActiveDragId(e.active.id)}
-        onDragEnd={handleDragEnd}
-        onDragCancel={() => setActiveDragId(null)}
-      >
-        <SortableContext items={displayedIds} strategy={verticalListSortingStrategy}>
-          <div className="flex flex-col items-center pb-0.5" style={{ paddingLeft: "3px" }}>
-            {visibleWorktrees.map((wt) => {
-              const name = worktreeName(wt);
-              const wtIsActive = wt.path === activeWorktreePath;
-              return (
-                <SortableCollapsedIcon
-                  key={wt.path}
-                  id={wt.path}
-                  name={name}
-                  isActive={wtIsActive}
-                  isPending={wt.pending !== undefined}
-                  onClick={() => !wt.pending && switchWorktree(wt.path)}
-                  onContextMenu={(e) => !wt.pending && menu.handleContextMenu(e, wt)}
-                />
-              );
-            })}
-            {/* Add worktree button */}
-            <div className="flex justify-center py-0.5">
-              <button
-                className="text-muted-foreground hover:text-foreground flex size-6 cursor-pointer items-center justify-center rounded-md transition-colors"
-                onClick={() => {
-                  toggleSidebar();
-                }}
-                title="Add worktree"
-              >
-                <GitBranchPlusIcon className="size-4" />
-              </button>
-            </div>
-          </div>
-        </SortableContext>
-        <DragOverlay dropAnimation={{ duration: 200, easing: "ease" }}>
-          {activeDragId ? (
-            <WorktreeIcon
-              name={
-                worktreeName(visibleWorktrees.find((wt) => wt.path === activeDragId)!) ??
-                String(activeDragId)
-              }
-              size="md"
-              active={false}
-            />
-          ) : null}
-        </DragOverlay>
-      </DndContext>
-
-      <WorktreeContextMenu menu={menu} />
-    </>
-  );
-}
-
-/** Sortable wrapper for CollapsedWorktreeIcon. */
-function SortableCollapsedIcon({
-  id,
-  name,
-  isActive,
-  isPending,
-  onClick,
-  onContextMenu,
-}: {
-  id: string;
-  name: string;
-  isActive: boolean;
-  isPending: boolean;
-  onClick: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id,
-  });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : undefined,
-  };
-
-  return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <CollapsedWorktreeIcon
-        id={id}
-        name={name}
-        isActive={isActive}
-        isPending={isPending}
-        onClick={onClick}
-        onContextMenu={onContextMenu}
-      />
-    </div>
-  );
-}
-
-function CollapsedWorktreeIcon({
-  id,
-  name,
-  isActive,
-  isPending,
-  onClick,
-  onContextMenu,
-}: {
-  id: string;
-  name: string;
-  isActive: boolean;
-  isPending: boolean;
-  onClick: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
-}) {
-  const [hovered, setHovered] = useState(false);
-  const [labelPos, setLabelPos] = useState({ top: 0, left: 0 });
-
-  const handleMouseEnter = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setLabelPos({ top: rect.top + rect.height / 2, left: rect.right + 8 });
-    setHovered(true);
-  }, []);
-
-  const hasNotification = usePanelNotificationStore((s) => hasWorktreeNotification(s, id));
-
-  return (
-    <>
-      <div className="flex justify-center py-1">
-        <button
-          className={cn(
-            "relative cursor-pointer rounded-md",
-            ENTRY_FOCUS_RING,
-            isPending && "opacity-50",
-          )}
-          onClick={onClick}
-          {...(isPending ? undefined : sidebarEntryProps(id))}
-          onContextMenu={onContextMenu}
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={() => setHovered(false)}
-        >
-          <WorktreeIcon name={name} size="md" active={isActive} />
-          {hasNotification && !isActive && <NotificationDot />}
-        </button>
-      </div>
-      {hovered &&
-        createPortal(
-          <div
-            className="animate-in fade-in slide-in-from-left-1 pointer-events-none fixed z-[9999] -translate-y-1/2 duration-150"
-            style={{ top: labelPos.top, left: labelPos.left }}
-          >
-            <div className="bg-popover border-border text-foreground rounded-md border px-2.5 py-1 text-xs font-medium whitespace-nowrap shadow-lg">
-              {name}
-            </div>
-          </div>,
-          document.body,
-        )}
-    </>
-  );
-}
-
-// ── Worktree List (for expanded bare repo projects) ─────────────────────
-
-function WorktreeList({ project }: { project: Project }) {
-  const ps = useWorktreeStore((s) => s.byProject[project.path]);
-  const worktrees = ps?.worktrees ?? EMPTY_WORKTREES;
-  const customOrder = ps?.customOrder;
-  const hiddenPaths = ps?.hiddenPaths ?? EMPTY_STRINGS;
-  const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
-  const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
-  const createWorktree = useWorktreeStore((s) => s.createWorktree);
-  const confirmCreateWorktree = useWorktreeStore((s) => s.confirmCreateWorktree);
-  const dismissPendingPlan = useWorktreeStore((s) => s.dismissPendingPlan);
-  const pendingAddPlan = useWorktreeStore((s) =>
-    s.pendingAddPlan?.projectPath === project.path ? s.pendingAddPlan : null,
-  );
-  const setCustomOrder = useWorktreeStore((s) => s.setCustomOrder);
-  const toggleVisibility = useWorktreeStore((s) => s.toggleVisibility);
-  const createWorktreeRequested = useWorktreeStore((s) => s.createWorktreeRequested);
-  const clearCreateWorktreeRequest = useWorktreeStore((s) => s.clearCreateWorktreeRequest);
-
-  const menu = useWorktreeContextMenu(project.path);
-
-  const orderedWorktrees = useMemo(
-    () => getOrderedWorktrees(worktrees, customOrder),
-    [worktrees, customOrder],
-  );
-  const hiddenSet = useMemo(() => new Set(hiddenPaths), [hiddenPaths]);
-
-  // Always show all worktrees in expanded sidebar
-  const displayedWorktrees = orderedWorktrees;
-  const displayedIds = useMemo(() => displayedWorktrees.map((wt) => wt.path), [displayedWorktrees]);
-
-  const [addingWorktree, setAddingWorktree] = useState(false);
-  const [addName, setAddName] = useState("");
-  const [addError, setAddError] = useState<string | null>(null);
-
-  // Respond to keybinding-triggered create request
-  useEffect(() => {
-    if (!createWorktreeRequested) return;
-    const activeProject = deriveProject(activeWorktreePath, useProjectStore.getState().projects);
-    if (activeProject?.path !== project.path) return;
-    clearCreateWorktreeRequest();
-    setAddingWorktree(true);
-  }, [createWorktreeRequested, clearCreateWorktreeRequest, activeWorktreePath, project.path]);
-
-  // --- @dnd-kit ---
-  const [activeDragId, setActiveDragId] = useState<UniqueIdentifier | null>(null);
-  const activeDragWt = useMemo(
-    () => (activeDragId ? displayedWorktrees.find((wt) => wt.path === activeDragId) : undefined),
-    [activeDragId, displayedWorktrees],
-  );
-
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveDragId(event.active.id);
-  }, []);
-
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      setActiveDragId(null);
-      const { active, over } = event;
-      if (!over || active.id === over.id) return;
-
-      const oldIndex = displayedWorktrees.findIndex((wt) => wt.path === active.id);
-      const newIndex = displayedWorktrees.findIndex((wt) => wt.path === over.id);
-      if (oldIndex === -1 || newIndex === -1) return;
-
-      const reordered = arrayMove(displayedWorktrees, oldIndex, newIndex);
-      setCustomOrder(
-        project.path,
-        reordered.map((wt) => wt.path),
-      );
-    },
-    [displayedWorktrees, setCustomOrder, project.path],
-  );
-
-  const handleDragCancel = useCallback(() => {
-    setActiveDragId(null);
-  }, []);
-
-  const handleAddSubmit = useCallback(async () => {
-    const name = addName.trim();
-    if (!name) return;
-    setAddError(null);
-    try {
-      await createWorktree(project.path, name);
-      setAddName("");
-      setAddingWorktree(false);
-    } catch (err) {
-      setAddError(err instanceof Error ? err.message : "Failed to create worktree");
-    }
-  }, [addName, createWorktree, project.path]);
-
-  const handleBranchConflictResolve = useCallback(
-    async (resolution: "use-existing" | "delete-and-create") => {
-      setAddError(null);
-      try {
-        await confirmCreateWorktree(resolution);
-        setAddName("");
-        setAddingWorktree(false);
-      } catch (err) {
-        setAddError(err instanceof Error ? err.message : "Failed to create worktree");
-      }
-    },
-    [confirmCreateWorktree],
-  );
-
-  return (
-    <>
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        modifiers={[restrictToVerticalAxis]}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-        onDragCancel={handleDragCancel}
-      >
-        <SortableContext items={displayedIds} strategy={verticalListSortingStrategy}>
-          <div>
-            {/* A bare repo's list is empty until its worktrees are fetched; a regular repo's
-                main checkout is never listed, so for it an empty list is the normal state and
-                the "Add worktree" row below is the affordance. */}
-            {project.isBare && worktrees.length === 0 && (
-              <div
-                className="text-muted-foreground cursor-pointer py-1.5 text-[11px] italic hover:underline"
-                style={{ paddingLeft: "40px" }}
-                onClick={() => switchWorktree(project.path)}
-              >
-                Click to load worktrees
-              </div>
-            )}
-            {displayedWorktrees.map((wt) => (
-              <WorktreeItem
-                key={wt.path}
-                wt={wt}
-                isActive={wt.path === activeWorktreePath}
-                isHidden={hiddenSet.has(wt.path)}
-                isDragOverlay={false}
-                onSelect={() => !wt.pending && switchWorktree(wt.path)}
-                onContextMenu={(e) => !wt.pending && menu.handleContextMenu(e, wt)}
-                onToggleVisibility={() => toggleVisibility(project.path, wt.path)}
-              />
-            ))}
-
-            {/* Add worktree inline input */}
-            {addingWorktree ? (
-              <div className="flex items-center gap-1 py-1 pr-2" style={{ paddingLeft: "40px" }}>
-                <button
-                  className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-                  onClick={() => {
-                    setAddingWorktree(false);
-                    setAddName("");
-                    setAddError(null);
-                  }}
-                  title="Cancel"
-                >
-                  <XIcon className="size-3.5" />
-                </button>
-                <div className="min-w-0 flex-1">
-                  <input
-                    value={addName}
-                    onChange={(e) => {
-                      setAddName(e.target.value.toLowerCase().replace(/\s/g, "-"));
-                      setAddError(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleAddSubmit();
-                      if (e.key === "Escape") {
-                        setAddingWorktree(false);
-                        setAddName("");
-                        setAddError(null);
-                      }
-                    }}
-                    placeholder="worktree name"
-                    className="bg-background border-border text-foreground placeholder:text-muted-foreground w-full rounded border px-2 py-1 text-xs outline-none"
-                    autoFocus
-                  />
-                  {addError && <div className="text-destructive mt-1 text-[10px]">{addError}</div>}
-                </div>
-                <button
-                  className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-                  onClick={handleAddSubmit}
-                  title="Create worktree"
-                >
-                  <PlusIcon className="size-3.5" />
-                </button>
-              </div>
-            ) : (
-              <div
-                className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2 py-1 transition-colors"
-                style={{ paddingLeft: "40px" }}
-                onClick={() => setAddingWorktree(true)}
-              >
-                <div className="flex size-5 shrink-0 items-center justify-center">
-                  <GitBranchPlusIcon className="size-4" />
-                </div>
-                <span className="text-[11px]">Add worktree</span>
-              </div>
-            )}
-          </div>
-        </SortableContext>
-
-        {/* Drag overlay */}
-        <DragOverlay dropAnimation={{ duration: 200, easing: "ease" }}>
-          {activeDragWt ? (
-            <WorktreeItem
-              wt={activeDragWt}
-              isActive={activeDragWt.path === activeWorktreePath}
-              isHidden={hiddenSet.has(activeDragWt.path)}
-              isDragOverlay
-              onSelect={() => {}}
-              onContextMenu={() => {}}
-              onToggleVisibility={() => {}}
-            />
-          ) : null}
-        </DragOverlay>
-      </DndContext>
-
-      <WorktreeContextMenu menu={menu} />
-
-      {/* Branch conflict resolution dialog */}
-      {pendingAddPlan?.branchConflict?.kind === "exists" && (
-        <BranchConflictDialog
-          branchName={pendingAddPlan.branch}
-          error={addError}
-          onResolve={handleBranchConflictResolve}
-          onCancel={() => {
-            dismissPendingPlan();
-            setAddError(null);
-          }}
-        />
-      )}
-    </>
-  );
-}
-
-// ── Worktree Item ───────────────────────────────────────────────────────
-
-function WorktreeItem({
-  wt,
-  isActive,
-  isHidden,
-  isDragOverlay,
-  onSelect,
-  onContextMenu,
-  onToggleVisibility,
-}: {
-  wt: WorktreeEntry;
-  isActive: boolean;
-  isHidden: boolean;
-  isDragOverlay: boolean;
-  onSelect: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
-  onToggleVisibility: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: wt.path,
-    disabled: isDragOverlay,
-  });
-  const hasNotification = usePanelNotificationStore((s) => hasWorktreeNotification(s, wt.path));
-
-  const name = worktreeName(wt);
-  const homeDir = useProjectStore((s) => s.homeDir);
-  const subtitle = worktreeSubtitle(wt, homeDir);
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition: transition ?? undefined,
-    paddingLeft: "36px",
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={cn(
-        "hover:bg-primary/50 group focus-visible:ring-ring relative flex cursor-pointer items-center gap-2 px-2 py-1 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
-        isActive && "bg-primary",
-        isHidden && "opacity-40",
-        isDragging && "z-10 opacity-30",
-        isDragOverlay && "bg-card border-border rounded-md border shadow-lg",
-        wt.pending && "opacity-50",
-      )}
-      title={wt.path}
-      onClick={onSelect}
-      onContextMenu={onContextMenu}
-      {...attributes}
-      {...listeners}
-      {...(wt.pending || isDragOverlay ? undefined : sidebarEntryProps(wt.path))}
-    >
-      <div className="relative shrink-0">
-        <WorktreeIcon name={name} size="sm" />
-        {hasNotification && !isActive && <NotificationDot />}
-      </div>
-      <div className="min-w-0 flex-1 overflow-hidden">
-        <div className="text-foreground truncate text-xs font-medium">{name}</div>
-        <div className="text-muted-foreground truncate text-[10px]">
-          {wt.pending === "creating"
-            ? "Creating..."
-            : wt.pending === "removing"
-              ? "Removing..."
-              : subtitle}
-        </div>
-      </div>
-      {!isDragOverlay && (
-        <button
-          className={cn(
-            "text-muted-foreground hover:text-foreground shrink-0 cursor-pointer transition-opacity",
-            isHidden ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-          )}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleVisibility();
-          }}
-          title={isHidden ? "Show in collapsed view" : "Hide from collapsed view"}
-        >
-          {isHidden ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ── Enhanced Remove Dialog ─────────────────────────────────────────────
-
-function RemoveWorktreeDialog({
-  plan,
-  error,
-  onConfirm,
-  onCancel,
-}: {
-  plan: NonNullable<ReturnType<typeof useWorktreeStore.getState>["pendingRemovePlan"]>;
-  error: string | null;
-  onConfirm: (options: { deleteBranch: boolean; force: boolean }) => void;
-  onCancel: () => void;
-}) {
-  const [deleteBranch, setDeleteBranch] = useState(false);
-  const [force, setForce] = useState(false);
-
-  const branch = plan.branch;
-  const needsForce = plan.dirty;
-  const blocked = needsForce && !force;
-
-  return (
-    <DialogShell open onCancel={onCancel} className="w-96">
-      <div className="px-4 pt-4 pb-2">
-        <h3 className="text-foreground text-sm font-medium">Remove worktree</h3>
-        <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-          Delete worktree{" "}
-          <span className="text-foreground font-medium break-words">{plan.name}</span>?
-          {branch && (
-            <>
-              <br />
-              Branch: <span className="text-foreground font-medium break-words">{branch}</span>
-            </>
-          )}
-        </p>
-
-        {plan.isMain && (
-          <div className="border-warning/20 bg-warning/5 mt-3 rounded-md border p-2.5">
-            <p className="text-warning text-[11px] font-medium">
-              This is the repository&rsquo;s main worktree.
-            </p>
-          </div>
-        )}
-
-        {plan.dirty && (
-          <div className="border-warning/20 bg-warning/5 mt-3 rounded-md border p-2.5">
-            <p className="text-warning text-[11px] font-medium">
-              This worktree has uncommitted or untracked files. They will be lost.
-            </p>
-          </div>
-        )}
-
-        <div className="mt-3 flex flex-col gap-1.5">
-          {needsForce && (
-            <label className="text-muted-foreground flex items-center gap-2 text-[11px]">
-              <input
-                type="checkbox"
-                checked={force}
-                onChange={(e) => setForce(e.target.checked)}
-                className="accent-destructive size-3"
-              />
-              Discard local changes (force remove)
-            </label>
-          )}
-          {branch && (
-            <label className="text-muted-foreground flex items-center gap-2 text-[11px]">
-              <input
-                type="checkbox"
-                checked={deleteBranch}
-                onChange={(e) => setDeleteBranch(e.target.checked)}
-                className="accent-destructive size-3"
-              />
-              Also delete branch &ldquo;{branch}&rdquo;
-            </label>
-          )}
-        </div>
-
-        {error && <div className="text-destructive mt-2 text-[10px]">{error}</div>}
-      </div>
-
-      <div className="flex flex-col gap-1.5 px-4 py-3">
-        <Button
-          variant="destructive-outline"
-          size="xs"
-          className="w-full"
-          disabled={blocked}
-          onClick={() => onConfirm({ deleteBranch, force })}
-        >
-          {deleteBranch ? "Remove worktree and branch" : "Remove worktree"}
-        </Button>
-        <Button variant="outline" size="xs" className="w-full" onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-    </DialogShell>
-  );
-}
-
-// ── Branch Conflict Dialog ─────────────────────────────────────────────
-
-function BranchConflictDialog({
-  branchName,
-  error,
-  onResolve,
-  onCancel,
-}: {
-  branchName: string;
-  error: string | null;
-  onResolve: (resolution: "use-existing" | "delete-and-create") => void;
-  onCancel: () => void;
-}) {
-  return (
-    <DialogShell open onCancel={onCancel} className="w-80">
-      <div className="px-4 pt-4 pb-2">
-        <h3 className="text-foreground text-sm font-medium">Branch already exists</h3>
-        <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-          Branch &ldquo;{branchName}&rdquo; already exists. How would you like to proceed?
-        </p>
-        {error && <div className="text-destructive mt-2 text-[10px]">{error}</div>}
-      </div>
-
-      <div className="flex flex-col gap-1.5 px-4 py-3">
-        <Button
-          variant="default"
-          size="xs"
-          className="w-full"
-          onClick={() => onResolve("use-existing")}
-        >
-          Use existing branch
-        </Button>
-        <Button
-          variant="outline"
-          size="xs"
-          className="w-full"
-          onClick={() => onResolve("delete-and-create")}
-        >
-          Delete and recreate branch
-        </Button>
-        <Button variant="ghost" size="xs" className="w-full" onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-    </DialogShell>
   );
 }

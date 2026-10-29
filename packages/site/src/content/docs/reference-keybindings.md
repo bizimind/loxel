@@ -90,7 +90,7 @@ In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G`
 | Focus worktree 1–8, last, 10             | `Ctrl+Alt+1` – `Ctrl+Alt+8`, `Ctrl+Alt+9`, `Ctrl+Alt+0` |
 | Delete worktree                          | unbound — command palette or right-click menu           |
 
-Back/forward work like a browser's history, across all projects. Worktree numbers count the active project's worktrees in sidebar order and skip hidden worktrees.
+Back/forward work like a browser's history, across all projects. Worktree numbers count the active project's worktrees in sidebar order and skip archived worktrees.
 
 ---
 
@@ -107,6 +107,7 @@ Back/forward work like a browser's history, across all projects. Worktree number
 | Action                     | Shortcut                                |
 | -------------------------- | --------------------------------------- |
 | Python: Select Interpreter | unbound — command palette or status bar |
+| Restart Language Servers   | unbound — command palette               |
 
 ---
 

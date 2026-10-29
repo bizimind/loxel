@@ -12,6 +12,14 @@ Loxel runs language servers for TypeScript, Python, TOML and other languages and
 
 The active worktree gets its own language server processes; only the YAML server is shared. Switching worktrees stops them and starts fresh ones for the worktree you switch to, so expect a short warm-up after a switch. There is no shared server state between worktrees — if one worktree is using an older TypeScript config, a different Python environment or a different version of your packages, it does not affect any other worktree's language servers.
 
+### When a language server stops
+
+If a language server crashes, Loxel starts it again within a few seconds and the editor picks up where it left off: diagnostics, hover and completions come back for the files you have open. The same happens when Loxel itself restarts. A server that keeps crashing right after it starts is given a few tries, then left stopped, with a notification saying so.
+
+Opening the same worktree in a second window moves its language servers to that window. The first window keeps editing normally, without language features for that worktree, and does not take them back on its own, so two windows never fight over them.
+
+While a language server is stopped, for any of these reasons or because it could not start, the status bar shows it, for example `basedpyright stopped` or `TypeScript in another window`. Hover it to see why, and click it to start it again (or to take the servers back into this window). **Restart Language Servers** in the command palette restarts every language server of the current worktree and the shared YAML one, stopped or not.
+
 ---
 
 ## Supported features

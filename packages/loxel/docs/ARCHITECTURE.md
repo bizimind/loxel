@@ -142,7 +142,7 @@ The same index as the [package README](../README.md#internal-docs), grouped the 
 
 **Workspace**
 
-- [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md) — project and worktree models, setup flows, `wt` integration, context switching, Others folders
+- [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md) — project and worktree models, worktree nesting, setup flows, `wt` integration, context switching, Others folders
 - [GIT.md](GIT.md) — git command and parser layer, status pipeline, diff selection and base resolution, commit graph, mutations
 - [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md) — dockview zones, panel registry and identity, opening and focus, tools bars, layout persistence per worktree
 - [KEYBINDINGS.md](KEYBINDINGS.md) — action registry, chords, focus navigation, find in panel, shortcuts inside webviews

@@ -27,7 +27,11 @@ export function ProjectIcon({ id, name, size, active }: ProjectIconProps) {
         sizeClasses[size],
         active && "shadow-[0_0_0_2px_white,0_0_0_4px_var(--primary)]",
       )}
-      style={{ backgroundColor: color.bg, color: color.text }}
+      // A tint of the project color, so projects read differently from the solid worktree icons.
+      style={{
+        backgroundColor: `color-mix(in oklch, ${color.bg} 24%, transparent)`,
+        color: `color-mix(in oklch, ${color.bg}, var(--foreground) 45%)`,
+      }}
     >
       {letter}
     </div>

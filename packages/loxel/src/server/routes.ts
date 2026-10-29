@@ -18,10 +18,14 @@ import {
   initBareRepo,
   transformToBare,
   ensureWorktreesDir,
+  executeInit,
+  planInit,
   shellQuote,
   type AddPlan,
+  type InitActionId,
   type ProgressHandler,
   type RemovePlan,
+  type RemoveResult,
 } from "@bizimind/wt/lib";
 
 import type { DiffInfo } from "@/api/diff-model";
@@ -45,6 +49,12 @@ import type {
   PythonInterpreter,
 } from "@/api/python-env-model";
 import type { SearchMatch } from "@/api/search-model";
+import type {
+  NestedRemoval,
+  NestedWorktreePlan,
+  WorktreeRemovePlan,
+  WorktreeRemoveResult,
+} from "@/api/worktree-removal-model";
 import type { TerminalSpawnTarget, WsMessage } from "@/api/ws-protocol";
 import { repoNameFromUrl } from "@/components/projects/wizard-detection";
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
@@ -68,6 +78,16 @@ import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
 import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
 import * as projectStore from "./project-store";
+import {
+  childWorktreeOptions,
+  titleMeta,
+  listProjectWorktrees,
+  nestedBelow,
+  projectWorktreesResponse,
+  updateWorktreeMeta,
+  type ProjectWorktree,
+  type WorktreeMetaUpdate,
+} from "./project-worktrees";
 import { getPythonEnv, listPythonEnvs, normalizePythonOverride } from "./python-env";
 import {
   getPythonOverride,
@@ -91,10 +111,12 @@ import {
 import { stress } from "./stress-detector";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
 import { getCurrentVersion } from "./version";
-import { INTERNAL_WORKTREE_PREFIX, findWorkspacePackages } from "./worktree-utils";
+import { findWorkspacePackages } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
 
 const wtLog = logger.child("worktrees");
+/** The one `wt init` action Loxel applies: turning on worktree metadata, so worktrees can nest. */
+const METADATA_ON_ACTION: InitActionId = "worktree-metadata-on";
 const searchLog = logger.child("search");
 const openInLog = logger.child("launch-services");
 const terminalLog = logger.child("terminal");
@@ -2144,10 +2166,16 @@ async function handleGetProjects(_req: Request, ctx: RouteContext): Promise<Resp
     data.projects.map(async (p) => {
       const project = ctx.getProject(p.path);
       if (!project) {
-        return { ...p, worktrees: [], worktreesDir: null };
+        return { ...p, worktrees: [], worktreesDir: null, worktreeMetadata: false };
       }
-      const worktrees = await listProjectWorktrees(project.cwd);
-      return { ...p, isBare: project.isBare, worktreesDir: project.worktreesDir, worktrees };
+      const { worktrees, worktreeMetadata } = await projectWorktreesResponse(project.cwd);
+      return {
+        ...p,
+        isBare: project.isBare,
+        worktreesDir: project.worktreesDir,
+        worktrees,
+        worktreeMetadata,
+      };
     }),
   );
   const response: ProjectsResponse = { projects: enriched, homeDir: homedir() };
@@ -2238,46 +2266,9 @@ async function handleDeleteProjectFromDisk(
   return json({ success: true });
 }
 
-/** List wt-managed worktrees for a project (bare or regular). */
-export async function listProjectWorktrees(projectPath: string): Promise<WorktreeEntryResponse[]> {
-  const managed = await listManagedWorktrees(projectPath);
-  return Promise.all(
-    managed
-      .filter((wt) => !basename(wt.path).startsWith(INTERNAL_WORKTREE_PREFIX))
-      .map(async (wt) => ({
-        path: wt.path,
-        branch: wt.branch,
-        commit: wt.head,
-        isMain: false,
-        createdAt: await statCreatedAt(wt.path),
-        wtName: wt.name,
-      })),
-  );
-}
-
 // GET /api/projects/:id/worktrees
 async function handleProjectWorktrees(projectPath: string): Promise<Response> {
-  const worktrees = await listProjectWorktrees(projectPath);
-  return json({ worktrees });
-}
-
-/** Shape returned by GET /api/projects/:id/worktrees — WorktreeEntry with a wt name. */
-interface WorktreeEntryResponse {
-  path: string;
-  branch: string | null;
-  commit: string;
-  isMain: boolean;
-  createdAt: string | null;
-  wtName: string;
-}
-
-async function statCreatedAt(dirPath: string): Promise<string | null> {
-  try {
-    const stats = await stat(dirPath);
-    return stats.birthtime.toISOString();
-  } catch {
-    return null;
-  }
+  return json(await projectWorktreesResponse(projectPath));
 }
 
 // ---------------------------------------------------------------------------
@@ -2312,11 +2303,24 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
     body.branchResolution === "use-existing" || body.branchResolution === "delete-and-create"
       ? body.branchResolution
       : undefined;
+  // A child worktree branches from its parent's current commit and is nested under it.
+  const parentPath = typeof body.parentPath === "string" ? body.parentPath : undefined;
+  const title = typeof body.title === "string" ? body.title : undefined;
 
-  wtLog.info(`Creating worktree '${name}'`, { branch, branchResolution });
+  wtLog.info(`Creating worktree '${name}'`, { branch, branchResolution, parentPath });
   try {
+    const child = parentPath ? await childWorktreeOptions(project.cwd, parentPath) : undefined;
+    const meta = { ...child?.meta, ...titleMeta(title) };
     const result = await executeAdd(
-      { name, branch, branchResolution, repoPath: project.cwd, hookEnv: buildSpawnEnv() },
+      {
+        name,
+        branch,
+        branchResolution,
+        repoPath: project.cwd,
+        hookEnv: buildSpawnEnv(),
+        ...(child ? { base: child.base } : {}),
+        ...(Object.keys(meta).length > 0 ? { meta } : {}),
+      },
       wtProgress,
     );
     wtLog.info(`Worktree '${name}' created`, { path: result.path, branch: result.branch });
@@ -2325,6 +2329,81 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
   } catch (err) {
     wtLog.error(`Failed to create worktree '${name}'`, { error: err });
     return error(describeError(err, "Failed to create worktree"));
+  }
+}
+
+/** A string, null, or absent (undefined); anything else is a bad request. */
+function optionalNullableString(
+  body: Record<string, unknown>,
+  field: string,
+): string | null | undefined {
+  const value = body[field];
+  if (value === undefined || value === null || typeof value === "string") return value;
+  throw new Error(`${field} must be a string or null`);
+}
+
+// POST /api/worktree/meta — nest a worktree under another (or un-nest it) and set its title
+async function handleUpdateWorktreeMeta(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const projectPath = requireString(body, "projectPath");
+  const project = ctx.getProject(projectPath);
+  if (!project) return error("Project not found", 404);
+  const wtPath = requireString(body, "path");
+  const update: WorktreeMetaUpdate = {
+    parentPath: optionalNullableString(body, "parentPath"),
+    title: optionalNullableString(body, "title"),
+  };
+
+  try {
+    await updateWorktreeMeta(project.cwd, wtPath, update);
+    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    return json({ success: true });
+  } catch (err) {
+    wtLog.error("Failed to update worktree metadata", { path: wtPath, error: err });
+    return error(describeError(err, "Failed to update the worktree"));
+  }
+}
+
+// POST /api/worktree/plan-enable-metadata — what turning on worktree metadata changes
+async function handlePlanEnableWorktreeMetadata(
+  req: Request,
+  ctx: RouteContext,
+): Promise<Response> {
+  const body = await parseBody(req);
+  const project = ctx.getProject(requireString(body, "projectPath"));
+  if (!project) return error("Project not found", 404);
+
+  try {
+    const plan = await planInit(project.cwd);
+    const action = plan.actions.find((candidate) => candidate.id === METADATA_ON_ACTION) ?? null;
+    return json({ action });
+  } catch (err) {
+    return error(describeError(err, "Failed to inspect the repository"));
+  }
+}
+
+// POST /api/worktree/enable-metadata — `wt init --worktree-metadata on`, and nothing else
+async function handleEnableWorktreeMetadata(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const project = ctx.getProject(requireString(body, "projectPath"));
+  if (!project) return error("Project not found", 404);
+
+  wtLog.info("Turning on worktree metadata", { project: project.cwd });
+  try {
+    const result = await executeInit(
+      project.cwd,
+      { apply: [METADATA_ON_ACTION], hookEnv: buildSpawnEnv() },
+      wtProgress,
+    );
+    const outcome = result.outcomes.find((candidate) => candidate.id === METADATA_ON_ACTION);
+    if (outcome?.status === "failed") {
+      return error(outcome.error ?? "Failed to turn on worktree metadata", 500);
+    }
+    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
+    return json({ status: outcome?.status ?? "not-needed" });
+  } catch (err) {
+    wtLog.error("Failed to turn on worktree metadata", { error: err });
+    return error(describeError(err, "Failed to turn on worktree metadata"), 500);
   }
 }
 
@@ -2344,9 +2423,66 @@ async function handlePlanRemoveWorktree(req: Request, ctx: RouteContext): Promis
     if (resolve(plan.worktreePath) !== resolve(wtPath)) {
       return error("Worktree path did not resolve to the requested worktree", 400);
     }
-    return json(plan);
+    const { descendants } = nestedBelow(await listProjectWorktrees(project.cwd), plan.worktreePath);
+    const nested: NestedWorktreePlan[] = await Promise.all(
+      descendants.map(async (wt) => ({
+        path: wt.path,
+        dirty: (await planRemove({ name: wt.wtName, repoPath: project.cwd })).dirty,
+      })),
+    );
+    const response: WorktreeRemovePlan = { ...plan, nested };
+    return json(response);
   } catch (err) {
     return error(describeError(err, "Failed to inspect worktree"));
+  }
+}
+
+/**
+ * Remove one worktree with its watchers suspended, then release everything Loxel kept for it.
+ * On failure the watchers resume and the error is rethrown.
+ */
+async function removeOneWorktree(
+  ctx: RouteContext,
+  project: ProjectState,
+  wtPath: string,
+  options: { deleteBranch: boolean; force: boolean },
+): Promise<RemoveResult> {
+  const name = getWorktreeName(wtPath, project.worktreesDir);
+  wtLog.info(`Removing worktree '${name}'`, options);
+  const resumeWatchers = await ctx.suspendWorktreeWatchers(wtPath);
+  try {
+    const result = await executeRemove(
+      {
+        name,
+        deleteBranch: options.deleteBranch,
+        // Design decision: checking "Also delete branch" is the confirmation, so skip git's
+        // merged check. It compares commit IDs and refuses squash-merged branches whose content
+        // is on main. This also deletes a branch whose commits were never pushed or merged; that
+        // is intended, not an oversight. The branch is only deleted after the worktree is, and a
+        // dirty worktree needs `force`.
+        forceBranch: options.deleteBranch,
+        force: options.force,
+        repoPath: project.cwd,
+        expectedPath: wtPath,
+        hookEnv: buildSpawnEnv(),
+      },
+      wtProgress,
+    );
+    wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
+    ctx.completeWorktreeRemoval(wtPath);
+    // A worktree later created at the same path starts with an empty Others section and its own
+    // Python interpreter detection.
+    storeDb.deleteStore(externalFoldersStoreKey(wtPath));
+    storeDb.deleteStore(pythonOverrideStoreKey(wtPath));
+    return result;
+  } catch (err) {
+    try {
+      await resumeWatchers();
+    } catch (resumeError) {
+      wtLog.error(`Failed to resume watchers for '${name}'`, { error: resumeError });
+    }
+    wtLog.error(`Failed to remove worktree '${name}'`, { error: err });
+    throw err;
   }
 }
 
@@ -2359,47 +2495,72 @@ async function handleRemoveWorktree(req: Request, ctx: RouteContext): Promise<Re
 
   const wtPath = requireString(body, "path");
   await git.validateWorktreePath(wtPath, project.cwd);
-  const name = getWorktreeName(wtPath, project.worktreesDir);
-  const deleteBranch = typeof body.deleteBranch === "boolean" ? body.deleteBranch : false;
-  const force = typeof body.force === "boolean" ? body.force : false;
+  const options = {
+    deleteBranch: typeof body.deleteBranch === "boolean" ? body.deleteBranch : false,
+    force: typeof body.force === "boolean" ? body.force : false,
+  };
+  const nestedRemoval: NestedRemoval = body.nested === "remove" ? "remove" : "move-up";
+  // The nested worktrees the user saw in the plan: one nested since then is not removed
+  // with `force` it was never confirmed for (it shows at the top level once its parent is gone).
+  const confirmedNested = new Set(
+    nestedRemoval === "remove" ? requireStringArray(body, "nestedPaths") : [],
+  );
+  const { parent, children, descendants } = nestedBelow(
+    await listProjectWorktrees(project.cwd),
+    resolve(wtPath),
+  );
 
-  wtLog.info(`Removing worktree '${name}'`, { deleteBranch, force });
-  const resumeWatchers = await ctx.suspendWorktreeWatchers(wtPath);
+  let branchesDeleted = true;
   try {
-    const result = await executeRemove(
-      {
-        name,
-        deleteBranch,
-        // Design decision: checking "Also delete branch" is the confirmation, so skip git's
-        // merged check. It compares commit IDs and refuses squash-merged branches whose content
-        // is on main. This also deletes a branch whose commits were never pushed or merged; that
-        // is intended, not an oversight. The branch is only deleted after the worktree is, and a
-        // dirty worktree needs `force`.
-        forceBranch: deleteBranch,
-        force,
-        repoPath: project.cwd,
-        expectedPath: wtPath,
-        hookEnv: buildSpawnEnv(),
-      },
-      wtProgress,
-    );
-    wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
-    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
-    ctx.completeWorktreeRemoval(wtPath);
-    // A worktree later created at the same path starts with an empty Others section and its own
-    // Python interpreter detection.
-    storeDb.deleteStore(externalFoldersStoreKey(wtPath));
-    storeDb.deleteStore(pythonOverrideStoreKey(wtPath));
-    return json(result);
-  } catch (err) {
-    try {
-      await resumeWatchers();
-    } catch (resumeError) {
-      wtLog.error(`Failed to resume watchers for '${name}'`, { error: resumeError });
+    if (nestedRemoval === "remove") {
+      // Deepest first, so no worktree is ever left nested under one that is gone.
+      for (const wt of descendants.toReversed()) {
+        if (!confirmedNested.has(wt.path)) continue;
+        const result = await removeOneWorktree(ctx, project, wt.path, options);
+        branchesDeleted &&= result.branchDeleted;
+      }
     }
-    wtLog.error(`Failed to remove worktree '${name}'`, { error: err });
+    const result = await removeOneWorktree(ctx, project, wtPath, options);
+    const branchDeleted = result.branchDeleted && branchesDeleted;
+    const unmoved =
+      nestedRemoval === "move-up" ? await moveChildrenUp(project.cwd, children, parent) : [];
+    const response: WorktreeRemoveResult = {
+      ...result,
+      branchDeleted,
+      ...(unmoved.length > 0
+        ? {
+            warning: `The worktree was removed, but ${unmoved.join(", ")} could not be moved up and now ${unmoved.length === 1 ? "shows" : "show"} at the top level.`,
+          }
+        : {}),
+    };
+    return json(response);
+  } catch (err) {
     return error(describeError(err, "Failed to remove worktree"));
+  } finally {
+    ctx.broadcastToProject(project.cwd, worktreesChangedMessage(project.cwd));
   }
+}
+
+/**
+ * Nest the children of a removed worktree under its parent. Without one they are already shown
+ * at the top level (their parent id matches no worktree), but the stale link is cleared too.
+ * Returns the names of the children that could not be moved.
+ */
+async function moveChildrenUp(
+  projectPath: string,
+  children: readonly ProjectWorktree[],
+  parent: ProjectWorktree | null,
+): Promise<string[]> {
+  const failed: string[] = [];
+  for (const child of children) {
+    try {
+      await updateWorktreeMeta(projectPath, child.path, { parentPath: parent?.path ?? null });
+    } catch (err) {
+      wtLog.warn("Failed to move a nested worktree up", { path: child.path, error: err });
+      failed.push(child.wtName);
+    }
+  }
+  return failed;
 }
 
 // ---------------------------------------------------------------------------
@@ -3197,6 +3358,9 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/worktree/create": handleCreateWorktree,
     "/api/worktree/plan-remove": handlePlanRemoveWorktree,
     "/api/worktree/remove": handleRemoveWorktree,
+    "/api/worktree/meta": handleUpdateWorktreeMeta,
+    "/api/worktree/plan-enable-metadata": handlePlanEnableWorktreeMetadata,
+    "/api/worktree/enable-metadata": handleEnableWorktreeMetadata,
     "/api/files/unwatch": handleFilesUnwatch,
     "/api/files/rename": handleFileRename,
     "/api/files/delete": handleFileDelete,

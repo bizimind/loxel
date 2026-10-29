@@ -103,6 +103,12 @@ export interface WorktreeEntry {
   createdAt: string | null;
   /** wt directory-based name (only present for wt-managed worktrees). */
   wtName?: string;
+  /** Stable id (`wt-id` metadata); absent while worktree metadata is off or not yet assigned. */
+  wtId?: string;
+  /** `wt-id` of the worktree this one is nested under (`loxel-parent-wt` metadata). */
+  parentWtId?: string;
+  /** Title shown instead of the worktree name (`loxel-title` metadata). */
+  title?: string;
   /** Set while the entry is being created or removed and not yet confirmed by the server. */
   pending?: "creating" | "removing";
 }
