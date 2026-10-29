@@ -125,7 +125,7 @@ export function TopBar() {
       )}
 
       {/* Right side — notifications + settings */}
-      <div className="ml-auto flex items-center">
+      <div className="ml-auto flex items-center gap-1.5">
         <UpdateIndicator />
         <NotificationBell />
         <button
@@ -133,7 +133,7 @@ export function TopBar() {
           onClick={() => useSettingsStore.getState().openSettings()}
           style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
         >
-          <SettingsIcon className="size-3.5" />
+          <SettingsIcon className="size-4" />
         </button>
       </div>
     </div>
@@ -151,9 +151,9 @@ function SidebarToggle() {
       style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
     >
       {expanded ? (
-        <PanelLeftCloseIcon className="size-4" />
+        <PanelLeftCloseIcon className="size-4.5" />
       ) : (
-        <PanelLeftOpenIcon className="size-4" />
+        <PanelLeftOpenIcon className="size-4.5" />
       )}
     </button>
   );

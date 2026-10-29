@@ -95,7 +95,7 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
   const nesting = ps.worktreeMetadata ?? false;
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const switchWorktree = useWorktreeStore((s) => s.switchWorktree);
-  const renameWorktree = useWorktreeStore((s) => s.renameWorktree);
+  const setWorktreeTitle = useWorktreeStore((s) => s.setWorktreeTitle);
   const setCustomOrder = useWorktreeStore((s) => s.setCustomOrder);
   const toggleArchived = useWorktreeStore((s) => s.toggleArchived);
   const markArchived = useWorktreeStore((s) => s.markArchived);
@@ -141,7 +141,7 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
 
   /** The New worktree dialog, open with the worktree it nests the new one under, if any. */
   const [newWorktree, setNewWorktree] = useState<{ parent?: WorktreeEntry } | null>(null);
-  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [editingTitlePath, setEditingTitlePath] = useState<string | null>(null);
 
   // Respond to keybinding-triggered create request
   useEffect(() => {
@@ -176,25 +176,25 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
     [expandGroup],
   );
 
-  const handleRenameStart = useCallback(
+  const handleEditTitleStart = useCallback(
     (wt: WorktreeEntry) => {
       if (!expanded) toggleSidebar();
-      setRenamingPath(wt.path);
+      setEditingTitlePath(wt.path);
     },
     [expanded, toggleSidebar],
   );
 
-  const handleRenameFinish = useCallback(
+  const handleEditTitleFinish = useCallback(
     async (wt: WorktreeEntry, value: string) => {
-      setRenamingPath(null);
+      setEditingTitlePath(null);
       try {
-        // Renaming back to the worktree's own name clears the title.
-        await renameWorktree(project.path, wt.path, value === worktreeName(wt) ? "" : value);
+        // Setting it back to the worktree's own name clears the title.
+        await setWorktreeTitle(project.path, wt.path, value === worktreeName(wt) ? "" : value);
       } catch (err) {
-        setMenuError(err instanceof Error ? err.message : "Failed to rename worktree");
+        setMenuError(err instanceof Error ? err.message : "Failed to change the title");
       }
     },
-    [renameWorktree, project.path, setMenuError],
+    [setWorktreeTitle, project.path, setMenuError],
   );
 
   // --- @dnd-kit: drop onto a row to nest, between rows to place it there ---
@@ -404,7 +404,7 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
         archived={archived.has(wt.path)}
         isDragging={wt.path === activeDragId}
         dropZone={dropTarget?.path === wt.path ? dropTarget.zone : null}
-        isRenaming={renamingPath === wt.path}
+        isEditingTitle={editingTitlePath === wt.path}
         homeDir={homeDir}
         knob={
           hasChildren
@@ -416,8 +416,8 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
               }
             : undefined
         }
-        onRenameFinish={(value) => handleRenameFinish(wt, value)}
-        onRenameCancel={() => setRenamingPath(null)}
+        onEditTitleFinish={(value) => handleEditTitleFinish(wt, value)}
+        onEditTitleCancel={() => setEditingTitlePath(null)}
         onSelect={() => !wt.pending && switchWorktree(wt.path)}
         onContextMenu={(e) => !wt.pending && menu.handleContextMenu(e, wt)}
         onToggleArchived={() => toggleArchived(project.path, wt.path)}
@@ -545,7 +545,11 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
         </DragOverlay>
       </DndContext>
 
-      <WorktreeContextMenu menu={menu} onNewChild={handleNewChild} onRename={handleRenameStart} />
+      <WorktreeContextMenu
+        menu={menu}
+        onNewChild={handleNewChild}
+        onEditTitle={handleEditTitleStart}
+      />
 
       {newWorktree && (
         <NewWorktreeDialog
@@ -621,10 +625,10 @@ interface TreeRowProps {
   archived: boolean;
   isDragging: boolean;
   dropZone: RowDrop["zone"] | null;
-  isRenaming: boolean;
+  isEditingTitle: boolean;
   homeDir: string | null;
-  onRenameFinish: (value: string) => void;
-  onRenameCancel: () => void;
+  onEditTitleFinish: (value: string) => void;
+  onEditTitleCancel: () => void;
   onSelect: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onToggleArchived: () => void;
@@ -647,10 +651,10 @@ function TreeRow({
   archived,
   isDragging,
   dropZone,
-  isRenaming,
+  isEditingTitle,
   homeDir,
-  onRenameFinish,
-  onRenameCancel,
+  onEditTitleFinish,
+  onEditTitleCancel,
   onSelect,
   onContextMenu,
   onToggleArchived,
@@ -659,7 +663,7 @@ function TreeRow({
   onKeyDown,
 }: TreeRowProps) {
   const pending = wt.pending !== undefined;
-  const drag = useDraggable({ id: wt.path, disabled: pending || isRenaming });
+  const drag = useDraggable({ id: wt.path, disabled: pending || isEditingTitle });
   const drop = useDroppable({ id: wt.path, disabled: pending });
   const rootRef = useCallback(
     (node: HTMLElement | null) => {
@@ -692,7 +696,7 @@ function TreeRow({
         data-active={isActive || undefined}
         data-drop-inside={dropZone === "inside" || undefined}
         title={expanded ? (wt.title ? `${worktreeName(wt)}\n${wt.path}` : wt.path) : undefined}
-        onClick={isRenaming ? undefined : onSelect}
+        onClick={isEditingTitle ? undefined : onSelect}
         onDoubleClick={onToggleOpen}
         onContextMenu={onContextMenu}
         onKeyDown={onKeyDown}
@@ -711,12 +715,12 @@ function TreeRow({
           {hasNotification && !isActive && <NotificationDot />}
         </div>
         <div className="wt-row-label">
-          {isRenaming ? (
+          {isEditingTitle ? (
             <div className="flex">
               <InlineRenameInput
                 currentName={label}
-                onFinish={onRenameFinish}
-                onCancel={onRenameCancel}
+                onFinish={onEditTitleFinish}
+                onCancel={onEditTitleCancel}
                 className="text-foreground py-0.5"
               />
             </div>

@@ -235,7 +235,7 @@ export interface WorktreeState {
     parentPath: string | null,
   ) => Promise<void>;
   /** Show `title` instead of the worktree name; empty shows the worktree name again. */
-  renameWorktree: (projectPath: string, path: string, title: string) => Promise<void>;
+  setWorktreeTitle: (projectPath: string, path: string, title: string) => Promise<void>;
   /** Turn on worktree metadata for the project, so its worktrees can nest. */
   enableWorktreeMetadata: (projectPath: string) => Promise<void>;
   dismissPendingPlan: () => void;
@@ -515,7 +515,7 @@ export const useWorktreeStore = create<WorktreeState>()(
           }
         },
 
-        renameWorktree: async (projectPath, path, title) => {
+        setWorktreeTitle: async (projectPath, path, title) => {
           const trimmed = title.trim();
           patchEntry(set, projectPath, path, { title: trimmed || undefined });
           try {

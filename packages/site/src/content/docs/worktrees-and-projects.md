@@ -95,7 +95,7 @@ Worktrees can be nested under the worktree they belong to, such as the worktrees
 With nesting on, the worktree menu has:
 
 - **New child worktree**: opens the New worktree dialog for a worktree whose branch starts at the parent's current commit, nested under it.
-- **Rename**: gives the worktree a title, shown instead of its name. Renaming it back to its worktree name removes the title. The worktree's directory and branch keep their names.
+- **Edit title**: changes the title the sidebar shows for the worktree (its name until you give it one). Setting it back to the worktree name removes the title. The worktree's directory and branch keep their names.
 - **Move to top level**: un-nests a nested worktree.
 
 Drag a worktree onto the middle of another worktree's row to nest it there, or onto the top or bottom edge of a row to place it before or after that row, at that row's level: dragging a nested worktree next to a top-level one moves it to the top level. Dragging works the same on the collapsed rail. Removing a worktree that has nested worktrees asks whether to keep them, nested under the removed worktree's own parent (or at the top level), or to remove them too.

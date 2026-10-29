@@ -213,8 +213,10 @@ describe("Sidebar worktree nesting", () => {
   };
 
   // Tests stub these actions; reset() restores state, not actions.
-  const { createWorktree, renameWorktree, setWorktreeParent } = useWorktreeStore.getState();
-  afterEach(() => useWorktreeStore.setState({ createWorktree, renameWorktree, setWorktreeParent }));
+  const { createWorktree, setWorktreeTitle, setWorktreeParent } = useWorktreeStore.getState();
+  afterEach(() =>
+    useWorktreeStore.setState({ createWorktree, setWorktreeTitle, setWorktreeParent }),
+  );
 
   function setNesting(worktreeMetadata: boolean, worktrees = [parent, child]) {
     useWorktreeStore.setState({
@@ -324,7 +326,7 @@ describe("Sidebar worktree nesting", () => {
     render(<Sidebar />);
 
     expect(await menuItems("parent")).toEqual(
-      expect.arrayContaining(["New child worktree", "Rename"]),
+      expect.arrayContaining(["New child worktree", "Edit title"]),
     );
     expect(await menuItems("parent")).not.toContain("Move to top level");
     expect(await menuItems("Child task")).toContain("Move to top level");
@@ -392,20 +394,20 @@ describe("Sidebar worktree nesting", () => {
     expect(screen.getByPlaceholderText("worktree-name")).toBeDefined();
   });
 
-  test("rename writes the title", async () => {
-    const renameWorktree = mock(() => Promise.resolve());
+  test("edit title writes the title", async () => {
+    const setWorktreeTitle = mock(() => Promise.resolve());
     setNesting(true);
-    useWorktreeStore.setState({ renameWorktree });
+    useWorktreeStore.setState({ setWorktreeTitle });
     render(<Sidebar />);
 
     fireEvent.contextMenu(screen.getByText("parent"));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit title" }));
     const input = screen.getByDisplayValue("parent");
     fireEvent.change(input, { target: { value: "Parent work" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() =>
-      expect(renameWorktree).toHaveBeenCalledWith(project.path, parent.path, "Parent work"),
+      expect(setWorktreeTitle).toHaveBeenCalledWith(project.path, parent.path, "Parent work"),
     );
   });
 });

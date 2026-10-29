@@ -45,7 +45,7 @@ export function useWorktreeContextMenu(projectPath: string) {
     position: { x: number; y: number };
     worktree: WorktreeEntry;
   } | null>(null);
-  /** Error of the last remove, move or rename; shown in the remove dialog while it is open. */
+  /** Error of the last remove, move or title change; shown in the remove dialog while it is open. */
   const [error, setError] = useState<string | null>(null);
   const [enablingNesting, setEnablingNesting] = useState(false);
 
@@ -112,17 +112,17 @@ export function useWorktreeContextMenu(projectPath: string) {
 
 /**
  * Renders the worktree context menu (copy, nesting, archive, remove) + removal dialogs.
- * `onNewChild` and `onRename` need the expanded list's inline inputs; without them the items
+ * `onNewChild` and `onEditTitle` need the expanded list's inline inputs; without them the items
  * are left out.
  */
 export function WorktreeContextMenu({
   menu,
   onNewChild,
-  onRename,
+  onEditTitle,
 }: {
   menu: ReturnType<typeof useWorktreeContextMenu>;
   onNewChild?: (wt: WorktreeEntry) => void;
-  onRename?: (wt: WorktreeEntry) => void;
+  onEditTitle?: (wt: WorktreeEntry) => void;
 }) {
   const toggleArchived = useWorktreeStore((s) => s.toggleArchived);
   const markArchived = useWorktreeStore((s) => s.markArchived);
@@ -187,15 +187,15 @@ export function WorktreeContextMenu({
                   New child worktree
                 </ContextMenuItem>
               )}
-              {onRename && (
+              {onEditTitle && (
                 <ContextMenuItem
                   onClick={() => {
                     close();
-                    onRename(wt);
+                    onEditTitle(wt);
                   }}
                 >
                   <PencilIcon className="size-3.5" />
-                  Rename
+                  Edit title
                 </ContextMenuItem>
               )}
               {isNested && (
