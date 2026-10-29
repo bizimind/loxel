@@ -54,6 +54,7 @@ describe("tool registry profile exposure", () => {
       taskManager: new TaskManager(path.join(workspaceRoot, ".tasks")),
       profile,
       runId: "run_test",
+      getEnv: () => undefined,
       emitEvent: async () => {},
       onHumanQuestion: async () => ({ answers: { q1: ["a"] } }),
       onApproval: async () => "allow",

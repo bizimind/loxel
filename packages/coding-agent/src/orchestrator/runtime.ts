@@ -7,6 +7,7 @@ import { SessionStore } from "../session/store.ts";
 import { normalizeToolName } from "../tools/tool-names.ts";
 import { createEventId, createRunId } from "../utils/ids.ts";
 import { redactSecrets } from "../utils/redaction.ts";
+import type { SpawnEnv, SpawnEnvSource } from "../utils/shell.ts";
 import { Orchestrator, type RunInputMessage } from "./loop.ts";
 import { ModelRouter, type ModelRouterOptions } from "./model-router.ts";
 
@@ -80,18 +81,19 @@ export class CodingAgentRuntime {
   private readonly pendingQuestions = new Map<string, PendingQuestion>();
   private readonly diagnosticListeners = new Set<RuntimeDiagnosticListener>();
 
-  private readonly spawnEnv?: Record<string, string | undefined>;
+  /** Read at every spawn; undefined inherits process.env. */
+  private readonly getSpawnEnv: () => SpawnEnv | undefined;
 
   constructor(
     private readonly sink: RuntimeEventSink,
     logger: AppLogger = createNoopLogger(),
     modelOptions?: ModelRouterOptions,
-    spawnEnv?: Record<string, string | undefined>,
+    spawnEnv?: SpawnEnvSource,
   ) {
     this.logger = logger.with({ component: "runtime" });
     this.sessionStore = new SessionStore();
-    this.modelRouter = new ModelRouter(modelOptions ?? {}, this.logger);
-    this.spawnEnv = spawnEnv;
+    this.getSpawnEnv = typeof spawnEnv === "function" ? spawnEnv : () => spawnEnv;
+    this.modelRouter = new ModelRouter(modelOptions ?? {}, this.logger, this.getSpawnEnv());
   }
 
   on(event: "error", listener: RuntimeDiagnosticListener): () => void {
@@ -350,7 +352,7 @@ export class CodingAgentRuntime {
         },
       },
       this.logger,
-      this.spawnEnv,
+      this.getSpawnEnv,
     );
   }
 

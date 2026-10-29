@@ -137,7 +137,7 @@ Click it, or run **Python: Select Interpreter** from the command palette (`Cmd+S
 - **Use automatic detection** goes back to the order above.
 - The rest of the list is every environment Loxel found: the ones above, plus `.venv`, `venv` and `env` environments and Pixi environments in project folders below the worktree root (folders with a `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `Pipfile` or `pixi.toml`), which is how you pick a sub-project's environment in a monorepo.
 
-The choice is saved for that worktree and survives restarts. The language servers switch to it right away, without a restart. If the chosen interpreter is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
+The choice is saved for that worktree and survives restarts. The language servers and the [coding agent](/docs/coding-agent#commands-the-agent-runs)'s next commands switch to it right away, without a restart, and new terminals start with it. If the chosen interpreter is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
 
 A `venvPath` and `venv` setting in `pyrightconfig.json`, or in the `[tool.basedpyright]` (or `[tool.pyright]`) table of `pyproject.toml`, takes precedence over the interpreter Loxel passes to the type checker, whether detected or chosen:
 
@@ -192,4 +192,5 @@ Projects that configure Tombi themselves, with a `tombi.toml` or `.tombi.toml` f
 
 - [Editor](/docs/editor) — the code editor, where diagnostics appear inline, and format on save
 - [Terminals](/docs/terminals) — new terminals start with the worktree's Python environment active
+- [Coding Agent](/docs/coding-agent#commands-the-agent-runs) — the built-in agent's commands run with the worktree's Python environment active
 - [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — runtime configuration reference

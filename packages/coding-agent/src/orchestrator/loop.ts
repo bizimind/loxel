@@ -19,6 +19,7 @@ import { TaskManager } from "../tools/task-manager.ts";
 import type { CanonicalToolName } from "../tools/tool-names.ts";
 import { createPlanFileName, createRunId } from "../utils/ids.ts";
 import { asRecord } from "../utils/record.ts";
+import type { SpawnEnv } from "../utils/shell.ts";
 import {
   verifyConditions,
   formatUnmetConditions,
@@ -212,7 +213,8 @@ export class Orchestrator {
     private readonly modelRouter: ModelRouter,
     private readonly callbacks: OrchestratorCallbacks,
     logger: AppLogger = createNoopLogger(),
-    private readonly spawnEnv?: Record<string, string | undefined>,
+    /** Read at every spawn; undefined inherits process.env. */
+    private readonly getSpawnEnv: () => SpawnEnv | undefined = () => undefined,
   ) {
     this.logger = logger.with({ component: "orchestrator" });
   }
@@ -309,7 +311,7 @@ export class Orchestrator {
     const modelProfile =
       input.modelProfile ?? (session.state.mode === "plan" ? "planner" : "executor");
 
-    const taskManager = new TaskManager(getSessionPaths(session.id).tasksDir, this.spawnEnv);
+    const taskManager = new TaskManager(getSessionPaths(session.id).tasksDir, this.getSpawnEnv);
     const permissionStore = new PermissionStore(session.workspaceRoot, session.id);
 
     const toolContext: ToolRuntimeContext = {
@@ -322,7 +324,7 @@ export class Orchestrator {
       runId,
       declaredTools: normalizeDeclaredTools(session.declaredTools) ?? undefined,
       approvalOverrides: input.approvalOverrides,
-      env: this.spawnEnv,
+      getEnv: this.getSpawnEnv,
       providerConfig: {
         webSearch: this.modelRouter.getWebSearchConfig(),
         webSearchFallback: this.modelRouter.getWebSearchFallbackConfig(),
@@ -705,7 +707,7 @@ export class Orchestrator {
       const verification = await verifyConditions(completionConditions, {
         workspaceRoot: session.workspaceRoot,
         listTasks,
-        env: this.spawnEnv,
+        env: this.getSpawnEnv(),
       });
 
       if (!verification.allMet) {
