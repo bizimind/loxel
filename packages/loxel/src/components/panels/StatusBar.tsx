@@ -24,6 +24,7 @@ import { toKeyBinding } from "@/store/keybindings/key-combo";
 import { usePendingChordStore } from "@/store/keybindings/pending-chord";
 
 import { IndentationStatus } from "./IndentationStatus";
+import { LanguageServerStatus } from "./LanguageServerStatus";
 import { PythonInterpreterStatus } from "./PythonInterpreterStatus";
 
 /** Shows the keystrokes of a chord in progress, like "⌘\ … waiting for the next key". */
@@ -111,6 +112,8 @@ export function StatusBar() {
       <IndentationStatus />
 
       <PythonInterpreterStatus />
+
+      <LanguageServerStatus />
 
       <PendingChordIndicator />
 

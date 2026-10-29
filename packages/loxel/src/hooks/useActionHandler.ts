@@ -15,6 +15,7 @@ import {
 } from "@/lib/focus-navigation";
 import { changeIndentation } from "@/lib/indentation-status";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
+import { restartLanguageServers } from "@/lib/lsp-client";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { selectPythonInterpreter } from "@/lib/python-interpreter";
 import { getActiveEditorFile, getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
@@ -397,6 +398,10 @@ export function useActionHandler(): (actionId: ActionId) => void {
         if (wtPath) void selectPythonInterpreter(wtPath);
         break;
       }
+
+      case "language.restartServers":
+        restartLanguageServers();
+        break;
 
       // -- App --
       case "app.settings":

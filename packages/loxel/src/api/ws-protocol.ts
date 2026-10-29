@@ -324,9 +324,20 @@ export function parseOutputFrame(
   return { terminalId, offset, payload: data.subarray(BIN_OUTPUT_HEADER_SIZE) };
 }
 
+// Close codes of a language-server socket, which tell the client whether to reconnect (see
+// `lsp-connection.ts`).
+
 /**
- * Close code of a language-server socket whose server Loxel restarts (a different binary was
- * picked); the client reconnects, which starts the new server. 4000 and 4001 (replaced by a newer
- * connection, failed to start) are final.
+ * Another connection (another window) took over the worktree's server. Final: reconnecting would
+ * take it back, and the other window would then do the same.
  */
+export const LSP_REPLACED_CLOSE_CODE = 4000;
+/** The server could not start (no binary, or it cannot be executed). Final until the user retries. */
+export const LSP_START_FAILED_CLOSE_CODE = 4001;
+/** Loxel restarts the server (a different binary was picked); the client reconnects at once. */
 export const LSP_RESTART_CLOSE_CODE = 4002;
+/**
+ * The server process exited on its own (crash, out of memory, killed outside Loxel); the client
+ * reconnects with backoff.
+ */
+export const LSP_EXITED_CLOSE_CODE = 4003;

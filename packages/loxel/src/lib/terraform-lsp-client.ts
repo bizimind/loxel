@@ -1,6 +1,9 @@
-import { createWorktreeLspClient } from "./lsp-client";
+import { createLspClient } from "./lsp-client";
 
-const { connect: connectTerraformLsp, disconnect: disconnectTerraformLsp } =
-  createWorktreeLspClient("ws/terraform-lsp", "terraform");
+const { connect: connectTerraformLsp, disconnect: disconnectTerraformLsp } = createLspClient({
+  route: "ws/terraform-lsp",
+  name: "Terraform",
+  languageId: "terraform",
+});
 
 export { connectTerraformLsp, disconnectTerraformLsp };
