@@ -1,6 +1,7 @@
 ---
 import Base from "./Base.astro";
 import { getCollection } from "astro:content";
+import { trackClick, trackScrollDepth } from "../lib/analytics";
 
 interface Props {
   title: string;
@@ -12,6 +13,8 @@ const { title, description } = Astro.props;
 const allDocs = await getCollection("docs");
 const sorted = allDocs.sort((a, b) => a.data.order - b.data.order);
 const currentPath = Astro.url.pathname;
+const isCurrent = (id: string) => currentPath === `/docs/${id}` || currentPath === `/docs/${id}/`;
+const currentSlug = sorted.find((doc) => isCurrent(doc.id))?.id ?? currentPath;
 ---
 
 <Base title={title} description={description}>
@@ -25,11 +28,12 @@ const currentPath = Astro.url.pathname;
           {
             sorted.map((doc) => {
               const href = `/docs/${doc.id}`;
-              const active = currentPath === href || currentPath === href + "/";
+              const active = isCurrent(doc.id);
               return (
                 <li>
                   <a
                     href={href}
+                    {...trackClick("docs_nav_clicked", { from: currentSlug, to: doc.id })}
                     class={`block text-sm px-3 py-1.5 rounded-md transition-colors ${
                       active
                         ? "bg-primary/15 text-accent font-medium"
@@ -45,7 +49,10 @@ const currentPath = Astro.url.pathname;
         </ul>
       </nav>
     </aside>
-    <article class="flex-1 min-w-0 prose max-w-3xl">
+    <article
+      class="flex-1 min-w-0 prose max-w-3xl"
+      {...trackScrollDepth("docs_scroll_depth", { slug: currentSlug })}
+    >
       <slot />
     </article>
   </div>
