@@ -25,7 +25,7 @@ wt add fix/terminal-title-after-rename --meta loxel-parent-wt=<id> --meta 'loxel
 
 ## When the script fails
 
-Continue with `/quick-pr` unchanged (a flat, untitled worktree, no `--meta`) and add a note to your report: the worktree is not nested, with the script's reason. Do not run the `wt init` it suggests yourself: it changes the repo's git config.
+Continue with `/quick-pr` unchanged, minus `--meta loxel-parent-wt` (`/quick-pr` step 2 still passes the title, and already falls back when metadata is off), and add a note to your report: the worktree is not nested, with the script's reason. Do not run the `wt init` it suggests yourself: it changes the repo's git config.
 
 ## Listing children
 
