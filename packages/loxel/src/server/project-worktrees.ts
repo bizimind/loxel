@@ -1,7 +1,7 @@
 /**
  * The worktree list Loxel shows for a project, and the worktree metadata Loxel owns: the parent
- * link that nests a worktree under another (`loxel-parent-wt`, a `wt-id`) and the display name
- * shown instead of its name (`loxel-pretty-name`). Metadata is stored by `wt` and needs
+ * link that nests a worktree under another (`loxel-parent-wt`, a `wt-id`) and the title
+ * shown instead of its name (`loxel-title`). Metadata is stored by `wt` and needs
  * `wt init --worktree-metadata on`.
  */
 import { stat } from "node:fs/promises";
@@ -25,22 +25,22 @@ import { childrenByParent, descendantsOf, resolveParents } from "@/lib/worktree-
 import { INTERNAL_WORKTREE_PREFIX } from "./worktree-utils";
 
 export const PARENT_KEY = "loxel-parent-wt";
-export const DISPLAY_NAME_KEY = "loxel-pretty-name";
+export const TITLE_KEY = "loxel-title";
+/** Where titles were stored before `loxel-title`; still read, and cleared when a title is written. */
+const LEGACY_TITLE_KEY = "loxel-pretty-name";
 
 /** A listed worktree: always wt-managed, so it always has a wt name. */
 export type ProjectWorktree = Omit<WorktreeEntry, "pending"> & { wtName: string };
 
 /** The entry fields a worktree's metadata provides; empty values count as absent. */
-function metaFields(
-  meta: WorktreeMeta,
-): Pick<WorktreeEntry, "wtId" | "parentWtId" | "displayName"> {
+function metaFields(meta: WorktreeMeta): Pick<WorktreeEntry, "wtId" | "parentWtId" | "title"> {
   const wtId = meta[WORKTREE_ID_KEY];
   const parentWtId = meta[PARENT_KEY];
-  const displayName = meta[DISPLAY_NAME_KEY]?.trim();
+  const title = (meta[TITLE_KEY] ?? meta[LEGACY_TITLE_KEY])?.trim();
   return {
     ...(wtId ? { wtId } : {}),
     ...(parentWtId ? { parentWtId } : {}),
-    ...(displayName ? { displayName } : {}),
+    ...(title ? { title } : {}),
   };
 }
 
@@ -121,7 +121,7 @@ export interface WorktreeMetaUpdate {
   /** Nest under the worktree at this path, or move to the top level */
   parentPath?: string | null;
   /** Show this name instead of the worktree name; empty or null shows the worktree name again */
-  displayName?: string | null;
+  title?: string | null;
 }
 
 /**
@@ -148,10 +148,11 @@ export async function updateWorktreeMeta(
     values[PARENT_KEY] = await parentId(projectPath, parent);
   }
 
-  if (update.displayName !== undefined) {
-    const displayName = update.displayName?.trim();
-    if (displayName) values[DISPLAY_NAME_KEY] = displayName;
-    else keys.push(DISPLAY_NAME_KEY);
+  if (update.title !== undefined) {
+    const title = update.title?.trim();
+    if (title) values[TITLE_KEY] = title;
+    else keys.push(TITLE_KEY);
+    keys.push(LEGACY_TITLE_KEY);
   }
 
   if (Object.keys(values).length > 0)

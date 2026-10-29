@@ -10,7 +10,14 @@ import type { NestedRemoval, WorktreeRemovePlan } from "@/api/worktree-removal-m
 import { STORAGE_PREFIX } from "@/lib/env";
 import { findTreeRoot } from "@/lib/project-file-helpers";
 import { toggleSet } from "@/lib/set-utils";
-import { buildWorktreeRows, type WorktreeRow } from "@/lib/worktree-hierarchy";
+import {
+  archivedSet,
+  buildWorktreeRows,
+  buildWorktreeTree,
+  resolveParents,
+  type WorktreeNode,
+  type WorktreeRow,
+} from "@/lib/worktree-hierarchy";
 
 import { deriveProject, useProjectStore } from "./projects";
 import { serverWorktreesStorage } from "./server-storage";
@@ -64,8 +71,8 @@ export interface ProjectState extends Partial<ProjectConfig> {
   worktrees: WorktreeEntry[];
   /** User-defined worktree display order, across all nesting levels. Persisted. */
   customOrder?: string[];
-  /** Worktree paths hidden (with everything nested below them) in the collapsed rail. Persisted. */
-  hiddenPaths?: string[];
+  /** Worktrees moved to the project's Archive group, each with everything nested below it. Persisted. */
+  archivedPaths?: string[];
   /** Worktrees whose nested worktrees are folded away in the sidebar. Persisted. */
   collapsedPaths?: string[];
 }
@@ -73,7 +80,7 @@ export interface ProjectState extends Partial<ProjectConfig> {
 const EMPTY_PROJECT: ProjectState = { worktrees: [] };
 
 /** The per-project lists saved through server storage and synced across windows. */
-const PERSISTED_KEYS = ["customOrder", "hiddenPaths", "collapsedPaths"] as const;
+const PERSISTED_KEYS = ["customOrder", "archivedPaths", "collapsedPaths"] as const;
 export type PersistedProjectState = Pick<ProjectState, (typeof PERSISTED_KEYS)[number]>;
 
 /** The persisted lists of every project that has any. */
@@ -102,8 +109,11 @@ export function mergePersistedProjectStates(
   for (const [path, entry] of Object.entries(saved)) {
     if (!entry || typeof entry !== "object") continue;
     const next: ProjectState = { ...(merged[path] ?? { worktrees: [] }) };
+    const record = entry as Record<string, unknown>;
     for (const key of PERSISTED_KEYS) {
-      const value: unknown = (entry as Record<string, unknown>)[key];
+      // Archive replaced "hide": worktrees saved as hidden come back archived.
+      const value: unknown =
+        record[key] ?? (key === "archivedPaths" ? record.hiddenPaths : undefined);
       if (Array.isArray(value)) next[key] = value.filter((x) => typeof x === "string");
     }
     merged[path] = next;
@@ -118,22 +128,37 @@ function prunePersisted(ps: ProjectState | undefined, valid: ReadonlySet<string>
   ) as PersistedProjectState;
 }
 
-/** The project's worktrees as the expanded sidebar lists them: nested, collapsed subtrees left out. */
+/** The project's worktrees split into the main list and its Archive group, each in display order. */
+function splitArchived(ps: ProjectState): { listed: WorktreeEntry[]; archived: WorktreeEntry[] } {
+  const ordered = getOrderedWorktrees(ps.worktrees, ps.customOrder);
+  const archived = archivedSet(ps.worktrees, ps.archivedPaths ?? []);
+  return {
+    listed: ordered.filter((wt) => !archived.has(wt.path)),
+    archived: ordered.filter((wt) => archived.has(wt.path)),
+  };
+}
+
+/** The project's listed (not archived) worktrees as the sidebar shows them: nested, collapsed subtrees left out. */
 export function getWorktreeRows(ps: ProjectState): WorktreeRow<WorktreeEntry>[] {
-  return buildWorktreeRows(
-    getOrderedWorktrees(ps.worktrees, ps.customOrder),
-    new Set(ps.collapsedPaths),
-    new Set(ps.hiddenPaths),
-  );
+  return buildWorktreeRows(splitArchived(ps).listed, new Set(ps.collapsedPaths));
+}
+
+/** The listed and archived worktrees as trees, for rendering the sidebar. */
+export function getWorktreeTrees(ps: ProjectState): {
+  listed: WorktreeNode<WorktreeEntry>[];
+  archived: WorktreeNode<WorktreeEntry>[];
+} {
+  const { listed, archived } = splitArchived(ps);
+  return { listed: buildWorktreeTree(listed), archived: buildWorktreeTree(archived) };
 }
 
 /**
- * The worktrees `Ctrl+Alt+1`–`0` number: the sidebar's visible order without hidden subtrees or
- * pending entries, the same whether or not the sidebar is expanded.
+ * The worktrees `Ctrl+Alt+1`–`0` number: the sidebar's visible order without collapsed subtrees,
+ * archived worktrees or pending entries, the same whether or not the sidebar is expanded.
  */
 export function getNumberedWorktrees(ps: ProjectState): WorktreeEntry[] {
   return getWorktreeRows(ps)
-    .filter((row) => !row.hidden && !row.wt.pending)
+    .filter((row) => !row.wt.pending)
     .map((row) => row.wt);
 }
 
@@ -170,6 +195,8 @@ export interface WorktreeState {
 
   /** Flag set by keybinding to trigger the inline create worktree UI. */
   createWorktreeRequested: boolean;
+  /** Projects whose Archive group is open in the sidebar; every Archive starts closed. */
+  openArchives: string[];
 
   /** Apply enriched project data (called by project store after fetchProjects). */
   applyEnrichedProjects: (enriched: EnrichedProject[]) => void;
@@ -202,8 +229,8 @@ export interface WorktreeState {
     path: string,
     parentPath: string | null,
   ) => Promise<void>;
-  /** Show `displayName` instead of the worktree name; empty shows the worktree name again. */
-  renameWorktree: (projectPath: string, path: string, displayName: string) => Promise<void>;
+  /** Show `title` instead of the worktree name; empty shows the worktree name again. */
+  renameWorktree: (projectPath: string, path: string, title: string) => Promise<void>;
   /** Turn on worktree metadata for the project, so its worktrees can nest. */
   enableWorktreeMetadata: (projectPath: string) => Promise<void>;
   dismissPendingPlan: () => void;
@@ -213,7 +240,18 @@ export interface WorktreeState {
   clearCreateWorktreeRequest: () => void;
 
   setCustomOrder: (projectPath: string, orderedPaths: string[]) => void;
-  toggleVisibility: (projectPath: string, path: string) => void;
+  /**
+   * Move a worktree, with everything nested below it, to the project's Archive group, or back out.
+   * A worktree archived as part of an ancestor brings that whole archived subtree back.
+   */
+  toggleArchived: (projectPath: string, path: string) => void;
+  /**
+   * Archive `path` in its own right, so it stays archived when it moves out of an archived
+   * worktree it was archived with. Does nothing when it already is.
+   */
+  markArchived: (projectPath: string, path: string) => void;
+  /** Open or close the project's Archive group. */
+  toggleArchiveOpen: (projectPath: string) => void;
   /** Fold or unfold the worktrees nested below `path`. */
   toggleCollapsed: (projectPath: string, path: string) => void;
   reset: () => void;
@@ -242,6 +280,7 @@ export const useWorktreeStore = create<WorktreeState>()(
         pendingAddPlan: null,
         pendingRemovePlan: null,
         createWorktreeRequested: false,
+        openArchives: [],
 
         applyEnrichedProjects: (enriched) => {
           // Derive the active project to initialize activeWorktreePath for non-bare repos
@@ -466,11 +505,11 @@ export const useWorktreeStore = create<WorktreeState>()(
           }
         },
 
-        renameWorktree: async (projectPath, path, displayName) => {
-          const trimmed = displayName.trim();
-          patchEntry(set, projectPath, path, { displayName: trimmed || undefined });
+        renameWorktree: async (projectPath, path, title) => {
+          const trimmed = title.trim();
+          patchEntry(set, projectPath, path, { title: trimmed || undefined });
           try {
-            await api.updateWorktreeMeta(projectPath, path, { displayName: trimmed || null });
+            await api.updateWorktreeMeta(projectPath, path, { title: trimmed || null });
           } finally {
             await get().refreshProjectWorktrees(projectPath);
           }
@@ -497,15 +536,29 @@ export const useWorktreeStore = create<WorktreeState>()(
           set((s) => ({ byProject: patchProject(s, projectPath, { customOrder: orderedPaths }) }));
         },
 
-        toggleVisibility: (projectPath, wtPath) => {
+        toggleArchived: (projectPath, wtPath) => {
           set((s) => {
-            const current = getProject(s, projectPath).hiddenPaths ?? [];
+            const ps = getProject(s, projectPath);
             return {
               byProject: patchProject(s, projectPath, {
-                hiddenPaths: [...toggleSet(new Set(current), wtPath)],
+                archivedPaths: toggleArchivedPaths(ps.worktrees, ps.archivedPaths ?? [], wtPath),
               }),
             };
           });
+        },
+
+        markArchived: (projectPath, wtPath) => {
+          set((s) => {
+            const current = getProject(s, projectPath).archivedPaths ?? [];
+            if (current.includes(wtPath)) return {};
+            return {
+              byProject: patchProject(s, projectPath, { archivedPaths: [...current, wtPath] }),
+            };
+          });
+        },
+
+        toggleArchiveOpen: (projectPath) => {
+          set((s) => ({ openArchives: [...toggleSet(new Set(s.openArchives), projectPath)] }));
         },
 
         toggleCollapsed: (projectPath, wtPath) => {
@@ -528,6 +581,7 @@ export const useWorktreeStore = create<WorktreeState>()(
             pendingAddPlan: null,
             pendingRemovePlan: null,
             createWorktreeRequested: false,
+            openArchives: [],
           });
         },
       }),
@@ -565,6 +619,28 @@ function releaseWorktree(path: string): void {
   purgeWorktreeStores(path);
   purgeWorktreeCache(path);
   wsClient.unsubscribeWorktree(path);
+}
+
+/**
+ * `archivedPaths` with `path` archived or brought back. Archiving drops archived paths below it,
+ * which it now covers; bringing back a worktree archived through an ancestor brings back that
+ * ancestor's whole subtree, including worktrees in it archived in their own right.
+ */
+export function toggleArchivedPaths(
+  worktrees: readonly WorktreeEntry[],
+  archivedPaths: readonly string[],
+  path: string,
+): string[] {
+  const parents = resolveParents(worktrees);
+  const ancestorsOf = (p: string): string[] => {
+    const chain: string[] = [];
+    for (let parent = parents.get(p); parent; parent = parents.get(parent)) chain.push(parent);
+    return chain;
+  };
+  const current = new Set(archivedPaths);
+  const root = [path, ...ancestorsOf(path)].find((p) => current.has(p));
+  if (root) return archivedPaths.filter((p) => p !== root && !ancestorsOf(p).includes(root));
+  return [...archivedPaths.filter((p) => !ancestorsOf(p).includes(path)), path];
 }
 
 // ── Optimistic update helpers ──────────────────────────────────────────

@@ -2313,7 +2313,7 @@ function optionalNullableString(
   throw new Error(`${field} must be a string or null`);
 }
 
-// POST /api/worktree/meta — nest a worktree under another (or un-nest it) and set its display name
+// POST /api/worktree/meta — nest a worktree under another (or un-nest it) and set its title
 async function handleUpdateWorktreeMeta(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
   const projectPath = requireString(body, "projectPath");
@@ -2322,7 +2322,7 @@ async function handleUpdateWorktreeMeta(req: Request, ctx: RouteContext): Promis
   const wtPath = requireString(body, "path");
   const update: WorktreeMetaUpdate = {
     parentPath: optionalNullableString(body, "parentPath"),
-    displayName: optionalNullableString(body, "displayName"),
+    title: optionalNullableString(body, "title"),
   };
 
   try {

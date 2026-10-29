@@ -165,28 +165,32 @@ describe("Sidebar worktree context menu", () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  test("hide and show toggle the worktree's visibility", async () => {
+  test("archive moves the worktree into the Archive group, and unarchive brings it back", async () => {
     openMenu();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Hide worktree" }));
-    expect(useWorktreeStore.getState().byProject[project.path]?.hiddenPaths).toEqual([
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive worktree" }));
+    expect(useWorktreeStore.getState().byProject[project.path]?.archivedPaths).toEqual([
       worktree.path,
     ]);
+    // The Archive starts closed, so the worktree is out of sight until it is opened.
+    await waitFor(() => expect(screen.queryByText("topic")).toBeNull());
+    fireEvent.click(screen.getByTitle("Open the archive"));
 
-    fireEvent.contextMenu(screen.getByText("topic"));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Show worktree" }));
-    expect(useWorktreeStore.getState().byProject[project.path]?.hiddenPaths).toEqual([]);
+    fireEvent.contextMenu(await screen.findByText("topic"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Unarchive worktree" }));
+    expect(useWorktreeStore.getState().byProject[project.path]?.archivedPaths).toEqual([]);
   });
 
-  test("hiding from the collapsed rail removes the worktree icon", async () => {
+  test("archiving from the collapsed rail moves the worktree icon into the Archive", async () => {
     useProjectStore.setState({ sidebarExpanded: false });
     const { container } = render(<Sidebar />);
-    const icon = () => container.querySelector(`[aria-roledescription="sortable"] button`);
-    expect(icon()).not.toBeNull();
+    const entry = (path: string) => container.querySelector(`[data-sidebar-entry="${path}"]`);
+    expect(entry(worktree.path)).not.toBeNull();
 
-    fireEvent.contextMenu(icon()!);
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Hide worktree" }));
+    fireEvent.contextMenu(entry(worktree.path)!);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive worktree" }));
 
-    await waitFor(() => expect(icon()).toBeNull());
+    await waitFor(() => expect(entry(worktree.path)).toBeNull());
+    expect(entry(`archive:${project.path}`)).not.toBeNull();
   });
 });
 
@@ -204,7 +208,7 @@ describe("Sidebar worktree nesting", () => {
     wtName: "child",
     wtId: "id-child",
     parentWtId: "id-parent",
-    displayName: "Child task",
+    title: "Child task",
     createdAt: "2026-01-02T00:00:00.000Z",
   };
 
@@ -226,7 +230,7 @@ describe("Sidebar worktree nesting", () => {
     return items.map((item) => item.textContent ?? "");
   }
 
-  test("shows a child under its parent with its display name, and folds it away", () => {
+  test("shows a child under its parent with its title, and folds it away", () => {
     setNesting(true);
     render(<Sidebar />);
 
@@ -248,14 +252,62 @@ describe("Sidebar worktree nesting", () => {
     expect(screen.queryByTitle("Collapse nested worktrees")).toBeNull();
   });
 
-  test("the collapsed rail shows only top-level worktrees, with their nested count", () => {
+  test("the collapsed rail shows nested worktrees in their group, folded by its tab", () => {
     setNesting(true);
     useProjectStore.setState({ sidebarExpanded: false });
     const { container } = render(<Sidebar />);
+    const entries = () =>
+      [...container.querySelectorAll("[data-sidebar-entry]")].map((e) =>
+        e.getAttribute("data-sidebar-entry"),
+      );
 
-    const icons = container.querySelectorAll(`[aria-roledescription="sortable"]`);
-    expect(icons).toHaveLength(1);
-    expect(screen.getByLabelText("1 nested worktree")).toBeDefined();
+    expect(entries()).toEqual([project.path, parent.path, child.path]);
+    fireEvent.click(screen.getByTitle("Collapse nested worktrees"));
+    expect(entries()).toEqual([project.path, parent.path]);
+    expect(screen.getByTitle("Expand nested worktrees").textContent).toBe("1");
+  });
+
+  test("the collapsed rail folds nesting below its third level into the count", () => {
+    const level = (name: string, parentId?: string): WorktreeEntry => ({
+      ...project.worktrees[0]!,
+      path: `/repo/.worktrees/${name}`,
+      wtName: name,
+      wtId: `id-${name}`,
+      ...(parentId ? { parentWtId: parentId } : {}),
+    });
+    setNesting(true, [
+      level("one"),
+      level("two", "id-one"),
+      level("three", "id-two"),
+      level("four", "id-three"),
+    ]);
+    useProjectStore.setState({ sidebarExpanded: false });
+    const { container } = render(<Sidebar />);
+
+    expect(container.querySelector('[data-sidebar-entry="/repo/.worktrees/three"]')).not.toBeNull();
+    expect(container.querySelector('[data-sidebar-entry="/repo/.worktrees/four"]')).toBeNull();
+
+    act(() => useProjectStore.setState({ sidebarExpanded: true }));
+    expect(container.querySelector('[data-sidebar-entry="/repo/.worktrees/four"]')).not.toBeNull();
+  });
+
+  test("arrow keys fold and unfold a group and step between parent and child", () => {
+    setNesting(true);
+    const { container } = render(<Sidebar />);
+    const entry = (path: string) =>
+      container.querySelector<HTMLElement>(`[data-sidebar-entry="${path}"]`);
+
+    fireEvent.keyDown(entry(parent.path)!, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(entry(child.path));
+    fireEvent.keyDown(entry(child.path)!, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(entry(parent.path));
+
+    fireEvent.keyDown(entry(parent.path)!, { key: "ArrowLeft" });
+    expect(useWorktreeStore.getState().byProject[project.path]?.collapsedPaths).toEqual([
+      parent.path,
+    ]);
+    fireEvent.keyDown(entry(parent.path)!, { key: "ArrowRight" });
+    expect(useWorktreeStore.getState().byProject[project.path]?.collapsedPaths).toEqual([]);
   });
 
   test("offers to enable nesting while metadata is off", async () => {
@@ -309,7 +361,7 @@ describe("Sidebar worktree nesting", () => {
     );
   });
 
-  test("rename writes the display name", async () => {
+  test("rename writes the title", async () => {
     const renameWorktree = mock(() => Promise.resolve());
     setNesting(true);
     useWorktreeStore.setState({ renameWorktree });

@@ -688,7 +688,7 @@ export async function createWorktree(
 export async function updateWorktreeMeta(
   projectPath: string,
   wtPath: string,
-  update: { parentPath?: string | null; displayName?: string | null },
+  update: { parentPath?: string | null; title?: string | null },
 ) {
   return fetchJson<{ success: true }>("/worktree/meta", {
     method: "POST",

@@ -107,8 +107,8 @@ export interface WorktreeEntry {
   wtId?: string;
   /** `wt-id` of the worktree this one is nested under (`loxel-parent-wt` metadata). */
   parentWtId?: string;
-  /** Name shown instead of the worktree name (`loxel-pretty-name` metadata). */
-  displayName?: string;
+  /** Title shown instead of the worktree name (`loxel-title` metadata). */
+  title?: string;
   /** Set while the entry is being created or removed and not yet confirmed by the server. */
   pending?: "creating" | "removing";
 }
