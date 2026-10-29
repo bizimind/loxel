@@ -1,8 +1,9 @@
-import { createWorktreeLspClient } from "./lsp-client";
+import { createLspClient } from "./lsp-client";
 
-const { connect: connectPythonLsp, disconnect: disconnectPythonLsp } = createWorktreeLspClient(
-  "ws/python-lsp",
-  "python",
-);
+const { connect: connectPythonLsp, disconnect: disconnectPythonLsp } = createLspClient({
+  route: "ws/python-lsp",
+  name: "basedpyright",
+  languageId: "python",
+});
 
 export { connectPythonLsp, disconnectPythonLsp };

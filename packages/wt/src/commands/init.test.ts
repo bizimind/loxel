@@ -3,36 +3,13 @@ import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 
 import { git, gitSucceeds } from "../git/index.ts";
-import { planInit } from "../lib/index.ts";
-import { createTestRepo, type TestRepo } from "../test-repo.ts";
+import { executeInit, planInit } from "../lib/index.ts";
+import { createTestRepo, runCli, type TestRepo } from "../test-repo.ts";
 import { parseFlags, resolveDecisions, type InitOptions } from "./init.ts";
 
 let repo: TestRepo;
 
 afterEach(() => repo.cleanup());
-
-const CLI = join(import.meta.dir, "..", "cli.ts");
-
-/** Run the CLI with no terminal on stdin, as an agent or script would. */
-async function runCli(
-  args: string[],
-  cwd: string,
-  env: Record<string, string | undefined> = process.env,
-): Promise<{ exitCode: number; json: unknown }> {
-  const proc = Bun.spawn([process.execPath, CLI, ...args], {
-    cwd,
-    env,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, , exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { exitCode, json: JSON.parse(stdout) };
-}
 
 async function decide(options: InitOptions) {
   const plan = await planInit(repo.root);
@@ -68,7 +45,7 @@ describe("resolveDecisions", () => {
   test("flags decide their own checks and leave the rest undecided", async () => {
     repo = await createTestRepo({ bare: true });
     expect(await decide({ fetchRefspec: true, worktreeMetadata: "on" })).toEqual({
-      apply: ["fetch-refspec", "worktree-metadata-on"],
+      apply: ["fetch-refspec", "worktree-metadata-on", "worktree-ids"],
       undecided: ["main-worktree"],
     });
   });
@@ -112,12 +89,31 @@ describe("wt init without a terminal", () => {
       outcomes: [
         { id: "fetch-refspec", status: "applied" },
         { id: "worktree-metadata-on", status: "applied" },
+        { id: "worktree-ids", status: "not-needed" },
         { id: "main-worktree", status: "applied" },
       ],
       pending: [],
     });
     expect(await git(["config", "--get", "extensions.worktreeConfig"], repo.root)).toBe("true");
     await git(["status"], join(repo.root, ".worktrees", "main"));
+  });
+
+  test("--worktree-metadata on backfills ids once metadata is already on", async () => {
+    repo = await createTestRepo();
+    await executeInit(repo.root, { apply: ["worktree-metadata-on"] });
+    const plain = join(repo.root, ".claude", "worktrees", "x");
+    await git(["worktree", "add", "-b", "x", plain], repo.root);
+
+    const pending = await runCli(["init", "-j"], repo.root);
+    expect(pending.json).toMatchObject({
+      pending: [{ check: { id: "worktree-ids" }, actions: [{ flag: "--worktree-metadata on" }] }],
+    });
+
+    const { exitCode, json } = await runCli(["init", "-j", "--worktree-metadata", "on"], repo.root);
+    expect(exitCode).toBe(0);
+    expect(json).toMatchObject({ outcomes: [{}, { id: "worktree-ids", status: "applied" }] });
+    const id = await runCli(["meta", "get", "wt-id", "-j"], plain);
+    expect(id.json).toMatchObject({ path: plain, value: expect.any(String) });
   });
 
   test("errors outside a repository instead of creating one", async () => {

@@ -22,13 +22,17 @@ import {
   isWorktreeConfigStranded,
   listWorktrees,
   pathExists,
+  readMeta,
   readWorktreeConfigState,
   resolveRemoteDefault,
   strandedWorktreeConfigKeys,
   resolveRepoRoot,
   runGit,
+  worktreeConfigFiles,
+  WORKTREE_ID_KEY,
   type Worktree,
   type WorktreeConfigState,
+  type WorktreeMeta,
 } from "../git/index.ts";
 import { HOOK_CLEAN, HOOK_INIT, HOOK_RENAME } from "../hooks/run.ts";
 import { shellArg } from "./shell-quote.ts";
@@ -45,6 +49,7 @@ export type CheckId =
   | "origin-head"
   | "main-worktree"
   | "worktree-metadata"
+  | "worktree-ids"
   | "moved-worktrees"
   | "stale-worktrees"
   | "locked-worktrees"
@@ -70,6 +75,7 @@ export type InitActionId =
   | "prune-worktrees"
   | "worktree-metadata-on"
   | "worktree-metadata-off"
+  | "worktree-ids"
   | "main-worktree";
 
 /** The order `executeInit` applies actions in: each may rely on the ones before it. */
@@ -80,6 +86,7 @@ export const INIT_ACTION_ORDER: readonly InitActionId[] = [
   "prune-worktrees",
   "worktree-metadata-on",
   "worktree-metadata-off",
+  "worktree-ids",
   "main-worktree",
 ];
 
@@ -94,7 +101,10 @@ export interface InitAction {
   recommendation: string;
   /** What else applying it does or costs */
   tradeoffs: string[];
-  /** The exact commands it runs, in order, from the repository root */
+  /**
+   * The exact commands it runs, in order, from the repository root. A step wt performs itself,
+   * with no command to type (assigning a `wt-id`), is a `#` comment saying what it does.
+   */
   commands: string[];
 }
 
@@ -102,7 +112,9 @@ export interface InitAction {
 export type InitStep =
   /** `onlyWithOriginRefs`: skipped when no `refs/remotes/origin/*` exists (origin has no branches) */
   | { kind: "git"; args: string[]; onlyWithOriginRefs?: true }
-  | { kind: "add-worktree"; name: string; branch: string };
+  | { kind: "add-worktree"; name: string; branch: string }
+  /** Give each worktree at `paths` a `wt-id` if it has none, under wt's metadata lock */
+  | { kind: "assign-worktree-ids"; paths: string[] };
 
 /** An action together with the steps behind its `commands`. */
 export interface PlannedAction extends InitAction {
@@ -137,6 +149,11 @@ export interface RepoState {
   /** The local branch a bare repo's first worktree checks out, when there is one */
   defaultBranch: string | null;
   worktreeConfig: WorktreeConfigState;
+  /**
+   * Worktrees with a checkout (not the bare repo, not stale) whose metadata has no `wt-id`, read
+   * whether or not metadata is on. A section git copied from another worktree does not count.
+   */
+  withoutId: string[];
   /** Hook scripts present at the root */
   hooks: string[];
   /** A `wt.yaml` from the config-based CLI is at the root */
@@ -188,6 +205,7 @@ export async function inspectRepo(repoPath: string): Promise<RepoState> {
     remoteDefault,
     defaultBranch: bare ? await bareDefaultBranch(root, remoteDefault) : null,
     worktreeConfig,
+    withoutId: await findWorktreesWithoutId(worktreeConfig.commonDir, worktrees),
     hooks,
     legacyConfig: await pathExists(join(root, "wt.yaml")),
   };
@@ -231,7 +249,8 @@ export function evaluate(state: RepoState): { checks: Check[]; actions: PlannedA
   }
   addRemoteChecks(state, add);
   addMainWorktreeCheck(state, add);
-  addWorktreeMetadataCheck(state.root, state.worktreeConfig, add);
+  addWorktreeMetadataCheck(state, add);
+  addWorktreeIdsCheck(state, add);
   addWorktreeListChecks(state, add);
   add({
     id: "hooks",
@@ -247,6 +266,9 @@ export function evaluate(state: RepoState): { checks: Check[]; actions: PlannedA
 
 /** Render a step as the command a user would type in the repository root. */
 export function describeStep(step: InitStep): string {
+  if (step.kind === "assign-worktree-ids") {
+    return `# give these worktrees a wt-id: ${step.paths.map(shellArg).join(" ")}`;
+  }
   if (step.kind === "add-worktree") {
     return `wt add ${shellArg(step.name)} -b ${shellArg(step.branch)}`;
   }
@@ -463,7 +485,8 @@ function addMainWorktreeCheck(state: RepoState, add: AddCheck): void {
   );
 }
 
-function addWorktreeMetadataCheck(root: string, config: WorktreeConfigState, add: AddCheck): void {
+function addWorktreeMetadataCheck(state: RepoState, add: AddCheck): void {
+  const { root, worktreeConfig: config } = state;
   const base = { id: "worktree-metadata", title: "Worktree metadata" } as const;
   // Steps run in the root, so show the config files relative to it: `config.worktree` in a bare
   // repo, `.git/config.worktree` in a regular one.
@@ -489,10 +512,15 @@ function addWorktreeMetadataCheck(root: string, config: WorktreeConfigState, add
                 `Tools that don't support extensions.worktreeConfig (some libgit2- and JGit-based apps) read only the shared config and may no longer see ${moved}`,
               ]
             : []),
+          ...(state.withoutId.length > 0
+            ? [`Gives the ${state.withoutId.length} existing worktree(s) without one a wt-id`]
+            : []),
           "Undo with: wt init --worktree-metadata off",
         ],
       },
-      toSteps(enableWorktreeConfigCommands(config)),
+      // Backfilled here so that turning metadata on, by flag or in the walkthrough, always
+      // leaves every worktree with an id; `worktree-ids` covers repositories where it is on.
+      [...toSteps(enableWorktreeConfigCommands(config)), ...assignIdsStep(state.withoutId)],
     );
   const disable = (recommendation: string) => {
     const keys = config.worktreeKeys.flatMap((entry) => entry.keys);
@@ -575,6 +603,41 @@ function addWorktreeMetadataCheck(root: string, config: WorktreeConfigState, add
     },
     disable("Only if a tool you use does not support extensions.worktreeConfig"),
   );
+}
+
+function addWorktreeIdsCheck(state: RepoState, add: AddCheck): void {
+  // While the config is broken, its repair (`worktree-metadata-on`) gives the ids as well.
+  if (!state.worktreeConfig.enabled || isWorktreeConfigBroken(state.worktreeConfig)) return;
+  const base = { id: "worktree-ids", title: "Worktree ids" } as const;
+  if (state.withoutId.length === 0) {
+    add({ ...base, status: "ok", summary: "Every worktree has a wt-id", affects: [] });
+    return;
+  }
+  add(
+    {
+      ...base,
+      status: "warn",
+      summary: `Without a wt-id (created before metadata was on, or by plain git worktree add): ${state.withoutId.join(", ")}`,
+      affects: [
+        "wt meta get <name> wt-id prints nothing for them, so tools that reference worktrees by id cannot refer to them until their metadata is first written",
+      ],
+    },
+    plannedAction(
+      {
+        id: "worktree-ids",
+        check: "worktree-ids",
+        title: "Give every worktree without one a wt-id",
+        recommended: true,
+        recommendation: "Every worktree then has the stable id tools reference it by",
+        tradeoffs: ["Writes only wt-meta.wt-id into each worktree's own config"],
+      },
+      assignIdsStep(state.withoutId),
+    ),
+  );
+}
+
+function assignIdsStep(paths: string[]): InitStep[] {
+  return paths.length > 0 ? [{ kind: "assign-worktree-ids", paths }] : [];
 }
 
 function addWorktreeListChecks(state: RepoState, add: AddCheck): void {
@@ -712,6 +775,20 @@ async function isCheckoutOf(
   const gitdirFile = Bun.file(join(commonDir, "worktrees", basename(pointer), "gitdir"));
   if (!(await gitdirFile.exists())) return false;
   return (await gitdirFile.text()).trim() === join(recordedPath, ".git");
+}
+
+async function findWorktreesWithoutId(commonDir: string, worktrees: Worktree[]): Promise<string[]> {
+  const files = await worktreeConfigFiles(commonDir, worktrees);
+  const missing = await Promise.all(
+    worktrees.map(async (wt) => {
+      const file = files.get(wt.path);
+      if (wt.bare || wt.prunable || !file) return false;
+      // An unreadable file counts as missing: the fix then fails with git's own error.
+      const meta = await readMeta(commonDir, file).catch((): WorktreeMeta => ({}));
+      return !meta[WORKTREE_ID_KEY];
+    }),
+  );
+  return worktrees.filter((_, i) => missing[i]).map((wt) => wt.path);
 }
 
 /** The branch a bare repo's HEAD names, else the local twin of the remote default. */

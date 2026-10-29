@@ -459,7 +459,7 @@ async function canonicalize(path: string): Promise<string> {
 }
 
 /** Canonicalize the longest existing ancestor and retain any missing suffix. */
-async function canonicalizePotentialPath(path: string): Promise<string> {
+export async function canonicalizePotentialPath(path: string): Promise<string> {
   const suffix: string[] = [];
   let cursor = resolve(path);
 

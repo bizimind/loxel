@@ -172,6 +172,7 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "tree.rename": ["F2", "Shift+F6"],
   "editor.changeIndentation": [],
   "python.selectInterpreter": [],
+  "language.restartServers": [],
   "app.settings": ["Cmd+Comma"],
 });
 

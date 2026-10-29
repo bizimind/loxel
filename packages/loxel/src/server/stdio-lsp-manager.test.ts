@@ -6,11 +6,14 @@ import { pathToFileURL } from "node:url";
 
 import type { ServerWebSocket, Subprocess } from "bun";
 
+import { LSP_EXITED_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
+
 import { FileChangeType } from "./lsp-watched-files";
 import { StdioLspManager, type WtLspContext, type WtLspSession } from "./stdio-lsp-manager";
 
 // A stand-in language server: echoes every frame it reads back as a `test/received`
-// notification, and writes whatever a `test/emit` notification carries as its own frame.
+// notification, writes whatever a `test/emit` notification carries as its own frame, exits with
+// the code a `test/exit` notification carries, and kills itself on `test/kill`.
 const FAKE_SERVER = `
 let buf = Buffer.alloc(0);
 const write = (msg) => {
@@ -27,6 +30,8 @@ for await (const chunk of process.stdin) {
     if (buf.byteLength < end + 4 + length) break;
     const msg = JSON.parse(buf.subarray(end + 4, end + 4 + length).toString());
     buf = buf.subarray(end + 4 + length);
+    if (msg.method === "test/exit") process.exit(msg.params.code);
+    if (msg.method === "test/kill") process.kill(process.pid, "SIGKILL");
     if (msg.method === "test/emit") write(msg.params);
     else write({ jsonrpc: "2.0", method: "test/received", params: msg });
   }
@@ -84,9 +89,13 @@ class FakeClient {
   readonly toServer: Frame[] = [];
   readonly closes: Array<[number | undefined, string | undefined]> = [];
   readonly ws: ServerWebSocket<unknown>;
+  /** Resolves with the code of the manager's first `close()` of the socket. */
+  readonly closed: Promise<number | undefined>;
   private waiters: Array<() => void> = [];
 
   constructor(private readonly manager: FakeLspManager) {
+    const { promise, resolve } = Promise.withResolvers<number | undefined>();
+    this.closed = promise;
     const ws = {
       send: (data: string) => {
         const frame = JSON.parse(data) as Frame;
@@ -97,6 +106,7 @@ class FakeClient {
       },
       close: (code?: number, reason?: string) => {
         this.closes.push([code, reason]);
+        resolve(code);
       },
     };
     this.ws = ws as unknown as ServerWebSocket<unknown>;
@@ -304,10 +314,86 @@ describe("StdioLspManager spawn failures", () => {
     const first = new FakeClient(manager);
 
     manager.start(first.ws, dir);
-    expect(first.closes).toEqual([[4001, "python-lsp failed to start"]]);
+    expect(first.closes).toEqual([[LSP_START_FAILED_CLOSE_CODE, "python-lsp failed to start"]]);
 
     // The next connection for the worktree finds no session left to replace.
     manager.start(new FakeClient(manager).ws, dir);
     expect(first.closes).toHaveLength(1);
+  });
+});
+
+describe("StdioLspManager process exit", () => {
+  class KeyedLspManager extends FakeLspManager {
+    /** Every `onSessionClosed` call; the exit handler makes one after it decides on closing. */
+    sessionCloses = 0;
+    private closeWaiters: Array<() => void> = [];
+
+    protected override getSessionKey(context: WtLspContext): string {
+      return context.wtPath;
+    }
+
+    protected override onSessionClosed(): void {
+      this.sessionCloses += 1;
+      for (const wake of this.closeWaiters.splice(0)) wake();
+    }
+
+    async untilSessionCloses(count: number): Promise<void> {
+      while (this.sessionCloses < count) {
+        await new Promise<void>((resolve) => {
+          this.closeWaiters.push(resolve);
+        });
+      }
+    }
+  }
+
+  async function setupKeyed(): Promise<{
+    client: FakeClient;
+    root: string;
+    keyed: KeyedLspManager;
+  }> {
+    dir = await realpath(await mkdtemp(join(tmpdir(), "stdio-lsp-manager-")));
+    const script = join(dir, "fake-server.mjs");
+    await writeFile(script, FAKE_SERVER);
+    const keyed = new KeyedLspManager(script);
+    manager = keyed;
+    const client = new FakeClient(keyed);
+    keyed.start(client.ws, dir);
+    return { client, root: dir, keyed };
+  }
+
+  test("a server that exits on its own closes the socket and frees the worktree's session", async () => {
+    const { client, root } = await setupKeyed();
+    client.send({ method: "test/exit", params: { code: 3 } });
+
+    expect(await client.closed).toBe(LSP_EXITED_CLOSE_CODE);
+    expect(client.closes).toEqual([[LSP_EXITED_CLOSE_CODE, "python-lsp exited with code 3"]]);
+
+    // The reconnect gets a new server, without replacing (closing) the gone socket again.
+    const next = new FakeClient(manager!);
+    manager!.start(next.ws, root);
+    next.send({ id: 1, method: "initialize", params: { capabilities: {} } });
+    await next.serverReceived((f) => f.method === "initialize");
+    expect(client.closes).toHaveLength(1);
+  });
+
+  test("names the signal that killed the server", async () => {
+    const { client } = await setupKeyed();
+    client.send({ method: "test/kill" });
+
+    expect(await client.closed).toBe(LSP_EXITED_CLOSE_CODE);
+    expect(client.closes).toEqual([[LSP_EXITED_CLOSE_CODE, "python-lsp was killed by SIGKILL"]]);
+  });
+
+  test("a server stopped by detach does not close the socket", async () => {
+    const { client, keyed } = await setupKeyed();
+    client.send({ id: 1, method: "initialize", params: { capabilities: {} } });
+    await client.serverReceived((f) => f.method === "initialize");
+
+    keyed.detach(client.ws);
+    expect(keyed.sessionCloses).toBe(1);
+    // The second is the exit handler's, which decides about closing the socket in the same step.
+    await keyed.untilSessionCloses(2);
+
+    expect(client.closes).toEqual([]);
   });
 });
