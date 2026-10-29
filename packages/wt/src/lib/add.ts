@@ -15,9 +15,16 @@ import {
   resolveRemoteDefault,
   resolveRepoRoot,
   type Worktree,
+  type WorktreeMeta,
 } from "../git/index.ts";
 import { HOOK_INIT, runHook, type HookContext } from "../hooks/run.ts";
 import { silentProgress, type ProgressHandler } from "../progress.ts";
+import {
+  initWorktreeMeta,
+  isWorktreeMetadataEnabled,
+  METADATA_OFF_MESSAGE,
+  writableMeta,
+} from "./meta.ts";
 
 /**
  * A branch that stands in the way of creating a worktree named after it.
@@ -50,6 +57,11 @@ export interface AddParams {
    * when an existing branch is checked out.
    */
   base?: string;
+  /**
+   * Metadata to store on the new worktree (see `setWorktreeMeta`). Needs
+   * metadata on; `wt-*` keys are reserved.
+   */
+  meta?: WorktreeMeta;
   /** Required when planAdd reported a branchConflict of kind "exists" */
   branchResolution?: "use-existing" | "delete-and-create";
   /**
@@ -72,14 +84,18 @@ export interface AddResult {
   base?: string;
   /** init.wt.sh existed and succeeded */
   hookRan: boolean;
+  /** The new worktree's metadata, its `wt-id` included; empty while metadata is off */
+  meta: WorktreeMeta;
 }
 
 /**
  * Inspect the repository and report what creating `name` would involve.
  * No mutations — safe to call speculatively.
  */
-export async function planAdd(params: { name: string; repoPath: string }): Promise<AddPlan> {
-  const { name, worktreePath, branchConflict } = await inspectAdd(params.name, params.repoPath);
+export async function planAdd(
+  params: Pick<AddParams, "name" | "repoPath" | "meta">,
+): Promise<AddPlan> {
+  const { name, worktreePath, branchConflict } = await inspectAdd(params);
   return { name, worktreePath, branch: name, ...(branchConflict ? { branchConflict } : {}) };
 }
 
@@ -87,14 +103,23 @@ export async function planAdd(params: { name: string; repoPath: string }): Promi
  * Create a worktree, then run the init hook.
  *
  * The worktree lands at `<worktreesDir>/<name>` on a branch named after it,
- * unless `branch` names an existing branch to check out instead.
+ * unless `branch` names an existing branch to check out instead. While
+ * metadata is on, the worktree gets a `wt-id` and `meta`, written before the
+ * hook runs so the hook can read them.
  */
 export async function executeAdd(
   params: AddParams,
   progress: ProgressHandler = silentProgress,
 ): Promise<AddResult> {
   const { name, repoPath } = params;
-  const { root, dir, worktreePath, branchConflict, worktrees } = await inspectAdd(name, repoPath);
+  const {
+    root,
+    dir,
+    worktreePath,
+    branchConflict,
+    worktrees,
+    meta: values,
+  } = await inspectAdd(params);
   await excludeWorktreesDir(root, dir);
 
   const { branch, base } = await createWorktree(
@@ -105,13 +130,31 @@ export async function executeAdd(
   const from = base ? ` from ${base}` : "";
   progress.log(`Created worktree '${name}' [${branch}]${from} at ${worktreePath}`);
 
+  let meta: WorktreeMeta;
+  try {
+    meta = await initWorktreeMeta(root, worktreePath, values);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Created worktree '${name}', but could not write its metadata: ${reason}`, {
+      cause: error,
+    });
+  }
+
   const hookRan = await runHook(
     HOOK_INIT,
     { root, name, worktreePath, branch, baseEnv: params.hookEnv },
     progress,
   );
 
-  return { name, path: worktreePath, branch, created: true, ...(base ? { base } : {}), hookRan };
+  return {
+    name,
+    path: worktreePath,
+    branch,
+    created: true,
+    ...(base ? { base } : {}),
+    hookRan,
+    meta,
+  };
 }
 
 interface AddContext {
@@ -207,13 +250,15 @@ async function resolveBase(
 }
 
 /**
- * Shared preflight for plan and execute: validate the name, resolve paths,
- * reject names already in use, and classify any branch conflict.
+ * Shared preflight for plan and execute: validate the name and metadata,
+ * resolve paths, reject names already in use, and classify any branch
+ * conflict.
  */
-async function inspectAdd(
-  name: string,
-  repoPath: string,
-): Promise<{
+async function inspectAdd({
+  name,
+  repoPath,
+  meta = {},
+}: Pick<AddParams, "name" | "repoPath" | "meta">): Promise<{
   root: string;
   /** Canonical worktrees directory */
   dir: string;
@@ -221,9 +266,16 @@ async function inspectAdd(
   name: string;
   branchConflict?: BranchConflict;
   worktrees: Worktree[];
+  /** The metadata to write, keys normalized */
+  meta: WorktreeMeta;
 }> {
   const root = await resolveRepoRoot(repoPath);
   await assertValidWorktreeName(name, root);
+
+  const values = writableMeta(meta);
+  if (Object.keys(values).length > 0 && !(await isWorktreeMetadataEnabled(root))) {
+    throw new Error(METADATA_OFF_MESSAGE);
+  }
 
   const dir = await canonicalWorktreesDir(root);
   const worktreePath = join(dir, name);
@@ -246,6 +298,7 @@ async function inspectAdd(
     worktreePath,
     name,
     worktrees,
+    meta: values,
     ...(branchConflict ? { branchConflict } : {}),
   };
 }

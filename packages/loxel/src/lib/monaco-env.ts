@@ -7,6 +7,7 @@ import cssWorker from "monaco-editor/language/css/css.worker.js?worker";
 import htmlWorker from "monaco-editor/language/html/html.worker.js?worker";
 import jsonWorker from "monaco-editor/language/json/json.worker.js?worker";
 
+import { wsClient } from "@/api/client";
 import { deriveProject, useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -15,6 +16,7 @@ import { connectDockerLsp, disconnectDockerLsp } from "./docker-lsp-client";
 import { createEditorOpener } from "./editor-opener";
 import { getHighlighter } from "./highlighter";
 import { isLiveEditorModel } from "./live-editor-model";
+import { resumeLanguageServers } from "./lsp-client";
 import { registerLoxelLanguages } from "./monaco-languages";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { isWithin } from "./project-file-helpers";
@@ -80,6 +82,10 @@ void getHighlighter().then((highlighter) => {
 
 // Connect to yaml-language-server — LSP features register async when capabilities arrive
 connectYamlLsp();
+
+// A restarted Loxel server dropped every language-server socket: reconnect the clients now
+// instead of waiting out their backoff, and those that gave up meanwhile.
+wsClient.onReconnect(resumeLanguageServers);
 
 // Worktree-scoped LSPs: one subprocess per language per worktree, rooted at
 // the worktree path so project-level features (cross-file refs, module

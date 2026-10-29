@@ -36,6 +36,7 @@ import { useProjectStore } from "./store/projects";
 import { useWorktreeToolsBar } from "./store/worktree-tools-bar";
 
 import "./styles/dockview-theme.css";
+import "./styles/worktree-tree.css";
 import { useWorktreeStore } from "./store/worktrees";
 
 export default function App() {

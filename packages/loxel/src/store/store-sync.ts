@@ -20,7 +20,7 @@ import { useProjectStore } from "./projects";
 import { useSearchStore } from "./search";
 import { useSettingsStore } from "./settings-store";
 import { useUIStore } from "./ui";
-import { useWorktreeStore } from "./worktrees";
+import { mergePersistedProjectStates, persistedProjectStates, useWorktreeStore } from "./worktrees";
 
 // ---------------------------------------------------------------------------
 // Sync target interface
@@ -106,40 +106,17 @@ const syncTargets: Record<string, SyncTarget> = {
   },
 
   worktrees: {
-    getState: () => {
-      const s = useWorktreeStore.getState();
-      // Mirror the partialize shape: only customOrder/hiddenPaths per project
-      const byProject: Record<string, { customOrder?: string[]; hiddenPaths?: string[] }> = {};
-      for (const [path, ps] of Object.entries(s.byProject)) {
-        if (ps.customOrder || ps.hiddenPaths) {
-          byProject[path] = {
-            ...(ps.customOrder ? { customOrder: ps.customOrder } : {}),
-            ...(ps.hiddenPaths ? { hiddenPaths: ps.hiddenPaths } : {}),
-          };
-        }
-      }
-      return { byProject };
-    },
+    // Only the persisted per-project lists, mirroring the store's partialize; merging keeps the
+    // runtime worktree data (worktree lists, etc.).
+    getState: () => ({ byProject: persistedProjectStates(useWorktreeStore.getState().byProject) }),
     setState: (partial) => {
-      // Merge customOrder/hiddenPaths into existing byProject entries
-      // without clobbering runtime worktree data (worktrees array, etc.)
-      const incoming = partial.byProject as
-        | Record<string, { customOrder?: string[]; hiddenPaths?: string[] }>
-        | undefined;
-      if (!incoming || typeof incoming !== "object") return;
-
-      const current = useWorktreeStore.getState().byProject;
-      const byProject = { ...current };
-      for (const [path, saved] of Object.entries(incoming)) {
-        if (!saved || typeof saved !== "object") continue;
-        const existing = byProject[path] ?? { worktrees: [] };
-        byProject[path] = {
-          ...existing,
-          ...(Array.isArray(saved.customOrder) ? { customOrder: saved.customOrder } : {}),
-          ...(Array.isArray(saved.hiddenPaths) ? { hiddenPaths: saved.hiddenPaths } : {}),
-        };
-      }
-      useWorktreeStore.setState({ byProject });
+      if (!partial.byProject || typeof partial.byProject !== "object") return;
+      useWorktreeStore.setState({
+        byProject: mergePersistedProjectStates(
+          useWorktreeStore.getState().byProject,
+          partial.byProject,
+        ),
+      });
     },
   },
 

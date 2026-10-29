@@ -267,6 +267,12 @@ function focusSidebarEntry(entry: HTMLElement): void {
   entry.scrollIntoView({ block: "nearest" });
 }
 
+/** Move the worktree sidebar cursor to the entry for `path`, if it is shown. */
+export function focusSidebarEntryForPath(path: string): void {
+  const entry = sidebarEntries().find((e) => e.getAttribute(SIDEBAR_ENTRY_ATTR) === path);
+  if (entry) focusSidebarEntry(entry);
+}
+
 /**
  * Focus the worktree sidebar entry for `path` if it is shown, else the active worktree's entry,
  * else the first entry.

@@ -1,8 +1,9 @@
-import { createWorktreeLspClient } from "./lsp-client";
+import { createLspClient } from "./lsp-client";
 
-const { connect: connectXmlLsp, disconnect: disconnectXmlLsp } = createWorktreeLspClient(
-  "ws/xml-lsp",
-  "xml",
-);
+const { connect: connectXmlLsp, disconnect: disconnectXmlLsp } = createLspClient({
+  route: "ws/xml-lsp",
+  name: "XML",
+  languageId: "xml",
+});
 
 export { connectXmlLsp, disconnectXmlLsp };

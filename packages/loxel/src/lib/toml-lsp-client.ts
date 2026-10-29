@@ -1,8 +1,9 @@
-import { createWorktreeLspClient } from "./lsp-client";
+import { createLspClient } from "./lsp-client";
 
-const { connect: connectTomlLsp, disconnect: disconnectTomlLsp } = createWorktreeLspClient(
-  "ws/toml-lsp",
-  "toml",
-);
+const { connect: connectTomlLsp, disconnect: disconnectTomlLsp } = createLspClient({
+  route: "ws/toml-lsp",
+  name: "TOML",
+  languageId: "toml",
+});
 
 export { connectTomlLsp, disconnectTomlLsp };
