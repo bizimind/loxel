@@ -463,7 +463,13 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
       >
         <div
           className={cn("wt-tree pb-0.5", expanded && "wt-tree-expanded")}
-          style={{ "--wt-knob-inset": `${KNOB_INSET}px` } as React.CSSProperties}
+          // Groups read the icon size too: their bracket and tree line start at the knob.
+          style={
+            {
+              "--wt-icon-size": `${ICON_PX}px`,
+              "--wt-knob-inset": `${KNOB_INSET}px`,
+            } as React.CSSProperties
+          }
         >
           {/* A bare repo's list is empty until its worktrees are fetched; a regular repo's
               main checkout is never listed, so for it an empty list is the normal state and

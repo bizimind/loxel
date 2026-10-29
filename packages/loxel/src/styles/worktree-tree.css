@@ -5,7 +5,7 @@
  *
  * Positions are rail coordinates: groups have no horizontal insets, so a row's padding is its
  * icon's x. Custom properties set by the component:
- *   tree:  --wt-knob-inset (how far inside the parent icon's corner the knob sits)
+ *   tree:  --wt-icon-size, --wt-knob-inset (how far inside the parent icon's corner the knob sits)
  *   row:   --wt-icon-size, --wt-pad (icon x on the rail), --wt-pad-expanded
  *   group: --wt-group-color, --wt-line-x and --wt-line-x-expanded (where the knob's line runs),
  *          and optionally --wt-knob-text
