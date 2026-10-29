@@ -90,7 +90,7 @@ In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G`
 | Focus worktree 1–8, last, 10             | `Ctrl+Alt+1` – `Ctrl+Alt+8`, `Ctrl+Alt+9`, `Ctrl+Alt+0` |
 | Delete worktree                          | unbound — command palette or right-click menu           |
 
-Back/forward work like a browser's history, across all projects. Worktree numbers count the active project's worktrees in sidebar order and skip hidden worktrees.
+Back/forward work like a browser's history, across all projects. Worktree numbers count the active project's worktrees in sidebar order and skip archived worktrees.
 
 ---
 
@@ -112,6 +112,7 @@ Back/forward work like a browser's history, across all projects. Worktree number
 | Source Action…             | `Ctrl+Alt+S`                            |
 | Refactor…                  | `Ctrl+Alt+R`                            |
 | Python: Select Interpreter | unbound — command palette or status bar |
+| Restart Language Servers   | unbound — command palette               |
 
 The code action shortcuts work in a code editor whose language server offers that kind of action, and the command palette lists them only then. When several servers offer one (Ruff and the type checker for Python), Fix All and Organize Imports apply the only fix offered or let you pick, and the others list every server's actions.
 

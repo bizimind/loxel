@@ -8,7 +8,6 @@ import * as monaco from "monaco-editor";
 
 import { isLiveEditorModel } from "./live-editor-model";
 import { getAllConnectedLspClients } from "./lsp-client";
-import { getYamlLspClient } from "./yaml-lsp-client";
 
 /**
  * Each code action command: the Monaco command it runs and the code action kinds it lists (Quick
@@ -42,8 +41,8 @@ function hasCodeActionProvider(
   kind: string,
   declared: boolean,
 ): boolean {
-  return [...getAllConnectedLspClients(), getYamlLspClient()].some((client) =>
-    client?.supportsCodeActionKind(model, kind, { declared }),
+  return getAllConnectedLspClients().some((client) =>
+    client.supportsCodeActionKind(model, kind, { declared }),
   );
 }
 

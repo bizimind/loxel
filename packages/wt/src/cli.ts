@@ -8,6 +8,9 @@ import { program } from "commander";
 
 import { getCurrentVersion } from "./version.ts";
 
+/** Commander option parser for repeatable options. */
+const collect = (value: string, previous: string[]) => [...previous, value];
+
 program
   .name("wt")
   .description("Configless git worktree manager. Git is the database; hooks do the setup.")
@@ -32,6 +35,7 @@ program
     "--base <ref>",
     "Start the new branch from this ref (default: origin/<default> as last fetched, else HEAD)",
   )
+  .option("--meta <key=value>", "Store metadata on the new worktree (repeatable)", collect, [])
   .option("-j, --json", "Output as JSON")
   .action(async (name, opts) => {
     const { addCommand } = await import("./commands/add.ts");
@@ -74,6 +78,42 @@ program
     await removeCommand(name, opts);
   });
 
+const meta = program
+  .command("meta")
+  .description("Read and write per-worktree metadata (needs: wt init --worktree-metadata on)");
+
+// The commands decide whether the first argument is the worktree name or a key (see
+// `resolveTarget`), so they get every positional argument as one list.
+meta
+  .command("get [name] [key]")
+  .description("Show a worktree's metadata, or one key's value (default: the current worktree)")
+  .option("-j, --json", "Output as JSON")
+  .action(async (name: string | undefined, key: string | undefined, opts: { json?: boolean }) => {
+    const { metaGetCommand } = await import("./commands/meta.ts");
+    await metaGetCommand(
+      [name, key].filter((arg) => arg !== undefined),
+      opts,
+    );
+  });
+
+meta
+  .command("set [name] [pairs...]")
+  .description("Set key=value metadata on a worktree (default: the current worktree)")
+  .option("-j, --json", "Output as JSON")
+  .action(async (name: string | undefined, pairs: string[], opts: { json?: boolean }) => {
+    const { metaSetCommand } = await import("./commands/meta.ts");
+    await metaSetCommand(name === undefined ? pairs : [name, ...pairs], opts);
+  });
+
+meta
+  .command("unset [name] [keys...]")
+  .description("Remove metadata keys from a worktree (default: the current worktree)")
+  .option("-j, --json", "Output as JSON")
+  .action(async (name: string | undefined, keys: string[], opts: { json?: boolean }) => {
+    const { metaUnsetCommand } = await import("./commands/meta.ts");
+    await metaUnsetCommand(name === undefined ? keys : [name, ...keys], opts);
+  });
+
 program
   .command("init [url] [dir]")
   .description(
@@ -87,7 +127,10 @@ program
   .option("--no-repair", "Leave moved worktrees alone")
   .option("--prune", "Prune worktrees whose directory is gone")
   .option("--no-prune", "Keep stale worktrees")
-  .option("--worktree-metadata <on|off>", "Turn per-worktree config (git config --worktree) on/off")
+  .option(
+    "--worktree-metadata <on|off>",
+    "Turn per-worktree config (git config --worktree) on/off; on also gives every worktree a wt-id",
+  )
   .option("--main-worktree", "Check out the default branch as a worktree (bare repos)")
   .option("--no-main-worktree", "Don't create the default branch's worktree")
   .option("-y, --yes", "Apply every recommended fix without asking")

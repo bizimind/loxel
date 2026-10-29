@@ -18,7 +18,6 @@ const fakeClient = {
   },
 };
 mock.module("./lsp-client", () => ({ getAllConnectedLspClients: () => [fakeClient] }));
-mock.module("./yaml-lsp-client", () => ({ getYamlLspClient: () => undefined }));
 
 const { canRunEditorCodeAction, runEditorCodeAction } = await import("./editor-code-actions");
 

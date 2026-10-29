@@ -5,11 +5,17 @@ import { cn } from "@/lib/utils";
 
 interface WorktreeIconProps {
   name: string;
-  size: "xs" | "sm" | "md";
+  size: WorktreeIconSize;
   active?: boolean;
 }
 
-const sizeClasses = { xs: "size-5", sm: "size-7", md: "size-7" };
+export type WorktreeIconSize = "2xs" | "xs" | "sm";
+
+const sizeClasses: Record<WorktreeIconSize, string> = {
+  "2xs": "size-4.5",
+  xs: "size-5",
+  sm: "size-6",
+};
 
 /** Generate a symmetric 5x5 grid pattern from the lower 15 bits of a hash. */
 function generatePattern5(hash: bigint): { x: number; y: number; show: boolean }[] {

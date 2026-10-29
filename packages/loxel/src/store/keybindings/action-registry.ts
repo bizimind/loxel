@@ -98,6 +98,7 @@ export type ActionId =
   | "editor.changeIndentation"
   | "python.selectInterpreter"
   | EditorCodeActionId
+  | "language.restartServers"
   | "app.settings";
 
 /**
@@ -336,6 +337,12 @@ export const ACTIONS: readonly ActionDef[] = [
     category: "language",
     isEnabled: () => canRunEditorCodeAction(id),
   })),
+  {
+    id: "language.restartServers",
+    label: "Restart Language Servers",
+    category: "language",
+    isEnabled: hasActiveWorktree,
+  },
 
   // App
   { id: "app.settings", label: "Open Settings", category: "app" },
