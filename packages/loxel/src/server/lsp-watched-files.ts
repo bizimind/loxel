@@ -252,10 +252,19 @@ export class WatchedFilesForwarder {
       const events = await Promise.all(
         batch.slice(i, i + STAT_CONCURRENCY).map(async ([absPath, kinds]) => {
           const type = await this.changeTypeOf(absPath);
-          return kinds & WATCH_KIND_BIT[type] ? { uri: fileUri(absPath), type } : null;
+          // A path judged created may be one the server already read (an atomic save, a checkout,
+          // a reinstalled package). TypeScript ignores a creation of a file it has loaded but needs
+          // it for a new root file, so a creation is reported as a change first; in the other order
+          // TypeScript keeps the old contents.
+          const types =
+            type === FileChangeType.Created
+              ? [FileChangeType.Changed, FileChangeType.Created]
+              : [type];
+          const uri = fileUri(absPath);
+          return types.filter((t) => kinds & WATCH_KIND_BIT[t]).map((t) => ({ uri, type: t }));
         }),
       );
-      for (const event of events) if (event) changes.push(event);
+      for (const fileEvents of events) changes.push(...fileEvents);
     }
     if (this.disposed || changes.length === 0) return;
     this.send(changes);

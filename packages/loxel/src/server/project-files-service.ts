@@ -28,6 +28,11 @@ export interface ProjectFilesServiceOptions {
    * handles them. Git-ignored directories are already filtered out.
    */
   onPathsChanged?: (paths: string[]) => void;
+  /**
+   * Called with the worktree-relative, `/`-separated path of each raw watcher event dropped because
+   * it lies in a git-ignored directory, unbatched (an install sends many).
+   */
+  onIgnoredPathChanged?: (relPath: string) => void;
   /** Called with absolute paths when a tracked file (see `trackFile`) was renamed or moved. */
   onFileMoved?: (oldPath: string, newPath: string, source: FileMoveSource) => void;
 }
@@ -127,7 +132,10 @@ export class ProjectFilesService {
         // Without git there is no ignored set; still skip the churn of repos nested in the tree.
         if (options.gitStatus === false && /(^|\/)\.git(\/|$)/.test(normalized)) return false;
         for (const ignoredDir of this.ignoredDirs) {
-          if (normalized === ignoredDir || normalized.startsWith(ignoredDir + "/")) return false;
+          if (normalized === ignoredDir || normalized.startsWith(ignoredDir + "/")) {
+            options.onIgnoredPathChanged?.(normalized);
+            return false;
+          }
         }
         return true;
       },
