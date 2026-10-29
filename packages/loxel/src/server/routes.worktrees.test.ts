@@ -4,6 +4,8 @@ import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { setWorktreeMeta } from "@bizimind/wt/lib";
+
 import { listProjectWorktrees, projectWorktreesResponse } from "./project-worktrees";
 import type { RouteContext } from "./routes";
 import { handleRequest } from "./routes";
@@ -251,14 +253,35 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       expect(cycle.status).toBe(400);
       expect(((await cycle.json()) as { error: string }).error).toContain("cannot be nested");
 
-      expect((await meta(wtPath("b"), { parentPath: null, displayName: " Bee " })).status).toBe(
-        200,
-      );
+      expect((await meta(wtPath("b"), { parentPath: null, title: " Bee " })).status).toBe(200);
       expect((await byName()).b?.parentWtId).toBeUndefined();
-      expect((await byName()).b?.displayName).toBe("Bee");
+      expect((await byName()).b?.title).toBe("Bee");
 
-      expect((await meta(wtPath("b"), { displayName: "" })).status).toBe(200);
-      expect((await byName()).b?.displayName).toBeUndefined();
+      expect((await meta(wtPath("b"), { title: "" })).status).toBe(200);
+      expect((await byName()).b?.title).toBeUndefined();
+    });
+
+    test("creates a worktree with a title, nested under its parent", async () => {
+      await create("parent");
+      expect(
+        (await create("titled", { parentPath: wtPath("parent"), title: " My task " })).status,
+      ).toBe(200);
+      const { parent, titled } = await byName();
+      expect(titled?.title).toBe("My task");
+      expect(titled?.parentWtId).toBe(parent!.wtId!);
+    });
+
+    test("reads a title stored under the old key, and clears it when the title changes", async () => {
+      await create("old");
+      await setWorktreeMeta({
+        repoPath: repo,
+        path: wtPath("old"),
+        values: { "loxel-pretty-name": "Old title" },
+      });
+      expect((await byName()).old?.title).toBe("Old title");
+
+      expect((await meta(wtPath("old"), { title: "" })).status).toBe(200);
+      expect((await byName()).old?.title).toBeUndefined();
     });
 
     test("removing a parent moves its children up to its own parent", async () => {

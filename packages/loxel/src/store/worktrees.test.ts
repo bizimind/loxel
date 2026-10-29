@@ -48,8 +48,11 @@ mock.module("@/api/client", () => ({
 const {
   deriveOwningWorktree,
   getNumberedWorktrees,
+  getWorktreeRows,
+  getWorktreeTrees,
   mergePersistedProjectStates,
   persistedProjectStates,
+  toggleArchivedPaths,
   useWorktreeStore,
 } = await import("./worktrees");
 const { useProjectStore } = await import("./projects");
@@ -314,10 +317,10 @@ describe("applyEnrichedProjects", () => {
     worktreeMetadata: false,
   };
 
-  test("keeps persisted order and hidden lists when the server returns no worktrees", () => {
+  test("keeps persisted order and archived lists when the server returns no worktrees", () => {
     useWorktreeStore.setState({
       byProject: {
-        [PROJECT]: { worktrees: [worktree], customOrder: [WT_PATH], hiddenPaths: [WT_PATH] },
+        [PROJECT]: { worktrees: [worktree], customOrder: [WT_PATH], archivedPaths: [WT_PATH] },
       },
     });
 
@@ -326,14 +329,14 @@ describe("applyEnrichedProjects", () => {
     const state = useWorktreeStore.getState().byProject[PROJECT];
     expect(state?.worktrees).toEqual([worktree]);
     expect(state?.customOrder).toEqual([WT_PATH]);
-    expect(state?.hiddenPaths).toEqual([WT_PATH]);
+    expect(state?.archivedPaths).toEqual([WT_PATH]);
   });
 
   test("prunes persisted lists against a non-empty server response", () => {
     const gone = "/repo/.worktrees/gone";
     useWorktreeStore.setState({
       byProject: {
-        [PROJECT]: { worktrees: [worktree], customOrder: [gone, WT_PATH], hiddenPaths: [gone] },
+        [PROJECT]: { worktrees: [worktree], customOrder: [gone, WT_PATH], archivedPaths: [gone] },
       },
     });
 
@@ -341,7 +344,7 @@ describe("applyEnrichedProjects", () => {
 
     const state = useWorktreeStore.getState().byProject[PROJECT];
     expect(state?.customOrder).toEqual([WT_PATH]);
-    expect(state?.hiddenPaths).toEqual([]);
+    expect(state?.archivedPaths).toEqual([]);
   });
 });
 
@@ -528,7 +531,7 @@ describe("worktree nesting", () => {
   };
   const loose: WorktreeEntry = { ...worktree, path: "/repo/.worktrees/loose", wtName: "loose" };
 
-  test("numbers worktrees in visible order, skipping hidden and collapsed subtrees", () => {
+  test("numbers worktrees in visible order, skipping archived and collapsed subtrees", () => {
     const ps = { worktrees: [parent, child, loose], customOrder: [WT_PATH, loose.path] };
     expect(getNumberedWorktrees(ps).map((wt) => wt.path)).toEqual([
       WT_PATH,
@@ -538,7 +541,7 @@ describe("worktree nesting", () => {
     expect(getNumberedWorktrees({ ...ps, collapsedPaths: [WT_PATH] }).map((wt) => wt.path)).toEqual(
       [WT_PATH, loose.path],
     );
-    expect(getNumberedWorktrees({ ...ps, hiddenPaths: [WT_PATH] }).map((wt) => wt.path)).toEqual([
+    expect(getNumberedWorktrees({ ...ps, archivedPaths: [WT_PATH] }).map((wt) => wt.path)).toEqual([
       loose.path,
     ]);
   });
@@ -552,9 +555,43 @@ describe("worktree nesting", () => {
 
     const merged = mergePersistedProjectStates(
       { [PROJECT]: { worktrees: [parent] } },
-      { [PROJECT]: { collapsedPaths: [WT_PATH, 3], hiddenPaths: "bad" } },
+      { [PROJECT]: { collapsedPaths: [WT_PATH, 3], archivedPaths: "bad" } },
     );
     expect(merged[PROJECT]).toEqual({ worktrees: [parent], collapsedPaths: [WT_PATH] });
+  });
+
+  test("brings worktrees saved as hidden back archived", () => {
+    const merged = mergePersistedProjectStates(
+      { [PROJECT]: { worktrees: [parent] } },
+      { [PROJECT]: { hiddenPaths: [WT_PATH] } },
+    );
+    expect(merged[PROJECT]?.archivedPaths).toEqual([WT_PATH]);
+  });
+
+  test("lists archived worktrees, with their nested ones, only in the Archive group", () => {
+    const ps = { worktrees: [parent, child, loose], archivedPaths: [WT_PATH] };
+    expect(getWorktreeRows(ps).map((row) => row.wt.path)).toEqual([loose.path]);
+    const [archivedRoot, ...others] = getWorktreeTrees(ps).archived;
+    expect(others).toEqual([]);
+    expect(archivedRoot?.wt.path).toBe(WT_PATH);
+    expect(archivedRoot?.children.map((node) => node.wt.path)).toEqual([child.path]);
+  });
+
+  test("archiving covers the archived worktrees below it, and bringing one back brings its archived ancestor's subtree back", () => {
+    const worktrees = [parent, child, loose];
+    expect(toggleArchivedPaths(worktrees, [child.path], WT_PATH)).toEqual([WT_PATH]);
+    expect(toggleArchivedPaths(worktrees, [WT_PATH], child.path)).toEqual([]);
+    expect(toggleArchivedPaths(worktrees, [WT_PATH], loose.path)).toEqual([WT_PATH, loose.path]);
+    // A worktree archived in its own right inside an archived one comes back with it.
+    expect(toggleArchivedPaths(worktrees, [WT_PATH, child.path], WT_PATH)).toEqual([]);
+    // ...and so does bringing back the inner one: it would stay covered by the outer one.
+    expect(toggleArchivedPaths(worktrees, [WT_PATH, child.path], child.path)).toEqual([]);
+  });
+
+  test("markArchived archives a worktree in its own right, once", () => {
+    useWorktreeStore.getState().markArchived(PROJECT, WT_PATH);
+    useWorktreeStore.getState().markArchived(PROJECT, WT_PATH);
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.archivedPaths).toEqual([WT_PATH]);
   });
 
   test("toggleCollapsed folds and unfolds a worktree", () => {

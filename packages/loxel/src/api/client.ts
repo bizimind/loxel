@@ -671,6 +671,8 @@ export interface CreateWorktreeOptions {
   branchResolution?: "use-existing" | "delete-and-create";
   /** Create a child of this worktree: branched from its current commit and nested under it */
   parentPath?: string;
+  /** Show the new worktree by this title (`loxel-title` metadata) */
+  title?: string;
 }
 
 export async function createWorktree(
@@ -688,7 +690,7 @@ export async function createWorktree(
 export async function updateWorktreeMeta(
   projectPath: string,
   wtPath: string,
-  update: { parentPath?: string | null; displayName?: string | null },
+  update: { parentPath?: string | null; title?: string | null },
 ) {
   return fetchJson<{ success: true }>("/worktree/meta", {
     method: "POST",

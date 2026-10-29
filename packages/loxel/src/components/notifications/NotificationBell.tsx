@@ -25,7 +25,7 @@ export function NotificationBell() {
         className="text-muted-foreground hover:text-foreground relative rounded p-1"
         style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}
       >
-        <BellIcon className="size-3.5" />
+        <BellIcon className="size-4" />
         {hasNotifications && (
           <span className="bg-destructive absolute -top-0 right-0 size-1.5 rounded-full" />
         )}

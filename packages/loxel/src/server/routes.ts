@@ -80,6 +80,7 @@ import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
 import * as projectStore from "./project-store";
 import {
   childWorktreeOptions,
+  titleMeta,
   listProjectWorktrees,
   nestedBelow,
   projectWorktreesResponse,
@@ -2286,12 +2287,22 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
       : undefined;
   // A child worktree branches from its parent's current commit and is nested under it.
   const parentPath = typeof body.parentPath === "string" ? body.parentPath : undefined;
+  const title = typeof body.title === "string" ? body.title : undefined;
 
   wtLog.info(`Creating worktree '${name}'`, { branch, branchResolution, parentPath });
   try {
-    const child = parentPath ? await childWorktreeOptions(project.cwd, parentPath) : {};
+    const child = parentPath ? await childWorktreeOptions(project.cwd, parentPath) : undefined;
+    const meta = { ...child?.meta, ...titleMeta(title) };
     const result = await executeAdd(
-      { name, branch, branchResolution, repoPath: project.cwd, hookEnv: buildSpawnEnv(), ...child },
+      {
+        name,
+        branch,
+        branchResolution,
+        repoPath: project.cwd,
+        hookEnv: buildSpawnEnv(),
+        ...(child ? { base: child.base } : {}),
+        ...(Object.keys(meta).length > 0 ? { meta } : {}),
+      },
       wtProgress,
     );
     wtLog.info(`Worktree '${name}' created`, { path: result.path, branch: result.branch });
@@ -2313,7 +2324,7 @@ function optionalNullableString(
   throw new Error(`${field} must be a string or null`);
 }
 
-// POST /api/worktree/meta — nest a worktree under another (or un-nest it) and set its display name
+// POST /api/worktree/meta — nest a worktree under another (or un-nest it) and set its title
 async function handleUpdateWorktreeMeta(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
   const projectPath = requireString(body, "projectPath");
@@ -2322,7 +2333,7 @@ async function handleUpdateWorktreeMeta(req: Request, ctx: RouteContext): Promis
   const wtPath = requireString(body, "path");
   const update: WorktreeMetaUpdate = {
     parentPath: optionalNullableString(body, "parentPath"),
-    displayName: optionalNullableString(body, "displayName"),
+    title: optionalNullableString(body, "title"),
   };
 
   try {

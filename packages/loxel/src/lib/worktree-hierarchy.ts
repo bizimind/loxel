@@ -84,8 +84,60 @@ export interface WorktreeRow<T extends HierarchyMember> {
   /** Number of worktrees below this one, at any depth */
   descendantCount: number;
   collapsed: boolean;
-  /** Hidden itself or below a hidden worktree */
-  hidden: boolean;
+}
+
+/** A worktree with the worktrees nested below it, for rendering the list as a tree. */
+export interface WorktreeNode<T extends HierarchyMember> {
+  wt: T;
+  depth: number;
+  children: WorktreeNode<T>[];
+  /** Number of worktrees below this one, at any depth */
+  descendantCount: number;
+}
+
+/** The nested list as a tree: siblings in the order of `ordered`, nothing left out. */
+export function buildWorktreeTree<T extends HierarchyMember>(
+  ordered: readonly T[],
+): WorktreeNode<T>[] {
+  const parents = resolveParents(ordered);
+  const children = childrenByParent(parents);
+  const byPath = new Map(ordered.map((wt) => [wt.path, wt]));
+
+  const build = (wt: T, depth: number): WorktreeNode<T> => {
+    const nested = (children.get(wt.path) ?? []).flatMap((path) => {
+      const entry = byPath.get(path);
+      return entry ? [build(entry, depth + 1)] : [];
+    });
+    const descendantCount = nested.reduce((sum, node) => sum + 1 + node.descendantCount, 0);
+    return { wt, depth, children: nested, descendantCount };
+  };
+
+  return ordered.filter((wt) => parents.get(wt.path) === null).map((wt) => build(wt, 0));
+}
+
+/**
+ * `nodes` as rows, depth-first, listing a node's children only where `isOpen` says so. Rows get
+ * `depth + levelOffset` (for trees drawn one level in, like the Archive group's) and the parent
+ * they are shown under, null for the given nodes.
+ */
+export function flattenTree<T extends HierarchyMember>(
+  nodes: readonly WorktreeNode<T>[],
+  isOpen: (node: WorktreeNode<T>) => boolean,
+  levelOffset = 0,
+  parent: string | null = null,
+): WorktreeRow<T>[] {
+  return nodes.flatMap((node) => {
+    const open = node.children.length > 0 && isOpen(node);
+    const row: WorktreeRow<T> = {
+      wt: node.wt,
+      depth: node.depth + levelOffset,
+      parent,
+      descendantCount: node.descendantCount,
+      collapsed: node.children.length > 0 && !open,
+    };
+    if (!open) return [row];
+    return [row, ...flattenTree(node.children, isOpen, levelOffset, node.wt.path)];
+  });
 }
 
 /**
@@ -95,33 +147,27 @@ export interface WorktreeRow<T extends HierarchyMember> {
 export function buildWorktreeRows<T extends HierarchyMember>(
   ordered: readonly T[],
   collapsedPaths: ReadonlySet<string>,
-  hiddenPaths: ReadonlySet<string>,
 ): WorktreeRow<T>[] {
-  const parents = resolveParents(ordered);
-  const children = childrenByParent(parents);
-  const byPath = new Map(ordered.map((wt) => [wt.path, wt]));
-  const rows: WorktreeRow<T>[] = [];
+  return flattenTree(buildWorktreeTree(ordered), (node) => !collapsedPaths.has(node.wt.path));
+}
 
-  const visit = (wt: T, depth: number, parentHidden: boolean) => {
-    const collapsed = collapsedPaths.has(wt.path);
-    const hidden = parentHidden || hiddenPaths.has(wt.path);
-    rows.push({
-      wt,
-      depth,
-      parent: parents.get(wt.path) ?? null,
-      descendantCount: descendantsOf(wt.path, children).length,
-      collapsed,
-      hidden,
-    });
-    if (collapsed) return;
-    for (const child of children.get(wt.path) ?? []) {
-      const entry = byPath.get(child);
-      if (entry) visit(entry, depth + 1, hidden);
-    }
-  };
-
-  for (const wt of ordered) if (parents.get(wt.path) === null) visit(wt, 0, false);
-  return rows;
+/**
+ * The worktrees that are archived: each path in `archivedPaths` with everything nested below it,
+ * since archiving moves a worktree together with its nested ones.
+ */
+export function archivedSet(
+  worktrees: readonly HierarchyMember[],
+  archivedPaths: readonly string[],
+): Set<string> {
+  const children = childrenByParent(resolveParents(worktrees));
+  const known = new Set(worktrees.map((wt) => wt.path));
+  const archived = new Set<string>();
+  for (const path of archivedPaths) {
+    if (!known.has(path)) continue;
+    archived.add(path);
+    for (const below of descendantsOf(path, children)) archived.add(below);
+  }
+  return archived;
 }
 
 /**
@@ -140,4 +186,56 @@ export function moveInOrder(
   if (index === -1) return [...orderedPaths];
   rest.splice(side === "before" ? index : index + 1, 0, moved);
   return rest;
+}
+
+/** Where a dragged worktree lands: nested inside a row, or just before or after it. */
+export interface RowDrop {
+  path: string;
+  zone: "before" | "after" | "inside";
+  /** The parent the dragged worktree ends up under, null for the top level */
+  parent: string | null;
+}
+
+/**
+ * Where dropping `moved` at `ratio` of `target`'s row height (0 top, 1 bottom) puts it, or null
+ * where the drop would do nothing or put a worktree under itself. With `nesting` on, the middle
+ * half of a row nests into it; otherwise, and at the edges, the worktree goes before or after the
+ * row as its sibling, under the row's parent. Dropping after an expanded parent puts it first
+ * among that parent's children, which is where the row boundary is.
+ */
+export function resolveRowDrop<T extends HierarchyMember>(
+  rows: readonly WorktreeRow<T>[],
+  moved: string,
+  target: string,
+  ratio: number,
+  nesting: boolean,
+): RowDrop | null {
+  const movedRow = rows.find((row) => row.wt.path === moved);
+  const targetIndex = rows.findIndex((row) => row.wt.path === target);
+  const targetRow = rows[targetIndex];
+  if (!movedRow || !targetRow || moved === target) return null;
+
+  // A visible target under `moved` has every row between them visible too.
+  const subtree = new Set([moved]);
+  for (const row of rows) {
+    if (row.parent !== null && subtree.has(row.parent)) subtree.add(row.wt.path);
+  }
+  if (subtree.has(target)) return null;
+
+  const middle = ratio > 0.25 && ratio < 0.75;
+  if (nesting && middle && movedRow.parent !== target) {
+    return { path: target, zone: "inside", parent: target };
+  }
+
+  const next = rows[targetIndex + 1];
+  const drop: RowDrop =
+    ratio < 0.5
+      ? { path: target, zone: "before", parent: targetRow.parent }
+      : next?.parent === target
+        ? { path: next.wt.path, zone: "before", parent: target }
+        : { path: target, zone: "after", parent: targetRow.parent };
+  if (drop.path === moved) return null;
+  // Changing a worktree's parent writes its metadata, which needs nesting on.
+  if (!nesting && drop.parent !== movedRow.parent) return null;
+  return drop;
 }
