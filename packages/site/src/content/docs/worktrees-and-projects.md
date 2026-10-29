@@ -25,7 +25,7 @@ Loxel pre-fills both lists from what the repository contains: `.env` files, dire
 | `pyproject.toml` with a `[tool.uv]` table | `uv sync`                                                                                   |
 | `requirements*.txt` files                 | `uv venv && uv pip install -r ...`, or with `python3 -m venv .venv` when uv isn't installed |
 
-Every worktree gets its own Python environment, since a virtual environment can't be shared between checkouts. Once it exists, the [Python language servers](/docs/language-intelligence#python-environment) and new terminals in that worktree use it.
+Every worktree gets its own Python environment, since a virtual environment can't be shared between checkouts. Once it exists, the [Python language servers](/docs/language-intelligence#python-environment), new terminals and the [coding agent's commands](/docs/coding-agent#commands-the-agent-runs) in that worktree use it.
 
 ### Detect
 

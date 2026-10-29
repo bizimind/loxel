@@ -92,6 +92,7 @@ describe("tool handlers", () => {
       taskManager: new TaskManager(path.join(workspaceRoot, ".tasks")),
       profile: session.state.profile,
       runId: "run_test",
+      getEnv: () => undefined,
       declaredTools: normalizeDeclaredTools(options?.declaredTools ?? null) ?? undefined,
       approvalOverrides: options?.approvalOverrides,
       abortSignal: options?.abortSignal,
@@ -433,6 +434,7 @@ describe("tool handlers", () => {
       taskManager: new TaskManager(path.join(workspaceRoot, ".tasks-a")),
       profile: "execute",
       runId: "run_a",
+      getEnv: () => undefined,
       emitEvent: async () => {},
       onHumanQuestion: async () => ({ answers: { q1: ["a"] } }),
       onApproval: async () => {
@@ -457,6 +459,7 @@ describe("tool handlers", () => {
       taskManager: new TaskManager(path.join(workspaceRoot, ".tasks-b")),
       profile: "execute",
       runId: "run_b",
+      getEnv: () => undefined,
       emitEvent: async () => {},
       onHumanQuestion: async () => ({ answers: { q1: ["a"] } }),
       onApproval: async () => {
@@ -601,6 +604,34 @@ describe("tool handlers", () => {
     }
   });
 
+  test("bash background task gets the environment current at launch", async () => {
+    let probe = "before";
+    const getEnv = () => ({ ...process.env, AGENT_ENV_PROBE: probe });
+    const base = await createContext({ mode: "execute" });
+    const ctx: ToolRuntimeContext = {
+      ...base,
+      getEnv,
+      taskManager: new TaskManager(path.join(base.workspaceRoot, ".tasks-env"), getEnv),
+    };
+    probe = "at-launch";
+
+    const launched = await invokeToolByName(
+      "Bash",
+      { command: 'printf %s "$AGENT_ENV_PROBE"', run_in_background: true },
+      ctx,
+    );
+    expect(launched.ok).toBe(true);
+    if (!launched.ok) return;
+    const taskId = (launched.value as { backgroundTaskId: string }).backgroundTaskId;
+
+    const output = await invokeToolByName(
+      "TaskOutput",
+      { task_id: taskId, block: true, timeout: 30_000 },
+      ctx,
+    );
+    expect(output.ok && (output.value as { stdout: string }).stdout).toBe("at-launch");
+  });
+
   test("Task supports resume with same task id", async () => {
     const ctx = await createContext({ mode: "execute" });
     const first = await invokeToolByName(
@@ -677,6 +708,7 @@ describe("tool handlers", () => {
       taskManager: new TaskManager(tasksDir),
       profile: "execute",
       runId: "run_a",
+      getEnv: () => undefined,
       emitEvent: async () => {},
       onHumanQuestion: async () => ({ answers: { q1: ["a"] } }),
       onApproval: async () => "allow",
@@ -701,6 +733,7 @@ describe("tool handlers", () => {
     const ctxB: ToolRuntimeContext = {
       ...ctxA,
       runId: "run_b",
+      getEnv: () => undefined,
       taskManager: new TaskManager(tasksDir),
     };
 

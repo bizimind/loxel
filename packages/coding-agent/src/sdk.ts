@@ -10,14 +10,19 @@ import type { ModelRouterOptions } from "./orchestrator/model-router.ts";
 import type { RuntimeDiagnostic, RuntimeEventSink } from "./orchestrator/runtime.ts";
 import { CodingAgentRuntime } from "./orchestrator/runtime.ts";
 import type { ProtocolEvent, ProtocolRequest } from "./protocol/schemas.ts";
+import type { SpawnEnvSource } from "./utils/shell.ts";
 
 export interface CodingAgentSessionOptions {
   /** Model configuration with per-function API key support. */
   models?: ModelRouterOptions;
   /** Logger conforming to AppLogger interface. */
   logger?: AppLogger;
-  /** Environment variables for subprocess spawns (grep, bash). When undefined, inherits process.env. */
-  env?: Record<string, string | undefined>;
+  /**
+   * Environment for tool subprocesses (Bash, Grep, background tasks, completion checks), also where
+   * the `OPENROUTER_*` fallbacks are read at session start. A function is called at every spawn,
+   * so the host can change the environment mid-session. When undefined, inherits process.env.
+   */
+  env?: SpawnEnvSource;
 }
 
 export type SessionEventListener = (event: ProtocolEvent) => void;

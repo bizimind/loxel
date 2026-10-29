@@ -11,6 +11,7 @@ import type { ModelRouterOptions } from "../orchestrator/model-router.ts";
 import type { RuntimeDiagnostic } from "../orchestrator/runtime.ts";
 import type { PlanStep, TodoItem } from "../session/model.ts";
 import type { ToolProfile } from "../tools/profile.ts";
+import type { SpawnEnvSource } from "../utils/shell.ts";
 
 // ---------------------------------------------------------------------------
 // Session configuration
@@ -20,8 +21,12 @@ export interface SessionConfig {
   workspaceRoot: string;
   models?: ModelRouterOptions;
   logger?: AppLogger;
-  /** Environment variables for subprocess spawns (grep, bash). When undefined, inherits process.env. */
-  env?: Record<string, string | undefined>;
+  /**
+   * Environment for tool subprocesses (Bash, Grep, background tasks, completion checks), also where
+   * the `OPENROUTER_*` fallbacks are read at session start. A function is called at every spawn,
+   * so the host can change the environment mid-session. When undefined, inherits process.env.
+   */
+  env?: SpawnEnvSource;
   mode?: "execute" | "plan";
   profile?: ToolProfile;
   promptProfile?: string;

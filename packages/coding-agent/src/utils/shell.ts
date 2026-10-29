@@ -1,3 +1,12 @@
+/** Environment variables for a spawned subprocess. */
+export type SpawnEnv = Record<string, string | undefined>;
+
+/**
+ * The environment a host gives tool subprocesses: a fixed value, or a function read at every
+ * spawn so the host can change it during a session.
+ */
+export type SpawnEnvSource = SpawnEnv | (() => SpawnEnv);
+
 function pushCandidate(target: string[], value: string | undefined): void {
   if (!value) {
     return;

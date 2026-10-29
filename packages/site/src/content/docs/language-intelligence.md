@@ -30,7 +30,7 @@ The TypeScript server provides all of these; the [other language servers](#other
 | ----------------- | ----------------------------------------------------------------------- |
 | Hover             | Type information and JSDoc for any symbol                               |
 | Go-to-definition  | Jump to the declaration of any symbol                                   |
-| Find references   | Jump to the usages of a symbol                                          |
+| Find references   | List the usages of a symbol across files                                |
 | Completions       | Context-aware autocompletion as you type                                |
 | Rename            | Rename a symbol and update all references                               |
 | Code actions      | Quick fixes, imports, and refactors                                     |
@@ -53,7 +53,9 @@ Files open in a tab can always be edited this way, wherever they are, as typing 
 
 ## Navigation
 
-`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. There is no inline peek; definitions always open as a full tab.
+`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. When a symbol has several definitions, a peek lists them instead.
+
+Press `Shift+F12` to find a symbol's references. A peek opens below the line, listing every usage grouped by file, with a preview of the selected one. `Alt+F12` peeks at a definition and `Cmd+Shift+F12` at implementations without leaving the file. Press `Enter` or double-click a usage to open it in a tab, which closes the peek; `Escape` closes it. Files that aren't open, including ones outside the project, are read-only in the preview; open the file to edit it. Files open in a tab can be edited right in the peek.
 
 ---
 
@@ -137,7 +139,7 @@ Click it, or run **Python: Select Interpreter** from the command palette (`Cmd+S
 - **Use automatic detection** goes back to the order above.
 - The rest of the list is every environment Loxel found: the ones above, plus `.venv`, `venv` and `env` environments and Pixi environments in project folders below the worktree root (folders with a `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `Pipfile` or `pixi.toml`), which is how you pick a sub-project's environment in a monorepo.
 
-The choice is saved for that worktree and survives restarts. The language servers switch to it right away, without a restart. If the chosen interpreter is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
+The choice is saved for that worktree and survives restarts. The language servers and the [coding agent](/docs/coding-agent#commands-the-agent-runs)'s next commands switch to it right away, without a restart, and new terminals start with it. If the chosen interpreter is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
 
 A `venvPath` and `venv` setting in `pyrightconfig.json`, or in the `[tool.basedpyright]` (or `[tool.pyright]`) table of `pyproject.toml`, takes precedence over the interpreter Loxel passes to the type checker, whether detected or chosen:
 
@@ -192,4 +194,5 @@ Projects that configure Tombi themselves, with a `tombi.toml` or `.tombi.toml` f
 
 - [Editor](/docs/editor) — the code editor, where diagnostics appear inline, and format on save
 - [Terminals](/docs/terminals) — new terminals start with the worktree's Python environment active
+- [Coding Agent](/docs/coding-agent#commands-the-agent-runs) — the built-in agent's commands run with the worktree's Python environment active
 - [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — runtime configuration reference

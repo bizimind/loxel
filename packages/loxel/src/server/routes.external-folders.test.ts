@@ -206,6 +206,44 @@ describe("Others folders routes", () => {
     expect(await read.json()).toEqual({ content: "new" });
   });
 
+  describe("GET /api/file-content?preview=1", () => {
+    const contentUrl = (path: string, query: string) =>
+      `/api/file-content?path=${encodeURIComponent(path)}&wt=${encodeURIComponent(wt)}${query}`;
+
+    test("reads a file outside every tree without adding it to Others", async () => {
+      const file = join(root, "lib.py");
+      await writeFile(file, "def f(): ...");
+
+      const preview = await get(contentUrl(file, "&preview=1"));
+
+      expect(await preview.json()).toEqual({ content: "def f(): ..." });
+      expect(resources.externalFilesService.listFiles()).toEqual([]);
+      // Opening it in an editor adds it.
+      await get(contentUrl(file, ""));
+      expect(resources.externalFilesService.listFiles().map((e) => e.path)).toEqual([file]);
+    });
+
+    test("reads worktree files and reports missing ones as deleted", async () => {
+      await writeFile(join(wt, "src", "a.ts"), "a");
+
+      const read = await get(contentUrl(join(wt, "src", "a.ts"), "&preview=1"));
+      const missing = await get(contentUrl(join(root, "nope.py"), "&preview=1"));
+
+      expect(await read.json()).toEqual({ content: "a" });
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toMatchObject({ code: "ENOENT" });
+    });
+
+    test("needs a known worktree for a file outside every tree", async () => {
+      const file = join(root, "lib.py");
+      await writeFile(file, "x");
+
+      const read = await get(`/api/file-content?path=${encodeURIComponent(file)}&preview=1`);
+
+      expect(read.status).toBe(404);
+    });
+  });
+
   describe("file operations", () => {
     beforeEach(async () => {
       await post("/api/external-folders/add", { wt, path: folder });
