@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { editorFilePath, isLiveEditorModel } from "./live-editor-model";
+import { editorFilePath, isLiveEditorModel, markPreviewModel } from "./live-editor-model";
 
 const uri = (scheme: string, authority: string, fragment = "", query = "") => ({
   scheme,
@@ -37,5 +37,11 @@ describe("isLiveEditorModel", () => {
     expect(isLiveEditorModel({ uri: uri("loxel", "HEAD") })).toBe(true);
     expect(isLiveEditorModel({ uri: uri("loxel", "HEAD", "new") })).toBe(false);
     expect(isLiveEditorModel({ uri: uri("inmemory", "model") })).toBe(false);
+  });
+
+  test("rejects a peek widget's snapshot of a file", () => {
+    const snapshot = { uri: uri("file", "") };
+    markPreviewModel(snapshot);
+    expect(isLiveEditorModel(snapshot)).toBe(false);
   });
 });

@@ -55,6 +55,8 @@ const result = await session.send("Read package.json and summarize scripts");
 session.destroy();
 ```
 
+`config.env` is the environment of the tools' subprocesses (`Bash`, `Grep`, background tasks, completion checks); without it they inherit `process.env`. Pass a function instead of an object to change it during a session: it is called at every spawn, so the next command sees the change.
+
 `@bizimind/coding-agent/schemas` ([`./src/schemas.ts`](./src/schemas.ts)) exports only Zod schemas and types with no Node.js dependencies, so browser builds can import it.
 
 Source of truth: [`./src/session/session-types.ts`](./src/session/session-types.ts), [`./src/sdk.ts`](./src/sdk.ts)
@@ -176,7 +178,7 @@ Source of truth: [`./src/session/store.ts`](./src/session/store.ts), [`./src/sta
 
 ## Configuration
 
-SDK hosts can pass models and API keys in `SessionConfig.models` / `CodingAgentSessionOptions.models`. Without them, the runtime reads these environment variables:
+SDK hosts can pass models and API keys in `SessionConfig.models` / `CodingAgentSessionOptions.models`. For what they leave unset, the runtime reads the `OPENROUTER_*` variables below from the session's `env` when the session starts, or from `process.env` without one; the other variables are always read from `process.env`:
 
 | Variable                              | Default                             | Effect                                                         |
 | ------------------------------------- | ----------------------------------- | -------------------------------------------------------------- |

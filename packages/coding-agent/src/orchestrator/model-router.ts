@@ -1,6 +1,8 @@
 import { createNoopLogger, type AppLogger } from "@bizimind/logger";
 import { createOpenRouter, type OpenRouterProvider } from "@openrouter/ai-sdk-provider";
 
+import type { SpawnEnv } from "../utils/shell.ts";
+
 export type ModelProfile = "planner" | "executor" | "fallback" | "judge";
 
 /** Resolved model + API key pair for a single function. */
@@ -10,7 +12,7 @@ export interface ModelConfig {
 }
 
 export interface ModelRouterOptions {
-  /** Default config for all functions. Falls back to env vars if omitted. */
+  /** Default config for all functions. Falls back to the `OPENROUTER_*` env vars if omitted. */
   base?: ModelConfig;
   /** Per-function overrides (each can carry its own apiKey). */
   planner?: ModelConfig;
@@ -35,11 +37,18 @@ export class ModelRouter {
   private readonly webSearchFallbackConfig: ModelConfig | undefined;
   private readonly baseApiKey: string | undefined;
   private readonly logger: AppLogger;
+  private readonly env: SpawnEnv;
 
-  constructor(options: ModelRouterOptions = {}, logger: AppLogger = createNoopLogger()) {
+  /** `env` holds the `OPENROUTER_*` fallbacks for what `options` leaves unset; read once, here. */
+  constructor(
+    options: ModelRouterOptions = {},
+    logger: AppLogger = createNoopLogger(),
+    env: SpawnEnv = process.env,
+  ) {
     this.logger = logger.with({ component: "model-router" });
+    this.env = env;
 
-    const baseApiKey = options.base?.apiKey ?? process.env.OPENROUTER_API_KEY;
+    const baseApiKey = options.base?.apiKey ?? env.OPENROUTER_API_KEY;
     this.baseApiKey = baseApiKey;
 
     this.configs = {
@@ -50,10 +59,13 @@ export class ModelRouter {
     };
 
     this.webSearchConfig =
-      options.webSearch ?? this.configFromEnv(process.env.OPENROUTER_WEBSEARCH_MODEL, baseApiKey);
+      options.webSearch ?? this.configFromEnv(env.OPENROUTER_WEBSEARCH_MODEL, baseApiKey);
     this.webSearchFallbackConfig =
       options.webSearchFallback ??
-      this.configFromEnv(process.env.OPENROUTER_WEBSEARCH_FALLBACK_MODEL, baseApiKey);
+      this.configFromEnv(
+        env.OPENROUTER_WEBSEARCH_FALLBACK_MODEL,
+        options.webSearch?.apiKey ?? baseApiKey,
+      );
 
     this.logger.info("Model router configured", {
       plannerModel: this.configs.planner?.modelId,
@@ -98,8 +110,8 @@ export class ModelRouter {
     if (explicit) return explicit;
 
     const envModelKey = `OPENROUTER_MODEL_${profile.toUpperCase()}`;
-    const envModelId = process.env[envModelKey];
-    const apiKey = base?.apiKey ?? process.env.OPENROUTER_API_KEY;
+    const envModelId = this.env[envModelKey];
+    const apiKey = base?.apiKey ?? this.env.OPENROUTER_API_KEY;
 
     if (envModelId && apiKey) return { modelId: envModelId, apiKey };
     if (base) return { modelId: base.modelId, apiKey: base.apiKey };

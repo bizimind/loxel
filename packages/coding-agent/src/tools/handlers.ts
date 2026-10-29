@@ -852,7 +852,7 @@ async function runGrep(
     cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: ctx.env,
+    env: ctx.getEnv(),
   });
   if (proc.exitCode !== 0 && proc.stdout.toString().trim().length === 0) {
     return ok(
@@ -985,7 +985,7 @@ async function runBash(
     cwd: ctx.workspaceRoot,
     stdout: "pipe",
     stderr: "pipe",
-    env: ctx.env,
+    env: ctx.getEnv(),
   });
 
   let timedOut = false;
@@ -1336,12 +1336,10 @@ async function runWebSearch(
 
   const wsConfig = ctx.providerConfig?.webSearch;
   const wsFallbackConfig = ctx.providerConfig?.webSearchFallback;
-  const apiKey = wsConfig?.apiKey ?? process.env.OPENROUTER_API_KEY;
-  const primaryModel = wsConfig?.modelId ?? process.env.OPENROUTER_WEBSEARCH_MODEL;
-
+  // The model router already resolved the `OPENROUTER_*` fallbacks from the session env.
   const message =
     "WebSearch provider is not configured. Set OPENROUTER_API_KEY and OPENROUTER_WEBSEARCH_MODEL to enable this tool.";
-  if (!apiKey || !primaryModel) {
+  if (!wsConfig?.apiKey || !wsConfig.modelId) {
     return err(
       "WEBSEARCH_UNAVAILABLE",
       message,
@@ -1359,9 +1357,9 @@ async function runWebSearch(
 
   const fullQuery = `${normalizedQuery} ${domainHints}`.trim();
   const started = Date.now();
+  const { apiKey, modelId: primaryModel } = wsConfig;
   const provider = createOpenRouter({ apiKey, compatibility: "strict" });
-  const fallbackModel =
-    wsFallbackConfig?.modelId ?? process.env.OPENROUTER_WEBSEARCH_FALLBACK_MODEL;
+  const fallbackModel = wsFallbackConfig?.modelId;
 
   const resultSchema = z.object({
     query: z.string(),
