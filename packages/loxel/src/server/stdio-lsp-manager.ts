@@ -211,7 +211,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * client capability is added to `initialize`, the server's watcher registrations are answered
    * here instead of reaching the client, and {@link notifyWatchedFilesChanged} forwards matching
    * changes as `workspace/didChangeWatchedFiles`. Needs {@link getSessionWorkspace}: only changes
-   * inside the session's worktree are reported, and none in its git-ignored directories.
+   * inside the session's worktree are reported, outside its git-ignored directories except for
+   * dependency installs under `node_modules` (see `node-modules-changes.ts`).
    */
   protected readonly forwardWatchedFiles: boolean = false;
 

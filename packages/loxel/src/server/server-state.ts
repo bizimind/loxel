@@ -9,6 +9,7 @@ import type { ExternalFilesService } from "./external-files-service";
 import type { ExternalFoldersService, FileTree } from "./external-folders-service";
 import type { FileOperationsHistory, FileOperationsService } from "./file-operations-service";
 import type { FileWatcher } from "./file-watcher";
+import type { NodeModulesChanges } from "./node-modules-changes";
 import type { ProjectFilesService } from "./project-files-service";
 import type { ReviewDb } from "./review-db";
 import type { WorktreeStatusTracker } from "./worktree-status-tracker";
@@ -80,6 +81,8 @@ export interface WorktreeResources {
   /** Watches a linked worktree's git dir for status events. Null for a regular repo's root. */
   worktreeWatcher: FileWatcher | null;
   filesService: ProjectFilesService;
+  /** Reports dependency installs, which `filesService` ignores, to the language servers. */
+  nodeModulesChanges: NodeModulesChanges;
   fileOpsService: FileOperationsService;
   detachedFilesService: DetachedFilesService;
   externalFilesService: ExternalFilesService;
