@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
+import type { ExternalTypeChecker } from "./python-lsp-manager";
+
 // Interpreter overrides live in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "python-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
@@ -42,6 +44,7 @@ afterEach(async () => {
 interface Diagnostic {
   message: string;
   code?: string;
+  severity?: number;
 }
 
 /** Stands in for the WebSocket and the Monaco LSP client behind it. */
@@ -50,6 +53,9 @@ class FakeClient {
   readonly diagnostics = new Map<string, Diagnostic[]>();
   private readonly responses = new Map<number, (result: unknown) => void>();
   private diagnosticsWaiter: (() => void) | null = null;
+  private nextId = 100;
+  /** Methods of the requests the server sent. */
+  readonly serverRequests: string[] = [];
 
   constructor(private readonly manager: InstanceType<typeof PythonLspManager>) {
     const ws = {
@@ -62,13 +68,17 @@ class FakeClient {
     this.ws = ws as unknown as ServerWebSocket<unknown>;
   }
 
-  async start(wtPath: string): Promise<void> {
+  /** `pull`: ask for diagnostics (`textDocument/diagnostic`) like Monaco does, instead of having them pushed. */
+  async start(wtPath: string, { pull = false } = {}): Promise<void> {
     this.manager.createSession(this.ws, wtPath);
     const rootUri = `file://${wtPath}`;
+    const textDocument = pull
+      ? { publishDiagnostics: {}, diagnostic: { dynamicRegistration: true } }
+      : { publishDiagnostics: {} };
     await this.request(1, "initialize", {
       processId: null,
       rootUri,
-      capabilities: { textDocument: { publishDiagnostics: {} }, workspace: {} },
+      capabilities: { textDocument, workspace: {} },
       workspaceFolders: [{ uri: rootUri, name: "wt" }],
     });
     this.send({ method: "initialized", params: {} });
@@ -105,6 +115,21 @@ class FakeClient {
     }
   }
 
+  /** Pull `uri`'s diagnostics until they satisfy `predicate`; the server answers once analyzed. */
+  async pullDiagnostics(
+    uri: string,
+    predicate: (diagnostics: Diagnostic[]) => boolean,
+  ): Promise<Diagnostic[]> {
+    while (true) {
+      const result = (await this.request(this.nextId++, "textDocument/diagnostic", {
+        textDocument: { uri },
+        previousResultId: "stale",
+      })) as { items?: Diagnostic[] };
+      const items = result.items ?? [];
+      if (predicate(items)) return items;
+    }
+  }
+
   private request(id: number, method: string, params: unknown): Promise<unknown> {
     return new Promise((resolve) => {
       this.responses.set(id, resolve);
@@ -129,11 +154,20 @@ class FakeClient {
       return;
     }
     if (message.method !== undefined && message.id !== undefined) {
+      this.serverRequests.push(message.method);
+      // Answered like monaco-lsp-client does: basedpyright stops answering pulls after a failed refresh.
+      if (
+        message.method === "client/registerCapability" ||
+        message.method === "workspace/diagnostic/refresh"
+      ) {
+        this.send({ id: message.id, result: null });
+        return;
+      }
       // Server→client requests the client doesn't implement, like monaco-lsp-client.
       this.send({ id: message.id, error: { code: -32601, message: "Unhandled method" } });
       return;
     }
-    if (message.id !== undefined) this.responses.get(message.id)?.(message.result);
+    if (message.id !== undefined) this.responses.get(message.id)?.(message.result ?? {});
   }
 }
 
@@ -169,6 +203,26 @@ const analyzed = (diagnostics: Diagnostic[]) =>
   diagnostics.some((d) => d.code === "reportAssignmentType");
 const hasUnusedCallResult = (diagnostics: Diagnostic[]) =>
   diagnostics.some((d) => d.code === "reportUnusedCallResult");
+
+/** A type checker standing in for mypy, owning every file once `owns` is set. */
+class FakeTypeChecker implements ExternalTypeChecker {
+  owns = false;
+  private readonly listeners = new Set<(wtPath: string) => void>();
+
+  ownsTypeChecking(): boolean {
+    return this.owns;
+  }
+
+  onTypeCheckingChange(listener: (wtPath: string) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  set(wtPath: string, owns: boolean): void {
+    this.owns = owns;
+    for (const listener of this.listeners) listener(wtPath);
+  }
+}
 
 /** A manager whose resolver found no interpreter, as on a machine without Python outside the repo. */
 class UnresolvedEnvManager extends PythonLspManager {
@@ -294,6 +348,35 @@ describe.skipIf(!canRun)("PythonLspManager with basedpyright", () => {
       await writeFile(module, "VALUE = 1\n");
       manager.notifyWatchedFilesChanged(wt, [module]);
       await client.waitForDiagnostics(uri, (d) => analyzed(d) && !hasMissingImport(d));
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "drops its type errors where another checker type-checks, unless the project configures it",
+    async () => {
+      const wt = await makeWorktree();
+      const file = join(wt, "checked.py");
+      await writeFile(file, `import os\n${SENTINEL}\n\ndef broken(:\n    pass\n`);
+      const checker = new FakeTypeChecker();
+      manager = new PythonLspManager(checker);
+      const client = new FakeClient(manager);
+      await client.start(wt, { pull: true });
+      const uri = client.open(file, await Bun.file(file).text());
+      await client.pullDiagnostics(uri, analyzed);
+
+      checker.set(wt, true);
+      // The client is asked to pull again; its answer never reaches basedpyright.
+      expect(client.serverRequests).toContain("workspace/diagnostic/refresh");
+      const owned = await client.pullDiagnostics(uri, () => true);
+      expect(analyzed(owned)).toBe(false);
+      // Syntax errors (no rule) and hints (unused import) stay.
+      expect(owned.some((d) => d.code === undefined)).toBe(true);
+      expect(owned.some((d) => d.code === "reportUnusedImport" && d.severity === 4)).toBe(true);
+
+      // A project that configures basedpyright wants its type errors next to the other checker's.
+      await writeFile(join(wt, "pyrightconfig.json"), "{}\n");
+      await client.pullDiagnostics(uri, analyzed);
     },
     TEST_TIMEOUT_MS,
   );

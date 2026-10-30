@@ -1,6 +1,11 @@
+import { statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { ServerWebSocket, Subprocess } from "bun";
 
 import type { PythonEnv } from "@/api/python-env-model";
+import { isRecord } from "@/lib/is-record";
 
 import {
   getPythonEnv,
@@ -16,6 +21,22 @@ import {
   type WtLspContext,
   type WtLspSession,
 } from "./stdio-lsp-manager";
+import { readToml, recordAt } from "./toml-file";
+
+/** Another type checker that owns type checking for some files (mypy, see `mypy-lsp-manager.ts`). */
+export interface ExternalTypeChecker {
+  /** Whether it type-checks `filePath` in `wtPath`, so basedpyright's own type errors are dropped there. */
+  ownsTypeChecking(wtPath: string, filePath: string): boolean;
+  /** Calls `listener` with a worktree whose answers may have changed; returns the unsubscribe. */
+  onTypeCheckingChange(listener: (wtPath: string) => void): () => void;
+}
+
+/** Ids of the `workspace/diagnostic/refresh` requests sent to the client, whose answers are dropped. */
+const REFRESH_ID_PREFIX = "loxel-diagnostic-refresh-";
+/** The id of a JSON-RPC response written with `jsonrpc` and `id` first. */
+const RESPONSE_ID = /^\{\s*"jsonrpc"\s*:\s*"2\.0"\s*,\s*"id"\s*:\s*(\d+|"(?:[^"\\]|\\.)*")/;
+/** LSP `DiagnosticSeverity.Hint`. */
+const HINT_SEVERITY = 4;
 
 interface PythonLspSession extends WtLspSession {
   unsubscribeEnv: (() => void) | null;
@@ -23,6 +44,10 @@ interface PythonLspSession extends WtLspSession {
   answeredEnv: PythonEnv | null | undefined;
   /** Set once the client's `initialized` reached the server, after which config may be pushed. */
   initialized: boolean;
+  /** The document of each `textDocument/diagnostic` request awaiting its report, by request id. */
+  diagnosticRequests: Map<number | string, string>;
+  /** Whether the external type checker owned each document when its last report was answered. */
+  reportedOwnership: Map<string, boolean>;
 }
 
 /**
@@ -57,12 +82,20 @@ export function pythonSettings(env: PythonEnv | null, wtPath: string): Record<st
  * through `workspace/configuration`.
  * A `pyrightconfig.json` / `[tool.basedpyright]` / `[tool.pyright]` `venv`
  * still takes precedence inside basedpyright.
+ *
+ * Where an {@link ExternalTypeChecker} type-checks a file (mypy, in projects configured for it),
+ * basedpyright's own type errors for that file are dropped from its diagnostics reports, keeping
+ * syntax errors and its unused, unreachable and deprecated hints, so the project's checker is the
+ * only one reporting type errors while basedpyright still serves completion, hover, navigation and
+ * refactors. A project that configures basedpyright or pyright itself keeps both.
  */
 export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspContext> {
   protected override readonly forwardWatchedFiles = true;
+  private refreshCount = 0;
 
-  constructor() {
+  constructor(private readonly typeChecker: ExternalTypeChecker | null = null) {
     super("python-lsp");
+    typeChecker?.onTypeCheckingChange((wtPath) => this.refreshDiagnostics(wtPath));
   }
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
@@ -102,6 +135,8 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       unsubscribeEnv: null,
       answeredEnv: undefined,
       initialized: false,
+      diagnosticRequests: new Map(),
+      reportedOwnership: new Map(),
     };
     session.unsubscribeEnv = subscribePythonEnv(session.wtPath, ({ env, first }) => {
       if (!this.isSessionLive(session) || !session.initialized) return;
@@ -129,6 +164,127 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
     session.initialized = true;
   }
 
+  protected override handleClientData(session: PythonLspSession, data: string): void {
+    if (!this.typeChecker) {
+      super.handleClientData(session, data);
+      return;
+    }
+    // Most frames are none of these, and need no second parse.
+    const message =
+      data.includes("textDocument/diagnostic") ||
+      data.includes("textDocument/didClose") ||
+      data.includes(REFRESH_ID_PREFIX)
+        ? parseRecord(data)
+        : null;
+    const { id, method, params } = message ?? {};
+    // The client's answer to a refresh this manager asked for: basedpyright never sent one.
+    if (method === undefined && typeof id === "string" && id.startsWith(REFRESH_ID_PREFIX)) return;
+    const uri =
+      isRecord(params) && isRecord(params.textDocument) ? params.textDocument.uri : undefined;
+    if (method === "textDocument/didClose" && typeof uri === "string") {
+      session.reportedOwnership.delete(uri);
+    }
+    if (
+      method === "textDocument/diagnostic" &&
+      (typeof id === "number" || typeof id === "string") &&
+      isRecord(params) &&
+      typeof uri === "string"
+    ) {
+      session.diagnosticRequests.set(id, uri);
+      // basedpyright's "unchanged" answer would keep a report filtered under the other owner: ask
+      // for the full one when the owner changed since the last report.
+      const reported = session.reportedOwnership.get(uri);
+      if ("previousResultId" in params && reported !== this.ownsTypeChecking(session, uri)) {
+        delete params.previousResultId;
+        super.handleClientData(session, JSON.stringify(message));
+        return;
+      }
+    }
+    super.handleClientData(session, data);
+  }
+
+  protected override handleServerFrame(session: PythonLspSession, body: string): void {
+    super.handleServerFrame(session, this.withoutExternalTypeErrors(session, body));
+  }
+
+  /** `body` without basedpyright's type errors for files the external type checker owns. */
+  private withoutExternalTypeErrors(session: PythonLspSession, body: string): string {
+    if (!this.typeChecker || !this.mayCarryDiagnostics(session, body)) return body;
+    const message = parseRecord(body);
+    if (!message) return body;
+    const { id, method, result, params } = message;
+    if (method === undefined && (typeof id === "number" || typeof id === "string")) {
+      const uri = session.diagnosticRequests.get(id);
+      if (uri === undefined) return body;
+      session.diagnosticRequests.delete(id);
+      if (!isRecord(result) || !Array.isArray(result.items)) return body;
+      const owned = this.ownsTypeChecking(session, uri);
+      session.reportedOwnership.set(uri, owned);
+      if (!owned) return body;
+      result.items = result.items.filter(isKeptDiagnostic);
+      return JSON.stringify(message);
+    }
+    if (
+      method === "textDocument/publishDiagnostics" &&
+      isRecord(params) &&
+      typeof params.uri === "string" &&
+      Array.isArray(params.diagnostics) &&
+      this.ownsTypeChecking(session, params.uri)
+    ) {
+      params.diagnostics = params.diagnostics.filter(isKeptDiagnostic);
+      return JSON.stringify(message);
+    }
+    return body;
+  }
+
+  /**
+   * Whether `body` may be diagnostics to filter: pushed ones, or the answer to a pending pull,
+   * told by the id at its start (basedpyright writes `jsonrpc` and `id` first), so completion and
+   * semantic-token answers that arrive while a pull is pending are not parsed twice.
+   */
+  private mayCarryDiagnostics(session: PythonLspSession, body: string): boolean {
+    if (body.includes("textDocument/publishDiagnostics")) return true;
+    if (session.diagnosticRequests.size === 0) return false;
+    const id = RESPONSE_ID.exec(body)?.[1];
+    if (id === undefined) return true;
+    const key: unknown = JSON.parse(id);
+    return (
+      (typeof key === "number" || typeof key === "string") && session.diagnosticRequests.has(key)
+    );
+  }
+
+  private ownsTypeChecking(session: PythonLspSession, uri: string): boolean {
+    let filePath: string;
+    try {
+      filePath = fileURLToPath(uri);
+    } catch {
+      return false;
+    }
+    return (
+      this.typeChecker?.ownsTypeChecking(session.wtPath, filePath) === true &&
+      !configuresPyright(session.wtPath)
+    );
+  }
+
+  /**
+   * Make the clients of `wtPath` pull basedpyright's diagnostics again, since which of them are
+   * dropped changed. The answers to these requests are dropped in {@link handleClientData}.
+   */
+  private refreshDiagnostics(wtPath: string): void {
+    for (const session of this.sessions.values()) {
+      if (session.wtPath !== wtPath || !session.initialized || !this.isSessionLive(session)) {
+        continue;
+      }
+      session.ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: `${REFRESH_ID_PREFIX}${++this.refreshCount}`,
+          method: "workspace/diagnostic/refresh",
+        }),
+      );
+    }
+  }
+
   protected override onSessionClosed(session: PythonLspSession): void {
     session.unsubscribeEnv?.();
     session.unsubscribeEnv = null;
@@ -145,5 +301,52 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
     const env = await getPythonEnvNow(session.wtPath);
     session.answeredEnv = env;
     return pythonSettings(env, session.wtPath);
+  }
+}
+
+/** Syntax errors carry no rule; hints (unused, unreachable, deprecated) are not type errors. */
+function isKeptDiagnostic(diagnostic: unknown): boolean {
+  if (!isRecord(diagnostic)) return true;
+  return diagnostic.code === undefined || diagnostic.severity === HINT_SEVERITY;
+}
+
+function parseRecord(json: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(json);
+    return isRecord(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Each worktree's answer to {@link configuresPyright}, kept while its config files are unchanged. */
+const pyrightConfigCache = new Map<string, { stamp: string; configured: boolean }>();
+
+/**
+ * Whether the project at `wtPath` configures basedpyright itself (`pyrightconfig.json`, or a
+ * `[tool.basedpyright]` / `[tool.pyright]` table in `pyproject.toml`, at the root, where
+ * basedpyright reads them), so it wants basedpyright's type errors even next to another checker.
+ */
+export function configuresPyright(wtPath: string): boolean {
+  const pyrightconfig = path.join(wtPath, "pyrightconfig.json");
+  const pyproject = path.join(wtPath, "pyproject.toml");
+  const stamp = [pyrightconfig, pyproject].map(fileStamp).join("|");
+  const cached = pyrightConfigCache.get(wtPath);
+  if (cached?.stamp === stamp) return cached.configured;
+  const tool = recordAt(readToml(pyproject), "tool");
+  const configured =
+    fileStamp(pyrightconfig) !== "" ||
+    recordAt(tool, "basedpyright") !== undefined ||
+    recordAt(tool, "pyright") !== undefined;
+  pyrightConfigCache.set(wtPath, { stamp, configured });
+  return configured;
+}
+
+function fileStamp(file: string): string {
+  try {
+    const stat = statSync(file);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return "";
   }
 }

@@ -12,6 +12,7 @@ Quick reference for per-LSP quirks. Consult when the new integration needs behav
 | Terraform             | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
 | Python (basedpyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
 | Python (ruff)         | downloaded    | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
+| Python (mypy)         | project env   | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
 | Astro                 | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
 | XML (LemMinX)         | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | none                          |
 | TOML (Tombi)          | downloaded    | worktree | lazy       | disabled        | no             | `lsp`           | schema map (post-init)        |
@@ -52,6 +53,10 @@ basedpyright reads only `disablePullDiagnostics` from `initializationOptions`; i
 ## Ruff — Second Server for a Language
 
 The pattern for a second server and for project-provided binaries is in `server-manager.md`. Runs next to basedpyright on the same `python` models: its own route, client and lazy connector, each client keeping its own diagnostics markers. `resolveBinary` is async: the `ruff` beside the resolved interpreter if it passes the environment trust rule and is at least 0.5.3, else the downloaded one. It picks again after each re-resolution of the environment and, when the pick changes, closes the socket with `LSP_RESTART_CLOSE_CODE` so the client reconnects to a new server. Suppresses its formatting (`suppressedFeatures`) so format on save stays the only Python formatter, and turns off syntax errors that basedpyright already reports.
+
+## mypy — A Tool Without a Language Server
+
+`mypy-lsp-manager.ts` is not a `StdioLspManager`: it speaks LSP over the WebSocket itself (handshake, open/close, `publishDiagnostics`, `window/showMessage`) and runs the project's `dmypy` per config root, so a CLI checker's results still go through the regular client pipeline. It mirrors the stdio managers' public surface (`createSession`, `destroySession`, `handleMessage`, `notifyWatchedFilesChanged`, `destroy`) so `server.ts` wires it like the others. It is basedpyright's `ExternalTypeChecker`: where it type-checks a file, `PythonLspManager` drops basedpyright's type errors. See LANGUAGE_SERVERS.md "basedpyright, ruff and mypy".
 
 ## Astro — Use as Template
 

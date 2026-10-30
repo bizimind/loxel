@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type * as monaco from "monaco-editor";
 
 import { fakeMonaco, fakeMonacoModule } from "../../testing/fake-monaco";
-import type { PublishDiagnosticsParams } from "../../types";
+import type { Diagnostic, PublishDiagnosticsParams } from "../../types";
 import type { LspConnection } from "../LspConnection";
 
 mock.module("monaco-editor", () => fakeMonacoModule);
@@ -31,11 +31,15 @@ function setup(model: monaco.editor.ITextModel, markerOwner?: string) {
     bridge: { translateBack: () => ({ textModel: model }) },
   } as unknown as LspConnection;
   const feature = new LspDiagnosticsFeature(connection, markerOwner);
-  const send = (message: string) =>
+  const send = (message: string, extra?: Partial<Diagnostic>) =>
     publish?.({
       uri: URI,
       diagnostics: [
-        { message, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } },
+        {
+          message,
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+          ...extra,
+        },
       ],
     });
   return { feature, send };
@@ -78,5 +82,21 @@ describe("LspDiagnosticsFeature", () => {
     next.send("new worktree");
     expect([...fakeMonaco.markers.keys()]).toEqual(["python-lsp"]);
     expect(messagesByOwner()).toEqual([["new worktree"]]);
+  });
+
+  test("a code with a description links to its documentation", () => {
+    const model = { uri: { toString: () => URI }, isDisposed: () => false };
+    const mypy = setup(model as unknown as monaco.editor.ITextModel, "mypy-lsp");
+    const href = "https://mypy.readthedocs.io/en/stable/_refs.html#code-assignment";
+    mypy.send("Incompatible types", { code: "assignment", codeDescription: { href } });
+    const [marker] = fakeMonaco.markers.get("mypy-lsp")?.get(URI) ?? [];
+    const code = marker?.code;
+    expect(typeof code === "object" ? [code.value, code.target.toString(true)] : code).toEqual([
+      "assignment",
+      href,
+    ]);
+
+    mypy.send("Plain code", { code: 7 });
+    expect(fakeMonaco.markers.get("mypy-lsp")?.get(URI)?.[0]?.code).toBe("7");
   });
 });

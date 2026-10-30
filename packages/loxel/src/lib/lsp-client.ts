@@ -62,6 +62,12 @@ export interface LspClientOptions {
   languageId: string | readonly string[];
   /** Runs for each connection's transport; what it returns is disposed with the connection. */
   onConnected?: (transport: WebSocketTransport) => IDisposable;
+  /**
+   * Show the errors and warnings the server sends with `window/showMessage` as toasts, each
+   * distinct message once while Loxel runs, for a server whose messages are meant for the user
+   * (mypy's setup problems).
+   */
+  showMessages?: boolean;
 }
 
 /**
@@ -81,8 +87,15 @@ export interface LspClientOptions {
  * documents. A client that stops reconnecting is listed in `useLspStatusStore` for the status bar,
  * with a toast when its server crashed or could not start.
  */
-export function createLspClient({ route, name, languageId, onConnected }: LspClientOptions) {
+export function createLspClient({
+  route,
+  name,
+  languageId,
+  onConnected,
+  showMessages,
+}: LspClientOptions) {
   const markerOwner = route.replace(/^ws\//, "");
+  const showMessage = showMessages ? createServerMessageToasts(name) : undefined;
 
   async function open(wtPath: string | null, signal: AbortSignal): Promise<LspLink> {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -101,6 +114,7 @@ export function createLspClient({ route, name, languageId, onConnected }: LspCli
         markerOwner,
         workspaceFileSystem: wtPath === null ? undefined : createLspWorkspaceFiles(wtPath),
         onWorkspaceEditFailure: (reason) => showToast(`Edit not applied: ${reason}`),
+        onShowMessage: showMessage,
       });
     } catch (err) {
       transport.dispose();
@@ -146,6 +160,26 @@ export function createLspClient({ route, name, languageId, onConnected }: LspCli
   const connection = createLspConnection({ open, onStateChange });
   connections.add(connection);
   return { connect: connection.connect, disconnect: connection.disconnect };
+}
+
+/** LSP `MessageType.Warning`: errors and warnings are shown, info and log messages are not. */
+const WARNING_MESSAGE_TYPE = 2;
+const ERROR_MESSAGE_TYPE = 1;
+
+/**
+ * Show the errors and warnings a server sends with `window/showMessage` as toasts, each distinct
+ * message once while Loxel runs, since a server that restarts or re-checks would repeat it.
+ */
+function createServerMessageToasts(
+  name: string,
+): (params: { type: number; message: string }) => void {
+  const shown = new Set<string>();
+  return ({ type, message }) => {
+    if (type > WARNING_MESSAGE_TYPE || shown.has(message)) return;
+    shown.add(message);
+    log.info("Language server message", { server: name, type, message });
+    showToast(`${name}: ${message}`, type === ERROR_MESSAGE_TYPE ? "error" : "info");
+  };
 }
 
 /**
