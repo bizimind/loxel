@@ -6,25 +6,16 @@
  */
 import type { NotificationSequence, NotificationSequences } from "@/api/ws-protocol";
 import { DEFAULT_NOTIFICATION_SEQUENCES, NOTIFICATION_SEQUENCES } from "@/api/ws-protocol";
+import { isRecord } from "@/lib/is-record";
 
+import { persistedSettingsState, SETTINGS_STORE_KEY } from "./persisted-settings";
 import { getStore, onStoreChange } from "./store-db";
 import type { TerminalSpawnOptions } from "./terminal-manager";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 /** The `terminal` section of a persisted settings JSON string; null if missing or malformed. */
 function terminalSection(raw: string | null): Record<string, unknown> | null {
-  if (!raw) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!isRecord(parsed) || !isRecord(parsed.state) || !isRecord(parsed.state.terminal)) return null;
-  return parsed.state.terminal;
+  const terminal = persistedSettingsState(raw)?.terminal;
+  return isRecord(terminal) ? terminal : null;
 }
 
 /**
@@ -77,7 +68,6 @@ export function createNotificationSequencesCache(read: () => string | null): {
   };
 }
 
-const SETTINGS_STORE_KEY = "settings";
 const cache = createNotificationSequencesCache(() => getStore(SETTINGS_STORE_KEY));
 onStoreChange((key) => {
   if (key === SETTINGS_STORE_KEY) cache.invalidate();

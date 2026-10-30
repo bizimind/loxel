@@ -103,8 +103,14 @@ export async function getStore(key: string): Promise<string | null> {
   return value;
 }
 
-export async function putStore(key: string, value: string, nonce?: string): Promise<void> {
+export async function putStore(
+  key: string,
+  value: string,
+  nonce?: string,
+  options?: Pick<RequestInit, "keepalive">,
+): Promise<void> {
   await fetchJson(`/stores/${encodeURIComponent(key)}`, {
+    ...options,
     method: "PUT",
     body: JSON.stringify({ value, nonce }),
   });
