@@ -1,9 +1,4 @@
 import { createLspClient } from "./lsp-client";
 
-const { connect: connectTomlLsp, disconnect: disconnectTomlLsp } = createLspClient({
-  route: "ws/toml-lsp",
-  name: "TOML",
-  languageId: "toml",
-});
-
-export { connectTomlLsp, disconnectTomlLsp };
+// Tombi: schema validation and completion for TOML (Settings > Schemas), plus TOML syntax checks.
+export default createLspClient({ route: "ws/toml-lsp", name: "TOML", languageId: "toml" });

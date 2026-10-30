@@ -10,7 +10,9 @@ interface Props {
 const { title, description } = Astro.props;
 
 const allDocs = await getCollection("docs");
-const sorted = allDocs.sort((a, b) => a.data.order - b.data.order);
+const sorted = allDocs.sort(
+  (a, b) => a.data.order - b.data.order || a.data.title.localeCompare(b.data.title),
+);
 const currentPath = Astro.url.pathname;
 ---
 

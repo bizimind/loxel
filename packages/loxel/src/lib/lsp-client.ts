@@ -159,8 +159,15 @@ export function createLspClient({
 
   const connection = createLspConnection({ open, onStateChange });
   connections.add(connection);
-  return { connect: connection.connect, disconnect: connection.disconnect };
+  return {
+    connect: connection.connect,
+    disconnect: connection.disconnect,
+    languageIds: typeof languageId === "string" ? [languageId] : languageId,
+    logCategory: markerOwner,
+  };
 }
+
+export type LspClient = ReturnType<typeof createLspClient>;
 
 /** LSP `MessageType.Warning`: errors and warnings are shown, info and log messages are not. */
 const WARNING_MESSAGE_TYPE = 2;

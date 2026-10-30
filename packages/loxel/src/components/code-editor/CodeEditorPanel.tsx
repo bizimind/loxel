@@ -24,6 +24,7 @@ import { detectIndentation } from "@/lib/detect-indentation";
 import { applyEditorConfigOnSave } from "@/lib/editorconfig-save-actions";
 import { removeDollarSchema, setDollarSchema } from "@/lib/json-schema-registry";
 import { validateStrictJson } from "@/lib/json-strict-validator";
+import { fileSchemeLanguages } from "@/lib/lsp-clients";
 import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
 import { resolveLanguage } from "@/lib/resolve-language";
@@ -306,20 +307,7 @@ export function CodeEditorPanel({
 
     const content = diskContent ?? "";
 
-    // Files served by an LSP that cares about real disk paths use file://
-    // URIs (YAML/JSON/TOML for schemas, Dockerfile/Terraform for workspace indexing,
-    // Python for import resolution and cross-file references). Other files use
-    // loxel://HEAD/<path>, which the TypeScript server bridge translates.
-    const useFileScheme =
-      language === "yaml" ||
-      language === "json" ||
-      language === "dockerfile" ||
-      language === "dockerbake" ||
-      language === "terraform" ||
-      language === "astro" ||
-      language === "xml" ||
-      language === "python" ||
-      language === "toml";
+    const useFileScheme = fileSchemeLanguages.has(language);
     const uri = useFileScheme
       ? monaco.Uri.from({ scheme: "file", path: filePath })
       : monaco.Uri.from({ scheme: "loxel", authority: "HEAD", path: filePath });

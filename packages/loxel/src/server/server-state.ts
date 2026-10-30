@@ -1,6 +1,7 @@
 import type { LocalDb } from "@bizimind/localdb-sdk";
 import type { ServerWebSocket } from "bun";
 
+import type { LspName } from "@/api/log-entry-model";
 import type { DirEntry } from "@/api/project-files-model";
 import { isWithin } from "@/lib/project-file-helpers";
 
@@ -140,19 +141,21 @@ export interface ClientState {
   shownWorktree?: string;
 }
 
-/** WS data tag for routing app vs language-server connections. */
-export type WsData =
-  | { type: "app" }
-  | { type: "yaml-lsp" }
-  | WorktreeLspData<"ts-lsp">
-  | WorktreeLspData<"docker-lsp">
-  | WorktreeLspData<"terraform-lsp">
-  | WorktreeLspData<"python-lsp">
-  | WorktreeLspData<"ruff-lsp">
-  | WorktreeLspData<"mypy-lsp">
-  | WorktreeLspData<"astro-lsp">
-  | WorktreeLspData<"xml-lsp">
-  | WorktreeLspData<"toml-lsp">;
+/** A language-server manager rooted at a worktree, as `server.ts` drives it. */
+export interface WorktreeLspServer {
+  readonly name: LspName;
+  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void;
+  destroySession(ws: ServerWebSocket<unknown>): void;
+  handleMessage(ws: ServerWebSocket<unknown>, data: string): void;
+  notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void;
+  destroy(): void;
+}
 
-export type WorktreeLspData<T extends string = string> = { type: T; wtPath: string };
-export type WorktreeLspType = Extract<WsData, { wtPath: string }>["type"];
+export interface WorktreeLspData {
+  type: LspName;
+  wtPath: string;
+  manager: WorktreeLspServer;
+}
+
+/** WS data tag for routing app vs language-server connections. */
+export type WsData = { type: "app" } | { type: "yaml-lsp" } | WorktreeLspData;

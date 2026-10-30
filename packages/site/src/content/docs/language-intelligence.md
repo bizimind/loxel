@@ -1,7 +1,17 @@
 ---
 title: Language Intelligence
-description: Per-worktree language servers for TypeScript, Python, TOML and more, mypy, Python environments and the interpreter picker.
+description: Per-worktree language servers, the features they provide, and how they start and stop.
 order: 13
+# Sections that moved to a language's own page; old links to them keep working.
+movedAnchors:
+  typescript-server: /docs/languages/typescript
+  python: /docs/languages/python
+  type-checking-rules: /docs/languages/python#type-checking-rules
+  python-environment: /docs/languages/python#python-environment
+  seeing-and-changing-the-interpreter: /docs/languages/python#seeing-and-changing-the-interpreter
+  python-linting: /docs/languages/python#python-linting
+  mypy: /docs/languages/python#mypy
+  toml: /docs/languages/toml
 ---
 
 Loxel runs language servers for TypeScript, Python, TOML and other languages and connects them to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per worktree, with no cross-worktree interference.
@@ -65,149 +75,23 @@ Symbols flagged as unused by the language server are dimmed in the editor, and d
 
 ---
 
-## TypeScript server
-
-Loxel uses the official TypeScript 7 native compiler and language server. It provides diagnostics, completions, navigation, refactors, and other editor features.
-
-Changes made outside the editor reach it without a restart: a `git checkout`, an agent's edits, and packages you install, upgrade or remove with npm, pnpm, yarn or bun, including in a monorepo's per-package `node_modules`. Imports of a newly installed package resolve, and auto-imports offer it, about a second after the install finishes.
-
----
-
 ## Other languages
 
-Loxel runs language servers for seven other languages. Each one is independent of the TypeScript server.
+Each language server is independent of the others. A language with more to say has its own page in the docs navigation, such as [TypeScript](/docs/languages/typescript), [Python](/docs/languages/python) and [TOML](/docs/languages/toml). These have none:
 
 | Language  | When it starts             | File types                                                       |
 | --------- | -------------------------- | ---------------------------------------------------------------- |
 | YAML      | Always active              | `.yml`, `.yaml`                                                  |
 | Terraform | First matching file opened | `.tf`, `.tfvars`, `.hcl`                                         |
 | Docker    | First matching file opened | `Dockerfile`, `Containerfile`, `*.dockerfile`, `docker-bake.hcl` |
-| Python    | First matching file opened | `.py`, `.pyi`, `.pyw`                                            |
 | Astro     | First matching file opened | `.astro`                                                         |
 | XML       | First matching file opened | `.xml`, `.xsd`, `.xsl`, `.xslt`, `.plist`, and other XML formats |
-| TOML      | First matching file opened | `.toml`, `Pipfile`, `Cargo.lock`, `poetry.lock`, `uv.lock`       |
 
 YAML starts with Loxel and stays running. The others start the first time you open a matching file and stop automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
-
----
-
-## Python
-
-Python files are checked by [basedpyright](https://docs.basedpyright.com), a type checker and language server built on Pyright (or by [mypy](#mypy), in projects that use it). Besides diagnostics, hover, go-to-definition, references, rename and signature help, you get:
-
-- **Semantic highlighting**: `self` and `cls`, decorators, builtins, modules, methods and constants are colored by what they are, not only by syntax.
-- **Inlay hints**: inferred types of variables, return types of functions without an annotation, and parameter names at call sites, shown inline.
-- **Auto-imports**: completions include names from the standard library and installed packages, and picking one adds its `import`.
-- **Quick fixes** (`Cmd+.`): import an undefined name, or silence a rule on one line with `# pyright: ignore[<rule>]`.
-- **Docs for compiled modules**: hover shows documentation for built-in modules such as `math` too.
-
-### Type-checking rules
-
-Without a configuration file, Loxel checks with basedpyright's `standard` ruleset, the default of plain Pyright. To choose rules for a project, add a `[tool.basedpyright]` table to `pyproject.toml` or a `pyrightconfig.json` file (a `[tool.pyright]` table works too). Once a project has one, basedpyright's own defaults apply to everything it leaves out, including the stricter `recommended` ruleset, so set `typeCheckingMode` there:
-
-```toml
-[tool.basedpyright]
-typeCheckingMode = "recommended" # or "basic", "standard", "strict", "all"
-reportUnusedCallResult = "none"
-```
-
-See basedpyright's [configuration reference](https://docs.basedpyright.com/latest/configuration/config-files/) for every rule.
-
-### Python environment
-
-The Python server checks your code against the project's own Python environment, so imports of installed packages resolve and checks follow that Python version. For each worktree Loxel uses the first of:
-
-1. The interpreter you chose for the worktree (see below).
-2. The virtual environment or conda environment that was active in the shell Loxel was started from, if it is inside the worktree.
-3. The environment set by uv's `UV_PROJECT_ENVIRONMENT`, or a `.venv`, `venv` or `env` virtual environment at the worktree root (what uv, PDM and `python -m venv` create).
-4. Pixi's default environment.
-5. Poetry's environment, when the project has a `poetry.lock`, or Pipenv's, when it has a `Pipfile.lock`.
-6. In a monorepo without an environment at the root, the virtual environment of the one project folder below the root that has one. When several do, choose one as described below.
-7. `python3`, or else `python`, on your shell's `PATH`.
-
-Loxel never uses an interpreter that is committed to the repository, since running it would run the repository's code.
-
-Creating or syncing an environment while Loxel is open, for example with `uv sync`, is picked up automatically, as are packages installed into it later.
-
-### Seeing and changing the interpreter
-
-While a Python file is the active editor, the status bar shows the worktree's interpreter, for example `Python 3.12.13 (.venv)`. Hover it to see the interpreter's full path and how it was found.
-
-Click it, or run **Python: Select Interpreter** from the command palette (`Cmd+Shift+P`), to choose another one:
-
-- **Enter interpreter path…** takes the path of a Python executable or of an environment directory, such as `~/envs/py313`.
-- **Use automatic detection** goes back to the order above.
-- The rest of the list is every environment Loxel found: the ones above, plus `.venv`, `venv` and `env` environments and Pixi environments in project folders below the worktree root (folders with a `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `Pipfile` or `pixi.toml`), which is how you pick a sub-project's environment in a monorepo.
-
-The choice is saved for that worktree and survives restarts. The language servers and the [coding agent](/docs/coding-agent#commands-the-agent-runs)'s next commands switch to it right away, without a restart, and new terminals start with it. If the chosen interpreter is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
-
-A `venvPath` and `venv` setting in `pyrightconfig.json`, or in the `[tool.basedpyright]` (or `[tool.pyright]`) table of `pyproject.toml`, takes precedence over the interpreter Loxel passes to the type checker, whether detected or chosen:
-
-```toml
-[tool.basedpyright]
-venvPath = "."
-venv = ".venv-py313"
-```
-
-The type checker only reads that environment's installed packages and never runs its interpreter; Ruff, format on save and terminals are not affected by this setting.
-
-### Python linting
-
-Python files also get [Ruff](https://docs.astral.sh/ruff/)'s linter, alongside type checking:
-
-- Lint problems are underlined as you type, and `Cmd+.` offers Ruff's quick fixes, including disabling a rule for one line with a `# noqa` comment.
-- **Organize Imports** (`Shift+Alt+O`) sorts the file's imports.
-- **Fix All** (`Ctrl+Shift+.`, or from the command palette) applies every automatic fix in the file.
-
-Ruff reads its settings from the `ruff.toml`, `.ruff.toml` or `pyproject.toml` closest to each file, so each project in a monorepo keeps its own rules, and edits to those files apply right away. Without any Ruff configuration, Ruff's default rules apply.
-
-If Ruff 0.5.3 or newer is installed in the project's Python environment (see above, including an interpreter you chose), Loxel uses that one, so the version pinned in your dev dependencies applies. Otherwise it uses the Ruff that ships with Loxel. When the environment changes, for example when `uv sync` installs the project's Ruff after a Python file was opened, or you upgrade Ruff or choose another interpreter, the linter restarts with the new Ruff. Syntax errors come from the type checker only, and formatting stays with [format on save](/docs/editor#formatter-auto-detection).
-
----
-
-### mypy
-
-Projects that type-check with [mypy](https://mypy.readthedocs.io) get mypy's errors in the editor instead of basedpyright's. Loxel recognizes a project as using mypy by its configuration: a `mypy.ini` or `.mypy.ini`, a `[tool.mypy]` table in `pyproject.toml`, or a `[mypy]` section in `setup.cfg`. The configuration closest to each file applies, so each project in a monorepo keeps its own.
-
-Loxel runs the mypy installed in the project's Python environment (see above, including an interpreter you chose), so your pinned version, settings and plugins (Django, pydantic, SQLAlchemy and others) apply, exactly as when you run mypy yourself:
-
-- mypy's errors are underlined, marked `mypy`, and their error code links to its explanation in the mypy docs.
-- Files are checked when you open them and whenever a Python file is saved or changes on disk, for example after `git checkout` or an agent's edits. mypy reads files from disk, so unsaved changes are checked once saved. Loxel keeps a mypy daemon running per project, so re-checks after the first are quick.
-- When your configuration lists what to check (`files`, `modules` or `packages`), Loxel checks the project as configured, which is what your CI checks too. Otherwise it checks the files you have open.
-- Editing the mypy configuration, or a change to the Python environment such as installing packages or choosing another interpreter, restarts mypy.
-
-While mypy checks a file, basedpyright stops reporting type errors there, so you only see the errors your project's checker reports. That covers the files your configuration's `files`, `modules` or `packages` name, plus any other file mypy reports an error in after following an import into it. Files outside those that mypy reports nothing in keep basedpyright's type checking, and so does every file while mypy cannot check the project. basedpyright still provides completions, hover, go-to-definition, rename, quick fixes and the other features above, and still reports syntax errors and fades unused and unreachable code. To see both checkers' type errors, configure basedpyright in the project too, with a `pyrightconfig.json` or a `[tool.basedpyright]` (or `[tool.pyright]`) table in `pyproject.toml`.
-
-If mypy is configured but not installed in the project's environment, Loxel says so once and basedpyright keeps checking types; add mypy to your dev dependencies (for example `uv add --dev mypy`) to switch. If mypy cannot check the project, for example because of an error in its configuration or a plugin that fails to load, Loxel shows mypy's message.
-
-## TOML
-
-TOML files are checked by [Tombi](https://tombi-toml.github.io/tombi/). It underlines syntax errors and values that do not match the file's JSON Schema, and the schema also drives completions and hover documentation for keys and values. You also get the document outline, folding, go-to-definition and quick fixes.
-
-Schemas come from **Settings > Schemas**, the same mappings JSON and YAML files use. These files have built-in schemas from [SchemaStore](https://www.schemastore.org):
-
-- `pyproject.toml`, including tool tables such as `[tool.ruff]` and `[tool.uv]`
-- `Cargo.toml` and `.cargo/config.toml`
-- `ruff.toml` and `.ruff.toml`
-- `uv.toml`
-- `rustfmt.toml` and `.rustfmt.toml`
-
-Turn a built-in schema off to stop checking files against it, or add your own mapping: a glob ending in `.toml` and the schema's URL or local path. Your mappings take precedence over the built-in ones for the same file. A TOML glob with wildcards, such as `config/*.toml`, applies only to files inside the project, and its `*` also matches files in subfolders. Schemas are downloaded when a file first needs them and cached for a day.
-
-A `#:schema` comment at the top of a file picks its schema directly, by URL or by a path relative to the file, and takes precedence over the settings:
-
-```toml
-#:schema ./schemas/app.schema.json
-name = "demo"
-```
-
-Projects that configure Tombi themselves, with a `tombi.toml` or `.tombi.toml` file or a `[tool.tombi]` table in `pyproject.toml`, use that configuration instead of the Schemas settings, so the editor agrees with the `tombi` command line. A `~/.config/tombi/config.toml` of your own does the same for every project. Formatting stays with [format on save](/docs/editor#formatter-auto-detection).
 
 ---
 
 ## See also
 
 - [Editor](/docs/editor) — the code editor, where diagnostics appear inline, and format on save
-- [Terminals](/docs/terminals) — new terminals start with the worktree's Python environment active
-- [Coding Agent](/docs/coding-agent#commands-the-agent-runs) — the built-in agent's commands run with the worktree's Python environment active
 - [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — runtime configuration reference

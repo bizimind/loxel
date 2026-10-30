@@ -1,0 +1,1 @@
+{ "script": "copy-typescript.ts", "resources": ["typescript-lib"], "sign": ["typescript-lib/tsc"] }

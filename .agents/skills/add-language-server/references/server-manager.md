@@ -26,7 +26,7 @@ monaco-lsp-client does not answer `workspace/configuration`, so the base does. D
 
 Python runs basedpyright and ruff on the same `python` models. Each server is a full server-side integration of its own; the language's Monaco registration, highlighting, icons and URI scheme already exist:
 
-- Its own manager, route, `LOG_CATEGORIES` entry and client module, plus a second `createLazyLspConnector` with the same `languageIds`. The client syncs every model of those languages to both servers.
+- Its own manager and client module, with the same language IDs. The client syncs every model of those languages to both servers.
 - Diagnostics stay apart because each client's marker owner is its route (`python-lsp`, `ruff-lsp`); nothing to configure, as long as the route names differ.
 - Decide which server owns each overlapping feature and turn it off in the other: `suppressedFeatures` for capabilities (ruff's formatting), the server's own settings for diagnostics (ruff's `showSyntaxErrors: false`, since basedpyright reports syntax errors). Leave features that don't compete (ruff's organize imports, which basedpyright lacks).
 

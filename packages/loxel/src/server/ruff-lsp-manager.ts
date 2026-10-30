@@ -26,7 +26,7 @@ import {
 const log = logger.child("ruff-lsp");
 
 const RUFF = process.platform === "win32" ? "ruff.exe" : "ruff";
-/** Where `download:ruff` puts the bundled binary in dev mode. */
+/** Where `build:language-servers` puts the bundled binary in dev mode. */
 const DEV_PATH = path.resolve(import.meta.dir, "../../build", RUFF);
 /** First release whose `ruff server` is stable (older ones lack it or need `--preview`). */
 const MIN_SERVER_VERSION = "0.5.3";

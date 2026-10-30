@@ -18,7 +18,7 @@ const TS_EXTENSIONS = new RegExp(
 );
 
 /**
- * JSON paths: their live editor models use `file://` URIs (CodeEditorPanel's `useFileScheme`),
+ * JSON paths: their live editor models use `file://` URIs (`fileSchemeLanguages`),
  * unlike TS/JS models, which use `loxel://HEAD/`.
  */
 const JSON_PATH = /\.jsonc?$/i;

@@ -23,10 +23,8 @@ import {
 } from "@/api/ws-protocol";
 
 import { AgentManager } from "./agent-manager";
-import { AstroLspManager } from "./astro-lsp-manager";
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
-import { DockerLspManager } from "./docker-lsp-manager";
 import { ExternalFilesService } from "./external-files-service";
 import {
   ExternalFolderRegistry,
@@ -37,8 +35,8 @@ import { FileOperationsHistory, FileOperationsService } from "./file-operations-
 import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
+import { tomlLspManager, worktreeLspManagers } from "./language-servers";
 import { logger } from "./logger";
-import { MypyLspManager } from "./mypy-lsp-manager";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
@@ -50,14 +48,12 @@ import {
   refreshPythonEnv,
   subscribePythonEnv,
 } from "./python-env";
-import { PythonLspManager } from "./python-lsp-manager";
 import { onPythonOverrideChange } from "./python-override-store";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import type { ActiveWindow, RouteContext } from "./routes";
 import { handleRequest } from "./routes";
-import { RuffLspManager } from "./ruff-lsp-manager";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
 import { createServerPerfMonitor } from "./server-perf-monitor";
@@ -71,9 +67,9 @@ import type {
   ClientState,
   ProjectState,
   ResolvedFilePath,
+  WorktreeLspData,
   WorktreeResources,
   WsData,
-  WorktreeLspType,
 } from "./server-state";
 import { LOGIN_SHELL_ENV_WAIT_MS, onLoginShellEnvChange, resolveLoginShellEnv } from "./shell-env";
 import { recoverOrphanLayoutSessions } from "./store-db";
@@ -82,13 +78,9 @@ import type { TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
 import type { TerminalSink } from "./terminal-session";
 import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
-import { TerraformLspManager } from "./terraform-lsp-manager";
-import { TomlLspManager } from "./toml-lsp-manager";
-import { TsLspManager } from "./ts-lsp-manager";
 import { WorktreeStatusTracker } from "./worktree-status-tracker";
 import { INTERNAL_WORKTREE_PREFIX } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
-import { XmlLspManager } from "./xml-lsp-manager";
 import { YamlLspManager } from "./yaml-lsp-manager";
 
 const log = logger.child("server");
@@ -812,31 +804,17 @@ const notificationStore = new NotificationStore();
 const schemaService = new SchemaService();
 const formatService = new FormatService();
 const yamlLspManager = new YamlLspManager({});
-const tsLspManager = new TsLspManager();
-const dockerLspManager = new DockerLspManager();
-const terraformLspManager = new TerraformLspManager();
-// mypy, in projects configured for it, takes over basedpyright's type-checking diagnostics.
-const mypyLspManager = new MypyLspManager();
-const pythonLspManager = new PythonLspManager(mypyLspManager);
 // A chosen interpreter reaches everything that shares the worktree's resolution (language
 // servers, terminals, format on save, the status bar) without a restart.
 onPythonOverrideChange(refreshPythonEnv);
-const ruffLspManager = new RuffLspManager();
-const astroLspManager = new AstroLspManager();
-const xmlLspManager = new XmlLspManager();
-const tomlLspManager = new TomlLspManager({});
-/** Language servers rooted at a worktree, which hear about its file changes. */
-const worktreeLspManagers = [
-  tsLspManager,
-  dockerLspManager,
-  terraformLspManager,
-  pythonLspManager,
-  ruffLspManager,
-  mypyLspManager,
-  astroLspManager,
-  xmlLspManager,
-  tomlLspManager,
-];
+const worktreeLspManagerByRoute = new Map(
+  worktreeLspManagers.map((manager) => [`/ws/${manager.name}`, manager]),
+);
+
+/** The worktree language-server connection a socket is, if it is one. */
+function worktreeLspData(ws: ServerWebSocket<WsData>): WorktreeLspData | null {
+  return ws.data && "wtPath" in ws.data ? ws.data : null;
+}
 
 function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
   switch (msg.type) {
@@ -1240,26 +1218,15 @@ const server = Bun.serve<WsData>({
       return undefined;
     }
 
-    {
-      const worktreeLspTypes: WorktreeLspType[] = [
-        "ts-lsp",
-        "docker-lsp",
-        "terraform-lsp",
-        "python-lsp",
-        "ruff-lsp",
-        "mypy-lsp",
-        "astro-lsp",
-        "xml-lsp",
-        "toml-lsp",
-      ];
-      for (const lspType of worktreeLspTypes) {
-        if (url.pathname !== `/ws/${lspType}`) continue;
-        const wtPath = url.searchParams.get("wt");
-        if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
-        const upgraded = server.upgrade(req, { data: { type: lspType, wtPath } });
-        if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
-        return undefined;
-      }
+    const worktreeLspManager = worktreeLspManagerByRoute.get(url.pathname);
+    if (worktreeLspManager) {
+      const wtPath = url.searchParams.get("wt");
+      if (!wtPath) return new Response("Missing 'wt' query parameter", { status: 400 });
+      const upgraded = server.upgrade(req, {
+        data: { type: worktreeLspManager.name, wtPath, manager: worktreeLspManager },
+      });
+      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 400 });
+      return undefined;
     }
 
     if (url.pathname === "/ws") {
@@ -1294,40 +1261,9 @@ const server = Bun.serve<WsData>({
         yamlLspManager.attach(ws);
         return;
       }
-      if (ws.data?.type === "ts-lsp") {
-        tsLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "docker-lsp") {
-        dockerLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "terraform-lsp") {
-        terraformLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "python-lsp") {
-        pythonLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "ruff-lsp") {
-        ruffLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "mypy-lsp") {
-        mypyLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "astro-lsp") {
-        astroLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "xml-lsp") {
-        xmlLspManager.createSession(ws, ws.data.wtPath);
-        return;
-      }
-      if (ws.data?.type === "toml-lsp") {
-        tomlLspManager.createSession(ws, ws.data.wtPath);
+      const worktreeLsp = worktreeLspData(ws);
+      if (worktreeLsp) {
+        worktreeLsp.manager.createSession(ws, worktreeLsp.wtPath);
         return;
       }
       if (shuttingDown) {
@@ -1349,40 +1285,9 @@ const server = Bun.serve<WsData>({
         yamlLspManager.detach(ws);
         return;
       }
-      if (ws.data?.type === "ts-lsp") {
-        tsLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "docker-lsp") {
-        dockerLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "terraform-lsp") {
-        terraformLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "python-lsp") {
-        pythonLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "ruff-lsp") {
-        ruffLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "mypy-lsp") {
-        mypyLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "astro-lsp") {
-        astroLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "xml-lsp") {
-        xmlLspManager.destroySession(ws);
-        return;
-      }
-      if (ws.data?.type === "toml-lsp") {
-        tomlLspManager.destroySession(ws);
+      const worktreeLsp = worktreeLspData(ws);
+      if (worktreeLsp) {
+        worktreeLsp.manager.destroySession(ws);
         return;
       }
       unsubscribeAllWorktrees(ws);
@@ -1423,40 +1328,9 @@ const server = Bun.serve<WsData>({
         if (typeof message === "string") yamlLspManager.handleMessage(ws, message);
         return;
       }
-      if (ws.data?.type === "ts-lsp") {
-        if (typeof message === "string") tsLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "docker-lsp") {
-        if (typeof message === "string") dockerLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "terraform-lsp") {
-        if (typeof message === "string") terraformLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "python-lsp") {
-        if (typeof message === "string") pythonLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "ruff-lsp") {
-        if (typeof message === "string") ruffLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "mypy-lsp") {
-        if (typeof message === "string") mypyLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "astro-lsp") {
-        if (typeof message === "string") astroLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "xml-lsp") {
-        if (typeof message === "string") xmlLspManager.handleMessage(ws, message);
-        return;
-      }
-      if (ws.data?.type === "toml-lsp") {
-        if (typeof message === "string") tomlLspManager.handleMessage(ws, message);
+      const worktreeLsp = worktreeLspData(ws);
+      if (worktreeLsp) {
+        if (typeof message === "string") worktreeLsp.manager.handleMessage(ws, message);
         return;
       }
       if (typeof message === "string") {
@@ -1520,15 +1394,7 @@ function shutdown(exitCode = 0) {
   agentManager.destroyAll().catch(() => {});
   formatService.destroy();
   yamlLspManager.destroy();
-  tsLspManager.destroy();
-  dockerLspManager.destroy();
-  terraformLspManager.destroy();
-  pythonLspManager.destroy();
-  ruffLspManager.destroy();
-  mypyLspManager.destroy();
-  astroLspManager.destroy();
-  xmlLspManager.destroy();
-  tomlLspManager.destroy();
+  for (const manager of worktreeLspManagers) manager.destroy();
   perfMonitor.dispose();
   stress.dispose();
   logger.shutdown();

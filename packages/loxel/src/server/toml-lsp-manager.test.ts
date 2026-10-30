@@ -61,7 +61,7 @@ describe("tombiSettings", () => {
   });
 });
 
-// The rest runs the real bundled Tombi (`pnpm run download:tombi`) behind the manager, the way
+// The rest runs the real bundled Tombi (`pnpm run build:language-servers tombi`) behind the manager, the way
 // Monaco's client talks to it: pull diagnostics, with `workspace/diagnostic/refresh` support.
 
 const BUNDLED_TOMBI = resolve(

@@ -2,7 +2,7 @@
  * Copies the platform-specific TypeScript 7 `tsc` binary plus its sibling libraries
  * into `packages/loxel/build/typescript-lib/` so it can be shipped alongside
  * `loxel-server` in both the Electron bundle (via electron-builder extraResources)
- * and the in-app upgrade archive (staged by release-loxel.yml).
+ * and the in-app upgrade archive (see language-server-binaries.ts).
  *
  * TypeScript is version-coupled to loxel-server: the LSP protocol surface and flags
  * must match what `ts-lsp-manager.ts` expects, so it ships in lockstep.

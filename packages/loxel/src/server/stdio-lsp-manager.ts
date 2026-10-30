@@ -2,7 +2,7 @@ import path from "node:path";
 
 import type { FileSink, ServerWebSocket, Subprocess } from "bun";
 
-import type { LogCategory } from "@/api/log-entry-model";
+import type { LspName } from "@/api/log-entry-model";
 import {
   LSP_EXITED_CLOSE_CODE,
   LSP_REPLACED_CLOSE_CODE,
@@ -100,7 +100,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private readonly watchedFiles = new Map<TSession, WatchedFilesForwarder>();
   protected readonly log: ReturnType<typeof logger.child>;
 
-  constructor(protected readonly name: LogCategory) {
+  constructor(readonly name: LspName) {
     this.log = logger.child(name);
   }
 

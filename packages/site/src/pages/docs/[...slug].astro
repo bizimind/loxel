@@ -12,9 +12,18 @@ export async function getStaticPaths() {
 
 const { doc } = Astro.props;
 const { Content } = await render(doc);
+const { movedAnchors } = doc.data;
 ---
 
 <Docs title={doc.data.title} description={doc.data.description}>
+  {
+    movedAnchors && (
+      <script is:inline define:vars={{ movedAnchors }}>
+        const anchor = location.hash.slice(1);
+        if (Object.hasOwn(movedAnchors, anchor)) location.replace(movedAnchors[anchor]);
+      </script>
+    )
+  }
   <h1>{doc.data.title}</h1>
   <Content />
 </Docs>
