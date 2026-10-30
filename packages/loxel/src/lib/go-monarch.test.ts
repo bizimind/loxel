@@ -112,6 +112,20 @@ describe.each(["go.mod", "go.work"])("%s tokenizer", (language) => {
     ]);
   });
 
+  test("a closing paren after a godebug value still ends the block", () => {
+    expect(tokenize("godebug (panicnil=1)\ngo 1.26", language)).toEqual([
+      [
+        "godebug:keyword",
+        "(:punctuation.section",
+        "panicnil:variable",
+        "=:keyword.operator",
+        "1:string",
+        "):punctuation.section",
+      ],
+      ["go:keyword", "1.26:constant.numeric"],
+    ]);
+  });
+
   test.each(["v2ray.com/core", "1password.com/sdk", "go1.example.com/x"])(
     "keeps the version-like module path %s a path",
     (path) => {

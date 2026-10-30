@@ -39,7 +39,7 @@ const GO_MOD_MONARCH: monaco.languages.IMonarchLanguage = {
         "constant.numeric",
       ],
       // godebug settings.
-      [/([\w.-]+)(=)(?!>)((?:(?!\/\/)\S)*)/, ["variable", "keyword.operator", "string"]],
+      [/([\w.-]+)(=)(?!>)((?:(?!\/\/)[^\s"`()[\],])*)/, ["variable", "keyword.operator", "string"]],
       // Local paths: `use ./tools`, `replace a => ../a`.
       [/\.{1,2}(?=[\s)]|\/\/|$)|\.{0,2}\/(?:(?!\/\/|=>)[^\s"`()[\],])*/, "string"],
       [/(?:(?!\/\/|=>)[^\s"`()[\],])+/, "entity.name.type"],
