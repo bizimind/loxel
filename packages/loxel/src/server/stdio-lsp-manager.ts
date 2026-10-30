@@ -74,6 +74,7 @@ const MAX_CLOSE_REASON_BYTES = 123;
 /** The server capability that advertises each suppressible LSP feature statically. */
 const SERVER_CAPABILITY_OF = {
   "textDocument/formatting": "documentFormattingProvider",
+  "textDocument/inlayHint": "inlayHintProvider",
   "textDocument/rangeFormatting": "documentRangeFormattingProvider",
   "textDocument/semanticTokens": "semanticTokensProvider",
 } as const;
@@ -517,8 +518,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * Fired after the client's `initialized` notification is forwarded.
    *
    * Override to push runtime configuration via `workspace/didChangeConfiguration`
-   * for servers whose config protocol is push-based — e.g. Docker's compose/
-   * telemetry settings, YAML's schema mappings. For config the server reads
+   * for servers whose config protocol is push-based — e.g. YAML's schema
+   * mappings. For config the server reads
    * from `initializationOptions` at startup, use {@link getInitializationOptions}.
    */
   protected onClientInitialized(_session: TSession): void {}
