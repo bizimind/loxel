@@ -1,9 +1,8 @@
 import { createLspClient } from "./lsp-client";
 
-const { connect: connectTerraformLsp, disconnect: disconnectTerraformLsp } = createLspClient({
+// terraform-ls: only worktrees with `.tf`/`.tfvars`/`.hcl` files pay the cost.
+export default createLspClient({
   route: "ws/terraform-lsp",
   name: "Terraform",
   languageId: "terraform",
 });
-
-export { connectTerraformLsp, disconnectTerraformLsp };

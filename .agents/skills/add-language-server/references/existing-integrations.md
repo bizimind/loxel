@@ -1,6 +1,6 @@
 # Existing LSP Integrations
 
-Quick reference for per-LSP quirks. Consult when the new integration needs behavior beyond the vanilla template.
+Quick reference for the quirks of the servers that existed before `docs/languages/`. Consult when the new integration needs behavior beyond the vanilla template. A new server records its own in `packages/loxel/docs/languages/<language>.md`, not here.
 
 ## Integration Matrix
 
@@ -30,7 +30,7 @@ The most complex manager. Unique behaviors not found in other LSPs:
 
 ## YAML — Global Singleton
 
-The only global LSP. Uses `attach(ws)` / `detach(ws)` instead of `createSession` / `destroySession`. Its client calls `createLspClient`'s `connect(null)` once (no `wt`) and never disconnects. In `server.ts`, the YAML route is handled separately from the `worktreeLspTypes` array.
+The only global LSP. Uses `attach(ws)` / `detach(ws)` instead of `createSession` / `destroySession`. Its client calls `createLspClient`'s `connect(null)` once (no `wt`) and never disconnects. In `server.ts`, the YAML route is handled separately from `worktreeLspManagers`.
 
 ## Docker — Three Non-Standard Behaviors
 

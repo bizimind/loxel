@@ -31,8 +31,8 @@ import {
 import type { DiffInfo } from "@/api/diff-model";
 import type { EditorConfigResponse } from "@/api/editorconfig-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
-import type { LogCategory, LogLevel } from "@/api/log-entry-model";
-import { LOG_CATEGORIES, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
+import type { LogLevel } from "@/api/log-entry-model";
+import { isLogCategory, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
 import type { PanelPlacement } from "@/api/panel-placement-model";
 import { parsePanelPlacement } from "@/api/panel-placement-model";
 import type {
@@ -2576,13 +2576,13 @@ async function handleLogIngest(req: Request): Promise<Response> {
 
   if (!level || !cat || !msg) return error("Missing required fields: level, cat, msg");
   if (!(level in LOG_LEVEL_PRIORITY)) return error(`Invalid level: ${level}`);
-  if (!LOG_CATEGORIES.includes(cat as LogCategory)) return error(`Invalid category: ${cat}`);
+  if (!isLogCategory(cat)) return error(`Invalid category: ${cat}`);
 
   const ctx =
     typeof body.ctx === "object" && body.ctx !== null
       ? (body.ctx as Record<string, unknown>)
       : undefined;
-  logger.ingest(level as LogLevel, cat as LogCategory, msg, ctx);
+  logger.ingest(level as LogLevel, cat, msg, ctx);
   return json({ ok: true });
 }
 

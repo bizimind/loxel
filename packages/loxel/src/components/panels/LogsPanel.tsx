@@ -24,6 +24,7 @@ import type { LogEntry, LogLevel } from "@/api/log-entry-model";
 import { LOG_CATEGORIES } from "@/api/log-entry-model";
 import { DraggablePanelHeader } from "@/components/panels/DraggablePanelHeader";
 import { highlightCode } from "@/lib/highlighter";
+import { lazyLspClients } from "@/lib/lsp-clients";
 import { cn } from "@/lib/utils";
 import { useLogStore } from "@/store/logs";
 import { useUIStore } from "@/store/ui";
@@ -37,7 +38,11 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
   error: "text-red-400",
 };
 
-const MAX_CAT_LEN = Math.max(...LOG_CATEGORIES.map((c) => c.length));
+/** The fixed categories, then the language servers that are not among them. */
+const CATEGORIES: readonly string[] = [
+  ...new Set([...LOG_CATEGORIES, ...lazyLspClients.map((client) => client.logCategory)]),
+];
+const MAX_CAT_LEN = Math.max(...CATEGORIES.map((c) => c.length));
 
 const LEVEL_LABELS: Record<LogLevel, string> = {
   debug: "DBG",
@@ -214,7 +219,7 @@ function FilterSidebar() {
           Category
         </div>
         <div className="flex flex-col">
-          {LOG_CATEGORIES.map((cat) => (
+          {CATEGORIES.map((cat) => (
             <FilterToggle
               key={cat}
               label={cat}

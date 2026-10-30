@@ -11,24 +11,17 @@ import { wsClient } from "@/api/client";
 import { deriveProject, useProjectStore } from "@/store/projects";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { connectAstroLsp, disconnectAstroLsp } from "./astro-lsp-client";
-import { connectDockerLsp, disconnectDockerLsp } from "./docker-lsp-client";
 import { createEditorOpener } from "./editor-opener";
 import { getHighlighter } from "./highlighter";
 import { isLiveEditorModel } from "./live-editor-model";
-import { resumeLanguageServers } from "./lsp-client";
+import { type LspClient, resumeLanguageServers } from "./lsp-client";
+import { lazyLspClients } from "./lsp-clients";
 import { registerLoxelLanguages } from "./monaco-languages";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
-import { connectMypyLsp, disconnectMypyLsp } from "./mypy-lsp-client";
 import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
 import { isWithin } from "./project-file-helpers";
 import { registerPythonLanguageConfiguration } from "./python-language-config";
-import { connectPythonLsp, disconnectPythonLsp } from "./python-lsp-client";
-import { connectRuffLsp, disconnectRuffLsp } from "./ruff-lsp-client";
-import { connectTerraformLsp, disconnectTerraformLsp } from "./terraform-lsp-client";
-import { connectTomlLsp, disconnectTomlLsp } from "./toml-lsp-client";
 import { connectTsLsp } from "./ts-lsp-client";
-import { connectXmlLsp, disconnectXmlLsp } from "./xml-lsp-client";
 import { connectYamlLsp } from "./yaml-lsp-client";
 
 self.MonacoEnvironment = {
@@ -109,11 +102,7 @@ wsClient.onReconnect(resumeLanguageServers);
 // Some LSPs are expensive to spawn (they walk the whole workspace) and most
 // worktrees have zero files for them. Defer spawning until a matching model
 // exists in the active worktree, and disconnect when the last one goes away.
-function createLazyLspConnector(opts: {
-  languageIds: readonly string[];
-  connect: (wtPath: string) => void;
-  disconnect: () => void;
-}): void {
+function createLazyLspConnector(opts: LspClient): void {
   let activeWt: string | null = useWorktreeStore.getState().activeWorktreePath ?? null;
   let modelCount = 0;
   // Models counted at creation; `isMatch` can change meanwhile (projects load, worktree switch).
@@ -171,62 +160,7 @@ function createLazyLspConnector(opts: {
   });
 }
 
-// terraform-ls: only worktrees with `.tf`/`.tfvars`/`.hcl` files pay the cost.
-createLazyLspConnector({
-  languageIds: ["terraform"],
-  connect: connectTerraformLsp,
-  disconnect: disconnectTerraformLsp,
-});
-
-// docker-language-server: only worktrees with Dockerfile/docker-bake.hcl pay.
-createLazyLspConnector({
-  languageIds: ["dockerfile", "dockerbake"],
-  connect: connectDockerLsp,
-  disconnect: disconnectDockerLsp,
-});
-
-// basedpyright: only worktrees with .py/.pyi files pay the cost.
-createLazyLspConnector({
-  languageIds: ["python"],
-  connect: connectPythonLsp,
-  disconnect: disconnectPythonLsp,
-});
-
-// ruff server: lint diagnostics, quick fixes, fix all and organize imports, next to basedpyright.
-createLazyLspConnector({
-  languageIds: ["python"],
-  connect: connectRuffLsp,
-  disconnect: disconnectRuffLsp,
-});
-
-// mypy, in projects configured for it: type checking in place of basedpyright's (the server starts
-// nothing for other projects).
-createLazyLspConnector({
-  languageIds: ["python"],
-  connect: connectMypyLsp,
-  disconnect: disconnectMypyLsp,
-});
-
-// astro-ls: only worktrees with .astro files pay the cost.
-createLazyLspConnector({
-  languageIds: ["astro"],
-  connect: connectAstroLsp,
-  disconnect: disconnectAstroLsp,
-});
-
-// lemminx: only worktrees with .xml files pay the cost.
-createLazyLspConnector({
-  languageIds: ["xml"],
-  connect: connectXmlLsp,
-  disconnect: disconnectXmlLsp,
-});
-
-// Tombi: schema validation and completion for TOML (Settings > Schemas), plus TOML syntax checks.
-createLazyLspConnector({
-  languageIds: ["toml"],
-  connect: connectTomlLsp,
-  disconnect: disconnectTomlLsp,
-});
+for (const client of lazyLspClients) createLazyLspConnector(client);
 
 // Initialize JSON language service — schemas populated dynamically via json-schema-registry.
 // Permissive mode: comments/trailing commas are NOT flagged here.

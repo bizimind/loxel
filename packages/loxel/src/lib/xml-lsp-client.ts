@@ -1,9 +1,4 @@
 import { createLspClient } from "./lsp-client";
 
-const { connect: connectXmlLsp, disconnect: disconnectXmlLsp } = createLspClient({
-  route: "ws/xml-lsp",
-  name: "XML",
-  languageId: "xml",
-});
-
-export { connectXmlLsp, disconnectXmlLsp };
+// lemminx: only worktrees with .xml files pay the cost.
+export default createLspClient({ route: "ws/xml-lsp", name: "XML", languageId: "xml" });

@@ -1,6 +1,12 @@
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
-/** All known log categories. */
+/** A language server's name: its route (`/ws/<name>`) and log category. */
+export type LspName = `${string}-lsp`;
+
+/**
+ * The fixed log categories, in the order the logs panel lists them. A language server added since
+ * needs no entry: any `LspName` is a category, and the panel lists the ones its clients connect to.
+ */
 export const LOG_CATEGORIES = [
   "server",
   "git",
@@ -31,7 +37,11 @@ export const LOG_CATEGORIES = [
   "perf",
 ] as const;
 
-export type LogCategory = (typeof LOG_CATEGORIES)[number];
+export type LogCategory = (typeof LOG_CATEGORIES)[number] | LspName;
+
+export function isLogCategory(value: string): value is LogCategory {
+  return (LOG_CATEGORIES as readonly string[]).includes(value) || /^[a-z0-9-]+-lsp$/.test(value);
+}
 
 export interface LogEntry {
   /** Monotonic counter, unique per server lifetime. */

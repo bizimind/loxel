@@ -20,6 +20,7 @@ import {
 } from "./python-env";
 import { pythonEnvActivation, setPythonEnvVars } from "./python-env-activation";
 import type { ExternalTypeChecker } from "./python-lsp-manager";
+import type { WorktreeLspServer } from "./server-state";
 import { buildSpawnEnv } from "./shell-env";
 
 const log = logger.child("mypy-lsp");
@@ -92,7 +93,8 @@ interface MypySession {
  * checks and those it reported on: {@link ownsTypeChecking} tells basedpyright's manager to drop
  * basedpyright's own type-checking diagnostics for them.
  */
-export class MypyLspManager implements ExternalTypeChecker {
+export class MypyLspManager implements ExternalTypeChecker, WorktreeLspServer {
+  readonly name = "mypy-lsp";
   private readonly sessions = new Map<ServerWebSocket<unknown>, MypySession>();
   private readonly sessionsByWorktree = new Map<string, MypySession>();
   private readonly typeCheckingListeners = new Set<(wtPath: string) => void>();

@@ -91,7 +91,7 @@ describe.skipIf(process.platform === "win32")("pickRuffBinary", () => {
   });
 });
 
-// Drives the bundled ruff (`pnpm run download:ruff`) through the manager the way the Monaco
+// Drives the bundled ruff (`pnpm run build:language-servers ruff`) through the manager the way the Monaco
 // client does.
 
 const BUNDLED_RUFF = resolve(import.meta.dir, "../../build/ruff");
