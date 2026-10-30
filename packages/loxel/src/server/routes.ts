@@ -73,6 +73,7 @@ import type { HistoryStep } from "./file-operations-service";
 import { listFolderApps } from "./folder-apps";
 import type { FormatResult } from "./format-service";
 import * as git from "./git-commands";
+import { deleteJdtlsData } from "./java-lsp-manager";
 import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
@@ -2474,6 +2475,7 @@ async function removeOneWorktree(
     // Python interpreter detection.
     storeDb.deleteStore(externalFoldersStoreKey(wtPath));
     storeDb.deleteStore(pythonOverrideStoreKey(wtPath));
+    deleteJdtlsData(wtPath);
     return result;
   } catch (err) {
     try {

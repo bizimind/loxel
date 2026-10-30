@@ -7,6 +7,7 @@
  */
 import { AstroLspManager } from "./astro-lsp-manager";
 import { DockerLspManager } from "./docker-lsp-manager";
+import { JavaLspManager } from "./java-lsp-manager";
 import { MypyLspManager } from "./mypy-lsp-manager";
 import { PythonLspManager } from "./python-lsp-manager";
 import { RuffLspManager } from "./ruff-lsp-manager";
@@ -24,6 +25,7 @@ export const tomlLspManager = new TomlLspManager({});
 export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   new AstroLspManager(),
   new DockerLspManager(),
+  new JavaLspManager(),
   new PythonLspManager(mypyLspManager),
   // After Python, which hears from it while it shuts down.
   mypyLspManager,
