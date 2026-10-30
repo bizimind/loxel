@@ -125,6 +125,8 @@ export interface BuiltinIndentation extends IndentationDefaults {
 export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, BuiltinIndentation> = new Map([
   ["csharp", { tabSize: 4, insertSpaces: true }], // .NET coding conventions, dotnet format
   ["go", { tabSize: 4, insertSpaces: false }], // gofmt
+  ["go.mod", { tabSize: 4, insertSpaces: false }], // go mod tidy
+  ["go.work", { tabSize: 4, insertSpaces: false }], // go work use
   ["just", { tabSize: 4, insertSpaces: true }], // just --fmt
   ["kotlin", { tabSize: 4, insertSpaces: true }], // Kotlin coding conventions, ktlint
   // Recipe lines must start with a tab (`*** missing separator`), whatever the content suggests:
@@ -485,6 +487,8 @@ export interface SettingsState {
   fileAssociations: FileAssociation[];
   /** Auto-reveal active editor file in project explorer on tab switch. */
   autoRevealInExplorer: boolean;
+  /** Check for updates when the server starts. The server reads this from the persisted settings. */
+  autoCheckForUpdates: boolean;
 
   // Transient UI state (not persisted)
   isOpen: boolean;
@@ -542,6 +546,9 @@ export interface SettingsState {
   // Auto-reveal
   setAutoRevealInExplorer: (enabled: boolean) => void;
 
+  // Updates
+  setAutoCheckForUpdates: (enabled: boolean) => void;
+
   // Wt config actions
 
   // UI actions
@@ -585,6 +592,7 @@ export const useSettingsStore = create<SettingsState>()(
       schemas: [],
       fileAssociations: [],
       autoRevealInExplorer: false,
+      autoCheckForUpdates: true,
 
       isOpen: false,
       activeSection: "general",
@@ -839,6 +847,10 @@ export const useSettingsStore = create<SettingsState>()(
 
       setAutoRevealInExplorer: (enabled) => set({ autoRevealInExplorer: enabled }),
 
+      // -- Updates --
+
+      setAutoCheckForUpdates: (enabled) => set({ autoCheckForUpdates: enabled }),
+
       // -- UI --
 
       openSettings: (section) => set({ isOpen: true, ...(section && { activeSection: section }) }),
@@ -856,8 +868,9 @@ export const useSettingsStore = create<SettingsState>()(
         schemas: state.schemas,
         fileAssociations: state.fileAssociations,
         autoRevealInExplorer: state.autoRevealInExplorer,
+        autoCheckForUpdates: state.autoCheckForUpdates,
       }),
-      version: 11,
+      version: 12,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -1023,6 +1036,13 @@ export const useSettingsStore = create<SettingsState>()(
               : undefined;
           if (terminal && typeof terminal.activatePythonEnv !== "boolean") {
             terminal.activatePythonEnv = true;
+          }
+        }
+
+        if (version <= 11) {
+          // v11 → v12: add automatic update check setting
+          if (typeof state.autoCheckForUpdates !== "boolean") {
+            state.autoCheckForUpdates = true;
           }
         }
 
