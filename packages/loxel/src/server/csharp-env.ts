@@ -13,6 +13,7 @@ import type {
 } from "@/api/csharp-env-model";
 import { isDirectory } from "@/fs-utils";
 
+import { mapWithConcurrency } from "./git-commands";
 import { logger } from "./logger";
 import { pathOutsideWorktree } from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
@@ -30,6 +31,10 @@ const MIN_RUNTIME_MAJOR = 10;
 const WATCH_DEBOUNCE_MS = 1000;
 /** Far above any real `global.json` or props file; a read of anything larger is refused. */
 const MAX_READ_BYTES = 1024 * 1024;
+/** Far above any real `sdk.paths`; a file with more counts as invalid. */
+const MAX_SDK_PATHS = 64;
+/** Checks that spawn git run in a small pool, since their number depends on the repository. */
+const GIT_CHECK_CONCURRENCY = 6;
 /** How many projects' restored state is watched, to bound open watches in a huge repository. */
 const MAX_WATCHED_PROJECTS = 200;
 
@@ -143,8 +148,8 @@ export async function isDotnetSafeToRun(
     // Git also lists a tracked file deleted from disk, which applies to nothing.
     const existing = (listed ?? []).filter((file) => existsSync(file));
     const files = new Set([...(applying ? [applying] : []), ...existing]);
-    const infos = await Promise.all(
-      [...files].map((file) => readGlobalJson(wtPath, file, options)),
+    const infos = await mapWithConcurrency([...files], GIT_CHECK_CONCURRENCY, (file) =>
+      readGlobalJson(wtPath, file, options),
     );
     return infos.every(isGlobalJsonSafe);
   } catch (err) {
@@ -216,13 +221,16 @@ async function readGlobalJson(
   const baseDir = path.dirname(file);
   // The host skips entries that are not strings.
   const entries = (paths ?? []).filter((entry): entry is string => typeof entry === "string");
+  if (entries.length > MAX_SDK_PATHS) return invalid;
   return {
     path: file,
     valid: true,
     sdkVersion: version ?? null,
     rollForward: rollForward ?? null,
     sdkPaths: paths
-      ? await Promise.all(entries.map((entry) => inspectSdkPath(wtPath, baseDir, entry, options)))
+      ? await mapWithConcurrency(entries, GIT_CHECK_CONCURRENCY, (entry) =>
+          inspectSdkPath(wtPath, baseDir, entry, options),
+        )
       : null,
   };
 }
@@ -579,12 +587,23 @@ export async function csharpRestoreState(
 ): Promise<CSharpRestoreState> {
   const wtPath = path.resolve(worktreePath);
   const project = path.resolve(projectPath);
-  const { assetsPath } = await restoreLayout(project).catch(() => ({ assetsPath: null }));
+  return restoreStateFrom(wtPath, project, await readRestoreLayout(project));
+}
+
+async function restoreStateFrom(
+  wtPath: string,
+  project: string,
+  { assetsPath }: RestoreLayout,
+): Promise<CSharpRestoreState> {
   return {
     project,
     assetsPath,
     restored: assetsPath ? await isUntrackedFile(wtPath, assetsPath) : false,
   };
+}
+
+function readRestoreLayout(project: string): Promise<RestoreLayout> {
+  return restoreLayout(project).catch(() => ({ assetsPath: null, inputs: [project] }));
 }
 
 async function isUntrackedFile(wtPath: string, file: string): Promise<boolean> {
@@ -953,19 +972,14 @@ async function readRestoreStatesOnce(wtPath: string, entry: WorktreeRestoreWatch
   const isCurrent = () => restoreWatches.get(wtPath) === entry;
   try {
     const { projects } = await discoverCSharpProjects(wtPath);
-    const layouts = await Promise.all(
-      projects.map((project) =>
-        restoreLayout(project).catch((): RestoreLayout => ({
-          assetsPath: null,
-          inputs: [project],
-        })),
-      ),
-    );
+    const layouts = await mapWithConcurrency(projects, GIT_CHECK_CONCURRENCY, readRestoreLayout);
     if (!isCurrent()) return;
     // Armed before reading, so a change made while reading schedules another read.
     armRestoreWatches(wtPath, entry, layouts);
-    const states = await Promise.all(
-      projects.map((project) => csharpRestoreState(wtPath, project)),
+    const states = await mapWithConcurrency(
+      projects.map((project, index) => ({ project, layout: layouts[index]! })),
+      GIT_CHECK_CONCURRENCY,
+      ({ project, layout }) => restoreStateFrom(wtPath, project, layout),
     );
     if (!isCurrent()) return;
     if (JSON.stringify(states) === JSON.stringify(entry.last)) return;

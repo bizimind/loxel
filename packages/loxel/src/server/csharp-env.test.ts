@@ -305,6 +305,13 @@ describe("isDotnetSafeToRun", () => {
     expect(await isDotnetSafeToRun(wt, { env, cwd: join(wt, "vendor") })).toBe(false);
   });
 
+  test("not for more sdk.paths than a real file has", async () => {
+    const { wt } = await makeRoot();
+    const paths = Array.from({ length: 65 }, (_, i) => `p${i}`);
+    await write(join(wt, "global.json"), JSON.stringify({ sdk: { paths } }));
+    expect(await isDotnetSafeToRun(wt, { env: { PATH: "" } })).toBe(false);
+  });
+
   test("reads a large repetitive global.json in one pass", async () => {
     const { wt } = await makeRoot();
     await write(join(wt, "global.json"), "/*".repeat(512 * 1024 - 8));
