@@ -125,6 +125,8 @@ export interface BuiltinIndentation extends IndentationDefaults {
 export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, BuiltinIndentation> = new Map([
   ["csharp", { tabSize: 4, insertSpaces: true }], // .NET coding conventions, dotnet format
   ["go", { tabSize: 4, insertSpaces: false }], // gofmt
+  ["go.mod", { tabSize: 4, insertSpaces: false }], // go mod tidy
+  ["go.work", { tabSize: 4, insertSpaces: false }], // go work use
   ["just", { tabSize: 4, insertSpaces: true }], // just --fmt
   ["kotlin", { tabSize: 4, insertSpaces: true }], // Kotlin coding conventions, ktlint
   // Recipe lines must start with a tab (`*** missing separator`), whatever the content suggests:

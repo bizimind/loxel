@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
 import type { PythonEnv } from "@/api/python-env-model";
+import { until } from "@/test/until";
+
+import type { EnvChange, ToolchainEnvContributor } from "./toolchain-env-contributor";
 
 // Interpreter overrides live in the store database; keep the tests' state out of the real one.
 const root = await realpath(await mkdtemp(join(tmpdir(), "loxel-agent-env-")));
@@ -12,7 +15,7 @@ process.env.LOXEL_STATE_DIR = join(root, "state");
 for (const name of ["VIRTUAL_ENV", "CONDA_PREFIX", "UV_PROJECT_ENVIRONMENT"])
   delete process.env[name];
 const { AgentEnv, buildAgentEnv } = await import("./agent-env");
-const { pythonEnvActivation } = await import("./python-env-activation");
+const { pythonAgentEnvChange } = await import("./python-toolchain-env");
 const { refreshPythonEnv, subscribePythonEnv } = await import("./python-env");
 const { setPythonOverride } = await import("./python-override-store");
 
@@ -65,7 +68,7 @@ async function agentEnvFor(
   wt: string,
   pythonEnv: PythonEnv,
 ): Promise<Record<string, string | undefined>> {
-  return buildAgentEnv(await pythonEnvActivation(pythonEnv, wt));
+  return buildAgentEnv([await pythonAgentEnvChange(pythonEnv, wt)]);
 }
 
 describe("buildAgentEnv", () => {
@@ -94,7 +97,7 @@ describe("buildAgentEnv", () => {
   test("leaves the env as it is without an environment or for one git tracks", async () => {
     const wt = await makeWorktree();
     const venv = await makeVenv(join(wt, ".venv"));
-    const plain = buildAgentEnv(null);
+    const plain = buildAgentEnv([]);
     expect(plain.AI_AGENT).toBe("loxel");
 
     git(wt, "add", "-f", ".venv/bin/python");
@@ -159,6 +162,109 @@ describe("AgentEnv", () => {
       delete process.env.AGENT_ENV_TEST_LATE;
       agentEnv.dispose();
     }
+  });
+
+  test("applies every toolchain in list order, past one that fails", async () => {
+    const wt = await makeWorktree();
+    const contributor = (
+      name: string,
+      resolveForAgent: ToolchainEnvContributor["resolveForAgent"],
+    ): ToolchainEnvContributor => ({
+      name,
+      resolveForTerminal: async () => null,
+      resolveForAgent,
+      subscribeForAgent: () => () => {},
+    });
+    let releaseSlow = () => {};
+    const slow = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    const agentEnv = new AgentEnv(wt, [
+      contributor("slow", async () => {
+        await slow;
+        return (env) => {
+          env.TOOLCHAIN_ORDER = "slow";
+        };
+      }),
+      contributor("failing", async () => {
+        throw new Error("no toolchain");
+      }),
+      contributor("fast", async () => (env) => {
+        env.TOOLCHAIN_ORDER = `${env.TOOLCHAIN_ORDER}, fast`;
+      }),
+    ]);
+    releaseSlow();
+    await agentEnv.settled();
+    expect(agentEnv.get().TOOLCHAIN_ORDER).toBe("slow, fast");
+    agentEnv.dispose();
+  });
+
+  test("a toolchain that never answers does not hold up another's updates", async () => {
+    const wt = await makeWorktree();
+    let hear: (resolve: () => Promise<EnvChange | null>) => void = () => {};
+    let heard = () => {};
+    const applied = new Promise<void>((resolve) => {
+      heard = resolve;
+    });
+    const agentEnv = new AgentEnv(wt, [
+      {
+        name: "hanging",
+        resolveForTerminal: async () => null,
+        resolveForAgent: () => new Promise(() => {}),
+        subscribeForAgent: () => () => {},
+      },
+      {
+        name: "live",
+        resolveForTerminal: async () => null,
+        resolveForAgent: async () => null,
+        subscribeForAgent: (_root, listener) => {
+          hear = listener;
+          return () => {};
+        },
+      },
+    ]);
+    hear(async () => {
+      heard();
+      return (env) => {
+        env.TOOLCHAIN_LIVE = "yes";
+      };
+    });
+    await applied;
+    await until(() => agentEnv.get().TOOLCHAIN_LIVE === "yes");
+    agentEnv.dispose();
+  });
+
+  test("a toolchain whose change or subscription throws costs the others nothing", async () => {
+    const wt = await makeWorktree();
+    const agentEnv = new AgentEnv(wt, [
+      {
+        name: "unsubscribable",
+        resolveForTerminal: async () => null,
+        resolveForAgent: async () => null,
+        subscribeForAgent: () => {
+          throw new Error("no subscription");
+        },
+      },
+      {
+        name: "throwing",
+        resolveForTerminal: async () => null,
+        resolveForAgent: async () => () => {
+          throw new Error("no change");
+        },
+        subscribeForAgent: () => () => {},
+      },
+      {
+        name: "fine",
+        resolveForTerminal: async () => null,
+        resolveForAgent: async () => (env) => {
+          env.TOOLCHAIN_FINE = "yes";
+        },
+        subscribeForAgent: () => () => {},
+      },
+    ]);
+    await agentEnv.settled();
+    expect(agentEnv.get().TOOLCHAIN_FINE).toBe("yes");
+    agentEnv.dispose();
   });
 
   test("gets no Python environment without a worktree", async () => {

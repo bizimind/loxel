@@ -89,6 +89,8 @@ Each language server is independent of the others. A language with more to say h
 
 YAML starts with Loxel and stays running. The others start the first time you open a matching file and stop automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
 
+The Docker language server itself sends nothing to Docker's services: no telemetry, crash reports, vulnerability scans or image lookups. Bake files get hover, completion and diagnostics. Dockerfile lint warnings come from `docker buildx` when the Docker CLI is installed; it runs with your own Docker setup, which can contact the registry of a base image (Docker Hub for most images), as `docker build` does. If your active builder is remote, the Dockerfile and build context go to that builder, also as with any `docker build`. Lint warnings are not available with a Docker daemon reached over TCP on another machine.
+
 ---
 
 ## See also

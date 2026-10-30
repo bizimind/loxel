@@ -1,11 +1,13 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { $ } from "bun";
 
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
+
+import type { LanguageFormatter } from "./language-formatter";
 
 // Python files reach the shared environment resolution, which reads interpreter overrides from
 // the store database; keep the tests' state out of the real one.
@@ -354,6 +356,180 @@ describe("FormatService Python detection", () => {
   });
 });
 
+describe("FormatService language modules", () => {
+  /** A formatter on PATH that prints where it came from and how it ran. */
+  const REPORT_SCRIPT = (label: string) =>
+    `#!/bin/sh\necho "${label} cwd=$(pwd -P) env=$FAKE_FMT_ENV args=$*"\n`;
+
+  async function installFormatter(dir: string, label: string): Promise<void> {
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "fake-fmt"), REPORT_SCRIPT(label), { mode: 0o755 });
+  }
+
+  const FAKE_FORMATTER = { command: "fake-fmt", args: "--stdin-filepath {file}" };
+
+  function fakeLanguage(overrides: Partial<LanguageFormatter>): LanguageFormatter {
+    return { extensions: ["fake"], detect: () => FAKE_FORMATTER, ...overrides };
+  }
+
+  test("detect receives the file's directory, and spawning defaults to the worktree", async () => {
+    const wt = await realpath(await makeWorktree({ "sub/dir/a.fake": "" }));
+    await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    const dirs: string[] = [];
+    const language = fakeLanguage({
+      detect: (dir) => {
+        dirs.push(dir);
+        return FAKE_FORMATTER;
+      },
+    });
+    const result = await new FormatService([language]).format(
+      "x",
+      "sub/dir/a.fake",
+      wt,
+      AUTO_DETECT,
+    );
+    expect(dirs).toEqual([join(wt, "sub/dir")]);
+    expect(result.content).toBe(
+      `node-modules cwd=${wt} env= args=--stdin-filepath sub/dir/a.fake\n`,
+    );
+  });
+
+  test("applies the module's cwd, env and bin dirs, with {file} absolute", async () => {
+    const wt = await realpath(await makeWorktree({ "mod/a.fake": "" }));
+    await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    await installFormatter(join(wt, "tools"), "tools");
+    const language = fakeLanguage({
+      spawnOptions: (_command, dir) => ({
+        cwd: dir,
+        env: { FAKE_FMT_ENV: "set" },
+        binDirs: [join(wt, "tools")],
+      }),
+    });
+    const result = await new FormatService([language]).format("x", "mod/a.fake", wt, AUTO_DETECT);
+    expect(result.content).toBe(
+      `tools cwd=${join(wt, "mod")} env=set args=--stdin-filepath ${join(wt, "mod/a.fake")}\n`,
+    );
+  });
+
+  test("empty bin dirs keep node_modules/.bin off PATH", async () => {
+    const wt = await makeWorktree({});
+    await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    const language = fakeLanguage({ spawnOptions: () => ({ binDirs: [] }) });
+    const result = await new FormatService([language]).format(
+      "x",
+      join(wt, "a.fake"),
+      wt,
+      AUTO_DETECT,
+    );
+    expect(result).toEqual({
+      content: null,
+      notice: 'Format on save skipped: "fake-fmt" is not installed.',
+    });
+  });
+
+  test("spawn options apply to a manual override too", async () => {
+    const wt = await makeWorktree({});
+    await installFormatter(join(wt, "tools"), "tools");
+    const language = fakeLanguage({
+      detect: () => null,
+      spawnOptions: () => ({ binDirs: [join(wt, "tools")] }),
+    });
+    const settings: FormattingSettings = {
+      ...AUTO_DETECT,
+      overrides: [{ id: "o1", extensions: "fake", command: "fake-fmt", args: "" }],
+    };
+    const result = await new FormatService([language]).format(
+      "x",
+      join(wt, "a.fake"),
+      wt,
+      settings,
+    );
+    expect(result.content).toStartWith("tools ");
+  });
+
+  test("a module that detects nothing leaves the file to the next one, then the root rules", async () => {
+    const wt = await makeWorktree({ "rustfmt.toml": "" });
+    const none = fakeLanguage({ extensions: ["rs"], detect: () => null });
+    const next = fakeLanguage({ extensions: ["rs"], detect: () => FAKE_FORMATTER });
+    const service = new FormatService([none, next]);
+    expect(service.getDetectedFormatters(wt)).toEqual([
+      { command: "rustfmt", extensions: ["rs"] },
+      { command: "fake-fmt", extensions: ["rs"] },
+    ]);
+    await installFormatter(join(wt, "node_modules/.bin"), "next");
+    const path = join(wt, "a.rs");
+    const result = await service.format("x", path, wt, AUTO_DETECT);
+    expect(result.content).toStartWith("next ");
+
+    // The root rule's rustfmt, here from node_modules/.bin so the test needs no real one.
+    await writeFile(join(wt, "node_modules/.bin/rustfmt"), REPORT_SCRIPT("root-rule"), {
+      mode: 0o755,
+    });
+    const rootRule = await new FormatService([none]).format("x", path, wt, AUTO_DETECT);
+    expect(rootRule.content).toStartWith("root-rule ");
+  });
+
+  test("a relative override command survives the module's cwd", async () => {
+    const wt = await makeWorktree({ "mod/a.fake": "" });
+    await installFormatter(join(wt, "tools"), "tools");
+    const language = fakeLanguage({ spawnOptions: (_command, dir) => ({ cwd: dir }) });
+    const settings: FormattingSettings = {
+      ...AUTO_DETECT,
+      overrides: [{ id: "o1", extensions: "fake", command: "./tools/fake-fmt", args: "" }],
+    };
+    const path = join(wt, "mod/a.fake");
+    const result = await new FormatService([language]).format("x", path, wt, settings);
+    expect(result.content).toStartWith("tools ");
+  });
+
+  test("options a module leaves undefined keep their defaults", async () => {
+    const wt = await realpath(await makeWorktree({}));
+    await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    const language = fakeLanguage({ spawnOptions: () => ({ cwd: undefined, binDirs: undefined }) });
+    const path = join(wt, "a.fake");
+    const result = await new FormatService([language]).format("x", path, wt, AUTO_DETECT);
+    expect(result.content).toStartWith(`node-modules cwd=${wt} `);
+  });
+
+  test("a module that throws does not fail the format", async () => {
+    const wt = await makeWorktree({});
+    await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    const throwing = () => {
+      throw new Error("bad config");
+    };
+    const path = join(wt, "a.fake");
+    const detect = new FormatService([fakeLanguage({ detect: throwing })]);
+    expect(await detect.format("x", path, wt, AUTO_DETECT)).toEqual({ content: null });
+    expect(detect.getDetectedFormatters(wt)).toEqual([]);
+
+    const spawn = new FormatService([fakeLanguage({ spawnOptions: throwing })]);
+    expect((await spawn.format("x", path, wt, AUTO_DETECT)).content).toStartWith("node-modules ");
+  });
+
+  test("a module does not see files with other extensions", async () => {
+    const wt = await makeWorktree({});
+    const language = fakeLanguage({
+      detect: () => {
+        throw new Error("must not run");
+      },
+    });
+    expect(
+      await new FormatService([language]).format("x", join(wt, "a.txt"), wt, AUTO_DETECT),
+    ).toEqual({ content: null });
+  });
+
+  test("a Python override still prefers the project venv", async () => {
+    const wt = await makeWorktree({});
+    await makeFakeVenv(join(wt, ".venv"), "ruff");
+    const settings: FormattingSettings = {
+      ...AUTO_DETECT,
+      overrides: [{ id: "o1", extensions: "py", command: "ruff", args: "format -" }],
+    };
+    const result = await new FormatService().format("x=1\n", join(wt, "a.py"), wt, settings);
+    expect(result.content).toBe("ruff format -\n");
+  });
+});
+
 describe("FormatService failure notices", () => {
   test("reports a missing formatter binary", async () => {
     const wt = await makeWorktree({});
@@ -387,6 +563,44 @@ describe("FormatService failure notices", () => {
     expect(result.content).toBeNull();
     expect(result.notice).toStartWith('Format on save skipped: "ruff" could not be started (');
   });
+
+  const closedPipe = () => Object.assign(new Error("broken pipe"), { code: "EPIPE" });
+  const closedStdinCases = {
+    "end throws": {
+      write: () => 1,
+      end: () => {
+        throw closedPipe();
+      },
+    },
+    "write rejects": { write: () => Promise.reject(closedPipe()), end: () => 0 },
+    "write rejects and end throws": {
+      write: () => Promise.reject(closedPipe()),
+      end: () => {
+        throw closedPipe();
+      },
+    },
+  };
+
+  for (const [name, stdin] of Object.entries(closedStdinCases)) {
+    test(`a formatter gone before reading stdin is judged by its output (${name})`, async () => {
+      const wt = await makeWorktree({ "ruff.toml": "" });
+      await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\necho formatted\n");
+      // Whether the real pipe is closed yet is a race, so the failure itself is simulated.
+      const spawn = Bun.spawn;
+      const spy = spyOn(Bun, "spawn").mockImplementation(((...args: Parameters<typeof spawn>) => {
+        const proc = spawn(...args);
+        return new Proxy(proc, {
+          get: (target, key) => (key === "stdin" ? stdin : Reflect.get(target, key)),
+        });
+      }) as typeof spawn);
+      try {
+        const result = await new FormatService().format("x", join(wt, "a.py"), wt, AUTO_DETECT);
+        expect(result).toEqual({ content: "formatted\n" });
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  }
 
   test("does not report a formatter that exits non-zero (e.g. a syntax error)", async () => {
     const wt = await makeWorktree({ "ruff.toml": "" });

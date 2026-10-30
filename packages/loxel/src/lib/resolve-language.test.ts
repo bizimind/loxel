@@ -97,6 +97,19 @@ describe("resolveLanguage for build files", () => {
   });
 });
 
+describe("resolveLanguage for Go project files", () => {
+  test.each([
+    ["/repo/go.mod", "go.mod"],
+    ["/repo/tools/go.mod", "go.mod"],
+    ["/repo/go.sum", "go.sum"],
+    ["/repo/go.work", "go.work"],
+    ["/repo/go.work.sum", "go.sum"],
+    ["/repo/main.go", "go"],
+  ])("%s → %s", (path, language) => {
+    expect(resolve(path)).toBe(language);
+  });
+});
+
 describe("toMonacoLanguage", () => {
   test("keeps TOML as its own Monaco language so it gets the TOML grammar", () => {
     expect(toMonacoLanguage("toml")).toBe("toml");

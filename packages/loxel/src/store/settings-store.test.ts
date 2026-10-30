@@ -51,6 +51,16 @@ describe("resolveIndentation", () => {
       insertSpaces: false,
       indentSize: 4,
     });
+    expect(indentation(settings(), "/repo/go.mod", { language: "go.mod" })).toEqual({
+      tabSize: 4,
+      insertSpaces: false,
+      indentSize: 4,
+    });
+    expect(indentation(settings(), "/repo/go.work", { language: "go.work" })).toEqual({
+      tabSize: 4,
+      insertSpaces: false,
+      indentSize: 4,
+    });
     expect(indentation(settings(), "/repo/lib.rs", { language: "rust" })).toEqual({
       tabSize: 4,
       insertSpaces: true,
