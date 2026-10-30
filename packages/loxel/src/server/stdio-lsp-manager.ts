@@ -187,6 +187,13 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected readonly disableSemanticTokens: boolean = false;
 
   /**
+   * Set to true for servers that mark completions as snippets without escaping them, so that text
+   * such as `$HOME` in the completion would be expanded on insertion. We strip `snippetSupport`
+   * from the client's initialize request, so a server that honors it answers in plain text.
+   */
+  protected readonly disableCompletionSnippets: boolean = false;
+
+  /**
    * Set to true for servers that advertise `TextDocumentSyncKind.Full` or
    * otherwise mis-handle incremental `textDocument/didChange` notifications.
    * When set, we track each document's content from didOpen and apply
@@ -287,7 +294,9 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             rootPath?: string | null;
             workspaceFolders?: unknown;
             capabilities?: {
-              textDocument?: Record<string, unknown>;
+              textDocument?: Record<string, unknown> & {
+                completion?: { completionItem?: { snippetSupport?: boolean } };
+              };
               workspace?: Record<string, unknown>;
             };
             initializationOptions?: Record<string, unknown>;
@@ -296,6 +305,10 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         if (msg.method === "initialize") {
           if (this.disableSemanticTokens && msg.params?.capabilities?.textDocument) {
             delete msg.params.capabilities.textDocument.semanticTokens;
+          }
+          if (this.disableCompletionSnippets) {
+            delete msg.params?.capabilities?.textDocument?.completion?.completionItem
+              ?.snippetSupport;
           }
           if (this.workspaceConfiguration && msg.params?.capabilities) {
             msg.params.capabilities.workspace = {
