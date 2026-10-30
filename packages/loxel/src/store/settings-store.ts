@@ -330,6 +330,11 @@ export const BUILTIN_FILE_ASSOCIATIONS: FileAssociation[] = [
   fa("**/requirements/*.txt", "pip-requirements"),
   fa("**/constraints*.txt", "pip-requirements"),
 
+  // libc++ and libstdc++ headers such as <vector> have no extension. Only those: these directories
+  // also hold files like module.modulemap, and anything with an extension resolves on its own.
+  fa("**/c++/v1/**/!(*.*)", "cpp"),
+  fa("**/include/c++/**/!(*.*)", "cpp"),
+
   // Filename-based defaults (from FILENAME_TO_LANG)
   ...Object.entries(FILENAME_TO_LANG).map(([name, lang]) => fa(`**/${name}`, lang)),
 

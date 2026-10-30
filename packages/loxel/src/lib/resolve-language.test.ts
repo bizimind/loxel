@@ -90,6 +90,36 @@ describe("resolveLanguage for C-family projects", () => {
     expect(resolve(path)).toBe(language);
   });
 
+  const XCODE_LIBCXX =
+    "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1";
+
+  test.each([
+    `${XCODE_LIBCXX}/vector`,
+    `${XCODE_LIBCXX}/__config`,
+    `${XCODE_LIBCXX}/experimental/simd`,
+    "/usr/include/c++/13/vector",
+    "/usr/include/c++/13/ext/random",
+    "/usr/lib/llvm-18/include/c++/v1/vector",
+    "/opt/homebrew/opt/llvm/include/c++/v1/string_view",
+    "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/map",
+  ])("treats the standard library header %s as C++", (path) => {
+    expect(resolve(path)).toBe("cpp");
+  });
+
+  test.each([
+    [`${XCODE_LIBCXX}/module.modulemap`, null],
+    [`${XCODE_LIBCXX}/libcxx.imp`, null],
+    [`${XCODE_LIBCXX}/__vector/vector.h`, "cpp"],
+    ["/usr/include/c++/13/bits/vector.tcc", "cpp"],
+    ["/repo/include/c++/notes.md", "markdown"],
+    ["/repo/include/c++/gen.py", "python"],
+    ["/repo/c++/v1/data.json", "json"],
+    ["/repo/src/vector", null],
+    ["/repo/include/vector", null],
+  ])("resolves %s on its own", (path, language) => {
+    expect(resolve(path)).toBe(language);
+  });
+
   test("a user association still decides `.C` files", () => {
     const associations = [{ id: "a", glob: "**/*.C", language: "c", enabled: true }];
     expect(resolveLanguage("/repo/app.C", associations)).toBe("c");
