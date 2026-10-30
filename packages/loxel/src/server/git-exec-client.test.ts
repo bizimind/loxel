@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { readOnlyGitEnv } from "./git-commands/git-env";
-import { createGitExecWorker, GitExecClient } from "./git-exec-client";
+import { readOnlyGitEnv } from "./git-commands";
+import { createGitExecWorker, GitExecClient, type GitExecWorker } from "./git-exec-client";
 
 function text(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
@@ -99,6 +99,16 @@ describe("GitExecClient", () => {
     const next = await client.exec({ args: shellArgs("printf alive"), env });
     expect(text(next.stdout)).toBe("alive");
     expect(workers).toHaveLength(2);
+  });
+
+  test("a worker that throws fails what was in flight with the error's own text", async () => {
+    const source = 'self.onmessage = () => { throw new Error("boom in worker"); };';
+    const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    const client = new GitExecClient(() => new Worker(url) as GitExecWorker);
+    clients.push(client);
+    await expect(client.exec({ args: ["status"], env })).rejects.toThrow(
+      /while running git status: it failed: error: boom in worker$/,
+    );
   });
 
   test("stop fails what is in flight", async () => {

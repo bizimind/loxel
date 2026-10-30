@@ -38,6 +38,12 @@ export function createGitExecWorker(): GitExecWorker {
   return new Worker(new URL("./git-exec-worker", import.meta.url).href) as GitExecWorker;
 }
 
+/** Bun's message for a throw in a worker dumps source lines first, with `error: ...` near the end. */
+function summarizeWorkerError(message: string): string {
+  const lines = message.split("\n");
+  return (lines.find((line) => line.startsWith("error:")) ?? lines[0] ?? message).trim();
+}
+
 /**
  * Owns one worker at a time. A worker that dies fails the requests it had in flight, since they may
  * or may not have run and a mutating command must not be repeated, and the next request starts a
@@ -74,8 +80,7 @@ export class GitExecClient {
     });
     worker.addEventListener("error", (event: ErrorEvent) => {
       log.error("Git exec worker failed", { error: event.message });
-      // Bun's message for a throw in a worker goes on to dump source lines.
-      this.retire(state, `it failed: ${event.message.split("\n", 1)[0]}`);
+      this.retire(state, `it failed: ${summarizeWorkerError(event.message)}`);
     });
     worker.addEventListener("close", () => {
       if (this.current !== state) return;

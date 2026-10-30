@@ -32,7 +32,7 @@ export function gitCommandLabel(args: readonly string[]): string {
   return "git";
 }
 
-/** Never rejects: a git that cannot be started reports exit code 1 with the reason on stderr. */
+/** A git that cannot be started reports exit code 1 with the reason on stderr, without rejecting. */
 export async function execGit({ args, env, stdin }: GitExecRequest): Promise<GitExecResult> {
   const start = performance.now();
   let proc;

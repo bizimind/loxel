@@ -6,13 +6,29 @@
 // nothing else. It may be terminated at any time, and anything it loaded (native addons above all)
 // would be torn down with it. Nothing here limits concurrency: the callers do, as they did when
 // they spawned on the main thread.
-import { execGit } from "./git-commands/git-exec";
+import { execGit, type GitExecResult } from "./git-commands/git-exec";
 import type { GitExecMessage, GitExecReply } from "./git-exec-client";
 
 declare const self: Worker;
 
-self.onmessage = async ({ data }: MessageEvent<GitExecMessage>) => {
-  const result = await execGit(data.request);
-  const reply: GitExecReply = { id: data.id, result };
-  self.postMessage(reply, [result.stdout.buffer, result.stderr.buffer]);
+function failure(error: unknown): GitExecResult {
+  return {
+    exitCode: 1,
+    stdout: new Uint8Array(),
+    stderr: new TextEncoder().encode(`${error instanceof Error ? error.message : String(error)}\n`),
+    spawnBlockMs: 0,
+    wallMs: 0,
+  };
+}
+
+// A throw here would kill the worker and fail every request in flight, so it stays with its request.
+self.onmessage = async ({ data: { id, request } }: MessageEvent<GitExecMessage>) => {
+  try {
+    const result = await execGit(request);
+    const reply: GitExecReply = { id, result };
+    self.postMessage(reply, [result.stdout.buffer, result.stderr.buffer]);
+  } catch (error) {
+    const reply: GitExecReply = { id, result: failure(error) };
+    self.postMessage(reply);
+  }
 };
