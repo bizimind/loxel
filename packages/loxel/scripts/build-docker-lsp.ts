@@ -77,11 +77,12 @@ const goEnv = {
   GOARM64: "",
   GOBIN: BUILD_DIR,
   GOCACHE: path.join(BUILD_DIR, "go-cache"),
+  // Without this, `go env -w` settings would apply wherever the entries here are empty.
+  GOENV: "off",
   GOEXPERIMENT: "",
   GOFLAGS: "-modcacherw",
   GOINSECURE: "",
   GONOPROXY: "",
-  GONOSUMCHECK: "",
   GONOSUMDB: "",
   GOOS: "",
   GOPATH: path.join(BUILD_DIR, "go-path"),
