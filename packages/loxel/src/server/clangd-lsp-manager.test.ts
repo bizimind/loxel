@@ -1,10 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { ServerWebSocket } from "bun";
+import { $, type ServerWebSocket } from "bun";
 
 import { LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
 
@@ -13,6 +23,7 @@ import {
   clangdMajorVersion,
   ClangdLspManager,
   escapeSnippetDollars,
+  indexDirectoryIsSymlink,
   prepareClangdUserConfig,
   queryDriverGlobs,
 } from "./clangd-lsp-manager";
@@ -210,6 +221,41 @@ describe("escapeSnippetDollars", () => {
     expect(escapeSnippetDollars(hover)).toBe(hover);
     const tabstops = frame({ insertText: "f(${1:x})", insertTextFormat: 2 });
     expect(escapeSnippetDollars(tabstops)).toBe(tabstops);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("indexDirectoryIsSymlink", () => {
+  test("finds a link at the root, at every part of the path", async () => {
+    for (const part of [".cache", ".cache/clangd", ".cache/clangd/index"]) {
+      const root = await makeDir();
+      await mkdir(join(root, part, ".."), { recursive: true });
+      await symlink(await makeDir(), join(root, part));
+      expect(await indexDirectoryIsSymlink(root)).toBe(true);
+    }
+  });
+
+  test("finds a link git tracks below the root", async () => {
+    const root = await makeDir();
+    await mkdir(join(root, "sub", ".cache", "clangd"), { recursive: true });
+    await symlink("../../../..", join(root, "sub", ".cache", "clangd", "index"));
+    await $`git init -q ${root}`.quiet();
+    await $`git -C ${root} add -A`.quiet();
+    expect(await indexDirectoryIsSymlink(root)).toBe(true);
+  });
+
+  test("leaves real directories, other links and non-repositories alone", async () => {
+    const root = await makeDir();
+    await mkdir(join(root, ".cache", "clangd", "index"), { recursive: true });
+    await symlink("..", join(root, "other-link"));
+    expect(await indexDirectoryIsSymlink(root)).toBe(false);
+    await $`git init -q ${root}`.quiet();
+    await $`git -C ${root} add -A`.quiet();
+    expect(await indexDirectoryIsSymlink(root)).toBe(false);
+  });
+
+  test("counts a git check that did not finish as a link", async () => {
+    const timedOut = async () => ({ code: null, stdout: "" });
+    expect(await indexDirectoryIsSymlink(await makeDir(), timedOut)).toBe(true);
   });
 });
 
@@ -512,6 +558,20 @@ describe.skipIf(!CLANGD || process.platform === "win32")("ClangdLspManager with 
     TEST_TIMEOUT_MS,
   );
 
+  test(
+    "skips the background index when its directory is a symlink",
+    async () => {
+      const root = await makeDir();
+      const elsewhere = await makeDir();
+      await mkdir(join(root, ".cache", "clangd"), { recursive: true });
+      await symlink(elsewhere, join(root, ".cache", "clangd", "index"));
+      const file = await writeProject(root, "/usr/bin/c++");
+      await runClangd(root, file);
+      expect(await readdir(elsewhere)).toEqual([]);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
   describe("--query-driver", () => {
     /** An executable named `file` that creates `marker` when it runs. */
     async function fakeCompiler(file: string, marker: string): Promise<void> {
@@ -530,7 +590,7 @@ describe.skipIf(!CLANGD || process.platform === "win32")("ClangdLspManager with 
 
       protected override spawnArgs(): readonly string[] {
         return [
-          ...super.spawnArgs().filter((arg) => !arg.startsWith("--query-driver")),
+          ...super.spawnArgs({ wtPath: "" }).filter((arg) => !arg.startsWith("--query-driver")),
           `--query-driver=${queryDriverGlobs([this.compilers])}`,
         ];
       }

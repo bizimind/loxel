@@ -43,7 +43,7 @@ For a small project, a `compile_flags.txt` file with one flag per line, at the p
 -Iinclude
 ```
 
-The index clangd builds is saved in `.cache/clangd/index/` beside `compile_commands.json`, and it ignores itself in git.
+The index clangd builds is saved in `.cache/clangd/index/` beside `compile_commands.json`, and it ignores itself in git. If that folder is a symlink, clangd runs without the index, and references and rename cover only the open files.
 
 ## Configure clangd
 

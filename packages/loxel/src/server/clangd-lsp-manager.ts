@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -155,17 +156,21 @@ const APPLE_CLANGD_STUB = "/usr/bin/clangd";
 const PROBE_TIMEOUT_MS = 10_000;
 
 /** A command's exit code and output; a code of null means it could not run or timed out. */
-async function probe(command: string[]): Promise<{ code: number | null; stdout: string }> {
+async function probe(
+  command: string[],
+  timeoutMs: number = PROBE_TIMEOUT_MS,
+): Promise<{ code: number | null; stdout: string }> {
   try {
     const proc = Bun.spawn(command, {
       stdin: "ignore",
       stdout: "pipe",
       stderr: "ignore",
       env: buildSpawnEnv(),
-      timeout: PROBE_TIMEOUT_MS,
+      timeout: timeoutMs,
     });
     const stdout = await new Response(proc.stdout).text();
-    return { code: await proc.exited, stdout };
+    const code = await proc.exited;
+    return { code: proc.signalCode ? null : code, stdout };
   } catch (err) {
     log.warn("Could not run a clangd probe", { command: command[0], error: err });
     return { code: null, stdout: "" };
@@ -205,6 +210,39 @@ export async function checkClangd(
   return major !== null && major < MIN_CLANGD_MAJOR ? "too-old" : "ok";
 }
 
+const INDEX_DIRECTORY_PARTS = [".cache", ".cache/clangd", ".cache/clangd/index"];
+const TRACKED_SYMLINK_MODE = "120000";
+/** clangd's start waits on this, and a filtered `git ls-files` normally takes milliseconds. */
+const INDEX_CHECK_TIMEOUT_MS = 3000;
+
+/**
+ * Whether clangd's index directory, `.cache/clangd/index` beside a compile database, or a parent of
+ * it up to `.cache`, is a symlink: at the worktree's root or tracked by git at any depth. clangd
+ * follows such a link, so the index would be written outside the project tree. A git check that
+ * does not finish counts as yes: the worktree only loses the index.
+ */
+export async function indexDirectoryIsSymlink(
+  wtPath: string,
+  run: typeof probe = probe,
+): Promise<boolean> {
+  for (const part of INDEX_DIRECTORY_PARTS) {
+    try {
+      if ((await lstat(join(wtPath, part))).isSymbolicLink()) return true;
+    } catch {
+      // Not there, which is the usual case.
+    }
+  }
+  const pathspecs = INDEX_DIRECTORY_PARTS.map((part) => `:(glob)**/${part}`);
+  const { code, stdout } = await run(
+    // The repository's own config must not pick a program to run.
+    ["git", "-c", "core.fsmonitor=false", "-C", wtPath, "ls-files", "-s", "-z", "--", ...pathspecs],
+    INDEX_CHECK_TIMEOUT_MS,
+  );
+  // Git exits with an error outside a repository; a null code is a timeout.
+  if (code === null) return true;
+  return code === 0 && stdout.split("\0").some((line) => line.startsWith(TRACKED_SYMLINK_MODE));
+}
+
 /**
  * Manages clangd child processes, one per worktree, for C, C++ and Objective-C. clangd finds each
  * file's compile command itself, per file, so monorepos with several compile databases work without
@@ -219,6 +257,8 @@ export class ClangdLspManager extends WorktreeLspManager {
 
   /** Why clangd won't start for a worktree, per worktree since each starts on its own. */
   private readonly failureReasons = new Map<string, string>();
+  /** Worktrees clangd runs in without its background index. */
+  private readonly withoutIndex = new Set<string>();
 
   constructor(
     private readonly platform: NodeJS.Platform = process.platform,
@@ -239,7 +279,17 @@ export class ClangdLspManager extends WorktreeLspManager {
       return null;
     }
     const check = await checkClangd(binary, this.platform);
-    if (check === "ok") return binary;
+    if (check === "ok") {
+      if (await indexDirectoryIsSymlink(context.wtPath)) {
+        this.log.info("Background index off: its directory is a symlink", {
+          wtPath: context.wtPath,
+        });
+        this.withoutIndex.add(context.wtPath);
+      } else {
+        this.withoutIndex.delete(context.wtPath);
+      }
+      return binary;
+    }
     this.log.warn(`Not starting ${binary}`, { check });
     this.failureReasons.set(
       context.wtPath,
@@ -254,8 +304,10 @@ export class ClangdLspManager extends WorktreeLspManager {
     return this.failureReasons.get(context.wtPath) ?? null;
   }
 
-  protected override spawnArgs(): readonly string[] {
+  protected override spawnArgs(context: WtLspContext): readonly string[] {
     return [
+      // Otherwise on by default. Skipped so index files aren't written outside the project tree.
+      ...(this.withoutIndex.has(context.wtPath) ? ["--background-index=false"] : []),
       // The defaults cap results: references at 1000 and renames at 50 files.
       "--limit-references=0",
       "--rename-file-limit=0",
