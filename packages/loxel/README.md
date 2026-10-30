@@ -107,7 +107,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 - [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, what ships in the app bundle versus in-app updates, browser panels, macOS integration
 - [docs/SHARED_SERVER.md](docs/SHARED_SERVER.md) — how all windows share one Bun server: discover-or-spawn, ownership, idle shutdown, state scopes
 - [docs/STATE_AND_STORAGE.md](docs/STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
-- [docs/WATCHERS.md](docs/WATCHERS.md) — filesystem and git watchers, their ownership and the status refresh pipeline
+- [docs/WATCHERS.md](docs/WATCHERS.md) — filesystem and git watchers, their ownership, the status refresh pipeline and the tests that lock it
 - [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) — macOS code signing and the provisioning profile behind passkeys
 
 **Workspace**
