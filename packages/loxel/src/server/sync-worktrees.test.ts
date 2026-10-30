@@ -135,7 +135,9 @@ describe.each(["bare", "regular"] as const)("worktree list, %s repo", (layout) =
       });
       await project.waitForSidebar(
         (list) =>
-          at(list, wtPath)?.title === undefined && at(list, wtPath)?.parentWtId === undefined,
+          at(list, wtPath) !== undefined &&
+          at(list, wtPath)?.title === undefined &&
+          at(list, wtPath)?.parentWtId === undefined,
         since,
       );
     },

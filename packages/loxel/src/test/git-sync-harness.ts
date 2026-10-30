@@ -304,7 +304,13 @@ export class SyncProject {
   static async open(repo: SyncRepo): Promise<SyncProject> {
     const project = new SyncProject(repo.root, repo.layout === "bare");
     await project.watcher.start();
-    await project.armProjectWatcher();
+    try {
+      await project.armProjectWatcher();
+    } catch (error) {
+      // The caller has no project to stop, and its repository is about to be deleted.
+      project.stop();
+      throw error;
+    }
     return project;
   }
 
@@ -320,11 +326,14 @@ export class SyncProject {
     } else if (event === "status") {
       for (const { files } of this.worktrees.values()) void files.refreshGitStatus();
     } else if (event === "refs") {
-      this.broadcast({
-        type: "refs_changed",
-        projectPath: this.cwd,
-        data: await getRefs(this.cwd),
+      // Nothing awaits this handler, and a read still running when a test ends finds no repository.
+      const refs = await getRefs(this.cwd).catch((error: unknown) => {
+        if (!this.stopped) throw error;
+        return null;
       });
+      if (refs && !this.stopped) {
+        this.broadcast({ type: "refs_changed", projectPath: this.cwd, data: refs });
+      }
     } else {
       this.broadcast({ type: "log_changed", projectPath: this.cwd });
       this.tracker.invalidate();
