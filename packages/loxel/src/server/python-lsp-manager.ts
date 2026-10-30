@@ -91,6 +91,9 @@ export function pythonSettings(env: PythonEnv | null, wtPath: string): Record<st
  */
 export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspContext> {
   protected override readonly forwardWatchedFiles = true;
+  // basedpyright's snippets are method overrides, at most a selected `pass` as a tab stop, and hold
+  // default values unescaped: inserted as snippets, `x="$HOME"` would become `x=""`.
+  protected override readonly disableCompletionSnippets = true;
   private refreshCount = 0;
 
   constructor(private readonly typeChecker: ExternalTypeChecker | null = null) {

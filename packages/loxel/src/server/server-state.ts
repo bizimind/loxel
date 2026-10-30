@@ -148,6 +148,7 @@ export interface WorktreeLspServer {
   destroySession(ws: ServerWebSocket<unknown>): void;
   handleMessage(ws: ServerWebSocket<unknown>, data: string): void;
   notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void;
+  notifyIgnoredPathChanged?(wtPath: string, relPath: string): void;
   destroy(): void;
 }
 

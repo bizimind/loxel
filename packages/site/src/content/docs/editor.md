@@ -1,6 +1,6 @@
 ---
 title: Editor
-description: Quick Open, Go to Symbol, Find in Files, autosave, formatter auto-detection, indentation, EditorConfig, Python files, conflict handling, and deleted or moved files.
+description: Quick Open, Go to Symbol, Find in Files, autosave, formatter auto-detection, indentation, EditorConfig, Python and Go files, conflict handling, and deleted or moved files.
 order: 10
 ---
 
@@ -80,7 +80,7 @@ Each file's indentation comes from the first of these that sets it:
 2. The project's [`.editorconfig`](#editorconfig).
 3. A **Per-Extension Override** in **Settings > Editor**.
 4. The file's own content: an existing file keeps the style it's written in, so Enter and Tab don't mix 2-space indents into a 4-space file or spaces into a tab-indented one.
-5. The language's convention, matching its formatter or official style guide: Python, Rust, C#, Kotlin, PHP and justfiles use 4 spaces, and Go and Makefiles use tabs. Makefiles get tabs even when the file's content is mostly indented with spaces, because make requires recipe lines to start with a tab.
+5. The language's convention, matching its formatter or official style guide: Python, Rust, C#, Kotlin, PHP and justfiles use 4 spaces, and Go (with `go.mod` and `go.work`) and Makefiles use tabs. Makefiles get tabs even when the file's content is mostly indented with spaces, because make requires recipe lines to start with a tab.
 6. **Default Indentation** in **Settings > Editor**, 2 spaces unless you change it.
 
 Each property is looked up on its own, so an `.editorconfig` that only sets `indent_style = space` takes the size from the next source down. A project's `.editorconfig` wins over your per-extension overrides because it's the convention everyone working on the project, and its formatters, follow; your overrides apply wherever a project doesn't set one.
@@ -121,7 +121,13 @@ Project files are recognized too: `pyproject.toml`, `uv.lock`, `poetry.lock`, an
 
 `.properties` files, such as `gradle.properties` and `gradle-wrapper.properties`, get their own highlighting, with `#` and `!` comments. Toggling a comment uses `#`. The `gradlew` and `mvnw` wrapper scripts are highlighted as shell, and `gradlew.bat` and `mvnw.cmd` as batch.
 
-In the file tree, Gradle build and settings files, `gradle.properties`, `gradlew`, and `libs.versions.toml` show a Gradle icon, `pom.xml` and `mvnw` a Maven icon, and Groovy files and `Jenkinsfile` a Groovy icon.
+In the file tree, Gradle build and settings files, `gradle.properties`, `libs.versions.toml`, and the `gradlew` scripts show a Gradle icon, `pom.xml` and the `mvnw` scripts a Maven icon, and Groovy files and `Jenkinsfile` a Groovy icon.
+
+---
+
+## Go project files
+
+`go.mod`, `go.work`, `go.sum`, and `go.work.sum` are highlighted in the editor: directives, module paths, versions, `=>` and comments, and in the checksum files the module, version and hash. In `go.mod` and `go.work`, toggling a line comment uses `//`, and pressing Enter inside a `require ( ... )` block indents the new line.
 
 ---
 

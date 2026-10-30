@@ -41,6 +41,9 @@ describe("registerLoxelLanguages", () => {
     expect(loxelLanguages.toSorted()).toEqual([
       "astro",
       "dockerbake",
+      "go.mod",
+      "go.sum",
+      "go.work",
       "groovy",
       "java-properties",
       "jsx",
@@ -54,7 +57,9 @@ describe("registerLoxelLanguages", () => {
   });
 
   // Monaco only configures the languages it registers itself; Shiki's grammars only tokenize.
-  test.each(loxelLanguages)("gives %s comments, brackets and auto-closing pairs", (id) => {
+  // go.sum is generated and has neither comments nor brackets.
+  const configured = loxelLanguages.filter((id) => id !== "go.sum");
+  test.each(configured)("gives %s comments, brackets and auto-closing pairs", (id) => {
     const configuration = configurations.get(id);
     const { lineComment, blockComment } = configuration?.comments ?? {};
     expect(lineComment ?? blockComment).toBeDefined();
@@ -113,26 +118,51 @@ describe("editing Loxel's languages in Monaco", () => {
     ["just", "build:", "# build:"],
     ["groovy", "id 'java'", "// id 'java'"],
     ["java-properties", "org.gradle.caching=true", "# org.gradle.caching=true"],
+    ["go.mod", "require a.b/c v1.0.0", "// require a.b/c v1.0.0"],
+    ["go.work", "use ./a", "// use ./a"],
   ])("toggles a line comment in %s", (language, line, commented) => {
     const model = open(language, line);
     editor.trigger("keyboard", "editor.action.commentLine", null);
     expect(model.getValue()).toBe(commented);
   });
 
-  test.each(["tsx", "jsx", "terraform", "make", "just", "groovy", "java-properties"])(
-    "auto-closes brackets in %s",
-    (lang) => {
-      const model = open(lang, "x = ");
-      type("(");
-      expect(model.getValue()).toBe("x = ()");
-    },
-  );
+  test.each([
+    "tsx",
+    "jsx",
+    "terraform",
+    "make",
+    "just",
+    "go.mod",
+    "go.work",
+    "groovy",
+    "java-properties",
+  ])("auto-closes brackets in %s", (lang) => {
+    const model = open(lang, "x = ");
+    type("(");
+    expect(model.getValue()).toBe("x = ()");
+  });
 
   test.each(['"""', "'''"])("auto-closes %s in Groovy", (quotes) => {
     const model = open("groovy", "def a = ");
     type(quotes);
     expect(model.getValue()).toBe(`def a = ${quotes}${quotes}`);
     expect(editor.getPosition()?.column).toBe("def a = ".length + quotes.length + 1);
+  });
+
+  test("leaves go.sum alone on toggle line comment", () => {
+    const line = "a.b/c v1.0.0 h1:abc=";
+    const model = open("go.sum", line);
+    editor.trigger("keyboard", "editor.action.commentLine", null);
+    expect(model.getValue()).toBe(line);
+  });
+
+  test.each(["go.mod", "go.work"])("indents a block on Enter in %s", (language) => {
+    const model = open(language, "require ");
+    type("(");
+    type("\n");
+    expect(model.getLineContent(2).trim()).toBe("");
+    expect(model.getLineContent(2).length).toBeGreaterThan(0);
+    expect(model.getLineContent(3)).toBe(")");
   });
 
   test("continues a JSDoc comment on Enter in TSX", () => {
