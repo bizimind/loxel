@@ -23,7 +23,7 @@ The app promises four things: no data collected without consent, no account, sub
 
 A setting proves nothing until tested, and a vendor's telemetry opt-out may be neither honored nor complete. docker-language-server ignored the shape Loxel sent `telemetry: "off"` in (#634), and even a correct one still lets its first heartbeat and BugSnag reports out (#820). PostHog's `respect_dnt` does nothing in cookieless mode, so the site checks Do Not Track and Global Privacy Control itself and skips loading PostHog.
 
-To verify a binary, run it with Loxel's real config and a real file open, and log every non-loopback connect and DNS lookup at the socket level with a `DYLD_INSERT_LIBRARIES` interposer. Re-sign a scratch copy ad hoc first if it has the hardened runtime, which ignores DYLD. Run a positive control, because a clean result proves nothing unless the same setup catches a binary known to phone home. A dead-end proxy misses traffic that ignores proxy variables, and `lsof` sampling misses short-lived sockets.
+To verify a binary, run it with Loxel's real config and a real file open, and log every non-loopback connect and DNS lookup at the socket level with a `DYLD_INSERT_LIBRARIES` interposer. Re-sign a scratch copy ad hoc first if it has the hardened runtime, which ignores DYLD. Run a positive control, because a clean result proves nothing unless the same setup catches a binary known to phone home. A dead-end proxy misses traffic that ignores proxy variables, and `lsof` sampling misses short-lived sockets. The interposer and an example driver are in `packages/loxel/scripts/network-audit/`.
 
 Report security vulnerabilities privately, per `SECURITY.md`, or fix them directly. Keep them out of public GitHub issues.
 

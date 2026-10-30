@@ -174,7 +174,7 @@ describe("POST /api/open terminals and placement", () => {
       isSequenceEnabled: () => false,
       onNotification: () => {},
       onExit: () => {},
-      pythonEnvFor: async () => null,
+      toolchainEnvs: [],
     });
     try {
       // The `wt` layout: a bare repository with its worktrees under `.worktrees`.

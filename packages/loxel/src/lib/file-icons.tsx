@@ -98,6 +98,7 @@ const FILE_NAME_MAP: Record<string, string> = {
   "go.mod": "goMod_dark.svg",
   "go.sum": "goSum_dark.svg",
   "go.work": "goWork_dark.svg",
+  "go.work.sum": "goSum_dark.svg",
   "Directory.Build.props": "projectProperties_dark.svg",
   "vercel.json": "vercel.svg",
 };

@@ -125,7 +125,7 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 3
+    timeout-minutes: 10
     outputs:
       sha256_darwin-arm64: ${{ steps.sha.outputs.sha256_darwin-arm64 }}
       sha256_darwin-x64: ${{ steps.sha.outputs.sha256_darwin-x64 }}
@@ -226,7 +226,7 @@ jobs:
           - os: blacksmith-6vcpu-macos-latest
             arch: x64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     outputs:
       sha256_dmg_arm64: ${{ steps.sha.outputs.sha256_dmg_arm64 }}
       sha256_dmg_x64: ${{ steps.sha.outputs.sha256_dmg_x64 }}

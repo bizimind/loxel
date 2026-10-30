@@ -68,9 +68,13 @@ interface LspContentChange {
   text: string;
 }
 
+/** A WebSocket close frame's limit on its reason, in UTF-8 bytes (RFC 6455). */
+const MAX_CLOSE_REASON_BYTES = 123;
+
 /** The server capability that advertises each suppressible LSP feature statically. */
 const SERVER_CAPABILITY_OF = {
   "textDocument/formatting": "documentFormattingProvider",
+  "textDocument/inlayHint": "inlayHintProvider",
   "textDocument/rangeFormatting": "documentRangeFormattingProvider",
   "textDocument/semanticTokens": "semanticTokensProvider",
 } as const;
@@ -98,6 +102,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private readonly _pendingFrames = new Map<ServerWebSocket<unknown>, string[]>();
   /** Each session's file-change forwarder, when {@link forwardWatchedFiles} and it has a worktree. */
   private readonly watchedFiles = new Map<TSession, WatchedFilesForwarder>();
+  /** Each session's open document URIs, tracked when {@link didSaveOnFileChange}. */
+  private readonly openDocuments = new Map<TSession, Set<string>>();
   protected readonly log: ReturnType<typeof logger.child>;
 
   constructor(readonly name: LspName) {
@@ -118,13 +124,50 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   /**
    * Forward changed files of a worktree, as reported by its file watcher, to the language servers
-   * rooted there that registered a matching file watcher. Only managers with
-   * {@link forwardWatchedFiles} have such servers.
+   * rooted there with a matching file watcher. Only managers with
+   * {@link forwardWatchedFiles} have such servers. With {@link didSaveOnFileChange}, changed files
+   * the session has open also get `textDocument/didSave`.
    */
   notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
     const root = path.resolve(wtPath);
     for (const [session, forwarder] of this.watchedFiles) {
       if (forwarder.root === root && this.isSessionLive(session)) forwarder.queue(paths);
+    }
+    for (const [session, openUris] of this.openDocuments) {
+      const workspace = this.getSessionWorkspace(session);
+      if (!workspace || path.resolve(workspace) !== root || !this.isSessionLive(session)) continue;
+      try {
+        for (const uri of paths.map(fileUri)) {
+          if (!openUris.has(uri)) continue;
+          this.writeToStdin(
+            session,
+            JSON.stringify({
+              jsonrpc: "2.0",
+              method: "textDocument/didSave",
+              params: { textDocument: { uri } },
+            }),
+          );
+        }
+      } catch (err) {
+        // A server that has closed its stdin, not yet reaped: this runs in file-watcher callbacks.
+        this.log.debug("Could not send didSave", { error: err });
+      }
+    }
+  }
+
+  /**
+   * Report a file-watcher event inside a git-ignored directory, at a worktree-relative,
+   * `/`-separated path. It goes through {@link notifyWatchedFilesChanged} only when a session
+   * rooted there asked for it with {@link watchedIgnoredGlobs}; the rest are dropped. Runs per
+   * event, for builds and installs that write thousands of files.
+   */
+  notifyIgnoredPathChanged(wtPath: string, relPath: string): void {
+    if (this.watchedIgnoredGlobs.length === 0) return;
+    const root = path.resolve(wtPath);
+    for (const forwarder of this.watchedFiles.values()) {
+      if (forwarder.root !== root || !forwarder.wantsIgnoredPath(relPath)) continue;
+      this.notifyWatchedFilesChanged(wtPath, [path.join(root, relPath)]);
+      return;
     }
   }
 
@@ -163,8 +206,17 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    */
   protected abstract resolveBinary(context: TContext): string | null | Promise<string | null>;
 
-  protected spawnArgs(): readonly string[] {
+  protected spawnArgs(_context: TContext): readonly string[] {
     return ["--stdio"];
+  }
+
+  /**
+   * What to tell the user when this server cannot start or exits, in place of the generic "binary
+   * not found" or "exited with code N": a missing runtime, or an error only the server's own log
+   * holds. Null keeps the generic text. It is cut to what a WebSocket close frame can carry.
+   */
+  protected serverFailureReason(_context: TContext): string | null {
+    return null;
   }
 
   protected spawnOptions(_context: TContext): SpawnOptions {
@@ -212,9 +264,38 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * here instead of reaching the client, and {@link notifyWatchedFilesChanged} forwards matching
    * changes as `workspace/didChangeWatchedFiles`. Needs {@link getSessionWorkspace}: only changes
    * inside the session's worktree are reported, outside its git-ignored directories except for
-   * dependency installs under `node_modules` (see `node-modules-changes.ts`).
+   * dependency installs under `node_modules` (see `node-modules-changes.ts`) and
+   * {@link watchedIgnoredGlobs}.
    */
   protected readonly forwardWatchedFiles: boolean = false;
+
+  /**
+   * Worktree-relative globs to report changes for without any registration from the server, for
+   * servers that register no watchers of their own and rely on the client to pick them (ESLint).
+   * They add to whatever the server registers and apply once the client's `initialized` passed
+   * through the base's {@link handleClientData}. Needs {@link forwardWatchedFiles}.
+   */
+  protected readonly watchedFileGlobs: readonly string[] = [];
+
+  /**
+   * Like {@link watchedFileGlobs}, and also matched against events inside git-ignored directories,
+   * which reach servers only through this: `build/compile_commands.json` (clangd),
+   * `obj/project.assets.json` (C#). Keep them narrow, since build output is the busiest part of
+   * a worktree. A manager that must act on such a file itself, rather than tell its server, can
+   * override {@link notifyWatchedFilesChanged}. Needs {@link forwardWatchedFiles}.
+   */
+  protected readonly watchedIgnoredGlobs: readonly string[] = [];
+
+  /**
+   * Set to true for servers that only react to `textDocument/didSave` (clangd reparses, and
+   * rust-analyzer runs its check): a change the file watcher reports to a document the session has
+   * open is sent as one, without text. monaco-lsp-client saves nothing itself, since saving goes
+   * through the file routes. The client keeps advertising `didSave: false`: these servers take the
+   * notification regardless, and advertising it would have rust-analyzer register it dynamically
+   * with a client that cannot send it. A subclass overriding {@link handleClientData} must pass
+   * `didOpen` and `didClose` to the base. Needs {@link getSessionWorkspace}.
+   */
+  protected readonly didSaveOnFileChange: boolean = false;
 
   /**
    * Return a dedup key for this session context. When non-null, the base class
@@ -260,6 +341,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * Answer the server's `workspace/configuration` requests here instead of
    * forwarding them (monaco-lsp-client does not implement that request).
    * Returns the value for one requested `section`; `null` means unset.
+   * `scopeUri` is the resource the server asks about, for settings per file
+   * (ESLint's working directory), undefined when it asks for the workspace.
    * Defining it also advertises the `workspace.configuration` client
    * capability in `initialize`, which pull-based servers such as basedpyright
    * need before they ask. Call {@link notifyConfigurationChanged} when an
@@ -268,6 +351,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected workspaceConfiguration?(
     session: TSession,
     section: string | undefined,
+    scopeUri: string | undefined,
   ): Promise<unknown>;
 
   /**
@@ -323,9 +407,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         }
         if (msg.method === "initialized") {
           this.writeToStdin(session, data);
+          this.watchedFiles.get(session)?.serverInitialized();
           this.onClientInitialized(session);
           return;
         }
+        if (this.didSaveOnFileChange) this.trackOpenDocument(session, parsed);
         if (this.requiresFullTextSync) {
           if (msg.method === "textDocument/didOpen") {
             this.trackDidOpen(session, parsed);
@@ -347,6 +433,19 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       // Not JSON — forward as-is.
     }
     this.writeToStdin(session, data);
+  }
+
+  /** Keep {@link openDocuments} current from a client notification. */
+  private trackOpenDocument(session: TSession, msg: object): void {
+    if (!("method" in msg) || !("params" in msg) || !isRecord(msg.params)) return;
+    const { textDocument } = msg.params;
+    if (!isRecord(textDocument) || typeof textDocument.uri !== "string") return;
+    if (msg.method === "textDocument/didOpen") {
+      const openUris = this.openDocuments.get(session) ?? new Set<string>();
+      this.openDocuments.set(session, openUris.add(textDocument.uri));
+    } else if (msg.method === "textDocument/didClose") {
+      this.openDocuments.get(session)?.delete(textDocument.uri);
+    }
   }
 
   /**
@@ -419,8 +518,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * Fired after the client's `initialized` notification is forwarded.
    *
    * Override to push runtime configuration via `workspace/didChangeConfiguration`
-   * for servers whose config protocol is push-based — e.g. Docker's compose/
-   * telemetry settings, YAML's schema mappings. For config the server reads
+   * for servers whose config protocol is push-based — e.g. YAML's schema
+   * mappings. For config the server reads
    * from `initializationOptions` at startup, use {@link getInitializationOptions}.
    */
   protected onClientInitialized(_session: TSession): void {}
@@ -608,11 +707,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       reason = `${this.name} binary not found — is it installed?`;
     }
     this.detach(ws);
-    ws.close(LSP_START_FAILED_CLOSE_CODE, reason);
+    ws.close(LSP_START_FAILED_CLOSE_CODE, this.failureCloseReason(context, reason));
   }
 
   private spawnProcess(ws: ServerWebSocket<unknown>, context: TContext, bin: string): void {
-    const args = this.spawnArgs();
+    const args = this.spawnArgs(context);
     const opts = this.spawnOptions(context);
     this.log.info(`Spawning ${this.name} ${args.join(" ")}: ${bin}`);
 
@@ -639,12 +738,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     // From the start, so changes made before the server registers its watchers reach it too.
     const watchedRoot = this.forwardWatchedFiles ? this.getSessionWorkspace(session) : null;
     if (watchedRoot) {
-      this.watchedFiles.set(
-        session,
-        new WatchedFilesForwarder(path.resolve(watchedRoot), (changes) =>
-          this.sendWatchedFilesChanged(session, changes),
-        ),
+      const forwarder = new WatchedFilesForwarder(path.resolve(watchedRoot), (changes) =>
+        this.sendWatchedFilesChanged(session, changes),
       );
+      forwarder.declareWatchers(this.watchedFileGlobs, this.watchedIgnoredGlobs);
+      this.watchedFiles.set(session, forwarder);
     }
 
     // Per-session token bucket to cap stderr volume so a chatty LSP (e.g.
@@ -687,13 +785,23 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         const how = proc.signalCode
           ? `was killed by ${proc.signalCode}`
           : `exited with code ${code}`;
-        ws.close(LSP_EXITED_CLOSE_CODE, `${this.name} ${how}`);
+        ws.close(LSP_EXITED_CLOSE_CODE, this.failureCloseReason(context, `${this.name} ${how}`));
       } catch (err) {
         this.log.debug("close() on an exited server's WebSocket threw (already closed)", {
           error: err,
         });
       }
     });
+  }
+
+  /** The close reason for a failed server; a throwing hook must not keep the socket from closing. */
+  private failureCloseReason(context: TContext, generic: string): string {
+    try {
+      return closeReason(this.serverFailureReason(context) ?? generic);
+    } catch (err) {
+      this.log.warn(`${this.name} failure reason threw`, { error: err });
+      return closeReason(generic);
+    }
   }
 
   /** True while `session` is still the live session of its WebSocket. */
@@ -768,6 +876,7 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private releaseSession(session: TSession): void {
     this.watchedFiles.get(session)?.dispose();
     this.watchedFiles.delete(session);
+    this.openDocuments.delete(session);
     this.onSessionClosed(session);
   }
 
@@ -822,13 +931,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     try {
       result = await Promise.all(
         items.map((item) => {
-          const section =
-            typeof item === "object" && item !== null && "section" in item
-              ? item.section
-              : undefined;
+          const { section, scopeUri } = isRecord(item) ? item : {};
           return this.workspaceConfiguration?.(
             session,
             typeof section === "string" ? section : undefined,
+            typeof scopeUri === "string" ? scopeUri : undefined,
           );
         }),
       );
@@ -983,6 +1090,21 @@ function mergeInitOptions(
     }
   }
   return out;
+}
+
+/**
+ * `reason` cut, at a character boundary, to what a close frame carries. Bun sends a longer one
+ * anyway, which the browser rejects as an invalid frame, losing the close code as well.
+ */
+function closeReason(reason: string): string {
+  let cut = "";
+  let bytes = 0;
+  for (const char of reason) {
+    bytes += Buffer.byteLength(char);
+    if (bytes > MAX_CLOSE_REASON_BYTES) break;
+    cut += char;
+  }
+  return cut;
 }
 
 /** The session's single workspace folder, as `initialize` and `workspace/workspaceFolders` carry it. */

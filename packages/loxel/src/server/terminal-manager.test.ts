@@ -1,14 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
-import type { PythonEnv } from "@/api/python-env-model";
 import type { TerminalState } from "@/api/ws-protocol";
 import { until } from "@/test/until";
 
 import { TerminalManager } from "./terminal-manager";
 import type { TerminalSink } from "./terminal-session";
+import type { ToolchainEnvContributor } from "./toolchain-env-contributor";
 
 const textDecoder = new TextDecoder();
 
@@ -28,14 +25,26 @@ afterEach(() => {
   for (const manager of managers.splice(0)) manager.destroyAll();
 });
 
-function createManager(
-  pythonEnvFor: (worktreePath: string) => Promise<PythonEnv | null> = async () => null,
-): TerminalManager {
+/** A contributor to terminals only, with the given resolution. */
+function contributor(
+  resolveForTerminal: ToolchainEnvContributor["resolveForTerminal"],
+  overrides: Partial<ToolchainEnvContributor> = {},
+): ToolchainEnvContributor {
+  return {
+    name: "Test",
+    resolveForTerminal,
+    resolveForAgent: async () => null,
+    subscribeForAgent: () => () => {},
+    ...overrides,
+  };
+}
+
+function createManager(toolchainEnvs: readonly ToolchainEnvContributor[] = []): TerminalManager {
   const manager = new TerminalManager({
     isSequenceEnabled: () => false,
     onNotification: () => {},
     onExit: () => {},
-    pythonEnvFor,
+    toolchainEnvs,
   });
   managers.push(manager);
   return manager;
@@ -127,40 +136,71 @@ describe("TerminalManager commands", () => {
   });
 });
 
-describe("TerminalManager Python environments", () => {
+describe("TerminalManager toolchain environments", () => {
   const originalShell = process.env.SHELL;
   afterEach(() => {
     process.env.SHELL = originalShell;
   });
 
-  test("activates the worktree's environment in the shell", async () => {
+  test("applies the worktree's toolchains to the shell, in list order, past one that fails", async () => {
     process.env.SHELL = "/bin/sh";
-    const envPath = await mkdtemp(join(tmpdir(), "loxel-test-env-"));
-    await mkdir(join(envPath, "bin"));
     const asked: string[] = [];
-    const manager = createManager(async (worktreePath) => {
-      asked.push(worktreePath);
-      return { source: "pixi", pythonPath: `${envPath}/bin/python`, envPath };
-    });
+    const manager = createManager([
+      contributor(async (worktreePath) => {
+        asked.push(worktreePath);
+        return (env) => {
+          env.TOOLCHAIN_ORDER = "first";
+        };
+      }),
+      contributor(async () => {
+        throw new Error("no toolchain");
+      }),
+      contributor(async () => (env) => {
+        env.TOOLCHAIN_ORDER = `${env.TOOLCHAIN_ORDER}-second`;
+      }),
+    ]);
     const id = crypto.randomUUID();
     const sink = createRecordingSink();
     await manager.attach(id, sink.sink, {
       ...attachOptions,
       worktreePath: "/",
-      // Only zsh keeps the entry first (macOS /etc/profile reorders PATH for sh), so check presence.
-      command: `case ":$PATH:" in *:${envPath}/bin:*) echo env-on-$((1+1));; esac`,
+      command: "echo order-[$TOOLCHAIN_ORDER]",
     });
-    await until(() => sink.outputText().includes("env-on-2"));
+    await until(() => sink.outputText().includes("order-[first-second]"));
     expect(asked).toEqual(["/"]);
+  });
 
-    // Turned off in settings: the environment is not even resolved.
-    const off = crypto.randomUUID();
-    await manager.attach(off, createRecordingSink().sink, {
+  test("a toolchain that never answers does not hold up the shell or the others", async () => {
+    process.env.SHELL = "/bin/sh";
+    const manager = createManager([
+      contributor(() => new Promise(() => {})),
+      contributor(async () => (env) => {
+        env.TOOLCHAIN_ANSWERED = "yes";
+      }),
+    ]);
+    const sink = createRecordingSink();
+    await manager.attach(crypto.randomUUID(), sink.sink, {
+      ...attachOptions,
+      command: "echo answered-[$TOOLCHAIN_ANSWERED]",
+    });
+    await until(() => sink.outputText().includes("answered-[yes]"));
+  }, 15_000);
+
+  test("a toolchain the terminal's settings turn off is not even resolved", async () => {
+    process.env.SHELL = "/bin/sh";
+    const asked: string[] = [];
+    const resolve = async (worktreePath: string) => {
+      asked.push(worktreePath);
+      return null;
+    };
+    const manager = createManager([
+      contributor(resolve, { enabledInTerminal: (s) => s.activatePythonEnv !== false }),
+    ]);
+    await manager.attach(crypto.randomUUID(), createRecordingSink().sink, {
       ...attachOptions,
       activatePythonEnv: false,
     });
-    expect(asked).toEqual(["/"]);
-    await rm(envPath, { recursive: true });
+    expect(asked).toEqual([]);
   });
 
   test("concurrent starts share one shell, and one closed while starting never runs", async () => {
@@ -169,7 +209,7 @@ describe("TerminalManager Python environments", () => {
     const gate = new Promise<null>((resolve) => {
       release = () => resolve(null);
     });
-    const manager = createManager(() => gate);
+    const manager = createManager([contributor(() => gate)]);
 
     const id = crypto.randomUUID();
     const first = manager.attach(id, createRecordingSink().sink, attachOptions);
@@ -190,7 +230,7 @@ describe("TerminalManager Python environments", () => {
     const gate = new Promise<null>((resolve) => {
       release = () => resolve(null);
     });
-    return { manager: createManager(() => gate), release };
+    return { manager: createManager([contributor(() => gate)]), release };
   }
 
   test("a panel attaching while a command's shell starts gets that shell, command included", async () => {

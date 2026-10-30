@@ -1,8 +1,8 @@
 {
-  "script": "download-docker-lsp.ts",
+  "script": "build-docker-lsp.ts",
   "resources": ["docker-language-server"],
   "license": "Apache-2.0",
   "source": "https://github.com/docker/docker-language-server/tree/v0.20.1",
   "licenseFile": "licenses/docker-language-server.txt",
-  "note": "Statically links the Go runtime (BSD-3-Clause) and the Go modules listed in go.mod at the source address."
+  "note": "Built from that source. Statically links the Go runtime (BSD-3-Clause) and the Go modules listed in go.mod at the source address."
 }

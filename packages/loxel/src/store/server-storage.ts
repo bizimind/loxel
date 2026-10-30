@@ -26,6 +26,28 @@ export function consumeNonce(nonce: string): boolean {
  */
 export function createServerStorage(storeKey: string): StateStorage {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingValue: string | null = null;
+
+  function flush(options?: Pick<RequestInit, "keepalive">): void {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = null;
+    if (pendingValue === null) return;
+    const value = pendingValue;
+    pendingValue = null;
+    const nonce = crypto.randomUUID();
+    pendingNonces.add(nonce);
+    api.putStore(storeKey, value, nonce, options).catch(() => {
+      // Silently fail — in-memory Zustand state is the source of truth.
+      // Next state change will retry.
+      pendingNonces.delete(nonce);
+    });
+  }
+
+  // keepalive so the write survives renderer teardown; a window closing within the debounce would
+  // otherwise lose the user's last change. pagehide also fires for reloads and on app quit.
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", () => flush({ keepalive: true }));
+  }
 
   return {
     getItem: async (name: string): Promise<string | null> => {
@@ -53,17 +75,9 @@ export function createServerStorage(storeKey: string): StateStorage {
     },
 
     setItem: (_name: string, value: string): void => {
+      pendingValue = value;
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        debounceTimer = null;
-        const nonce = crypto.randomUUID();
-        pendingNonces.add(nonce);
-        api.putStore(storeKey, value, nonce).catch(() => {
-          // Silently fail — in-memory Zustand state is the source of truth.
-          // Next state change will retry.
-          pendingNonces.delete(nonce);
-        });
-      }, DEBOUNCE_MS);
+      debounceTimer = setTimeout(() => flush(), DEBOUNCE_MS);
     },
 
     removeItem: (): void => {
