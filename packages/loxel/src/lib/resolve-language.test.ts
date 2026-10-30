@@ -57,6 +57,45 @@ describe("resolveLanguage for build files", () => {
   });
 });
 
+describe("resolveLanguage for C-family projects", () => {
+  test.each([
+    ["/repo/src/lib.c", "c"],
+    ["/repo/build/lib.i", "c"],
+    ["/repo/src/app.C", "cpp"],
+    ["/repo/include/fmt/base.h", "cpp"],
+    ["/repo/include/WINDOWS.H", "cpp"],
+    ["/repo/src/app.CPP", "cpp"],
+    ["/repo/build/app.ii", "cpp"],
+    ["/repo/sketch.ino", "cpp"],
+    ...["cpp", "cc", "cxx", "c++"].map((ext) => [`/repo/src/a.${ext}`, "cpp"]),
+    ...["hpp", "hh", "hxx", "h++", "inl", "ipp", "tpp", "tcc", "txx"].map((ext) => [
+      `/repo/include/a.${ext}`,
+      "cpp",
+    ]),
+    ...["ixx", "cppm", "ccm", "cxxm", "c++m"].map((ext) => [`/repo/mod/a.${ext}`, "cpp"]),
+    ["/repo/ios/View.m", "objective-c"],
+    ["/repo/ios/Bridge.mm", "objective-cpp"],
+    ["/repo/CMakeLists.txt", "cmake"],
+    ["/repo/cmake/Modules.cmake", "cmake"],
+    ["/repo/build/CMakeCache.txt", "ini"],
+    ["/repo/CMakePresets.json", "json"],
+    ["/repo/compile_commands.json", "json"],
+    ["/repo/compile_flags.txt", "plaintext"],
+    ["/repo/.clangd", "yaml"],
+    ["/repo/.clang-format", "yaml"],
+    ["/repo/_clang-format", "yaml"],
+    ["/repo/.clang-tidy", "yaml"],
+    ["/repo/.clang-format-ignore", "ini"],
+  ])("%s → %s", (path, language) => {
+    expect(resolve(path)).toBe(language);
+  });
+
+  test("a user association still decides `.C` files", () => {
+    const associations = [{ id: "a", glob: "**/*.C", language: "c", enabled: true }];
+    expect(resolveLanguage("/repo/app.C", associations)).toBe("c");
+  });
+});
+
 describe("toMonacoLanguage", () => {
   test("keeps TOML as its own Monaco language so it gets the TOML grammar", () => {
     expect(toMonacoLanguage("toml")).toBe("toml");

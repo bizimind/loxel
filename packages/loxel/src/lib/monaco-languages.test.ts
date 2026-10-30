@@ -40,10 +40,12 @@ describe("registerLoxelLanguages", () => {
   test("registers languages Monaco does not ship", () => {
     expect(loxelLanguages.toSorted()).toEqual([
       "astro",
+      "cmake",
       "dockerbake",
       "jsx",
       "just",
       "make",
+      "objective-cpp",
       "pip-requirements",
       "terraform",
       "toml",
@@ -109,16 +111,49 @@ describe("editing Loxel's languages in Monaco", () => {
     ["terraform", 'name = "a"', '# name = "a"'],
     ["make", "all: build", "# all: build"],
     ["just", "build:", "# build:"],
+    ["cmake", "project(fmt)", "# project(fmt)"],
+    ["objective-cpp", "int a = 1;", "// int a = 1;"],
   ])("toggles a line comment in %s", (language, line, commented) => {
     const model = open(language, line);
     editor.trigger("keyboard", "editor.action.commentLine", null);
     expect(model.getValue()).toBe(commented);
   });
 
-  test.each(["tsx", "jsx", "terraform", "make", "just"])("auto-closes brackets in %s", (lang) => {
-    const model = open(lang, "x = ");
-    type("(");
-    expect(model.getValue()).toBe("x = ()");
+  test.each(["tsx", "jsx", "terraform", "make", "just", "cmake", "objective-cpp"])(
+    "auto-closes brackets in %s",
+    (lang) => {
+      const model = open(lang, "x = ");
+      type("(");
+      expect(model.getValue()).toBe("x = ()");
+    },
+  );
+
+  test("toggles a CMake bracket comment", () => {
+    const model = open("cmake", "project(fmt)");
+    editor.setSelection(model.getFullModelRange());
+    editor.trigger("keyboard", "editor.action.blockComment", null);
+    expect(model.getValue()).toBe("#[[ project(fmt) ]]");
+  });
+
+  test.each(["if(WIN32)", "foreach(f ${FILES})  # all", "ELSE()", "add_library("])(
+    "indents after %p in CMake",
+    (line) => {
+      const model = open("cmake", line);
+      type("\n");
+      expect(model.getLineContent(2)).toBe("    ");
+    },
+  );
+
+  test.each(["endif()", "project(fmt)", "# if(WIN32)"])("keeps the indent after %p", (line) => {
+    const model = open("cmake", line);
+    type("\n");
+    expect(model.getLineContent(2)).toBe("");
+  });
+
+  test("continues a doc comment on Enter in Objective-C++", () => {
+    const model = open("objective-cpp", "/**");
+    type("\n");
+    expect(model.getLineContent(2)).toBe(" * ");
   });
 
   test("continues a JSDoc comment on Enter in TSX", () => {

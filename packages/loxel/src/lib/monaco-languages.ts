@@ -1,8 +1,10 @@
 import * as monaco from "monaco-editor";
+import { conf as cppConf } from "monaco-editor/languages/definitions/cpp/cpp.js";
 import { conf as hclConf } from "monaco-editor/languages/definitions/hcl/hcl.js";
 import { conf as javascriptConf } from "monaco-editor/languages/definitions/javascript/javascript.js";
 import { conf as typescriptConf } from "monaco-editor/languages/definitions/typescript/typescript.js";
 
+import { extendCFamilyConfiguration } from "./c-language-config";
 import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
 
@@ -82,6 +84,20 @@ const HASH_COMMENT_SCRIPT_CONFIGURATION: monaco.languages.LanguageConfiguration 
   ],
 };
 
+const CMAKE_CONFIGURATION: monaco.languages.LanguageConfiguration = {
+  ...HASH_COMMENT_SCRIPT_CONFIGURATION,
+  comments: { lineComment: "#", blockComment: ["#[[", "]]"] },
+  onEnterRules: [
+    // A command that opens a block, with its arguments closed on the same line. Parens left open
+    // indent through `brackets` instead. Not `indentationRules`: the editor's `autoIndent` stays at
+    // "advanced", which ignores them.
+    {
+      beforeText: /^\s*(?:if|elseif|else|while|foreach|function|macro|block)\s*\(.*\)\s*(?:#.*)?$/i,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+  ],
+};
+
 /**
  * Languages Monaco doesn't ship, with their editing behavior (comments, brackets, auto-closing and
  * surrounding pairs, on-enter rules). Most exist as their own IDs so `shikiToMonaco` can attach
@@ -128,6 +144,19 @@ const LOXEL_LANGUAGES: {
   {
     language: { id: "just", extensions: [".just"], aliases: ["Just", "just"] },
     configuration: HASH_COMMENT_SCRIPT_CONFIGURATION,
+  },
+  {
+    language: {
+      id: "cmake",
+      extensions: [".cmake"],
+      filenames: ["CMakeLists.txt"],
+      aliases: ["CMake", "cmake"],
+    },
+    configuration: CMAKE_CONFIGURATION,
+  },
+  {
+    language: { id: "objective-cpp", extensions: [".mm"], aliases: ["Objective-C++", "objcpp"] },
+    configuration: extendCFamilyConfiguration(cppConf),
   },
 ];
 
