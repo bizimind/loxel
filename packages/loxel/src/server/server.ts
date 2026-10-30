@@ -1425,7 +1425,7 @@ process.on("unhandledRejection", (reason) => {
 // --- Background update check (production only) ---
 
 if (!config.isDev) {
-  const { cleanupStaleUpdates, checkForUpdate } = await import("./update");
+  const { cleanupStaleUpdates, runAutomaticUpdateCheck } = await import("./update");
   cleanupStaleUpdates();
-  setTimeout(() => checkForUpdate(broadcastAll), 5_000);
+  setTimeout(() => runAutomaticUpdateCheck(broadcastAll), 5_000);
 }
