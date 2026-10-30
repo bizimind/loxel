@@ -5,6 +5,7 @@ import { conf as javascriptConf } from "monaco-editor/languages/definitions/java
 import { conf as typescriptConf } from "monaco-editor/languages/definitions/typescript/typescript.js";
 
 import { extendCFamilyConfiguration } from "./c-language-config";
+import { registerGoProjectFileLanguages } from "./go-monarch";
 import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
 
@@ -166,7 +167,9 @@ export function registerLoxelLanguages(): void {
     monaco.languages.register(language);
     monaco.languages.setLanguageConfiguration(language.id, configuration);
   }
-  // Shiki has no grammar for docker-bake or pip requirements, so they get Monarch tokenizers.
+  // Shiki has no grammar for docker-bake, Go's project files or pip requirements, so they get
+  // Monarch tokenizers.
   registerDockerBakeMonarch();
+  registerGoProjectFileLanguages();
   registerPipRequirementsLanguage();
 }

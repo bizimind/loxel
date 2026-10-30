@@ -42,6 +42,9 @@ describe("registerLoxelLanguages", () => {
       "astro",
       "cmake",
       "dockerbake",
+      "go.mod",
+      "go.sum",
+      "go.work",
       "jsx",
       "just",
       "make",
@@ -54,7 +57,9 @@ describe("registerLoxelLanguages", () => {
   });
 
   // Monaco only configures the languages it registers itself; Shiki's grammars only tokenize.
-  test.each(loxelLanguages)("gives %s comments, brackets and auto-closing pairs", (id) => {
+  // go.sum is generated and has neither comments nor brackets.
+  const configured = loxelLanguages.filter((id) => id !== "go.sum");
+  test.each(configured)("gives %s comments, brackets and auto-closing pairs", (id) => {
     const configuration = configurations.get(id);
     const { lineComment, blockComment } = configuration?.comments ?? {};
     expect(lineComment ?? blockComment).toBeDefined();
@@ -113,20 +118,29 @@ describe("editing Loxel's languages in Monaco", () => {
     ["just", "build:", "# build:"],
     ["cmake", "project(fmt)", "# project(fmt)"],
     ["objective-cpp", "int a = 1;", "// int a = 1;"],
+    ["go.mod", "require a.b/c v1.0.0", "// require a.b/c v1.0.0"],
+    ["go.work", "use ./a", "// use ./a"],
   ])("toggles a line comment in %s", (language, line, commented) => {
     const model = open(language, line);
     editor.trigger("keyboard", "editor.action.commentLine", null);
     expect(model.getValue()).toBe(commented);
   });
 
-  test.each(["tsx", "jsx", "terraform", "make", "just", "cmake", "objective-cpp"])(
-    "auto-closes brackets in %s",
-    (lang) => {
-      const model = open(lang, "x = ");
-      type("(");
-      expect(model.getValue()).toBe("x = ()");
-    },
-  );
+  test.each([
+    "tsx",
+    "jsx",
+    "terraform",
+    "make",
+    "just",
+    "cmake",
+    "objective-cpp",
+    "go.mod",
+    "go.work",
+  ])("auto-closes brackets in %s", (lang) => {
+    const model = open(lang, "x = ");
+    type("(");
+    expect(model.getValue()).toBe("x = ()");
+  });
 
   test("toggles a CMake bracket comment", () => {
     const model = open("cmake", "project(fmt)");
@@ -154,6 +168,22 @@ describe("editing Loxel's languages in Monaco", () => {
     const model = open("objective-cpp", "/**");
     type("\n");
     expect(model.getLineContent(2)).toBe(" * ");
+  });
+
+  test("leaves go.sum alone on toggle line comment", () => {
+    const line = "a.b/c v1.0.0 h1:abc=";
+    const model = open("go.sum", line);
+    editor.trigger("keyboard", "editor.action.commentLine", null);
+    expect(model.getValue()).toBe(line);
+  });
+
+  test.each(["go.mod", "go.work"])("indents a block on Enter in %s", (language) => {
+    const model = open(language, "require ");
+    type("(");
+    type("\n");
+    expect(model.getLineContent(2).trim()).toBe("");
+    expect(model.getLineContent(2).length).toBeGreaterThan(0);
+    expect(model.getLineContent(3)).toBe(")");
   });
 
   test("continues a JSDoc comment on Enter in TSX", () => {

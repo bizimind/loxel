@@ -40,6 +40,8 @@ export class LspCompletionFeature extends Disposable {
               commitCharactersSupport: true,
               deprecatedSupport: true,
               preselectSupport: true,
+              snippetSupport: true,
+              resolveSupport: { properties: ["additionalTextEdits"] },
             },
           },
         },
