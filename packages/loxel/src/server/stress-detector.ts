@@ -218,11 +218,15 @@ export function createStressDetector(
     count(counter, state, time);
   }
 
-  function closeKeyWindows(state: CheckpointState, time: number): void {
+  /** Returns whether any key still has an episode open. */
+  function closeKeyWindows(state: CheckpointState, time: number): boolean {
+    let open = false;
     for (const [key, counter] of state.byKey) {
-      closeWindows(counter, state, time);
-      if (!counter.episode) state.byKey.delete(key);
+      const closed = closeWindows(counter, state, time);
+      if (counter.episode) open = true;
+      else if (closed) state.byKey.delete(key);
     }
+    return open;
   }
 
   function startSweeping(): void {
@@ -241,8 +245,7 @@ export function createStressDetector(
     let open = false;
     for (const state of states.values()) {
       closeWindows(state.global, state, time);
-      closeKeyWindows(state, time);
-      if (state.global.episode || state.byKey.size > 0) open = true;
+      if (closeKeyWindows(state, time) || state.global.episode) open = true;
     }
     if (!open) stopSweeping();
   }

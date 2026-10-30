@@ -34,7 +34,7 @@ export async function getLog(
     args.push(...branches);
   }
 
-  const result = await gitText([...args], { cwd, env: readOnlyGitEnv() });
+  const result = await gitText(args, { cwd, env: readOnlyGitEnv() });
   return parseLogOutput(result);
 }
 
@@ -105,7 +105,7 @@ export async function getBranchCommits(
     "--topo-order",
     `${mergeBase}..HEAD`,
   ];
-  const result = await gitText([...args], { cwd, env: readOnlyGitEnv(), nothrow: true });
+  const result = await gitText(args, { cwd, env: readOnlyGitEnv(), nothrow: true });
   const commits = parseLogOutput(result.trim());
   const truncated = commits.length > limit;
 

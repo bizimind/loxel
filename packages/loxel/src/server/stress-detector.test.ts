@@ -181,6 +181,18 @@ describe("stress-detector", () => {
     detector.dispose();
   });
 
+  test("rate+key: a sweep mid-window does not lose a key's count", () => {
+    const { detector, logs, fire, advance } = setup({ test: { rate: 100, windowMs: 1000 } });
+    // Aligns the window, so the sweep below lands inside it.
+    detector.track("test");
+    fire("test", 40, "loop");
+    advance(500);
+    detector.sweep();
+    fire("test", 20, "loop");
+    expect(logs.filter((l) => l.ctx.key === "loop")).toHaveLength(1);
+    detector.dispose();
+  });
+
   test("custom warnRatio", () => {
     const { detector, logs, fire } = setup({ test: { rate: 10, warnRatio: 0.3 } });
     fire("test", 4);
