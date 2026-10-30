@@ -6,6 +6,7 @@ import { $ } from "bun";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 
 import { logger } from "./logger";
+import { measureSpawn } from "./spawn-metrics";
 import { stress } from "./stress-detector";
 import { resolveTypeScriptBinary } from "./typescript-path";
 import { INTERNAL_WORKTREE_PREFIX, REF_PATTERN, symlinkNodeModules } from "./worktree-utils";
@@ -28,7 +29,7 @@ export async function getDiagnostics(
   cwd: string,
   ref: string | undefined,
 ): Promise<TypeScriptDiagnostic[]> {
-  stress.track("diagnostics", { ref: ref ?? "__working_tree__" });
+  stress.track("diagnostics", ref ?? "__working_tree__");
   // Only a root tsconfig makes a project to check. Without one `tsc` prints its help text (or
   // falls back to a tsconfig in some ancestor directory, which is not this worktree's project).
   // Working tree: run directly, no cache
@@ -108,12 +109,14 @@ async function runTypeScriptInDir(
     return [];
   }
   try {
-    const proc = Bun.spawn([tsc, "--noEmit", "--pretty", "false"], {
-      cwd: dir,
-      env: { ...process.env, NO_COLOR: "1" },
-      stdout: "pipe",
-      stderr: "ignore",
-    });
+    const proc = measureSpawn("tsc", () =>
+      Bun.spawn([tsc, "--noEmit", "--pretty", "false"], {
+        cwd: dir,
+        env: { ...process.env, NO_COLOR: "1" },
+        stdout: "pipe",
+        stderr: "ignore",
+      }),
+    );
 
     // Race against timeout
     let timer: ReturnType<typeof setTimeout>;

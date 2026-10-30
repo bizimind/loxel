@@ -9,6 +9,7 @@ import { logger } from "./logger";
 import { getPythonEnv, getPythonEnvNow, isSamePythonEnv, subscribePythonEnv } from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
 import { isEnvShippedByRepo, isShippedByRepo } from "./shipped-by-repo";
+import { measureSpawn } from "./spawn-metrics";
 import {
   type SpawnOptions,
   StdioLspManager,
@@ -243,14 +244,16 @@ async function isTrustedRuff(
  */
 async function ruffVersion(wtPath: string, ruff: string): Promise<string | null> {
   try {
-    const proc = Bun.spawn([ruff, "--version"], {
-      cwd: wtPath,
-      env: buildSpawnEnv(),
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-      timeout: VERSION_TIMEOUT_MS,
-    });
+    const proc = measureSpawn("ruff", () =>
+      Bun.spawn([ruff, "--version"], {
+        cwd: wtPath,
+        env: buildSpawnEnv(),
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+        timeout: VERSION_TIMEOUT_MS,
+      }),
+    );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     const match = /^ruff (\d+\.\d+\.\d+)/.exec(stdout.trim());
     return exitCode === 0 && match?.[1] ? match[1] : null;

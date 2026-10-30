@@ -678,7 +678,7 @@ export class AgentManager {
     }
 
     // Forward to attached client
-    stress.track("agent-event", { sessionId: session.id });
+    stress.track("agent-event", session.id);
     session.onEvent?.(session.id, event, session.eventSeq);
   }
 
