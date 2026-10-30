@@ -27,10 +27,7 @@ const SEVERITY = { error: 1, warning: 2, note: 3 } as const;
 
 /** A language-server diagnostic, as `textDocument/publishDiagnostics` carries it. */
 export interface MypyDiagnostic {
-  range: {
-    start: { line: number; character: number };
-    end: { line: number; character: number };
-  };
+  range: { start: { line: number; character: number }; end: { line: number; character: number } };
   severity: (typeof SEVERITY)[keyof typeof SEVERITY];
   source: "mypy";
   message: string;
@@ -105,13 +102,7 @@ export class MypyDaemon {
         ...flags,
         ...targets,
       ],
-      {
-        cwd: this.root,
-        env: this.options.env,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-      },
+      { cwd: this.root, env: this.options.env, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
     );
     this.running = proc;
     const [stdout, stderr, exitCode] = await Promise.all([

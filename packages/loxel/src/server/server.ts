@@ -38,6 +38,7 @@ import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
 import { logger } from "./logger";
+import { MypyLspManager } from "./mypy-lsp-manager";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
@@ -49,7 +50,6 @@ import {
   refreshPythonEnv,
   subscribePythonEnv,
 } from "./python-env";
-import { MypyLspManager } from "./mypy-lsp-manager";
 import { PythonLspManager } from "./python-lsp-manager";
 import { onPythonOverrideChange } from "./python-override-store";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";

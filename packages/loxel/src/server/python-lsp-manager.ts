@@ -184,7 +184,8 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       // for the full one.
       if ("previousResultId" in params) {
         delete params.previousResultId;
-        data = JSON.stringify(message);
+        super.handleClientData(session, JSON.stringify(message));
+        return;
       }
     }
     super.handleClientData(session, data);
@@ -197,7 +198,10 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
   /** `body` without basedpyright's type errors for files the external type checker owns. */
   private withoutExternalTypeErrors(session: PythonLspSession, body: string): string {
     if (!this.typeChecker) return body;
-    if (session.diagnosticRequests.size === 0 && !body.includes("textDocument/publishDiagnostics")) {
+    if (
+      session.diagnosticRequests.size === 0 &&
+      !body.includes("textDocument/publishDiagnostics")
+    ) {
       return body;
     }
     const message = parseRecord(body);
@@ -207,7 +211,11 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       const uri = session.diagnosticRequests.get(id);
       if (uri === undefined) return body;
       session.diagnosticRequests.delete(id);
-      if (!isRecord(result) || !Array.isArray(result.items) || !this.ownsTypeChecking(session, uri)) {
+      if (
+        !isRecord(result) ||
+        !Array.isArray(result.items) ||
+        !this.ownsTypeChecking(session, uri)
+      ) {
         return body;
       }
       result.items = result.items.filter(isKeptDiagnostic);

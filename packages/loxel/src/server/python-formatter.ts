@@ -169,4 +169,3 @@ function requirementName(requirement: string): string {
 function normalizePackageName(name: string): string {
   return name.toLowerCase().replace(/[-_.]+/g, "-");
 }
-

@@ -42,7 +42,12 @@ afterEach(async () => {
 interface Received {
   method?: string;
   id?: number;
-  params?: { uri?: string; diagnostics?: { message: string; source: string }[]; type?: number; message?: string };
+  params?: {
+    uri?: string;
+    diagnostics?: { message: string; source: string }[];
+    type?: number;
+    message?: string;
+  };
   result?: unknown;
 }
 
@@ -78,7 +83,10 @@ class FakeClient {
   }
 
   close(file: string): void {
-    this.send({ method: "textDocument/didClose", params: { textDocument: { uri: fileUri(file) } } });
+    this.send({
+      method: "textDocument/didClose",
+      params: { textDocument: { uri: fileUri(file) } },
+    });
   }
 
   /** The first message received from now on (or already, when `since` is 0) that `predicate` accepts. */
@@ -86,7 +94,9 @@ class FakeClient {
     while (true) {
       const found = this.received.slice(since).find(predicate);
       if (found) return found;
-      await new Promise<void>((resolve) => this.waiters.push(resolve));
+      await new Promise<void>((resolve) => {
+        this.waiters.push(resolve);
+      });
     }
   }
 
@@ -224,7 +234,8 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
     const notice = await client.waitFor((m) => m.method === "window/showMessage");
     expect(notice.params).toEqual({
       type: 1,
-      message: "mypy could not check the worktree: pyproject.toml: Invalid value (at line 2, column 10)",
+      message:
+        "mypy could not check the worktree: pyproject.toml: Invalid value (at line 2, column 10)",
     });
   });
 

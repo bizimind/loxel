@@ -11,13 +11,13 @@ import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import { findMypyConfig, isMypyConfigFile, type MypyConfig } from "./mypy-config";
 import { MypyDaemon, type MypyDiagnostic } from "./mypy-daemon";
-import { pythonEnvActivation, setPythonEnvVars } from "./python-env-activation";
 import {
   getPythonEnv,
   isEnvShippedByRepo,
   isShippedByRepo,
   subscribePythonEnv,
 } from "./python-env";
+import { pythonEnvActivation, setPythonEnvVars } from "./python-env-activation";
 import type { ExternalTypeChecker } from "./python-lsp-manager";
 import { buildSpawnEnv } from "./shell-env";
 
@@ -225,7 +225,11 @@ export class MypyLspManager implements ExternalTypeChecker {
       const targetsChanged = config.hasTargets !== project.config.hasTargets;
       project.config = config;
       if (targetsChanged) this.scheduleCheck(session, project);
-      else if (changed && !config.hasTargets && findMypyConfig(changed, session.wtPath)?.dir === dir) {
+      else if (
+        changed &&
+        !config.hasTargets &&
+        findMypyConfig(changed, session.wtPath)?.dir === dir
+      ) {
         this.scheduleCheck(session, project);
       }
     }

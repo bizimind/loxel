@@ -1,6 +1,6 @@
 ---
 title: Language Intelligence
-description: Per-worktree language servers for TypeScript, Python, TOML and more, Python environments and the interpreter picker.
+description: Per-worktree language servers for TypeScript, Python, TOML and more, mypy, Python environments and the interpreter picker.
 order: 13
 ---
 
@@ -93,7 +93,7 @@ YAML starts with Loxel and stays running. The others start the first time you op
 
 ## Python
 
-Python files are checked by [basedpyright](https://docs.basedpyright.com), a type checker and language server built on Pyright. Besides diagnostics, hover, go-to-definition, references, rename and signature help, you get:
+Python files are checked by [basedpyright](https://docs.basedpyright.com), a type checker and language server built on Pyright (or by [mypy](#mypy), in projects that use it). Besides diagnostics, hover, go-to-definition, references, rename and signature help, you get:
 
 - **Semantic highlighting**: `self` and `cls`, decorators, builtins, modules, methods and constants are colored by what they are, not only by syntax.
 - **Inlay hints**: inferred types of variables, return types of functions without an annotation, and parameter names at call sites, shown inline.
@@ -164,6 +164,21 @@ Ruff reads its settings from the `ruff.toml`, `.ruff.toml` or `pyproject.toml` c
 If Ruff 0.5.3 or newer is installed in the project's Python environment (see above, including an interpreter you chose), Loxel uses that one, so the version pinned in your dev dependencies applies. Otherwise it uses the Ruff that ships with Loxel. When the environment changes, for example when `uv sync` installs the project's Ruff after a Python file was opened, or you upgrade Ruff or choose another interpreter, the linter restarts with the new Ruff. Syntax errors come from the type checker only, and formatting stays with [format on save](/docs/editor#formatter-auto-detection).
 
 ---
+
+### mypy
+
+Projects that type-check with [mypy](https://mypy.readthedocs.io) get mypy's errors in the editor instead of basedpyright's. Loxel recognizes a project as using mypy by its configuration: a `mypy.ini` or `.mypy.ini`, a `[tool.mypy]` table in `pyproject.toml`, or a `[mypy]` section in `setup.cfg`. The configuration closest to each file applies, so each project in a monorepo keeps its own.
+
+Loxel runs the mypy installed in the project's Python environment (see above, including an interpreter you chose), so your pinned version, settings and plugins (Django, pydantic, SQLAlchemy and others) apply, exactly as when you run mypy yourself:
+
+- mypy's errors are underlined, marked `mypy`, and their error code links to its explanation in the mypy docs.
+- Files are checked when you open them and whenever a Python file is saved or changes on disk, for example after `git checkout` or an agent's edits. mypy reads files from disk, so unsaved changes are checked once saved. Loxel keeps a mypy daemon running per project, so re-checks after the first are quick.
+- When your configuration lists what to check (`files`, `modules` or `packages`), Loxel checks the project as configured, which is what your CI checks too. Otherwise it checks the files you have open.
+- Editing the mypy configuration, or a change to the Python environment such as installing packages or choosing another interpreter, restarts mypy.
+
+While mypy checks a file, basedpyright stops reporting type errors there, so you only see the errors your project's checker reports. basedpyright still provides completions, hover, go-to-definition, rename, quick fixes and the other features above, and still reports syntax errors and fades unused and unreachable code. To see both checkers' type errors, configure basedpyright in the project too, with a `pyrightconfig.json` or a `[tool.basedpyright]` (or `[tool.pyright]`) table in `pyproject.toml`.
+
+If mypy is configured but not installed in the project's environment, Loxel says so once and basedpyright keeps checking types; add mypy to your dev dependencies (for example `uv add --dev mypy`) to switch. If mypy cannot check the project, for example because of an error in its configuration or a plugin that fails to load, Loxel shows mypy's message.
 
 ## TOML
 
