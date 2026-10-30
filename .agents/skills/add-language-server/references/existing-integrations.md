@@ -32,7 +32,7 @@ The most complex manager. Unique behaviors not found in other LSPs:
 
 The only global LSP. Uses `attach(ws)` / `detach(ws)` instead of `createSession` / `destroySession`. Its client calls `createLspClient`'s `connect(null)` once (no `wt`) and never disconnects. In `server.ts`, the YAML route is handled separately from `worktreeLspManagers`.
 
-## Docker — Three Non-Standard Behaviors
+## Docker — Non-Standard Behaviors
 
 1. **`requiresFullTextSync = true`** — server overwrites entire document on incremental changes
 2. **Panic swallowing** — `handleServerFrame` catches `-32803` errors from a known bug and returns null
