@@ -12,6 +12,7 @@ import {
   checkClangd,
   clangdMajorVersion,
   ClangdLspManager,
+  escapeSnippetDollars,
   prepareClangdUserConfig,
   queryDriverGlobs,
 } from "./clangd-lsp-manager";
@@ -181,6 +182,34 @@ describe("prepareClangdUserConfig", () => {
     const state = await makeDir();
     await writeFile(join(state, "clangd-config"), "a file where the directory would go");
     expect(() => prepareClangdUserConfig(state, "linux", { HOME: state })).toThrow();
+  });
+});
+
+describe("escapeSnippetDollars", () => {
+  const frame = (item: Record<string, unknown>) =>
+    JSON.stringify({ id: 1, result: { isIncomplete: false, items: [item] } });
+
+  test("escapes names in snippets and leaves tabstops alone", () => {
+    const escaped = JSON.parse(
+      escapeSnippetDollars(
+        frame({
+          insertText: "my$fn(${1:int $a}, $0)",
+          insertTextFormat: 2,
+          textEdit: { newText: "FOO$BAR(${1:x})" },
+        }),
+      ),
+    ) as { result: { items: { insertText: string; textEdit: { newText: string } }[] } };
+    expect(escaped.result.items[0]?.insertText).toBe("my\\$fn(${1:int \\$a}, $0)");
+    expect(escaped.result.items[0]?.textEdit.newText).toBe("FOO\\$BAR(${1:x})");
+  });
+
+  test("leaves plain text items, other frames and frames with no such $ as they are", () => {
+    const plain = frame({ insertText: "my$var", insertTextFormat: 1 });
+    expect(JSON.parse(escapeSnippetDollars(plain))).toEqual(JSON.parse(plain));
+    const hover = JSON.stringify({ id: 2, result: { contents: "costs $x" } });
+    expect(escapeSnippetDollars(hover)).toBe(hover);
+    const tabstops = frame({ insertText: "f(${1:x})", insertTextFormat: 2 });
+    expect(escapeSnippetDollars(tabstops)).toBe(tabstops);
   });
 });
 

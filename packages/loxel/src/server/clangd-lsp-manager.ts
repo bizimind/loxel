@@ -2,6 +2,8 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { isRecord } from "@/lib/is-record";
+
 import { config } from "./config";
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
@@ -10,6 +12,7 @@ import {
   type SpawnOptions,
   type SuppressibleFeature,
   type WtLspContext,
+  type WtLspSession,
 } from "./stdio-lsp-manager";
 
 const log = logger.child("clangd-lsp");
@@ -112,6 +115,38 @@ function isMissingFile(err: unknown): boolean {
   return err instanceof Error && "code" in err && err.code === "ENOENT";
 }
 
+/**
+ * Escape the `$` signs in a completion result's snippets that are not clangd's own tabstops. clangd
+ * writes names into snippets as they are, so a `my$fn` would insert the snippet variable `$fn`.
+ */
+export function escapeSnippetDollars(body: string): string {
+  // Most frames have no such `$`, and parsing them again would be wasted.
+  if (!/\$[^0-9{]/.test(body)) return body;
+  let message: unknown;
+  try {
+    message = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (!isRecord(message) || !isRecord(message.result) || !Array.isArray(message.result.items)) {
+    return body;
+  }
+  for (const item of message.result.items as unknown[]) {
+    if (!isRecord(item) || item.insertTextFormat !== SNIPPET_TEXT_FORMAT) continue;
+    if (typeof item.insertText === "string") item.insertText = escapeDollars(item.insertText);
+    if (isRecord(item.textEdit) && typeof item.textEdit.newText === "string") {
+      item.textEdit.newText = escapeDollars(item.textEdit.newText);
+    }
+  }
+  return JSON.stringify(message);
+}
+
+const SNIPPET_TEXT_FORMAT = 2;
+
+function escapeDollars(snippet: string): string {
+  return snippet.replace(/\$(?![0-9{])/g, "\\$");
+}
+
 /** The oldest clangd that takes the flags and compile flags above. */
 const MIN_CLANGD_MAJOR = 16;
 /** Apple's stub, which runs the clangd of the active developer tools or offers to install them. */
@@ -181,9 +216,6 @@ export class ClangdLspManager extends WorktreeLspManager {
     "textDocument/rangeFormatting",
   ];
 
-  // clangd writes identifiers into snippets as they are, so a `$` in one would read as a variable.
-  protected override readonly disableCompletionSnippets = true;
-
   /** Why clangd won't start for a worktree, per worktree since each starts on its own. */
   private readonly failureReasons = new Map<string, string>();
 
@@ -229,6 +261,10 @@ export class ClangdLspManager extends WorktreeLspManager {
       "--header-insertion-decorators=0",
       `--query-driver=${queryDriverGlobs()}`,
     ];
+  }
+
+  protected override handleServerFrame(session: WtLspSession, body: string): void {
+    super.handleServerFrame(session, escapeSnippetDollars(body));
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
