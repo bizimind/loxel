@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
-import { drainSpawnStats, measureSpawn, recordSpawn } from "./spawn-metrics";
+import { drainSpawnStats, measureSpawn, recordSpawn, recordWorkerSpawn } from "./spawn-metrics";
 
 describe("spawn-metrics", () => {
   beforeEach(() => {
@@ -11,15 +11,15 @@ describe("spawn-metrics", () => {
     const start = performance.now();
     drainSpawnStats(start);
 
-    recordSpawn("git status", 2, 40);
-    recordSpawn("git status", 6, 20);
-    recordSpawn("git log", 1, 100);
+    recordWorkerSpawn("git status", 2, 40);
+    recordWorkerSpawn("git status", 6, 20);
+    recordWorkerSpawn("git log", 1, 100);
 
     const stats = drainSpawnStats(start + 10_000);
     expect(stats.windowMs).toBe(10_000);
     expect(stats.spawns).toBe(3);
     expect(stats.spawnsPerSec).toBe(0.3);
-    expect(stats.blockMs).toEqual({ total: 9, max: 6 });
+    expect(stats.workerBlockMs).toEqual({ total: 9, max: 6 });
     expect(stats.childWallMs).toEqual({ total: 160, max: 100 });
     expect(stats.top).toEqual([
       { label: "git status", count: 2, blockMs: 8, wallMs: 60 },
@@ -41,6 +41,18 @@ describe("spawn-metrics", () => {
       "label-4",
       "label-3",
     ]);
+  });
+
+  test("a worker spawn counts as a spawn but not as event loop block time", () => {
+    recordSpawn("lsp", 3);
+    recordWorkerSpawn("git status", 40, 90);
+
+    const stats = drainSpawnStats();
+    expect(stats.spawns).toBe(2);
+    expect(stats.blockMs).toEqual({ total: 3, max: 3 });
+    expect(stats.workerBlockMs).toEqual({ total: 40, max: 40 });
+    expect(stats.childWallMs).toEqual({ total: 90, max: 90 });
+    expect(stats.top).toContainEqual({ label: "git status", count: 1, blockMs: 40, wallMs: 90 });
   });
 
   test("measureSpawn counts the call, returns its result and counts one that throws", () => {

@@ -6,7 +6,7 @@ Related docs: [WATCHERS.md](WATCHERS.md) (what triggers refreshes), [SHARED_SERV
 
 ## Command layer
 
-Every Git read the UI depends on goes through [`src/server/git-commands/`](../src/server/git-commands/), imported by the server as a single barrel ([index.ts](../src/server/git-commands/index.ts)). Commands go through `runGit` and `gitText` ([run-git.ts](../src/server/git-commands/run-git.ts)) with argv arrays and plain-data options, never a shell string: `gitText(["log", ...], { cwd, env: readOnlyGitEnv() })`. A non-zero exit throws `GitCommandError` unless `nothrow` is set, and hunk staging passes the patch as `stdin`. `cwd` becomes `git -C` rather than the child's working directory, so a missing directory is Git's own exit 128 rather than a spawn error. [git-exec.ts](../src/server/git-commands/git-exec.ts) holds the one `Bun.spawn`, taking and returning plain data; `runGit` records every call in [spawn-metrics.ts](../src/server/spawn-metrics.ts).
+Every Git read the UI depends on goes through [`src/server/git-commands/`](../src/server/git-commands/), imported by the server as a single barrel ([index.ts](../src/server/git-commands/index.ts)). Commands go through `runGit` and `gitText` ([run-git.ts](../src/server/git-commands/run-git.ts)) with argv arrays and plain-data options, never a shell string: `gitText(["log", ...], { cwd, env: readOnlyGitEnv() })`. A non-zero exit throws `GitCommandError` unless `nothrow` is set, and hunk staging passes the patch as `stdin`. `cwd` becomes `git -C` rather than the child's working directory, so a missing directory is Git's own exit 128 rather than a spawn error. [git-exec.ts](../src/server/git-commands/git-exec.ts) holds the one `Bun.spawn`, taking and returning plain data; `runGit` sends it to the [git exec worker](#git-exec-worker) and records every call in [spawn-metrics.ts](../src/server/spawn-metrics.ts).
 
 | Module                                                        | Owns                                                                                                  |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -24,6 +24,16 @@ Every Git read the UI depends on goes through [`src/server/git-commands/`](../sr
 | [operations.ts](../src/server/git-commands/operations.ts)     | commit, checkout, reset, cherry-pick, revert, branch create/delete/rename, stash                      |
 | [validation.ts](../src/server/git-commands/validation.ts)     | allowlist regexes for commit hashes, ref names and relative paths                                     |
 | [concurrency.ts](../src/server/git-commands/concurrency.ts)   | `mapWithConcurrency`, an order-preserving bounded pool                                                |
+
+### Git exec worker
+
+`Bun.spawn` forks and execs synchronously on its calling thread, and macOS serialises process creation system-wide, so while agents and builds are spawning, each spawn holds its caller for tens of milliseconds. `runGit` therefore starts git on one Bun Worker, [git-exec-worker.ts](../src/server/git-exec-worker.ts), and the server's event loop and terminals keep running. [git-exec-client.ts](../src/server/git-exec-client.ts) is the main-thread side.
+
+- **Plain data.** A request is argv, the child's complete environment and optional stdin; a result is stdout and stderr bytes, the exit code and timings. A Worker has its own copy of `process.env`, so the environment is always resolved on the main thread and sent with the request, including `GIT_OPTIONAL_LOCKS=0` from `readOnlyGitEnv()`.
+- **Ordering and concurrency.** Each caller awaits its own request's result, so a caller's ordering is what it was on the main thread. The worker adds no limit or queue; the caps stay with the callers (`mapWithConcurrency`).
+- **A worker that dies.** The requests it had in flight reject with an error naming the command, even with `nothrow`, and are not retried because they may already have run. The next request starts a new worker. `shutdown()` in [server.ts](../src/server/server.ts) stops the worker.
+- **Nothing else loads there.** The worker imports only `git-exec.ts`, so no native code can be torn down with it. PTYs, language servers and the other subprocess sites stay on the main thread.
+- **Builds.** A `bun build` bundle embeds a worker only when it is passed as an extra entrypoint, so every server build script names `src/server/git-exec-worker.ts`. Bundling also makes `import.meta.url` the entry point's, so the client and worker sit next to `index.ts` and the worker's URL has no extension, which resolves in source, in `dist/` and in the compiled binary.
 
 Inputs from clients are validated before they reach Git: hashes against `^[a-f0-9]{4,40}$`, refs against a conservative character allowlist, paths against `..` and reserved characters. Working-tree reads additionally call `validateWorktreePath`, which accepts only paths that `git worktree list` reports for the project (one extra `git worktree list` per request).
 

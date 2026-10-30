@@ -22,6 +22,16 @@ export interface GitExecResult {
   wallMs: number;
 }
 
+/** The subcommand, skipping git's global options: a name for a command that carries no paths or messages. */
+export function gitCommandLabel(args: readonly string[]): string {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "-c" || arg === "-C") i++;
+    else if (!arg.startsWith("-")) return `git ${arg}`;
+  }
+  return "git";
+}
+
 /** Never rejects: a git that cannot be started reports exit code 1 with the reason on stderr. */
 export async function execGit({ args, env, stdin }: GitExecRequest): Promise<GitExecResult> {
   const start = performance.now();
