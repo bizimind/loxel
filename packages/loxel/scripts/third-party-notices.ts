@@ -231,7 +231,7 @@ async function renderEntry(entry: NoticeEntry): Promise<string> {
   if (entry.note !== undefined) lines.push(entry.note);
   lines.push("");
   if (entry.licenseFile === undefined) {
-    lines.push(`License text: under npm packages below (installed as ${entry.npm?.join(", ")}).`);
+    lines.push(`License text: see ${entry.npm?.join(", ")} under npm packages below.`);
   } else {
     lines.push((await Bun.file(entry.licenseFile).text()).replaceAll("\r\n", "\n").trim());
   }
@@ -274,6 +274,22 @@ export async function renderNotices(
   return `${sections.join("\n\n")}\n`;
 }
 
+/** Names an entry's npm packages as the notices list them: an alias resolves to another name. */
+async function withInstalledNames(entry: NoticeEntry, packageDir: string): Promise<NoticeEntry> {
+  if (entry.npm === undefined) return entry;
+  const rootDir = realpathSync(packageDir);
+  const npm = await Promise.all(
+    entry.npm.map(async (name) => {
+      const dir = resolvePackageDir(name, rootDir);
+      if (dir === undefined) throw new Error(`${name} is not installed`);
+      const pkg: unknown = await Bun.file(path.join(dir, "package.json")).json();
+      if (!isRecord(pkg)) throw new Error(`${dir}/package.json: not an object`);
+      return `${String(pkg.name)}@${String(pkg.version)}`;
+    }),
+  );
+  return { ...entry, npm };
+}
+
 async function bunRuntimeEntry(): Promise<NoticeEntry> {
   const version = (await Bun.file(path.join(REPO_ROOT, ".bun-version")).text()).trim();
   return {
@@ -293,7 +309,10 @@ async function main(packageDir: string, outFile: string): Promise<void> {
   );
   const notices = await renderNotices(
     packageDir,
-    [await bunRuntimeEntry(), ...entries],
+    [
+      await bunRuntimeEntry(),
+      ...(await Promise.all(entries.map((entry) => withInstalledNames(entry, packageDir)))),
+    ],
     npmPackages,
   );
   mkdirSync(path.dirname(path.resolve(outFile)), { recursive: true });

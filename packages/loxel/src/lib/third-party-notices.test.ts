@@ -28,6 +28,57 @@ function writePackage(dir: string, pkg: Record<string, unknown>, license?: strin
   if (license !== undefined) writeFileSync(path.join(dir, "LICENSE"), license);
 }
 
+describe("the command line", () => {
+  test("writes notices for a package without third-party.json, as the CLIs have", async () => {
+    const product = path.join(root, "product");
+    writePackage(product, { dependencies: { a: "1" } });
+    writePackage(
+      path.join(product, "node_modules", "a"),
+      { name: "a", version: "1.0.0", license: "MIT" },
+      "a's license",
+    );
+    const out = path.join(root, "dist", "THIRD_PARTY_NOTICES.txt");
+
+    const generator = Bun.spawn(
+      ["bun", path.join(LOXEL, "scripts/third-party-notices.ts"), product, out],
+      { stdout: "ignore" },
+    );
+
+    expect(await generator.exited).toBe(0);
+    const notices = await Bun.file(out).text();
+    expect(notices).toContain("Bun runtime");
+    expect(notices).toContain("a@1.0.0 (MIT)");
+    expect(notices).toContain("a's license");
+  });
+
+  test("names an aliased npm package as it is installed", async () => {
+    const product = path.join(root, "product");
+    writePackage(product, {});
+    writePackage(
+      path.join(product, "node_modules", "@x", "alias"),
+      { name: "real", version: "2.0.0", license: "MIT" },
+      "real's license",
+    );
+    writeFileSync(
+      path.join(product, "third-party.json"),
+      JSON.stringify({
+        entries: [{ name: "x", license: "MIT", source: "https://example.com", npm: ["@x/alias"] }],
+      }),
+    );
+    const out = path.join(root, "notices.txt");
+
+    const generator = Bun.spawn(
+      ["bun", path.join(LOXEL, "scripts/third-party-notices.ts"), product, out],
+      { stdout: "ignore" },
+    );
+
+    expect(await generator.exited).toBe(0);
+    const notices = await Bun.file(out).text();
+    expect(notices).toContain("License text: see real@2.0.0 under npm packages below.");
+    expect(notices).toContain("real@2.0.0 (MIT)");
+  });
+});
+
 describe("the repo's own entries", () => {
   test("every language server manifest and hand-maintained entry is complete", async () => {
     const entries = await readEntries(LOXEL);
