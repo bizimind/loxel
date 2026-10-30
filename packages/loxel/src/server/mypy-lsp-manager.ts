@@ -89,8 +89,8 @@ interface MypySession {
  * `files` reach into a nested project), the file gets both roots' diagnostics.
  *
  * While a root's daemon checks successfully, it is the project's type checker for the files it
- * checks: {@link ownsTypeChecking} tells basedpyright's manager to drop basedpyright's own
- * type-checking diagnostics for them.
+ * checks and those it reported on: {@link ownsTypeChecking} tells basedpyright's manager to drop
+ * basedpyright's own type-checking diagnostics for them.
  */
 export class MypyLspManager implements ExternalTypeChecker {
   private readonly sessions = new Map<ServerWebSocket<unknown>, MypySession>();
@@ -185,8 +185,18 @@ export class MypyLspManager implements ExternalTypeChecker {
     const session = this.sessionsByWorktree.get(wtPath);
     if (!session) return false;
     const config = findMypyConfig(filePath, wtPath);
-    if (!config || session.projects.get(config.dir)?.state !== "active") return false;
-    return coversFile(config, filePath);
+    if (
+      config &&
+      session.projects.get(config.dir)?.state === "active" &&
+      coversFile(config, filePath)
+    ) {
+      return true;
+    }
+    // A module outside the targets that mypy followed an import into and reported on.
+    const file = path.resolve(filePath);
+    return [...session.projects.values()].some(
+      (project) => project.state === "active" && project.diagnostics.has(file),
+    );
   }
 
   onTypeCheckingChange(listener: (wtPath: string) => void): () => void {
@@ -238,8 +248,8 @@ export class MypyLspManager implements ExternalTypeChecker {
         void this.setUp(session, created);
         continue;
       }
-      const targetsChanged = config.hasTargets !== project.config.hasTargets;
-      const filesChanged = !config.hasTargets && !sameSet(files, project.openFiles);
+      const targetsChanged = (config.targets === null) !== (project.config.targets === null);
+      const filesChanged = config.targets === null && !sameSet(files, project.openFiles);
       project.config = config;
       project.openFiles = files;
       if (targetsChanged || filesChanged) this.scheduleCheck(session, project);
@@ -324,10 +334,10 @@ export class MypyLspManager implements ExternalTypeChecker {
     daemon: MypyDaemon,
   ): Promise<void> {
     const { config } = project;
-    const targets = config.hasTargets
+    const targets = config.targets
       ? []
       : [...project.openFiles].map((file) => path.relative(config.dir, file));
-    if (!config.hasTargets && targets.length === 0) {
+    if (!config.targets && targets.length === 0) {
       this.publish(session, project, new Map());
       return;
     }
@@ -360,7 +370,13 @@ export class MypyLspManager implements ExternalTypeChecker {
     diagnostics: Map<string, MypyDiagnostic[]>,
   ): void {
     const files = new Set([...project.diagnostics.keys(), ...diagnostics.keys()]);
+    const reportedChanged = !sameSet(
+      new Set(project.diagnostics.keys()),
+      new Set(diagnostics.keys()),
+    );
     project.diagnostics = diagnostics;
+    // Reported files are owned (see `ownsTypeChecking`).
+    if (reportedChanged && project.state === "active") this.emitTypeCheckingChange(session.wtPath);
     if (!this.isLive(session)) return;
     for (const file of files) {
       const list = [...session.projects.values()].flatMap((p) => p.diagnostics.get(file) ?? []);
@@ -394,8 +410,11 @@ export class MypyLspManager implements ExternalTypeChecker {
     project.daemon?.stop();
     project.daemon = null;
     session.projects.delete(project.config.dir);
+    const wasActive = project.state === "active";
+    // Gone: clearing what it reported is no ownership change of its own.
+    project.state = "pending";
     this.publish(session, project, new Map());
-    if (project.state === "active") this.emitTypeCheckingChange(session.wtPath);
+    if (wasActive) this.emitTypeCheckingChange(session.wtPath);
   }
 
   private closeSession(session: MypySession): void {

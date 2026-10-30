@@ -175,7 +175,8 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
       `-- --python-executable ${python} --output json --show-error-end main.py`,
     );
     expect(manager.ownsTypeChecking(wt, main)).toBe(true);
-    expect(changes).toEqual([wt]);
+    // Owned once set up, and the reported file again once the check reported it.
+    expect(changes).toEqual([wt, wt]);
 
     // Closing the last file of the project stops it and clears what it published.
     const before = client.received.length;
@@ -183,13 +184,13 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
     const cleared = await client.waitFor(client.diagnosticsFor(main), before);
     expect(cleared.params?.diagnostics).toEqual([]);
     expect(manager.ownsTypeChecking(wt, main)).toBe(false);
-    expect(changes).toEqual([wt, wt]);
+    expect(changes).toEqual([wt, wt, wt]);
   });
 
   test("checks what the config names, and re-checks when a Python file changes", async () => {
     const wt = await makeWorktree({
       "services/api/setup.cfg": "[mypy]\nfiles = api\n",
-      "services/api/.dmypy-output": `${report("api/models.py", 1, "First")}\n`,
+      "services/api/.dmypy-output": `${report("api/models.py", 1, "First")}\n${report("helpers/util.py", 2, "Followed")}\n`,
     });
     const api = join(wt, "services", "api");
     manager = new MypyLspManager();
@@ -204,12 +205,16 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
     // Only the files mypy checks are its to type-check.
     expect(manager.ownsTypeChecking(wt, join(api, "api", "app.py"))).toBe(true);
     expect(manager.ownsTypeChecking(wt, join(api, "tests", "test_app.py"))).toBe(false);
+    // A module mypy followed an import into is owned while mypy reports on it.
+    const util = join(api, "helpers", "util.py");
+    expect(manager.ownsTypeChecking(wt, util)).toBe(true);
 
     await writeFile(join(api, ".dmypy-output"), "");
     const before = client.received.length;
     manager.notifyWatchedFilesChanged(wt, [models]);
     const cleared = await client.waitFor(client.diagnosticsFor(models), before);
     expect(cleared.params?.diagnostics).toEqual([]);
+    expect(manager.ownsTypeChecking(wt, util)).toBe(false);
   });
 
   test("tells the user once when mypy is configured but not installed", async () => {

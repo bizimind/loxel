@@ -17,8 +17,11 @@ const log = logger.child("mypy-lsp");
 
 /** An idle daemon exits on its own after this long, so one Loxel could not stop does not linger. */
 const DAEMON_IDLE_TIMEOUT_S = 3600;
-/** First mypy release with `--output json`; older ones are read in their text format. */
-const MIN_JSON_VERSION = "1.11.0";
+/**
+ * First mypy release whose `--output json` carries error ends (1.11 to 1.19 have JSON output
+ * without them); older ones are read in their text format, which has them.
+ */
+const MIN_JSON_VERSION = "1.20.0";
 const VERSION_TIMEOUT_MS = 10_000;
 /** A check taking longer is stopped (a hung daemon or plugin), so later checks are not held up forever. */
 const RUN_TIMEOUT_MS = 15 * 60_000;
@@ -199,12 +202,17 @@ export class MypyDaemon {
       const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
       const version = /(\d+\.\d+(?:\.\d+)?)/.exec(stdout)?.[1];
       log.info("Using mypy", { root: this.root, dmypy: this.options.dmypy, version });
-      return version !== undefined && Bun.semver.order(version, MIN_JSON_VERSION) >= 0;
+      return version !== undefined && readsJsonOutput(version);
     } catch (err) {
       log.warn("Could not read the mypy version", { dmypy: this.options.dmypy, error: err });
       return false;
     }
   }
+}
+
+/** Whether mypy `version` is read through its JSON output, rather than its text format. */
+export function readsJsonOutput(version: string): boolean {
+  return Bun.semver.order(version, MIN_JSON_VERSION) >= 0;
 }
 
 /** What `dmypy run` prints about the daemon itself. */

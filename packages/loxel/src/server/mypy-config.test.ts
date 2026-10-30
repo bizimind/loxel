@@ -29,8 +29,7 @@ describe("findMypyConfig", () => {
     expect(findMypyConfig(join(wt, "src", "pkg", "mod.py"), wt)).toEqual({
       dir: wt,
       file: join(wt, "pyproject.toml"),
-      hasTargets: true,
-      files: ["src"],
+      targets: ["src"],
     });
   });
 
@@ -51,8 +50,7 @@ describe("findMypyConfig", () => {
     expect(findMypyConfig(join(wt, "services", "api", "api", "app.py"), wt)).toEqual({
       dir: join(wt, "services", "api"),
       file: join(wt, "services", "api", "setup.cfg"),
-      hasTargets: true,
-      files: ["api"],
+      targets: ["api"],
     });
     expect(findMypyConfig(join(wt, "tools", "x.py"), wt)?.dir).toBe(wt);
   });
@@ -65,8 +63,7 @@ describe("findMypyConfig", () => {
     expect(findMypyConfig(join(wt, "main.py"), wt)).toEqual({
       dir: wt,
       file: join(wt, "mypy.ini"),
-      hasTargets: false,
-      files: null,
+      targets: null,
     });
   });
 
@@ -116,15 +113,30 @@ test("coversFile follows the config's files entries: paths, directories and glob
   const config = {
     dir: "/wt",
     file: "/wt/setup.cfg",
-    hasTargets: true,
-    files: ["src", "scripts/*.py", "tools/run.py"],
+    targets: ["src", "scripts/*.py", "tools/run.py"],
   };
   expect(coversFile(config, "/wt/src/pkg/mod.py")).toBe(true);
   expect(coversFile(config, "/wt/scripts/build.py")).toBe(true);
   expect(coversFile(config, "/wt/tools/run.py")).toBe(true);
   expect(coversFile(config, "/wt/tests/test_mod.py")).toBe(false);
   expect(coversFile(config, "/wt/srcx/mod.py")).toBe(false);
-  expect(coversFile({ ...config, files: null }, "/wt/tests/test_mod.py")).toBe(true);
+  expect(coversFile({ ...config, targets: null }, "/wt/tests/test_mod.py")).toBe(true);
+});
+
+test("modules and packages are found in the config's directory, src and mypy_path", async () => {
+  const wt = await makeWorktree({
+    "setup.cfg": "[mypy]\npackages = myapp\nmodules = tools.run\nmypy_path = stubs:lib\n",
+  });
+  const config = findMypyConfig(join(wt, "main.py"), wt);
+  if (!config) throw new Error("no config found");
+  expect(coversFile(config, join(wt, "myapp", "views.py"))).toBe(true);
+  expect(coversFile(config, join(wt, "src", "myapp", "models", "user.py"))).toBe(true);
+  expect(coversFile(config, join(wt, "lib", "myapp", "core.py"))).toBe(true);
+  expect(coversFile(config, join(wt, "tools", "run.py"))).toBe(true);
+  // What mypy never checks keeps basedpyright's type checking.
+  expect(coversFile(config, join(wt, "tests", "test_app.py"))).toBe(false);
+  expect(coversFile(config, join(wt, "tools", "other.py"))).toBe(false);
+  expect(coversFile(config, join(wt, "manage.py"))).toBe(false);
 });
 
 test("isMypyConfigFile", () => {

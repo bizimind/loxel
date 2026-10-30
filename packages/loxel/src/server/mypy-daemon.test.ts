@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseMypyOutput } from "./mypy-daemon";
+import { parseMypyOutput, readsJsonOutput } from "./mypy-daemon";
 
 const ROOT = "/wt/app";
 
@@ -109,4 +109,11 @@ describe("parseMypyOutput", () => {
       "mypy.ini: [mypy]: Unrecognized option: bogus = 1",
     ]);
   });
+});
+
+test("only mypy releases whose JSON output has error ends are read through it", () => {
+  expect(readsJsonOutput("1.19.1")).toBe(false);
+  expect(readsJsonOutput("1.11.0")).toBe(false);
+  expect(readsJsonOutput("1.20.0")).toBe(true);
+  expect(readsJsonOutput("2.4.1")).toBe(true);
 });
