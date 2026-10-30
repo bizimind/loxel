@@ -21,6 +21,7 @@
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.3.5",
+    "posthog-js": "^1.438.18",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "satteri": "0.10.5",

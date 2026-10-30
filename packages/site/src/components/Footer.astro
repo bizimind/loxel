@@ -1,4 +1,6 @@
 ---
+import { trackClick } from "../lib/analytics";
+
 const year = new Date().getFullYear();
 ---
 
@@ -17,6 +19,7 @@ const year = new Date().getFullYear();
         href="https://github.com/bizimind/loxel"
         target="_blank"
         rel="noopener noreferrer"
+        {...trackClick("github_link_clicked", { location: "footer" })}
         class="hover:text-foreground transition-colors"
       >
         GitHub

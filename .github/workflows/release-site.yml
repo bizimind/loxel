@@ -43,12 +43,17 @@ jobs:
 
       - name: Build site
         run: pnpm -C packages/site run build
+        env:
+          # Only production sends analytics; preview builds get no key, so they track nothing.
+          PUBLIC_POSTHOG_KEY: ${{ github.ref_name == 'main' && vars.PUBLIC_POSTHOG_KEY || '' }}
 
       - name: Deploy to Cloudflare Pages
         id: deploy
+        # wrangler bundles Pages Functions from ./functions, so it must run from the site package.
+        working-directory: packages/site
         run: |
           set -o pipefail
-          OUTPUT=$(pnpm dlx wrangler pages deploy packages/site/dist --project-name loxel --branch "$BRANCH" 2>&1 | tee /dev/stderr)
+          OUTPUT=$(pnpm dlx wrangler pages deploy dist --project-name loxel --branch "$BRANCH" 2>&1 | tee /dev/stderr)
           echo "url=$(echo "$OUTPUT" | sed -n 's/.*Deployment alias URL: //p')" >> "$GITHUB_OUTPUT"
         env:
           BRANCH: ${{ github.ref_name }}

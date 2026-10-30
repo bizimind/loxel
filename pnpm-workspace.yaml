@@ -47,6 +47,7 @@ overrides:
   "ws@>=8.0.0 <8.21.0": "8.21.3"
 
 allowBuilds:
+  core-js: false
   electron: true
   electron-winstaller: true
   esbuild: true

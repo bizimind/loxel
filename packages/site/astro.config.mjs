@@ -3,7 +3,7 @@ import mdx from "@astrojs/mdx";
 import react from "@astrojs/react";
 import sitemap from "@astrojs/sitemap";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "astro/config";
+import { defineConfig, envField } from "astro/config";
 
 import { satteriKbd } from "./src/lib/satteri-kbd.ts";
 
@@ -16,4 +16,10 @@ export default defineConfig({
   integrations: [react(), mdx(), sitemap()],
   markdown: { processor: satteri({ hastPlugins: [satteriKbd] }) },
   vite: { plugins: [tailwindcss()] },
+  env: {
+    schema: {
+      // PostHog project key; builds without it send no analytics (see src/lib/analytics.ts).
+      PUBLIC_POSTHOG_KEY: envField.string({ context: "client", access: "public", optional: true }),
+    },
+  },
 });
