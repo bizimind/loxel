@@ -20,6 +20,7 @@ import { restartLanguageServers } from "@/lib/lsp-client";
 import { navigateToNotification } from "@/lib/notification-navigation";
 import { selectPythonInterpreter } from "@/lib/python-interpreter";
 import { getActiveEditorFile, getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
+import { selectRustToolchain } from "@/lib/rust-toolchain";
 import { renameActiveTab } from "@/lib/tab-rename";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
@@ -397,6 +398,14 @@ export function useActionHandler(): (actionId: ActionId) => void {
         const wtPath =
           getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
         if (wtPath) void selectPythonInterpreter(wtPath);
+        break;
+      }
+
+      case "rust.selectToolchain": {
+        // The worktree of the file being edited, which the status bar item shows.
+        const wtPath =
+          getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
+        if (wtPath) void selectRustToolchain(wtPath);
         break;
       }
 

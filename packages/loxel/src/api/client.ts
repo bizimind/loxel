@@ -41,6 +41,11 @@ import type {
   PlacedThread,
   Review,
 } from "./review-model";
+import type {
+  RustToolchainCandidatesResponse,
+  RustToolchainChoiceRequest,
+  RustToolchainResponse,
+} from "./rust-toolchain-model";
 import type { UpdateState } from "./update-model";
 import type {
   NestedRemoval,
@@ -329,6 +334,28 @@ export async function setPythonOverride(
   request: PythonOverrideRequest,
 ): Promise<PythonEnvResponse> {
   return fetchJson<PythonEnvResponse>("/python-env/override", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function getRustToolchain(worktreePath: string): Promise<RustToolchainResponse> {
+  return fetchJson<RustToolchainResponse>(withScope("/rust-toolchain", { wt: worktreePath }));
+}
+
+export async function getRustToolchainCandidates(
+  worktreePath: string,
+): Promise<RustToolchainCandidatesResponse> {
+  return fetchJson<RustToolchainCandidatesResponse>(
+    withScope("/rust-toolchain/candidates", { wt: worktreePath }),
+  );
+}
+
+/** Choose the worktree's toolchain, or return it to automatic detection with null. */
+export async function setRustToolchainChoice(
+  request: RustToolchainChoiceRequest,
+): Promise<RustToolchainResponse> {
+  return fetchJson<RustToolchainResponse>("/rust-toolchain/choice", {
     method: "POST",
     body: JSON.stringify(request),
   });

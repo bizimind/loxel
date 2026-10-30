@@ -54,6 +54,12 @@ import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import type { ActiveWindow, RouteContext } from "./routes";
 import { handleRequest } from "./routes";
+import {
+  refreshAllRustToolchains,
+  refreshRustToolchain,
+  subscribeRustToolchain,
+} from "./rust-toolchain";
+import { onRustChoiceChange } from "./rust-toolchain-store";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
 import { createServerPerfMonitor } from "./server-perf-monitor";
@@ -518,6 +524,9 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     unsubscribePythonEnv: subscribePythonEnv(wtPath, ({ changed }) => {
       if (changed) broadcastToSubscribers(wtPath, { type: "python_env_changed", wtPath });
     }),
+    unsubscribeRustToolchain: subscribeRustToolchain(wtPath, ({ changed }) => {
+      if (changed) broadcastToSubscribers(wtPath, { type: "rust_toolchain_changed", wtPath });
+    }),
   };
 
   wtResources.set(wtPath, resources);
@@ -576,6 +585,7 @@ function teardownWorktreeResources(wtPath: string, resources: WorktreeResources)
   resources.externalFilesService.stop();
   resources.externalFoldersService.stop();
   resources.unsubscribePythonEnv();
+  resources.unsubscribeRustToolchain();
   formatService.invalidateCache(wtPath);
   wtResources.delete(wtPath);
   log.info(`Worktree resources torn down: ${wtPath}`);
@@ -807,6 +817,7 @@ const yamlLspManager = new YamlLspManager({});
 // A chosen interpreter reaches everything that shares the worktree's resolution (language
 // servers, terminals, format on save, the status bar) without a restart.
 onPythonOverrideChange(refreshPythonEnv);
+onRustChoiceChange(refreshRustToolchain);
 const worktreeLspManagerByRoute = new Map(
   worktreeLspManagers.map((manager) => [`/ws/${manager.name}`, manager]),
 );
@@ -1104,6 +1115,7 @@ await initSecretStore();
 // projects load; serving waits for it below. Python environments resolved before a capture (with
 // the inherited PATH, or an older capture's) resolve again when it changed what they read.
 onLoginShellEnvChange((names) => refreshAllPythonEnvs(names));
+onLoginShellEnvChange((names) => refreshAllRustToolchains(names));
 const loginShellEnv = resolveLoginShellEnv();
 
 const repoArg = process.argv[2];

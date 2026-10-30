@@ -324,6 +324,12 @@ export function useWsBridge(): void {
           });
           break;
 
+        case "rust_toolchain_changed":
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.rustToolchain(deriveProjectPath(message.wtPath), message.wtPath),
+          });
+          break;
+
         case "external_files_changed": {
           const projectPath = deriveProjectPath(message.wtPath);
           queryClient.setQueryData(

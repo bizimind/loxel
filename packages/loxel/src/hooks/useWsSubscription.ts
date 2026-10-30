@@ -24,6 +24,7 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
       // `python_env_changed` reaches only subscribers, so a cached interpreter may have gone
       // stale while this window was on another worktree.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pythonEnvAll() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.rustToolchainAll() });
     }
     if (prev) {
       onWorktreeSavesDrained(prev, () => wsClient.unsubscribeWorktree(prev));

@@ -42,6 +42,10 @@ export const queryKeys = {
     ["pythonEnv", projectPath, wtPath] as const,
   /** Prefix key for every worktree's Python interpreter. */
   pythonEnvAll: () => ["pythonEnv"] as const,
+  rustToolchain: (projectPath: string | null, wtPath: string | null) =>
+    ["rustToolchain", projectPath, wtPath] as const,
+  /** Prefix key for every worktree's Rust toolchain. */
+  rustToolchainAll: () => ["rustToolchain"] as const,
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
   openInApps: (path: string) => ["openInApps", path] as const,

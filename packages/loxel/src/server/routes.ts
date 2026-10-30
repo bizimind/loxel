@@ -97,6 +97,8 @@ import {
 import { pythonVersion } from "./python-version";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
+import { handleRustToolchainRequest } from "./rust-toolchain-routes";
+import { rustChoiceStoreKey } from "./rust-toolchain-store";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
 import { listOthers, worktreeTree } from "./server-state";
 import { scanSetupSuggestions } from "./setup-suggestions";
@@ -2474,6 +2476,7 @@ async function removeOneWorktree(
     // Python interpreter detection.
     storeDb.deleteStore(externalFoldersStoreKey(wtPath));
     storeDb.deleteStore(pythonOverrideStoreKey(wtPath));
+    storeDb.deleteStore(rustChoiceStoreKey(wtPath));
     return result;
   } catch (err) {
     try {
@@ -3547,6 +3550,18 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
       const message = err instanceof Error ? err.message : "Unknown error";
       return error(message, 500);
     }
+  }
+
+  if (pathname.startsWith("/api/rust-toolchain")) {
+    const rustResponse = await handleRustToolchainRequest(req, pathname, {
+      worktreeFromQuery: () => resolvePythonWorktree(req, ctx),
+      worktreeFromBody: async (body) => {
+        const resolved = resolveProjectFromBody(body, ctx);
+        if (resolved instanceof Response) return resolved;
+        return validatedWorktreePath(resolved.wtPath, resolved.cwd);
+      },
+    });
+    if (rustResponse) return rustResponse;
   }
 
   // "Open In" routes (macOS only) — Finder reveal and open-with-app

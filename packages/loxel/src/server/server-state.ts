@@ -95,6 +95,8 @@ export interface WorktreeResources {
   subscribers: Set<ServerWebSocket<WsData>>;
   /** Keeps the worktree's Python environment resolution shared and watched (see `python-env.ts`). */
   unsubscribePythonEnv: () => void;
+  /** Keeps the worktree's Rust toolchain resolution shared and watched (see `rust-toolchain.ts`). */
+  unsubscribeRustToolchain: () => void;
 }
 
 /** A worktree's Others section: its open folders, then its open external files. */
