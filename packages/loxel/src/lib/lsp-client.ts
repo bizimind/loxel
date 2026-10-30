@@ -1,4 +1,5 @@
 import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client";
+import type { IDisposable } from "monaco-editor";
 
 import { showToast } from "@/components/ui/toast";
 import { useLspStatusStore } from "@/store/lsp-status";
@@ -59,6 +60,8 @@ export interface LspClientOptions {
   /** The server's name for notices, such as `basedpyright`. */
   name: string;
   languageId: string | readonly string[];
+  /** Runs for each connection's transport; what it returns is disposed with the connection. */
+  onConnected?: (transport: WebSocketTransport) => IDisposable;
 }
 
 /**
@@ -78,7 +81,7 @@ export interface LspClientOptions {
  * documents. A client that stops reconnecting is listed in `useLspStatusStore` for the status bar,
  * with a toast when its server crashed or could not start.
  */
-export function createLspClient({ route, name, languageId }: LspClientOptions) {
+export function createLspClient({ route, name, languageId, onConnected }: LspClientOptions) {
   const markerOwner = route.replace(/^ws\//, "");
 
   async function open(wtPath: string | null, signal: AbortSignal): Promise<LspLink> {
@@ -104,12 +107,14 @@ export function createLspClient({ route, name, languageId }: LspClientOptions) {
       throw err;
     }
     connectedClients.set(client, wtPath);
+    const extension = onConnected?.(transport);
     return {
       closed,
       // The client first, so its `textDocument/didClose` notifications still go out over a live
       // socket.
       dispose() {
         connectedClients.delete(client);
+        extension?.dispose();
         try {
           client.dispose();
         } catch (err) {
