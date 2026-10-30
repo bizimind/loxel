@@ -35,7 +35,7 @@ import { FileOperationsHistory, FileOperationsService } from "./file-operations-
 import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
-import { tomlLspManager, worktreeLspManagers } from "./language-servers";
+import { tomlLspManager, worktreeLspManagers, xmlLspManager } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
@@ -54,6 +54,8 @@ import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
 import type { ActiveWindow, RouteContext } from "./routes";
 import { handleRequest } from "./routes";
+import { SchemaConsent } from "./schema-consent";
+import { SchemaDownloads } from "./schema-downloads";
 import { SchemaService } from "./schema-service";
 import { initSecretStore } from "./secret-store";
 import { createServerPerfMonitor } from "./server-perf-monitor";
@@ -72,7 +74,7 @@ import type {
   WsData,
 } from "./server-state";
 import { LOGIN_SHELL_ENV_WAIT_MS, onLoginShellEnvChange, resolveLoginShellEnv } from "./shell-env";
-import { recoverOrphanLayoutSessions } from "./store-db";
+import { getStore, putStore, recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
 import type { TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
@@ -803,7 +805,33 @@ const agentManager = new AgentManager();
 const notificationStore = new NotificationStore();
 const schemaService = new SchemaService();
 const formatService = new FormatService();
-const yamlLspManager = new YamlLspManager({});
+const SCHEMA_CONSENT_STORE_KEY = "schema-consent";
+const schemaConsent = new SchemaConsent({
+  load: () => getStore(SCHEMA_CONSENT_STORE_KEY),
+  save: (json) => putStore(SCHEMA_CONSENT_STORE_KEY, json),
+  onStateChanged: (data) => {
+    tomlLspManager.setTrustedHosts(schemaConsent.chosenHosts());
+    broadcastAll({ type: "schema_consent_changed", data });
+  },
+  onDecision: (change) => {
+    void (change === "revoked"
+      ? schemaDownloads.onRevoked()
+      : schemaDownloads.onTrusted(change.trusted));
+  },
+});
+const schemaDownloads = new SchemaDownloads({
+  tombiCacheDir: config.tombiSchemaCacheDir,
+  lemminxWorkDir: config.lemminxWorkDir,
+  fetchText: (url) => schemaService.fetchText(url),
+  request: (url) => schemaConsent.request(url),
+  addReferences: (root, references) => schemaConsent.addReferences(root, references),
+  restartServers: () => {
+    for (const manager of [yamlLspManager, tomlLspManager, xmlLspManager]) {
+      manager.restartSessions("schemas changed; reconnect");
+    }
+  },
+});
+const yamlLspManager = new YamlLspManager({}, (url) => schemaDownloads.contentFor(url));
 // A chosen interpreter reaches everything that shares the worktree's resolution (language
 // servers, terminals, format on save, the status bar) without a restart.
 onPythonOverrideChange(refreshPythonEnv);
@@ -1173,6 +1201,8 @@ const routeContext: RouteContext = {
   teardownProject,
   shutdown,
   resolveSchema: (url, baseDir) => schemaService.resolve(url, baseDir),
+  schemaConsent,
+  ensureSchemas: (urls) => schemaDownloads.ensure(urls),
   updateYamlSchemas: (schemaMap) => yamlLspManager.updateSchemas(schemaMap),
   updateTomlSchemas: (schemaMap) => tomlLspManager.updateSchemas(schemaMap),
   formatContent: (content, filePath, wtPath, settings) =>
@@ -1277,6 +1307,7 @@ const server = Bun.serve<WsData>({
       }
       clients.set(ws, { terminals: new Set(), subscribedWorktrees: new Set() });
       sendTo(ws, { type: "notifications_sync", data: notificationStore.getAll() });
+      sendTo(ws, { type: "schema_consent_changed", data: schemaConsent.state() });
       log.debug(`Client connected (${clients.size} total)`);
     },
 

@@ -28,6 +28,10 @@ export const config = {
   isDev,
   stateDir,
   commentsDir: join(stateDir, "comments"),
+  /** Tombi's `TOMBI_CACHE_HOME`; see `SchemaDownloads`. */
+  tombiSchemaCacheDir: join(stateDir, "schema-cache", "tombi"),
+  /** LemMinX's `xml.server.workDir`; see `SchemaDownloads`. */
+  lemminxWorkDir: join(stateDir, "schema-cache", "lemminx"),
   updatesDir: join(stateDir, "updates"),
   port,
 } as const;

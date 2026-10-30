@@ -7,6 +7,7 @@ import type { LogEntry } from "./log-entry-model";
 import type { ServerNotification } from "./notification-model";
 import type { PanelOpenOptions } from "./panel-placement-model";
 import type { DirEntry } from "./project-files-model";
+import type { SchemaConsentState } from "./schema-consent-model";
 import type { UpdateState } from "./update-model";
 
 export type AgentStatus = "starting" | "ready" | "running" | "waiting" | "exited";
@@ -114,7 +115,8 @@ export type WsMessage =
   | { type: "notification_panel_dismissed"; panelId: string }
   | { type: "notifications_cleared" }
   | { type: "notifications_sync"; data: readonly ServerNotification[] }
-  | { type: "store_updated"; key: string; state: Record<string, unknown>; nonce?: string };
+  | { type: "store_updated"; key: string; state: Record<string, unknown>; nonce?: string }
+  | { type: "schema_consent_changed"; data: SchemaConsentState };
 
 /** Terminal notification sequences Loxel understands; see docs/TERMINALS.md#notifications. */
 export const NOTIFICATION_SEQUENCES = ["osc9", "osc777", "osc99"] as const;

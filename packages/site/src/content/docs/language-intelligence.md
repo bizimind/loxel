@@ -91,6 +91,20 @@ YAML starts with Loxel and stays running. The others start the first time you op
 
 ---
 
+## Schemas a file names
+
+A file can name its own schema: `$schema` in a JSON file, a `# yaml-language-server: $schema=` comment in YAML, a `#:schema` comment in TOML, or a schema or DTD in XML. Before Loxel downloads a schema at an address a file names, it shows a notification with the full address, so opening a project you just cloned does not contact hosts that project chooses. Files work normally until you answer, without checks and completions from that schema.
+
+- **Allow** trusts this address. Loxel downloads the schema now and whenever it needs it again, along with files it references on the same host.
+- **Don't fetch** skips this address, and Loxel does not ask about it again.
+- **Never ask** stops downloading schemas named by files, including ones you trusted, with no further prompts.
+
+Your choices last across restarts and apply to every project. To review or change them, open **Settings > Security**: remove an address to be asked about it again, or use the **Never fetch schemas named by files** switch.
+
+Schemas in [**Settings > Schemas**](/docs/reference-env-files-cli-settings), including the built-in ones, are your own choice and do not ask. Loxel downloads one the first time you open a file that matches it. When Loxel does download a schema, the request goes from your machine to that address, which sees your IP address like any web request.
+
+---
+
 ## See also
 
 - [Editor](/docs/editor) — the code editor, where diagnostics appear inline, and format on save

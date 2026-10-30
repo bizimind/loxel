@@ -91,6 +91,8 @@ describe("project conversion preflight", () => {
       teardownProject: onTeardown,
       shutdown: () => {},
       resolveSchema: async () => ({}),
+      schemaConsent: {} as never,
+      ensureSchemas: async () => {},
       updateYamlSchemas: () => {},
       updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),

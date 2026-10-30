@@ -97,6 +97,7 @@ import {
 import { pythonVersion } from "./python-version";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
+import type { SchemaConsent } from "./schema-consent";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
 import { listOthers, worktreeTree } from "./server-state";
 import { scanSetupSuggestions } from "./setup-suggestions";
@@ -172,6 +173,10 @@ export interface RouteContext {
   shutdown: (exitCode?: number) => void;
   /** Resolve a schema URL or file path (with caching). */
   resolveSchema: (urlOrPath: string, baseDir?: string) => Promise<unknown>;
+  /** The user's decisions on schema URLs named by project files. */
+  schemaConsent: SchemaConsent;
+  /** Download what open files name or match, as far as they may be fetched. */
+  ensureSchemas: (urls: readonly string[]) => Promise<void>;
   /** Update YAML LSP schema mappings (schema URL → globs) on all active sessions. */
   updateYamlSchemas: (schemaMap: Record<string, string[]>) => void;
   /** Update TOML LSP schema mappings (schema URL → globs) on all active sessions. */
@@ -2608,6 +2613,10 @@ function languageServerSchemaUrl(url: string): string {
 }
 
 /** Add `glob` to the globs mapped to `url`. */
+function isRemoteSchemaUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
 function addSchemaGlob(map: Record<string, string[]>, url: string, glob: string): void {
   const existing = map[url];
   if (existing) existing.push(glob);
@@ -2621,20 +2630,51 @@ async function handleSchemaResolve(req: Request, ctx: RouteContext): Promise<Res
   if (!schemaUrl) return error("Missing url parameter");
 
   const baseDir = url.searchParams.get("baseDir") ?? undefined;
+  if (isRemoteSchemaUrl(schemaUrl) && ctx.schemaConsent.request(schemaUrl) !== "allowed") {
+    return json(null);
+  }
   const schema = await ctx.resolveSchema(schemaUrl, baseDir);
   if (schema === null) return error("Failed to resolve schema", 404);
   return json(schema);
 }
 
-// POST /api/schemas/sync — resolve configured schemas, update the YAML and TOML language servers
+// POST /api/schemas/ensure — download schemas that open files name or match, when allowed
+async function handleSchemaEnsure(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  if (!Array.isArray(body.urls)) return error("urls must be an array");
+  const urls = body.urls.filter((url): url is string => typeof url === "string");
+  void ctx.ensureSchemas(urls.filter(isRemoteSchemaUrl));
+  return json({ ok: true });
+}
+
+// POST /api/schemas/consent — record, change or forget the decision on one schema URL
+async function handleSchemaConsent(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const { url, decision } = body;
+  if (typeof url !== "string") return error("url must be a string");
+  if (decision !== "trust" && decision !== "deny" && decision !== null) {
+    return error('decision must be "trust", "deny" or null');
+  }
+  ctx.schemaConsent.decide(url, decision);
+  return json({ ok: true });
+}
+
+// POST /api/schemas/never-fetch — the "Never ask" switch
+async function handleSchemaNeverFetch(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  if (typeof body.neverFetch !== "boolean") return error("neverFetch must be a boolean");
+  ctx.schemaConsent.setNeverFetch(body.neverFetch);
+  return json({ ok: true });
+}
+
+// POST /api/schemas/sync — take the configured schemas, update the YAML and TOML language servers
 async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
   const schemas = body.schemas;
   if (!Array.isArray(schemas)) return error("schemas must be an array");
 
-  // Monaco's JSON worker gets resolved schemas; the language servers get URLs and fetch them
-  // (and the `$ref`s inside them, often relative to the schema's URL) themselves.
-  const jsonToResolve: { glob: string; url: string }[] = [];
+  // Nothing is downloaded here: a schema is fetched when an open file first matches its glob.
+  const configuredUrls: string[] = [];
   const yamlMap: Record<string, string[]> = {};
   const tomlMap: Record<string, string[]> = {};
 
@@ -2644,22 +2684,15 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
     if (typeof glob !== "string" || typeof url !== "string") continue;
 
     const languages = classifySchemaGlob(glob);
-    if (languages.json) jsonToResolve.push({ glob, url });
+    configuredUrls.push(url);
     if (languages.yaml) addSchemaGlob(yamlMap, languageServerSchemaUrl(url), glob);
     if (languages.toml) addSchemaGlob(tomlMap, languageServerSchemaUrl(url), glob);
   }
 
-  // Resolve JSON schemas in parallel
-  const jsonResults = await Promise.all(
-    jsonToResolve.map(async ({ glob, url }) => {
-      const schema = await ctx.resolveSchema(url);
-      return { glob, url, schema };
-    }),
-  );
-
+  ctx.schemaConsent.setConfigured(configuredUrls);
   ctx.updateYamlSchemas(yamlMap);
   ctx.updateTomlSchemas(tomlMap);
-  return json({ json: jsonResults, yaml: { synced: true }, toml: { synced: true } });
+  return json({ synced: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -3376,6 +3409,9 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detached-file-rename": handleDetachedFileRename,
     "/api/detached-file-copy-to-project": handleDetachedFileCopyToProject,
     "/api/schemas/sync": handleSchemaSync,
+    "/api/schemas/ensure": handleSchemaEnsure,
+    "/api/schemas/consent": handleSchemaConsent,
+    "/api/schemas/never-fetch": handleSchemaNeverFetch,
     "/api/update/check": handleUpdateCheck,
     "/api/update/download": handleUpdateDownload,
     "/api/update/install": handleUpdateInstall,

@@ -75,6 +75,8 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       teardownProject: () => {},
       shutdown: () => {},
       resolveSchema: async () => ({}),
+      schemaConsent: {} as never,
+      ensureSchemas: async () => {},
       updateYamlSchemas: () => {},
       updateTomlSchemas: () => {},
       formatContent: async () => ({ content: null }),

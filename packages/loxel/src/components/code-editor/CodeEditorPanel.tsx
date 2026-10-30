@@ -28,11 +28,13 @@ import { fileSchemeLanguages } from "@/lib/lsp-clients";
 import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
 import { resolveLanguage } from "@/lib/resolve-language";
+import { requestSchemasForOpenFiles } from "@/lib/schema-sync";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
 import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
 import { type EditorIndentation, useEditorIndentationStore } from "@/store/editor-indentation";
 import { useEditorStateStore } from "@/store/editor-state";
+import { useSchemaConsentStore } from "@/store/schema-consent";
 import {
   type IndentationLayer,
   resolveIndentation,
@@ -497,8 +499,17 @@ export function CodeEditorPanel({
           : new URL(schemaUrl, `file://${filePath}`).href;
       api.resolveSchema(schemaUrl, baseDir).then((schema) => {
         if (schema) setDollarSchema(fileUriStr, resolvedUrl, schema);
+        else removeDollarSchema(fileUriStr);
       });
     }
+
+    // A decision on a schema URL can change what this file's `$schema` resolves to.
+    const unsubscribeSchemaConsent = isJsonFile
+      ? useSchemaConsentStore.subscribe(() => {
+          lastDollarSchema = null;
+          detectAndApplyDollarSchema();
+        })
+      : undefined;
 
     if (isJsonFile) {
       // Initial detection
@@ -507,6 +518,16 @@ export function CodeEditorPanel({
       editor.onDidChangeModelContent(() => {
         clearTimeout(dollarSchemaTimer);
         dollarSchemaTimer = setTimeout(detectAndApplyDollarSchema, 300);
+      });
+    }
+
+    // Configured schemas this file matches, and remote schemas a TOML or XML file names.
+    requestSchemasForOpenFiles();
+    let schemaRequestTimer: ReturnType<typeof setTimeout> | undefined;
+    if (language === "toml" || language === "xml") {
+      editor.onDidChangeModelContent(() => {
+        clearTimeout(schemaRequestTimer);
+        schemaRequestTimer = setTimeout(requestSchemasForOpenFiles, 300);
       });
     }
 
@@ -529,6 +550,8 @@ export function CodeEditorPanel({
     return () => {
       if (navRafId !== undefined) cancelAnimationFrame(navRafId);
       clearTimeout(dollarSchemaTimer);
+      clearTimeout(schemaRequestTimer);
+      unsubscribeSchemaConsent?.();
       clearTimeout(inspectTimer);
       cursorDisposable.dispose();
       if (inspectorWidgetRef.current) {

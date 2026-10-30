@@ -3,7 +3,9 @@ import path from "node:path";
 
 import {
   WorktreeLspManager,
+  type SpawnOptions,
   type SuppressibleFeature,
+  type WtLspContext,
   type WtLspSession,
 } from "./stdio-lsp-manager";
 
@@ -29,8 +31,19 @@ export class TomlLspManager extends WorktreeLspManager {
   /** Sessions whose client has sent `initialized`, which may take configuration. */
   private readonly initializedSessions = new WeakSet<WtLspSession>();
 
-  constructor(private schemaMap: Record<string, string[]>) {
+  /** Hosts of schemas the user chose; Tombi refuses a non-public host unless it is listed. */
+  private trustedHosts: readonly string[] = [];
+
+  constructor(
+    private schemaMap: Record<string, string[]>,
+    private readonly cacheDir: string,
+  ) {
     super("toml-lsp");
+  }
+
+  /** The hosts a session started from now on trusts. Offline, this only lets it read its cache. */
+  setTrustedHosts(hosts: readonly string[]): void {
+    this.trustedHosts = hosts;
   }
 
   /** Replace the schema mappings (schema URL → Loxel globs) and push them to every session. */
@@ -48,8 +61,19 @@ export class TomlLspManager extends WorktreeLspManager {
     return this.resolveBundledBinary(TOMBI, path.resolve(import.meta.dir, "../../build", TOMBI));
   }
 
+  // Offline, Tombi reads schemas only from its cache, which `SchemaDownloads` fills.
   protected override spawnArgs(): readonly string[] {
-    return ["lsp"];
+    return ["lsp", "--offline"];
+  }
+
+  protected override spawnOptions(context: WtLspContext): SpawnOptions {
+    return {
+      ...super.spawnOptions(context),
+      env: {
+        TOMBI_CACHE_HOME: this.cacheDir,
+        TOMBI_SCHEMA_TRUSTED_HOSTS: this.trustedHosts.join(","),
+      },
+    };
   }
 
   protected override onClientInitialized(session: WtLspSession): void {
@@ -96,8 +120,7 @@ function canonicalPath(dir: string): string {
 /**
  * Tombi's editor configuration for Loxel's schema mappings in the worktree at `root`. The
  * catalogs' associations are off, so the mappings in Settings > Schemas are the only automatic
- * ones (disabling a built-in removes it; Tombi may still fetch SchemaStore's catalog once while it
- * starts, before this configuration arrives), and `#:schema` directives in a file still win.
+ * ones (disabling a built-in removes it), and `#:schema` directives in a file still win.
  * Strict mode is off, so a schema validates TOML by the JSON Schema rules it validates JSON and
  * YAML with (Tombi's strict mode treats a missing `additionalProperties` as `false`).
  */

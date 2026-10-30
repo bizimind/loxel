@@ -6,13 +6,15 @@ import { logger } from "./logger";
 const log = logger.child("schema-service");
 
 const REMOTE_TTL_MS = 60 * 60 * 1000; // 1 hour
-const MAX_REMOTE_BYTES = 5 * 1024 * 1024; // 5 MB
+/** What a language server may be handed. */
+const MAX_REMOTE_BYTES = 64 * 1024 * 1024; // 64 MB
+/** What goes inline to Monaco's JSON worker. */
+const MAX_INLINE_BYTES = 5 * 1024 * 1024; // 5 MB
 
 interface CacheEntry {
   schema: unknown;
-  fetchedAt: number;
-  /** For local files — revalidate when mtime changes. */
-  mtimeMs?: number;
+  /** Revalidate when mtime changes. */
+  mtimeMs: number;
 }
 
 /**
@@ -23,6 +25,7 @@ interface CacheEntry {
  */
 export class SchemaService {
   private cache = new Map<string, CacheEntry>();
+  private remoteCache = new Map<string, { text: string; fetchedAt: number }>();
 
   /** Resolve a schema URL or file path. Returns parsed JSON or `null` on failure. */
   async resolve(urlOrPath: string, baseDir?: string): Promise<unknown> {
@@ -41,27 +44,51 @@ export class SchemaService {
     return this.resolveLocal(absPath);
   }
 
+  /** Download a remote schema's text, whatever its format, cached for an hour. */
+  async fetchText(url: string): Promise<string | null> {
+    const cached = this.remoteCache.get(url);
+    if (cached && Date.now() - cached.fetchedAt < REMOTE_TTL_MS) return cached.text;
+
+    const text = await this.download(url);
+    if (text === null) return null;
+    this.remoteCache.set(url, { text, fetchedAt: Date.now() });
+    log.debug("Cached remote schema", { url });
+    return text;
+  }
+
   /** Invalidate a specific cache entry. */
   invalidate(key: string): void {
     this.cache.delete(key);
+    this.remoteCache.delete(key);
   }
 
   /** Clear all cached schemas. */
   clear(): void {
     this.cache.clear();
+    this.remoteCache.clear();
   }
 
   // ---------------------------------------------------------------------------
 
   private async resolveRemote(url: string): Promise<unknown> {
-    const cached = this.cache.get(url);
-    if (cached && Date.now() - cached.fetchedAt < REMOTE_TTL_MS) {
-      return cached.schema;
+    const text = await this.fetchText(url);
+    if (text === null) return null;
+    if (text.length > MAX_INLINE_BYTES) {
+      log.warn("Schema body too large, skipping", { url, bytes: text.length });
+      return null;
     }
+    try {
+      return JSON.parse(text);
+    } catch (err) {
+      log.warn("Remote schema is not JSON", { url, error: err instanceof Error ? err : undefined });
+      return null;
+    }
+  }
 
+  private async download(url: string): Promise<string | null> {
     try {
       const res = await fetch(url, {
-        headers: { Accept: "application/json, application/schema+json" },
+        headers: { Accept: "application/json, application/schema+json, */*;q=0.1" },
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) {
@@ -80,11 +107,7 @@ export class SchemaService {
         log.warn("Schema body too large, skipping", { url, bytes: text.length });
         return null;
       }
-
-      const schema: unknown = JSON.parse(text);
-      this.cache.set(url, { schema, fetchedAt: Date.now() });
-      log.debug("Cached remote schema", { url });
-      return schema;
+      return text;
     } catch (err) {
       log.warn("Failed to resolve remote schema", {
         url,
@@ -108,7 +131,7 @@ export class SchemaService {
       const file = Bun.file(realPath);
       const text = await file.text();
       const schema: unknown = JSON.parse(text);
-      this.cache.set(realPath, { schema, fetchedAt: Date.now(), mtimeMs });
+      this.cache.set(realPath, { schema, mtimeMs });
       log.debug("Cached local schema", { path: realPath });
       return schema;
     } catch (err) {

@@ -18,6 +18,7 @@ import { FileSearchModal } from "./components/file-search/FileSearchModal";
 import { StatusBar } from "./components/panels/StatusBar";
 import { TopBar } from "./components/panels/TopBar";
 import { SearchModal } from "./components/search/SearchModal";
+import { SchemaConsentPrompt } from "./components/settings/SchemaConsentPrompt";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { SymbolSearchModal } from "./components/symbol-search/SymbolSearchModal";
@@ -112,6 +113,7 @@ export default function App() {
       <CommandPaletteModal />
       <SymbolSearchModal />
       <ToastContainer />
+      <SchemaConsentPrompt />
       <ConfirmDialogHost />
     </div>
   );
