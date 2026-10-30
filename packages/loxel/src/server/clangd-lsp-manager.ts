@@ -43,6 +43,8 @@ const REMOVED_COMPILE_FLAGS = [
   "-Xpreprocessor",
   "-Wp,*",
   "/clang:*",
+  // Not an output flag: clangd never finishes a file compiled with it, and it ignores SIGTERM then.
+  "-traditional-cpp",
 ];
 
 /**
@@ -140,6 +142,13 @@ export function clangdMajorVersion(versionOutput: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** What to run for a missing clangd, short enough for a WebSocket close frame. */
+function installHint(platform: NodeJS.Platform): string {
+  return platform === "darwin"
+    ? "clangd not found: run xcode-select --install in a terminal"
+    : "clangd not found: install it with your package manager, e.g. sudo apt install clangd";
+}
+
 export type ClangdCheck = "ok" | "not-installed" | "too-old";
 
 /**
@@ -172,6 +181,9 @@ export class ClangdLspManager extends WorktreeLspManager {
     "textDocument/rangeFormatting",
   ];
 
+  // clangd writes identifiers into snippets as they are, so a `$` in one would read as a variable.
+  protected override readonly disableCompletionSnippets = true;
+
   /** Why clangd won't start for a worktree, per worktree since each starts on its own. */
   private readonly failureReasons = new Map<string, string>();
 
@@ -189,13 +201,19 @@ export class ClangdLspManager extends WorktreeLspManager {
       return null;
     }
     const binary = this.resolveBundledBinary("clangd");
-    if (!binary) return null;
+    if (!binary) {
+      this.failureReasons.set(context.wtPath, installHint(this.platform));
+      return null;
+    }
     const check = await checkClangd(binary, this.platform);
     if (check === "ok") return binary;
     this.log.warn(`Not starting ${binary}`, { check });
-    if (check === "too-old") {
-      this.failureReasons.set(context.wtPath, `clangd ${MIN_CLANGD_MAJOR} or newer is required`);
-    }
+    this.failureReasons.set(
+      context.wtPath,
+      check === "too-old"
+        ? `clangd ${MIN_CLANGD_MAJOR} or newer is required`
+        : installHint(this.platform),
+    );
     return null;
   }
 

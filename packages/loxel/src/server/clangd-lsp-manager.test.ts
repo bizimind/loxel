@@ -232,6 +232,26 @@ describe("ClangdLspManager", () => {
     });
   });
 
+  test.skipIf(process.platform === "win32")("says what to run for a missing clangd", async () => {
+    const { PATH } = process.env;
+    process.env.PATH = await makeDir();
+    try {
+      for (const [platform, command] of [
+        ["darwin", "xcode-select --install"],
+        ["linux", "apt install clangd"],
+      ] as const) {
+        manager = new ClangdLspManager(platform, await makeDir());
+        const client = new FakeClient(manager);
+        manager.createSession(client.ws, await makeDir());
+        const { code, reason } = await client.closed;
+        expect(code).toBe(LSP_START_FAILED_CLOSE_CODE);
+        expect(reason).toContain(command);
+      }
+    } finally {
+      process.env.PATH = PATH;
+    }
+  });
+
   test.skipIf(process.platform === "win32")(
     "names the version a clangd falls short of",
     async () => {
@@ -382,6 +402,16 @@ describe.skipIf(!CLANGD || process.platform === "win32")("ClangdLspManager with 
         ]);
         await runClangd(root, named);
         expect(await exists(written)).toBe(false);
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      "that clangd cannot finish a file with",
+      async () => {
+        const root = await makeDir();
+        const file = await writeProject(root, "/usr/bin/c++", ["-traditional-cpp"]);
+        await runClangd(root, file);
       },
       TEST_TIMEOUT_MS,
     );
