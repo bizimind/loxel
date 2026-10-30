@@ -432,7 +432,12 @@ function createFilesService(
       onFileMoved: (oldPath, newPath, source) =>
         broadcastFileMoved(wtPath, oldPath, newPath, source),
       onPathsChanged: (paths) => notifyLspWatchedFiles(wtPath, paths),
-      onIgnoredPathChanged: (relPath) => nodeModulesChanges.add(relPath),
+      onIgnoredPathChanged: (relPath) => {
+        nodeModulesChanges.add(relPath);
+        for (const manager of worktreeLspManagers) {
+          manager.notifyIgnoredPathChanged?.(wtPath, relPath);
+        }
+      },
     },
   );
   return service;

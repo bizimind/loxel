@@ -3,7 +3,8 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { isRecord } from "@/lib/is-record";
 
-import { envBinDir, getPythonEnvNow, isEnvShippedByRepo, VENV_DIR_NAMES } from "./python-env";
+import { envBinDir, getPythonEnvNow, VENV_DIR_NAMES } from "./python-env";
+import { isEnvShippedByRepo } from "./shipped-by-repo";
 import { readToml, recordAt } from "./toml-file";
 
 export const PYTHON_FORMAT_EXTENSIONS: readonly string[] = ["py", "pyi"];
