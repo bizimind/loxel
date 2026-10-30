@@ -305,6 +305,12 @@ describe("isDotnetSafeToRun", () => {
     expect(await isDotnetSafeToRun(wt, { env, cwd: join(wt, "vendor") })).toBe(false);
   });
 
+  test("reads a large repetitive global.json in one pass", async () => {
+    const { wt } = await makeRoot();
+    await write(join(wt, "global.json"), "/*".repeat(512 * 1024 - 8));
+    expect(await isDotnetSafeToRun(wt, { env: { PATH: "" } })).toBe(false);
+  });
+
   test("not when a file can be read differently from the host", async () => {
     const { wt } = await makeRoot();
     for (const content of [
@@ -744,6 +750,23 @@ describe("csharpRestoreState", () => {
         restored: false,
         assetsPath: null,
       });
+    }
+  });
+
+  test("reads large repetitive files in one pass", async () => {
+    const { wt } = await makeRoot();
+    const project = await ignoredProject(wt);
+    const size = 1024 * 1024 - 64;
+    let nested = "<!--X-->";
+    while (nested.length < size) nested = `<!-${nested}--->`;
+    for (const body of [
+      nested,
+      "<PropertyGroup ".repeat(size / 15),
+      "<Choose >".repeat(size / 9),
+      "<a<".repeat(size / 3),
+    ]) {
+      await write(join(wt, "Directory.Build.props"), `<Project>${body}</Project>`);
+      expect((await csharpRestoreState(wt, project)).restored).toBe(false);
     }
   });
 

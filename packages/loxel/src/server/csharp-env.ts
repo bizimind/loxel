@@ -227,8 +227,6 @@ async function readGlobalJson(
   };
 }
 
-/** Strings and comments, matched together so a `//` inside a string is left alone. */
-const JSON_STRING_OR_COMMENT = /"(?:[^"\\]|\\.)*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g;
 const JSON_STRING_MAYBE_KEY = /("(?:[^"\\]|\\.)*")(\s*:)?/g;
 /** The keys this module reads; for a repeated key the host takes the first, `JSON.parse` the last. */
 const SINGLE_KEYS = new Set(["sdk", "version", "rollForward", "paths"]);
@@ -240,9 +238,9 @@ const SINGLE_KEYS = new Set(["sdk", "version", "rollForward", "paths"]);
  */
 function parseGlobalJson(bytes: Uint8Array): unknown {
   const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  const stripped = text.replace(JSON_STRING_OR_COMMENT, (match) =>
-    match.startsWith('"') ? match : " ",
-  );
+  const stripped = stripJsonComments(text);
+  // First, so the scan for keys below only sees balanced strings.
+  const parsed: unknown = JSON.parse(stripped);
   const seen = new Set<string>();
   for (const [, token, colon] of stripped.matchAll(JSON_STRING_MAYBE_KEY)) {
     if (!colon) continue;
@@ -251,7 +249,37 @@ function parseGlobalJson(bytes: Uint8Array): unknown {
     if (seen.has(key)) throw new Error(`Repeated key in global.json: ${key}`);
     seen.add(key);
   }
-  return JSON.parse(stripped);
+  return parsed;
+}
+
+/** One pass over the text, so the time taken stays linear in its size. Throws on an open comment. */
+function stripJsonComments(text: string): string {
+  const kept: string[] = [];
+  let keptFrom = 0;
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '"') {
+      i = endOfJsonString(text, i);
+    } else if (text.startsWith("//", i) || text.startsWith("/*", i)) {
+      const isLine = text[i + 1] === "/";
+      const end = text.indexOf(isLine ? "\n" : "*/", i + 2);
+      if (end === -1 && !isLine) throw new Error("Unterminated comment in global.json");
+      kept.push(text.slice(keptFrom, i), " ");
+      if (end === -1) i = text.length;
+      else i = isLine ? end : end + 2;
+      keptFrom = i;
+    } else {
+      i++;
+    }
+  }
+  kept.push(text.slice(keptFrom));
+  return kept.join("");
+}
+
+function endOfJsonString(text: string, start: number): number {
+  let i = start + 1;
+  while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
+  return i + 1;
 }
 
 async function inspectSdkPath(
@@ -536,26 +564,6 @@ const UNFOLLOWED_LAYOUT_PROPS = new Set([
 ]);
 const USE_ARTIFACTS_PROP = "useartifactsoutput";
 const ARTIFACTS_PATH_PROP = "artifactspath";
-const LAYOUT_PROP_MENTION = new RegExp(
-  `<(${[...UNFOLLOWED_LAYOUT_PROPS, USE_ARTIFACTS_PROP, ARTIFACTS_PATH_PROP].join("|")})\\b`,
-  "gi",
-);
-/** A tag's attributes, quote-aware since an attribute value may contain `>`. */
-const XML_ATTRIBUTES = `(?:[^>"']|"[^"]*"|'[^']*')*`;
-const SELF_CLOSED_GROUP = new RegExp(`<PropertyGroup\\b${XML_ATTRIBUTES}/>`, "gi");
-const PROPERTY_GROUP = new RegExp(
-  `<PropertyGroup\\b(${XML_ATTRIBUTES})>([\\s\\S]*?)</PropertyGroup\\s*>`,
-  "gi",
-);
-const PROPERTY_ELEMENT = new RegExp(`<([\\w.-]+)\\b(${XML_ATTRIBUTES})>([^<]*)</\\1\\s*>`, "g");
-const IMPORT_ELEMENT = new RegExp(`<Import\\b${XML_ATTRIBUTES}>`, "gi");
-/** `Sdk` imports, and imports under a condition or a `Choose`, which this module does not follow. */
-const UNFOLLOWED_IMPORTS = new RegExp(
-  `<Project\\b${XML_ATTRIBUTES}\\bSdk\\s*=|<Sdk\\b|<ImportGroup\\b${XML_ATTRIBUTES}\\bCondition\\s*=|<Choose\\b[\\s\\S]*<Import\\b`,
-  "i",
-);
-/** Constructs whose properties are not plain evaluation-time settings. */
-const UNSCANNED_CONSTRUCT = /<(Choose|Target)\b|<!\[CDATA\[/i;
 const THIS_FILE_DIR = /\$\(MSBuildThisFileDirectory\)/gi;
 const FILE_ABOVE_IMPORT =
   /^\$\(\[MSBuild\]::GetPathOfFileAbove\(\s*'([^'$]+)'\s*,\s*'\$\(MSBuildThisFileDirectory\)([^'$]*)'\s*\)\)$/i;
@@ -653,7 +661,7 @@ function expandArtifactsPath(setting: PropSetting, projectDir: string): string |
     .trim()
     .replace(THIS_FILE_DIR, `${path.dirname(setting.file)}/`)
     .replaceAll("\\", "/");
-  if (!expanded || expanded.includes("$(")) return null;
+  if (!expanded || expanded.includes("$(") || expanded.includes("&")) return null;
   return path.resolve(projectDir, expanded);
 }
 
@@ -672,14 +680,16 @@ async function readPropsFile(
   visited.add(file);
   inputs.push(file);
   const text = stripXmlComments(await readSmallText(file));
-  if (UNFOLLOWED_IMPORTS.test(text)) return null;
+  const tags = scanXmlTags(text);
+  if (!tags || hasUnfollowedImports(tags)) return null;
 
   const settings = scanPropertyGroups(text, file);
   if (!settings) return null;
-  for (const [element] of text.matchAll(IMPORT_ELEMENT)) {
-    const project = xmlAttribute(element, "Project");
-    const conditional = xmlAttribute(element, "Condition") !== null;
-    if (xmlAttribute(element, "Sdk") !== null || !project) return null;
+  for (const { name, closing, attributes } of tags) {
+    if (name !== "import" || closing) continue;
+    const project = xmlAttribute(attributes, "Project");
+    const conditional = xmlAttribute(attributes, "Condition") !== null;
+    if (xmlAttribute(attributes, "Sdk") !== null || !project) return null;
     const imported = resolveImport(project, file);
     if (imported === null) return null;
     // `GetPathOfFileAbove` found nothing, or a conditional import of a file that is not there.
@@ -718,42 +728,121 @@ function findFileAbove(name: string, startDir: string): string | null {
   }
 }
 
+/** `Sdk` imports, and imports under a condition or a `Choose`, which this module does not follow. */
+function hasUnfollowedImports(tags: XmlTag[]): boolean {
+  let inChoose = false;
+  for (const { name, closing, attributes } of tags) {
+    if (closing) continue;
+    if (name === "choose") inChoose = true;
+    if (name === "sdk" || (name === "import" && inChoose)) return true;
+    if (name === "project" && xmlAttribute(attributes, "Sdk") !== null) return true;
+    if (name === "importgroup" && xmlAttribute(attributes, "Condition") !== null) return true;
+  }
+  return false;
+}
+
 /**
  * The layout properties set in a file, or null when it mentions one in a way this scan does not
  * read (a `Choose`, a `Target`, CDATA, a nested or self-closed element).
  */
 function scanPropertyGroups(source: string, file: string): PropSetting[] | null {
   const text = stripXmlComments(source);
-  const mentions = text.match(LAYOUT_PROP_MENTION)?.length ?? 0;
+  const tags = scanXmlTags(text);
+  if (!tags) return null;
+  const mentions = tags.filter((tag) => !tag.closing && isLayoutProp(tag.name)).length;
   if (mentions === 0) return [];
-  if (UNSCANNED_CONSTRUCT.test(text)) return null;
+  if (text.includes("<![CDATA[") || text.includes("<!--")) return null;
+  if (tags.some((tag) => tag.name === "choose" || tag.name === "target")) return null;
+
   const settings: PropSetting[] = [];
-  for (const [, groupAttributes, body] of text
-    .replace(SELF_CLOSED_GROUP, "")
-    .matchAll(PROPERTY_GROUP)) {
-    const groupConditional = /\bCondition\s*=/i.test(groupAttributes!);
-    for (const [, name, attributes, value] of body!.matchAll(PROPERTY_ELEMENT)) {
-      const lowered = name!.toLowerCase();
-      if (!isLayoutProp(lowered)) continue;
-      settings.push({
-        name: lowered,
-        value: value!.trim(),
-        conditional: groupConditional || /\bCondition\s*=/i.test(attributes!),
-        file,
-      });
+  let group: XmlTag | null = null;
+  for (const [i, tag] of tags.entries()) {
+    if (tag.name === "propertygroup") {
+      if (!tag.selfClosed) group = tag.closing ? null : tag;
+      continue;
     }
+    const next = tags[i + 1];
+    if (!group || tag.closing || tag.selfClosed || !isLayoutProp(tag.name)) continue;
+    if (!next?.closing || next.name !== tag.name) continue;
+    settings.push({
+      name: tag.name,
+      value: text.slice(tag.end, next.start).trim(),
+      conditional: hasCondition(group) || hasCondition(tag),
+      file,
+    });
   }
   return settings.length === mentions ? settings : null;
 }
 
-/** Until nothing changes, since removing one comment can complete the opening of another. */
-function stripXmlComments(text: string): string {
-  let stripped = text;
-  for (;;) {
-    const next = stripped.replace(/<!--[\s\S]*?-->/g, "");
-    if (next === stripped) return stripped;
-    stripped = next;
+function hasCondition(tag: XmlTag): boolean {
+  return /\bCondition\s*=/i.test(tag.attributes);
+}
+
+/** One XML tag, with the offsets of its `<` and of what follows its `>`. */
+interface XmlTag {
+  /** Lower-cased, since MSBuild property names are case-insensitive. */
+  name: string;
+  closing: boolean;
+  selfClosed: boolean;
+  attributes: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * The tags of a file, quote-aware since an attribute value may contain `>`, or null when a tag does
+ * not end. One pass over the text, so the time taken stays linear in its size.
+ */
+function scanXmlTags(text: string): XmlTag[] | null {
+  const tags: XmlTag[] = [];
+  let at = text.indexOf("<");
+  while (at !== -1) {
+    const closing = text[at + 1] === "/";
+    const nameStart = at + (closing ? 2 : 1);
+    let i = nameStart;
+    while (i < text.length && /[\w.-]/.test(text[i]!)) i++;
+    if (i === nameStart) {
+      // A declaration, a processing instruction or a stray `<`.
+      at = text.indexOf("<", at + 1);
+      continue;
+    }
+    const attributesStart = i;
+    let quote: string | null = null;
+    for (; i < text.length && (quote || text[i] !== ">"); i++) {
+      const char = text[i]!;
+      if (quote) {
+        if (char === quote) quote = null;
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      }
+    }
+    if (i >= text.length) return null;
+    tags.push({
+      name: text.slice(nameStart, attributesStart).toLowerCase(),
+      closing,
+      selfClosed: text[i - 1] === "/",
+      attributes: text.slice(attributesStart, i),
+      start: at,
+      end: i + 1,
+    });
+    at = text.indexOf("<", i + 1);
   }
+  return tags;
+}
+
+/** One pass over the text; what removing a comment leaves behind is never read as a new one. */
+function stripXmlComments(text: string): string {
+  const kept: string[] = [];
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf("<!--", at);
+    const close = open === -1 ? -1 : text.indexOf("-->", open + 4);
+    if (close === -1) break;
+    kept.push(text.slice(at, open));
+    at = close + 3;
+  }
+  kept.push(text.slice(at));
+  return kept.join("");
 }
 
 function xmlAttribute(element: string, name: string): string | null {
