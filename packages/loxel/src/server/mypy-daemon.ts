@@ -2,15 +2,15 @@
  * One mypy daemon (`dmypy`) for one mypy config root, run from the worktree's Python environment,
  * and the parsing of its reports into language-server diagnostics.
  */
-import { createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Subprocess } from "bun";
 
 import { isRecord } from "@/lib/is-record";
 
+import { config } from "./config";
 import { logger } from "./logger";
 
 const log = logger.child("mypy-lsp");
@@ -20,6 +20,10 @@ const DAEMON_IDLE_TIMEOUT_S = 3600;
 /** First mypy release with `--output json`; older ones are read in their text format. */
 const MIN_JSON_VERSION = "1.11.0";
 const VERSION_TIMEOUT_MS = 10_000;
+/** A check taking longer is stopped (a hung daemon or plugin), so later checks are not held up forever. */
+const RUN_TIMEOUT_MS = 15 * 60_000;
+/** Where the daemons' status files live: Loxel's own, private directory, not the project. */
+const STATUS_DIR = path.join(config.stateDir, "dmypy");
 /** Where mypy documents each error code. */
 const ERROR_CODE_DOCS = "https://mypy.readthedocs.io/en/stable/_refs.html#code-";
 
@@ -47,17 +51,20 @@ export interface MypyDaemonOptions {
   root: string;
   /** The environment's `dmypy`. */
   dmypy: string;
+  /**
+   * The environment's interpreter, passed as `--python-executable`: mypy reads its packages, and
+   * never runs an interpreter the project's config names or one it infers from `python_version`.
+   */
+  pythonPath: string;
   /** Spawn environment, with the Python environment activated. */
   env: Record<string, string | undefined>;
-  /** Distinguishes the daemons of different worktrees sharing a root path over time. */
-  owner: string;
 }
 
 /**
  * A mypy daemon for one config root. The daemon starts with the first {@link run} (`dmypy run`
  * starts it, and restarts it when mypy's options change) and keeps its state between runs, so a
- * re-check after an edit only analyzes what changed. Its status file lives outside the project, so
- * nothing is written there but mypy's own `.mypy_cache`.
+ * re-check after an edit only analyzes what changed. Its status file is its own, in Loxel's state
+ * directory, so nothing is written to the project but mypy's own `.mypy_cache`.
  */
 export class MypyDaemon {
   readonly root: string;
@@ -68,8 +75,7 @@ export class MypyDaemon {
 
   constructor(private readonly options: MypyDaemonOptions) {
     this.root = options.root;
-    const id = createHash("sha256").update(`${options.owner}\0${options.root}`).digest("hex");
-    this.statusFile = path.join(tmpdir(), "loxel-dmypy", `${id.slice(0, 16)}.json`);
+    this.statusFile = path.join(STATUS_DIR, `${randomUUID()}.json`);
   }
 
   /**
@@ -79,8 +85,8 @@ export class MypyDaemon {
   async run(targets: readonly string[]): Promise<MypyRunResult | null> {
     const json = await (this.jsonOutput ??= this.supportsJsonOutput());
     if (this.stopped) return null;
-    mkdirSync(path.dirname(this.statusFile), { recursive: true });
-    const flags = json
+    mkdirSync(STATUS_DIR, { recursive: true, mode: 0o700 });
+    const output = json
       ? ["--output", "json", "--show-error-end"]
       : [
           "--show-column-numbers",
@@ -99,10 +105,19 @@ export class MypyDaemon {
         "--timeout",
         String(DAEMON_IDLE_TIMEOUT_S),
         "--",
-        ...flags,
+        "--python-executable",
+        this.options.pythonPath,
+        ...output,
         ...targets,
       ],
-      { cwd: this.root, env: this.options.env, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+      {
+        cwd: this.root,
+        env: this.options.env,
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: RUN_TIMEOUT_MS,
+      },
     );
     this.running = proc;
     const [stdout, stderr, exitCode] = await Promise.all([
@@ -116,13 +131,23 @@ export class MypyDaemon {
       this.killDaemon();
       return null;
     }
+    if (proc.signalCode) {
+      // Timed out: the daemon may be the one hanging, so the next check starts a fresh one.
+      this.killDaemon();
+      const failure = `the check did not finish within ${RUN_TIMEOUT_MS / 60_000} minutes`;
+      log.warn("mypy check timed out", { root: this.root });
+      return { diagnostics: new Map(), failure };
+    }
     // A plugin that fails to load is reported on stderr, as an error against the config file.
     const { diagnostics, otherLines } = parseMypyOutput(`${stdout}\n${stderr}`, this.root, json);
-    // 0: no errors, 1: errors found, 2: mypy could not check (a config error, a crash).
-    if (exitCode === 0 || exitCode === 1) return { diagnostics, failure: null };
     const said = otherLines
       .map((line) => line.trim())
       .filter((line) => line && !DAEMON_CHATTER.test(line));
+    // 0: no errors, 1: errors found, 2: mypy could not check (a config error, a crash). dmypy
+    // also exits with 1, reporting nothing, when it refuses the config's options
+    // (`follow_imports = silent`, `incremental = False`).
+    const refused = exitCode === 1 && diagnostics.size === 0 && said.length > 0;
+    if ((exitCode === 0 || exitCode === 1) && !refused) return { diagnostics, failure: null };
     const errors = [...diagnostics.values()]
       .flat()
       .filter((d) => d.severity === SEVERITY.error)
@@ -185,9 +210,12 @@ export class MypyDaemon {
 /** What `dmypy run` prints about the daemon itself. */
 const DAEMON_CHATTER = /^(Daemon (started|stopped)|Restarting: )/;
 
-/** `path:line:col:end_line:end_col: severity: message  [code]`, mypy's text format with error ends. */
+/**
+ * `path:line:col:end_line:end_col: severity: message  [code]`, mypy's text format with error ends;
+ * reports mypy has no column for come as `path:line: severity: message`.
+ */
 const TEXT_LINE =
-  /^(.+?):(\d+):(\d+):(\d+):(\d+): (error|warning|note): (.*?)(?: {2}\[([a-z0-9-]+)\])?$/;
+  /^(.+?):(\d+)(?::(\d+):(\d+):(\d+))?: (error|warning|note): (.*?)(?: {2}\[([a-z0-9-]+)\])?$/;
 
 /**
  * Parse `dmypy run` output (JSON lines, or the text format with column numbers and error ends)
@@ -255,17 +283,18 @@ function parseJsonLine(line: string): MypyReport | null {
   };
 }
 
-function parseTextLine(line: string): MypyReport | null {
-  const match = TEXT_LINE.exec(line);
+function parseTextLine(text: string): MypyReport | null {
+  const match = TEXT_LINE.exec(text);
   if (!match) return null;
   const [, file = "", row, col, endRow, endCol, severity, message = "", code] = match;
+  const line = Number(row);
   return {
     file,
-    line: Number(row),
+    line,
     // Text columns are 1-based; an end column is inclusive, which makes it the exclusive end.
-    column: Number(col) - 1,
-    endLine: Number(endRow),
-    endColumn: Number(endCol),
+    column: col === undefined ? 0 : Number(col) - 1,
+    endLine: endRow === undefined ? line : Number(endRow),
+    endColumn: endCol === undefined ? 0 : Number(endCol),
     severity: isSeverity(severity) ? severity : "error",
     message,
     code: code ?? null,

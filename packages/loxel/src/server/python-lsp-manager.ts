@@ -33,6 +33,8 @@ export interface ExternalTypeChecker {
 
 /** Ids of the `workspace/diagnostic/refresh` requests sent to the client, whose answers are dropped. */
 const REFRESH_ID_PREFIX = "loxel-diagnostic-refresh-";
+/** The id of a JSON-RPC response written with `jsonrpc` and `id` first. */
+const RESPONSE_ID = /^\{\s*"jsonrpc"\s*:\s*"2\.0"\s*,\s*"id"\s*:\s*(\d+|"(?:[^"\\]|\\.)*")/;
 /** LSP `DiagnosticSeverity.Hint`. */
 const HINT_SEVERITY = 4;
 
@@ -44,6 +46,8 @@ interface PythonLspSession extends WtLspSession {
   initialized: boolean;
   /** The document of each `textDocument/diagnostic` request awaiting its report, by request id. */
   diagnosticRequests: Map<number | string, string>;
+  /** Whether the external type checker owned each document when its last report was answered. */
+  reportedOwnership: Map<string, boolean>;
 }
 
 /**
@@ -132,6 +136,7 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       answeredEnv: undefined,
       initialized: false,
       diagnosticRequests: new Map(),
+      reportedOwnership: new Map(),
     };
     session.unsubscribeEnv = subscribePythonEnv(session.wtPath, ({ env, first }) => {
       if (!this.isSessionLive(session) || !session.initialized) return;
@@ -164,25 +169,32 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       super.handleClientData(session, data);
       return;
     }
-    // Most frames are neither, and need no second parse.
+    // Most frames are none of these, and need no second parse.
     const message =
-      data.includes("textDocument/diagnostic") || data.includes(REFRESH_ID_PREFIX)
+      data.includes("textDocument/diagnostic") ||
+      data.includes("textDocument/didClose") ||
+      data.includes(REFRESH_ID_PREFIX)
         ? parseRecord(data)
         : null;
     const { id, method, params } = message ?? {};
     // The client's answer to a refresh this manager asked for: basedpyright never sent one.
     if (method === undefined && typeof id === "string" && id.startsWith(REFRESH_ID_PREFIX)) return;
+    const uri =
+      isRecord(params) && isRecord(params.textDocument) ? params.textDocument.uri : undefined;
+    if (method === "textDocument/didClose" && typeof uri === "string") {
+      session.reportedOwnership.delete(uri);
+    }
     if (
       method === "textDocument/diagnostic" &&
       (typeof id === "number" || typeof id === "string") &&
       isRecord(params) &&
-      isRecord(params.textDocument) &&
-      typeof params.textDocument.uri === "string"
+      typeof uri === "string"
     ) {
-      session.diagnosticRequests.set(id, params.textDocument.uri);
-      // An "unchanged" answer would keep a report filtered under the previous owner: always ask
-      // for the full one.
-      if ("previousResultId" in params) {
+      session.diagnosticRequests.set(id, uri);
+      // basedpyright's "unchanged" answer would keep a report filtered under the other owner: ask
+      // for the full one when the owner changed since the last report.
+      const reported = session.reportedOwnership.get(uri);
+      if ("previousResultId" in params && reported !== this.ownsTypeChecking(session, uri)) {
         delete params.previousResultId;
         super.handleClientData(session, JSON.stringify(message));
         return;
@@ -197,13 +209,7 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
 
   /** `body` without basedpyright's type errors for files the external type checker owns. */
   private withoutExternalTypeErrors(session: PythonLspSession, body: string): string {
-    if (!this.typeChecker) return body;
-    if (
-      session.diagnosticRequests.size === 0 &&
-      !body.includes("textDocument/publishDiagnostics")
-    ) {
-      return body;
-    }
+    if (!this.typeChecker || !this.mayCarryDiagnostics(session, body)) return body;
     const message = parseRecord(body);
     if (!message) return body;
     const { id, method, result, params } = message;
@@ -211,13 +217,10 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       const uri = session.diagnosticRequests.get(id);
       if (uri === undefined) return body;
       session.diagnosticRequests.delete(id);
-      if (
-        !isRecord(result) ||
-        !Array.isArray(result.items) ||
-        !this.ownsTypeChecking(session, uri)
-      ) {
-        return body;
-      }
+      if (!isRecord(result) || !Array.isArray(result.items)) return body;
+      const owned = this.ownsTypeChecking(session, uri);
+      session.reportedOwnership.set(uri, owned);
+      if (!owned) return body;
       result.items = result.items.filter(isKeptDiagnostic);
       return JSON.stringify(message);
     }
@@ -232,6 +235,22 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       return JSON.stringify(message);
     }
     return body;
+  }
+
+  /**
+   * Whether `body` may be diagnostics to filter: pushed ones, or the answer to a pending pull,
+   * told by the id at its start (basedpyright writes `jsonrpc` and `id` first), so completion and
+   * semantic-token answers that arrive while a pull is pending are not parsed twice.
+   */
+  private mayCarryDiagnostics(session: PythonLspSession, body: string): boolean {
+    if (body.includes("textDocument/publishDiagnostics")) return true;
+    if (session.diagnosticRequests.size === 0) return false;
+    const id = RESPONSE_ID.exec(body)?.[1];
+    if (id === undefined) return true;
+    const key: unknown = JSON.parse(id);
+    return (
+      (typeof key === "number" || typeof key === "string") && session.diagnosticRequests.has(key)
+    );
   }
 
   private ownsTypeChecking(session: PythonLspSession, uri: string): boolean {

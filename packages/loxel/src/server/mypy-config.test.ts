@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { findMypyConfig, iniSectionKeys, isMypyConfigFile } from "./mypy-config";
+import { coversFile, findMypyConfig, iniSection, isMypyConfigFile } from "./mypy-config";
 
 let root: string | undefined;
 
@@ -30,6 +30,7 @@ describe("findMypyConfig", () => {
       dir: wt,
       file: join(wt, "pyproject.toml"),
       hasTargets: true,
+      files: ["src"],
     });
   });
 
@@ -51,6 +52,7 @@ describe("findMypyConfig", () => {
       dir: join(wt, "services", "api"),
       file: join(wt, "services", "api", "setup.cfg"),
       hasTargets: true,
+      files: ["api"],
     });
     expect(findMypyConfig(join(wt, "tools", "x.py"), wt)?.dir).toBe(wt);
   });
@@ -64,6 +66,7 @@ describe("findMypyConfig", () => {
       dir: wt,
       file: join(wt, "mypy.ini"),
       hasTargets: false,
+      files: null,
     });
   });
 
@@ -85,8 +88,8 @@ describe("findMypyConfig", () => {
   });
 });
 
-describe("iniSectionKeys", () => {
-  test("lists the keys of a section, skipping comments and continuation lines", () => {
+describe("iniSection", () => {
+  test("reads a section's values, skipping comments and joining continuation lines", () => {
     const text = [
       "[metadata]",
       "files = nope",
@@ -99,9 +102,29 @@ describe("iniSectionKeys", () => {
       "[mypy-tests.*]",
       "ignore_errors = True",
     ].join("\n");
-    expect(iniSectionKeys(text, "mypy")).toEqual(new Set(["strict", "packages"]));
-    expect(iniSectionKeys(text, "tool")).toBeNull();
+    expect(iniSection(text, "mypy")).toEqual(
+      new Map([
+        ["strict", "True"],
+        ["packages", "a b"],
+      ]),
+    );
+    expect(iniSection(text, "tool")).toBeNull();
   });
+});
+
+test("coversFile follows the config's files entries: paths, directories and globs", () => {
+  const config = {
+    dir: "/wt",
+    file: "/wt/setup.cfg",
+    hasTargets: true,
+    files: ["src", "scripts/*.py", "tools/run.py"],
+  };
+  expect(coversFile(config, "/wt/src/pkg/mod.py")).toBe(true);
+  expect(coversFile(config, "/wt/scripts/build.py")).toBe(true);
+  expect(coversFile(config, "/wt/tools/run.py")).toBe(true);
+  expect(coversFile(config, "/wt/tests/test_mod.py")).toBe(false);
+  expect(coversFile(config, "/wt/srcx/mod.py")).toBe(false);
+  expect(coversFile({ ...config, files: null }, "/wt/tests/test_mod.py")).toBe(true);
 });
 
 test("isMypyConfigFile", () => {

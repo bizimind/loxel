@@ -62,6 +62,12 @@ export interface LspClientOptions {
   languageId: string | readonly string[];
   /** Runs for each connection's transport; what it returns is disposed with the connection. */
   onConnected?: (transport: WebSocketTransport) => IDisposable;
+  /**
+   * Show the errors and warnings the server sends with `window/showMessage` as toasts, each
+   * distinct message once while Loxel runs, for a server whose messages are meant for the user
+   * (mypy's setup problems).
+   */
+  showMessages?: boolean;
 }
 
 /**
@@ -81,9 +87,15 @@ export interface LspClientOptions {
  * documents. A client that stops reconnecting is listed in `useLspStatusStore` for the status bar,
  * with a toast when its server crashed or could not start.
  */
-export function createLspClient({ route, name, languageId, onConnected }: LspClientOptions) {
+export function createLspClient({
+  route,
+  name,
+  languageId,
+  onConnected,
+  showMessages,
+}: LspClientOptions) {
   const markerOwner = route.replace(/^ws\//, "");
-  const showMessage = createServerMessageToasts(name);
+  const showMessage = showMessages ? createServerMessageToasts(name) : undefined;
 
   async function open(wtPath: string | null, signal: AbortSignal): Promise<LspLink> {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -155,9 +167,8 @@ const WARNING_MESSAGE_TYPE = 2;
 const ERROR_MESSAGE_TYPE = 1;
 
 /**
- * Show the errors and warnings a server sends with `window/showMessage` (mypy's setup problems,
- * ruff's config errors) as toasts, each distinct message once per session, since a server that
- * restarts or re-checks would repeat it.
+ * Show the errors and warnings a server sends with `window/showMessage` as toasts, each distinct
+ * message once while Loxel runs, since a server that restarts or re-checks would repeat it.
  */
 function createServerMessageToasts(
   name: string,

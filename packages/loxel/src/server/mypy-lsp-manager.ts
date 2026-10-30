@@ -9,12 +9,13 @@ import { isRecord } from "@/lib/is-record";
 
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
-import { findMypyConfig, isMypyConfigFile, type MypyConfig } from "./mypy-config";
+import { coversFile, findMypyConfig, isMypyConfigFile, type MypyConfig } from "./mypy-config";
 import { MypyDaemon, type MypyDiagnostic } from "./mypy-daemon";
 import {
   getPythonEnv,
   isEnvShippedByRepo,
   isShippedByRepo,
+  pathOutsideWorktree,
   subscribePythonEnv,
 } from "./python-env";
 import { pythonEnvActivation, setPythonEnvVars } from "./python-env-activation";
@@ -36,11 +37,17 @@ const MESSAGE_TYPE = { error: 1, warning: 2 } as const;
 /** One mypy config root with open files, and the daemon checking it. */
 interface MypyProject {
   config: MypyConfig;
-  /** `active` once its daemon can run; `unavailable` when the environment has no usable mypy. */
-  state: "pending" | "active" | "unavailable";
+  /**
+   * `active` once its daemon can run, until a check fails; `failing` after a check mypy could not
+   * run, until one succeeds; `unavailable` when the environment has no usable mypy. Only an
+   * `active` project owns type checking, so basedpyright's type errors return otherwise.
+   */
+  state: "pending" | "active" | "failing" | "unavailable";
   daemon: MypyDaemon | null;
-  /** Files whose diagnostics were last published, to clear the ones a later check no longer reports. */
-  published: Set<string>;
+  /** The open files it checks, as of the last {@link MypyLspManager.syncProjects}. */
+  openFiles: Set<string>;
+  /** What its last check reported, by file. */
+  diagnostics: Map<string, MypyDiagnostic[]>;
   timer: ReturnType<typeof setTimeout> | null;
   checking: boolean;
   /** A check was asked for while one ran. */
@@ -58,6 +65,8 @@ interface MypySession {
   openFiles: Set<string>;
   /** By config directory. */
   projects: Map<string, MypyProject>;
+  /** Files with diagnostics published, so a check that no longer reports one clears it. */
+  published: Set<string>;
   unsubscribeEnv: (() => void) | null;
 }
 
@@ -76,10 +85,12 @@ interface MypySession {
  * files. A check runs when files open or close and when Python files under the root change on disk
  * (saves, checkouts, agents' edits, as watched files); a change to a config file or the Python
  * environment restarts the daemons. Setup problems (mypy not installed, a config error) are shown
- * once each as `window/showMessage`.
+ * once each as `window/showMessage`. Where two roots report on the same file (a config whose
+ * `files` reach into a nested project), the file gets both roots' diagnostics.
  *
- * While a root's daemon can run, it is the project's type checker: {@link ownsTypeChecking} tells
- * basedpyright's manager to drop basedpyright's own type-checking diagnostics for its files.
+ * While a root's daemon checks successfully, it is the project's type checker for the files it
+ * checks: {@link ownsTypeChecking} tells basedpyright's manager to drop basedpyright's own
+ * type-checking diagnostics for them.
  */
 export class MypyLspManager implements ExternalTypeChecker {
   private readonly sessions = new Map<ServerWebSocket<unknown>, MypySession>();
@@ -102,6 +113,7 @@ export class MypyLspManager implements ExternalTypeChecker {
       wtPath,
       openFiles: new Set(),
       projects: new Map(),
+      published: new Set(),
       unsubscribeEnv: null,
     };
     session.unsubscribeEnv = subscribePythonEnv(wtPath, ({ first }) => {
@@ -137,10 +149,10 @@ export class MypyLspManager implements ExternalTypeChecker {
     if (!file || !PYTHON_FILE.test(file)) return;
     if (method === "textDocument/didOpen") {
       session.openFiles.add(file);
-      this.syncProjects(session, file);
+      this.syncProjects(session);
     } else if (method === "textDocument/didClose") {
       session.openFiles.delete(file);
-      this.syncProjects(session, file);
+      this.syncProjects(session);
     }
   }
 
@@ -155,7 +167,7 @@ export class MypyLspManager implements ExternalTypeChecker {
     const configDirs = new Set(paths.filter(isMypyConfigFile).map((file) => path.dirname(file)));
     if (configDirs.size > 0) {
       this.restartProjects(session, (project) => configDirs.has(project.config.dir));
-      this.syncProjects(session, null);
+      this.syncProjects(session);
     }
     for (const project of session.projects.values()) {
       const root = project.config.dir + path.sep;
@@ -173,7 +185,8 @@ export class MypyLspManager implements ExternalTypeChecker {
     const session = this.sessionsByWorktree.get(wtPath);
     if (!session) return false;
     const config = findMypyConfig(filePath, wtPath);
-    return config !== null && session.projects.get(config.dir)?.state === "active";
+    if (!config || session.projects.get(config.dir)?.state !== "active") return false;
+    return coversFile(config, filePath);
   }
 
   onTypeCheckingChange(listener: (wtPath: string) => void): () => void {
@@ -202,36 +215,34 @@ export class MypyLspManager implements ExternalTypeChecker {
 
   /**
    * Bring the session's projects in line with its open files: a project for every config root
-   * with an open file, none for a root without. `changed` is the file just opened or closed, whose
-   * project is checked again when it is checked on its open files.
+   * with an open file, none for a root without. A project checked on its open files is checked
+   * again when they change, and so is one whose config changed what it checks.
    */
-  private syncProjects(session: MypySession, changed: string | null): void {
-    const wanted = new Map<string, MypyConfig>();
+  private syncProjects(session: MypySession): void {
+    const wanted = new Map<string, { config: MypyConfig; files: Set<string> }>();
     for (const file of session.openFiles) {
       const config = findMypyConfig(file, session.wtPath);
-      if (config) wanted.set(config.dir, config);
+      if (!config) continue;
+      const entry = wanted.get(config.dir) ?? { config, files: new Set<string>() };
+      entry.files.add(file);
+      wanted.set(config.dir, entry);
     }
     for (const [dir, project] of session.projects) {
       if (!wanted.has(dir)) this.disposeProject(session, project);
     }
-    for (const [dir, config] of wanted) {
+    for (const [dir, { config, files }] of wanted) {
       const project = session.projects.get(dir);
       if (!project) {
-        const created = createProject(config);
+        const created = createProject(config, files);
         session.projects.set(dir, created);
         void this.setUp(session, created);
         continue;
       }
       const targetsChanged = config.hasTargets !== project.config.hasTargets;
+      const filesChanged = !config.hasTargets && !sameSet(files, project.openFiles);
       project.config = config;
-      if (targetsChanged) this.scheduleCheck(session, project);
-      else if (
-        changed &&
-        !config.hasTargets &&
-        findMypyConfig(changed, session.wtPath)?.dir === dir
-      ) {
-        this.scheduleCheck(session, project);
-      }
+      project.openFiles = files;
+      if (targetsChanged || filesChanged) this.scheduleCheck(session, project);
     }
   }
 
@@ -252,31 +263,33 @@ export class MypyLspManager implements ExternalTypeChecker {
     const dmypy = await usableDmypy(session.wtPath, env);
     const spawnEnv = dmypy && env ? await activatedEnv(session.wtPath, env) : null;
     if (project.generation !== generation || !this.isLive(session)) return;
-    if (!dmypy || !spawnEnv) {
+    if (!dmypy || !env || !spawnEnv) {
       this.setState(session, project, "unavailable");
-      const where = env ? ` (${env.envPath ?? env.pythonPath})` : "";
+      // What an earlier daemon reported is stale now.
+      this.publish(session, project, new Map());
+      // The same words for every worktree of a project, so the client shows it once.
       this.notify(
         session,
         project,
         MESSAGE_TYPE.warning,
         `mypy is configured in ${this.relative(session, project.config.file)} but is not installed ` +
-          `in the worktree's Python environment${where}. Install it there to see mypy's ` +
-          "diagnostics; until then basedpyright checks types.",
+          "in the worktree's Python environment. Install it there to see mypy's diagnostics; " +
+          "until then basedpyright checks types.",
       );
       return;
     }
     project.daemon = new MypyDaemon({
       root: project.config.dir,
       dmypy,
+      pythonPath: env.pythonPath,
       env: spawnEnv,
-      owner: session.wtPath,
     });
     this.setState(session, project, "active");
     this.scheduleCheck(session, project);
   }
 
   private scheduleCheck(session: MypySession, project: MypyProject): void {
-    if (project.state !== "active") return;
+    if (!project.daemon) return;
     if (project.timer) clearTimeout(project.timer);
     project.timer = setTimeout(() => {
       project.timer = null;
@@ -313,9 +326,7 @@ export class MypyLspManager implements ExternalTypeChecker {
     const { config } = project;
     const targets = config.hasTargets
       ? []
-      : [...session.openFiles]
-          .filter((file) => findMypyConfig(file, session.wtPath)?.dir === config.dir)
-          .map((file) => path.relative(config.dir, file));
+      : [...project.openFiles].map((file) => path.relative(config.dir, file));
     if (!config.hasTargets && targets.length === 0) {
       this.publish(session, project, new Map());
       return;
@@ -326,8 +337,11 @@ export class MypyLspManager implements ExternalTypeChecker {
     this.publish(session, project, result.diagnostics);
     if (result.failure === null) {
       project.notice = null;
+      this.setState(session, project, "active");
       return;
     }
+    // Until mypy checks again, basedpyright's type errors are better than none.
+    this.setState(session, project, "failing");
     const failure =
       result.failure.length > MAX_NOTICE_LENGTH
         ? `${result.failure.slice(0, MAX_NOTICE_LENGTH)}…`
@@ -336,24 +350,28 @@ export class MypyLspManager implements ExternalTypeChecker {
     this.notify(session, project, MESSAGE_TYPE.error, `mypy could not check ${where}: ${failure}`);
   }
 
-  /** Publish `diagnostics`, clearing the files the previous check reported and this one does not. */
+  /**
+   * Make `diagnostics` the project's report and publish each file it or the previous report
+   * names, with every project's diagnostics for that file.
+   */
   private publish(
     session: MypySession,
     project: MypyProject,
     diagnostics: Map<string, MypyDiagnostic[]>,
   ): void {
-    for (const file of project.published) {
-      if (!diagnostics.has(file)) this.sendDiagnostics(session, file, []);
+    const files = new Set([...project.diagnostics.keys(), ...diagnostics.keys()]);
+    project.diagnostics = diagnostics;
+    if (!this.isLive(session)) return;
+    for (const file of files) {
+      const list = [...session.projects.values()].flatMap((p) => p.diagnostics.get(file) ?? []);
+      if (list.length === 0 && !session.published.has(file)) continue;
+      if (list.length > 0) session.published.add(file);
+      else session.published.delete(file);
+      this.send(session, {
+        method: "textDocument/publishDiagnostics",
+        params: { uri: fileUri(file), diagnostics: list },
+      });
     }
-    for (const [file, list] of diagnostics) this.sendDiagnostics(session, file, list);
-    project.published = new Set(diagnostics.keys());
-  }
-
-  private sendDiagnostics(session: MypySession, file: string, diagnostics: MypyDiagnostic[]): void {
-    this.send(session, {
-      method: "textDocument/publishDiagnostics",
-      params: { uri: fileUri(file), diagnostics },
-    });
   }
 
   private notify(session: MypySession, project: MypyProject, type: number, message: string): void {
@@ -376,7 +394,7 @@ export class MypyLspManager implements ExternalTypeChecker {
     project.daemon?.stop();
     project.daemon = null;
     session.projects.delete(project.config.dir);
-    if (this.isLive(session)) this.publish(session, project, new Map());
+    this.publish(session, project, new Map());
     if (project.state === "active") this.emitTypeCheckingChange(session.wtPath);
   }
 
@@ -411,12 +429,13 @@ export class MypyLspManager implements ExternalTypeChecker {
   }
 }
 
-function createProject(config: MypyConfig): MypyProject {
+function createProject(config: MypyConfig, openFiles: Set<string>): MypyProject {
   return {
     config,
     state: "pending",
     daemon: null,
-    published: new Set(),
+    openFiles,
+    diagnostics: new Map(),
     timer: null,
     checking: false,
     recheck: false,
@@ -432,6 +451,10 @@ function filePathOf(uri: string): string | null {
   } catch {
     return null;
   }
+}
+
+function sameSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  return a.size === b.size && [...a].every((item) => b.has(item));
 }
 
 /**
@@ -458,6 +481,9 @@ async function activatedEnv(
   env: PythonEnv,
 ): Promise<Record<string, string | undefined> | null> {
   const spawnEnv: Record<string, string | undefined> = buildSpawnEnv();
+  // Nothing mypy runs by name (an interpreter it infers from `python_version`) may come from the
+  // worktree; activation then puts the trusted environment's `bin` first.
+  spawnEnv.PATH = pathOutsideWorktree(spawnEnv.PATH ?? "", wtPath);
   // An interpreter outside any environment (a system Python) needs no activation.
   if (!env.envPath) return spawnEnv;
   const activation = await pythonEnvActivation(env, wtPath);

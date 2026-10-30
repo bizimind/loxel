@@ -169,7 +169,11 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
       { message: "Incompatible types", source: "mypy", code: "assignment" },
     ]);
     // The open file is the target, after mypy's output flags.
-    expect((await runs(wt))[0]).toEndWith("-- --output json --show-error-end main.py");
+    // The environment's interpreter is mypy's, whatever the config says; the open file is the target.
+    const python = join(wt, ".venv", "bin", "python");
+    expect((await runs(wt))[0]).toEndWith(
+      `-- --python-executable ${python} --output json --show-error-end main.py`,
+    );
     expect(manager.ownsTypeChecking(wt, main)).toBe(true);
     expect(changes).toEqual([wt]);
 
@@ -196,7 +200,10 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
     const models = join(api, "api", "models.py");
     await client.waitFor(client.diagnosticsFor(models));
     // No targets: mypy checks the configured files, run from the config's directory.
-    expect((await runs(api))[0]).toEndWith("-- --output json --show-error-end");
+    expect((await runs(api))[0]).toEndWith("--output json --show-error-end");
+    // Only the files mypy checks are its to type-check.
+    expect(manager.ownsTypeChecking(wt, join(api, "api", "app.py"))).toBe(true);
+    expect(manager.ownsTypeChecking(wt, join(api, "tests", "test_app.py"))).toBe(false);
 
     await writeFile(join(api, ".dmypy-output"), "");
     const before = client.received.length;
@@ -237,6 +244,52 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
       message:
         "mypy could not check the worktree: pyproject.toml: Invalid value (at line 2, column 10)",
     });
+    // basedpyright checks types again until mypy can.
+    expect(manager.ownsTypeChecking(wt, join(wt, "main.py"))).toBe(false);
+  });
+
+  test("tells the user when dmypy refuses the config's options", async () => {
+    const wt = await makeWorktree({
+      "mypy.ini": "[mypy]\nfollow_imports = silent\n",
+      ".dmypy-output": "dmypy: follow-imports=silent not supported\n",
+      ".dmypy-exit": "1",
+    });
+    manager = new MypyLspManager();
+    const changes: string[] = [];
+    manager.onTypeCheckingChange((path) => changes.push(path));
+    const client = new FakeClient(manager);
+    await client.start(wt);
+
+    client.open(join(wt, "main.py"));
+    const notice = await client.waitFor((m) => m.method === "window/showMessage");
+    expect(notice.params?.message).toBe(
+      "mypy could not check the worktree: dmypy: follow-imports=silent not supported",
+    );
+    expect(manager.ownsTypeChecking(wt, join(wt, "main.py"))).toBe(false);
+    // Owned once set up, given back when the check failed.
+    expect(changes).toEqual([wt, wt]);
+  });
+
+  test("clears what mypy reported when the environment no longer has it", async () => {
+    const wt = await makeWorktree({
+      "pyproject.toml": "[tool.mypy]\n",
+      ".dmypy-output": `${report("main.py", 1, "Incompatible types")}\n`,
+    });
+    manager = new MypyLspManager();
+    const client = new FakeClient(manager);
+    await client.start(wt);
+    const main = join(wt, "main.py");
+    client.open(main);
+    await client.waitFor(
+      (m) => client.diagnosticsFor(main)(m) && m.params?.diagnostics?.length === 1,
+    );
+
+    await rm(join(wt, ".venv", "bin", "dmypy"));
+    const before = client.received.length;
+    manager.notifyWatchedFilesChanged(wt, [join(wt, "pyproject.toml")]);
+    const cleared = await client.waitFor(client.diagnosticsFor(main), before);
+    expect(cleared.params?.diagnostics).toEqual([]);
+    expect(manager.ownsTypeChecking(wt, main)).toBe(false);
   });
 
   test("ignores files without a mypy config", async () => {

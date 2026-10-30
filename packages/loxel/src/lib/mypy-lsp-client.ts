@@ -4,6 +4,8 @@ const { connect: connectMypyLsp, disconnect: disconnectMypyLsp } = createLspClie
   route: "ws/mypy-lsp",
   name: "mypy",
   languageId: "python",
+  // Setup problems (mypy not installed, a config error) are only told this way.
+  showMessages: true,
 });
 
 export { connectMypyLsp, disconnectMypyLsp };

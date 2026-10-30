@@ -76,6 +76,7 @@ describe("parseMypyOutput", () => {
       'src/app.py:10:20:10:24: error: Unsupported operand types for + ("str" and "int")  [operator]',
       'src/app.py: note: In function "f":',
       "src/app.py:3:1:3:1: note: Some note",
+      "src/app.py:7: error: No column here  [misc]",
       "mypy.ini: [mypy]: Unrecognized option: bogus = 1",
     ].join("\n");
     const { diagnostics, otherLines } = parseMypyOutput(stdout, ROOT, false);
@@ -93,6 +94,14 @@ describe("parseMypyOutput", () => {
         severity: 3,
         source: "mypy",
         message: "Some note",
+      },
+      {
+        range: { start: { line: 6, character: 0 }, end: { line: 6, character: 0 } },
+        severity: 1,
+        source: "mypy",
+        message: "No column here",
+        code: "misc",
+        codeDescription: { href: "https://mypy.readthedocs.io/en/stable/_refs.html#code-misc" },
       },
     ]);
     expect(otherLines).toEqual([
