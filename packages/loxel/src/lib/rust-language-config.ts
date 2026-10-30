@@ -11,27 +11,23 @@ const BLOCK_COMMENT_CLOSE = " */";
 const BLOCK_COMMENT_BODY = String.raw`(?:[^*]|\*(?!\/))*`;
 
 /** A `///` doc comment line, excluding `////`, which Rust treats as a plain comment. */
-export const RUST_OUTER_DOC_LINE = /^\s*\/\/\/(?!\/).*$/;
+const OUTER_DOC_LINE = /^\s*\/\/\/(?!\/).*$/;
 
 /** A `//!` inner doc comment line. */
-export const RUST_INNER_DOC_LINE = /^\s*\/\/!.*$/;
+const INNER_DOC_LINE = /^\s*\/\/!.*$/;
 
 /** An open `/**` or `/*!` block doc comment, excluding the empty comment `/**\/`. */
-export const RUST_BLOCK_DOC_START = new RegExp(
-  String.raw`^\s*\/\*[*!](?!\/)${BLOCK_COMMENT_BODY}$`,
-);
+const BLOCK_DOC_START = new RegExp(String.raw`^\s*\/\*[*!](?!\/)${BLOCK_COMMENT_BODY}$`);
 
 /**
  * A ` * ` continuation line. Its star sits one space past the comment's indent, so rustfmt's
- * operator lines at an even indent (`    * factor`) never match, and `RUST_BLOCK_DOC_PREVIOUS`
- * guards the rest.
+ * operator lines at an even indent (`    * factor`) never match, and `BLOCK_DOC_PREVIOUS` guards
+ * the rest.
  */
-export const RUST_BLOCK_DOC_CONTINUATION = new RegExp(
-  String.raw`^(?:\t| {2})* \*(?: ${BLOCK_COMMENT_BODY})?$`,
-);
+const BLOCK_DOC_CONTINUATION = new RegExp(String.raw`^(?:\t| {2})* \*(?: ${BLOCK_COMMENT_BODY})?$`);
 
 /** The line above a continuation line: the start of the comment or an earlier continuation. */
-export const RUST_BLOCK_DOC_PREVIOUS = /^\s*(?:\/\*[*!]|\*(?!\/))(?!.*\*\/)/;
+const BLOCK_DOC_PREVIOUS = /^\s*(?:\/\*[*!]|\*(?!\/))(?!.*\*\/)/;
 
 /** Monaco's built-in Rust configuration extended with doc comment editing and region folding. */
 export function extendRustConfiguration(
@@ -57,17 +53,17 @@ export function extendRustConfiguration(
     folding: { markers: { start: /^\s*\/\/\s*region\b/, end: /^\s*\/\/\s*endregion\b/ } },
     onEnterRules: [
       ...(builtin.onEnterRules ?? []),
-      { beforeText: RUST_OUTER_DOC_LINE, action: { indentAction: None, appendText: "/// " } },
-      { beforeText: RUST_INNER_DOC_LINE, action: { indentAction: None, appendText: "//! " } },
+      { beforeText: OUTER_DOC_LINE, action: { indentAction: None, appendText: "/// " } },
+      { beforeText: INNER_DOC_LINE, action: { indentAction: None, appendText: "//! " } },
       {
-        beforeText: RUST_BLOCK_DOC_START,
+        beforeText: BLOCK_DOC_START,
         afterText: /^\s*\*\/$/,
         action: { indentAction: IndentOutdent, appendText: " * " },
       },
-      { beforeText: RUST_BLOCK_DOC_START, action: { indentAction: None, appendText: " * " } },
+      { beforeText: BLOCK_DOC_START, action: { indentAction: None, appendText: " * " } },
       {
-        beforeText: RUST_BLOCK_DOC_CONTINUATION,
-        previousLineText: RUST_BLOCK_DOC_PREVIOUS,
+        beforeText: BLOCK_DOC_CONTINUATION,
+        previousLineText: BLOCK_DOC_PREVIOUS,
         action: { indentAction: None, appendText: "* " },
       },
       // Back to the comment's indent after its closing line.

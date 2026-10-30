@@ -47,6 +47,12 @@ interface Diagnostic {
   severity?: number;
 }
 
+interface CompletionItem {
+  label: string;
+  insertTextFormat?: number;
+  textEdit?: { newText: string };
+}
+
 /** Stands in for the WebSocket and the Monaco LSP client behind it. */
 class FakeClient {
   readonly ws: ServerWebSocket<unknown>;
@@ -72,9 +78,11 @@ class FakeClient {
   async start(wtPath: string, { pull = false } = {}): Promise<void> {
     this.manager.createSession(this.ws, wtPath);
     const rootUri = `file://${wtPath}`;
-    const textDocument = pull
-      ? { publishDiagnostics: {}, diagnostic: { dynamicRegistration: true } }
-      : { publishDiagnostics: {} };
+    const textDocument = {
+      publishDiagnostics: {},
+      completion: { completionItem: { snippetSupport: true } },
+      ...(pull ? { diagnostic: { dynamicRegistration: true } } : {}),
+    };
     await this.request(1, "initialize", {
       processId: null,
       rootUri,
@@ -127,6 +135,17 @@ class FakeClient {
       })) as { items?: Diagnostic[] };
       const items = result.items ?? [];
       if (predicate(items)) return items;
+    }
+  }
+
+  /** Ask for completions until there are some; the server has none while it is still loading. */
+  async completionItems(uri: string, line: number, character: number): Promise<CompletionItem[]> {
+    while (true) {
+      const result = (await this.request(this.nextId++, "textDocument/completion", {
+        textDocument: { uri },
+        position: { line, character },
+      })) as { items?: CompletionItem[] };
+      if (result.items?.length) return result.items;
     }
   }
 
@@ -248,6 +267,23 @@ async function analyzeMain(
 }
 
 describe.skipIf(!canRun)("PythonLspManager with basedpyright", () => {
+  test(
+    "gets method overrides in plain text, so default values reach the editor unexpanded",
+    async () => {
+      const wt = await makeWorktree();
+      manager = new PythonLspManager();
+      const client = new FakeClient(manager);
+      await client.start(wt);
+      await writeFile(join(wt, "base.py"), `class Base:\n    def run(self, x="$HOME"): ...\n`);
+      const text = `from base import Base\nclass Sub(Base):\n    def ru\n`;
+      const uri = client.open(join(wt, "sub.py"), text);
+      const [run] = await client.completionItems(uri, 2, 10);
+      expect(run?.textEdit?.newText).toContain("$HOME");
+      expect(run?.insertTextFormat).not.toBe(2);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
   test(
     "resolves imports installed only in the worktree's .venv",
     async () => {

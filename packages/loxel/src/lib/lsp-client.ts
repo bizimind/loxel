@@ -15,6 +15,7 @@ import {
   type LspLink,
 } from "./lsp-connection";
 import { createLspWorkspaceFiles } from "./lsp-workspace-files";
+import { SEMANTIC_TOKEN_STYLING } from "./monaco-theme";
 
 const log = frontendLog.child("ui");
 
@@ -115,6 +116,7 @@ export function createLspClient({
         workspaceFileSystem: wtPath === null ? undefined : createLspWorkspaceFiles(wtPath),
         onWorkspaceEditFailure: (reason) => showToast(`Edit not applied: ${reason}`),
         onShowMessage: showMessage,
+        semanticTokenStyling: SEMANTIC_TOKEN_STYLING,
       });
     } catch (err) {
       transport.dispose();
