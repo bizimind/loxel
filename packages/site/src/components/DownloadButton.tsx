@@ -1,8 +1,12 @@
 import { useState, useEffect } from "react";
 
+import { trackClick } from "../lib/analytics";
+
 interface Props {
   version: string;
   binaries: Record<string, string>;
+  /** Where the button sits on the site, reported with the `download_clicked` event. */
+  location: string;
 }
 
 type Platform = "mac-arm" | "mac-intel" | "other";
@@ -16,25 +20,31 @@ async function detectPlatform(): Promise<Platform> {
       userAgentData?: { getHighEntropyValues(hints: string[]): Promise<{ architecture?: string }> };
     };
     const data = await nav.userAgentData?.getHighEntropyValues(["architecture"]);
-    return data?.architecture === "arm" ? "mac-arm" : "mac-intel";
+    // Safari and Firefox don't expose the architecture (their user agent says "Intel" on every Mac),
+    // so anything not reported as x86 is assumed to be Apple Silicon.
+    return data?.architecture === "x86" ? "mac-intel" : "mac-arm";
   } catch {
-    return navigator.userAgent.includes("Intel") ? "mac-intel" : "mac-arm";
+    return "mac-arm";
   }
 }
 
-export default function DownloadButton({ version, binaries }: Props) {
+export default function DownloadButton({ version, binaries, location }: Props) {
   const [platform, setPlatform] = useState<Platform>("mac-arm");
 
   useEffect(() => {
     detectPlatform().then(setPlatform);
   }, []);
 
-  const builds: Record<Platform, { label: string; url: string } | null> = {
+  const builds: Record<Platform, { label: string; url: string; arch: string } | null> = {
     "mac-arm": binaries["darwin-arm64"]
-      ? { label: "Download for macOS (Apple Silicon)", url: binaries["darwin-arm64"] }
+      ? {
+          label: "Download for macOS (Apple Silicon)",
+          url: binaries["darwin-arm64"],
+          arch: "arm64",
+        }
       : null,
     "mac-intel": binaries["darwin-x64"]
-      ? { label: "Download for macOS (Intel)", url: binaries["darwin-x64"] }
+      ? { label: "Download for macOS (Intel)", url: binaries["darwin-x64"], arch: "x64" }
       : null,
     other: null,
   };
@@ -76,6 +86,12 @@ export default function DownloadButton({ version, binaries }: Props) {
     <div className="flex flex-col items-center gap-2">
       <a
         href={build.url}
+        {...trackClick("download_clicked", {
+          platform: "darwin",
+          arch: build.arch,
+          version,
+          location,
+        })}
         className="bg-primary text-primary-foreground hover:bg-accent inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition-colors"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">

@@ -43,5 +43,9 @@ const pageTitle =
       <slot />
     </main>
     <Footer />
+    <script>
+      import { initAnalytics } from "../lib/analytics";
+      initAnalytics();
+    </script>
   </body>
 </html>

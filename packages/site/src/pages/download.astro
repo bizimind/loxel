@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import DownloadButton from "../components/DownloadButton.tsx";
+import { trackClick } from "../lib/analytics";
 import { fetchManifest } from "../lib/manifest";
 
 const { version, downloads: binaries } = await fetchManifest();
@@ -12,7 +13,7 @@ const { version, downloads: binaries } = await fetchManifest();
     <p class="text-muted-foreground mb-12">Free · macOS · Open Beta</p>
 
     <div class="bg-card border border-border rounded-xl p-10 mb-10">
-      <DownloadButton client:load version={version} binaries={binaries} />
+      <DownloadButton client:load version={version} binaries={binaries} location="download_page" />
     </div>
 
     <div class="text-left space-y-8">
@@ -47,6 +48,7 @@ const { version, downloads: binaries } = await fetchManifest();
           {binaries["darwin-arm64"] && (
             <a
               href={binaries["darwin-arm64"]}
+              {...trackClick("download_clicked", { platform: "darwin", arch: "arm64", version, location: "download_page_list" })}
               class="text-accent underline underline-offset-2 hover:opacity-75 transition-opacity"
             >
               macOS Apple Silicon (.dmg)
@@ -55,6 +57,7 @@ const { version, downloads: binaries } = await fetchManifest();
           {binaries["darwin-x64"] && (
             <a
               href={binaries["darwin-x64"]}
+              {...trackClick("download_clicked", { platform: "darwin", arch: "x64", version, location: "download_page_list" })}
               class="text-accent underline underline-offset-2 hover:opacity-75 transition-opacity"
             >
               macOS Intel (.dmg)

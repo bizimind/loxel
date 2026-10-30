@@ -3,6 +3,7 @@ import { Image } from "astro:assets";
 import appScreenshot from "../../public/screenshots/app-screenshot.png";
 import Base from "../layouts/Base.astro";
 import DownloadButton from "../components/DownloadButton.tsx";
+import { trackClick, trackView } from "../lib/analytics";
 import { fetchManifest } from "../lib/manifest";
 
 const { version, downloads: binaries } = await fetchManifest();
@@ -56,11 +57,12 @@ const features = [
 
       <!-- Desktop: download buttons -->
       <div class="hidden sm:flex flex-row items-start justify-center gap-4">
-        <DownloadButton client:load version={version} binaries={binaries} />
+        <DownloadButton client:load version={version} binaries={binaries} location="hero" />
         <a
           href="https://github.com/bizimind/loxel"
           target="_blank"
           rel="noopener noreferrer"
+          {...trackClick("github_link_clicked", { location: "hero" })}
           class="inline-flex items-center gap-2 border border-border text-foreground hover:border-muted-foreground font-medium px-5 py-2.5 rounded-md transition-colors text-sm"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -78,6 +80,7 @@ const features = [
           href="https://github.com/bizimind/loxel"
           target="_blank"
           rel="noopener noreferrer"
+          {...trackClick("github_link_clicked", { location: "hero_mobile" })}
           class="inline-flex items-center gap-2 border border-border text-foreground hover:border-muted-foreground font-medium px-5 py-2.5 rounded-md transition-colors text-sm"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -182,13 +185,16 @@ const features = [
   </section>
 
   <!-- CTA — desktop only -->
-  <section class="hidden sm:block py-20 px-4 sm:px-6 text-center border-t border-border">
+  <section
+    class="hidden sm:block py-20 px-4 sm:px-6 text-center border-t border-border"
+    {...trackView("cta_viewed", { location: "bottom_cta" })}
+  >
     <div class="max-w-xl mx-auto">
       <h2 class="text-3xl font-bold text-foreground mb-4 text-balance">Ready to try it?</h2>
       <p class="text-muted-foreground mb-8 text-balance">
         Free download. No account required. Runs entirely on your machine.
       </p>
-      <DownloadButton client:load version={version} binaries={binaries} />
+      <DownloadButton client:load version={version} binaries={binaries} location="bottom_cta" />
     </div>
   </section>
 </Base>
