@@ -196,14 +196,18 @@ describe("SchemaDownloads", () => {
   });
 
   test("a revocation during a cache write leaves nothing behind", async () => {
-    let revoked: Promise<void> = Promise.resolve();
+    let markRevoked = () => {};
+    const revoked = new Promise<void>((done) => {
+      markRevoked = done;
+    });
     downloads = new SchemaDownloads({
       tombiCacheDir: join(root, "tombi"),
       lemminxWorkDir: join(root, "lemminx"),
       fetchText: async () => {
-        // The next event-loop turn: after this download has started writing.
+        // The next event-loop turn, while this download is writing on a fast enough machine. Whenever
+        // it lands, nothing may remain once it has finished.
         setImmediate(() => {
-          revoked = downloads.onRevoked();
+          void downloads.onRevoked().then(markRevoked);
         });
         return "{}";
       },
