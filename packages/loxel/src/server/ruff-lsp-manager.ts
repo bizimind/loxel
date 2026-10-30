@@ -6,15 +6,9 @@ import type { PythonEnv } from "@/api/python-env-model";
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
 import { logger } from "./logger";
-import {
-  getPythonEnv,
-  getPythonEnvNow,
-  isEnvShippedByRepo,
-  isSamePythonEnv,
-  isShippedByRepo,
-  subscribePythonEnv,
-} from "./python-env";
+import { getPythonEnv, getPythonEnvNow, isSamePythonEnv, subscribePythonEnv } from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
+import { isEnvShippedByRepo, isShippedByRepo } from "./shipped-by-repo";
 import {
   type SpawnOptions,
   StdioLspManager,

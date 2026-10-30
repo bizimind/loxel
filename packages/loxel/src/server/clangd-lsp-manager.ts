@@ -2,10 +2,6 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { ServerWebSocket } from "bun";
-
-import { LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
-
 import { config } from "./config";
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
@@ -176,6 +172,9 @@ export class ClangdLspManager extends WorktreeLspManager {
     "textDocument/rangeFormatting",
   ];
 
+  /** Why clangd won't start for a worktree, per worktree since each starts on its own. */
+  private readonly failureReasons = new Map<string, string>();
+
   constructor(
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly stateDir: string = config.stateDir,
@@ -183,22 +182,25 @@ export class ClangdLspManager extends WorktreeLspManager {
     super("clangd-lsp");
   }
 
-  override createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
+  protected async resolveBinary(context: WtLspContext): Promise<string | null> {
+    this.failureReasons.delete(context.wtPath);
     if (this.platform === "win32") {
-      this.log.info("clangd is not available on Windows yet");
-      ws.close(LSP_START_FAILED_CLOSE_CODE, "clangd is not available on Windows yet");
-      return;
+      this.failureReasons.set(context.wtPath, "clangd is not available on Windows yet");
+      return null;
     }
-    super.createSession(ws, wtPath);
-  }
-
-  protected async resolveBinary(): Promise<string | null> {
     const binary = this.resolveBundledBinary("clangd");
     if (!binary) return null;
     const check = await checkClangd(binary, this.platform);
     if (check === "ok") return binary;
-    this.log.warn(`Not starting ${binary}`, { check, minMajorVersion: MIN_CLANGD_MAJOR });
+    this.log.warn(`Not starting ${binary}`, { check });
+    if (check === "too-old") {
+      this.failureReasons.set(context.wtPath, `clangd ${MIN_CLANGD_MAJOR} or newer is required`);
+    }
     return null;
+  }
+
+  protected override serverFailureReason(context: WtLspContext): string | null {
+    return this.failureReasons.get(context.wtPath) ?? null;
   }
 
   protected override spawnArgs(): readonly string[] {

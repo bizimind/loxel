@@ -19,6 +19,8 @@ export function GeneralSection() {
   const queryClient = useQueryClient();
   const autoReveal = useSettingsStore((s) => s.autoRevealInExplorer);
   const setAutoReveal = useSettingsStore((s) => s.setAutoRevealInExplorer);
+  const autoCheck = useSettingsStore((s) => s.autoCheckForUpdates);
+  const setAutoCheck = useSettingsStore((s) => s.setAutoCheckForUpdates);
 
   const { data: versionData } = useQuery({
     queryKey: queryKeys.version(),
@@ -122,6 +124,14 @@ export function GeneralSection() {
               Restarting...
             </Button>
           )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-foreground text-xs">Check for updates automatically</span>
+          <span className="text-muted-foreground text-[10px]">
+            (ask the update server for the latest version when Loxel starts)
+          </span>
+          <Switch checked={autoCheck} onCheckedChange={setAutoCheck} className="ml-auto" />
         </div>
       </div>
 

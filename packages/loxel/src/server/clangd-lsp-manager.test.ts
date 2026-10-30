@@ -41,20 +41,21 @@ async function makeDir(): Promise<string> {
 /** Just enough of a language client to start the server and wait for a file's diagnostics. */
 class FakeClient {
   readonly ws: ServerWebSocket<unknown>;
-  closed: { code?: number; reason?: string } | undefined;
+  /** The socket's close, for a server that never starts. */
+  readonly closed: Promise<{ code?: number; reason?: string }>;
   private nextId = 1;
   private readonly responses = new Map<number, (result: unknown) => void>();
   private readonly diagnosticsWaiters = new Map<string, (diagnostics: unknown[]) => void>();
 
   constructor(private readonly server: ClangdLspManager) {
+    const { promise, resolve } = Promise.withResolvers<{ code?: number; reason?: string }>();
+    this.closed = promise;
     const ws = {
       send: (data: string) => {
         this.receive(data);
         return data.length;
       },
-      close: (code?: number, reason?: string) => {
-        this.closed = { code, reason };
-      },
+      close: (code?: number, reason?: string) => resolve({ code, reason }),
     };
     this.ws = ws as unknown as ServerWebSocket<unknown>;
   }
@@ -225,11 +226,33 @@ describe("ClangdLspManager", () => {
     manager = new ClangdLspManager("win32", await makeDir());
     const client = new FakeClient(manager);
     manager.createSession(client.ws, await makeDir());
-    expect(client.closed).toEqual({
+    expect(await client.closed).toEqual({
       code: LSP_START_FAILED_CLOSE_CODE,
       reason: "clangd is not available on Windows yet",
     });
   });
+
+  test.skipIf(process.platform === "win32")(
+    "names the version a clangd falls short of",
+    async () => {
+      const bin = await makeDir();
+      await writeFile(join(bin, "clangd"), '#!/bin/sh\necho "clangd version 15.0.6"\n');
+      await chmod(join(bin, "clangd"), 0o755);
+      const { PATH } = process.env;
+      process.env.PATH = `${bin}:${PATH}`;
+      try {
+        manager = new ClangdLspManager(process.platform, await makeDir());
+        const client = new FakeClient(manager);
+        manager.createSession(client.ws, await makeDir());
+        expect(await client.closed).toEqual({
+          code: LSP_START_FAILED_CLOSE_CODE,
+          reason: "clangd 16 or newer is required",
+        });
+      } finally {
+        process.env.PATH = PATH;
+      }
+    },
+  );
 });
 
 /** A project whose compile database runs `compiler` for `x.cpp`, with `flags` before the file. */
