@@ -54,7 +54,10 @@ function hasCodeActionProvider(
  */
 function focusedCodeEditor(): monaco.editor.ICodeEditor | undefined {
   const editors = monaco.editor.getEditors();
-  const editor = editors.find((e) => e.hasTextFocus()) ?? editors.find((e) => e.hasWidgetFocus());
+  // The last with widget focus, as Monaco: two only both have it when one is nested in the other
+  // (a peek preview's find widget), and the inner one registers later.
+  const editor =
+    editors.find((e) => e.hasTextFocus()) ?? editors.findLast((e) => e.hasWidgetFocus());
   const model = editor?.getModel();
   return model && isLiveEditorModel(model) ? editor : undefined;
 }

@@ -109,6 +109,16 @@ describe("editor code actions", () => {
     expect(tab.run).not.toHaveBeenCalled();
   });
 
+  test("in a peek preview's find widget, still the preview", () => {
+    const tab = fakeEditor("file:///wt/app.py", { focused: false, widgetFocused: true });
+    const peek = fakeEditor("file:///wt/lib.py", { focused: false, widgetFocused: true });
+    editors.push(tab.editor, peek.editor);
+    offered.set("file:///wt/lib.py", ["source.fixAll"]);
+    runEditorCodeAction("codeAction.fixAll");
+    expect(peek.run).toHaveBeenCalledTimes(1);
+    expect(tab.run).not.toHaveBeenCalled();
+  });
+
   test("a peek of a file no tab has open (a read-only snapshot) gets none", () => {
     const tab = fakeEditor("file:///wt/app.py", { focused: false, widgetFocused: true });
     editors.push(tab.editor, fakeEditor("file:///wt/lib.py", { preview: true }).editor);
