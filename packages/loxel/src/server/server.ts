@@ -42,12 +42,7 @@ import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
 import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
-import {
-  getPythonEnv,
-  refreshAllPythonEnvs,
-  refreshPythonEnv,
-  subscribePythonEnv,
-} from "./python-env";
+import { refreshAllPythonEnvs, refreshPythonEnv, subscribePythonEnv } from "./python-env";
 import { onPythonOverrideChange } from "./python-override-store";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
@@ -78,6 +73,7 @@ import type { TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
 import type { TerminalSink } from "./terminal-session";
 import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
+import { toolchainEnvs } from "./toolchain-envs";
 import { WorktreeStatusTracker } from "./worktree-status-tracker";
 import { INTERNAL_WORKTREE_PREFIX } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
@@ -432,7 +428,12 @@ function createFilesService(
       onFileMoved: (oldPath, newPath, source) =>
         broadcastFileMoved(wtPath, oldPath, newPath, source),
       onPathsChanged: (paths) => notifyLspWatchedFiles(wtPath, paths),
-      onIgnoredPathChanged: (relPath) => nodeModulesChanges.add(relPath),
+      onIgnoredPathChanged: (relPath) => {
+        nodeModulesChanges.add(relPath);
+        for (const manager of worktreeLspManagers) {
+          manager.notifyIgnoredPathChanged?.(wtPath, relPath);
+        }
+      },
     },
   );
   return service;
@@ -782,7 +783,7 @@ const agentOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
 const terminalManager = new TerminalManager({
   isSequenceEnabled: isNotificationSequenceEnabled,
-  pythonEnvFor: (worktreePath) => getPythonEnv(worktreePath),
+  toolchainEnvs,
   onNotification: (session, payload) => {
     const notification = notificationStore.add({
       source: { kind: "terminal", panelId: session.id, worktreePath: session.worktreePath },

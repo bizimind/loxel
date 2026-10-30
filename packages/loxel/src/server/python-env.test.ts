@@ -8,7 +8,6 @@ const stateDir = await mkdtemp(join(tmpdir(), "python-env-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const {
   getPythonEnv,
-  isShippedByRepo,
   refreshAllPythonEnvs,
   listPythonEnvs,
   normalizePythonOverride,
@@ -445,12 +444,6 @@ describe("resolvePythonEnv discovery", () => {
     await writeFile(join(wt, "worker", "requirements.txt"), "");
     await makeVenv(join(wt, "worker", "venv"));
     expect((await resolvePythonEnv(wt, { env: { PATH: bin } }))?.pythonPath).toBe(system);
-  });
-
-  test("treats a path that cannot be checked as tracked instead of failing", async () => {
-    const { wt } = await makeRoot();
-    Bun.spawnSync(["git", "-C", wt, "init", "-q"]);
-    expect(await isShippedByRepo(wt, join(wt, "gone", "python"))).toBe(true);
   });
 });
 
