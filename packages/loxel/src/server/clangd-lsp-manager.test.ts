@@ -355,6 +355,7 @@ describe.skipIf(!CLANGD || process.platform === "win32")("ClangdLspManager with 
       [`-Wp,-serialize-diagnostic-file,${written}`],
       ["-MJ", written],
       ["-gen-cdb-fragment-path", written],
+      ["-fmodules", `-fmodules-cache-path=${written}`],
     ];
 
     test(

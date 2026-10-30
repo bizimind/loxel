@@ -40,6 +40,7 @@ const REMOVED_COMPILE_FLAGS = [
   "-serialize-diagnostics",
   "-MJ",
   "-gen-cdb-fragment-path",
+  "-fmodules-cache-path=*",
   "--config",
   "--config=*",
   "-Xclang",
