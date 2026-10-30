@@ -22,11 +22,11 @@ pnpm -C packages/site run typecheck  # astro check
 
 ## Analytics
 
-The site sends product analytics to PostHog (EU cloud) when it is built with `PUBLIC_POSTHOG_KEY` set to the PostHog project API key. Without the key, or under `astro dev`, nothing is loaded or sent. CI passes the key (the `PUBLIC_POSTHOG_KEY` Actions variable) only to production builds from `main`, so preview deployments track nothing. To test locally, build with the key and serve with `pnpm dlx wrangler pages dev dist` from this package, which also runs the `/ingest` proxy; `astro preview` has no Functions.
+The site sends product analytics to PostHog (EU cloud) when it is built with `PUBLIC_POSTHOG_KEY` set to the PostHog project API key. Without the key, under `astro dev`, or for visitors whose browser sends Do Not Track or Global Privacy Control, nothing is loaded or sent. CI passes the key (the `PUBLIC_POSTHOG_KEY` Actions variable) only to production builds from `main`, so preview deployments track nothing. To test locally, build with the key and serve with `pnpm dlx wrangler pages dev dist` from this package, which also runs the `/ingest` proxy; `astro preview` has no Functions.
 
 - **Proxy**: the SDK sends everything to `/ingest` on the site's own domain, and the `functions/ingest/[[path]].ts` Pages Function forwards it to PostHog with the visitor's IP, so blocklists that match PostHog's domains don't drop events.
 - **Cookieless**: PostHog runs with `cookieless_mode: "always"` and stores nothing in the browser, which is designed to avoid needing a cookie consent banner. PostHog identifies a visitor by a daily-salted hash of IP and user agent, so funnels work across page loads within a day but visitors aren't recognized on later days. The PostHog project must have **Enable cookieless tracking** turned on (Settings > Project > Web analytics), or events are dropped.
-- **Events**: pageviews and autocapture, plus the custom events in `src/lib/analytics.ts`: `download_clicked`, `github_link_clicked`, `cta_viewed`, `docs_nav_clicked`, and `docs_scroll_depth`. Markup opts in by spreading `trackClick`, `trackView`, or `trackScrollDepth` onto an element, which adds `data-analytics-*` attributes; don't attach tracking to copy or CSS selectors.
+- **Events**: pageviews and page leaves, plus the custom events in `src/lib/analytics.ts`: `download_clicked`, `github_link_clicked`, `cta_viewed`, `docs_nav_clicked`, and `docs_scroll_depth`. Markup opts in by spreading `trackClick`, `trackView`, or `trackScrollDepth` onto an element, which adds `data-analytics-*` attributes; don't attach tracking to copy or CSS selectors.
 
 ## Deployment
 

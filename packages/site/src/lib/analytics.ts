@@ -1,5 +1,4 @@
 import { PUBLIC_POSTHOG_KEY } from "astro:env/client";
-import type { CaptureOptions } from "posthog-js";
 
 // The custom events the site sends, with their properties. Markup opts in through the
 // `trackClick`/`trackView`/`trackScrollDepth` attribute helpers below, so tracking never depends on
@@ -38,7 +37,7 @@ export function trackScrollDepth<E extends keyof ScrollDepthEvents>(
   return { "data-analytics-scroll-depth": event, "data-analytics-props": JSON.stringify(props) };
 }
 
-type Capture = (event: string, props: Record<string, unknown>, options?: CaptureOptions) => void;
+type Capture = (event: string, props: Record<string, unknown>) => void;
 
 /**
  * Loads PostHog and wires the `data-analytics-*` attributes to it. Does nothing in `astro dev` or
@@ -46,18 +45,30 @@ type Capture = (event: string, props: Record<string, unknown>, options?: Capture
  */
 export function initAnalytics(): void {
   const key = PUBLIC_POSTHOG_KEY;
-  if (import.meta.env.DEV || !key) return;
+  if (import.meta.env.DEV || !key || prefersNoTracking()) return;
 
   // Starts loading right away (asynchronously, without blocking rendering): events captured
   // before the SDK is ready are lost if the visitor leaves the page in the meantime.
   const posthog = loadPostHog(key).catch(() => undefined);
-  const capture: Capture = (event, props, options) => {
-    void posthog.then((client) => client?.capture(event, props, options));
+  // Custom events are sent right away rather than batched: they often fire just before the visitor
+  // leaves the page (a docs link, a scroll then a click), which drops events still in the queue.
+  const capture: Capture = (event, props) => {
+    void posthog.then((client) =>
+      client?.capture(event, props, { send_instantly: true, transport: "sendBeacon" }),
+    );
   };
 
   trackClicks(capture);
   trackViews(capture);
   trackScrollDepths(capture);
+}
+
+// Visitors who send Do Not Track or Global Privacy Control aren't tracked at all. PostHog's own
+// `respect_dnt` only withholds cookie consent, which cookieless mode never asks for, so it would
+// still send their events.
+function prefersNoTracking(): boolean {
+  const gpc = "globalPrivacyControl" in navigator && navigator.globalPrivacyControl === true;
+  return navigator.doNotTrack === "1" || gpc;
 }
 
 async function loadPostHog(key: string) {
@@ -89,8 +100,7 @@ function trackClicks(capture: Capture): void {
     const element = event.target.closest<HTMLElement>("[data-analytics-click]");
     const name = element?.dataset.analyticsClick;
     if (!element || !name) return;
-    // Tracked clicks often leave the page, which drops events still waiting in PostHog's batch queue.
-    capture(name, readProps(element), { send_instantly: true, transport: "sendBeacon" });
+    capture(name, readProps(element));
   };
   document.addEventListener("click", onClick, { capture: true });
   document.addEventListener("auxclick", onClick, { capture: true });

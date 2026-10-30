@@ -14,7 +14,8 @@ export async function onRequest({ request }: { request: Request }): Promise<Resp
   const headers = new Headers(request.headers);
   headers.delete("cookie");
   headers.delete("authorization");
-  // PostHog derives geolocation and the cookieless visitor hash from the client IP.
+  // PostHog's cookieless visitor hash includes the client IP; without this every visitor would
+  // share Cloudflare's IP. (Cookieless mode strips the IP before GeoIP runs, so there is no geolocation.)
   const clientIp = request.headers.get("CF-Connecting-IP");
   if (clientIp) headers.set("X-Forwarded-For", clientIp);
 
