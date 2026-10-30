@@ -84,7 +84,7 @@ describe("Kotlin editing in Monaco", () => {
   function type(initial: string, text: string): string {
     const model = editor.getModel()!;
     const marker = initial.indexOf("|");
-    model.setValue(marker === -1 ? initial : initial.replace("|", ""));
+    model.setValue(marker === -1 ? initial : initial.slice(0, marker) + initial.slice(marker + 1));
     // Rendering tokenizes visible lines; headless, Monaco skips auto-close on untokenized lines.
     const { tokenization } = model as unknown as InternalTextModel;
     for (let line = 1; line <= model.getLineCount(); line++) tokenization.forceTokenization(line);
