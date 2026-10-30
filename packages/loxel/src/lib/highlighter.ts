@@ -97,6 +97,9 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   ".justfile": "just",
   procfile: "yaml",
   caddyfile: "ini",
+  ".classpath": "xml",
+  ".project": "xml",
+  ".factorypath": "xml",
 
   // RC files (JSON-based)
   ".babelrc": "json",
@@ -192,6 +195,9 @@ export const EXT_TO_LANG: Record<string, string> = {
   xaml: "xml",
   axaml: "xml",
   axml: "xml",
+  pom: "xml",
+  fxml: "xml",
+  tld: "xml",
   env: "dotenv",
 
   // Docs

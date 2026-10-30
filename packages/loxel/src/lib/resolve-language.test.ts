@@ -43,6 +43,34 @@ describe("resolveLanguage for Python projects", () => {
   });
 });
 
+describe("resolveLanguage for Java tooling files", () => {
+  test.each([
+    ["/repo/src/App.java", "java"],
+    ["/repo/pom.xml", "xml"],
+    ["/repo/lib-1.0.pom", "xml"],
+    ["/repo/.classpath", "xml"],
+    ["/repo/.project", "xml"],
+    ["/repo/.factorypath", "xml"],
+    ["/repo/src/view.fxml", "xml"],
+    ["/repo/WEB-INF/tags.tld", "xml"],
+  ])("%s → %s", (path, language) => {
+    expect(resolve(path)).toBe(language);
+  });
+
+  test("resolves Eclipse project files without sniffing their content", () => {
+    expect(resolve("/home/me/repo/.worktrees/fix/x/.factorypath", "no xml here")).toBe("xml");
+  });
+
+  test.each([
+    ["/repo/META-INF/MANIFEST.MF"],
+    ["/repo/src/main/webapp/index.jsp"],
+    ["/repo/.java-version"],
+    ["/repo/.sdkmanrc"],
+  ])("leaves %s as plain text", (path) => {
+    expect(resolve(path)).toBeNull();
+  });
+});
+
 describe("resolveLanguage for build files", () => {
   test.each([
     ["/repo/Makefile", "make"],
