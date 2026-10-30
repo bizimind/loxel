@@ -1,8 +1,19 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { SchemaService } from "./schema-service";
 
 const SCHEMA = { type: "object" };
+
+// The package's test run replaces `fetch` and `Response` with happy-dom's; this needs real sockets.
+const domRegistered = GlobalRegistrator.isRegistered;
+beforeAll(async () => {
+  if (domRegistered) await GlobalRegistrator.unregister();
+});
+afterAll(() => {
+  if (domRegistered) GlobalRegistrator.register();
+});
 
 let stop: (() => void) | undefined;
 
