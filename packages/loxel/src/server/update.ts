@@ -10,6 +10,8 @@ import type { WsMessage } from "@/api/ws-protocol";
 
 import { config } from "./config";
 import { logger } from "./logger";
+import { persistedSettingsState, SETTINGS_STORE_KEY } from "./persisted-settings";
+import { getStore } from "./store-db";
 import { getCurrentVersion } from "./version";
 
 const log = logger.child("update");
@@ -134,6 +136,45 @@ export async function checkForUpdate(broadcastAlways: (msg: WsMessage) => void):
     }
     log.error("Update check failed", { error: err });
   }
+}
+
+// --- Automatic check ---
+
+/**
+ * Whether the `autoCheckForUpdates` setting allows an automatic check, given the persisted settings
+ * JSON string. On by default, but a row that cannot be parsed might hold the user's opt-out, so it
+ * counts as off.
+ */
+export function isAutoCheckEnabled(raw: string | null): boolean {
+  if (raw === null) return true;
+  const state = persistedSettingsState(raw);
+  return state !== null && state.autoCheckForUpdates !== false;
+}
+
+/**
+ * The check the server runs on its own at startup. Reads the setting when the check is due, not
+ * when it is scheduled, so turning it off right after launch still counts. The manual check
+ * (`checkForUpdate`) ignores the setting.
+ */
+export async function runAutomaticUpdateCheck(
+  broadcastAlways: (msg: WsMessage) => void,
+): Promise<void> {
+  let raw: string | null;
+  try {
+    raw = getStore(SETTINGS_STORE_KEY);
+  } catch (err) {
+    log.error("Skipping automatic update check: could not read settings", { error: err });
+    return;
+  }
+  if (!isAutoCheckEnabled(raw)) {
+    if (raw !== null && persistedSettingsState(raw) === null) {
+      log.warn("Skipping automatic update check: persisted settings are malformed");
+    } else {
+      log.info("Automatic update check is turned off");
+    }
+    return;
+  }
+  await checkForUpdate(broadcastAlways);
 }
 
 // --- Download update ---
