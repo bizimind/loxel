@@ -70,11 +70,18 @@ interface InternalTextModel {
 /** `StandardTokenType.String`, which monaco.d.ts does not export. */
 const STRING_TOKEN_TYPE = 2;
 
+/** Whether the character at `offset` is part of a string, by its token type. */
+function isStringAt(model: monaco.editor.ITextModel, lineNumber: number, offset: number): boolean {
+  const tokens = (model as unknown as InternalTextModel).tokenization.getLineTokens(lineNumber);
+  return tokens.getStandardTokenType(tokens.findTokenIndexAtOffset(offset)) === STRING_TOKEN_TYPE;
+}
+
 /**
  * Whether a `"` typed at `position` continues an open string, as in `@"say ""hi"""` or the closing
  * delimiter of a multi-line raw string, where the `"""` pair would add three stray quotes. Monaco's
  * `notIn` cannot tell, as it reads the token just before the cursor, so this reads the one before
  * the run of quotes, and before any `$` or `@`, which are colored as part of the string they open.
+ * At the start of a line that is the end of the last line with text on it.
  */
 export function isQuoteInsideOpenString(
   model: monaco.editor.ITextModel,
@@ -83,11 +90,11 @@ export function isQuoteInsideOpenString(
   const line = model.getLineContent(lineNumber);
   if (line[column - 1] === '"') return false;
   const start = line.slice(0, column - 1).search(/[$@]*""+$/);
-  if (start < 1) return false;
-  const tokens = (model as unknown as InternalTextModel).tokenization.getLineTokens(lineNumber);
-  return (
-    tokens.getStandardTokenType(tokens.findTokenIndexAtOffset(start - 1)) === STRING_TOKEN_TYPE
-  );
+  if (start === -1) return false;
+  if (start > 0) return isStringAt(model, lineNumber, start - 1);
+  let previous = lineNumber - 1;
+  while (previous > 0 && model.getLineLength(previous) === 0) previous -= 1;
+  return previous > 0 && isStringAt(model, previous, model.getLineLength(previous) - 1);
 }
 
 /** Inserts just the quote where the `"""` pair would otherwise add three stray ones. */

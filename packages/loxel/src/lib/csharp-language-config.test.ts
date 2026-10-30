@@ -209,6 +209,15 @@ describe("C# and Razor editing in Monaco", () => {
       expect(editor.getPosition()?.column).toBe(16);
     });
 
+    test("types an unindented closing delimiter by hand in a multi-line raw string", () => {
+      expect(typeAtEnd(`var s = """\nbody\n`, `"""`)).toBe(`var s = """\nbody\n"""`);
+      expect(typeAtEnd(`var s = """\nbody\n\n`, `"""`)).toBe(`var s = """\nbody\n\n"""`);
+    });
+
+    test("opens a raw string at the start of the first line", () => {
+      expect(typeAtEnd(``, `"""`)).toBe(`""""""`);
+    });
+
     test("does not auto-close triple quotes in comments", () => {
       expect(typeAtEnd("// ", `"""`)).toBe(`// """`);
       expect(typeAtEnd("/// ", `"""`)).toBe(`/// """`);
@@ -245,6 +254,11 @@ describe("C# and Razor editing in Monaco", () => {
 
     test("auto-closes an interpolation hole", () => {
       expect(typeAtEnd(`var s = `, `$"{`)).toBe(`var s = $"{}"`);
+    });
+
+    test("treats a quote at the start of a line by the line before it", () => {
+      expect(typeAtEnd(`var s = @"say\n`, `"";`)).toBe(`var s = @"say\n"";`);
+      expect(typeAtEnd(`var a = 1;\n`, `"""`)).toBe(`var a = 1;\n""""""`);
     });
 
     test("types an escaped quote at the end of a verbatim string", () => {
