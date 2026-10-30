@@ -6,7 +6,7 @@ export interface GlobalJsonSdkPath {
   path: string | null;
   /** The path lies inside the worktree. */
   insideWorktree: boolean;
-  /** Git tracks something there (see `isShippedByRepo` in `python-env.ts`). */
+  /** Git tracks something there (see `isShippedByRepo` in `shipped-by-repo.ts`). */
   tracked: boolean;
 }
 

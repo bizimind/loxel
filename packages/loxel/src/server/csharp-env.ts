@@ -13,10 +13,10 @@ import type {
 } from "@/api/csharp-env-model";
 import { isDirectory } from "@/fs-utils";
 
-import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
-import { isShippedByRepo, pathOutsideWorktree } from "./python-env";
+import { pathOutsideWorktree } from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
+import { isInside, isShippedByRepo, runGit } from "./shipped-by-repo";
 
 const log = logger.child("server");
 
@@ -505,28 +505,17 @@ function rootEntries(wtPath: string): string[] {
 
 /** Tracked and untracked but not ignored files, as absolute paths; null when git cannot answer. */
 async function gitListFiles(wtPath: string, patterns: string[]): Promise<string[] | null> {
-  try {
-    const proc = Bun.spawn(
-      [
-        "git",
-        "-C",
-        wtPath,
-        "ls-files",
-        "-z",
-        "--cached",
-        "--others",
-        "--exclude-standard",
-        "--",
-        ...patterns,
-      ],
-      { env: readOnlyGitEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore" },
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (exitCode !== 0) return null;
-    return [...new Set(stdout.split("\0").filter(Boolean))].map((file) => path.join(wtPath, file));
-  } catch {
-    return null;
-  }
+  const { exitCode, stdout } = await runGit(wtPath, [
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+    "--",
+    ...patterns,
+  ]);
+  if (exitCode !== 0) return null;
+  return [...new Set(stdout.split("\0").filter(Boolean))].map((file) => path.join(wtPath, file));
 }
 
 // ---------------------------------------------------------------------------
@@ -1034,9 +1023,4 @@ async function fileStamp(file: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-function isInside(child: string, parent: string): boolean {
-  const relative = path.relative(parent, child);
-  return !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..";
 }
