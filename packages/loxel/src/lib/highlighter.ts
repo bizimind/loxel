@@ -96,6 +96,10 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   gnumakefile: "make",
   justfile: "just",
   ".justfile": "just",
+  "go.mod": "go.mod",
+  "go.sum": "go.sum",
+  "go.work": "go.work",
+  "go.work.sum": "go.sum",
   procfile: "yaml",
   caddyfile: "ini",
 
