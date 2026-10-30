@@ -68,6 +68,7 @@ describe("Others folders routes", () => {
       externalFoldersService,
       subscribers: new Set(),
       unsubscribePythonEnv: () => {},
+      unsubscribeJavaEnv: () => {},
     };
 
     sent = [];

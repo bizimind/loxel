@@ -31,6 +31,7 @@ import {
 import type { DiffInfo } from "@/api/diff-model";
 import type { EditorConfigResponse } from "@/api/editorconfig-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
+import type { JavaEnvCandidatesResponse, JavaEnvResponse } from "@/api/java-env-model";
 import type { LogLevel } from "@/api/log-entry-model";
 import { isLogCategory, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
 import type { PanelPlacement } from "@/api/panel-placement-model";
@@ -73,6 +74,13 @@ import type { HistoryStep } from "./file-operations-service";
 import { listFolderApps } from "./folder-apps";
 import type { FormatResult } from "./format-service";
 import * as git from "./git-commands";
+import {
+  getJavaEnvResolution,
+  listJavaRuntimes,
+  normalizeJavaOverride,
+  resolveJavaEnv,
+} from "./java-env";
+import { getJavaOverride, javaOverrideStoreKey, setJavaOverride } from "./java-override-store";
 import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
@@ -1128,6 +1136,64 @@ async function handlePythonOverride(req: Request, ctx: RouteContext): Promise<Re
   }
   setPythonOverride(wtPath, chosen);
   return json(await pythonEnvResponse(wtPath));
+}
+
+/** The worktree path of a `wt` query parameter, once it is known to be a real worktree. */
+async function resolveJavaWorktree(req: Request, ctx: RouteContext): Promise<string | Response> {
+  const resolved = resolveWorktreeFromReq(req, ctx);
+  if (resolved instanceof Response) return resolved;
+  return validatedWorktreePath(resolved.wtPath, resolved.cwd);
+}
+
+async function javaEnvResponse(wtPath: string): Promise<JavaEnvResponse> {
+  const { env, ignoredJavaHome } = await getJavaEnvResolution(wtPath);
+  return { env, overridePath: getJavaOverride(wtPath), ignoredJavaHome };
+}
+
+// GET /api/java-env?wt= — The JDK Loxel uses for a worktree
+async function handleJavaEnv(req: Request, ctx: RouteContext): Promise<Response> {
+  const wtPath = await resolveJavaWorktree(req, ctx);
+  if (wtPath instanceof Response) return wtPath;
+  return json(await javaEnvResponse(wtPath));
+}
+
+// GET /api/java-env/candidates?wt= — JDKs the user can choose for a worktree
+async function handleJavaEnvCandidates(req: Request, ctx: RouteContext): Promise<Response> {
+  const wtPath = await resolveJavaWorktree(req, ctx);
+  if (wtPath instanceof Response) return wtPath;
+  const [candidates, automatic] = await Promise.all([
+    listJavaRuntimes(wtPath),
+    resolveJavaEnv(wtPath, { overridePath: null }),
+  ]);
+  const response: JavaEnvCandidatesResponse = {
+    candidates,
+    automatic: automatic.env,
+    overridePath: getJavaOverride(wtPath),
+  };
+  return json(response);
+}
+
+// POST /api/java-env/override — Choose a worktree's JDK, or (null) return to detection
+async function handleJavaOverride(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const resolved = resolveProjectFromBody(body, ctx);
+  if (resolved instanceof Response) return resolved;
+  const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
+  if (wtPath instanceof Response) return wtPath;
+  const { javaHome } = body;
+  if (javaHome !== null && typeof javaHome !== "string") {
+    return error("javaHome must be a string or null", 400);
+  }
+  let chosen: string | null = null;
+  if (javaHome !== null) {
+    try {
+      chosen = await normalizeJavaOverride(wtPath, javaHome);
+    } catch (err) {
+      return error(err instanceof Error ? err.message : "Invalid JDK", 400);
+    }
+  }
+  setJavaOverride(wtPath, chosen);
+  return json(await javaEnvResponse(wtPath));
 }
 
 // ---------------------------------------------------------------------------
@@ -2471,9 +2537,10 @@ async function removeOneWorktree(
     wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
     ctx.completeWorktreeRemoval(wtPath);
     // A worktree later created at the same path starts with an empty Others section and its own
-    // Python interpreter detection.
+    // Python interpreter and JDK detection.
     storeDb.deleteStore(externalFoldersStoreKey(wtPath));
     storeDb.deleteStore(pythonOverrideStoreKey(wtPath));
+    storeDb.deleteStore(javaOverrideStoreKey(wtPath));
     return result;
   } catch (err) {
     try {
@@ -3329,6 +3396,8 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detected-formatters": handleDetectedFormatters,
     "/api/python-env": handlePythonEnv,
     "/api/python-env/candidates": handlePythonEnvCandidates,
+    "/api/java-env": handleJavaEnv,
+    "/api/java-env/candidates": handleJavaEnvCandidates,
     "/api/editorconfig": handleEditorConfig,
   },
   POST: {
@@ -3383,6 +3452,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/external-folders/add": handleExternalFolderAdd,
     "/api/external-folders/remove": handleExternalFolderRemove,
     "/api/python-env/override": handlePythonOverride,
+    "/api/java-env/override": handleJavaOverride,
   },
 };
 

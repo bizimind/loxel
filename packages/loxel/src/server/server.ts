@@ -35,6 +35,8 @@ import { FileOperationsHistory, FileOperationsService } from "./file-operations-
 import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
+import { refreshAllJavaEnvs, refreshJavaEnv, subscribeJavaEnv } from "./java-env";
+import { onJavaOverrideChange } from "./java-override-store";
 import { tomlLspManager, worktreeLspManagers } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
@@ -518,6 +520,10 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     unsubscribePythonEnv: subscribePythonEnv(wtPath, ({ changed }) => {
       if (changed) broadcastToSubscribers(wtPath, { type: "python_env_changed", wtPath });
     }),
+    // Likewise the status bar's JDK, once something has asked for it.
+    unsubscribeJavaEnv: subscribeJavaEnv(wtPath, ({ changed }) => {
+      if (changed) broadcastToSubscribers(wtPath, { type: "java_env_changed", wtPath });
+    }),
   };
 
   wtResources.set(wtPath, resources);
@@ -576,6 +582,7 @@ function teardownWorktreeResources(wtPath: string, resources: WorktreeResources)
   resources.externalFilesService.stop();
   resources.externalFoldersService.stop();
   resources.unsubscribePythonEnv();
+  resources.unsubscribeJavaEnv();
   formatService.invalidateCache(wtPath);
   wtResources.delete(wtPath);
   log.info(`Worktree resources torn down: ${wtPath}`);
@@ -807,6 +814,7 @@ const yamlLspManager = new YamlLspManager({});
 // A chosen interpreter reaches everything that shares the worktree's resolution (language
 // servers, terminals, format on save, the status bar) without a restart.
 onPythonOverrideChange(refreshPythonEnv);
+onJavaOverrideChange(refreshJavaEnv);
 const worktreeLspManagerByRoute = new Map(
   worktreeLspManagers.map((manager) => [`/ws/${manager.name}`, manager]),
 );
@@ -1104,6 +1112,7 @@ await initSecretStore();
 // projects load; serving waits for it below. Python environments resolved before a capture (with
 // the inherited PATH, or an older capture's) resolve again when it changed what they read.
 onLoginShellEnvChange((names) => refreshAllPythonEnvs(names));
+onLoginShellEnvChange((names) => refreshAllJavaEnvs(names));
 const loginShellEnv = resolveLoginShellEnv();
 
 const repoArg = process.argv[2];

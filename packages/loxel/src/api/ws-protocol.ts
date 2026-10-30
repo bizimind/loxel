@@ -76,6 +76,8 @@ export type WsMessage =
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
   /** The worktree's Python interpreter may have changed (re-detected, or its override changed). */
   | { type: "python_env_changed"; wtPath: string }
+  /** The worktree's JDK may have changed (re-detected, or its override changed). */
+  | { type: "java_env_changed"; wtPath: string }
   | { type: "open_url"; wtPath: string; data: { url: string } & PanelOpenOptions }
   // Window-scoped (sent to the window the user is working in)
   | { type: "open_file"; data: { filePath: string } & PanelOpenOptions }

@@ -186,3 +186,13 @@ export function usePythonEnvQuery(wtPath: string | null) {
     staleTime: Infinity, // WebSocket bridge invalidates it on python_env_changed
   });
 }
+
+/** Worktree `wtPath`'s JDK, given explicitly like {@link usePythonEnvQuery}. Null defers the request. */
+export function useJavaEnvQuery(wtPath: string | null) {
+  const projectPath = useProjectStore((s) => deriveProject(wtPath, s.projects)?.path ?? null);
+  return useQuery({
+    queryKey: queryKeys.javaEnv(projectPath, wtPath),
+    queryFn: wtPath ? () => api.getJavaEnv(wtPath) : skipToken,
+    staleTime: Infinity, // WebSocket bridge invalidates it on java_env_changed
+  });
+}

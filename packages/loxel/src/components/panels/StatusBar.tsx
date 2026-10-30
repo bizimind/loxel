@@ -24,6 +24,7 @@ import { toKeyBinding } from "@/store/keybindings/key-combo";
 import { usePendingChordStore } from "@/store/keybindings/pending-chord";
 
 import { IndentationStatus } from "./IndentationStatus";
+import { JavaRuntimeStatus } from "./JavaRuntimeStatus";
 import { LanguageServerStatus } from "./LanguageServerStatus";
 import { PythonInterpreterStatus } from "./PythonInterpreterStatus";
 
@@ -112,6 +113,8 @@ export function StatusBar() {
       <IndentationStatus />
 
       <PythonInterpreterStatus />
+
+      <JavaRuntimeStatus />
 
       <LanguageServerStatus />
 

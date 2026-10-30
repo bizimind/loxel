@@ -21,9 +21,10 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
     if (prev === activeWorktreePath) return;
     if (activeWorktreePath) {
       wsClient.subscribeWorktree(activeWorktreePath);
-      // `python_env_changed` reaches only subscribers, so a cached interpreter may have gone
-      // stale while this window was on another worktree.
+      // `python_env_changed` and `java_env_changed` reach only subscribers, so a cached interpreter
+      // or JDK may have gone stale while this window was on another worktree.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pythonEnvAll() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.javaEnvAll() });
     }
     if (prev) {
       onWorktreeSavesDrained(prev, () => wsClient.unsubscribeWorktree(prev));

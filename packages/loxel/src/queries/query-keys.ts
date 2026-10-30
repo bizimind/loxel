@@ -42,6 +42,10 @@ export const queryKeys = {
     ["pythonEnv", projectPath, wtPath] as const,
   /** Prefix key for every worktree's Python interpreter. */
   pythonEnvAll: () => ["pythonEnv"] as const,
+  javaEnv: (projectPath: string | null, wtPath: string | null) =>
+    ["javaEnv", projectPath, wtPath] as const,
+  /** Prefix key for every worktree's JDK. */
+  javaEnvAll: () => ["javaEnv"] as const,
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
   openInApps: (path: string) => ["openInApps", path] as const,

@@ -324,6 +324,12 @@ export function useWsBridge(): void {
           });
           break;
 
+        case "java_env_changed":
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.javaEnv(deriveProjectPath(message.wtPath), message.wtPath),
+          });
+          break;
+
         case "external_files_changed": {
           const projectPath = deriveProjectPath(message.wtPath);
           queryClient.setQueryData(

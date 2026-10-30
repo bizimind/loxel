@@ -15,6 +15,7 @@ import {
   toggleWorktreeSidebar,
 } from "@/lib/focus-navigation";
 import { changeIndentation } from "@/lib/indentation-status";
+import { selectJavaRuntime } from "@/lib/java-runtime";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { restartLanguageServers } from "@/lib/lsp-client";
 import { navigateToNotification } from "@/lib/notification-navigation";
@@ -397,6 +398,14 @@ export function useActionHandler(): (actionId: ActionId) => void {
         const wtPath =
           getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
         if (wtPath) void selectPythonInterpreter(wtPath);
+        break;
+      }
+
+      case "java.selectRuntime": {
+        // The worktree of the file being edited, which the status bar item shows.
+        const wtPath =
+          getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
+        if (wtPath) void selectJavaRuntime(wtPath);
         break;
       }
 

@@ -12,6 +12,11 @@ import type {
   StatusInfo,
   WorktreeStatusInfo,
 } from "./git-models";
+import type {
+  JavaEnvCandidatesResponse,
+  JavaEnvResponse,
+  JavaOverrideRequest,
+} from "./java-env-model";
 import type { LogEntry } from "./log-entry-model";
 import type { OpenInApps, OpenWithAppRequest, RevealInFinderRequest } from "./open-in-model";
 import type { DirEntry } from "./project-files-model";
@@ -335,6 +340,28 @@ export async function setPythonOverride(
   request: PythonOverrideRequest,
 ): Promise<PythonEnvResponse> {
   return fetchJson<PythonEnvResponse>("/python-env/override", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+// --- JDK ---
+
+export async function getJavaEnv(worktreePath: string): Promise<JavaEnvResponse> {
+  return fetchJson<JavaEnvResponse>(withScope("/java-env", { wt: worktreePath }));
+}
+
+export async function getJavaEnvCandidates(
+  worktreePath: string,
+): Promise<JavaEnvCandidatesResponse> {
+  return fetchJson<JavaEnvCandidatesResponse>(
+    withScope("/java-env/candidates", { wt: worktreePath }),
+  );
+}
+
+/** Choose the worktree's JDK, or return it to automatic detection with null. */
+export async function setJavaOverride(request: JavaOverrideRequest): Promise<JavaEnvResponse> {
+  return fetchJson<JavaEnvResponse>("/java-env/override", {
     method: "POST",
     body: JSON.stringify(request),
   });

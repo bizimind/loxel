@@ -97,6 +97,7 @@ export type ActionId =
   | "tree.rename"
   | "editor.changeIndentation"
   | "python.selectInterpreter"
+  | "java.selectRuntime"
   | EditorCodeActionId
   | "language.restartServers"
   | "app.settings";
@@ -319,6 +320,12 @@ export const ACTIONS: readonly ActionDef[] = [
   {
     id: "python.selectInterpreter",
     label: "Python: Select Interpreter",
+    category: "language",
+    isEnabled: hasActiveWorktree,
+  },
+  {
+    id: "java.selectRuntime",
+    label: "Java: Select JDK",
     category: "language",
     isEnabled: hasActiveWorktree,
   },
