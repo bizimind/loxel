@@ -324,6 +324,9 @@ export const BUILTIN_FILE_ASSOCIATIONS: FileAssociation[] = [
   fa("**/requirements/*.txt", "pip-requirements"),
   fa("**/constraints*.txt", "pip-requirements"),
 
+  // Cargo's older config name; `config` alone says nothing about the format.
+  fa("**/.cargo/config", "toml"),
+
   // Filename-based defaults (from FILENAME_TO_LANG)
   ...Object.entries(FILENAME_TO_LANG).map(([name, lang]) => fa(`**/${name}`, lang)),
 
@@ -428,6 +431,12 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     id: builtinId("**/.cargo/config.toml"),
     glob: "**/.cargo/config.toml",
     url: "https://json.schemastore.org/cargo-config.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/rust-toolchain.toml"),
+    glob: "**/rust-toolchain.toml",
+    url: "https://json.schemastore.org/rust-toolchain.json",
     enabled: true,
   },
   {

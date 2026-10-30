@@ -43,6 +43,35 @@ describe("resolveLanguage for Python projects", () => {
   });
 });
 
+describe("resolveLanguage for Rust projects", () => {
+  test.each([
+    ["/repo/src/main.rs", "rust"],
+    ["/repo/Cargo.toml", "toml"],
+    ["/repo/Cargo.lock", "toml"],
+    ["/repo/.cargo/config.toml", "toml"],
+    ["/repo/.cargo/config", "toml"],
+    ["/home/me/.cargo/config", "toml"],
+    ["/repo/rust-toolchain.toml", "toml"],
+    ["/repo/clippy.toml", "toml"],
+    ["/repo/.clippy.toml", "toml"],
+    ["/repo/rustfmt.toml", "toml"],
+    ["/repo/.rustfmt.toml", "toml"],
+  ])("%s → %s", (path, language) => {
+    expect(resolve(path)).toBe(language);
+  });
+
+  test("leaves other files named config alone", () => {
+    expect(resolve("/repo/config")).toBeNull();
+    expect(resolve("/repo/.git/config")).toBeNull();
+  });
+
+  // Its legacy format is a bare channel name, on which Tombi would report a syntax error.
+  test("leaves the extensionless rust-toolchain as plain text", () => {
+    expect(resolve("/repo/rust-toolchain", "nightly-2024-01-01\n")).toBeNull();
+    expect(resolve("/repo/rust-toolchain", '[toolchain]\nchannel = "stable"\n')).toBeNull();
+  });
+});
+
 describe("resolveLanguage for build files", () => {
   test.each([
     ["/repo/Makefile", "make"],

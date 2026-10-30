@@ -26,3 +26,19 @@ describe("Python project icons", () => {
     },
   );
 });
+
+describe("Rust project icons", () => {
+  test.each([
+    ["main.rs", "rustFile_dark.svg"],
+    ["Cargo.toml", "cargo_dark.svg"],
+    ["Cargo.lock", "cargoLock_dark.svg"],
+    ["rust-toolchain.toml", "cargo_dark.svg"],
+    ["rust-toolchain", "cargo_dark.svg"],
+    ["clippy.toml", "rustFile_dark.svg"],
+    [".clippy.toml", "rustFile_dark.svg"],
+    ["rustfmt.toml", "rustFile_dark.svg"],
+    [".rustfmt.toml", "rustFile_dark.svg"],
+  ])("%s → %s", (filename, icon) => {
+    expect(getFileIconPath(filename)).toBe(`./icons/${icon}`);
+  });
+});
