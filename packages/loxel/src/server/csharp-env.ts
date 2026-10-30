@@ -757,8 +757,14 @@ function scanPropertyGroups(source: string, file: string): PropSetting[] | null 
   return settings.length === mentions ? settings : null;
 }
 
+/** Until nothing changes, since removing one comment can complete the opening of another. */
 function stripXmlComments(text: string): string {
-  return text.replace(/<!--[\s\S]*?-->/g, "");
+  let stripped = text;
+  for (;;) {
+    const next = stripped.replace(/<!--[\s\S]*?-->/g, "");
+    if (next === stripped) return stripped;
+    stripped = next;
+  }
 }
 
 function xmlAttribute(element: string, name: string): string | null {

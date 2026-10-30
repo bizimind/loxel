@@ -736,6 +736,7 @@ describe("csharpRestoreState", () => {
       "<PropertyGroup Label=\">\" Condition=\"'$(CI)'=='1'\"><UseArtifactsOutput>true</UseArtifactsOutput></PropertyGroup>",
       "<PropertyGroup /><PropertyGroup Condition=\"'$(CI)'=='1'\"><UseArtifactsOutput>true</UseArtifactsOutput></PropertyGroup>",
       "<UseArtifactsOutput />",
+      "<!<!-- x -->-- <PropertyGroup><UseArtifactsOutput>maybe</UseArtifactsOutput></PropertyGroup>",
       "<Choose><When Condition=\"'$(CI)'=='1'\"><Import Project=\"eng/x.props\" /></When></Choose>",
     ]) {
       await write(join(wt, "Directory.Build.props"), `<Project>${props}</Project>`);
