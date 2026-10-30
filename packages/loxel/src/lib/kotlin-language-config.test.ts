@@ -5,7 +5,7 @@ import * as monaco from "monaco-editor";
 
 import { getHighlighter } from "./highlighter";
 import { registerLanguageConfiguration } from "./kotlin-language-config";
-import { registerPythonLanguageConfiguration } from "./python-language-config";
+import { registerLanguageConfiguration as registerPythonLanguageConfiguration } from "./python-language-config";
 import { resolveLanguage } from "./resolve-language";
 
 /** Internal model surface (not in monaco.d.ts) used to tokenize synchronously. */
@@ -160,7 +160,6 @@ describe("Kotlin editing in Monaco", () => {
     ["list.map { x ->|}", "\n", "list.map { x ->\n    |\n}"],
     ["list.map { (a, b): Pair<Int, Int> ->", "\n", "list.map { (a, b): Pair<Int, Int> ->\n    |"],
     ["list.map { x -> x + 1 }", "\n", "list.map { x -> x + 1 }\n|"],
-    ["list.map { x -> // why", "\n", "list.map { x -> // why\n    |"],
     ["list.map { x -> ", "\n", "list.map { x -> \n    |"],
     ["x.let { it } ->", "\n", "x.let { it } ->\n|"],
     // Only lambdas: `when` branches and function types keep the current indent.

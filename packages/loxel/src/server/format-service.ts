@@ -1,18 +1,21 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import type { FileSink } from "bun";
+
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 
 import type { BackendMode, FormatterBackend } from "./formatter-backends";
+import {
+  type FileFormatter,
+  type FormatterSpawnOptions,
+  type LanguageFormatter,
+  nodeModulesBin,
+} from "./language-formatter";
+import { languageFormatters } from "./language-formatters";
 import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
 import { PrettierLibBackend } from "./prettier-lib-backend";
-import {
-  detectPythonFormatter,
-  findVenvBin,
-  PYTHON_FORMAT_EXTENSIONS,
-  type PythonFormatter,
-} from "./python-formatter";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 
 const log = logger.child("format");
@@ -190,6 +193,8 @@ export class FormatService {
   private cacheByWorktree = new Map<string, DetectionCache>();
   private backends = new Map<string, FormatterBackend>();
 
+  constructor(private readonly languages: readonly LanguageFormatter[] = languageFormatters) {}
+
   /**
    * Format file content using the resolved formatter.
    * Returns null `content` if no formatter matched or formatting failed.
@@ -230,14 +235,15 @@ export class FormatService {
   }
 
   /**
-   * Return detected formatters for a worktree (for settings UI). The Python formatter is listed
-   * as detected for the worktree root; subprojects may resolve to a different one.
+   * Return detected formatters for a worktree (for settings UI). Language modules' formatters are
+   * listed as detected for the worktree root; subprojects may resolve to a different one.
    */
   getDetectedFormatters(worktreePath: string): { command: string; extensions: string[] }[] {
-    const python = detectPythonFormatter(worktreePath, worktreePath);
-    const formatters = python
-      ? [...this.detectFormatters(worktreePath), toDetectedPythonFormatter(python)]
-      : this.detectFormatters(worktreePath);
+    const formatters = [...this.detectFormatters(worktreePath)];
+    for (const language of this.languages) {
+      const detected = detectFormatter(language, worktreePath, worktreePath);
+      if (detected) formatters.push(toDetectedFormatter(detected, language));
+    }
     return formatters.map((f) => ({ command: f.command, extensions: [...f.extensions] }));
   }
 
@@ -266,19 +272,47 @@ export class FormatService {
   // -------------------------------------------------------------------------
 
   /**
-   * The auto-detected formatter for a file. Python formatters are resolved per file from the
-   * nearest config (see `detectPythonFormatter`); the others from the worktree root's config.
+   * The auto-detected formatter for a file: per file from the language modules claiming its
+   * extension, else from the worktree root's config.
    */
   private findDetectedFormatter(
     ext: string,
     filePath: string,
     worktreePath: string,
   ): DetectedFormatter | undefined {
-    if (!PYTHON_FORMAT_EXTENSIONS.includes(ext)) {
-      return this.detectFormatters(worktreePath).find((f) => f.extensions.has(ext));
+    const dir = fileDir(filePath, worktreePath);
+    for (const language of this.languages) {
+      const detected =
+        language.extensions.includes(ext) && detectFormatter(language, dir, worktreePath);
+      if (detected) return toDetectedFormatter(detected, language);
     }
-    const python = detectPythonFormatter(fileDir(filePath, worktreePath), worktreePath);
-    return python ? toDetectedPythonFormatter(python) : undefined;
+    return this.detectFormatters(worktreePath).find((f) => f.extensions.has(ext));
+  }
+
+  /** How to spawn `command` for a file: what its language module sets, over the defaults. */
+  private async spawnOptions(
+    command: string,
+    ext: string,
+    filePath: string,
+    worktreePath: string,
+  ): Promise<FormatterSpawnOptions> {
+    const language = this.languages.find((l) => l.extensions.includes(ext));
+    let options: FormatterSpawnOptions | undefined;
+    try {
+      options = await language?.spawnOptions?.(
+        command,
+        fileDir(filePath, worktreePath),
+        worktreePath,
+      );
+    } catch (err) {
+      // Formatting runs before the write: a module's failure must not lose the save.
+      log.warn("Formatter spawn options failed", { command, filePath, error: errorMessage(err) });
+    }
+    return {
+      ...options,
+      cwd: options?.cwd ?? worktreePath,
+      binDirs: options?.binDirs ?? [nodeModulesBin(worktreePath)],
+    };
   }
 
   private async formatWithBackend(
@@ -365,42 +399,34 @@ export class FormatService {
     worktreePath: string | undefined,
   ): Promise<FormatResult> {
     const ext = extractExtension(filePath) ?? "";
+    const options = worktreePath
+      ? await this.spawnOptions(command, ext, filePath, worktreePath)
+      : {};
+    // Relative paths are relative to the worktree, so they would not survive another cwd.
+    const fromWorktree = (path: string) =>
+      worktreePath && options.cwd !== worktreePath ? resolve(worktreePath, path) : path;
     // Split template args first, then substitute placeholders in each element.
     // This prevents file paths with spaces from being split across arguments.
     const argv = [
-      command,
-      ...splitArgs(argsTemplate).map((a) => substitutePlaceholders(a, filePath, ext)),
+      command.includes("/") ? fromWorktree(command) : command,
+      ...splitArgs(argsTemplate).map((a) => substitutePlaceholders(a, fromWorktree(filePath), ext)),
     ].filter(Boolean);
 
-    const env = buildSpawnEnv();
-    // Prepend node_modules/.bin, and for Python files the project venv's bin, so project-local
-    // formatters win over global installs.
-    if (worktreePath) {
-      env.PATH = prependPath(env.PATH, join(worktreePath, "node_modules", ".bin"));
-      // A command given as a path does not go through PATH.
-      const venvBin =
-        PYTHON_FORMAT_EXTENSIONS.includes(ext) && !command.includes("/")
-          ? await findVenvBin(fileDir(filePath, worktreePath), worktreePath, command)
-          : undefined;
-      if (venvBin) env.PATH = prependPath(env.PATH, venvBin);
-    }
+    const env = { ...buildSpawnEnv(), ...options.env };
+    // Project-local formatters win over global installs.
+    if (options.binDirs?.length)
+      env.PATH = [...options.binDirs, env.PATH].filter(Boolean).join(":");
 
     let proc: ReturnType<typeof spawnFormatter>;
     try {
-      proc = spawnFormatter(argv, worktreePath, env);
+      proc = spawnFormatter(argv, options.cwd, env);
     } catch (err) {
-      log.warn("Formatter could not be started", {
-        command,
-        filePath,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      log.warn("Formatter could not be started", { command, filePath, error: errorMessage(err) });
       return { content: null, notice: spawnFailureNotice(command, err, env.PATH ?? "") };
     }
 
     try {
-      // Write content to stdin
-      proc.stdin.write(content);
-      proc.stdin.end();
+      feedStdin(proc.stdin, content, command);
 
       // Race between process completion and timeout
       const exitCode = await Promise.race([
@@ -438,11 +464,7 @@ export class FormatService {
 
       return { content: formatted };
     } catch (err) {
-      log.warn("Formatter failed", {
-        command,
-        filePath,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      log.warn("Formatter failed", { command, filePath, error: errorMessage(err) });
       return UNFORMATTED;
     }
   }
@@ -450,16 +472,34 @@ export class FormatService {
 
 function spawnFormatter(
   argv: string[],
-  worktreePath: string | undefined,
+  cwd: string | undefined,
   env: Record<string, string | undefined>,
 ) {
-  return Bun.spawn(argv, {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: worktreePath ?? undefined,
-    env,
-  });
+  return Bun.spawn(argv, { stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd, env });
+}
+
+/**
+ * Write `content` to a formatter's stdin without waiting for it to be read. A formatter that exits
+ * first (`EPIPE`, thrown or as a rejection depending on how much was buffered) is not a failure of
+ * its own: its exit code and output still decide the result. Other errors throw or get logged.
+ */
+function feedStdin(stdin: FileSink, content: string, command: string): void {
+  const logRejection = (err: unknown) => {
+    if (!isClosedPipe(err))
+      log.warn("Formatter stdin failed", { command, error: errorMessage(err) });
+  };
+  try {
+    for (const step of [() => stdin.write(content), () => stdin.end()]) {
+      const pending = step();
+      if (pending instanceof Promise) pending.catch(logRejection);
+    }
+  } catch (err) {
+    if (!isClosedPipe(err)) throw err;
+  }
+}
+
+function isClosedPipe(err: unknown): boolean {
+  return err instanceof Error && "code" in err && err.code === "EPIPE";
 }
 
 /**
@@ -495,12 +535,29 @@ function fileDir(filePath: string, worktreePath: string): string {
   return dirname(resolve(worktreePath, filePath));
 }
 
-function prependPath(path: string | undefined, dir: string): string {
-  return path ? `${dir}:${path}` : dir;
+/** A module's `detect`; one that throws detects nothing, since formatting runs before the write. */
+function detectFormatter(
+  language: LanguageFormatter,
+  dir: string,
+  wtRoot: string,
+): FileFormatter | null {
+  try {
+    return language.detect(dir, wtRoot);
+  } catch (err) {
+    log.warn("Formatter detection failed", { dir, error: errorMessage(err) });
+    return null;
+  }
 }
 
-function toDetectedPythonFormatter(python: PythonFormatter): DetectedFormatter {
-  return { ...python, extensions: new Set(PYTHON_FORMAT_EXTENSIONS), backendMode: "command" };
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function toDetectedFormatter(
+  formatter: FileFormatter,
+  language: LanguageFormatter,
+): DetectedFormatter {
+  return { ...formatter, extensions: new Set(language.extensions), backendMode: "command" };
 }
 
 function findMatchingOverride(

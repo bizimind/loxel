@@ -87,7 +87,7 @@ function overtypeTripleQuotes(editor: monaco.editor.ICodeEditor): void {
  *
  * Resolves once ours is registered, or failed to (logged), after the first Python model.
  */
-export function registerPythonLanguageConfiguration(): Promise<void> {
+export function registerLanguageConfiguration(): Promise<void> {
   monaco.editor.onDidCreateEditor(overtypeTripleQuotes);
   return new Promise((resolve) => {
     monaco.languages.onLanguageEncountered("python", () => {

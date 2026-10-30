@@ -12,7 +12,7 @@ Running one server instead of one per window removes a whole class of cross-proc
 - **Watchers** — one set of watchers and one `git status` per event, whatever the window count (see [WATCHERS.md](WATCHERS.md)).
 - **Write nonces** — all clients share one nonce store, so the window that saved a file suppresses its own echo while every other window viewing the file receives `file_content_changed` as an external change.
 - **Caches** — directory caches and Git status snapshots are shared rather than duplicated.
-- **Updates** — one server checks for and downloads updates.
+- **Updates** — one server checks for and downloads updates. It checks by itself once at startup unless the `autoCheckForUpdates` setting is off; the manual check in Settings always works.
 
 ## Electron: discover or spawn
 

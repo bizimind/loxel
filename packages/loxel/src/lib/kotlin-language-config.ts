@@ -4,8 +4,8 @@ import { frontendLog } from "./frontend-logger";
 
 const log = frontendLog.child("ui");
 
-/** A lambda opened on this line whose parameter list ends it, as in `list.map { x -> // why`. */
-const LAMBDA_PARAMETERS_BEFORE = /\{[^{}]*->\s*(?:\/\/.*)?$/;
+/** A lambda opened on this line whose parameter list ends it, as in `list.map { x ->`. */
+const LAMBDA_PARAMETERS_BEFORE = /\{[^{}]*->\s*$/;
 /** An open KDoc comment, as in `/** ...` up to the cursor. */
 const KDOC_START_BEFORE = /^\s*\/\*\*(?!\/)(?:[^*]|\*(?!\/))*$/;
 /** A KDoc body line: its ` * ` sits one space past the comment's indent. */

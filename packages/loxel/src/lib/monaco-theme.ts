@@ -1,6 +1,9 @@
+import type { SemanticTokenStyling } from "@bizimind/monaco-lsp-client";
 import { textmateThemeToMonacoTheme } from "@shikijs/monaco";
 import * as monaco from "monaco-editor";
 import type { Highlighter } from "shiki";
+
+import { loxelDark } from "./loxel-themes";
 
 function resolveColorVar(name: string, el: Element): string {
   const raw = getComputedStyle(el).getPropertyValue(name).trim();
@@ -26,10 +29,9 @@ function readThemeColors(el: Element) {
   };
 }
 
-// Semantic token rules from LSPs (TypeScript, basedpyright) — these layer on top of
-// TextMate syntax tokens and are styled by Monaco's semantic token renderer. A token
-// type without a rule is painted in the default foreground, hiding its TextMate color,
-// so every type a server emits needs a rule here.
+// Semantic token rules from LSPs — these layer on top of TextMate syntax tokens and are
+// styled by Monaco's semantic token renderer. Only deliberate choices belong here: a token
+// type without a rule keeps its TextMate color (see `SEMANTIC_TOKEN_STYLING`).
 const DARK_SEMANTIC_RULES: monaco.editor.ITokenThemeRule[] = [
   { token: "function", foreground: "659488" }, // #659488
   // { token: "function", foreground: "57A8F5" },
@@ -54,6 +56,18 @@ const DARK_SEMANTIC_RULES: monaco.editor.ITokenThemeRule[] = [
   { token: "variable.readonly", foreground: "a6859e" }, // #a6859e
   { token: "delimiter.html", foreground: "93B196" }, // #93B196
 ];
+
+/**
+ * What the theme styles, for language clients. A type counts only with a rule of its own: Monaco
+ * paints `punctuation` in the default foreground even with a `punctuation.definition.comment` rule.
+ */
+export const SEMANTIC_TOKEN_STYLING: SemanticTokenStyling = {
+  types: new Set([
+    ...DARK_SEMANTIC_RULES.map((rule) => rule.token),
+    ...loxelDark.settings.flatMap((setting) => setting.scope ?? []),
+  ]),
+  modifiers: new Set(DARK_SEMANTIC_RULES.flatMap((rule) => rule.token.split(".").slice(1))),
+};
 
 /**
  * Register initial Monaco themes synchronously so editors that mount before
