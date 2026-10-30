@@ -54,6 +54,11 @@ export function isInsideTripleQuote(line: string, column: number, quote: string)
   return start < offset && offset < end && end - start === 3;
 }
 
+/** Adds a language, whose configuration auto-closes `"""` or `'''`, to the step-over below. */
+export function stepOverTripleQuotesIn(language: string): void {
+  TRIPLE_QUOTE_LANGUAGES.add(language);
+}
+
 /**
  * Monaco overtypes only the first character of a multi-character auto-closed pair, so typing the
  * closing `"""` of an auto-closed docstring would leave two stray quotes. Step over the rest of a

@@ -28,6 +28,7 @@ const BUNDLED_LANGUAGES = [
   "c",
   "cpp",
   "csharp",
+  "razor",
   "swift",
   "kotlin",
   "ruby",
@@ -98,6 +99,16 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   procfile: "yaml",
   caddyfile: "ini",
 
+  // .NET XML configuration (the `config` extension alone is not always XML)
+  "app.config": "xml",
+  "applicationhost.config": "xml",
+  "machine.config": "xml",
+  "nuget.config": "xml",
+  "packages.config": "xml",
+  "web.config": "xml",
+  "web.debug.config": "xml",
+  "web.release.config": "xml",
+
   // RC files (JSON-based)
   ".babelrc": "json",
   ".prettierrc": "json",
@@ -110,6 +121,7 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   // RC files (YAML-based)
   ".clang-format": "yaml",
   ".clang-tidy": "yaml",
+  ".csharpierrc": "yaml", // JSON or YAML, and JSON is valid YAML
   ".yamllint": "yaml",
 
   // RC files (INI-based)
@@ -169,12 +181,14 @@ export const EXT_TO_LANG: Record<string, string> = {
   jsonc: "jsonc",
   jsonl: "jsonl",
   ndjson: "jsonl",
+  slnf: "json",
   yaml: "yaml",
   yml: "yaml",
   toml: "toml",
   ini: "ini",
   cfg: "ini",
   conf: "ini",
+  globalconfig: "ini",
   xml: "xml",
   xsd: "xml",
   xsl: "xml",
@@ -185,6 +199,7 @@ export const EXT_TO_LANG: Record<string, string> = {
   csproj: "xml",
   fsproj: "xml",
   vbproj: "xml",
+  slnx: "xml",
   props: "xml",
   targets: "xml",
   nuspec: "xml",
@@ -207,7 +222,11 @@ export const EXT_TO_LANG: Record<string, string> = {
   cc: "cpp",
   cxx: "cpp",
   hpp: "cpp",
+  cake: "csharp",
   cs: "csharp",
+  cshtml: "razor",
+  csx: "csharp",
+  razor: "razor",
 
   // JVM
   java: "java",
