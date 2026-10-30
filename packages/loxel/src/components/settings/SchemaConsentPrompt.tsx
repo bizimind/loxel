@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { showToast } from "@/components/ui/toast";
 import { useSchemaConsentStore } from "@/store/schema-consent";
 
-function reportFailure(err: unknown): void {
+export function reportFailure(err: unknown): void {
   showToast(`Could not save your choice: ${err instanceof Error ? err.message : String(err)}`);
 }
 
@@ -34,8 +34,8 @@ export function SchemaConsentPrompt() {
         Download this schema?{waiting > 1 ? ` (1 of ${waiting})` : ""}
       </span>
       <span className="text-muted-foreground text-xs">
-        A file in this project names a schema at this address. Loxel downloads it only if you allow
-        it. The file works without it, without schema checks and completions.
+        A file in this project, or a schema it uses, names a schema at this address. Loxel downloads
+        it only if you allow it. The file works without it, without schema checks and completions.
       </span>
       <code className="text-foreground bg-muted max-h-24 overflow-y-auto rounded px-1.5 py-1 text-[11px] break-all">
         {url}

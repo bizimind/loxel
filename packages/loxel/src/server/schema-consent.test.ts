@@ -31,6 +31,7 @@ describe("normalizeSchemaUrl", () => {
   test("refuses everything else", () => {
     expect(normalizeSchemaUrl("file:///etc/passwd")).toBeNull();
     expect(normalizeSchemaUrl("./local.json")).toBeNull();
+    expect(normalizeSchemaUrl("https://github.com@example.org/a.json")).toBeNull();
     expect(normalizeSchemaUrl(`https://example.com/${"a".repeat(3000)}`)).toBeNull();
   });
 });
@@ -125,6 +126,49 @@ describe("SchemaConsent", () => {
     expect(consent.check(sibling)).toBe("undecided");
   });
 
+  test("a chain of same-origin references shares the verdict, unless a link is denied", () => {
+    const { consent } = setup();
+    const one = "https://schemas.example.com/one.json";
+    const two = "https://schemas.example.com/two.json";
+    consent.decide(URL_A, "trust");
+    consent.addReferences(URL_A, [one]);
+    consent.addReferences(one, [two]);
+    expect(consent.check(two)).toBe("allowed");
+    consent.decide(one, "deny");
+    expect(consent.check(one)).toBe("denied");
+    expect(consent.check(two)).toBe("undecided");
+  });
+
+  test("a configured schema brings its references along, from any origin", () => {
+    const { consent } = setup();
+    const www = "https://www.example.com/a.json";
+    const partial = "https://cdn.example.net/partial.json";
+    consent.setConfigured([URL_A]);
+    consent.setNeverFetch(true);
+    expect(consent.mayFollowRedirect(URL_A, www)).toBe(true);
+    consent.addReferences(www, [partial]);
+    expect(consent.request(partial)).toBe("allowed");
+    expect(consent.state().pending).toEqual([]);
+  });
+
+  test("a redirect from a trusted URL stays on its origin without asking", () => {
+    const { consent } = setup();
+    consent.decide(URL_A, "trust");
+    expect(consent.mayFollowRedirect(URL_A, "https://schemas.example.com/moved.json")).toBe(true);
+    expect(consent.state().pending).toEqual([]);
+    expect(consent.mayFollowRedirect(URL_A, "http://127.0.0.1:8080/x")).toBe(false);
+    expect(consent.state().pending).toEqual(["http://127.0.0.1:8080/x"]);
+  });
+
+  test("trusting under the switch records the choice without downloading", () => {
+    const { consent, decisions } = setup();
+    consent.setNeverFetch(true);
+    decisions.length = 0;
+    consent.decide(URL_A, "trust");
+    expect(decisions).toEqual([]);
+    expect(consent.check(URL_A)).toBe("denied");
+  });
+
   test("references of an undecided schema are not allowed", () => {
     const { consent } = setup();
     const sibling = "https://schemas.example.com/partial.json";
@@ -158,6 +202,14 @@ describe("SchemaConsent", () => {
     expect(consent.check(URL_A)).toBe("undecided");
     const wrongShape = setup(JSON.stringify({ trusted: "everything" }));
     expect(wrongShape.consent.check(URL_A)).toBe("undecided");
+  });
+
+  test("persisted entries that are not schema URLs are dropped", () => {
+    const { consent } = setup(
+      JSON.stringify({ trusted: ["not a url", URL_A], denied: [], neverFetch: false }),
+    );
+    expect(consent.state().trusted).toEqual([URL_A]);
+    expect(consent.chosenHosts()).toEqual(["schemas.example.com"]);
   });
 
   test("the number of prompts is bounded", () => {

@@ -803,7 +803,7 @@ const terminalManager = new TerminalManager({
 });
 const agentManager = new AgentManager();
 const notificationStore = new NotificationStore();
-const schemaService = new SchemaService();
+const schemaService = new SchemaService((from, to) => schemaConsent.mayFollowRedirect(from, to));
 const formatService = new FormatService();
 const SCHEMA_CONSENT_STORE_KEY = "schema-consent";
 const schemaConsent = new SchemaConsent({
@@ -831,6 +831,7 @@ const schemaDownloads = new SchemaDownloads({
     }
   },
 });
+tomlLspManager.setTrustedHosts(schemaConsent.chosenHosts());
 const yamlLspManager = new YamlLspManager({}, (url) => schemaDownloads.contentFor(url));
 // A chosen interpreter reaches everything that shares the worktree's resolution (language
 // servers, terminals, format on save, the status bar) without a restart.

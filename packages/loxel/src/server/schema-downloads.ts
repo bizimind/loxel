@@ -1,6 +1,8 @@
 import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 
+import { xmlSchemaLocations } from "@/lib/schema-references";
+
 import { logger } from "./logger";
 import { normalizeSchemaUrl, type SchemaVerdict } from "./schema-consent";
 
@@ -12,8 +14,6 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_FILES_PER_SCHEMA = 100;
 /** What a language server gets for a schema it may not have: one that accepts everything. */
 const EMPTY_SCHEMA = "{}";
-
-const XML_REFERENCE_RE = /(?:schemaLocation|SYSTEM|href)\s*=?\s*["']([^"']+)["']/g;
 
 /** The absolute HTTP(S) URLs a JSON Schema, XSD or DTD references, resolved against its URL. */
 export function schemaReferences(text: string, url: string): string[] {
@@ -33,7 +33,7 @@ export function schemaReferences(text: string, url: string): string[] {
     parsed = JSON.parse(text);
   } catch {
     // Not JSON: a YAML schema (the server reads its references through the same gate) or XML.
-    for (const match of text.matchAll(XML_REFERENCE_RE)) add(match[1]!);
+    for (const location of xmlSchemaLocations(text)) add(location);
     return [...references];
   }
 
@@ -75,8 +75,12 @@ export function lemminxCachePath(root: string, url: string): string | null {
   }
 }
 
-/** The path of `segments` under `root`, or null when they would lead out of it. */
+/**
+ * The path of `segments` under `root`, or null when one is not a plain name: a decoded `%2F` must
+ * not let one URL write the file another URL is read from.
+ */
 function confined(root: string, segments: string[]): string | null {
+  if (segments.some((segment) => /^\.\.?$|[/\\\0]/.test(segment))) return null;
   const path = resolve(root, ...segments);
   return path.startsWith(resolve(root) + sep) ? path : null;
 }
@@ -101,6 +105,8 @@ export interface SchemaDownloadsOptions {
 export class SchemaDownloads {
   /** Settles once a running {@link onRevoked} has emptied the caches. */
   private revoking: Promise<unknown> = Promise.resolve();
+  /** Bumped by {@link onRevoked}: a download that began before it writes nothing after it. */
+  private generation = 0;
   /** Downloads under way, so a file opening while one runs does not restart servers twice. */
   private readonly running = new Map<string, Promise<boolean>>();
 
@@ -111,6 +117,7 @@ export class SchemaDownloads {
     if (this.options.request(url) !== "allowed") return EMPTY_SCHEMA;
     const text = await this.options.fetchText(url);
     if (text === null) throw new Error(`Could not download ${url}`);
+    if (this.options.request(url) !== "allowed") return EMPTY_SCHEMA;
     this.options.addReferences(url, schemaReferences(text, url));
     return text;
   }
@@ -130,6 +137,7 @@ export class SchemaDownloads {
 
   /** Forget everything downloaded, after the user took a trust decision back. */
   async onRevoked(): Promise<void> {
+    this.generation++;
     this.revoking = Promise.all(
       [this.options.tombiCacheDir, this.options.lemminxWorkDir].map((dir) =>
         rm(dir, { recursive: true, force: true }),
@@ -145,23 +153,26 @@ export class SchemaDownloads {
 
   /** Cache `root` once at a time. Resolves to whether this call brought a new file. */
   private async cache(root: string): Promise<boolean> {
-    const running = this.running.get(root);
+    const key = `${this.generation} ${root}`;
+    const running = this.running.get(key);
     if (running) {
       await running;
       return false;
     }
-    const download = this.download(root).finally(() => this.running.delete(root));
-    this.running.set(root, download);
+    const download = this.download(root).finally(() => this.running.delete(key));
+    this.running.set(key, download);
     return download;
   }
 
   private async download(root: string): Promise<boolean> {
+    const { generation } = this;
     await this.revoking;
     const queue = [root];
     const seen = new Set(queue);
     let arrived = false;
     while (queue.length > 0 && seen.size <= MAX_FILES_PER_SCHEMA) {
       const url = queue.shift()!;
+      if (this.options.request(url) !== "allowed") continue;
       const paths = this.cachePaths(url);
       if (paths.length === 0) continue;
       const age = await cacheAge(paths);
@@ -169,8 +180,10 @@ export class SchemaDownloads {
 
       const text = await this.options.fetchText(url);
       if (text === null) continue;
-      await writeAll(paths, text);
-      if (age === null) arrived = true;
+      if (generation !== this.generation || this.options.request(url) !== "allowed") {
+        return arrived;
+      }
+      if ((await writeAll(paths, text)) && age === null) arrived = true;
 
       const references = schemaReferences(text, url);
       this.options.addReferences(root, references);
@@ -201,7 +214,8 @@ async function cacheAge(paths: readonly string[]): Promise<number | null> {
   }
 }
 
-async function writeAll(paths: readonly string[], text: string): Promise<void> {
+/** Whether `text` reached every path. */
+async function writeAll(paths: readonly string[], text: string): Promise<boolean> {
   try {
     await Promise.all(
       paths.map(async (path) => {
@@ -209,7 +223,9 @@ async function writeAll(paths: readonly string[], text: string): Promise<void> {
         await writeFile(path, text);
       }),
     );
+    return true;
   } catch (err) {
     log.warn("Could not cache a schema", { error: err instanceof Error ? err : undefined });
+    return false;
   }
 }

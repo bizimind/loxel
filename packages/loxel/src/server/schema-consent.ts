@@ -21,6 +21,8 @@ export function normalizeSchemaUrl(url: string): string | null {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    // `https://github.com@example.org/` reads as another host, and would send credentials.
+    if (parsed.username || parsed.password) return null;
     parsed.hash = "";
     return parsed.href;
   } catch {
@@ -43,6 +45,7 @@ export interface SchemaConsentOptions {
  * the user's own choice and always may; anything else needs the user's decision, which is persisted
  * here. A schema's same-origin references count as part of it, so trusting a schema does not ask
  * again for each file it is split into, while a reference to another origin asks like any other URL.
+ * What a configured schema references or redirects to needs no decision, wherever it is.
  */
 export class SchemaConsent {
   private decisions: SchemaConsentDecisions;
@@ -72,10 +75,9 @@ export class SchemaConsent {
     const normalized = normalizeSchemaUrl(url);
     if (!normalized) return "denied";
     const direct = this.checkOne(normalized);
-    if (direct !== "undecided") return direct;
-    const roots = this.referencedBy.get(normalized);
-    if (roots && [...roots].some((root) => this.checkOne(root) === "allowed")) return "allowed";
-    return "undecided";
+    if (direct === "allowed" || this.decisions.denied.includes(normalized)) return direct;
+    const viaRoot = this.roots(normalized).some((root) => this.checkOne(root) === "allowed");
+    return viaRoot ? "allowed" : direct;
   }
 
   /** The verdict on a URL, asking the user when it has none yet. */
@@ -103,18 +105,30 @@ export class SchemaConsent {
     this.publish();
   }
 
-  /** Record what `root` references, keeping the same-origin URLs as part of it. */
+  /** Record what `root` references, keeping the URLs it may bring along as part of it. */
   addReferences(root: string, references: readonly string[]): void {
     const normalizedRoot = normalizeSchemaUrl(root);
     if (!normalizedRoot) return;
     const { origin } = new URL(normalizedRoot);
+    const anyOrigin = [normalizedRoot, ...this.roots(normalizedRoot)].some((url) =>
+      this.configured.has(url),
+    );
     for (const reference of references) {
       const normalized = normalizeSchemaUrl(reference);
-      if (!normalized || new URL(normalized).origin !== origin) continue;
+      if (!normalized || (!anyOrigin && new URL(normalized).origin !== origin)) continue;
       const roots = this.referencedBy.get(normalized) ?? new Set<string>();
       roots.add(normalizedRoot);
       this.referencedBy.set(normalized, roots);
     }
+  }
+
+  /**
+   * Whether a download of `from` may follow its redirect to `to`, which counts as a reference: the
+   * user allowed one address, and a redirect must not make that another one they never saw.
+   */
+  mayFollowRedirect(from: string, to: string): boolean {
+    this.addReferences(from, [to]);
+    return this.request(to) === "allowed";
   }
 
   /** Record a decision on a URL; null forgets it, so the next use asks again. */
@@ -131,8 +145,10 @@ export class SchemaConsent {
     this.pending.delete(normalized);
     this.options.save(JSON.stringify(this.decisions));
     this.publish();
-    if (decision === "trust") this.options.onDecision({ trusted: normalized });
-    else if (wasTrusted) this.options.onDecision("revoked");
+    if (decision === "trust") {
+      // Another window may have turned the switch on while this one still showed the prompt.
+      if (this.check(normalized) === "allowed") this.options.onDecision({ trusted: normalized });
+    } else if (wasTrusted) this.options.onDecision("revoked");
     else if (decision === null && wasDenied) this.options.onDecision("revoked");
   }
 
@@ -144,6 +160,20 @@ export class SchemaConsent {
     this.options.save(JSON.stringify(this.decisions));
     this.publish();
     this.options.onDecision("revoked");
+  }
+
+  /** The schemas `url` is transitively part of, not through any denied one. */
+  private roots(url: string): string[] {
+    const found = new Set<string>();
+    const pending = [url];
+    while (pending.length > 0) {
+      for (const root of this.referencedBy.get(pending.pop()!) ?? []) {
+        if (found.has(root) || this.decisions.denied.includes(root)) continue;
+        found.add(root);
+        pending.push(root);
+      }
+    }
+    return [...found];
   }
 
   private checkOne(normalized: string): SchemaVerdict {
@@ -166,7 +196,11 @@ function readDecisions(load: () => string | null): SchemaConsentDecisions {
     const raw = load();
     if (raw === null) return none;
     const parsed = schemaConsentDecisionsSchema.safeParse(JSON.parse(raw));
-    if (parsed.success) return parsed.data;
+    if (parsed.success) {
+      const urls = (list: string[]) => list.flatMap((url) => normalizeSchemaUrl(url) ?? []);
+      const { trusted, denied, neverFetch } = parsed.data;
+      return { trusted: urls(trusted), denied: urls(denied), neverFetch };
+    }
     log.warn("Ignoring invalid schema decisions", { error: parsed.error });
   } catch (err) {
     log.warn("Ignoring unreadable schema decisions", {

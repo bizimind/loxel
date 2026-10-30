@@ -37,6 +37,11 @@ describe("schemaReferences", () => {
       "https://example.com/a/common.mod",
     ]);
   });
+
+  test("ignores the links of a page that is not a schema", () => {
+    const html = `<html><a href="/login">Log in</a><a href="https://other.example/y">y</a></html>`;
+    expect(schemaReferences(html, "https://example.com/a.json")).toEqual([]);
+  });
 });
 
 describe("cache paths", () => {
@@ -64,6 +69,9 @@ describe("cache paths", () => {
     );
     expect(lemminxCachePath("/w", "https://example.com/..%2f..%2f..%2f..%2f..%2fetc")).toBeNull();
     expect(lemminxCachePath("/w", "https://example.com/%ff")).toBeNull();
+    expect(lemminxCachePath("/w", "https://evil.example/..%2Fother.example%2Fa.xsd")).toBeNull();
+    expect(lemminxCachePath("/w", "https://evil.example/a%2Fb.xsd")).toBeNull();
+    expect(tombiCachePath("/c", "http://../x.json")).toBeNull();
   });
 });
 
@@ -159,6 +167,44 @@ describe("SchemaDownloads", () => {
     verdicts.set(A, "allowed");
     await downloads.ensure([A]);
     expect(restarts).toBe(0);
+  });
+
+  test("a revocation stops a download under way from writing", async () => {
+    let release = (_text: string) => {};
+    const held = new Promise<string>((done) => {
+      release = done;
+    });
+    const started = new Promise<void>((started) => {
+      downloads = new SchemaDownloads({
+        tombiCacheDir: join(root, "tombi"),
+        lemminxWorkDir: join(root, "lemminx"),
+        fetchText: async () => {
+          started();
+          return held;
+        },
+        request: () => "allowed",
+        addReferences: () => {},
+        restartServers: () => {},
+      });
+    });
+    const running = downloads.ensure([A]);
+    await started;
+    await downloads.onRevoked();
+    release("{}");
+    await running;
+    expect(await Bun.file(tombiCachePath(join(root, "tombi"), A)!).exists()).toBe(false);
+  });
+
+  test("a schema that cannot be cached does not restart the servers", async () => {
+    const clash = "https://example.com/a.json/b.json";
+    verdicts.set(A, "allowed");
+    verdicts.set(clash, "allowed");
+    responses.set(A, "{}");
+    responses.set(clash, "{}");
+    await downloads.ensure([A]);
+    expect(restarts).toBe(1);
+    await downloads.ensure([clash]);
+    expect(restarts).toBe(1);
   });
 
   test("revoking empties the caches, so nothing is served without asking again", async () => {

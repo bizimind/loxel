@@ -8,7 +8,7 @@ import type { ServerWebSocket } from "bun";
 
 import { lemminxCachePath } from "./schema-downloads";
 import type { StdioLspManager } from "./stdio-lsp-manager";
-import { XmlLspManager } from "./xml-lsp-manager";
+import { withoutForceDownload, XmlLspManager } from "./xml-lsp-manager";
 import { YamlLspManager } from "./yaml-lsp-manager";
 
 const TEST_TIMEOUT_MS = 30_000;
@@ -190,6 +190,22 @@ describe.skipIf(!(await Bun.file(join(BUILD, "yaml-language-server")).exists()))
   },
 );
 
+describe("withoutForceDownload", () => {
+  const frame = (result: unknown) => JSON.stringify({ jsonrpc: "2.0", id: 7, result });
+
+  test("removes LemMinX's force download quick fixes and keeps the rest", () => {
+    const body = frame([{ title: "Force download of 'http://x/a.xsd'." }, { title: "Close tag" }]);
+    expect(JSON.parse(withoutForceDownload(body)).result).toEqual([{ title: "Close tag" }]);
+  });
+
+  test("leaves other frames as they are", () => {
+    const notification = `{"method":"window/logMessage","params":{"message":"Force download"}}`;
+    expect(withoutForceDownload(notification)).toBe(notification);
+    const other = frame([{ title: "Close tag" }]);
+    expect(withoutForceDownload(other)).toBe(other);
+  });
+});
+
 describe.skipIf(!(await Bun.file(join(BUILD, "lemminx/lemminx")).exists()))(
   "XmlLspManager with LemMinX",
   () => {
@@ -227,6 +243,23 @@ describe.skipIf(!(await Bun.file(join(BUILD, "lemminx/lemminx")).exists()))(
           "xml",
           document(remote.url("/named.xsd")),
         );
+        await reported;
+        expect(remote.hits).toEqual([]);
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      "reaches nothing for a URL its cache does not handle",
+      async () => {
+        const dir = await tempDir();
+        const remote = recordingServer();
+        const client = await start(join(dir, "work"), dir);
+        const reported = client.diagnostics((messages) =>
+          messages.some((m) => m.includes("up.xsd")),
+        );
+        const location = remote.url("/up.xsd").replace("http:", "hTtP:");
+        client.open(pathToFileURL(join(dir, "a.xml")).href, "xml", document(location));
         await reported;
         expect(remote.hits).toEqual([]);
       },

@@ -18,7 +18,7 @@ describe("schemaUrlsNamedBy", () => {
 <!DOCTYPE other PUBLIC "-//X//EN" "https://example.com/public.dtd">
 <root xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:noNamespaceSchemaLocation="https://example.com/none.xsd"
-  xsi:schemaLocation="urn:a https://example.com/a.xsd  urn:b b.xsd"/>`;
+  xsi:schemaLocation="http://example.com/ns https://example.com/a.xsd  urn:b b.xsd"/>`;
     expect(schemaUrlsNamedBy("xml", xml).sort()).toEqual([
       "http://example.com/system.dtd",
       "https://example.com/a.xsd",
@@ -26,6 +26,12 @@ describe("schemaUrlsNamedBy", () => {
       "https://example.com/none.xsd",
       "https://example.com/public.dtd",
     ]);
+  });
+
+  test("takes a TOML directive only from the leading comments", () => {
+    const named = "# comment\n\n#:schema https://example.com/a.json\n";
+    expect(schemaUrlsNamedBy("toml", named)).toEqual(["https://example.com/a.json"]);
+    expect(schemaUrlsNamedBy("toml", "a = 1\n#:schema https://example.com/a.json\n")).toEqual([]);
   });
 
   test("names nothing in other languages", () => {

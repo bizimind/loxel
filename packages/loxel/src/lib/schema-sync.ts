@@ -20,7 +20,7 @@ import { frontendLog } from "./frontend-logger";
 import { setConfiguredSchemas } from "./json-schema-registry";
 import { editorFilePath, isLiveEditorModel } from "./live-editor-model";
 import { classifySchemaGlob } from "./schema-glob";
-import { schemaGlobMatches, schemaUrlsNamedBy } from "./schema-references";
+import { isRemoteSchemaUrl, schemaGlobMatches, schemaUrlsNamedBy } from "./schema-references";
 
 const log = frontendLog.child("ui");
 
@@ -60,7 +60,7 @@ export function requestSchemasForOpenFiles(): void {
     for (const { glob, url } of mappings) {
       if (!classifySchemaGlob(glob)[language] || !schemaGlobMatches(glob, path)) continue;
       if (language === "json") jsonUrls.add(url);
-      else if (/^https?:\/\//i.test(url)) remoteUrls.add(url);
+      else if (isRemoteSchemaUrl(url)) remoteUrls.add(url);
     }
   }
 

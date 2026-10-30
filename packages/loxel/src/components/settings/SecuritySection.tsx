@@ -2,12 +2,9 @@ import { Trash2Icon } from "lucide-react";
 
 import * as api from "@/api/client";
 import { Switch } from "@/components/ui/switch";
-import { showToast } from "@/components/ui/toast";
 import { useSchemaConsentStore } from "@/store/schema-consent";
 
-function reportFailure(err: unknown): void {
-  showToast(`Could not save your choice: ${err instanceof Error ? err.message : String(err)}`);
-}
+import { reportFailure } from "./SchemaConsentPrompt";
 
 function SchemaUrlRow({ url, trusted }: { url: string; trusted: boolean }) {
   return (

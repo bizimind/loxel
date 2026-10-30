@@ -10,6 +10,7 @@ const REMOTE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_REMOTE_BYTES = 64 * 1024 * 1024; // 64 MB
 /** What goes inline to Monaco's JSON worker. */
 const MAX_INLINE_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_REDIRECTS = 5;
 
 interface CacheEntry {
   schema: unknown;
@@ -26,6 +27,9 @@ interface CacheEntry {
 export class SchemaService {
   private cache = new Map<string, CacheEntry>();
   private remoteCache = new Map<string, { text: string; fetchedAt: number }>();
+
+  /** `mayFollowRedirect` decides each hop: a redirect can lead anywhere its server chooses. */
+  constructor(private readonly mayFollowRedirect: (from: string, to: string) => boolean) {}
 
   /** Resolve a schema URL or file path. Returns parsed JSON or `null` on failure. */
   async resolve(urlOrPath: string, baseDir?: string): Promise<unknown> {
@@ -87,10 +91,8 @@ export class SchemaService {
 
   private async download(url: string): Promise<string | null> {
     try {
-      const res = await fetch(url, {
-        headers: { Accept: "application/json, application/schema+json, */*;q=0.1" },
-        signal: AbortSignal.timeout(10_000),
-      });
+      const res = await this.fetchFollowing(url);
+      if (!res) return null;
       if (!res.ok) {
         log.warn("Schema fetch failed", { url, status: res.status });
         return null;
@@ -115,6 +117,29 @@ export class SchemaService {
       });
       return null;
     }
+  }
+
+  /** Fetch `url`, following only the redirects allowed; null when one is not. */
+  private async fetchFollowing(url: string): Promise<Response | null> {
+    const signal = AbortSignal.timeout(10_000);
+    let current = url;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const res = await fetch(current, {
+        headers: { Accept: "application/json, application/schema+json, */*;q=0.1" },
+        redirect: "manual",
+        signal,
+      });
+      const location = res.headers.get("location");
+      if (res.status < 300 || res.status >= 400 || !location) return res;
+      const next = new URL(location, current).href;
+      if (!this.mayFollowRedirect(current, next)) {
+        log.info("Not following a schema redirect", { from: current, to: next });
+        return null;
+      }
+      current = next;
+    }
+    log.warn("Too many schema redirects", { url });
+    return null;
   }
 
   private async resolveLocal(absPath: string): Promise<unknown> {

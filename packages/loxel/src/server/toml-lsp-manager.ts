@@ -41,9 +41,11 @@ export class TomlLspManager extends WorktreeLspManager {
     super("toml-lsp");
   }
 
-  /** The hosts a session started from now on trusts. Offline, this only lets it read its cache. */
+  /** The hosts sessions trust, which they read once at startup. Offline, this only lets them read their cache. */
   setTrustedHosts(hosts: readonly string[]): void {
+    if (hosts.join() === this.trustedHosts.join()) return;
     this.trustedHosts = hosts;
+    this.restartSessions("schema hosts changed; reconnect");
   }
 
   /** Replace the schema mappings (schema URL → Loxel globs) and push them to every session. */

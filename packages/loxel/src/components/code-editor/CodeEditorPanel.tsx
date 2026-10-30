@@ -135,6 +135,9 @@ function getResolvedMonacoColor(
   return colorMap[fgIndex].toString();
 }
 
+/** Long enough that a schema URL being typed is not taken for the finished address and prompted. */
+const SCHEMA_DETECTION_DELAY_MS = 2000;
+
 /** Extract $schema URL from the first few lines of a JSON file. */
 const DOLLAR_SCHEMA_RE = /"\$schema"\s*:\s*"([^"]+)"/;
 
@@ -517,7 +520,7 @@ export function CodeEditorPanel({
       // Debounced on content change
       editor.onDidChangeModelContent(() => {
         clearTimeout(dollarSchemaTimer);
-        dollarSchemaTimer = setTimeout(detectAndApplyDollarSchema, 300);
+        dollarSchemaTimer = setTimeout(detectAndApplyDollarSchema, SCHEMA_DETECTION_DELAY_MS);
       });
     }
 
@@ -527,7 +530,7 @@ export function CodeEditorPanel({
     if (language === "toml" || language === "xml") {
       editor.onDidChangeModelContent(() => {
         clearTimeout(schemaRequestTimer);
-        schemaRequestTimer = setTimeout(requestSchemasForOpenFiles, 300);
+        schemaRequestTimer = setTimeout(requestSchemasForOpenFiles, SCHEMA_DETECTION_DELAY_MS);
       });
     }
 

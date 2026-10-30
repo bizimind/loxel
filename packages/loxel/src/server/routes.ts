@@ -61,6 +61,7 @@ import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-mod
 import { getMediaType } from "@/lib/media-extensions";
 import { findTreeRoot, isWithin } from "@/lib/project-file-helpers";
 import { classifySchemaGlob } from "@/lib/schema-glob";
+import { isRemoteSchemaUrl } from "@/lib/schema-references";
 import { isHttpUrl } from "@/url-utils";
 
 import { config } from "./config";
@@ -2613,10 +2614,6 @@ function languageServerSchemaUrl(url: string): string {
 }
 
 /** Add `glob` to the globs mapped to `url`. */
-function isRemoteSchemaUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url);
-}
-
 function addSchemaGlob(map: Record<string, string[]>, url: string, glob: string): void {
   const existing = map[url];
   if (existing) existing.push(glob);
