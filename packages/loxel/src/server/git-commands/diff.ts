@@ -2,14 +2,13 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { $ } from "bun";
-
 import type { DiffInfo, FileDiff } from "@/api/diff-model";
 
 import { logger } from "../logger";
 import { parseDiffOutput } from "../parsers/diff";
 import { mapWithConcurrency } from "./concurrency";
 import { SUBMODULE_GITLINK_ONLY, readOnlyGitEnv } from "./git-env";
+import { gitText, runGit } from "./run-git";
 import { validateCommitHash } from "./validation";
 import { validateWorktreePath } from "./worktree";
 
@@ -26,10 +25,11 @@ const log = logger.child("git");
  */
 export async function resolveCommit(cwd: string, rev: string): Promise<string | null> {
   const spec = `${rev}^{commit}`;
-  const result = await $`git -C ${cwd} rev-parse --verify --quiet ${spec}`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
+  const result = await gitText(["rev-parse", "--verify", "--quiet", spec], {
+    cwd,
+    env: readOnlyGitEnv(),
+    nothrow: true,
+  });
   return result.trim() || null;
 }
 
@@ -38,33 +38,35 @@ export async function resolveMergeBase(
   left: string,
   right: string,
 ): Promise<string | null> {
-  const result = await $`git -C ${cwd} merge-base ${left} ${right}`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
+  const result = await gitText(["merge-base", left, right], {
+    cwd,
+    env: readOnlyGitEnv(),
+    nothrow: true,
+  });
   return result.trim() || null;
 }
 
 export async function getStagedDiff(cwd: string): Promise<DiffInfo> {
   const baseRef = await resolveCommit(cwd, "HEAD");
   const result = baseRef
-    ? await $`git -C ${cwd} diff --cached ${baseRef}`.env(readOnlyGitEnv()).text()
-    : await $`git -C ${cwd} diff --cached`.env(readOnlyGitEnv()).text();
+    ? await gitText(["diff", "--cached", baseRef], { cwd, env: readOnlyGitEnv() })
+    : await gitText(["diff", "--cached"], { cwd, env: readOnlyGitEnv() });
   return { files: parseDiffOutput(result), baseRef };
 }
 
 export async function getUnstagedDiff(cwd: string): Promise<DiffInfo> {
-  const result = await $`git -C ${cwd} ${SUBMODULE_GITLINK_ONLY} diff`.env(readOnlyGitEnv()).text();
+  const result = await gitText([...SUBMODULE_GITLINK_ONLY, "diff"], { cwd, env: readOnlyGitEnv() });
   // The old side here is the index, which is not a commit and has no SHA to name.
   return { files: parseDiffOutput(result), baseRef: null };
 }
 
 export async function getCommitDiff(cwd: string, commit: string): Promise<DiffInfo> {
   validateCommitHash(commit);
-  const result = await $`git -C ${cwd} diff-tree -p --root ${commit}`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
+  const result = await gitText(["diff-tree", "-p", "--root", commit], {
+    cwd,
+    env: readOnlyGitEnv(),
+    nothrow: true,
+  });
   // A root commit has no parent, so the old side is the empty tree: null.
   return { files: parseDiffOutput(result), baseRef: await resolveCommit(cwd, `${commit}^`) };
 }
@@ -85,7 +87,7 @@ export async function getRangeDiff(cwd: string, range: string): Promise<DiffInfo
   let rangeSpec: string;
   if (!ref1) {
     const emptyTree = (
-      await $`git hash-object -t tree /dev/null`.env(readOnlyGitEnv()).text()
+      await gitText(["hash-object", "-t", "tree", "/dev/null"], { env: readOnlyGitEnv() })
     ).trim();
     baseRef = null;
     rangeSpec = `${emptyTree}..${rightRef}`;
@@ -97,7 +99,7 @@ export async function getRangeDiff(cwd: string, range: string): Promise<DiffInfo
     baseRef = await resolveCommit(cwd, ref1);
     rangeSpec = `${baseRef ?? ref1}..${rightRef}`;
   }
-  const result = await $`git -C ${cwd} diff ${rangeSpec}`.env(readOnlyGitEnv()).text();
+  const result = await gitText(["diff", rangeSpec], { cwd, env: readOnlyGitEnv() });
   return { files: parseDiffOutput(result), baseRef };
 }
 
@@ -117,10 +119,10 @@ export async function getWorkingTreeDiff(
       // Resolved against the worktree, not `cwd`: an unqualified HEAD here means
       // the commit this worktree has checked out, which is rarely the project's.
       const baseRef = await resolveCommit(worktreePath, ref);
-      const result =
-        await $`git -C ${worktreePath} ${SUBMODULE_GITLINK_ONLY} diff ${baseRef ?? ref}`
-          .env(readOnlyGitEnv())
-          .text();
+      const result = await gitText([...SUBMODULE_GITLINK_ONLY, "diff", baseRef ?? ref], {
+        cwd: worktreePath,
+        env: readOnlyGitEnv(),
+      });
       return { baseRef, files: parseDiffOutput(result) };
     })(),
     getUntrackedDiff(worktreePath),
@@ -137,10 +139,11 @@ export async function getWorkingTreeDiff(
  * are left out rather than surfacing as a gitlink.
  */
 async function listUntrackedFiles(worktreePath: string): Promise<string[]> {
-  const result = await $`git -C ${worktreePath} ls-files --others --exclude-standard -z`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
+  const result = await gitText(["ls-files", "--others", "--exclude-standard", "-z"], {
+    cwd: worktreePath,
+    env: readOnlyGitEnv(),
+    nothrow: true,
+  });
   return result.split("\0").filter((file) => file && !file.endsWith("/"));
 }
 
@@ -179,34 +182,44 @@ async function getUntrackedDiff(worktreePath: string): Promise<FileDiff[]> {
     // A file deleted between listing and adding fails the whole `add`; list again once.
     for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0) files = await listUntrackedFiles(worktreePath);
-      // Never an empty Buffer: Bun's shell does not close stdin for one and git would hang.
       if (files.length === 0) return [];
       await rm(env.GIT_INDEX_FILE, { force: true });
       // No split index (it would write `sharedindex.*` into the git dir) and no hooks
       // (`post-index-change`) for a throwaway index.
-      const add =
-        await $`git -c core.splitIndex=false -c core.hooksPath=/dev/null -C ${worktreePath} add --intent-to-add --pathspec-from-file=- --pathspec-file-nul < ${Buffer.from(files.join("\0"))}`
-          .env(env)
-          .nothrow()
-          .quiet();
+      const add = await runGit(
+        [
+          "-c",
+          "core.splitIndex=false",
+          "-c",
+          "core.hooksPath=/dev/null",
+          "-C",
+          worktreePath,
+          "add",
+          "--intent-to-add",
+          "--pathspec-from-file=-",
+          "--pathspec-file-nul",
+        ],
+        { env, stdin: files.join("\0"), nothrow: true },
+      );
       if (add.exitCode !== 0) {
         log.debug("Intent-to-add of untracked files failed", {
           path: worktreePath,
           attempt,
-          stderr: add.stderr.toString().trim(),
+          stderr: add.stderr.trim(),
         });
         continue;
       }
       // `add -N` never reads contents, so an unreadable file or a missing textconv helper only
       // fails here; the per-file fallback below then loses just that file, not the whole diff.
-      const diff = await $`git -C ${worktreePath} ${SUBMODULE_GITLINK_ONLY} diff`
-        .env(env)
-        .nothrow()
-        .quiet();
-      if (diff.exitCode === 0) return parseDiffOutput(diff.stdout.toString());
+      const diff = await runGit([...SUBMODULE_GITLINK_ONLY, "diff"], {
+        cwd: worktreePath,
+        env,
+        nothrow: true,
+      });
+      if (diff.exitCode === 0) return parseDiffOutput(diff.stdout);
       log.debug("Diff of intent-to-add untracked files failed", {
         path: worktreePath,
-        stderr: diff.stderr.toString().trim(),
+        stderr: diff.stderr.trim(),
       });
       break;
     }
@@ -223,10 +236,11 @@ async function getUntrackedDiff(worktreePath: string): Promise<FileDiff[]> {
     count: files.length,
   });
   const perFile = await mapWithConcurrency(files, FALLBACK_DIFF_CONCURRENCY, async (file) => {
-    const diff = await $`git -C ${worktreePath} diff --no-index -- /dev/null ${file}`
-      .env(readOnlyGitEnv())
-      .nothrow()
-      .text();
+    const diff = await gitText(["diff", "--no-index", "--", "/dev/null", file], {
+      cwd: worktreePath,
+      env: readOnlyGitEnv(),
+      nothrow: true,
+    });
     return parseDiffOutput(diff);
   });
   return perFile.flat();

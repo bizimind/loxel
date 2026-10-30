@@ -19,6 +19,7 @@ import {
   withWatchedFilesCapability,
 } from "./lsp-watched-files";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 import {
   createStderrThrottle,
   STDERR_THROTTLE_CAPACITY,
@@ -74,6 +75,7 @@ const MAX_CLOSE_REASON_BYTES = 123;
 /** The server capability that advertises each suppressible LSP feature statically. */
 const SERVER_CAPABILITY_OF = {
   "textDocument/formatting": "documentFormattingProvider",
+  "textDocument/inlayHint": "inlayHintProvider",
   "textDocument/rangeFormatting": "documentRangeFormattingProvider",
   "textDocument/semanticTokens": "semanticTokensProvider",
 } as const;
@@ -238,6 +240,13 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected readonly disableSemanticTokens: boolean = false;
 
   /**
+   * Set to true for servers that mark completions as snippets without escaping them, so that text
+   * such as `$HOME` in the completion would be expanded on insertion. We strip `snippetSupport`
+   * from the client's initialize request, so a server that honors it answers in plain text.
+   */
+  protected readonly disableCompletionSnippets: boolean = false;
+
+  /**
    * Set to true for servers that advertise `TextDocumentSyncKind.Full` or
    * otherwise mis-handle incremental `textDocument/didChange` notifications.
    * When set, we track each document's content from didOpen and apply
@@ -370,7 +379,9 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             rootPath?: string | null;
             workspaceFolders?: unknown;
             capabilities?: {
-              textDocument?: Record<string, unknown>;
+              textDocument?: Record<string, unknown> & {
+                completion?: { completionItem?: { snippetSupport?: boolean } };
+              };
               workspace?: Record<string, unknown>;
             };
             initializationOptions?: Record<string, unknown>;
@@ -379,6 +390,10 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         if (msg.method === "initialize") {
           if (this.disableSemanticTokens && msg.params?.capabilities?.textDocument) {
             delete msg.params.capabilities.textDocument.semanticTokens;
+          }
+          if (this.disableCompletionSnippets) {
+            delete msg.params?.capabilities?.textDocument?.completion?.completionItem
+              ?.snippetSupport;
           }
           if (this.workspaceConfiguration && msg.params?.capabilities) {
             msg.params.capabilities.workspace = {
@@ -517,8 +532,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * Fired after the client's `initialized` notification is forwarded.
    *
    * Override to push runtime configuration via `workspace/didChangeConfiguration`
-   * for servers whose config protocol is push-based — e.g. Docker's compose/
-   * telemetry settings, YAML's schema mappings. For config the server reads
+   * for servers whose config protocol is push-based — e.g. YAML's schema
+   * mappings. For config the server reads
    * from `initializationOptions` at startup, use {@link getInitializationOptions}.
    */
   protected onClientInitialized(_session: TSession): void {}
@@ -714,16 +729,18 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     const opts = this.spawnOptions(context);
     this.log.info(`Spawning ${this.name} ${args.join(" ")}: ${bin}`);
 
-    const proc = Bun.spawn([bin, ...args], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: opts.cwd,
-      // Login-shell environment, so servers that run user tools (basedpyright's
-      // interpreter probe, terraform-ls's `terraform`) find the user's PATH
-      // even when Loxel was launched from Finder.
-      env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },
-    });
+    const proc = measureSpawn("lsp", () =>
+      Bun.spawn([bin, ...args], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        cwd: opts.cwd,
+        // Login-shell environment, so servers that run user tools (basedpyright's
+        // interpreter probe, terraform-ls's `terraform`) find the user's PATH
+        // even when Loxel was launched from Finder.
+        env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },
+      }),
+    );
 
     // Until it is in `sessions` nothing else would kill the process (`detach` finds the session there).
     let session: TSession;

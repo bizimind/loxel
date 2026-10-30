@@ -1,11 +1,10 @@
-import { $ } from "bun";
-
 import type { BranchCommits, CommitInfo } from "@/api/git-models";
 
 import { LOG_FORMAT, parseLogOutput } from "../parsers/log";
 import { resolveCommit, resolveMergeBase } from "./diff";
 import { readOnlyGitEnv } from "./git-env";
 import { resolveDefaultBranchRef } from "./repo";
+import { gitText } from "./run-git";
 import { validateRefName } from "./validation";
 
 export async function getLog(
@@ -35,7 +34,7 @@ export async function getLog(
     args.push(...branches);
   }
 
-  const result = await $`git -C ${cwd} ${args}`.env(readOnlyGitEnv()).text();
+  const result = await gitText(args, { cwd, env: readOnlyGitEnv() });
   return parseLogOutput(result);
 }
 
@@ -74,10 +73,11 @@ export async function getBranchCommits(
     return { commits: [], mergeBase: null, truncated: false };
   }
 
-  const branchResult = await $`git -C ${cwd} symbolic-ref --short HEAD`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
+  const branchResult = await gitText(["symbolic-ref", "--short", "HEAD"], {
+    cwd,
+    env: readOnlyGitEnv(),
+    nothrow: true,
+  });
   const currentBranch = branchResult.trim();
   if (!currentBranch) {
     const commits = await getLog(cwd, { limit: 1 });
@@ -105,7 +105,7 @@ export async function getBranchCommits(
     "--topo-order",
     `${mergeBase}..HEAD`,
   ];
-  const result = await $`git -C ${cwd} ${args}`.env(readOnlyGitEnv()).nothrow().text();
+  const result = await gitText(args, { cwd, env: readOnlyGitEnv(), nothrow: true });
   const commits = parseLogOutput(result.trim());
   const truncated = commits.length > limit;
 
