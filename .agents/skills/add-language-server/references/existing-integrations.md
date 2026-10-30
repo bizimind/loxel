@@ -8,7 +8,7 @@ Quick reference for the quirks of the servers that existed before `docs/language
 | --------------------- | ------------- | -------- | ---------- | --------------- | -------------- | --------------- | ----------------------------- |
 | TypeScript (tsc)      | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences                   |
 | YAML                  | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (pulled)           |
-| Docker                | downloaded    | worktree | lazy       | disabled        | yes            | `start --stdio` | compose=off (post-init)       |
+| Docker                | source-built  | worktree | lazy       | disabled        | yes            | `start --stdio` | compose, telemetry, Scout off |
 | Terraform             | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
 | Python (basedpyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
 | Python (ruff)         | downloaded    | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
@@ -32,11 +32,12 @@ The most complex manager. Unique behaviors not found in other LSPs:
 
 The only global LSP. Uses `attach(ws)` / `detach(ws)` instead of `createSession` / `destroySession`. Its client calls `createLspClient`'s `connect(null)` once (no `wt`) and never disconnects. In `server.ts`, the YAML route is handled separately from `worktreeLspManagers`.
 
-## Docker — Three Non-Standard Behaviors
+## Docker — Non-Standard Behaviors
 
 1. **`requiresFullTextSync = true`** — server overwrites entire document on incremental changes
 2. **Panic swallowing** — `handleServerFrame` catches `-32803` errors from a known bug and returns null
-3. **Post-init config** — `onClientInitialized()` disables compose support (YAML LSP handles compose files)
+3. **Config** — `getInitializationOptions()` disables compose support (YAML LSP handles compose files) and telemetry; `workspaceConfiguration()` disables Scout
+4. **No network** — built from source without Docker's keys, inlay hints suppressed, spawned with a dead HTTP proxy
 
 Also: serves two language IDs via array, overrides `resolveBinary()` for Windows `.exe`, uses `["start", "--stdio"]`.
 
