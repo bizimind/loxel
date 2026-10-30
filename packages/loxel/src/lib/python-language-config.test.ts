@@ -5,7 +5,7 @@ import * as monaco from "monaco-editor";
 import {
   PYTHON_DEDENT_AFTER,
   isInsideTripleQuote,
-  registerPythonLanguageConfiguration,
+  registerLanguageConfiguration,
 } from "./python-language-config";
 
 describe("PYTHON_DEDENT_AFTER", () => {
@@ -91,7 +91,7 @@ describe("Python editing in Monaco", () => {
         return setConfiguration(id, configuration);
       },
     );
-    const registered = registerPythonLanguageConfiguration();
+    const registered = registerLanguageConfiguration();
     monaco.languages.register({ id: "toml" }); // registered by monaco-languages.ts in the app
     container = document.createElement("div");
     document.body.append(container);

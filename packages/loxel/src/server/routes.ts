@@ -103,6 +103,7 @@ import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server
 import { listOthers, worktreeTree } from "./server-state";
 import { scanSetupSuggestions } from "./setup-suggestions";
 import { buildSpawnEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 import * as storeDb from "./store-db";
 import {
   decryptModelKeys,
@@ -1751,10 +1752,12 @@ function validateCloneUrl(url: string): void {
 }
 
 async function createInitialCommit(bareRepoPath: string): Promise<void> {
-  const result = Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "Initial commit"], {
-    cwd: bareRepoPath,
-    env: { ...process.env, GIT_DIR: bareRepoPath, GIT_WORK_TREE: bareRepoPath },
-  });
+  const result = measureSpawn("git commit", () =>
+    Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "Initial commit"], {
+      cwd: bareRepoPath,
+      env: { ...process.env, GIT_DIR: bareRepoPath, GIT_WORK_TREE: bareRepoPath },
+    }),
+  );
   if (result.exitCode !== 0) {
     throw new Error(`Failed to create initial commit: ${result.stderr.toString()}`);
   }
@@ -1857,7 +1860,9 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   mkdirSync(projectDir, { recursive: true });
 
   if (setup === "single") {
-    const result = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: projectDir });
+    const result = measureSpawn("git init", () =>
+      Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: projectDir }),
+    );
     if (result.exitCode !== 0) return error("git init failed", 500);
   } else {
     await initBareRepo(projectDir, "main");
@@ -1905,7 +1910,9 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   if (setup === "single") {
     const repoName = repoNameFromUrl(url);
     const clonedPath = join(destDir, repoName);
-    const result = Bun.spawnSync(["git", "clone", "--", url, clonedPath]);
+    const result = measureSpawn("git clone", () =>
+      Bun.spawnSync(["git", "clone", "--", url, clonedPath]),
+    );
     if (result.exitCode !== 0) {
       return error(`git clone failed: ${result.stderr.toString()}`, 500);
     }
@@ -1925,7 +1932,9 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   const repoName = repoNameFromUrl(url);
   const bareDir = join(destDir, `${repoName}.git`);
 
-  const result = Bun.spawnSync(["git", "clone", "--bare", "--", url, bareDir]);
+  const result = measureSpawn("git clone", () =>
+    Bun.spawnSync(["git", "clone", "--bare", "--", url, bareDir]),
+  );
   if (result.exitCode !== 0) {
     return error(`git clone --bare failed: ${result.stderr.toString()}`, 500);
   }
@@ -1977,7 +1986,9 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
   }
 
   if (setup === "single") {
-    const result = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath });
+    const result = measureSpawn("git init", () =>
+      Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath }),
+    );
     if (result.exitCode !== 0) return error("git init failed", 500);
   } else {
     // For non-empty directories: init as regular repo first, then convert to bare.
@@ -1987,13 +1998,17 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     const hasFiles = entries.some((e) => !e.startsWith("."));
 
     if (hasFiles) {
-      const initResult = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath });
+      const initResult = measureSpawn("git init", () =>
+        Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath }),
+      );
       if (initResult.exitCode !== 0) return error("git init failed", 500);
-      const addResult = Bun.spawnSync(["git", "add", "."], { cwd: dirPath });
+      const addResult = measureSpawn("git add", () =>
+        Bun.spawnSync(["git", "add", "."], { cwd: dirPath }),
+      );
       if (addResult.exitCode !== 0) return error("git add failed", 500);
-      const commitResult = Bun.spawnSync(["git", "commit", "-m", "Initial commit"], {
-        cwd: dirPath,
-      });
+      const commitResult = measureSpawn("git commit", () =>
+        Bun.spawnSync(["git", "commit", "-m", "Initial commit"], { cwd: dirPath }),
+      );
       if (commitResult.exitCode !== 0) {
         return error(`git commit failed: ${commitResult.stderr.toString()}`, 500);
       }
@@ -3148,7 +3163,9 @@ async function handleSearch(req: Request, ctx: RouteContext): Promise<Response> 
   }
 
   try {
-    const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() });
+    const proc = measureSpawn("rg", () =>
+      Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() }),
+    );
     const result = await collectSearchMatches(proc, maxResults, req.signal);
     const exitCode = await proc.exited;
 
@@ -3243,9 +3260,12 @@ const BINARY_EXTENSIONS = new Set([
 async function collectWorktreeFileIndex(
   wtPath: string,
 ): Promise<{ dirs: string[]; extensions: string[] }> {
-  const proc = Bun.spawn(
-    ["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath],
-    { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() },
+  const proc = measureSpawn("rg", () =>
+    Bun.spawn(["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: buildSpawnEnv(),
+    }),
   );
   const text = await new Response(proc.stdout).text();
   await proc.exited;
@@ -3287,9 +3307,12 @@ const FILE_INDEX_MAX_FILES = 100_000;
 
 /** Use ripgrep --files to collect all relative file paths in the worktree for quick-open search. */
 async function collectFileList(wtPath: string): Promise<{ files: string[]; truncated: boolean }> {
-  const proc = Bun.spawn(
-    ["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath],
-    { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() },
+  const proc = measureSpawn("rg", () =>
+    Bun.spawn(["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: buildSpawnEnv(),
+    }),
   );
   const text = await new Response(proc.stdout).text();
   await proc.exited;
@@ -3427,7 +3450,7 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
   const url = new URL(req.url);
   const method = req.method;
   const pathname = url.pathname;
-  stress.track("api-request", { method, path: pathname });
+  stress.track("api-request", `${method} ${pathname}`);
 
   // Static route table — checked first so dynamic patterns don't shadow named routes
   const handler = routes[method]?.[pathname];

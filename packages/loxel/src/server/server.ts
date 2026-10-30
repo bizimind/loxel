@@ -69,6 +69,7 @@ import type {
   WsData,
 } from "./server-state";
 import { LOGIN_SHELL_ENV_WAIT_MS, onLoginShellEnvChange, resolveLoginShellEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 import { getStore, putStore, recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
 import type { TerminalSpawnOptions } from "./terminal-manager";
@@ -155,10 +156,12 @@ async function pruneOrphanedTempWorktrees(cwd: string): Promise<void> {
     );
     for (const wt of orphans) {
       try {
-        Bun.spawnSync(["git", "-C", cwd, "worktree", "remove", "--force", wt.path], {
-          stdout: "ignore",
-          stderr: "ignore",
-        });
+        measureSpawn("git worktree", () =>
+          Bun.spawnSync(["git", "-C", cwd, "worktree", "remove", "--force", wt.path], {
+            stdout: "ignore",
+            stderr: "ignore",
+          }),
+        );
       } catch (err) {
         log.warn(`Failed to remove temp worktree ${wt.path}`, { error: err });
       }
@@ -176,7 +179,7 @@ async function pruneOrphanedTempWorktrees(cwd: string): Promise<void> {
 
 /** Send a message to all subscribers of a specific worktree (with dedup). */
 function broadcastToSubscribers(wtPath: string, message: WsMessage) {
-  stress.track("broadcast", { type: message.type });
+  stress.track("broadcast", message.type);
   const resources = wtResources.get(wtPath);
   if (!resources || resources.subscribers.size === 0) return;
   const data = JSON.stringify(message);
@@ -187,7 +190,7 @@ function broadcastToSubscribers(wtPath: string, message: WsMessage) {
 
 /** Send a message to all subscribers of any worktree under a project. */
 function broadcastToProject(projectPath: string, message: WsMessage) {
-  stress.track("broadcast", { type: message.type });
+  stress.track("broadcast", message.type);
   const data = JSON.stringify(message);
   const sent = new Set<ServerWebSocket<WsData>>();
   for (const resources of wtResources.values()) {
@@ -203,7 +206,7 @@ function broadcastToProject(projectPath: string, message: WsMessage) {
 
 /** Send a message to ALL connected clients. */
 function broadcastAll(message: WsMessage) {
-  stress.track("broadcast", { type: message.type });
+  stress.track("broadcast", message.type);
   const data = JSON.stringify(message);
   for (const client of clients.keys()) {
     client.send(data);
@@ -320,7 +323,7 @@ function broadcastOthers(wtPath: string): void {
 function requestStatusRefresh(wtPath: string): void {
   const resources = wtResources.get(wtPath);
   if (!resources || suspendedWorktrees.has(wtPath)) return;
-  stress.track("status-event", { wtPath });
+  stress.track("status-event", wtPath);
   void resources.filesService.refreshGitStatus();
 }
 

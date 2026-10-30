@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");
 
@@ -42,14 +43,16 @@ export async function pythonVersion(pythonPath: string, cwd: string): Promise<st
 
 async function readVersion(pythonPath: string, cwd: string): Promise<string | null> {
   try {
-    const proc = Bun.spawn([pythonPath, "--version"], {
-      cwd,
-      env: buildSpawnEnv(),
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: VERSION_TIMEOUT_MS,
-    });
+    const proc = measureSpawn("python-version", () =>
+      Bun.spawn([pythonPath, "--version"], {
+        cwd,
+        env: buildSpawnEnv(),
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: VERSION_TIMEOUT_MS,
+      }),
+    );
     // Python 2 printed the version to stderr.
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
