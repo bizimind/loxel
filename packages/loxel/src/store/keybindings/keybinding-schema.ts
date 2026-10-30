@@ -4,6 +4,7 @@
 
 import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
+import { toolchainStatuses } from "@/api/toolchain-statuses";
 
 import type { ActionId, SplitPanelType } from "./action-registry";
 import { ACTIONS, ACTION_IDS, SPLIT_PANEL_TYPES } from "./action-registry";
@@ -171,7 +172,7 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "tree.open": ["Enter"],
   "tree.rename": ["F2", "Shift+F6"],
   "editor.changeIndentation": [],
-  "python.selectInterpreter": [],
+  ...Object.fromEntries(toolchainStatuses.map(({ selectAction }) => [selectAction.id, []])),
   // Code actions, enabled only in an editor whose language server offers them. Quick Fix and
   // Organize Imports keep Monaco's keys; Monaco's Refactor key (⌃⇧R) is Toggle Comments here.
   "codeAction.quickFix": ["Cmd+Period"],

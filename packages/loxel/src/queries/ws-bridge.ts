@@ -2,6 +2,8 @@ import { useEffect } from "react";
 
 import * as api from "@/api/client";
 import { wsClient } from "@/api/client";
+import { isToolchainChangedMessage } from "@/api/toolchain-status-model";
+import { toolchainStatuses } from "@/api/toolchain-statuses";
 import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
@@ -197,6 +199,18 @@ export function useWsBridge(): void {
     };
 
     const unsubscribe = wsClient.subscribe((message: WsMessage) => {
+      if (isToolchainChangedMessage(message)) {
+        const toolchain = toolchainStatuses.find((t) => t.changedMessage === message.type);
+        if (!toolchain) return;
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.toolchainStatus(
+            toolchain.id,
+            deriveProjectPath(message.wtPath),
+            message.wtPath,
+          ),
+        });
+        return;
+      }
       switch (message.type) {
         // --- Worktree-scoped events (carry wtPath) ---
 
@@ -318,12 +332,6 @@ export function useWsBridge(): void {
           );
           break;
         }
-
-        case "python_env_changed":
-          void queryClient.invalidateQueries({
-            queryKey: queryKeys.pythonEnv(deriveProjectPath(message.wtPath), message.wtPath),
-          });
-          break;
 
         case "external_files_changed": {
           const projectPath = deriveProjectPath(message.wtPath);

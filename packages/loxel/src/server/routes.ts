@@ -42,12 +42,6 @@ import type {
   ScanSuggestionsResult,
   WorkspaceSetup,
 } from "@/api/project-model";
-import type {
-  PythonEnv,
-  PythonEnvCandidatesResponse,
-  PythonEnvResponse,
-  PythonInterpreter,
-} from "@/api/python-env-model";
 import type { SearchMatch } from "@/api/search-model";
 import type {
   NestedRemoval,
@@ -89,13 +83,6 @@ import {
   type ProjectWorktree,
   type WorktreeMetaUpdate,
 } from "./project-worktrees";
-import { getPythonEnv, listPythonEnvs, normalizePythonOverride } from "./python-env";
-import {
-  getPythonOverride,
-  pythonOverrideStoreKey,
-  setPythonOverride,
-} from "./python-override-store";
-import { pythonVersion } from "./python-version";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import type { SchemaConsent } from "./schema-consent";
@@ -112,6 +99,7 @@ import {
   isEncryptedStoreKey,
 } from "./store-encryption";
 import { stress } from "./stress-detector";
+import { toolchainStatusModules } from "./toolchain-statuses";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
 import { getCurrentVersion } from "./version";
 import { findWorkspacePackages } from "./worktree-utils";
@@ -1063,9 +1051,9 @@ async function handleEditorConfig(req: Request, ctx: RouteContext): Promise<Resp
 
 /**
  * The worktree path of a `wt` query parameter, once it is known to be a real worktree of its
- * project: resolving a Python environment may run `poetry` in the directory.
+ * project: resolving a language's toolchain may run tools in the directory.
  */
-async function resolvePythonWorktree(req: Request, ctx: RouteContext): Promise<string | Response> {
+async function worktreeFromQuery(req: Request, ctx: RouteContext): Promise<string | Response> {
   const resolved = resolveWorktreeFromReq(req, ctx);
   if (resolved instanceof Response) return resolved;
   return validatedWorktreePath(resolved.wtPath, resolved.cwd);
@@ -1081,61 +1069,34 @@ async function validatedWorktreePath(wtPath: string, cwd: string): Promise<strin
   return absolute;
 }
 
-async function withVersion(env: PythonEnv, wtPath: string): Promise<PythonInterpreter> {
-  return { ...env, version: await pythonVersion(env.pythonPath, wtPath) };
-}
+/** Every language toolchain's GET routes, given the validated worktree of their `wt` parameter. */
+const toolchainGetRoutes = Object.fromEntries(
+  toolchainStatusModules
+    .flatMap(({ routes: { GET } }) => Object.entries(GET))
+    .map(([route, handle]): [string, RouteHandler] => [
+      route,
+      async (req, ctx) => {
+        const wtPath = await worktreeFromQuery(req, ctx);
+        return wtPath instanceof Response ? wtPath : handle(wtPath);
+      },
+    ]),
+);
 
-async function pythonEnvResponse(wtPath: string): Promise<PythonEnvResponse> {
-  const env = await getPythonEnv(wtPath);
-  return { env: env && (await withVersion(env, wtPath)), overridePath: getPythonOverride(wtPath) };
-}
-
-// GET /api/python-env?wt= — The Python interpreter Loxel uses for a worktree
-async function handlePythonEnv(req: Request, ctx: RouteContext): Promise<Response> {
-  const wtPath = await resolvePythonWorktree(req, ctx);
-  if (wtPath instanceof Response) return wtPath;
-  return json(await pythonEnvResponse(wtPath));
-}
-
-// GET /api/python-env/candidates?wt= — Interpreters the user can choose for a worktree
-async function handlePythonEnvCandidates(req: Request, ctx: RouteContext): Promise<Response> {
-  const wtPath = await resolvePythonWorktree(req, ctx);
-  if (wtPath instanceof Response) return wtPath;
-  const { candidates, automatic } = await listPythonEnvs(wtPath);
-  const response: PythonEnvCandidatesResponse = {
-    candidates: await Promise.all(candidates.map((env) => withVersion(env, wtPath))),
-    automaticPath: automatic?.pythonPath ?? null,
-    overridePath: getPythonOverride(wtPath),
-  };
-  return json(response);
-}
-
-// POST /api/python-env/override — Choose a worktree's interpreter, or (null) return to detection
-async function handlePythonOverride(req: Request, ctx: RouteContext): Promise<Response> {
-  const body = await parseBody(req);
-  const resolved = resolveProjectFromBody(body, ctx);
-  if (resolved instanceof Response) return resolved;
-  const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
-  if (wtPath instanceof Response) return wtPath;
-  const { pythonPath } = body;
-  if (pythonPath !== null && typeof pythonPath !== "string") {
-    return error("pythonPath must be a string or null", 400);
-  }
-  let chosen: string | null = null;
-  if (pythonPath !== null) {
-    try {
-      chosen = await normalizePythonOverride(wtPath, pythonPath);
-    } catch (err) {
-      return error(err instanceof Error ? err.message : "Invalid Python interpreter", 400);
-    }
-    // Language servers and terminals will run it, so take only what answers like a Python.
-    if (!(await pythonVersion(chosen, wtPath))) {
-      return error(`${chosen} did not report a Python version; is it a Python interpreter?`, 400);
-    }
-  }
-  setPythonOverride(wtPath, chosen);
-  return json(await pythonEnvResponse(wtPath));
-}
+/** Every language toolchain's POST routes, given the validated worktree of `worktreePath`. */
+const toolchainPostRoutes = Object.fromEntries(
+  toolchainStatusModules
+    .flatMap(({ routes: { POST } }) => Object.entries(POST))
+    .map(([route, handle]): [string, RouteHandler] => [
+      route,
+      async (req, ctx) => {
+        const body = await parseBody(req);
+        const resolved = resolveProjectFromBody(body, ctx);
+        if (resolved instanceof Response) return resolved;
+        const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
+        return wtPath instanceof Response ? wtPath : handle(wtPath, body);
+      },
+    ]),
+);
 
 // ---------------------------------------------------------------------------
 // Service-dependent routes: files panel
@@ -2492,9 +2453,11 @@ async function removeOneWorktree(
     wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
     ctx.completeWorktreeRemoval(wtPath);
     // A worktree later created at the same path starts with an empty Others section and its own
-    // Python interpreter detection.
+    // toolchain detection.
     storeDb.deleteStore(externalFoldersStoreKey(wtPath));
-    storeDb.deleteStore(pythonOverrideStoreKey(wtPath));
+    for (const { overrideStoreKey } of toolchainStatusModules) {
+      storeDb.deleteStore(overrideStoreKey(wtPath));
+    }
     return result;
   } catch (err) {
     try {
@@ -3380,8 +3343,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/version": handleGetVersion,
     "/api/update/status": handleGetUpdateStatus,
     "/api/detected-formatters": handleDetectedFormatters,
-    "/api/python-env": handlePythonEnv,
-    "/api/python-env/candidates": handlePythonEnvCandidates,
+    ...toolchainGetRoutes,
     "/api/editorconfig": handleEditorConfig,
   },
   POST: {
@@ -3438,7 +3400,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/open": handleOpen,
     "/api/external-folders/add": handleExternalFolderAdd,
     "/api/external-folders/remove": handleExternalFolderRemove,
-    "/api/python-env/override": handlePythonOverride,
+    ...toolchainPostRoutes,
   },
 };
 

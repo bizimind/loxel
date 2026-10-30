@@ -28,11 +28,6 @@ import type {
   ScanSuggestionsResult,
 } from "./project-model";
 import type {
-  PythonEnvCandidatesResponse,
-  PythonEnvResponse,
-  PythonOverrideRequest,
-} from "./python-env-model";
-import type {
   Comment,
   CommentThread,
   CreateReviewRequest,
@@ -54,7 +49,7 @@ import { BIN_MSG_OUTPUT, encodeInputFrame, parseOutputFrame } from "./ws-protoco
 const API_BASE = "/api";
 
 /** Append wt or project scope param to a URL path. */
-function withScope(path: string, scope: { wt?: string; project?: string }): string {
+export function withScope(path: string, scope: { wt?: string; project?: string }): string {
   const url = new URL(`http://x${path}`);
   if (scope.wt) url.searchParams.set("wt", scope.wt);
   if (scope.project) url.searchParams.set("project", scope.project);
@@ -81,7 +76,7 @@ export function isFileMissingError(err: unknown): boolean {
   return err instanceof ApiError && err.status === 404 && err.code === "ENOENT";
 }
 
-async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
+export async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
@@ -315,30 +310,6 @@ export async function getDetectedFormatters(worktreePath: string): Promise<Detec
     `/detected-formatters?${params.toString()}`,
   );
   return result.formatters;
-}
-
-// --- Python interpreter ---
-
-export async function getPythonEnv(worktreePath: string): Promise<PythonEnvResponse> {
-  return fetchJson<PythonEnvResponse>(withScope("/python-env", { wt: worktreePath }));
-}
-
-export async function getPythonEnvCandidates(
-  worktreePath: string,
-): Promise<PythonEnvCandidatesResponse> {
-  return fetchJson<PythonEnvCandidatesResponse>(
-    withScope("/python-env/candidates", { wt: worktreePath }),
-  );
-}
-
-/** Choose the worktree's interpreter, or return it to automatic detection with null. */
-export async function setPythonOverride(
-  request: PythonOverrideRequest,
-): Promise<PythonEnvResponse> {
-  return fetchJson<PythonEnvResponse>("/python-env/override", {
-    method: "POST",
-    body: JSON.stringify(request),
-  });
 }
 
 // --- Full-text search ---
