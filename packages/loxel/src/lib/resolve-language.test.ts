@@ -66,3 +66,36 @@ describe("toMonacoLanguage", () => {
     expect(toMonacoLanguage("pip-requirements")).toBe("pip-requirements");
   });
 });
+
+describe("resolveLanguage for Gradle and Maven projects", () => {
+  test.each([
+    ["/repo/build.gradle", "groovy"],
+    ["/repo/settings.gradle", "groovy"],
+    ["/repo/gradle/libs.gradle", "groovy"],
+    ["/repo/src/Util.groovy", "groovy"],
+    ["/repo/Jenkinsfile", "groovy"],
+    ["/repo/build.gradle.kts", "kotlin"],
+    ["/repo/gradle.properties", "java-properties"],
+    ["/repo/gradle/wrapper/gradle-wrapper.properties", "java-properties"],
+    ["/repo/src/main/resources/messages_de.properties", "java-properties"],
+    ["/repo/gradlew", "bash"],
+    ["/repo/mvnw", "bash"],
+    ["/repo/gradlew.bat", "bat"],
+    ["/repo/mvnw.cmd", "bat"],
+  ])("%s → %s", (path, language) => {
+    expect(resolve(path)).toBe(language);
+  });
+
+  test.each([
+    ["/repo/build.gradle", "groovy"],
+    ["/repo/gradle.properties", "java-properties"],
+    ["/repo/gradlew", "shell"],
+    ["/repo/gradlew.bat", "bat"],
+  ])("%s opens in Monaco as %s", (path, monacoLanguage) => {
+    expect(toMonacoLanguage(resolve(path))).toBe(monacoLanguage);
+  });
+
+  test("leaves other batch files alone", () => {
+    expect(resolve("/repo/run.bat")).toBeNull();
+  });
+});

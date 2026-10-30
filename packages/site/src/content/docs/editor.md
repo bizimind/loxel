@@ -115,6 +115,14 @@ Python source (`.py`), stub (`.pyi`), and `.pyw` files get highlighting and [Pyt
 
 Project files are recognized too: `pyproject.toml`, `uv.lock`, `poetry.lock`, and `Pipfile` are highlighted as TOML, `Pipfile.lock` as JSON, and `requirements*.txt`, `requirements*.in`, `requirements/*.txt`, and `constraints*.txt` as pip requirements. In the file tree, `.venv`, `venv`, `__pycache__`, and Python tool cache folders show a distinct folder icon. To treat other files as a given language, add a glob in **Settings > File Associations**.
 
+## Gradle and Maven files
+
+`.gradle` and `.groovy` files and `Jenkinsfile` are highlighted as Groovy, including comment toggling and bracket matching. Typing `"""` or `'''` adds the closing quotes, and typing the closing quotes steps over them.
+
+`.properties` files, such as `gradle.properties` and `gradle-wrapper.properties`, get their own highlighting, with `#` and `!` comments. Toggling a comment uses `#`. The `gradlew` and `mvnw` wrapper scripts are highlighted as shell, and `gradlew.bat` and `mvnw.cmd` as batch.
+
+In the file tree, Gradle build and settings files, `gradle.properties`, `gradlew`, and `libs.versions.toml` show a Gradle icon, `pom.xml` and `mvnw` a Maven icon, and Groovy files and `Jenkinsfile` a Groovy icon.
+
 ---
 
 ## Markdown files

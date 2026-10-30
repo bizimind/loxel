@@ -41,6 +41,8 @@ describe("registerLoxelLanguages", () => {
     expect(loxelLanguages.toSorted()).toEqual([
       "astro",
       "dockerbake",
+      "groovy",
+      "java-properties",
       "jsx",
       "just",
       "make",
@@ -109,16 +111,28 @@ describe("editing Loxel's languages in Monaco", () => {
     ["terraform", 'name = "a"', '# name = "a"'],
     ["make", "all: build", "# all: build"],
     ["just", "build:", "# build:"],
+    ["groovy", "id 'java'", "// id 'java'"],
+    ["java-properties", "org.gradle.caching=true", "# org.gradle.caching=true"],
   ])("toggles a line comment in %s", (language, line, commented) => {
     const model = open(language, line);
     editor.trigger("keyboard", "editor.action.commentLine", null);
     expect(model.getValue()).toBe(commented);
   });
 
-  test.each(["tsx", "jsx", "terraform", "make", "just"])("auto-closes brackets in %s", (lang) => {
-    const model = open(lang, "x = ");
-    type("(");
-    expect(model.getValue()).toBe("x = ()");
+  test.each(["tsx", "jsx", "terraform", "make", "just", "groovy", "java-properties"])(
+    "auto-closes brackets in %s",
+    (lang) => {
+      const model = open(lang, "x = ");
+      type("(");
+      expect(model.getValue()).toBe("x = ()");
+    },
+  );
+
+  test.each(['"""', "'''"])("auto-closes %s in Groovy", (quotes) => {
+    const model = open("groovy", "def a = ");
+    type(quotes);
+    expect(model.getValue()).toBe(`def a = ${quotes}${quotes}`);
+    expect(editor.getPosition()?.column).toBe("def a = ".length + quotes.length + 1);
   });
 
   test("continues a JSDoc comment on Enter in TSX", () => {

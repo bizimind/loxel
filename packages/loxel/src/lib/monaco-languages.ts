@@ -1,5 +1,7 @@
 import * as monaco from "monaco-editor";
 import { conf as hclConf } from "monaco-editor/languages/definitions/hcl/hcl.js";
+import { conf as iniConf } from "monaco-editor/languages/definitions/ini/ini.js";
+import { conf as javaConf } from "monaco-editor/languages/definitions/java/java.js";
 import { conf as javascriptConf } from "monaco-editor/languages/definitions/javascript/javascript.js";
 import { conf as typescriptConf } from "monaco-editor/languages/definitions/typescript/typescript.js";
 
@@ -82,6 +84,15 @@ const HASH_COMMENT_SCRIPT_CONFIGURATION: monaco.languages.LanguageConfiguration 
   ],
 };
 
+const GROOVY_CONFIGURATION: monaco.languages.LanguageConfiguration = {
+  ...javaConf,
+  autoClosingPairs: [
+    { open: '"""', close: '"""', notIn: ["comment"] },
+    { open: "'''", close: "'''", notIn: ["comment"] },
+    ...(javaConf.autoClosingPairs ?? []),
+  ],
+};
+
 /**
  * Languages Monaco doesn't ship, with their editing behavior (comments, brackets, auto-closing and
  * surrounding pairs, on-enter rules). Most exist as their own IDs so `shikiToMonaco` can attach
@@ -128,6 +139,19 @@ const LOXEL_LANGUAGES: {
   {
     language: { id: "just", extensions: [".just"], aliases: ["Just", "just"] },
     configuration: HASH_COMMENT_SCRIPT_CONFIGURATION,
+  },
+  {
+    language: { id: "groovy", extensions: [".groovy", ".gradle"], aliases: ["Groovy", "groovy"] },
+    configuration: GROOVY_CONFIGURATION,
+  },
+  // Its own ID rather than Monaco's `ini`, so it gets the grammar in java-properties-grammar.ts.
+  {
+    language: {
+      id: "java-properties",
+      extensions: [".properties"],
+      aliases: ["Java Properties", "properties"],
+    },
+    configuration: iniConf,
   },
 ];
 
