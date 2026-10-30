@@ -195,6 +195,30 @@ describe("SchemaDownloads", () => {
     expect(await Bun.file(tombiCachePath(join(root, "tombi"), A)!).exists()).toBe(false);
   });
 
+  test("a revocation during a cache write leaves nothing behind", async () => {
+    let revoked: Promise<void> = Promise.resolve();
+    downloads = new SchemaDownloads({
+      tombiCacheDir: join(root, "tombi"),
+      lemminxWorkDir: join(root, "lemminx"),
+      fetchText: async () => {
+        // The next event-loop turn: after this download has started writing.
+        setImmediate(() => {
+          revoked = downloads.onRevoked();
+        });
+        return "{}";
+      },
+      request: () => "allowed",
+      addReferences: () => {},
+      restartServers: () => {
+        restarts++;
+      },
+    });
+    await downloads.ensure([A]);
+    await revoked;
+    expect(await Bun.file(tombiCachePath(join(root, "tombi"), A)!).exists()).toBe(false);
+    expect(await Bun.file(lemminxCachePath(join(root, "lemminx"), A)!).exists()).toBe(false);
+  });
+
   test("a schema that cannot be cached does not restart the servers", async () => {
     const clash = "https://example.com/a.json/b.json";
     verdicts.set(A, "allowed");

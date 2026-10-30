@@ -107,6 +107,8 @@ export class SchemaDownloads {
   private revoking: Promise<unknown> = Promise.resolve();
   /** Bumped by {@link onRevoked}: a download that began before it writes nothing after it. */
   private generation = 0;
+  /** Cache writes under way, which {@link onRevoked} waits for so that it removes what they wrote. */
+  private readonly writes = new Set<Promise<boolean>>();
   /** Downloads under way, so a file opening while one runs does not restart servers twice. */
   private readonly running = new Map<string, Promise<boolean>>();
 
@@ -138,15 +140,19 @@ export class SchemaDownloads {
   /** Forget everything downloaded, after the user took a trust decision back. */
   async onRevoked(): Promise<void> {
     this.generation++;
-    this.revoking = Promise.all(
-      [this.options.tombiCacheDir, this.options.lemminxWorkDir].map((dir) =>
-        rm(dir, { recursive: true, force: true }),
-      ),
-    ).catch((err: unknown) => {
-      log.warn("Could not empty the schema caches", {
-        error: err instanceof Error ? err : undefined,
+    this.revoking = Promise.allSettled(this.writes)
+      .then(() =>
+        Promise.all(
+          [this.options.tombiCacheDir, this.options.lemminxWorkDir].map((dir) =>
+            rm(dir, { recursive: true, force: true }),
+          ),
+        ),
+      )
+      .catch((err: unknown) => {
+        log.warn("Could not empty the schema caches", {
+          error: err instanceof Error ? err : undefined,
+        });
       });
-    });
     await this.revoking;
     this.options.restartServers();
   }
@@ -183,7 +189,11 @@ export class SchemaDownloads {
       if (generation !== this.generation || this.options.request(url) !== "allowed") {
         return arrived;
       }
-      if ((await writeAll(paths, text)) && age === null) arrived = true;
+      const write = writeAll(paths, text).finally(() => this.writes.delete(write));
+      this.writes.add(write);
+      const written = await write;
+      if (generation !== this.generation) return arrived;
+      if (written && age === null) arrived = true;
 
       const references = schemaReferences(text, url);
       this.options.addReferences(root, references);
