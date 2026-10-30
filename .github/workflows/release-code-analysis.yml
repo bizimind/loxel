@@ -138,6 +138,9 @@ jobs:
           aws s3 cp packages/code-analysis/dist/code-analysis \
             "s3://loxel/code-analysis/${{ matrix.platform }}/code-analysis" \
             --content-type application/octet-stream
+          aws s3 cp packages/code-analysis/dist/THIRD_PARTY_NOTICES.txt \
+            "s3://loxel/code-analysis/${{ matrix.platform }}/THIRD_PARTY_NOTICES.txt" \
+            --content-type text/plain
 
   release:
     needs: [build-matrix, check-and-bump, build]
@@ -196,6 +199,7 @@ jobs:
             --generate-notes \
             --notes "## Downloads
 
-          ${LINKS}"
+          ${LINKS}
+          Third-party notices: THIRD_PARTY_NOTICES.txt next to each platform's binary, for example [linux-x64](${BASE}/linux-x64/THIRD_PARTY_NOTICES.txt)"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

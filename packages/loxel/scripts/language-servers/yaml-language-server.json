@@ -1,1 +1,7 @@
-{ "script": "build-yaml-lsp.ts", "resources": ["yaml-language-server"] }
+{
+  "script": "build-yaml-lsp.ts",
+  "resources": ["yaml-language-server"],
+  "license": "MIT",
+  "source": "https://github.com/redhat-developer/yaml-language-server",
+  "npm": ["yaml-language-server"]
+}

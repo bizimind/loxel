@@ -1,1 +1,7 @@
-{ "script": "download-tombi.ts", "resources": ["tombi"] }
+{
+  "script": "download-tombi.ts",
+  "resources": ["tombi"],
+  "license": "MIT",
+  "source": "https://github.com/tombi-toml/tombi/tree/v1.9.6",
+  "licenseFile": "licenses/tombi.txt"
+}

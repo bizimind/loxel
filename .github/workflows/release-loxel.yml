@@ -188,6 +188,7 @@ jobs:
           mkdir -p staging
           cp packages/loxel/build/loxel-server staging/
           cp -R packages/loxel/build/language-servers/. staging/
+          cp packages/loxel/build/THIRD_PARTY_NOTICES.txt staging/
           cp -r packages/loxel/dist staging/renderer
           tar czf "$ARCHIVE" -C staging .
 

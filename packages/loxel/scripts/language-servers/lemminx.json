@@ -1,1 +1,8 @@
-{ "script": "download-xml-lsp.ts", "resources": ["lemminx/lemminx"] }
+{
+  "script": "download-xml-lsp.ts",
+  "resources": ["lemminx/lemminx"],
+  "license": "EPL-2.0",
+  "source": "https://github.com/redhat-developer/vscode-xml/releases/tag/0.29.2",
+  "licenseFile": "licenses/lemminx.txt",
+  "note": "Native image built by that vscode-xml release from https://github.com/eclipse-lemminx/lemminx with GraalVM Community Edition."
+}
