@@ -1,3 +1,4 @@
+export { mapWithConcurrency } from "./concurrency";
 export {
   getCommitDiff,
   getRangeDiff,
