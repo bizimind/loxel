@@ -217,6 +217,7 @@ const EXTENSION_LANGUAGE: Record<string, string> = {
   rs: "rust",
   java: "java",
   kt: "kotlin",
+  kts: "kotlin",
   swift: "swift",
   css: "css",
   scss: "scss",
