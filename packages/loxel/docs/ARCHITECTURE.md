@@ -138,7 +138,7 @@ The same index as the [package README](../README.md#internal-docs), grouped the 
 - [ELECTRON.md](ELECTRON.md) — Electron process model, what ships in the app bundle versus in-app updates, browser panels, macOS integration
 - [SHARED_SERVER.md](SHARED_SERVER.md) — how all windows share one Bun server: discover-or-spawn, ownership, idle shutdown, state scopes
 - [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
-- [WATCHERS.md](WATCHERS.md) — filesystem and git watchers, their ownership and the status refresh pipeline
+- [WATCHERS.md](WATCHERS.md) — filesystem and git watchers, their ownership, the status refresh pipeline and the tests that lock it
 - [RELEASE_SIGNING.md](RELEASE_SIGNING.md) — macOS code signing and the provisioning profile behind passkeys
 
 **Workspace**
