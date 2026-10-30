@@ -55,7 +55,8 @@ describe("runGit", () => {
     const result = await runGit(["status"], { env, nothrow: true });
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("git");
-    expect(runGit(["status"], { env })).rejects.toBeInstanceOf(GitCommandError);
+    const error: unknown = await runGit(["status"], { env }).catch((e) => e);
+    expect(error).toBeInstanceOf(GitCommandError);
   });
 
   test("passes stdin, as text or bytes", async () => {
