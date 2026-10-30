@@ -1,7 +1,6 @@
 import picomatch from "picomatch";
 
-/** Only comments and blank lines may come before the directive. */
-const TOML_DIRECTIVE_RE = /^(?:[ \t]*(?:#[^\n]*)?\r?\n)*?[ \t]*#:schema[ \t]+(\S+)/;
+const TOML_DIRECTIVE_RE = /^\s*#:schema\s+(\S+)/;
 const XML_SCHEMA_LOCATION_RE = /schemaLocation\s*=\s*["']([^"']+)["']/gi;
 const XML_SYSTEM_ID_RE = /\b(?:SYSTEM|PUBLIC\s+["'][^"']*["'])\s+["']([^"']+)["']/g;
 const XML_MODEL_RE = /<\?xml-model\b[^>]*\bhref\s*=\s*["']([^"']+)["']/g;
@@ -28,6 +27,17 @@ export function xmlSchemaLocations(text: string): string[] {
   ];
 }
 
+/** A TOML file's `#:schema` value: only comments and blank lines may come before it. */
+function tomlSchemaDirective(text: string): string | null {
+  for (const line of text.split("\n")) {
+    const match = TOML_DIRECTIVE_RE.exec(line);
+    if (match) return match[1]!;
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith("#")) return null;
+  }
+  return null;
+}
+
 /**
  * The remote schema URLs a TOML or XML file names. Those servers cannot ask for a schema while they
  * work, so the editor reports what a file names when it opens. Relative and local references need
@@ -36,8 +46,8 @@ export function xmlSchemaLocations(text: string): string[] {
 export function schemaUrlsNamedBy(language: string, content: string): string[] {
   const text = content.slice(0, MAX_SCANNED_CHARS);
   if (language === "toml") {
-    const match = TOML_DIRECTIVE_RE.exec(text);
-    return match && isRemoteSchemaUrl(match[1]!) ? [match[1]!] : [];
+    const url = tomlSchemaDirective(text);
+    return url && isRemoteSchemaUrl(url) ? [url] : [];
   }
   if (language !== "xml") return [];
   return [...new Set(xmlSchemaLocations(text).filter(isRemoteSchemaUrl))];
