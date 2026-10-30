@@ -6,7 +6,7 @@ import { createHighlighter } from "shiki";
 
 import { CSHARP_DOC_COMMENT_LINE, registerLanguageConfiguration } from "./csharp-language-config";
 import { loxelDark } from "./loxel-themes";
-import { registerPythonLanguageConfiguration } from "./python-language-config";
+import { registerLanguageConfiguration as registerPythonLanguageConfiguration } from "./python-language-config";
 
 describe("CSHARP_DOC_COMMENT_LINE", () => {
   test.each(["///", "/// <summary>", "    /// text", "\t///text"])("matches %p", (line) => {
