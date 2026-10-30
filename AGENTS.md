@@ -104,6 +104,8 @@ Each package README is the authoritative doc for that package; this list only or
 
 **Agent Detection**: Check `CLAUDECODE=1` environment variable to branch between agent (non-blocking) and human (standard) behavior.
 
+**Privacy and Licensing**: Loxel never collects data about users without consent and never requires an account. Load the `legal` skill before adding a network request, telemetry, a login, or a third-party dependency, binary or asset, or before any privacy, licensing or legal decision.
+
 **Standalone Binaries**: Packages compile to standalone executables via `bun build --compile`. Production binaries are built and signed in CI and placed in `~/.local/bin/`. If specifically requested to use a locally built binary, copy it to `~/.local/bin/` and ad-hoc sign with `codesign -s -` (required on macOS or the binary gets SIGKILL'd).
 
 ## Bun Guidelines
