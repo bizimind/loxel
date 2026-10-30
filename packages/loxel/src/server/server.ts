@@ -35,6 +35,7 @@ import { FileOperationsHistory, FileOperationsService } from "./file-operations-
 import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
+import { gitExecClient } from "./git-exec-client";
 import { tomlLspManager, worktreeLspManagers } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
@@ -1402,6 +1403,7 @@ function shutdown(exitCode = 0) {
   formatService.destroy();
   yamlLspManager.destroy();
   for (const manager of worktreeLspManagers) manager.destroy();
+  gitExecClient.stop();
   perfMonitor.dispose();
   stress.dispose();
   logger.shutdown();
