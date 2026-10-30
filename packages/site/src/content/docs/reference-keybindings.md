@@ -106,8 +106,15 @@ Back/forward work like a browser's history, across all projects. Worktree number
 
 | Action                     | Shortcut                                |
 | -------------------------- | --------------------------------------- |
+| Quick Fix…                 | `Cmd+.`                                 |
+| Fix All                    | `Ctrl+Shift+.`                          |
+| Organize Imports           | `Shift+Alt+O`                           |
+| Source Action…             | `Ctrl+Alt+S`                            |
+| Refactor…                  | `Ctrl+Alt+R`                            |
 | Python: Select Interpreter | unbound — command palette or status bar |
 | Restart Language Servers   | unbound — command palette               |
+
+The code action shortcuts work in a code editor whose language server offers that kind of action, and the command palette lists them only then. When several servers offer one (Ruff and the type checker for Python), Fix All and Organize Imports apply the only fix offered or let you pick, and the others list every server's actions.
 
 ---
 

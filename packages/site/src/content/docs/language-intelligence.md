@@ -39,7 +39,7 @@ The TypeScript server provides all of these; the [other language servers](#other
 | Workspace symbols | [Go to Symbol](/docs/editor#go-to-symbol) in the projects of open files |
 | Folding ranges    | Collapse functions, blocks, and regions                                 |
 
-These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quick fixes); the code editor has no right-click menu. They work in editor tabs; the [diff viewer](/docs/diff-viewer) shows code without them.
+These use Monaco's default keys (for example `F2` to rename); the code editor has no right-click menu. Code actions are also in the command palette: **Quick Fix…** (`Cmd+.`), **Fix All** (`Ctrl+Shift+.`), **Organize Imports** (`Shift+Alt+O`), **Source Action…** (`Ctrl+Alt+S`) and **Refactor…** (`Ctrl+Alt+R`), listed while a code editor has focus and its language server offers them; you can remap them in **Settings > Keybindings**. They work in editor tabs; the [diff viewer](/docs/diff-viewer) shows code without them.
 
 ---
 
@@ -156,8 +156,8 @@ The type checker only reads that environment's installed packages and never runs
 Python files also get [Ruff](https://docs.astral.sh/ruff/)'s linter, alongside type checking:
 
 - Lint problems are underlined as you type, and `Cmd+.` offers Ruff's quick fixes, including disabling a rule for one line with a `# noqa` comment.
-- `Shift+Option+O` organizes the file's imports.
-- **Fix All** (press `F1` and search for it) applies every automatic fix in the file.
+- **Organize Imports** (`Shift+Alt+O`) sorts the file's imports.
+- **Fix All** (`Ctrl+Shift+.`, or from the command palette) applies every automatic fix in the file.
 
 Ruff reads its settings from the `ruff.toml`, `.ruff.toml` or `pyproject.toml` closest to each file, so each project in a monorepo keeps its own rules, and edits to those files apply right away. Without any Ruff configuration, Ruff's default rules apply.
 
