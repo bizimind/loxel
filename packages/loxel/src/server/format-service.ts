@@ -14,6 +14,7 @@ import {
   type PythonFormatter,
 } from "./python-formatter";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("format");
 
@@ -453,13 +454,15 @@ function spawnFormatter(
   worktreePath: string | undefined,
   env: Record<string, string | undefined>,
 ) {
-  return Bun.spawn(argv, {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd: worktreePath ?? undefined,
-    env,
-  });
+  return measureSpawn("formatter", () =>
+    Bun.spawn(argv, {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      cwd: worktreePath ?? undefined,
+      env,
+    }),
+  );
 }
 
 /**

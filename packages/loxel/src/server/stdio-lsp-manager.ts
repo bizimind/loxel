@@ -19,6 +19,7 @@ import {
   withWatchedFilesCapability,
 } from "./lsp-watched-files";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 import {
   createStderrThrottle,
   STDERR_THROTTLE_CAPACITY,
@@ -714,16 +715,18 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     const opts = this.spawnOptions(context);
     this.log.info(`Spawning ${this.name} ${args.join(" ")}: ${bin}`);
 
-    const proc = Bun.spawn([bin, ...args], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: opts.cwd,
-      // Login-shell environment, so servers that run user tools (basedpyright's
-      // interpreter probe, terraform-ls's `terraform`) find the user's PATH
-      // even when Loxel was launched from Finder.
-      env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },
-    });
+    const proc = measureSpawn("lsp", () =>
+      Bun.spawn([bin, ...args], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        cwd: opts.cwd,
+        // Login-shell environment, so servers that run user tools (basedpyright's
+        // interpreter probe, terraform-ls's `terraform`) find the user's PATH
+        // even when Loxel was launched from Finder.
+        env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },
+      }),
+    );
 
     // Until it is in `sessions` nothing else would kill the process (`detach` finds the session there).
     let session: TSession;
