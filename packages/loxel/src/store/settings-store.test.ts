@@ -9,6 +9,8 @@ import {
   type IndentationInputs,
   type ResolvedIndentation,
   resolveIndentation,
+  type SettingsState,
+  useSettingsStore,
 } from "./settings-store";
 
 function settings(overrides: EditorSettings["overrides"] = []): EditorSettings {
@@ -241,5 +243,19 @@ describe("BUILTIN_SCHEMA_DEFAULTS", () => {
   ])("%s is built in and routes to its languages", (glob, languages) => {
     expect(BUILTIN_SCHEMA_DEFAULTS.some((schema) => schema.glob === glob)).toBe(true);
     expect(classifySchemaGlob(glob)).toEqual(languages);
+  });
+});
+
+describe("settings migration", () => {
+  const migrate = useSettingsStore.persist.getOptions().migrate;
+
+  test("v11 settings get the automatic update check turned on", async () => {
+    const migrated = (await migrate?.({ terminal: {} }, 11)) as SettingsState;
+    expect(migrated.autoCheckForUpdates).toBe(true);
+  });
+
+  test("keeps an existing opt-out", async () => {
+    const migrated = (await migrate?.({ autoCheckForUpdates: false }, 11)) as SettingsState;
+    expect(migrated.autoCheckForUpdates).toBe(false);
   });
 });
