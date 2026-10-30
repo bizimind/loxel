@@ -407,9 +407,13 @@ export async function dotnetRuntimes(
   try {
     const onPath = await resolveDotnet(wtPath, { env });
     const underRoot = await dotnetRootDotnet(wtPath, env);
-    const dotnets = [...new Set([underRoot, onPath])].filter((dotnet) => dotnet !== null);
-    if (dotnets.length === 0) return null;
-    const lists = await Promise.all(dotnets.map((dotnet) => listRuntimes(wtPath, dotnet, env)));
+    // One per install: a `dotnet` on PATH is commonly a symlink into the DOTNET_ROOT install.
+    const found = [underRoot, onPath].filter((dotnet) => dotnet !== null);
+    if (found.length === 0) return null;
+    const installs = new Set(await Promise.all(found.map((dotnet) => realpath(dotnet))));
+    const lists = await Promise.all(
+      [...installs].map((dotnet) => listRuntimes(wtPath, dotnet, env)),
+    );
     const runtimes = lists.flatMap((list) => list ?? []);
     const modern = runtimes.find((runtime) => majorOf(runtime.version) >= MIN_RUNTIME_MAJOR);
     return { runtimes, runtime10Root: modern?.root ?? null };
@@ -755,19 +759,22 @@ function scanPropertyGroups(source: string, file: string): PropSetting[] | null 
   if (tags.some((tag) => tag.name === "choose" || tag.name === "target")) return null;
 
   const settings: PropSetting[] = [];
-  let group: XmlTag | null = null;
+  let inGroup = false;
+  let groupConditional = false;
   for (const [i, tag] of tags.entries()) {
     if (tag.name === "propertygroup") {
-      if (!tag.selfClosed) group = tag.closing ? null : tag;
+      if (tag.selfClosed) continue;
+      inGroup = !tag.closing;
+      groupConditional = inGroup && hasCondition(tag);
       continue;
     }
     const next = tags[i + 1];
-    if (!group || tag.closing || tag.selfClosed || !isLayoutProp(tag.name)) continue;
+    if (!inGroup || tag.closing || tag.selfClosed || !isLayoutProp(tag.name)) continue;
     if (!next?.closing || next.name !== tag.name) continue;
     settings.push({
       name: tag.name,
       value: text.slice(tag.end, next.start).trim(),
-      conditional: hasCondition(group) || hasCondition(tag),
+      conditional: groupConditional || hasCondition(tag),
       file,
     });
   }

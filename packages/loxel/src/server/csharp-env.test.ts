@@ -522,6 +522,17 @@ describe("dotnetRuntimes", () => {
     expect((await dotnetRuntimes(wt, { env: { PATH: outside } }))?.runtime10Root).toBe(outside);
   });
 
+  test("asks one install once when a symlink on PATH leads into DOTNET_ROOT", async () => {
+    const { wt, bin, outside } = await makeRoot();
+    const { dotnet, runs } = await fakeDotnet(outside, { runtimes: listing(outside, "10.0.14") });
+    await symlink(dotnet, join(bin, "dotnet"));
+    expect(await dotnetRuntimes(wt, { env: { PATH: bin, DOTNET_ROOT: outside } })).toEqual({
+      runtimes: [{ version: "10.0.14", root: outside }],
+      runtime10Root: outside,
+    });
+    expect(await runs()).toHaveLength(1);
+  });
+
   test("returns null without dotnet", async () => {
     const { wt, bin } = await makeRoot();
     expect(await dotnetRuntimes(wt, { env: { PATH: bin } })).toBeNull();
@@ -764,6 +775,7 @@ describe("csharpRestoreState", () => {
       "<PropertyGroup ".repeat(size / 15),
       "<Choose >".repeat(size / 9),
       "<a<".repeat(size / 3),
+      `<PropertyGroup ${"Condition ".repeat(size / 40)}>${"<ArtifactsPath></ArtifactsPath>".repeat(size / 62)}</PropertyGroup>`,
     ]) {
       await write(join(wt, "Directory.Build.props"), `<Project>${body}</Project>`);
       expect((await csharpRestoreState(wt, project)).restored).toBe(false);
