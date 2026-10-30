@@ -18,8 +18,8 @@ import { createLspWorkspaceFiles } from "./lsp-workspace-files";
 
 const log = frontendLog.child("ui");
 
-/** Every connected worktree client, with the worktree it serves. */
-const connectedClients = new Map<MonacoLspClient, string>();
+/** Every connected client, with the worktree it serves (null: YAML, shared by every worktree). */
+const connectedClients = new Map<MonacoLspClient, string | null>();
 
 /** Every client's connection, for restarting them. */
 const connections = new Set<LspConnection>();
@@ -30,6 +30,11 @@ const connections = new Set<LspConnection>();
  */
 export function getConnectedLspClients(wtPath: string): MonacoLspClient[] {
   return [...connectedClients].filter(([, path]) => path === wtPath).map(([client]) => client);
+}
+
+/** Every connected client, whatever its worktree, including YAML's. */
+export function getAllConnectedLspClients(): MonacoLspClient[] {
+  return [...connectedClients.keys()];
 }
 
 /** Restart every language server Loxel is connected to (or trying to be), from scratch. */
@@ -101,7 +106,7 @@ export function createLspClient({ route, name, languageId, onConnected }: LspCli
       transport.dispose();
       throw err;
     }
-    if (wtPath !== null) connectedClients.set(client, wtPath);
+    connectedClients.set(client, wtPath);
     const extension = onConnected?.(transport);
     return {
       closed,

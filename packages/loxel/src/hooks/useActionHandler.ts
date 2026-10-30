@@ -6,6 +6,7 @@ import type { IDockviewPanel } from "dockview-react";
 import { useCallback } from "react";
 
 import type { PanelPlacement, SplitDirection } from "@/api/panel-placement-model";
+import { runEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import {
   moveFocus,
@@ -399,6 +400,13 @@ export function useActionHandler(): (actionId: ActionId) => void {
         break;
       }
 
+      case "codeAction.quickFix":
+      case "codeAction.fixAll":
+      case "codeAction.organizeImports":
+      case "codeAction.sourceAction":
+      case "codeAction.refactor":
+        runEditorCodeAction(actionId);
+        break;
       case "language.restartServers":
         restartLanguageServers();
         break;

@@ -172,6 +172,13 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "tree.rename": ["F2", "Shift+F6"],
   "editor.changeIndentation": [],
   "python.selectInterpreter": [],
+  // Code actions, enabled only in an editor whose language server offers them. Quick Fix and
+  // Organize Imports keep Monaco's keys; Monaco's Refactor key (⌃⇧R) is Toggle Comments here.
+  "codeAction.quickFix": ["Cmd+Period"],
+  "codeAction.fixAll": ["Ctrl+Shift+Period"],
+  "codeAction.organizeImports": ["Alt+Shift+O"],
+  "codeAction.sourceAction": ["Ctrl+Alt+S"],
+  "codeAction.refactor": ["Ctrl+Alt+R"],
   "language.restartServers": [],
   "app.settings": ["Cmd+Comma"],
 });
