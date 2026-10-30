@@ -1,6 +1,7 @@
-import { recordSpawn } from "../spawn-metrics";
+import { gitExecClient } from "../git-exec-client";
+import { recordWorkerSpawn } from "../spawn-metrics";
 import { inheritedGitEnv } from "./git-env";
-import { execGit } from "./git-exec";
+import { gitCommandLabel } from "./git-exec";
 
 export interface RunGitOptions {
   /** Passed as a leading `-C`, so a missing directory is git's exit 128 rather than a spawn error. */
@@ -33,31 +34,24 @@ export class GitCommandError extends Error {
   }
 }
 
-/** The subcommand, skipping git's global options: what a spawn is reported under. */
-function spawnLabel(args: readonly string[]): string {
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg === "-c" || arg === "-C") i++;
-    else if (!arg.startsWith("-")) return `git ${arg}`;
-  }
-  return "git";
-}
-
 function decode(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString();
 }
 
-/** Run `git <args>` and collect its output. Every git command in `git-commands/` goes through here. */
+/**
+ * Run `git <args>` on the git exec worker and collect its output. Every git command in
+ * `git-commands/` goes through here. Rejects, whatever `nothrow` says, if the worker dies first.
+ */
 export async function runGit(
   args: readonly string[],
   { cwd, env, stdin, nothrow = false }: RunGitOptions = {},
 ): Promise<GitResult> {
-  const executed = await execGit({
+  const executed = await gitExecClient.exec({
     args: cwd === undefined ? args : ["-C", cwd, ...args],
     env: env ?? inheritedGitEnv(),
     stdin: typeof stdin === "string" ? Buffer.from(stdin) : stdin,
   });
-  recordSpawn(spawnLabel(args), executed.spawnBlockMs, executed.wallMs);
+  recordWorkerSpawn(gitCommandLabel(args), executed.spawnBlockMs, executed.wallMs);
 
   const result: GitResult = {
     exitCode: executed.exitCode,
