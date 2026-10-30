@@ -124,6 +124,16 @@ Each rule has a `BackendMode` from [formatter-backends.ts](../src/server/formatt
 
 `invalidateCache(wtPath)` (called from worktree teardown) drops detection and destroys backends; `destroy()` runs at shutdown. `GET /api/detected-formatters?wt=` exposes detection to the settings UI.
 
+## Toolchain status items
+
+A language whose toolchain the user can see and choose (Python's interpreter) gets a status bar item, a picker, a command and routes through one seam. The shared code loops over three lists, each one import and one entry per language, and knows no language:
+
+- [toolchain-statuses.ts](../src/api/toolchain-statuses.ts) lists each language's `ToolchainStatusDescriptor` ([toolchain-status-model.ts](../src/api/toolchain-status-model.ts)): its id, Monaco languages, changed message and select action. It is static because [ws-protocol.ts](../src/api/ws-protocol.ts) and the [action registry](../src/store/keybindings/action-registry.ts) derive literal types from it. Every select action is unbound by default, enabled while a worktree is active.
+- [server/toolchain-statuses.ts](../src/server/toolchain-statuses.ts) lists each language's `ToolchainStatusModule` ([toolchain-status-module.ts](../src/server/toolchain-status-module.ts)): subscribe, refresh, the stored choice and its routes. [server.ts](../src/server/server.ts) holds a subscription per worktree, broadcasts the changed message when `changed`, and refreshes on a new choice or login-shell capture. [routes.ts](../src/server/routes.ts) validates the worktree for each route, then calls the module's handler, and deletes the stored choice with the worktree.
+- [lib/toolchain-status-items.ts](../src/lib/toolchain-status-items.ts) lists each language's `ToolchainStatusItem` ([toolchain-status-item.ts](../src/lib/toolchain-status-item.ts)): the status bar component and the picker. An item builds on `useActiveToolchainStatus` ([use-toolchain-status.ts](../src/queries/use-toolchain-status.ts)), which follows the active editor's panel and worktree, and [ToolchainStatusButton.tsx](../src/components/panels/ToolchainStatusButton.tsx). The WebSocket bridge invalidates a toolchain's query on its changed message, and [useWsSubscription.ts](../src/hooks/useWsSubscription.ts) invalidates all of them on subscribing to a worktree, since only subscribers get those messages.
+
+A language calls its own routes from its own client file (`src/api/<language>-*-client.ts`). Python's modules are named in [languages/python.md](languages/python.md#python-environment).
+
 ## Schemas and JSON validation
 
 - [schema-service.ts](../src/server/schema-service.ts) resolves a schema from an HTTP(S) URL (1 h TTL, 5 MB cap, 10 s timeout) or a local path (relative to a base directory, revalidated by mtime). Other URL schemes are rejected.
@@ -147,6 +157,7 @@ Each rule has a `BackendMode` from [formatter-backends.ts](../src/server/formatt
 - Client wiring: [monaco-env.ts](../src/lib/monaco-env.ts), [lsp-client.ts](../src/lib/lsp-client.ts), [lsp-clients.ts](../src/lib/lsp-clients.ts), [monaco-lsp-client](../../monaco-lsp-client/README.md).
 - URI choice and markers: [CodeEditorPanel.tsx](../src/components/code-editor/CodeEditorPanel.tsx), [GitSideBySideDiffView.tsx](../src/components/diff-viewer/GitSideBySideDiffView.tsx), [CompareFilesPanel.tsx](../src/components/compare/CompareFilesPanel.tsx), [diff/EditorPanel.tsx](../src/components/diff/EditorPanel.tsx).
 - Formatting: [format-service.ts](../src/server/format-service.ts) and its backends, [language-formatter.ts](../src/server/language-formatter.ts), the list in [language-formatters.ts](../src/server/language-formatters.ts), [python-formatter.ts](../src/server/python-formatter.ts), [formatting-model.ts](../src/lib/formatting-model.ts).
+- Toolchain status items: [Toolchain status items](#toolchain-status-items).
 - Per-language modules: the [languages/](languages/) files.
 - Bridge helpers: [lsp-watched-files.ts](../src/server/lsp-watched-files.ts), [node-modules-changes.ts](../src/server/node-modules-changes.ts), [lsp-workspace-files.ts](../src/lib/lsp-workspace-files.ts), [shipped-by-repo.ts](../src/server/shipped-by-repo.ts).
 - Schemas: [schema-service.ts](../src/server/schema-service.ts), [schema-glob.ts](../src/lib/schema-glob.ts), [schema-sync.ts](../src/lib/schema-sync.ts), [json-schema-registry.ts](../src/lib/json-schema-registry.ts), [toml-lsp-manager.ts](../src/server/toml-lsp-manager.ts).
