@@ -1,4 +1,5 @@
 import { MonacoLspClient, WebSocketTransport } from "@bizimind/monaco-lsp-client";
+import type { IDisposable } from "monaco-editor";
 
 import { showToast } from "@/components/ui/toast";
 import { useLspStatusStore } from "@/store/lsp-status";
@@ -17,8 +18,8 @@ import { createLspWorkspaceFiles } from "./lsp-workspace-files";
 
 const log = frontendLog.child("ui");
 
-/** Every connected worktree client, with the worktree it serves. */
-const connectedClients = new Map<MonacoLspClient, string>();
+/** Every connected client, with the worktree it serves (null: YAML, shared by every worktree). */
+const connectedClients = new Map<MonacoLspClient, string | null>();
 
 /** Every client's connection, for restarting them. */
 const connections = new Set<LspConnection>();
@@ -29,6 +30,11 @@ const connections = new Set<LspConnection>();
  */
 export function getConnectedLspClients(wtPath: string): MonacoLspClient[] {
   return [...connectedClients].filter(([, path]) => path === wtPath).map(([client]) => client);
+}
+
+/** Every connected client, whatever its worktree, including YAML's. */
+export function getAllConnectedLspClients(): MonacoLspClient[] {
+  return [...connectedClients.keys()];
 }
 
 /** Restart every language server Loxel is connected to (or trying to be), from scratch. */
@@ -54,6 +60,8 @@ export interface LspClientOptions {
   /** The server's name for notices, such as `basedpyright`. */
   name: string;
   languageId: string | readonly string[];
+  /** Runs for each connection's transport; what it returns is disposed with the connection. */
+  onConnected?: (transport: WebSocketTransport) => IDisposable;
 }
 
 /**
@@ -73,7 +81,7 @@ export interface LspClientOptions {
  * documents. A client that stops reconnecting is listed in `useLspStatusStore` for the status bar,
  * with a toast when its server crashed or could not start.
  */
-export function createLspClient({ route, name, languageId }: LspClientOptions) {
+export function createLspClient({ route, name, languageId, onConnected }: LspClientOptions) {
   const markerOwner = route.replace(/^ws\//, "");
   const showMessage = createServerMessageToasts(name);
 
@@ -100,13 +108,15 @@ export function createLspClient({ route, name, languageId }: LspClientOptions) {
       transport.dispose();
       throw err;
     }
-    if (wtPath !== null) connectedClients.set(client, wtPath);
+    connectedClients.set(client, wtPath);
+    const extension = onConnected?.(transport);
     return {
       closed,
       // The client first, so its `textDocument/didClose` notifications still go out over a live
       // socket.
       dispose() {
         connectedClients.delete(client);
+        extension?.dispose();
         try {
           client.dispose();
         } catch (err) {

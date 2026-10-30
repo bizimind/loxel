@@ -44,6 +44,15 @@ export function toMonacoCodeActionKind(kind: CodeActionKind | undefined): string
   return lspCodeActionKindToMonacoCodeActionKind.get(kind) ?? kind;
 }
 
+/**
+ * Whether one code action kind contains the other (`source` and `source.fixAll.ruff`), the test
+ * Monaco applies to a provider's `providedCodeActionKinds` when asked for a kind. The empty kind
+ * contains every kind.
+ */
+export function codeActionKindsIntersect(a: string, b: string): boolean {
+  return a === "" || b === "" || a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+}
+
 // ============================================================================
 // Code Action Trigger Kind
 // ============================================================================
@@ -270,20 +279,6 @@ export function toMonacoFoldingRangeKind(
 // Diagnostic Severity
 // ============================================================================
 
-export const monacoMarkerSeverityToLspDiagnosticSeverity = new Map<
-  monaco.MarkerSeverity,
-  DiagnosticSeverity
->([
-  [monaco.MarkerSeverity.Error, DiagnosticSeverity.Error],
-  [monaco.MarkerSeverity.Warning, DiagnosticSeverity.Warning],
-  [monaco.MarkerSeverity.Info, DiagnosticSeverity.Information],
-  [monaco.MarkerSeverity.Hint, DiagnosticSeverity.Hint],
-]);
-
-export function toLspDiagnosticSeverity(severity: monaco.MarkerSeverity): DiagnosticSeverity {
-  return monacoMarkerSeverityToLspDiagnosticSeverity.get(severity) ?? DiagnosticSeverity.Error;
-}
-
 export const lspDiagnosticSeverityToMonacoMarkerSeverity = new Map<
   DiagnosticSeverity,
   monaco.MarkerSeverity
@@ -465,21 +460,18 @@ export function matchesDocumentSelector(
   }
   return false;
 }
-/** The diagnostic's code, linked to its documentation (`codeDescription`) when the server gives one. */
-function toMarkerCode(diagnostic: Diagnostic): monaco.editor.IMarkerData["code"] {
-  const value = diagnostic.code?.toString();
-  if (value === undefined) return undefined;
-  const href = diagnostic.codeDescription?.href;
-  return href ? { value, target: monaco.Uri.parse(href) } : value;
-}
-
 export function toDiagnosticMarker(diagnostic: Diagnostic): monaco.editor.IMarkerData {
+  const code = diagnostic.code === undefined ? undefined : String(diagnostic.code);
   const marker: monaco.editor.IMarkerData = {
     severity: toMonacoDiagnosticSeverity(diagnostic.severity),
     ...toMonacoRange(diagnostic.range),
     message: diagnostic.message,
     source: diagnostic.source,
-    code: toMarkerCode(diagnostic),
+    // With a description the code links to it in the hover (ruff's rule pages, for example).
+    code:
+      code !== undefined && diagnostic.codeDescription
+        ? { value: code, target: monaco.Uri.parse(diagnostic.codeDescription.href) }
+        : code,
   };
 
   if (diagnostic.tags) {

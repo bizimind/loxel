@@ -149,7 +149,7 @@ The same index as the [package README](../README.md#internal-docs), grouped the 
 
 **Features**
 
-- [EDITOR.md](EDITOR.md) — Monaco and markdown editors, EditorConfig, indentation and its status item, disk sync and saving, file operations, drafts, Others files, localdb, search
+- [EDITOR.md](EDITOR.md) — Monaco and markdown editors, peek widgets, EditorConfig, indentation and its status item, disk sync and saving, file operations, drafts, Others files, localdb, search
 - [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md) — language-server managers and routing (watched files, pulled configuration, on-disk workspace edits), the per-worktree Python environment, interpreter choice and environment trust rule, URI schemes, diagnostics, formatting, JSON/YAML/TOML schemas, highlighting and editing behavior
 - [TERMINALS.md](TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, login-shell environment capture, Python environment activation, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
 - [CODE_REVIEW.md](CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export

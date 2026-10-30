@@ -30,7 +30,7 @@ The TypeScript server provides all of these; the [other language servers](#other
 | ----------------- | ----------------------------------------------------------------------- |
 | Hover             | Type information and JSDoc for any symbol                               |
 | Go-to-definition  | Jump to the declaration of any symbol                                   |
-| Find references   | Jump to the usages of a symbol                                          |
+| Find references   | List the usages of a symbol across files                                |
 | Completions       | Context-aware autocompletion as you type                                |
 | Rename            | Rename a symbol and update all references                               |
 | Code actions      | Quick fixes, imports, and refactors                                     |
@@ -39,7 +39,7 @@ The TypeScript server provides all of these; the [other language servers](#other
 | Workspace symbols | [Go to Symbol](/docs/editor#go-to-symbol) in the projects of open files |
 | Folding ranges    | Collapse functions, blocks, and regions                                 |
 
-These use Monaco's default keys (for example `F2` to rename and `Cmd+.` for quick fixes); the code editor has no right-click menu. They work in editor tabs; the [diff viewer](/docs/diff-viewer) shows code without them.
+These use Monaco's default keys (for example `F2` to rename); the code editor has no right-click menu. Code actions are also in the command palette: **Quick Fix…** (`Cmd+.`), **Fix All** (`Ctrl+Shift+.`), **Organize Imports** (`Shift+Alt+O`), **Source Action…** (`Ctrl+Alt+S`) and **Refactor…** (`Ctrl+Alt+R`), listed while a code editor has focus and its language server offers them; you can remap them in **Settings > Keybindings**. They work in editor tabs; the [diff viewer](/docs/diff-viewer) shows code without them.
 
 ---
 
@@ -53,7 +53,9 @@ Files open in a tab can always be edited this way, wherever they are, as typing 
 
 ## Navigation
 
-`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. There is no inline peek; definitions always open as a full tab.
+`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. When a symbol has several definitions, a peek lists them instead.
+
+Press `Shift+F12` to find a symbol's references. A peek opens below the line, listing every usage grouped by file, with a preview of the selected one. `Alt+F12` peeks at a definition and `Cmd+Shift+F12` at implementations without leaving the file. Press `Enter` or double-click a usage to open it in a tab, which closes the peek; `Escape` closes it. Files that aren't open, including ones outside the project, are read-only in the preview; open the file to edit it. Files open in a tab can be edited right in the peek.
 
 ---
 
@@ -154,8 +156,8 @@ The type checker only reads that environment's installed packages and never runs
 Python files also get [Ruff](https://docs.astral.sh/ruff/)'s linter, alongside type checking:
 
 - Lint problems are underlined as you type, and `Cmd+.` offers Ruff's quick fixes, including disabling a rule for one line with a `# noqa` comment.
-- `Shift+Option+O` organizes the file's imports.
-- **Fix All** (press `F1` and search for it) applies every automatic fix in the file.
+- **Organize Imports** (`Shift+Alt+O`) sorts the file's imports.
+- **Fix All** (`Ctrl+Shift+.`, or from the command palette) applies every automatic fix in the file.
 
 Ruff reads its settings from the `ruff.toml`, `.ruff.toml` or `pyproject.toml` closest to each file, so each project in a monorepo keeps its own rules, and edits to those files apply right away. Without any Ruff configuration, Ruff's default rules apply.
 

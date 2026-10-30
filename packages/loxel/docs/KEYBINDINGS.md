@@ -17,7 +17,7 @@ How app shortcuts, keyboard focus navigation and find-in-panel are wired. For th
 Conventions:
 
 - **Every shortcut is an action.** Add an `ActionDef` and a default binding rather than a local `keydown` handler, so it shows in the command palette and can be remapped. `hidden: true` keeps internal actions (tree navigation, the palette itself) out of the palette.
-- **Context-dependent actions declare `isEnabled`.** A disabled action's key resolves as unbound, so it reaches the focused widget instead (for example `⌃⇧Space` in the center goes to the terminal or editor, and `⌘F` outside a find target goes to Monaco's own find widget).
+- **Context-dependent actions declare `isEnabled`.** A disabled action's key resolves as unbound, so it reaches the focused widget instead (for example `⌃⇧Space` in the center goes to the terminal or editor, and `⌘F` outside a find target goes to Monaco's own find widget). The command palette lists only the actions enabled where focus was when it opened (it takes focus itself, and the dialog gives it back before the chosen action runs).
 - **Reserved keys.** Defaults stay clear of macOS text editing, Monaco's defaults and Rectangle's global `⌃⌥` shortcuts (Restore on `⌃⌥⌫` is why Delete Worktree has no default key). The "no default binding takes reserved keys" test in `keybinding-validation.test.ts` enforces this; extend its list when reserving a new key.
 - **Chords** are up to three keystrokes. A single-key binding takes precedence over a chord with the same first key, and remapping removes overlapping bindings (equal, or a chord prefix) from other actions.
 
@@ -36,6 +36,10 @@ Panels opt in to `⌘F` / `⌘G` / `⇧⌘G` by registering their root element w
 ## Shortcuts inside browser panels
 
 Keys typed in a `<webview>` go to the guest page, never the window's document. The renderer tells the Electron main process which keystrokes to intercept (the first keystroke of every binding enabled where focus is, or every keystroke while a chord is in progress); the main process withholds those from the page and forwards them back, where they are resolved like document keys. See `src/electron/webview-keystrokes.ts` and the IPC constants in `src/electron/ipc-channels.ts`. The interception set must be re-sent whenever what is enabled can change (focus moves, a find target is registered or removed), or a context-disabled key would be taken from the page.
+
+## Editor code actions
+
+The `codeAction.*` actions (Quick Fix, Fix All, Organize Imports, Source Action, Refactor) live in `src/lib/editor-code-actions.ts`. Each is enabled while the focused Monaco editor, picked as Monaco picks it (the editor with text focus, else the last with widget focus, so a peek preview wins over the tab around it), is writable and shows an editor tab's live model, and one of the file's language clients may offer its kind, checked with `MonacoLspClient.supportsCodeActionKind` over every connected client (`getAllConnectedLspClients`) (Quick Fix accepts a quick fix or a refactor, since its menu lists both; Fix All and Organize Imports need a server that declares the kind, since Monaco runs them only then), and runs Monaco's own command on that editor. Monaco asks every provider of the file and applies the only Fix All or Organize Imports action or shows a picker, so when several servers serve a file (ruff and basedpyright) the user picks between their answers rather than Loxel choosing a server. Quick Fix and Organize Imports default to Monaco's keys, and Loxel takes them only where it runs the same command on the same editor; Monaco's Refactor key (`⌃⇧R`) is Toggle Comments here.
 
 ## Worktree history
 
