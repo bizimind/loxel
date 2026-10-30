@@ -308,10 +308,12 @@ describe("StdioLspManager watched files", () => {
 describe("StdioLspManager opt-in hooks", () => {
   const DID_SAVE = "textDocument/didSave";
   const setupOptIn = () => setup("wt", (script) => new OptInLspManager(script));
+  let marks = 0;
   /** Everything sent before now has been read once the server echoes this. */
   async function drained(client: FakeClient): Promise<void> {
-    client.send({ method: "test/mark" });
-    await client.serverReceived((f) => f.method === "test/mark");
+    const mark = `test/mark-${++marks}`;
+    client.send({ method: mark });
+    await client.serverReceived((f) => f.method === mark);
   }
 
   test("workspaceConfiguration receives the request's scopeUri", async () => {
