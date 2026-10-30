@@ -2,8 +2,14 @@ import { $ } from "bun";
 
 import type { BranchInfo, RefInfo, StashInfo } from "@/api/git-models";
 
+import { logger } from "../logger";
 import { parseBranchOutput, parseRefsOutput, parseStashOutput } from "../parsers/refs";
+import { mapWithConcurrency } from "./concurrency";
 import { readOnlyGitEnv } from "./git-env";
+
+const log = logger.child("git");
+
+const REFLOG_FALLBACK_CONCURRENCY = 6;
 
 let refsCache: { data: RefInfo[]; expiry: number; cwd: string } | null = null;
 
@@ -30,24 +36,57 @@ export async function getRefs(cwd: string): Promise<RefInfo[]> {
  * name. Branches without a reflog are absent. This is the commit's date rather than the time of the
  * reflog entry, so a branch reset to an old commit reports that commit's old date.
  *
- * One process for all branches: `--branches` resolves each name the way `git reflog show <branch>`
- * does. The walk reads every entry of every branch's reflog because git has no per-ref limit.
+ * One process for all branches. `--branches` hands git each bare branch name, resolved the way
+ * `git reflog show <branch>` resolves it. The walk reads every entry of every branch's reflog
+ * because git has no per-ref limit.
  */
 async function readBranchReflogTimes(cwd: string): Promise<Map<string, number>> {
   const format = "%gD %at";
-  const output =
-    await $`git -C ${cwd} log --walk-reflogs --no-show-signature --branches --format=${format}`
+  const result =
+    await $`git -C ${cwd} log --walk-reflogs --no-show-signature --encoding=UTF-8 --branches --format=${format}`
       .env(readOnlyGitEnv())
       .nothrow()
-      .text();
+      .quiet();
+  if (result.exitCode !== 0) {
+    log.warn("reflog walk failed, reading branches one by one", {
+      cwd,
+      exitCode: result.exitCode,
+      stderr: result.stderr.toString(),
+    });
+    return readBranchReflogTimesOneByOne(cwd);
+  }
 
   const times = new Map<string, number>();
-  for (const line of output.split("\n")) {
-    const match = line.match(/^(.+)@\{[^}]*\} (\d+)$/);
+  for (const line of result.text().split("\n")) {
+    const match = line.match(/^(.+)@\{\d+\} (\d+)$/);
     if (!match?.[1] || !match[2]) continue;
     // Each branch's entries are newest first, even when branches interleave.
     if (!times.has(match[1])) times.set(match[1], parseInt(match[2], 10));
   }
+  return times;
+}
+
+/**
+ * A missing or corrupt object anywhere in the reflogs kills the whole walk. One process per branch
+ * confines that damage to the branches it actually affects, at the cost of the spawns.
+ */
+async function readBranchReflogTimesOneByOne(cwd: string): Promise<Map<string, number>> {
+  const listFormat = "%(refname:lstrip=2)";
+  const list = await $`git -C ${cwd} for-each-ref --format=${listFormat} refs/heads`
+    .env(readOnlyGitEnv())
+    .nothrow()
+    .text();
+  const branches = list.trim().split("\n").filter(Boolean);
+
+  const times = new Map<string, number>();
+  await mapWithConcurrency(branches, REFLOG_FALLBACK_CONCURRENCY, async (branch) => {
+    const output = await $`git -C ${cwd} reflog show ${branch} --format=%at -n 1`
+      .env(readOnlyGitEnv())
+      .nothrow()
+      .text();
+    const timestamp = parseInt(output.trim(), 10);
+    if (!isNaN(timestamp)) times.set(branch, timestamp);
+  });
   return times;
 }
 

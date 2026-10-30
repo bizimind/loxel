@@ -278,9 +278,81 @@ describe("branch reflog times", () => {
     expect(await getRecentBranchNames(repo.path, 1)).toEqual(["origin/fresh"]);
   });
 
-  test("log.date does not disturb the parsing", async () => {
-    await $`git -C ${repo.path} config log.date iso`.quiet();
-    expect(lastUpdatedOf(await getBranches(repo.path), "main")).toBe(AUTHOR_2022);
+  test("runs one process for all branches, without per-branch reflog reads", async () => {
+    for (const name of ["a", "b", "c", "d", "e", "f"]) {
+      await $`git -C ${repo.path} branch ${name}`.quiet();
+    }
+    const trace = `${repo.path}-trace`;
+    const countGitProcesses = async (read: () => Promise<unknown>) => {
+      await rm(trace, { force: true });
+      process.env.GIT_TRACE = trace;
+      try {
+        await read();
+      } finally {
+        delete process.env.GIT_TRACE;
+      }
+      const lines = (await Bun.file(trace).text()).split("\n");
+      expect(lines.filter((line) => line.includes("built-in: git reflog"))).toEqual([]);
+      return lines.filter((line) => line.includes("trace: built-in:")).length;
+    };
+    try {
+      expect(await countGitProcesses(() => getBranches(repo.path))).toBe(3);
+      expect(await countGitProcesses(() => getRecentBranchNames(repo.path, 1))).toBe(3);
+    } finally {
+      await rm(trace, { force: true });
+    }
+  });
+
+  test("non-ASCII branch names survive a non-UTF-8 log encoding", async () => {
+    await $`git -C ${repo.path} config i18n.logOutputEncoding ISO-8859-1`.quiet();
+    const name = "f\u00e9";
+    await $`git -C ${repo.path} branch ${name}`.quiet();
+    expect(lastUpdatedOf(await getBranches(repo.path), name)).toBe(AUTHOR_2022);
+    await expectSameAsPerBranch(repo.path);
+  });
+
+  test("log.showSignature runs no signature check", async () => {
+    const raw = await $`git -C ${repo.path} cat-file commit HEAD`.text();
+    const signed = raw.replace("\n\n", "\ngpgsig not-a-signature\n\n");
+    const signedPath = `${repo.path}-signed`;
+    const marker = `${repo.path}-gpg-ran`;
+    const fakeGpg = `${repo.path}-gpg`;
+    await Bun.write(signedPath, signed);
+    await Bun.write(fakeGpg, `#!/bin/sh\ntouch "${marker}"\n`);
+    await $`chmod +x ${fakeGpg}`.quiet();
+    try {
+      const tip = (
+        await $`git -C ${repo.path} hash-object -t commit -w ${signedPath}`.text()
+      ).trim();
+      await $`git -C ${repo.path} branch signed ${tip}`.quiet();
+      await $`git -C ${repo.path} config log.showSignature true`.quiet();
+      await $`git -C ${repo.path} config gpg.program ${fakeGpg}`.quiet();
+
+      expect(lastUpdatedOf(await getBranches(repo.path), "signed")).toBe(AUTHOR_2022);
+      expect(await Bun.file(marker).exists()).toBe(false);
+    } finally {
+      await rm(signedPath, { force: true });
+      await rm(fakeGpg, { force: true });
+      await rm(marker, { force: true });
+    }
+  });
+
+  test("a branch tip with a missing object does not cost the others their times", async () => {
+    await $`git -C ${repo.path} branch ok ${oldCommit}`.quiet();
+    await Bun.write(path.join(repo.path, ".git/refs/heads/broken"), `${"1".repeat(40)}\n`);
+    const branches = await getBranches(repo.path);
+    expect(lastUpdatedOf(branches, "ok")).toBe(AUTHOR_2020);
+    expect(lastUpdatedOf(branches, "main")).toBe(AUTHOR_2022);
+    await expectSameAsPerBranch(repo.path);
+  });
+
+  test("a corrupt commit only in an old reflog entry does not cost anyone their time", async () => {
+    await $`git -C ${repo.path} branch healthy ${oldCommit}`.quiet();
+    const loose = path.join(repo.path, ".git/objects", oldCommit.slice(0, 2), oldCommit.slice(2));
+    await rm(loose, { force: true });
+    await Bun.write(loose, "not a zlib stream");
+    await commit(repo.path, "now");
+    expect(lastUpdatedOf(await getBranches(repo.path), "main")).toBeDefined();
     await expectSameAsPerBranch(repo.path);
   });
 
