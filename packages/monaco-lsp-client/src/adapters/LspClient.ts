@@ -28,6 +28,7 @@ import { LspRangeFormattingFeature } from "./languageFeatures/LspRangeFormatting
 import { LspReferencesFeature } from "./languageFeatures/LspReferencesFeature";
 import { LspRenameFeature } from "./languageFeatures/LspRenameFeature";
 import { LspSelectionRangeFeature } from "./languageFeatures/LspSelectionRangeFeature";
+import type { SemanticTokenStyling } from "./languageFeatures/LspSemanticTokensFeature";
 import { LspSemanticTokensFeature } from "./languageFeatures/LspSemanticTokensFeature";
 import { LspSignatureHelpFeature } from "./languageFeatures/LspSignatureHelpFeature";
 import { LspTypeDefinitionFeature } from "./languageFeatures/LspTypeDefinitionFeature";
@@ -68,6 +69,8 @@ export interface MonacoLspClientOptions {
   markerOwner?: string;
   /** Called with each `window/showMessage` notification, for the app to show to the user. */
   onShowMessage?: (params: ShowMessageParams) => void;
+  /** What the app's Monaco theme has rules for, so that the rest keeps its TextMate color. */
+  semanticTokenStyling?: SemanticTokenStyling;
 }
 
 export class MonacoLspClient {
@@ -81,6 +84,7 @@ export class MonacoLspClient {
   private readonly _codeActions: LspCodeActionFeature;
   private readonly _workspaceSymbols: LspWorkspaceSymbolFeature;
   private readonly _messages: IDisposable | undefined;
+  private readonly _semanticTokenStyling: SemanticTokenStyling | undefined;
 
   private _initPromise: Promise<void>;
 
@@ -124,6 +128,7 @@ export class MonacoLspClient {
       this._edits,
       defaultLanguageIds,
     );
+    this._semanticTokenStyling = options?.semanticTokenStyling;
     this._features = this.createFeatures();
     // Code actions send back the diagnostics behind the client's markers.
     this._diagnostics = new LspDiagnosticsFeature(this._connection, options?.markerOwner);
@@ -250,7 +255,7 @@ export class MonacoLspClient {
     store.add(new LspFoldingRangeFeature(this._connection));
     store.add(new LspSelectionRangeFeature(this._connection));
     store.add(new LspInlayHintsFeature(this._connection));
-    store.add(new LspSemanticTokensFeature(this._connection));
+    store.add(new LspSemanticTokensFeature(this._connection, this._semanticTokenStyling));
     store.add(new LspLinkedEditingRangeFeature(this._connection));
     store.add(new LspInlineCompletionFeature(this._connection));
     store.add(new LspApplyEditFeature(this._connection));
