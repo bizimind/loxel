@@ -217,11 +217,7 @@ describe("StdioLspManager completion snippets", () => {
   });
 
   test("disableCompletionSnippets takes only snippet support out of initialize", async () => {
-    const { root } = await setup();
-    manager?.destroy();
-    manager = new NoSnippetsLspManager(join(dir ?? "", "fake-server.mjs"));
-    const client = new FakeClient(manager);
-    manager.start(client.ws, root);
+    const { client } = await setup("wt", (script) => new NoSnippetsLspManager(script));
     client.send({
       id: 1,
       method: "initialize",
