@@ -1,18 +1,20 @@
 /**
  * Stress detection for critical paths.
  *
- * Monitors call rates at named checkpoints and logs warnings/errors when
- * thresholds are exceeded. Detection only — no throttling or corrective action.
+ * Monitors call rates at named checkpoints and logs when thresholds are exceeded. Detection
+ * only — no throttling or corrective action.
  *
  * Two modes:
  * - Rate-only: detects when a checkpoint fires above a configured rate.
- * - Rate + params: detects when the same checkpoint fires with identical
- *   parameters above the configured rate (loop detection).
+ * - Rate + key: also detects when the same key (a string identifying the parameters) fires above
+ *   the configured rate (loop detection).
  *
- * Cooldown: after an error alert fires, further logs for that counter are
- * suppressed for `cooldownWindows` consecutive windows. When the cooldown
- * expires (or the counter drops below the warn threshold), a single summary
- * is emitted with the peak rate and stress duration.
+ * Logs transitions, not windows: a counter logs when it enters an episode (warn above the warn
+ * threshold), when it escalates within one (error above the rate), and once when the episode ends
+ * with a summary of its peak and duration. An episode ends after `calmWindows` consecutive windows
+ * at or below the warn threshold, so a bursty rate is one episode rather than a stream of logs. A
+ * timer closes windows while any episode is open, because a rate that drops to zero has no further
+ * calls to notice that with.
  */
 import type { ChildLogger, LogLevel } from "@/api/log-entry-model";
 
@@ -29,68 +31,61 @@ export interface StressCheckpointConfig {
   windowMs?: number;
   /** Warn threshold as fraction of rate (default: 0.5). */
   warnRatio?: number;
-  /** Windows to suppress logs after an error alert (default: 10). */
-  cooldownWindows?: number;
+  /** Consecutive windows at or below the warn threshold that end an episode (default: 10). */
+  calmWindows?: number;
+}
+
+interface Episode {
+  level: "elevated" | "high";
+  start: number;
+  /** When the count last went above the warn threshold, which is when the episode really ended. */
+  lastHotAt: number;
+  peakCount: number;
+  calmStreak: number;
 }
 
 interface RateCounter {
+  key: string | undefined;
   count: number;
   windowStart: number;
-  warned: boolean;
-  alerted: boolean;
-  /** Remaining windows to suppress logs. 0 = not in cooldown. */
-  cooldownRemaining: number;
-  /** Peak count observed during cooldown (for summary). */
-  cooldownPeak: number;
-  /** Timestamp when cooldown began. */
-  cooldownStart: number;
+  episode: Episode | null;
 }
 
 interface CheckpointState {
-  config: Required<
-    Pick<StressCheckpointConfig, "rate" | "windowMs" | "warnRatio" | "cooldownWindows">
-  >;
+  config: Required<Pick<StressCheckpointConfig, "rate" | "windowMs" | "warnRatio" | "calmWindows">>;
   warnThreshold: number;
   global: RateCounter;
-  byParams: Map<string, RateCounter>;
+  byKey: Map<string, RateCounter>;
   log: ChildLogger;
 }
 
 export interface StressDetector {
-  /** Track a checkpoint firing (rate-only mode). */
-  track(name: string): void;
-  /** Track a checkpoint with params (rate + same-params mode). */
-  track(name: string, params: Record<string, unknown>): void;
+  /** Track a checkpoint firing, optionally for a key identifying its parameters. */
+  track(name: string, key?: string): void;
+  /** Close elapsed windows, ending episodes that have calmed down. */
+  sweep(): void;
   /** Clear internal state. Call on shutdown. */
   dispose(): void;
+}
+
+export interface StressDetectorOptions {
+  logFn?: LogFn;
+  /** The clock, in milliseconds. */
+  now?: () => number;
 }
 
 // --- Constants ---
 
 const DEFAULT_WINDOW_MS = 1000;
 const DEFAULT_WARN_RATIO = 0.5;
-const DEFAULT_COOLDOWN_WINDOWS = 10;
+const DEFAULT_CALM_WINDOWS = 10;
 const MAX_PARAM_KEYS = 500;
+const SWEEP_INTERVAL_MS = 1000;
 
 // --- Helpers ---
 
-function createCounter(now: number): RateCounter {
-  return {
-    count: 0,
-    windowStart: now,
-    warned: false,
-    alerted: false,
-    cooldownRemaining: 0,
-    cooldownPeak: 0,
-    cooldownStart: 0,
-  };
-}
-
-function resetCounter(counter: RateCounter, now: number): void {
-  counter.count = 0;
-  counter.windowStart = now;
-  counter.warned = false;
-  counter.alerted = false;
+function createCounter(now: number, key?: string): RateCounter {
+  return { key, count: 0, windowStart: now, episode: null };
 }
 
 // --- Factory ---
@@ -103,20 +98,21 @@ export type LogFn = (
 
 export function createStressDetector(
   checkpoints: Record<string, StressCheckpointConfig>,
-  logFn?: LogFn,
+  { logFn, now = Date.now }: StressDetectorOptions = {},
 ): StressDetector {
   const states = new Map<string, CheckpointState>();
+  let sweepTimer: ReturnType<typeof setInterval> | null = null;
 
   for (const [name, cfg] of Object.entries(checkpoints)) {
     const windowMs = cfg.windowMs ?? DEFAULT_WINDOW_MS;
     const warnRatio = cfg.warnRatio ?? DEFAULT_WARN_RATIO;
-    const cooldownWindows = cfg.cooldownWindows ?? DEFAULT_COOLDOWN_WINDOWS;
+    const calmWindows = cfg.calmWindows ?? DEFAULT_CALM_WINDOWS;
     const childLog = log.with({ checkpoint: name });
     states.set(name, {
-      config: { rate: cfg.rate, windowMs, warnRatio, cooldownWindows },
+      config: { rate: cfg.rate, windowMs, warnRatio, calmWindows },
       warnThreshold: Math.floor(cfg.rate * warnRatio),
       global: createCounter(0),
-      byParams: new Map(),
+      byKey: new Map(),
       log: logFn
         ? {
             ...childLog,
@@ -127,105 +123,139 @@ export function createStressDetector(
     });
   }
 
-  /** Increment counter, check thresholds, return whether the window was reset. */
-  function checkCounter(
+  /** Account for the windows that have ended by `time`; returns whether any had. */
+  function closeWindows(counter: RateCounter, state: CheckpointState, time: number): boolean {
+    const { windowMs, calmWindows, rate } = state.config;
+    const elapsed = Math.floor((time - counter.windowStart) / windowMs);
+    if (elapsed < 1) return false;
+
+    const { episode } = counter;
+    if (episode) {
+      // Windows with no calls at all are calm too, hence the rest of `elapsed`.
+      const calm = counter.count > state.warnThreshold ? elapsed - 1 : elapsed;
+      episode.calmStreak = calm === elapsed ? episode.calmStreak + calm : calm;
+      if (episode.calmStreak >= calmWindows) {
+        const ctx: Record<string, unknown> = {
+          level: episode.level,
+          peakCount: episode.peakCount,
+          threshold: rate,
+          windowMs,
+          durationMs: episode.lastHotAt - episode.start,
+        };
+        if (counter.key !== undefined) ctx.key = counter.key;
+        state.log.warn("[stress] Call rate back to normal", ctx);
+        counter.episode = null;
+      }
+    }
+
+    counter.count = 0;
+    counter.windowStart += elapsed * windowMs;
+    return true;
+  }
+
+  function logEntry(
     counter: RateCounter,
     state: CheckpointState,
-    now: number,
-    params?: Record<string, unknown>,
-  ): boolean {
-    // Reset window if elapsed
-    let wasReset = false;
-    if (now - counter.windowStart >= state.config.windowMs) {
-      // Handle cooldown transitions on window boundary
-      if (counter.cooldownRemaining > 0) {
-        counter.cooldownRemaining--;
-        counter.cooldownPeak = Math.max(counter.cooldownPeak, counter.count);
-
-        if (counter.cooldownRemaining === 0) {
-          // Cooldown expired — emit summary
-          const durationMs = now - counter.cooldownStart;
-          const ctx: Record<string, unknown> = {
-            peakCount: counter.cooldownPeak,
-            threshold: state.config.rate,
-            windowMs: state.config.windowMs,
-            durationMs,
-          };
-          if (params) ctx.params = params;
-          state.log.warn("[stress] Cooldown ended", ctx);
-        }
-      }
-
-      resetCounter(counter, now);
-      wasReset = true;
-    }
-
-    counter.count++;
-
-    // During cooldown, track peak but suppress logs
-    if (counter.cooldownRemaining > 0) {
-      counter.cooldownPeak = Math.max(counter.cooldownPeak, counter.count);
-      return wasReset;
-    }
-
+    level: "warn" | "error",
+    msg: string,
+  ): void {
     const ctx: Record<string, unknown> = {
       count: counter.count,
       threshold: state.config.rate,
       windowMs: state.config.windowMs,
     };
-    if (params) ctx.params = params;
-
-    if (!counter.warned && counter.count > state.warnThreshold) {
-      counter.warned = true;
-      state.log.warn("[stress] Elevated call rate", { ...ctx, warnThreshold: state.warnThreshold });
-    }
-
-    if (!counter.alerted && counter.count > state.config.rate) {
-      counter.alerted = true;
-      state.log.error("[stress] High call rate detected", ctx);
-
-      // Enter cooldown
-      counter.cooldownRemaining = state.config.cooldownWindows;
-      counter.cooldownPeak = counter.count;
-      counter.cooldownStart = now;
-    }
-
-    return wasReset;
+    if (level === "warn") ctx.warnThreshold = state.warnThreshold;
+    if (counter.key !== undefined) ctx.key = counter.key;
+    state.log[level](msg, ctx);
   }
 
-  function track(name: string, params?: Record<string, unknown>): void {
+  /** Count one call and log any state change it causes. */
+  function count(counter: RateCounter, state: CheckpointState, time: number): void {
+    counter.count++;
+    if (counter.count <= state.warnThreshold) return;
+
+    if (!counter.episode) {
+      counter.episode = {
+        level: "elevated",
+        start: time,
+        lastHotAt: time,
+        peakCount: counter.count,
+        calmStreak: 0,
+      };
+      logEntry(counter, state, "warn", "[stress] Elevated call rate");
+      startSweeping();
+    }
+
+    const { episode } = counter;
+    episode.lastHotAt = time;
+    episode.peakCount = Math.max(episode.peakCount, counter.count);
+    if (episode.level === "elevated" && counter.count > state.config.rate) {
+      episode.level = "high";
+      logEntry(counter, state, "error", "[stress] High call rate detected");
+    }
+  }
+
+  function track(name: string, key?: string): void {
     const state = states.get(name);
     if (!state) return;
 
-    const now = Date.now();
+    const time = now();
+    const globalRolled = closeWindows(state.global, state, time);
+    count(state.global, state, time);
+    if (key === undefined) return;
 
-    // Always check global counter
-    const globalReset = checkCounter(state.global, state, now);
+    // Key counters only need to outlive the window while they have an episode to finish.
+    if (globalRolled) closeKeyWindows(state, time);
 
-    // Params mode: also check per-param counter
-    if (params) {
-      const key = JSON.stringify(params);
-
-      // Clear param counters when the global window rolls over
-      if (globalReset && state.byParams.size > 0) {
-        state.byParams.clear();
-      }
-
-      let paramCounter = state.byParams.get(key);
-      if (!paramCounter) {
-        if (state.byParams.size >= MAX_PARAM_KEYS) return;
-        paramCounter = createCounter(now);
-        state.byParams.set(key, paramCounter);
-      }
-      checkCounter(paramCounter, state, now, params);
+    let counter = state.byKey.get(key);
+    if (!counter) {
+      if (state.byKey.size >= MAX_PARAM_KEYS) return;
+      counter = createCounter(time, key);
+      state.byKey.set(key, counter);
+    } else {
+      closeWindows(counter, state, time);
     }
+    count(counter, state, time);
+  }
+
+  /** Returns whether any key still has an episode open. */
+  function closeKeyWindows(state: CheckpointState, time: number): boolean {
+    let open = false;
+    for (const [key, counter] of state.byKey) {
+      const closed = closeWindows(counter, state, time);
+      if (counter.episode) open = true;
+      else if (closed) state.byKey.delete(key);
+    }
+    return open;
+  }
+
+  function startSweeping(): void {
+    if (sweepTimer) return;
+    sweepTimer = setInterval(sweep, SWEEP_INTERVAL_MS);
+    sweepTimer.unref();
+  }
+
+  function stopSweeping(): void {
+    if (sweepTimer) clearInterval(sweepTimer);
+    sweepTimer = null;
+  }
+
+  function sweep(): void {
+    const time = now();
+    let open = false;
+    for (const state of states.values()) {
+      closeWindows(state.global, state, time);
+      if (closeKeyWindows(state, time) || state.global.episode) open = true;
+    }
+    if (!open) stopSweeping();
   }
 
   function dispose(): void {
+    stopSweeping();
     states.clear();
   }
 
-  return { track, dispose };
+  return { track, sweep, dispose };
 }
 
 // --- Default instance ---

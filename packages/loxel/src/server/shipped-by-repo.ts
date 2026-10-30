@@ -6,6 +6,7 @@ import { isDirectory } from "@/fs-utils";
 
 import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");
 
@@ -237,12 +238,14 @@ export async function runGit(
   args: string[],
 ): Promise<{ exitCode: number; stdout: string }> {
   try {
-    const proc = Bun.spawn(["git", "-C", cwd, ...args], {
-      env: readOnlyGitEnv(),
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-    });
+    const proc = measureSpawn("git", () =>
+      Bun.spawn(["git", "-C", cwd, ...args], {
+        env: readOnlyGitEnv(),
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+      }),
+    );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     return { exitCode, stdout };
   } catch {
