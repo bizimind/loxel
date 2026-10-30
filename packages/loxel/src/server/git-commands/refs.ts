@@ -25,38 +25,44 @@ export async function getRefs(cwd: string): Promise<RefInfo[]> {
   return refs;
 }
 
+/**
+ * Author time (unix seconds) of the commit at each local branch's newest reflog entry, by branch
+ * name. Branches without a reflog are absent. This is the commit's date rather than the time of the
+ * reflog entry, so a branch reset to an old commit reports that commit's old date.
+ *
+ * One process for all branches: `--branches` resolves each name the way `git reflog show <branch>`
+ * does. The walk reads every entry of every branch's reflog because git has no per-ref limit.
+ */
+async function readBranchReflogTimes(cwd: string): Promise<Map<string, number>> {
+  const format = "%gD %at";
+  const output =
+    await $`git -C ${cwd} log --walk-reflogs --no-show-signature --branches --format=${format}`
+      .env(readOnlyGitEnv())
+      .nothrow()
+      .text();
+
+  const times = new Map<string, number>();
+  for (const line of output.split("\n")) {
+    const match = line.match(/^(.+)@\{[^}]*\} (\d+)$/);
+    if (!match?.[1] || !match[2]) continue;
+    // Each branch's entries are newest first, even when branches interleave.
+    if (!times.has(match[1])) times.set(match[1], parseInt(match[2], 10));
+  }
+  return times;
+}
+
 export async function getBranches(cwd: string): Promise<BranchInfo[]> {
   const format = "%(objectname) %(refname) %(upstream) %(upstream:track)";
-  const [result, headResult] = await Promise.all([
+  const [result, headResult, reflogTimes] = await Promise.all([
     $`git -C ${cwd} for-each-ref --format=${format} refs/heads`.env(readOnlyGitEnv()).text(),
     $`git -C ${cwd} symbolic-ref --short HEAD`.env(readOnlyGitEnv()).nothrow().text(),
+    readBranchReflogTimes(cwd),
   ]);
   const headBranch = headResult.trim() || null;
 
-  const localBranches = result
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => line.match(/refs\/heads\/(\S+)/)?.[1])
-    .filter((b): b is string => b !== undefined);
-
   const branchTimestamps = new Map<string, string>();
-  const reflogFormat = "%at";
-  const reflogResults = await Promise.all(
-    localBranches.map(async (branch) => {
-      const reflogResult =
-        await $`git -C ${cwd} reflog show ${branch} --format=${reflogFormat} -n 1`
-          .env(readOnlyGitEnv())
-          .nothrow()
-          .text();
-      const timestamp = parseInt(reflogResult.trim(), 10);
-      return { branch, timestamp: isNaN(timestamp) ? null : timestamp };
-    }),
-  );
-  for (const { branch, timestamp } of reflogResults) {
-    if (timestamp !== null) {
-      branchTimestamps.set(branch, new Date(timestamp * 1000).toISOString());
-    }
+  for (const [branch, timestamp] of reflogTimes) {
+    branchTimestamps.set(branch, new Date(timestamp * 1000).toISOString());
   }
 
   return parseBranchOutput(result, headBranch, branchTimestamps);
@@ -67,35 +73,29 @@ export async function getRecentBranchNames(cwd: string, days: number): Promise<s
   sinceDate.setDate(sinceDate.getDate() - days);
   const sinceTimestamp = Math.floor(sinceDate.getTime() / 1000);
 
-  const branchListResult = await $`git -C ${cwd} for-each-ref --format=%(refname:short) refs/heads`
-    .env(readOnlyGitEnv())
-    .nothrow()
-    .text();
-  const localBranches = branchListResult
-    .trim()
-    .split("\n")
-    .filter((b) => b);
-
+  const localFormat = "%(refname) %(refname:short)";
   const remoteFormat = "%(refname:short) %(committerdate:unix)";
-  const [localResults, remoteResult] = await Promise.all([
-    Promise.all(
-      localBranches.map(async (branch) => {
-        const reflogResult = await $`git -C ${cwd} reflog show ${branch} --format=%at -n 1`
-          .env(readOnlyGitEnv())
-          .nothrow()
-          .text();
-        const timestamp = parseInt(reflogResult.trim(), 10);
-        if (!isNaN(timestamp) && timestamp >= sinceTimestamp) return branch;
-        return null;
-      }),
-    ),
+  const [localResult, reflogTimes, remoteResult] = await Promise.all([
+    $`git -C ${cwd} for-each-ref --format=${localFormat} refs/heads`
+      .env(readOnlyGitEnv())
+      .nothrow()
+      .text(),
+    readBranchReflogTimes(cwd),
     $`git -C ${cwd} for-each-ref --format=${remoteFormat} refs/remotes`
       .env(readOnlyGitEnv())
       .nothrow()
       .text(),
   ]);
 
-  const recentBranches = localResults.filter((b): b is string => b !== null);
+  const recentBranches: string[] = [];
+
+  for (const line of localResult.trim().split("\n")) {
+    const [refname, shortName] = line.split(" ");
+    if (!refname || !shortName) continue;
+    // The short name is `heads/<branch>` when a tag shares the branch's name; callers get it as is.
+    const timestamp = reflogTimes.get(refname.slice("refs/heads/".length));
+    if (timestamp !== undefined && timestamp >= sinceTimestamp) recentBranches.push(shortName);
+  }
 
   for (const line of remoteResult.trim().split("\n")) {
     if (!line) continue;
