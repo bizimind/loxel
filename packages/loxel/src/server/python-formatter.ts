@@ -1,14 +1,23 @@
 import { existsSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { isRecord } from "@/lib/is-record";
 
+import { dirsUpToRoot, type LanguageFormatter, nodeModulesBin } from "./language-formatter";
 import { envBinDir, getPythonEnvNow, isEnvShippedByRepo, VENV_DIR_NAMES } from "./python-env";
 import { readToml, recordAt } from "./toml-file";
 
-export const PYTHON_FORMAT_EXTENSIONS: readonly string[] = ["py", "pyi"];
+export const pythonFormatter: LanguageFormatter = {
+  extensions: ["py", "pyi"],
+  detect: detectPythonFormatter,
+  spawnOptions: async (command, dir, wtRoot) => {
+    // A command given as a path does not go through PATH.
+    const venvBin = command.includes("/") ? undefined : await findVenvBin(dir, wtRoot, command);
+    return { binDirs: venvBin ? [venvBin, nodeModulesBin(wtRoot)] : [nodeModulesBin(wtRoot)] };
+  },
+};
 
-export interface PythonFormatter {
+interface PythonFormatter {
   command: "ruff" | "black";
   args: string;
 }
@@ -39,7 +48,7 @@ const RUFF_CONFIG_FILES = [".ruff.toml", "ruff.toml"];
  * Not cached: a save costs a few `existsSync` calls per directory level plus parsing the
  * `pyproject.toml` files on the way, negligible next to spawning the formatter.
  */
-export function detectPythonFormatter(startDir: string, wtRoot: string): PythonFormatter | null {
+function detectPythonFormatter(startDir: string, wtRoot: string): PythonFormatter | null {
   let ruffWithoutFormat = false;
   for (const dir of dirsUpToRoot(startDir, wtRoot)) {
     const pyproject = readToml(join(dir, "pyproject.toml"));
@@ -105,21 +114,6 @@ async function binWith(
   const executable = Bun.which(command, { PATH: binDir });
   if (!executable || (await isEnvShippedByRepo(wtRoot, envPath, executable))) return undefined;
   return binDir;
-}
-
-/** `startDir` and its ancestors up to `wtRoot` (inclusive); just `wtRoot` when outside it. */
-function dirsUpToRoot(startDir: string, wtRoot: string): string[] {
-  const root = resolve(wtRoot);
-  let dir = resolve(root, startDir);
-  const rel = relative(root, dir);
-  // Lexical check: callers pass the file path in the same form as the worktree path.
-  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return [root];
-  const dirs = [dir];
-  while (dir !== root) {
-    dir = dirname(dir);
-    dirs.push(dir);
-  }
-  return dirs;
 }
 
 /** The ruff config table from `.ruff.toml` / `ruff.toml` in `dir` (empty when unparsable). */

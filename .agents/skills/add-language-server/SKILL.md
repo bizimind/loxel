@@ -10,7 +10,7 @@ Integrate a new language server into loxel. A worktree-scoped server is new file
 - `references/server-manager.md`: the manager's hooks, how a server gets its settings, project-provided binaries, and a second server for a language that already has one (basedpyright + ruff).
 - `references/existing-integrations.md`: integration matrix and per-server quirks.
 
-This skill covers LSP integration only, not formatters, TextMate grammars or monaco-lsp-client internals.
+This skill covers LSP integration only, not TextMate grammars or monaco-lsp-client internals. Format on save is its own module plus one line in `src/server/language-formatters.ts`, see [Formatting](../../../packages/loxel/docs/LANGUAGE_SERVERS.md#formatting).
 
 ## Decision Points
 

@@ -1,2 +1,3 @@
 # One line per server: local merges combine parallel additions. GitHub's own merge ignores this.
+packages/loxel/src/server/language-formatters.ts merge=union
 packages/loxel/src/server/language-servers.ts merge=union
