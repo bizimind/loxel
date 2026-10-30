@@ -62,8 +62,9 @@ describe("Rust editing in Monaco", () => {
   /** Sets the content (a `|` marks the cursor, default at the end) and types `text` there. */
   function type(marked: string, text: string): string {
     const model = editor.getModel()!;
-    const offset = marked.includes("|") ? marked.indexOf("|") : marked.length;
-    model.setValue(marked.replace("|", ""));
+    const marker = marked.indexOf("|");
+    const offset = marker === -1 ? marked.length : marker;
+    model.setValue(marked.slice(0, offset) + marked.slice(offset + 1));
     // Rendering tokenizes visible lines; headless, Monaco skips auto-close on untokenized lines.
     (model as unknown as InternalTextModel).tokenization.forceTokenization(model.getLineCount());
     editor.setPosition(model.getPositionAt(offset));
