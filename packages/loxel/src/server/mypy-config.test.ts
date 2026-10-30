@@ -139,6 +139,15 @@ test("modules and packages are found in the config's directory, src and mypy_pat
   expect(coversFile(config, join(wt, "manage.py"))).toBe(false);
 });
 
+test("a module that is a package covers only its __init__, as mypy -m checks it", async () => {
+  const wt = await makeWorktree({ "mypy.ini": "[mypy]\nmodules = mypkg\n" });
+  const config = findMypyConfig(join(wt, "main.py"), wt);
+  if (!config) throw new Error("no config found");
+  expect(coversFile(config, join(wt, "mypkg", "__init__.py"))).toBe(true);
+  expect(coversFile(config, join(wt, "mypkg", "__main__.py"))).toBe(false);
+  expect(coversFile(config, join(wt, "mypkg", "deep", "x.py"))).toBe(false);
+});
+
 test("isMypyConfigFile", () => {
   expect(isMypyConfigFile("/wt/sub/setup.cfg")).toBe(true);
   expect(isMypyConfigFile("/wt/.mypy.ini")).toBe(true);

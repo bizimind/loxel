@@ -21,9 +21,9 @@ export interface MypyConfig {
   file: string;
   /**
    * The paths the config's targets name, relative to `dir`, or null when it names none (mypy
-   * then checks the open files): `files` entries
-   * (paths or globs), and where the `modules` and `packages` it names would be found (`<module>.py`,
-   * `<module>.pyi`, the package directory) under `dir`, `src` and the config's `mypy_path`.
+   * then checks the open files): `files` entries (paths or globs), and where the `modules` and
+   * `packages` it names would be found under `dir`, `src` and the config's `mypy_path`: a module's
+   * `.py` / `.pyi` or package `__init__` (`modules` is not recursive), a package's whole directory.
    */
   targets: string[] | null;
 }
@@ -131,7 +131,13 @@ function parsedTargets(list: (key: string) => string[] | null): ParsedConfig {
     ...(modules ?? []).flatMap((module) =>
       roots.flatMap((root) => {
         const base = path.join(root, asPath(module));
-        return [`${base}.py`, `${base}.pyi`, base];
+        // `modules` is not recursive: a name that is a package covers only its `__init__`.
+        return [
+          `${base}.py`,
+          `${base}.pyi`,
+          path.join(base, "__init__.py"),
+          path.join(base, "__init__.pyi"),
+        ];
       }),
     ),
     ...(packages ?? []).flatMap((pkg) => roots.map((root) => path.join(root, asPath(pkg)))),
