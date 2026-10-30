@@ -4,7 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { isRecord } from "@/lib/is-record";
 
 import { dirsUpToRoot, type LanguageFormatter, nodeModulesBin } from "./language-formatter";
-import { envBinDir, getPythonEnvNow, isEnvShippedByRepo, VENV_DIR_NAMES } from "./python-env";
+import { envBinDir, getPythonEnvNow, VENV_DIR_NAMES } from "./python-env";
+import { isEnvShippedByRepo } from "./shipped-by-repo";
 import { readToml, recordAt } from "./toml-file";
 
 export const pythonFormatter: LanguageFormatter = {
