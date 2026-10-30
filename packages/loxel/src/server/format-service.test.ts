@@ -573,6 +573,12 @@ describe("FormatService failure notices", () => {
       },
     },
     "write rejects": { write: () => Promise.reject(closedPipe()), end: () => 0 },
+    "write rejects and end throws": {
+      write: () => Promise.reject(closedPipe()),
+      end: () => {
+        throw closedPipe();
+      },
+    },
   };
 
   for (const [name, stdin] of Object.entries(closedStdinCases)) {

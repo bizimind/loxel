@@ -489,7 +489,8 @@ function feedStdin(stdin: FileSink, content: string, command: string): void {
       log.warn("Formatter stdin failed", { command, error: errorMessage(err) });
   };
   try {
-    for (const pending of [stdin.write(content), stdin.end()]) {
+    for (const step of [() => stdin.write(content), () => stdin.end()]) {
+      const pending = step();
       if (pending instanceof Promise) pending.catch(logRejection);
     }
   } catch (err) {
