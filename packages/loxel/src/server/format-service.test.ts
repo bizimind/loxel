@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -563,6 +563,38 @@ describe("FormatService failure notices", () => {
     expect(result.content).toBeNull();
     expect(result.notice).toStartWith('Format on save skipped: "ruff" could not be started (');
   });
+
+  const closedPipe = () => Object.assign(new Error("broken pipe"), { code: "EPIPE" });
+  const closedStdinCases = {
+    "end throws": {
+      write: () => 1,
+      end: () => {
+        throw closedPipe();
+      },
+    },
+    "write rejects": { write: () => Promise.reject(closedPipe()), end: () => 0 },
+  };
+
+  for (const [name, stdin] of Object.entries(closedStdinCases)) {
+    test(`a formatter gone before reading stdin is judged by its output (${name})`, async () => {
+      const wt = await makeWorktree({ "ruff.toml": "" });
+      await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\necho formatted\n");
+      // Whether the real pipe is closed yet is a race, so the failure itself is simulated.
+      const spawn = Bun.spawn;
+      const spy = spyOn(Bun, "spawn").mockImplementation(((...args: Parameters<typeof spawn>) => {
+        const proc = spawn(...args);
+        return new Proxy(proc, {
+          get: (target, key) => (key === "stdin" ? stdin : Reflect.get(target, key)),
+        });
+      }) as typeof spawn);
+      try {
+        const result = await new FormatService().format("x", join(wt, "a.py"), wt, AUTO_DETECT);
+        expect(result).toEqual({ content: "formatted\n" });
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  }
 
   test("does not report a formatter that exits non-zero (e.g. a syntax error)", async () => {
     const wt = await makeWorktree({ "ruff.toml": "" });

@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import type { FileSink } from "bun";
+
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 
 import type { BackendMode, FormatterBackend } from "./formatter-backends";
@@ -419,18 +421,12 @@ export class FormatService {
     try {
       proc = spawnFormatter(argv, options.cwd, env);
     } catch (err) {
-      log.warn("Formatter could not be started", {
-        command,
-        filePath,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      log.warn("Formatter could not be started", { command, filePath, error: errorMessage(err) });
       return { content: null, notice: spawnFailureNotice(command, err, env.PATH ?? "") };
     }
 
     try {
-      // Write content to stdin
-      proc.stdin.write(content);
-      proc.stdin.end();
+      feedStdin(proc.stdin, content, command);
 
       // Race between process completion and timeout
       const exitCode = await Promise.race([
@@ -468,11 +464,7 @@ export class FormatService {
 
       return { content: formatted };
     } catch (err) {
-      log.warn("Formatter failed", {
-        command,
-        filePath,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      log.warn("Formatter failed", { command, filePath, error: errorMessage(err) });
       return UNFORMATTED;
     }
   }
@@ -484,6 +476,29 @@ function spawnFormatter(
   env: Record<string, string | undefined>,
 ) {
   return Bun.spawn(argv, { stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd, env });
+}
+
+/**
+ * Write `content` to a formatter's stdin without waiting for it to be read. A formatter that exits
+ * first (`EPIPE`, thrown or as a rejection depending on how much was buffered) is not a failure of
+ * its own: its exit code and output still decide the result. Other errors throw or get logged.
+ */
+function feedStdin(stdin: FileSink, content: string, command: string): void {
+  const logRejection = (err: unknown) => {
+    if (!isClosedPipe(err))
+      log.warn("Formatter stdin failed", { command, error: errorMessage(err) });
+  };
+  try {
+    for (const pending of [stdin.write(content), stdin.end()]) {
+      if (pending instanceof Promise) pending.catch(logRejection);
+    }
+  } catch (err) {
+    if (!isClosedPipe(err)) throw err;
+  }
+}
+
+function isClosedPipe(err: unknown): boolean {
+  return err instanceof Error && "code" in err && err.code === "EPIPE";
 }
 
 /**
