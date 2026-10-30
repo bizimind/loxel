@@ -14,14 +14,13 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { connectAstroLsp, disconnectAstroLsp } from "./astro-lsp-client";
 import { connectDockerLsp, disconnectDockerLsp } from "./docker-lsp-client";
 import { createEditorOpener } from "./editor-opener";
-import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { getHighlighter } from "./highlighter";
 import { isLiveEditorModel } from "./live-editor-model";
 import { resumeLanguageServers } from "./lsp-client";
+import { registerLoxelLanguages } from "./monaco-languages";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { connectMypyLsp, disconnectMypyLsp } from "./mypy-lsp-client";
 import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
-import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
 import { isWithin } from "./project-file-helpers";
 import { registerPythonLanguageConfiguration } from "./python-language-config";
 import { connectPythonLsp, disconnectPythonLsp } from "./python-lsp-client";
@@ -67,95 +66,12 @@ monaco.typescript.javascriptDefaults.setModeConfiguration(disabledModeConfig);
 // Register themes before any editor mounts to prevent flicker
 registerMonacoThemes();
 
-// Register languages that Monaco doesn't ship out of the box so model
-// creation + LSP client registration work. Dockerfile is built in.
-monaco.languages.register({
-  id: "terraform",
-  extensions: [".tf", ".tfvars", ".hcl"],
-  aliases: ["Terraform", "HCL", "terraform"],
-});
-
-monaco.languages.register({ id: "astro", extensions: [".astro"], aliases: ["Astro", "astro"] });
-
-// TSX/JSX as distinct language IDs so shikiToMonaco can attach TextMate tokenizers.
-// Monaco has built-in "typescript"/"javascript" but not "tsx"/"jsx". TS language
-// features come from the TypeScript LSP, not Monaco's built-in TS workers (disabled above).
-monaco.languages.register({
-  id: "tsx",
-  extensions: [".tsx"],
-  aliases: ["TypeScript React", "tsx"],
-});
-monaco.languages.register({
-  id: "jsx",
-  extensions: [".jsx"],
-  aliases: ["JavaScript React", "jsx"],
-});
-
-// docker-bake HCL — served by docker-language-server, not terraform-ls.
-monaco.languages.register({ id: "dockerbake", aliases: ["Docker Bake", "dockerbake"] });
-
-// Monarch tokenizer for docker-bake HCL — not a Shiki-bundled language.
-registerDockerBakeMonarch();
-
-// pip requirements files — Shiki has no grammar for them, so a Monarch tokenizer.
-registerPipRequirementsLanguage();
-
-// TOML as its own language ID so shikiToMonaco attaches Shiki's TOML grammar (Monaco ships none).
-monaco.languages.register({ id: "toml", extensions: [".toml"], aliases: ["TOML", "toml"] });
-monaco.languages.setLanguageConfiguration("toml", {
-  comments: { lineComment: "#" },
-  brackets: [
-    ["{", "}"],
-    ["[", "]"],
-  ],
-  autoClosingPairs: [
-    { open: "{", close: "}" },
-    { open: "[", close: "]" },
-    { open: '"""', close: '"""', notIn: ["comment"] },
-    { open: "'''", close: "'''", notIn: ["comment"] },
-    { open: '"', close: '"', notIn: ["string"] },
-    { open: "'", close: "'", notIn: ["string", "comment"] },
-  ],
-  surroundingPairs: [
-    { open: "{", close: "}" },
-    { open: "[", close: "]" },
-    { open: '"', close: '"' },
-    { open: "'", close: "'" },
-  ],
-});
+// Languages Monaco doesn't ship (Dockerfile is built in), so model creation, LSP client
+// registration and shikiToMonaco's TextMate tokenizers work for them.
+registerLoxelLanguages();
 
 // Docstring auto-close and dedent after block-ending statements, on top of Monaco's built-in config.
 void registerPythonLanguageConfiguration();
-
-// Astro language configuration (brackets, comments, auto-closing pairs).
-// shikiToMonaco handles tokenization; this provides editing behavior.
-monaco.languages.setLanguageConfiguration("astro", {
-  comments: { lineComment: "//", blockComment: ["/*", "*/"] },
-  brackets: [
-    ["{", "}"],
-    ["[", "]"],
-    ["(", ")"],
-    ["<", ">"],
-  ],
-  autoClosingPairs: [
-    { open: "{", close: "}" },
-    { open: "[", close: "]" },
-    { open: "(", close: ")" },
-    { open: '"', close: '"' },
-    { open: "'", close: "'" },
-    { open: "`", close: "`" },
-    { open: "<!--", close: "-->" },
-  ],
-  surroundingPairs: [
-    { open: "{", close: "}" },
-    { open: "[", close: "]" },
-    { open: "(", close: ")" },
-    { open: '"', close: '"' },
-    { open: "'", close: "'" },
-    { open: "`", close: "`" },
-    { open: "<", close: ">" },
-  ],
-});
 
 // Bridge Shiki's TextMate grammars into Monaco for VS Code-quality highlighting.
 // This replaces Monarch tokenizers for all Shiki-bundled languages (TS, JS, HTML,

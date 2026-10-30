@@ -112,12 +112,25 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   formatting: structuredClone(DEFAULT_FORMATTING_SETTINGS),
 };
 
+export interface BuiltinIndentation extends IndentationDefaults {
+  /** The language's syntax requires this style, so it outranks detection from the content. */
+  required?: boolean;
+}
+
 /**
- * Built-in indentation for languages whose formatter-enforced convention differs from the
- * global default, keyed by resolved (highlighter) language ID.
+ * Built-in indentation for languages whose convention, set by their formatter or official style
+ * guide, differs from the global default, keyed by resolved (highlighter) language ID. Languages
+ * whose common formatters disagree (Java, Swift, C and C++, shell) are left to the default.
  */
-export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, IndentationDefaults> = new Map([
+export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, BuiltinIndentation> = new Map([
+  ["csharp", { tabSize: 4, insertSpaces: true }], // .NET coding conventions, dotnet format
   ["go", { tabSize: 4, insertSpaces: false }], // gofmt
+  ["just", { tabSize: 4, insertSpaces: true }], // just --fmt
+  ["kotlin", { tabSize: 4, insertSpaces: true }], // Kotlin coding conventions, ktlint
+  // Recipe lines must start with a tab (`*** missing separator`), whatever the content suggests:
+  // space-indented continuation lines can outnumber the recipes. 4 is only the tab's display width.
+  ["make", { tabSize: 4, insertSpaces: false, required: true }],
+  ["php", { tabSize: 4, insertSpaces: true }], // PSR-12 / PER Coding Style, PHP-CS-Fixer
   ["python", { tabSize: 4, insertSpaces: true }], // PEP 8, ruff, black
   ["rust", { tabSize: 4, insertSpaces: true }], // rustfmt
 ]);
@@ -166,7 +179,8 @@ export interface IndentationResolution {
  *    too, so it outranks Loxel's settings, as it does in VS Code and JetBrains IDEs.
  * 3. The user's per-extension override, which applies to every project.
  * 4. Detection from the file's content, so editing an existing file keeps its style.
- * 5. The built-in default for the file's resolved language.
+ * 5. The built-in default for the file's resolved language. One its syntax requires (make's tabs)
+ *    comes before detection instead.
  * 6. The global default, which sets every property.
  */
 export function resolveIndentation(
@@ -176,12 +190,16 @@ export function resolveIndentation(
 ): IndentationResolution {
   const override = findIndentationOverride(editor.overrides, filePath) ?? null;
   const builtin = language ? BUILTIN_LANGUAGE_INDENTATION.get(language) : undefined;
+  const detectedLayer: [IndentationSource, IndentationLayer] = ["detected", detected];
+  const languageLayer: [IndentationSource, IndentationLayer] = [
+    "language",
+    builtin ? defaultsLayer(builtin) : {},
+  ];
   const layers: [IndentationSource, IndentationLayer][] = [
     ["file", fileChoice],
     ["editorconfig", editorConfigLayer(editorConfig)],
     ["override", override ? defaultsLayer(override) : {}],
-    ["detected", detected],
-    ["language", builtin ? defaultsLayer(builtin) : {}],
+    ...(builtin?.required ? [languageLayer, detectedLayer] : [detectedLayer, languageLayer]),
     ["default", defaultsLayer(editor.indentation)],
   ];
   const [insertSpaces, insertSpacesSource] = resolveProperty(layers, "insertSpaces");

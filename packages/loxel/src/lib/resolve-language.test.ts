@@ -43,6 +43,20 @@ describe("resolveLanguage for Python projects", () => {
   });
 });
 
+describe("resolveLanguage for build files", () => {
+  test.each([
+    ["/repo/Makefile", "make"],
+    ["/repo/makefile", "make"],
+    ["/repo/GNUmakefile", "make"],
+    ["/repo/build/rules.mk", "make"],
+    ["/repo/justfile", "just"],
+    ["/repo/.justfile", "just"],
+    ["/repo/tasks.just", "just"],
+  ])("%s → %s", (path, language) => {
+    expect(resolve(path)).toBe(language);
+  });
+});
+
 describe("toMonacoLanguage", () => {
   test("keeps TOML as its own Monaco language so it gets the TOML grammar", () => {
     expect(toMonacoLanguage("toml")).toBe("toml");

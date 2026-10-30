@@ -36,6 +36,8 @@ const BUNDLED_LANGUAGES = [
   "shell",
   "bash",
   "dockerfile",
+  "make",
+  "just",
   "terraform",
   "graphql",
   "vue",
@@ -89,8 +91,10 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   containerfile: "dockerfile",
   "docker-bake.hcl": "dockerbake",
   "docker-bake.override.hcl": "dockerbake",
-  makefile: "shell",
-  justfile: "shell",
+  makefile: "make",
+  gnumakefile: "make",
+  justfile: "just",
+  ".justfile": "just",
   procfile: "yaml",
   caddyfile: "ini",
 
@@ -231,6 +235,8 @@ export const EXT_TO_LANG: Record<string, string> = {
 
   // Config
   dockerfile: "dockerfile",
+  mk: "make",
+  just: "just",
   graphql: "graphql",
   gql: "graphql",
   sql: "sql",

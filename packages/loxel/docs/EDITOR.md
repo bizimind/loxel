@@ -136,7 +136,7 @@ The save properties are applied on the client by [editorconfig-save-actions.ts](
 2. `editorconfig`: the file's `.editorconfig` properties.
 3. `override`: the user's per-extension override.
 4. `detected`: [detect-indentation.ts](../src/lib/detect-indentation.ts), run when the panel loads the file's content or replaces it with a newer disk version, not on the echoes of its own saves, so neither typing nor a conversion shifts it. It is adapted from Monaco's internal `guessIndentation` but reports only what the content shows: nothing without indented lines, and no size for tabs.
-5. `language`: `BUILTIN_LANGUAGE_INDENTATION`, keyed by resolved language.
+5. `language`: `BUILTIN_LANGUAGE_INDENTATION`, keyed by resolved language. An entry marked `required` (make, whose recipe lines must start with a tab) comes before `detected` instead, since a Makefile's space-indented continuation lines can outnumber its recipes.
 6. `default`: the global default, which sets every property.
 
 `.editorconfig` outranks the per-extension override, as in VS Code and JetBrains IDEs: it is the project's committed convention, shared with its formatters, while an override applies to every project, so an override set once for one project would otherwise rewrite the indentation of every other project's files of that type. The resolution also returns the matching override, so the status item can say when `.editorconfig` outranks it.
