@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/loxel",
-  "version": "0.1.268",
+  "version": "0.1.273",
   "description": "IDE for the agentic coding era",
   "homepage": "https://github.com/bizimind/loxel",
   "author": {
@@ -13,9 +13,9 @@
     "dev": "LOXEL_DEV=1 bun src/server/index.ts & vite",
     "dev:server": "LOXEL_DEV=1 bun --watch src/server/index.ts",
     "dev:client": "vite",
-    "build": "vite build && bun build src/server/index.ts --outdir dist/server --target bun",
+    "build": "vite build && bun build src/server/index.ts src/server/git-exec-worker.ts --outdir dist/server --target bun",
     "build:ui": "vite build",
-    "build:server": "bun build src/server/index.ts --outdir dist/server --target bun",
+    "build:server": "bun build src/server/index.ts src/server/git-exec-worker.ts --outdir dist/server --target bun",
     "start": "bun dist/server/index.js",
     "prod": "pnpm run build && pnpm run start",
     "dev:app": "ELECTRON=1 vite",
@@ -24,7 +24,7 @@
     "build:language-servers": "bun scripts/language-server-binaries.ts build",
     "build:notices": "bun scripts/third-party-notices.ts . build/THIRD_PARTY_NOTICES.txt",
     "build:cli": "bun build src/cli.ts --compile --outfile build/loxel",
-    "build:server:standalone": "bun build src/server/index.ts --compile --outfile build/loxel-server && pnpm run build:language-servers && pnpm run build:notices",
+    "build:server:standalone": "bun build src/server/index.ts src/server/git-exec-worker.ts --compile --outfile build/loxel-server && pnpm run build:language-servers && pnpm run build:notices",
     "sign": "codesign --sign \"$LOXEL_CODESIGN_IDENTITY\" --options runtime build/loxel-server",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",

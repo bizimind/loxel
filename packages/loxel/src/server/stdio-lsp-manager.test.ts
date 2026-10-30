@@ -194,6 +194,45 @@ describe("StdioLspManager workspace root", () => {
   });
 });
 
+describe("StdioLspManager completion snippets", () => {
+  class NoSnippetsLspManager extends FakeLspManager {
+    protected override readonly disableCompletionSnippets = true;
+  }
+
+  const textDocument = (): Record<string, unknown> => ({
+    completion: {
+      completionItem: { snippetSupport: true, resolveSupport: { properties: ["detail"] } },
+    },
+  });
+
+  test("keeps the client's snippet support by default", async () => {
+    const { client } = await setup();
+    client.send({
+      id: 1,
+      method: "initialize",
+      params: { capabilities: { textDocument: textDocument() } },
+    });
+    const init = await client.serverReceived((f) => f.method === "initialize");
+    expect(init.params?.capabilities).toMatchObject({ textDocument: textDocument() });
+  });
+
+  test("disableCompletionSnippets takes only snippet support out of initialize", async () => {
+    const { client } = await setup("wt", (script) => new NoSnippetsLspManager(script));
+    client.send({
+      id: 1,
+      method: "initialize",
+      params: { capabilities: { textDocument: textDocument() } },
+    });
+    const init = await client.serverReceived((f) => f.method === "initialize");
+    expect(init.params?.capabilities).toMatchObject({
+      textDocument: {
+        completion: { completionItem: { resolveSupport: { properties: ["detail"] } } },
+      },
+    });
+    expect(JSON.stringify(init.params?.capabilities)).not.toContain("snippetSupport");
+  });
+});
+
 describe("StdioLspManager watched files", () => {
   test("advertises the client capability in initialize", async () => {
     const { client } = await setup();

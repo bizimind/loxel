@@ -2,8 +2,6 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, sep } from "node:path";
 
-import { $ } from "bun";
-
 import type { StatusInfo } from "@/api/git-models";
 import type { DirEntry, ProjectFileStatus } from "@/api/project-files-model";
 import type { FileMoveSource } from "@/api/ws-protocol";
@@ -11,7 +9,7 @@ import type { FileMoveSource } from "@/api/ws-protocol";
 import { FileMoveDetector } from "./file-move-detector";
 import type { FileChange } from "./file-sync-service";
 import { FilesSyncService } from "./file-sync-service";
-import { getStatus, readOnlyGitEnv } from "./git-commands";
+import { getStatus, gitText, readOnlyGitEnv, runGit } from "./git-commands";
 import { logger } from "./logger";
 
 const log = logger.child("files");
@@ -455,15 +453,15 @@ export class ProjectFilesService {
         }
         return null;
       }),
-      $`git -C ${this.worktreeCwd} ls-files --others --ignored --exclude-standard --directory -z`
-        .env(readOnlyGitEnv())
-        .text()
-        .catch((err: unknown) => {
-          if (existsSync(this.worktreeCwd)) {
-            log.error("Failed to list ignored files for file tree", { error: err });
-          }
-          return null;
-        }),
+      gitText(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], {
+        cwd: this.worktreeCwd,
+        env: readOnlyGitEnv(),
+      }).catch((err: unknown) => {
+        if (existsSync(this.worktreeCwd)) {
+          log.error("Failed to list ignored files for file tree", { error: err });
+        }
+        return null;
+      }),
     ]);
     if (this.stopped || !status) return null;
 
@@ -533,18 +531,18 @@ export class ProjectFilesService {
   private async checkIgnored(paths: string[]): Promise<Set<string>> {
     if (paths.length === 0) return new Set();
     // NUL-separated both ways: otherwise names with quotes or non-ASCII bytes come back quoted.
-    // Non-empty by the guard above — Bun's shell never closes stdin for an empty Buffer.
-    const input = Buffer.from(paths.join("\0"));
-    const result = await $`git -C ${this.worktreeCwd} check-ignore --stdin -z < ${input}`
-      .env(readOnlyGitEnv())
-      .nothrow()
-      .quiet();
+    const result = await runGit(["check-ignore", "--stdin", "-z"], {
+      cwd: this.worktreeCwd,
+      env: readOnlyGitEnv(),
+      stdin: paths.join("\0"),
+      nothrow: true,
+    });
     // Exit code 1 just means none of the paths are ignored.
     if (result.exitCode !== 0 && result.exitCode !== 1) {
-      log.warn("git check-ignore failed", { stderr: result.stderr.toString().trim() });
+      log.warn("git check-ignore failed", { stderr: result.stderr.trim() });
       return new Set();
     }
-    return new Set(result.stdout.toString().split("\0").filter(Boolean));
+    return new Set(result.stdout.split("\0").filter(Boolean));
   }
 
   private async readAndClassifyDir(dir: string): Promise<DirEntry[]> {
