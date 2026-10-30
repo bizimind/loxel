@@ -3,9 +3,8 @@ import path from "node:path";
 import { WorktreeLspManager, type WtLspSession } from "./stdio-lsp-manager";
 
 /**
- * LemMinX checks its download setting only for what it reads through its cache, and that check
- * compares the URL's scheme case-sensitively. Anything else leaves through the JVM's URL handlers,
- * so those get a proxy that goes nowhere, for every host.
+ * LemMinX's download setting covers what it reads through its cache. Everything else it would open
+ * goes through the JVM's URL handlers, so those get a proxy that leads nowhere, for every host.
  */
 const NO_OUTBOUND_ARGS = [
   ...["http", "https", "ftp"].flatMap((protocol) => [
