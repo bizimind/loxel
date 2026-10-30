@@ -51,6 +51,8 @@ const syncTargets: Record<string, SyncTarget> = {
         editor: s.editor,
         schemas: s.schemas,
         fileAssociations: s.fileAssociations,
+        autoRevealInExplorer: s.autoRevealInExplorer,
+        autoCheckForUpdates: s.autoCheckForUpdates,
       };
     },
     setState: (partial) => useSettingsStore.setState(partial),
