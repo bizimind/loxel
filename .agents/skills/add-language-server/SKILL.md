@@ -40,7 +40,7 @@ All paths are under `packages/loxel/`.
 Only if the language needs it (Go, Rust, C/C++, C#, Java and Kotlin are already covered):
 
 - **Monaco.** If Monaco lacks the language (json, xml, yaml, python and dockerfile are built in), add it with its language configuration to `LOXEL_LANGUAGES` in `src/lib/monaco-languages.ts`, reusing Monaco's built-in `conf` for the same syntax where one exists.
-- **Highlighting and icons.** `src/lib/highlighter.ts` `BUNDLED_LANGUAGES` plus `EXT_TO_LANG` / `FILENAME_TO_LANG`; a Shiki ID that differs from Monaco's goes in `monaco-theme.ts` `LANG_MAP`, and each semantic token type the server emits needs a `DARK_SEMANTIC_RULES` rule or it loses its TextMate color. `src/lib/file-icons.tsx`: SVG in `public/icons/`, `EXT_MAP` / `FILE_NAME_MAP`.
+- **Highlighting and icons.** `src/lib/highlighter.ts` `BUNDLED_LANGUAGES` plus `EXT_TO_LANG` / `FILENAME_TO_LANG`; a Shiki ID that differs from Monaco's goes in `monaco-theme.ts` `LANG_MAP`. A semantic token type with no `DARK_SEMANTIC_RULES` rule keeps its TextMate color, so a rule is only for a deliberate choice. `src/lib/file-icons.tsx`: SVG in `public/icons/`, `EXT_MAP` / `FILE_NAME_MAP`.
 - **Toolchain environment.** If the language's toolchain must reach terminals and the coding agent's commands (a chosen version on `PATH`, `RUSTUP_TOOLCHAIN`): `src/server/<language>-toolchain-env.ts` exporting a `ToolchainEnvContributor` (`python-toolchain-env.ts` is the example; the interface's comment lists what a `PATH` entry must refuse), plus one import and one entry in `src/server/toolchain-envs.ts`.
 - **Update resource directory.** A resource directory the server ships whose stale files would cause harm (`typeshed-fallback`) goes in `UPDATE_RESOURCE_DIRS` in `src/electron/main.ts`.
 
