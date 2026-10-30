@@ -149,6 +149,7 @@ export type WsData =
   | WorktreeLspData<"terraform-lsp">
   | WorktreeLspData<"python-lsp">
   | WorktreeLspData<"ruff-lsp">
+  | WorktreeLspData<"mypy-lsp">
   | WorktreeLspData<"astro-lsp">
   | WorktreeLspData<"xml-lsp">
   | WorktreeLspData<"toml-lsp">;

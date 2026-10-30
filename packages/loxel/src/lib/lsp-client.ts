@@ -75,6 +75,7 @@ export interface LspClientOptions {
  */
 export function createLspClient({ route, name, languageId }: LspClientOptions) {
   const markerOwner = route.replace(/^ws\//, "");
+  const showMessage = createServerMessageToasts(name);
 
   async function open(wtPath: string | null, signal: AbortSignal): Promise<LspLink> {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -93,6 +94,7 @@ export function createLspClient({ route, name, languageId }: LspClientOptions) {
         markerOwner,
         workspaceFileSystem: wtPath === null ? undefined : createLspWorkspaceFiles(wtPath),
         onWorkspaceEditFailure: (reason) => showToast(`Edit not applied: ${reason}`),
+        onShowMessage: showMessage,
       });
     } catch (err) {
       transport.dispose();
@@ -136,6 +138,27 @@ export function createLspClient({ route, name, languageId }: LspClientOptions) {
   const connection = createLspConnection({ open, onStateChange });
   connections.add(connection);
   return { connect: connection.connect, disconnect: connection.disconnect };
+}
+
+/** LSP `MessageType.Warning`: errors and warnings are shown, info and log messages are not. */
+const WARNING_MESSAGE_TYPE = 2;
+const ERROR_MESSAGE_TYPE = 1;
+
+/**
+ * Show the errors and warnings a server sends with `window/showMessage` (mypy's setup problems,
+ * ruff's config errors) as toasts, each distinct message once per session, since a server that
+ * restarts or re-checks would repeat it.
+ */
+function createServerMessageToasts(
+  name: string,
+): (params: { type: number; message: string }) => void {
+  const shown = new Set<string>();
+  return ({ type, message }) => {
+    if (type > WARNING_MESSAGE_TYPE || shown.has(message)) return;
+    shown.add(message);
+    log.info("Language server message", { server: name, type, message });
+    showToast(`${name}: ${message}`, type === ERROR_MESSAGE_TYPE ? "error" : "info");
+  };
 }
 
 /**

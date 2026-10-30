@@ -465,13 +465,21 @@ export function matchesDocumentSelector(
   }
   return false;
 }
+/** The diagnostic's code, linked to its documentation (`codeDescription`) when the server gives one. */
+function toMarkerCode(diagnostic: Diagnostic): monaco.editor.IMarkerData["code"] {
+  const value = diagnostic.code?.toString();
+  if (value === undefined) return undefined;
+  const href = diagnostic.codeDescription?.href;
+  return href ? { value, target: monaco.Uri.parse(href) } : value;
+}
+
 export function toDiagnosticMarker(diagnostic: Diagnostic): monaco.editor.IMarkerData {
   const marker: monaco.editor.IMarkerData = {
     severity: toMonacoDiagnosticSeverity(diagnostic.severity),
     ...toMonacoRange(diagnostic.range),
     message: diagnostic.message,
     source: diagnostic.source,
-    code: typeof diagnostic.code === "string" ? diagnostic.code : diagnostic.code?.toString(),
+    code: toMarkerCode(diagnostic),
   };
 
   if (diagnostic.tags) {

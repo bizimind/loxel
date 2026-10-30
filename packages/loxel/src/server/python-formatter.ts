@@ -1,7 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import { isRecord } from "@/lib/is-record";
+
 import { envBinDir, getPythonEnvNow, isEnvShippedByRepo, VENV_DIR_NAMES } from "./python-env";
+import { readToml, recordAt } from "./toml-file";
 
 export const PYTHON_FORMAT_EXTENSIONS: readonly string[] = ["py", "pyi"];
 
@@ -128,17 +131,6 @@ function readRuffConfig(dir: string): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function readToml(path: string): Record<string, unknown> | undefined {
-  if (!existsSync(path)) return undefined;
-  try {
-    const parsed: unknown = Bun.TOML.parse(readFileSync(path, "utf-8"));
-    return isRecord(parsed) ? parsed : undefined;
-  } catch {
-    // An unparsable file contributes nothing; the formatter reports the error if it runs.
-    return undefined;
-  }
-}
-
 /**
  * Normalized names of the packages a `pyproject.toml` depends on: PEP 621 dependencies and
  * extras, PEP 735 dependency groups, uv, Poetry and PDM dev dependencies, and Hatch environments.
@@ -178,12 +170,3 @@ function normalizePackageName(name: string): string {
   return name.toLowerCase().replace(/[-_.]+/g, "-");
 }
 
-function recordAt(value: unknown, key: string): Record<string, unknown> | undefined {
-  if (!isRecord(value)) return undefined;
-  const child = value[key];
-  return isRecord(child) ? child : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}

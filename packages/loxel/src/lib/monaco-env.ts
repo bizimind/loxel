@@ -19,6 +19,7 @@ import { getHighlighter } from "./highlighter";
 import { isLiveEditorModel } from "./live-editor-model";
 import { resumeLanguageServers } from "./lsp-client";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
+import { connectMypyLsp, disconnectMypyLsp } from "./mypy-lsp-client";
 import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
 import { isWithin } from "./project-file-helpers";
 import { registerPythonLanguageConfiguration } from "./python-language-config";
@@ -279,6 +280,14 @@ createLazyLspConnector({
   languageIds: ["python"],
   connect: connectRuffLsp,
   disconnect: disconnectRuffLsp,
+});
+
+// mypy, in projects configured for it: type checking in place of basedpyright's (the server starts
+// nothing for other projects).
+createLazyLspConnector({
+  languageIds: ["python"],
+  connect: connectMypyLsp,
+  disconnect: disconnectMypyLsp,
 });
 
 // astro-ls: only worktrees with .astro files pay the cost.

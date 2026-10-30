@@ -2,7 +2,7 @@ import type { IMessageTransport, IRequestSender } from "@hediet/json-rpc";
 import { Channel, StreamBasedChannel, TypedChannel } from "@hediet/json-rpc";
 import type * as monaco from "monaco-editor";
 
-import type { ClientCapabilities } from "../types";
+import type { ClientCapabilities, ShowMessageParams } from "../types";
 import { api } from "../types";
 import type { IDisposable } from "../utils";
 import { DisposableStore } from "../utils";
@@ -66,6 +66,8 @@ export interface MonacoLspClientOptions {
    * Defaults to an owner unique to the client (`lsp-<n>`).
    */
   markerOwner?: string;
+  /** Called with each `window/showMessage` notification, for the app to show to the user. */
+  onShowMessage?: (params: ShowMessageParams) => void;
 }
 
 export class MonacoLspClient {
@@ -76,6 +78,7 @@ export class MonacoLspClient {
   private readonly _edits: WorkspaceEditApplier;
   private readonly _features: IDisposable;
   private readonly _workspaceSymbols: LspWorkspaceSymbolFeature;
+  private readonly _messages: IDisposable | undefined;
 
   private _initPromise: Promise<void>;
 
@@ -124,6 +127,10 @@ export class MonacoLspClient {
       this._connection,
       () => this._initPromise,
     );
+    const onShowMessage = options?.onShowMessage;
+    if (onShowMessage) {
+      this._messages = c.registerNotificationHandler(api.client.windowShowMessage, onShowMessage);
+    }
 
     this._initPromise = this._init().catch((err: unknown) => {
       console.error("[MonacoLspClient] initialization failed:", err);
@@ -131,6 +138,7 @@ export class MonacoLspClient {
   }
 
   dispose(): void {
+    this._messages?.dispose();
     this._features.dispose();
     this._workspaceSymbols.dispose();
     this._commands.dispose();

@@ -49,6 +49,7 @@ import {
   refreshPythonEnv,
   subscribePythonEnv,
 } from "./python-env";
+import { MypyLspManager } from "./mypy-lsp-manager";
 import { PythonLspManager } from "./python-lsp-manager";
 import { onPythonOverrideChange } from "./python-override-store";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
@@ -814,7 +815,9 @@ const yamlLspManager = new YamlLspManager({});
 const tsLspManager = new TsLspManager();
 const dockerLspManager = new DockerLspManager();
 const terraformLspManager = new TerraformLspManager();
-const pythonLspManager = new PythonLspManager();
+// mypy, in projects configured for it, takes over basedpyright's type-checking diagnostics.
+const mypyLspManager = new MypyLspManager();
+const pythonLspManager = new PythonLspManager(mypyLspManager);
 // A chosen interpreter reaches everything that shares the worktree's resolution (language
 // servers, terminals, format on save, the status bar) without a restart.
 onPythonOverrideChange(refreshPythonEnv);
@@ -829,6 +832,7 @@ const worktreeLspManagers = [
   terraformLspManager,
   pythonLspManager,
   ruffLspManager,
+  mypyLspManager,
   astroLspManager,
   xmlLspManager,
   tomlLspManager,
@@ -1243,6 +1247,7 @@ const server = Bun.serve<WsData>({
         "terraform-lsp",
         "python-lsp",
         "ruff-lsp",
+        "mypy-lsp",
         "astro-lsp",
         "xml-lsp",
         "toml-lsp",
@@ -1309,6 +1314,10 @@ const server = Bun.serve<WsData>({
         ruffLspManager.createSession(ws, ws.data.wtPath);
         return;
       }
+      if (ws.data?.type === "mypy-lsp") {
+        mypyLspManager.createSession(ws, ws.data.wtPath);
+        return;
+      }
       if (ws.data?.type === "astro-lsp") {
         astroLspManager.createSession(ws, ws.data.wtPath);
         return;
@@ -1358,6 +1367,10 @@ const server = Bun.serve<WsData>({
       }
       if (ws.data?.type === "ruff-lsp") {
         ruffLspManager.destroySession(ws);
+        return;
+      }
+      if (ws.data?.type === "mypy-lsp") {
+        mypyLspManager.destroySession(ws);
         return;
       }
       if (ws.data?.type === "astro-lsp") {
@@ -1428,6 +1441,10 @@ const server = Bun.serve<WsData>({
       }
       if (ws.data?.type === "ruff-lsp") {
         if (typeof message === "string") ruffLspManager.handleMessage(ws, message);
+        return;
+      }
+      if (ws.data?.type === "mypy-lsp") {
+        if (typeof message === "string") mypyLspManager.handleMessage(ws, message);
         return;
       }
       if (ws.data?.type === "astro-lsp") {
@@ -1508,6 +1525,7 @@ function shutdown(exitCode = 0) {
   terraformLspManager.destroy();
   pythonLspManager.destroy();
   ruffLspManager.destroy();
+  mypyLspManager.destroy();
   astroLspManager.destroy();
   xmlLspManager.destroy();
   tomlLspManager.destroy();
