@@ -16,6 +16,7 @@ import {
   refreshGoEnv,
   subscribeGoEnv,
 } from "./go-env";
+import { getGoChoice } from "./go-toolchain-store";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import {
   type SpawnOptions,
@@ -173,7 +174,7 @@ export function goSetupProblem(body: string): GoSetupProblem | null {
     const [, needed, running] = newerGo;
     return {
       kind: "newer-go",
-      message: `This project needs Go ${needed}, and the Go in use is ${running}. Loxel does not download Go toolchains: run \`go version\` in the project from a terminal to download it, or put Go ${needed} on your PATH, and gopls restarts.`,
+      message: `This project needs Go ${needed}, and the Go in use is ${running}. Loxel does not download Go toolchains. Run \`go version\` in the project from a terminal to download it, or put Go ${needed} on your PATH, and automatic detection finds it and restarts gopls.`,
     };
   }
   if (isRecord(frame.error)) {
@@ -278,9 +279,8 @@ export class GoLspManager extends WorktreeLspManager {
 
   protected override serverFailureReason(context: WtLspContext): string | null {
     const { wtPath } = context;
-    // A chosen Go need not be on the PATH at all.
-    const go = this.spawned.get(context)?.go;
-    const found = (go && go.source !== "path") || Bun.which(GO, { PATH: goToolPath(wtPath) });
+    // A chosen Go need not be on the PATH at all; one that is gone is in `withoutGo` if nothing else is.
+    const found = getGoChoice(wtPath) !== null || Bun.which(GO, { PATH: goToolPath(wtPath) });
     return found && !this.withoutGo.has(context) ? null : GO_NOT_FOUND_REASON;
   }
 

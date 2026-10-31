@@ -1,4 +1,12 @@
-import { accessSync, constants, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
+import {
+  accessSync,
+  constants,
+  readlinkSync,
+  realpathSync,
+  statSync,
+  watch,
+  type FSWatcher,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -27,6 +35,7 @@ export const GO_ENV = { GOPROXY: "off", GOTOOLCHAIN: "local", GOSUMDB: "off", GO
 export const GO = process.platform === "win32" ? "go.exe" : "go";
 export const GOPLS = process.platform === "win32" ? "gopls.exe" : "gopls";
 const GO_ENV_TIMEOUT_MS = 10_000;
+const MAX_LINK_HOPS = 16;
 const WATCH_DEBOUNCE_MS = 1000;
 /** Far above any real `go.mod`; the repository decides what this file is. */
 const MAX_PROJECT_FILE_BYTES = 1024 * 1024;
@@ -202,7 +211,18 @@ export function goToolPath(wtPath: string): string {
 
 /** A version manager's shim: asdf, mise and goenv all keep theirs in a directory of this name. */
 export function isShim(binary: string): boolean {
-  return path.basename(path.dirname(binary)) === "shims";
+  const inShims = (file: string) => path.basename(path.dirname(file)) === "shims";
+  // Each link on the way counts: mise's shims are themselves links to the `mise` binary.
+  let current = binary;
+  for (let hops = 0; hops < MAX_LINK_HOPS; hops++) {
+    if (inShims(current)) return true;
+    try {
+      current = path.resolve(path.dirname(current), readlinkSync(current));
+    } catch {
+      break;
+    }
+  }
+  return inShims(realpathOr(binary));
 }
 
 /**
@@ -216,7 +236,7 @@ export function goSpawnEnv(
 ): Record<string, string> {
   const dirs = goToolPath(wtPath)
     .split(path.delimiter)
-    .filter((dir) => path.basename(dir) !== "shims");
+    .filter((dir) => path.basename(dir) !== "shims" && path.basename(realpathOr(dir)) !== "shims");
   const goroot = env?.goroot;
   const own: Record<string, string> = goroot && env.source !== "path" ? { GOROOT: goroot } : {};
   const first = goroot && (env.source !== "path" || isShim(env.binary));
@@ -228,13 +248,16 @@ export function goSpawnEnv(
 }
 
 /** The first `name` on {@link goToolPath}, unless the repository could have provided it. */
-async function trustedOnPath(wtPath: string, name: string): Promise<string | null> {
+export async function trustedOnPath(wtPath: string, name: string): Promise<string | null> {
   const binary = Bun.which(name, { PATH: goToolPath(wtPath) });
   return binary && (await isTrustedBinary(wtPath, binary)) ? binary : null;
 }
 
 export async function isTrustedBinary(wtPath: string, binary: string): Promise<boolean> {
-  const inWorktree = isInside(realpathOr(binary), realpathOr(wtPath));
+  // By what it resolves to, and by where the link itself is, which the repository can re-point.
+  const realRoot = realpathOr(wtPath);
+  const linkPath = path.join(realpathOr(path.dirname(binary)), path.basename(binary));
+  const inWorktree = isInside(realpathOr(binary), realRoot) || isInside(linkPath, realRoot);
   if (!inWorktree && !(await isShippedByRepo(wtPath, binary))) return true;
   log.warn("Ignoring a Go tool that the repository ships", { wtPath, binary });
   return false;
@@ -393,7 +416,7 @@ export async function goVersion(wtPath: string, go: string): Promise<string | nu
     );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     if (exitCode !== 0) return null;
-    return versionFromGoVersion(/^go version (\S+) \S+\/\S+/.exec(stdout)?.[1]);
+    return versionFromGoVersion(/^go version (.+) \S+\/\S+$/.exec(stdout.trim())?.[1]);
   } catch (err) {
     log.debug("go version failed", { go, error: err });
     return null;

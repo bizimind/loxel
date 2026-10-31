@@ -7,6 +7,7 @@ import { ToolchainStatusButton } from "./ToolchainStatusButton";
 
 const CLICK_TO_SELECT = "Click to select a Go toolchain, or to look for Go again";
 const DOWNLOAD_IN_TERMINAL = "Running `go version` in the project from a terminal downloads it";
+const CHOSEN_STAYS = "The Go chosen for this worktree stays in use until you select another";
 
 const SOURCE_NOTES: Record<GoEnv["source"], string | null> = {
   path: null,
@@ -25,6 +26,7 @@ function goTooltip({ env, chosen }: GoEnvResponse): string {
       .join("\n");
   }
   const { newerGoNeeded: needed, newerToolchainSuggested: suggested } = env;
+  const howToGetIt = env.source === "chosen" ? CHOSEN_STAYS : DOWNLOAD_IN_TERMINAL;
   return [
     env.binary,
     SOURCE_NOTES[env.source],
@@ -36,9 +38,9 @@ function goTooltip({ env, chosen }: GoEnvResponse): string {
     !env.gowork && !env.gomod && "No go.mod or go.work at the worktree root",
     `gopls: ${env.gopls ?? "bundled with Loxel"}`,
     needed &&
-      `${needed.file} needs Go ${needed.version}, and the Go in use is ${env.version}. Loxel does not download Go. ${DOWNLOAD_IN_TERMINAL}`,
+      `${needed.file} needs Go ${needed.version}, and the Go in use is ${env.version}. Loxel does not download Go. ${howToGetIt}`,
     suggested &&
-      `${suggested.file} suggests Go ${suggested.version}. Loxel does not download it and uses Go ${env.version}. ${DOWNLOAD_IN_TERMINAL}`,
+      `${suggested.file} suggests Go ${suggested.version}. Loxel does not download it and uses Go ${env.version}. ${howToGetIt}`,
     CLICK_TO_SELECT,
   ]
     .filter(Boolean)

@@ -149,6 +149,17 @@ describe("GoToolchainStatus", () => {
     expect(button.className).toContain("text-muted-foreground");
   });
 
+  test("does not suggest a download that would not change a chosen Go", async () => {
+    response = {
+      env: { ...ENV, source: "chosen", newerGoNeeded: { file: "go.mod", version: "1.99.0" } },
+      chosen: ENV.binary,
+    };
+    renderStatus();
+    const button = await screen.findByRole("button", { name: "Go 1.27.3" });
+    expect(button.title).toContain("stays in use until you select another");
+    expect(button.title).not.toContain("go version");
+  });
+
   test("warns when the chosen Go cannot be used, and names it", async () => {
     response = { env: ENV, chosen: "/gone/bin/go" };
     renderStatus();

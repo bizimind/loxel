@@ -15,12 +15,12 @@ import {
   compareGoVersions,
   GO,
   goBehindShim,
-  goToolPath,
   goVersion,
   isExecutableFile,
   isShim,
   isTrustedBinary,
   realpathOr,
+  trustedOnPath,
 } from "./go-env";
 import { buildSpawnEnv } from "./shell-env";
 
@@ -58,7 +58,7 @@ function installedGoPaths(home: string): string[] {
 }
 
 async function pathGo(wtPath: string): Promise<string | null> {
-  const binary = Bun.which(GO, { PATH: goToolPath(wtPath) });
+  const binary = await trustedOnPath(wtPath, GO);
   if (!binary) return null;
   return isShim(binary) ? goBehindShim(wtPath, binary) : binary;
 }
