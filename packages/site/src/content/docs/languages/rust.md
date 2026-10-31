@@ -22,6 +22,8 @@ Loxel never downloads or installs a toolchain or component. If the project pins 
 
 Loxel uses toolchains from outside the worktree. If a toolchain file names one inside it, or one the repository contains, the status bar item shows this in the warning color, and you can choose an installed toolchain instead.
 
+Loxel doesn't run version-manager shims, such as asdf's or mise's, or other script wrappers. Install Rust with rustup or a package to use it here.
+
 Editing the worktree's toolchain file, installing or removing a toolchain or component, or changing your rustup default while Loxel is open is picked up automatically.
 
 ## Seeing and changing the toolchain

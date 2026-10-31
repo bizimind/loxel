@@ -4,6 +4,7 @@ import {
   beforeEach,
   describe,
   expect,
+  mock,
   setDefaultTimeout,
   test,
 } from "bun:test";
@@ -18,6 +19,9 @@ import type {
 
 // Each test spawns git and fake tools; on a loaded machine that takes far longer than the default.
 setDefaultTimeout(120_000);
+
+// The fakes here are scripts, which the lookup refuses; `rust-tool-shim.test.ts` covers that.
+mock.module("./rust-tool-shim", () => ({ isVersionManagerShim: async () => false }));
 
 // Choices live in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "routes-rust-toolchain-state-"));

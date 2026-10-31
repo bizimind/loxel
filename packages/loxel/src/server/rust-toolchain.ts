@@ -13,6 +13,7 @@ import { isDirectory } from "@/fs-utils";
 
 import { logger } from "./logger";
 import { pathOutsideWorktree } from "./python-env";
+import { isVersionManagerShim } from "./rust-tool-shim";
 import { getRustChoice } from "./rust-toolchain-store";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import { isShippedByRepo } from "./shipped-by-repo";
@@ -286,7 +287,7 @@ async function resolve(
     }
     // It may have been installed since the login shell was captured.
     void refreshLoginShellEnv();
-    return { status: "none", rustupPath: null, detail: null };
+    return { status: "none", rustupPath: null, detail: await shimDetail(dirs) };
   } catch (err) {
     log.warn("Rust toolchain resolution failed", { wtPath, error: err });
     return { status: "none", rustupPath: null, detail: null };
@@ -411,7 +412,7 @@ async function rustupTool(
   name: string,
   dirs: string[],
 ): Promise<string | null> {
-  if (!real || (await isRepoLocal(wtPath, real))) return null;
+  if (!real || (await isRepoLocal(wtPath, real)) || (await isVersionManagerShim(real))) return null;
   return (await findTool(wtPath, name, dirs)) ?? real;
 }
 
@@ -679,8 +680,8 @@ function searchDirs(env: SpawnEnv): string[] {
 }
 
 /**
- * The first usable hit: outside the worktree (see {@link isRepoLocal}), entry by entry, so a hit in
- * it does not hide a real tool later. `skipProxies` is for a tool a rustup proxy may stand for
+ * The first usable hit: outside the worktree (see {@link isRepoLocal}) and no version manager's
+ * shim, entry by entry, so a refused hit does not hide a real tool later. `skipProxies` is for a tool a rustup proxy may stand for
  * without having it.
  */
 async function findTool(
@@ -691,7 +692,9 @@ async function findTool(
 ): Promise<string | null> {
   for (const dir of pathOutsideWorktree(dirs.join(path.delimiter), wtPath).split(path.delimiter)) {
     const found = dir ? Bun.which(name, { PATH: dir }) : null;
-    if (!found || (await isRepoLocal(wtPath, found))) continue;
+    if (!found || (await isRepoLocal(wtPath, found)) || (await isVersionManagerShim(found))) {
+      continue;
+    }
     if (skipProxies && (await rustupBehindProxy(found))) continue;
     return found;
   }
@@ -711,6 +714,19 @@ async function isRepoLocal(wtPath: string, target: string): Promise<boolean> {
     log.debug("Could not check whether a path belongs to the worktree", { target, error: err });
     return true;
   }
+}
+
+/** What to say when Rust is on the lookup path only as a version manager's shim. */
+async function shimDetail(dirs: string[]): Promise<string | null> {
+  for (const dir of dirs) {
+    for (const name of ["rustup", "rustc"]) {
+      const found = Bun.which(name, { PATH: dir });
+      if (found && (await isVersionManagerShim(found))) {
+        return `Loxel doesn't run version-manager shims such as ${found}. To use Rust here, install it with rustup: https://rustup.rs`;
+      }
+    }
+  }
+  return null;
 }
 
 type RustInstall =
