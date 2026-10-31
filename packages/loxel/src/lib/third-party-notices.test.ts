@@ -179,6 +179,27 @@ describe("renderNotices", () => {
     expect(notices).not.toContain(root);
   });
 
+  test("points the source statement at sourceCode when the entry has one", async () => {
+    const licenseFile = path.join(root, "license.txt");
+    writeFileSync(licenseFile, license);
+    const notices = await renderNotices(
+      root,
+      [
+        {
+          name: "x",
+          license: "EPL-2.0",
+          source: "https://example.com/release",
+          sourceCode: "https://example.com/tree",
+          licenseFile,
+        },
+      ],
+      [],
+    );
+    expect(notices).toContain(
+      "The source code of this program is available at https://example.com/tree",
+    );
+  });
+
   test("gives no source statement for a permissive license", async () => {
     const licenseFile = path.join(root, "license.txt");
     writeFileSync(licenseFile, license);

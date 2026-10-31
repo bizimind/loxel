@@ -13,11 +13,13 @@
  *
  * An entry, in third-party.json or as a language server manifest (named after its file):
  *
- *   { "name": "x", "license": "<SPDX id>", "source": "<URL>", "note"?: "...",
+ *   { "name": "x", "license": "<SPDX id>", "source": "<URL>", "sourceCode"?: "<URL>", "note"?: "...",
  *     "licenseFile": "<path>" | "npm": ["<package>"] }
  *
  * `licenseFile` is relative to the file holding the entry. A language server whose script pins
  * `const VERSION` must name that version in `source`, so a bump cannot leave a stale source link.
+ * `sourceCode` is for a binary whose `source` is a distributor's release rather than the program's
+ * own source tree.
  */
 
 import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
@@ -36,6 +38,8 @@ export interface NoticeEntry {
   name: string;
   license: string;
   source: string;
+  /** Where the program's source is, when `source` does not hold it. */
+  sourceCode?: string;
   note?: string;
   /** Absolute path of the license text. */
   licenseFile?: string;
@@ -64,7 +68,7 @@ function optionalString(value: unknown, where: string, field: string): string | 
 /** Validates one entry; `baseDir` is what its `licenseFile` is relative to. */
 export function parseEntry(raw: unknown, baseDir: string, where: string): NoticeEntry {
   if (!isRecord(raw)) throw new Error(`${where}: not an object`);
-  const { name, license, source, note, licenseFile, npm } = raw;
+  const { name, license, source, sourceCode, note, licenseFile, npm } = raw;
   if (typeof name !== "string" || typeof license !== "string" || typeof source !== "string") {
     throw new Error(`${where}: third-party notices need license (SPDX id) and source (URL)`);
   }
@@ -84,6 +88,7 @@ export function parseEntry(raw: unknown, baseDir: string, where: string): Notice
     name,
     license,
     source,
+    sourceCode: optionalString(sourceCode, where, "sourceCode"),
     note: optionalString(note, where, "note"),
     licenseFile: licensePath,
     npm,
@@ -226,7 +231,9 @@ const RULE = "=".repeat(80);
 async function renderEntry(entry: NoticeEntry): Promise<string> {
   const lines = [RULE, entry.name, `License: ${entry.license}`, `Source: ${entry.source}`];
   if (SOURCE_NOTICE_LICENSES.test(entry.license)) {
-    lines.push(`The source code of this program is available at the Source address above.`);
+    lines.push(
+      `The source code of this program is available at ${entry.sourceCode ?? entry.source}`,
+    );
   }
   if (entry.note !== undefined) lines.push(entry.note);
   lines.push("");

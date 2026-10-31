@@ -3,6 +3,7 @@
   "resources": ["lemminx/lemminx"],
   "license": "EPL-2.0",
   "source": "https://github.com/redhat-developer/vscode-xml/releases/tag/0.29.2",
+  "sourceCode": "https://github.com/eclipse-lemminx/lemminx/tree/0.31.1",
   "licenseFile": "licenses/lemminx.txt",
-  "note": "Native image built by that vscode-xml release from https://github.com/eclipse-lemminx/lemminx with GraalVM Community Edition."
+  "note": "Native image built by that vscode-xml release from LemMinX 0.31.1 with GraalVM Community Edition."
 }
