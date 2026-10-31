@@ -233,6 +233,15 @@ describe("csharpFormatter local tool", () => {
     expect(existsSync(ranMarker)).toBe(false);
   });
 
+  test("another project's global.json does not hold this one back", async () => {
+    await install(tools, "dotnet");
+    await addFiles({
+      "svc/dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }),
+      "other/global.json": "{",
+    });
+    expect((await save("svc/a.cs")).content).toContain("dotnet cwd=");
+  });
+
   test("a manual dotnet override goes through the same check", async () => {
     await install(tools, "dotnet");
     await addFiles({ "global.json": "{" });

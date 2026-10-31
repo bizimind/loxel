@@ -45,6 +45,16 @@ export interface DotnetOptions {
   env?: SpawnEnv;
 }
 
+/** Where a `dotnet` will run, for the SDK check. */
+export interface DotnetRunOptions extends DotnetOptions {
+  cwd?: string;
+  /**
+   * Check only the `global.json` applying to `cwd`, for a run that starts nothing elsewhere in the
+   * worktree. It skips listing them all through git, which a run on every save should not pay for.
+   */
+  applyingOnly?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Finding dotnet
 
@@ -104,7 +114,7 @@ export interface PreparedDotnet {
  */
 export async function prepareDotnet(
   worktreePath: string,
-  options: DotnetOptions & { cwd?: string } = {},
+  options: DotnetRunOptions = {},
 ): Promise<PreparedDotnet | null> {
   const env = options.env ?? buildSpawnEnv();
   if (!(await isDotnetSafeToRun(worktreePath, options))) return null;
@@ -135,11 +145,14 @@ function dotnetSpawnEnv(wtPath: string, env: SpawnEnv): SpawnEnv {
  */
 export async function isDotnetSafeToRun(
   worktreePath: string,
-  options: DotnetOptions & { cwd?: string } = {},
+  options: DotnetRunOptions = {},
 ): Promise<boolean> {
   const wtPath = path.resolve(worktreePath);
   try {
     const applying = await findGlobalJson(options.cwd ?? wtPath);
+    if (options.applyingOnly) {
+      return !applying || isGlobalJsonSafe(await readGlobalJson(wtPath, applying, options));
+    }
     // Later callers run dotnet from project directories, whose global.json can differ.
     // `icase`: on a case-insensitive disk the host opens any casing of the name.
     const listed = await gitListFiles(wtPath, [`:(glob,icase)**/${GLOBAL_JSON}`]);

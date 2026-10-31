@@ -55,7 +55,8 @@ const NOT_RESTORED_HINT = "dotnet tool restore";
  * signals. CSharpier resolves its own nested options from `--stdin-path`.
  *
  * Not cached: a save costs a few `statSync` calls per directory level plus parsing the manifests
- * on the way, negligible next to spawning the formatter.
+ * on the way, negligible next to spawning the formatter. So does the SDK check, which reads one
+ * `global.json` and asks git only about its `sdk.paths` entries.
  */
 function detectCSharpFormatter(startDir: string, wtRoot: string): FileFormatter | null {
   const dirs = dirsUpToRoot(startDir, wtRoot);
@@ -143,7 +144,8 @@ async function dotnetSpawnOptions(dir: string, wtRoot: string): Promise<Formatte
   const dirs = dirsUpToRoot(dir, wtRoot);
   // dotnet finds the manifest from its working directory.
   const cwd = findLocalToolDir(dirs) ?? dirs.find(isDirectory) ?? resolve(wtRoot);
-  const prepared = await prepareDotnet(wtRoot, { cwd });
+  // On every save, and the run stays in `cwd`: other projects' global.json files do not apply.
+  const prepared = await prepareDotnet(wtRoot, { cwd, applyingOnly: true });
   if (!prepared) {
     if (await resolveDotnet(wtRoot)) {
       log.info("dotnet may not run in this worktree; not formatting", { wtRoot });

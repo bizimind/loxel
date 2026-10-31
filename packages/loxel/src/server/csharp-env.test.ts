@@ -264,6 +264,19 @@ describe("isDotnetSafeToRun", () => {
     expect(await isDotnetSafeToRun(wt, { env: { PATH: "" } })).toBe(false);
   });
 
+  test("applyingOnly checks the file applying to cwd, not the others below the root", async () => {
+    const { wt } = await makeRoot();
+    await trackedSdk(join(wt, "vendor"));
+    await mkdir(join(wt, "svc"), { recursive: true });
+    const env = { PATH: "" };
+    expect(await isDotnetSafeToRun(wt, { env, cwd: join(wt, "svc") })).toBe(false);
+    expect(await isDotnetSafeToRun(wt, { env, cwd: join(wt, "svc"), applyingOnly: true })).toBe(
+      true,
+    );
+    const vendor = { env, cwd: join(wt, "vendor"), applyingOnly: true };
+    expect(await isDotnetSafeToRun(wt, vendor)).toBe(false);
+  });
+
   test("with an untracked SDK a build script installed, and with one not installed", async () => {
     const { wt } = await makeRoot();
     await write(join(wt, ".gitignore"), ".dotnet/\n");
