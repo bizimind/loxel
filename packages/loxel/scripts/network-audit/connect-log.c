@@ -78,6 +78,33 @@ static int my_connect(int fd, const struct sockaddr *a, socklen_t l) {
 }
 DYLD_INTERPOSE(my_connect, connect)
 
+// .NET's sockets call these variants, which interposing `connect` does not reach.
+extern int connect_nocancel(int, const struct sockaddr *, socklen_t) __asm("_connect$NOCANCEL");
+static int my_connect_nocancel(int fd, const struct sockaddr *a, socklen_t l) {
+  char what[256];
+  if (describe(a, what, sizeof what)) {
+    logline("connect", what, "BLOCKED");
+    errno = ECONNREFUSED;
+    return -1;
+  }
+  logline("connect", what, "local");
+  return connect_nocancel(fd, a, l);
+}
+DYLD_INTERPOSE(my_connect_nocancel, connect_nocancel)
+
+static int my_connectx(int fd, const sa_endpoints_t *e, sae_associd_t assoc, unsigned int flags,
+                       const struct iovec *iov, unsigned int iovcnt, size_t *len,
+                       sae_connid_t *conn) {
+  char what[256];
+  if (e && describe(e->sae_dstaddr, what, sizeof what)) {
+    logline("connectx", what, "BLOCKED");
+    errno = ECONNREFUSED;
+    return -1;
+  }
+  return connectx(fd, e, assoc, flags, iov, iovcnt, len, conn);
+}
+DYLD_INTERPOSE(my_connectx, connectx)
+
 static ssize_t my_sendto(int fd, const void *b, size_t n, int f, const struct sockaddr *a,
                          socklen_t l) {
   char what[256];
@@ -89,6 +116,18 @@ static ssize_t my_sendto(int fd, const void *b, size_t n, int f, const struct so
   return sendto(fd, b, n, f, a, l);
 }
 DYLD_INTERPOSE(my_sendto, sendto)
+
+extern ssize_t sendmsg_nocancel(int, const struct msghdr *, int) __asm("_sendmsg$NOCANCEL");
+static ssize_t my_sendmsg_nocancel(int fd, const struct msghdr *m, int f) {
+  char what[256];
+  if (m && m->msg_name && describe((const struct sockaddr *)m->msg_name, what, sizeof what)) {
+    logline("sendmsg", what, "BLOCKED");
+    errno = ECONNREFUSED;
+    return -1;
+  }
+  return sendmsg_nocancel(fd, m, f);
+}
+DYLD_INTERPOSE(my_sendmsg_nocancel, sendmsg_nocancel)
 
 static int my_getaddrinfo(const char *h, const char *s, const struct addrinfo *hints,
                           struct addrinfo **res) {
