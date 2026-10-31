@@ -561,6 +561,7 @@ describe("listGoToolchains and the trust rule", () => {
       Bun.spawnSync(["git", "-C", repo, ...args], { env: { ...process.env, PATH: gitDir } });
     git("init", "-q");
     git("add", ".");
+    Bun.spawnSync(["git", "init", "-q", wt], { env: { ...process.env, PATH: gitDir } });
     process.env.PATH = [join(repo, "shims"), bin, gitDir].join(delimiter);
     await listGoToolchains(wt, null, await makeDir("go-home-"));
     expect((await calls()).some((call) => call.startsWith(shim))).toBe(false);
