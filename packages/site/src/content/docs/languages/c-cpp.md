@@ -17,7 +17,7 @@ These files are served by [clangd](https://clangd.llvm.org). Besides diagnostics
 
 Loxel uses the `clangd` on your shell's `PATH`, version 16 or newer:
 
-- **macOS**: Xcode or its Command Line Tools include it (`xcode-select --install`).
+- **macOS**: install LLVM's clangd with `brew install llvm`, and put its folder first on your `PATH` (`brew info llvm` shows the path). Xcode's clangd isn't supported.
 - **Linux**: install your distribution's package, for example `sudo apt install clangd`, or `clangd-16` or newer where the default package is older.
 
 If it was missing when you opened a file, the status bar says so; install it, then click that message to restart the server.
@@ -59,7 +59,7 @@ Diagnostics:
 
 See clangd's [configuration reference](https://clangd.llvm.org/config) for every option. Your own config at `~/Library/Preferences/clangd/config.yaml` on macOS, or `~/.config/clangd/config.yaml` on Linux, applies to every project.
 
-Loxel leaves out compile flags that make the compiler write output files, and flags that pass options through to it or load them from elsewhere: `-Xclang`, `-Xpreprocessor`, `-Wp,` and `--config`. This does not affect how your project builds, only what clangd sees.
+Loxel leaves out compile flags that make the compiler write output files, and flags that pass options through to it or load them from elsewhere: `-Xpreprocessor`, `-Wp,` and `--config`. This does not affect how your project builds, only what clangd sees.
 
 ## clang-tidy
 

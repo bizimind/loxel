@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -33,23 +33,27 @@ export function queryDriverGlobs(dirs: readonly string[] = QUERY_DRIVER_DIRS): s
 
 /**
  * Compile flags that make the compiler write output files have no place in an editor session.
- * clangd takes a project's flags from several places, so they are removed where it combines them:
- * the `-X` and `-W` forwarders and `/clang:` pass such flags on, and a `--config` file adds them.
+ * clangd takes a project's flags from several places, so they are removed where it combines them,
+ * by the spelling clang's driver uses or, for `-Xclang`, its frontend: clangd then drops the
+ * `-Xclang` before them and their values too. `-Xclang` itself stays, since real builds rely on it
+ * (CMake's precompiled headers do). `-Xpreprocessor`, `-Wp,` and `/clang:` also pass flags on, and
+ * a `--config` file adds them.
  */
 const REMOVED_COMPILE_FLAGS = [
   "--serialize-diagnostics",
-  "-serialize-diagnostics",
+  "-serialize-diagnostic-file",
+  "-diagnostic-log-file",
+  "-dump-minimization-hints=*",
   "-MJ",
   "-gen-cdb-fragment-path",
   "-fmodules-cache-path=*",
   "--config",
-  "--config=*",
-  "-Xclang",
   "-Xpreprocessor",
   "-Wp,*",
   "/clang:*",
-  // Not an output flag: clangd never finishes a file compiled with it, and it ignores SIGTERM then.
+  // Not output flags: clangd never finishes a file compiled with these, and ignores SIGTERM then.
   "-traditional-cpp",
+  "-fincremental-extensions",
 ];
 
 /**
@@ -153,7 +157,7 @@ function escapeDollars(snippet: string): string {
 
 /** The oldest clangd that takes the flags and compile flags above. */
 const MIN_CLANGD_MAJOR = 16;
-/** Apple's stub, which runs the clangd of the active developer tools or offers to install them. */
+/** Apple's stub, which runs Xcode's clangd or offers to install the developer tools. */
 const APPLE_CLANGD_STUB = "/usr/bin/clangd";
 const PROBE_TIMEOUT_MS = 10_000;
 
@@ -188,28 +192,43 @@ export function clangdMajorVersion(versionOutput: string): number | null {
 /** What to run for a missing clangd, short enough for a WebSocket close frame. */
 function installHint(platform: NodeJS.Platform): string {
   return platform === "darwin"
-    ? "clangd not found: run xcode-select --install in a terminal"
+    ? "clangd not found: install LLVM's (brew install llvm) and put its clangd on PATH"
     : "clangd not found: install it with your package manager, e.g. sudo apt install clangd";
 }
 
-export type ClangdCheck = "ok" | "not-installed" | "too-old";
+const FAILURE_REASONS = {
+  apple:
+    "Xcode's clangd isn't supported: install LLVM's (brew install llvm) and put its clangd first on PATH",
+  "too-old": `clangd ${MIN_CLANGD_MAJOR} or newer is required`,
+  unknown: "Could not read the version of the clangd on PATH",
+} as const;
+
+export type ClangdCheck = "ok" | keyof typeof FAILURE_REASONS;
 
 /**
- * Whether a clangd found on `PATH` can serve. Running Apple's stub without the developer tools
- * would raise macOS's install dialog at every retry, and `xcode-select -p` tells without doing so.
- * A clangd too old for the flags exits at once. A version that can't be read is left to start.
+ * Whether a clangd found on `PATH` can serve. Xcode's isn't supported, under any path; Apple's stub
+ * isn't even run, since that can raise macOS's install dialog. Too old a clangd exits at once on
+ * the flags below, and only a version it can read is known to be neither.
  */
 export async function checkClangd(
   binary: string,
   platform: NodeJS.Platform,
   run: typeof probe = probe,
 ): Promise<ClangdCheck> {
-  if (platform === "darwin" && binary === APPLE_CLANGD_STUB) {
-    const { code } = await run(["/usr/bin/xcode-select", "-p"]);
-    if (code !== 0) return "not-installed";
+  if (platform === "darwin" && realPath(binary) === APPLE_CLANGD_STUB) return "apple";
+  const { stdout } = await run([binary, "--version"]);
+  if (/\bApple\b/.test(stdout)) return "apple";
+  const major = clangdMajorVersion(stdout);
+  if (major === null) return "unknown";
+  return major < MIN_CLANGD_MAJOR ? "too-old" : "ok";
+}
+
+function realPath(file: string): string {
+  try {
+    return realpathSync(file);
+  } catch {
+    return file;
   }
-  const major = clangdMajorVersion((await run([binary, "--version"])).stdout);
-  return major !== null && major < MIN_CLANGD_MAJOR ? "too-old" : "ok";
 }
 
 const INDEX_DIRECTORY_PARTS = [".cache", ".cache/clangd", ".cache/clangd/index"];
@@ -293,12 +312,7 @@ export class ClangdLspManager extends WorktreeLspManager {
       return binary;
     }
     this.log.warn(`Not starting ${binary}`, { check });
-    this.failureReasons.set(
-      context.wtPath,
-      check === "too-old"
-        ? `clangd ${MIN_CLANGD_MAJOR} or newer is required`
-        : installHint(this.platform),
-    );
+    this.failureReasons.set(context.wtPath, FAILURE_REASONS[check]);
     return null;
   }
 
