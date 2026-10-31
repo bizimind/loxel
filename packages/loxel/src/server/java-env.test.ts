@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { JavaEnv } from "@/api/java-env-model";
+import { repeatUntil } from "@/test/repeat-until";
 
 // JDK overrides live in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "java-env-state-"));
@@ -558,12 +559,6 @@ describe("the shared resolution", () => {
     return { update, unsubscribe };
   }
 
-  /** Waits for `update`, repeating `poke` slower than the debounce, in case a new watch missed it. */
-  async function pokeUntil(update: Promise<unknown>, poke: () => Promise<void>): Promise<void> {
-    const settled = update.then(() => true);
-    while (!(await Promise.race([settled, Bun.sleep(1500).then(() => false)]))) await poke();
-  }
-
   test("memoizes while subscribed, and follows a changed override", async () => {
     await setup();
     const first = await makeJdk(join(root, "first"));
@@ -649,16 +644,16 @@ describe("the shared resolution", () => {
       expect((await getJavaEnvResolution(wt)).ignoredJavaHome).toBe(jdk);
       await mkdir(dirname(jdk));
       await rename(staging, jdk);
-      await pokeUntil(appeared.update, async () => {
+      const env = await repeatUntil(appeared.update, async () => {
         await rename(jdk, staging);
         await rename(staging, jdk);
       });
-      expect((await appeared.update)?.source).toBe("java-home");
+      expect(env?.source).toBe("java-home");
 
       const disappeared = nextUpdate(wt, (env) => env?.path !== jdk);
       try {
         await rename(jdk, staging);
-        await pokeUntil(disappeared.update, async () => {
+        await repeatUntil(disappeared.update, async () => {
           await mkdir(jdk);
           await rm(jdk, { recursive: true });
         });
