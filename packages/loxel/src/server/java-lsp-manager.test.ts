@@ -6,12 +6,14 @@ import path from "node:path";
 import {
   dropUnusableActions,
   dropWillRename,
+  firstJavaFile,
   indentationOf,
   JAVA_SETTINGS,
   jdtlsArgs,
   jdtlsDataDir,
   latestLogMessage,
 } from "./java-lsp-manager";
+import { fileUri } from "./lsp-file-uri";
 
 const scratch = mkdtempSync(path.join(tmpdir(), "java-lsp-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -88,6 +90,29 @@ describe("dropUnusableActions", () => {
   });
 });
 
+describe("firstJavaFile", () => {
+  const root = path.join(scratch, "scan");
+  mkdirSync(path.join(root, "node_modules/x"), { recursive: true });
+  mkdirSync(path.join(root, ".hidden"), { recursive: true });
+  writeFileSync(path.join(root, "node_modules/x/Skipped.java"), "");
+  writeFileSync(path.join(root, ".hidden/Skipped.java"), "");
+
+  test("skips dependency and hidden folders, and finds nothing there", async () => {
+    expect(await firstJavaFile(root)).toBeNull();
+  });
+
+  test("finds a source file, the shallowest first", async () => {
+    mkdirSync(path.join(root, "src/deep/er"), { recursive: true });
+    writeFileSync(path.join(root, "src/deep/er/Deep.java"), "");
+    writeFileSync(path.join(root, "src/Top.java"), "");
+    expect(await firstJavaFile(root)).toBe(fileUri(path.join(root, "src/Top.java")));
+  });
+
+  test("treats an unreadable or missing folder as empty", async () => {
+    expect(await firstJavaFile(path.join(root, "missing"))).toBeNull();
+  });
+});
+
 describe("indentationOf", () => {
   test("reads spaces and tabs from the first indented line", () => {
     expect(indentationOf("class A {\n  int a;\n}\n")).toEqual({ tabSize: 2, insertSpaces: true });
@@ -111,10 +136,18 @@ describe("latestLogMessage", () => {
     writeFileSync(path.join(dir, "1.log"), "!MESSAGE old\n");
     utimesSync(path.join(dir, "1.log"), 1, 1);
     writeFileSync(path.join(dir, "2.log"), "!ENTRY x\n!MESSAGE first\n!MESSAGE last\nstack\n");
-    expect(latestLogMessage(dir)).toBe("last");
+    expect(latestLogMessage(dir, 0)).toBe("last");
   });
 
   test("has no answer without a readable log", () => {
-    expect(latestLogMessage(path.join(scratch, "nowhere"))).toBeNull();
+    expect(latestLogMessage(path.join(scratch, "nowhere"), 0)).toBeNull();
+  });
+
+  test("ignores logs from before this run", () => {
+    const dir = path.join(scratch, "old-logs");
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, "1.log"), "!MESSAGE old\n");
+    utimesSync(path.join(dir, "1.log"), 1, 1);
+    expect(latestLogMessage(dir, 5000)).toBeNull();
   });
 });

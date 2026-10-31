@@ -15,7 +15,11 @@ const SHA256 = "b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4
 const outDir = path.join(BUILD_DIR, "jdtls");
 const versionFile = `${outDir}.version`;
 
-if (existsSync(versionFile) && (await Bun.file(versionFile).text()) === VERSION) {
+if (
+  existsSync(outDir) &&
+  existsSync(versionFile) &&
+  (await Bun.file(versionFile).text()) === VERSION
+) {
   console.log(`jdtls ${VERSION} already present at ${outDir}, skipping download`);
   process.exit(0);
 }

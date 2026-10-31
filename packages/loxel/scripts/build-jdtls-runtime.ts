@@ -7,7 +7,17 @@
  * `java.desktop`: its bundles import `java.beans`.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import path from "node:path";
 
 import { BUILD_DIR, downloadVerified } from "./download-release-binary";
@@ -64,7 +74,11 @@ const isWindows = process.platform === "win32";
 const outDir = path.join(BUILD_DIR, "jdtls-runtime");
 const versionFile = `${outDir}.version`;
 
-if (existsSync(versionFile) && (await Bun.file(versionFile).text()) === VERSION) {
+if (
+  existsSync(outDir) &&
+  existsSync(versionFile) &&
+  (await Bun.file(versionFile).text()) === VERSION
+) {
   console.log(`Java runtime ${VERSION} already present at ${outDir}, skipping build`);
   process.exit(0);
 }
@@ -89,6 +103,16 @@ try {
   // Only `java` runs. These come with their modules.
   for (const tool of ["jrunscript", "keytool", "rmiregistry"]) {
     rmSync(path.join(linked, "bin", isWindows ? `${tool}.exe` : tool), { force: true });
+  }
+  // jlink links each module's shared notices to java.base's copy. Staging copies the runtime and
+  // would leave those links pointing into this build directory, so the notices become real files.
+  const legal = path.join(linked, "legal");
+  for (const entry of readdirSync(legal, { recursive: true, encoding: "utf8" })) {
+    const file = path.join(legal, entry);
+    if (!lstatSync(file).isSymbolicLink()) continue;
+    const target = realpathSync(file);
+    rmSync(file);
+    copyFileSync(target, file);
   }
   rmSync(outDir, { recursive: true, force: true });
   renameSync(linked, outDir);

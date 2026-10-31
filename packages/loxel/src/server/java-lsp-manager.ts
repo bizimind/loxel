@@ -1,5 +1,13 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +37,10 @@ export const JAVA_SETTINGS = {
 
 /** Directories never worth starting from when looking for a Java file. */
 const NOT_SOURCE_DIRS = new Set(["node_modules", "build", "target", "out", "bin"]);
+/** Where looking for a Java file stops, in a repository with none near the top. */
+const MAX_SCANNED_DIRS = 20_000;
+/** Longest a new server waits for the previous one to let go of its workspace directory. */
+const PREVIOUS_SERVER_EXIT_TIMEOUT_MS = 10_000;
 
 /** The client command behind the actions that need a prompt Loxel does not have. */
 const PROMPT_COMMAND = "java.action.applyRefactoringCommand";
@@ -72,12 +84,16 @@ function jdtlsConfigurationDir(home: string): string {
   return path.join(JDTLS_STATE_DIR, "configuration", core);
 }
 
-/** The last error of the newest log in `dir`: a JVM that cannot start writes only there. */
-export function latestLogMessage(dir: string): string | null {
+/**
+ * The last error of the newest log in `dir` written since `sinceMs`: a JVM that cannot start writes
+ * only there, and the directory holds the logs of earlier runs too.
+ */
+export function latestLogMessage(dir: string, sinceMs: number): string | null {
   try {
     const logs = readdirSync(dir)
       .filter((name) => name.endsWith(".log"))
       .map((name) => path.join(dir, name))
+      .filter((file) => statSync(file).mtimeMs >= sinceMs)
       .toSorted((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
     if (!logs[0]) return null;
     const messages = readFileSync(logs[0], "utf8").match(/^!MESSAGE .*$/gm);
@@ -149,28 +165,36 @@ export function jdtlsDataDir(wtPath: string): string {
 
 /** Forget a removed worktree's workspace directory. */
 export function deleteJdtlsData(wtPath: string): void {
-  rmSync(jdtlsDataDir(wtPath), { recursive: true, force: true });
+  try {
+    rmSync(jdtlsDataDir(wtPath), { recursive: true, force: true });
+  } catch (err) {
+    // Its server may still be writing; `onSessionClosed` deletes it once the server exits.
+    logger.child("java-lsp").debug("Deleting the workspace directory failed", { error: err });
+  }
 }
 
 /**
- * A Java file of the worktree. jdtls infers a folder's source root from the first file it hears
- * about, and `initialize` comes before any file is open.
+ * A Java file of the worktree, as shallow as possible. jdtls infers a folder's source root from the
+ * first file it hears about, and `initialize` comes before any file is open. Symbolic links are not
+ * followed, and an unreadable folder is skipped.
  */
-function firstJavaFile(wtPath: string): string | null {
-  try {
-    for (const file of new Bun.Glob("**/*.java").scanSync({ cwd: wtPath })) {
-      if (!file.split(path.sep).some((segment) => NOT_SOURCE_DIRS.has(segment))) {
-        return fileUri(path.join(wtPath, file));
+export async function firstJavaFile(wtPath: string): Promise<string | null> {
+  const queue = [wtPath];
+  for (let i = 0; i < queue.length && i < MAX_SCANNED_DIRS; i++) {
+    const dir = queue[i] ?? "";
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith(".java"))
+        return fileUri(path.join(dir, entry.name));
+      if (entry.isDirectory() && !entry.name.startsWith(".") && !NOT_SOURCE_DIRS.has(entry.name)) {
+        queue.push(path.join(dir, entry.name));
       }
     }
-  } catch (err) {
-    // An unreadable folder must not cost the session its settings.
-    logger.child("java-lsp").debug("Looking for a Java file failed", { error: err });
   }
   return null;
 }
 
-/** The indentation a Java file uses, from its first indented line that is not inside a comment. */
+/** The indentation a Java file uses, from its first indented line, skipping `*` comment lines. */
 export function indentationOf(text: string): { tabSize: number; insertSpaces: boolean } | null {
   for (const line of text.split("\n")) {
     const indent = /^[\t ]+(?=[^\s*])/.exec(line)?.[0];
@@ -216,11 +240,31 @@ export function dropUnusableActions(message: Record<string, unknown>): boolean {
 export class JavaLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
 
+  /** By worktree: the file `initialize` names, found while the session's frames are held. */
+  private readonly triggerFiles = new Map<string, string | null>();
+  /** By worktree: when its server was last started, to tell its log from earlier ones. */
+  private readonly startedAt = new Map<string, number>();
+  /** By worktree: the exit of its closed server, until that server is gone. */
+  private readonly exiting = new Map<string, Promise<unknown>>();
+
   constructor() {
     super("java-lsp");
   }
 
-  protected resolveBinary(): string | null {
+  protected async resolveBinary(context: WtLspContext): Promise<string | null> {
+    // A workspace directory takes one server at a time, and a replaced server is still exiting.
+    const previous = this.exiting.get(context.wtPath);
+    if (previous) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        previous,
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, PREVIOUS_SERVER_EXIT_TIMEOUT_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+    }
+    this.triggerFiles.set(context.wtPath, await firstJavaFile(context.wtPath));
     return resolveBundledJdtls()?.java ?? null;
   }
 
@@ -233,13 +277,15 @@ export class JavaLspManager extends WorktreeLspManager {
     mkdirSync(configuration, { recursive: true });
     mkdirSync(data, { recursive: true });
     writeFileSync(hosts, "127.0.0.1 localhost\n");
+    this.startedAt.set(context.wtPath, Date.now());
     return jdtlsArgs({ home: bundled.home, configuration, data, hosts });
   }
 
-  protected override serverFailureReason(): string | null {
+  protected override serverFailureReason(context: WtLspContext): string | null {
     const bundled = resolveBundledJdtls();
     if (!bundled) return "The Java language server is missing from this build of Loxel";
-    const message = latestLogMessage(jdtlsConfigurationDir(bundled.home));
+    const since = this.startedAt.get(context.wtPath) ?? Date.now();
+    const message = latestLogMessage(jdtlsConfigurationDir(bundled.home), since);
     return message ? `Java language server: ${message}` : null;
   }
 
@@ -253,8 +299,18 @@ export class JavaLspManager extends WorktreeLspManager {
   }
 
   protected override getInitializationOptions(session: WtLspSession): Record<string, unknown> {
-    const trigger = firstJavaFile(session.wtPath);
+    const trigger = this.triggerFiles.get(session.wtPath);
     return { settings: { java: JAVA_SETTINGS }, ...(trigger ? { triggerFiles: [trigger] } : {}) };
+  }
+
+  protected override onSessionClosed(session: WtLspSession): void {
+    const { proc, wtPath } = session;
+    const exited = proc.exited.then(() => {
+      if (this.exiting.get(wtPath) === exited) this.exiting.delete(wtPath);
+      // The worktree went away while its server ran, which could write until it stopped.
+      if (!existsSync(wtPath)) deleteJdtlsData(wtPath);
+    });
+    this.exiting.set(wtPath, exited);
   }
 
   protected override onClientInitialized(session: WtLspSession): void {
@@ -292,7 +348,13 @@ export class JavaLspManager extends WorktreeLspManager {
       super.handleServerFrame(session, body);
       return;
     }
-    const message: unknown = JSON.parse(body);
+    let message: unknown;
+    try {
+      message = JSON.parse(body);
+    } catch {
+      super.handleServerFrame(session, body);
+      return;
+    }
     if (isRecord(message) && (dropWillRename(message) || dropUnusableActions(message))) {
       super.handleServerFrame(session, JSON.stringify(message));
       return;

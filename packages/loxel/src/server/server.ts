@@ -36,6 +36,7 @@ import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
 import { gitExecClient } from "./git-exec-client";
+import { deleteJdtlsData } from "./java-lsp-manager";
 import { tomlLspManager, worktreeLspManagers } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
@@ -598,6 +599,7 @@ function reconcileRemovedWorktrees(projectPath: string): void {
 
 /** Permanently release a removed worktree after its final project broadcast. */
 function completeWorktreeRemoval(wtPath: string): void {
+  deleteJdtlsData(wtPath);
   const resources = wtResources.get(wtPath);
   if (!resources) return;
   for (const ws of resources.subscribers) {

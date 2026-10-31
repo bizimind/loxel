@@ -22,8 +22,8 @@ Temurin's Mach-O files keep their signatures through jlink. A release signs them
 The runtime's `java` runs directly, with `-jar` on the launcher. There is no PATH fallback: this server runs only on its own runtime.
 
 - `-configuration` is writable, in `<state>/jdtls/configuration/<core plugin file name>`, because the signed app is not. `osgi.sharedConfiguration.area` points read-only at the bundled `config_<platform>`.
-- `-data` is per worktree path, `<state>/jdtls/data/<hash>`, since two same-named projects in one directory collide. It is deleted with the worktree, and the JVM's working directory is this directory rather than the worktree.
-- `serverFailureReason` reports the last `!MESSAGE` of the newest log in the configuration directory, which is the only place a JVM that cannot start explains why.
+- `-data` is per worktree path, `<state>/jdtls/data/<hash>`, since two same-named projects in one directory collide. It is deleted when the worktree is removed, in Loxel or from outside it, or when the server exits if it was still running then. A moved worktree starts a new one. A new server waits for the previous one on its worktree to exit first, since the directory takes one server at a time, and the JVM's working directory is this directory rather than the worktree.
+- `serverFailureReason` reports the last `!MESSAGE` of the newest log written since the server started in the configuration directory, which is the only place a JVM that cannot start explains why.
 - `-Xmx1G` with `ParallelGC` tuned to return memory. Resident memory is about 700 MB on a project of 300 files, most of it not heap: a cap of 256 MB still leaves 544 MB and starts slower.
 
 ## Project import off
@@ -35,7 +35,7 @@ The server starts with project import off and makes no network requests.
 - `-Djdk.net.hosts.file` points at a file naming only `localhost`.
 - [audit-jdtls.ts](../../scripts/network-audit/audit-jdtls.ts) checks all of this through the built `loxel-server`, on opening files and on every command a user can reach, with `--control` as its positive control. Run it after changing the pin, the runtime or the manager.
 
-Each folder gets one invisible project. jdtls infers its source root from the first Java file it hears about, and `initialize` comes before any file opens, so `firstJavaFile` passes one as `triggerFiles`. A folder with a build file stays outside any project, and its files report "non-project file, only syntax errors are reported".
+Each folder gets one invisible project. jdtls infers its source root from the first Java file it hears about, and `initialize` comes before any file opens, so `firstJavaFile`, a pruned walk that runs while the session's frames are held, passes one as `triggerFiles`. A folder with a build file stays outside any project, and its files report "non-project file, only syntax errors are reported".
 
 ## Client capabilities
 
