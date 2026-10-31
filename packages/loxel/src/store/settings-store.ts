@@ -140,6 +140,7 @@ export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, BuiltinIndentatio
   ["objective-cpp", { tabSize: 4, insertSpaces: true }],
   ["php", { tabSize: 4, insertSpaces: true }], // PSR-12 / PER Coding Style, PHP-CS-Fixer
   ["python", { tabSize: 4, insertSpaces: true }], // PEP 8, ruff, black
+  ["razor", { tabSize: 4, insertSpaces: true }], // ASP.NET Core and Blazor templates
   ["rust", { tabSize: 4, insertSpaces: true }], // rustfmt
 ]);
 

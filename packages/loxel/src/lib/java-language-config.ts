@@ -2,6 +2,7 @@ import * as monaco from "monaco-editor";
 import { conf as typescriptConf } from "monaco-editor/languages/definitions/typescript/typescript.js";
 
 import { frontendLog } from "./frontend-logger";
+import { stepOverTripleQuotesIn } from "./python-language-config";
 
 const log = frontendLog.child("ui");
 
@@ -59,7 +60,8 @@ export function closingTextBlockAction(
   textAfter: string,
 ): "collapse" | "insert" | null {
   // A quote is escaped by an odd run of backslashes: `\\` is an escaped backslash, not an escape.
-  if (!/(?:^|[^"\\])(?:\\\\)*""$/.test(textBefore)) return null;
+  // A third quote already there means a fourth was typed, not a delimiter completed.
+  if (!/(?:^|[^\\])(?:\\\\)*""$/.test(textBefore) || textBefore.endsWith('"""')) return null;
   // Java strings only span lines as text blocks, so an odd count of delimiters means inside one.
   // A `"""` in a comment or a one-line string can miscount, which only falls back to Monaco's typing.
   if ((textBefore.match(/(?<!(?:^|[^\\])\\(?:\\\\)*)"""/g)?.length ?? 0) % 2 === 0) return null;
@@ -112,6 +114,7 @@ function closeTextBlocks(editor: monaco.editor.ICodeEditor): void {
  * Resolves once ours is registered, or failed to (logged), after the first Java model.
  */
 export function registerLanguageConfiguration(): Promise<void> {
+  stepOverTripleQuotesIn("java");
   monaco.editor.onDidCreateEditor(closeTextBlocks);
   return new Promise((resolve) => {
     monaco.languages.onLanguageEncountered("java", () => {

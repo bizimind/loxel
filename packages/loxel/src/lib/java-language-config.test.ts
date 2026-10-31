@@ -144,6 +144,15 @@ describe("Java editing in Monaco", () => {
       expect(typeAtEnd("String s = ", '"""\nC:\\\\"""')).toBe('String s = """\n    C:\\\\"""');
     });
 
+    test("a quote before an escaped backslash does not stop the delimiter closing", () => {
+      const open = 'String s = """\n    say "\\\\';
+      expect(typeAtEnd(open, '"""')).toBe(`${open}"""`);
+    });
+
+    test("a fourth quote is not treated as completing a delimiter", () => {
+      expect(closingTextBlockAction('String s = """\n    a"""', "")).toBeNull();
+    });
+
     test("an escaped backslash before a delimiter keeps later blocks counted", () => {
       const first = 'String a = """\n    C:\\\\""";\nString b = ';
       expect(typeAtEnd(first, '"""')).toBe(`${first}""""""`);

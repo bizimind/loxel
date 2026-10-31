@@ -29,6 +29,7 @@ const BUNDLED_LANGUAGES = [
   "cmake",
   "cpp",
   "csharp",
+  "razor",
   "objective-c",
   "objective-cpp",
   "swift",
@@ -112,6 +113,16 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   ".project": "xml",
   ".factorypath": "xml",
 
+  // .NET XML configuration (the `config` extension alone is not always XML)
+  "app.config": "xml",
+  "applicationhost.config": "xml",
+  "machine.config": "xml",
+  "nuget.config": "xml",
+  "packages.config": "xml",
+  "web.config": "xml",
+  "web.debug.config": "xml",
+  "web.release.config": "xml",
+
   // JS tool configs whose tools accept comments in JSON (no strict-JSON markers)
   ".babelrc.json": "jsonc",
   ".eslintrc.json": "jsonc",
@@ -136,6 +147,7 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   ".clang-format": "yaml",
   "_clang-format": "yaml",
   ".clang-tidy": "yaml",
+  ".csharpierrc": "yaml", // JSON or YAML, and JSON is valid YAML
   ".clangd": "yaml",
   ".commitlintrc": "yaml",
   ".lintstagedrc": "yaml",
@@ -201,12 +213,14 @@ export const EXT_TO_LANG: Record<string, string> = {
   jsonc: "jsonc",
   jsonl: "jsonl",
   ndjson: "jsonl",
+  slnf: "json",
   yaml: "yaml",
   yml: "yaml",
   toml: "toml",
   ini: "ini",
   cfg: "ini",
   conf: "ini",
+  globalconfig: "ini",
   xml: "xml",
   xsd: "xml",
   xsl: "xml",
@@ -217,6 +231,7 @@ export const EXT_TO_LANG: Record<string, string> = {
   csproj: "xml",
   fsproj: "xml",
   vbproj: "xml",
+  slnx: "xml",
   props: "xml",
   targets: "xml",
   nuspec: "xml",
@@ -247,6 +262,7 @@ export const EXT_TO_LANG: Record<string, string> = {
   ii: "cpp",
   ino: "cpp",
   hpp: "cpp",
+  cake: "csharp",
   hh: "cpp",
   hxx: "cpp",
   "h++": "cpp",
@@ -261,6 +277,9 @@ export const EXT_TO_LANG: Record<string, string> = {
   cxxm: "cpp",
   "c++m": "cpp",
   cs: "csharp",
+  cshtml: "razor",
+  csx: "csharp",
+  razor: "razor",
 
   // JVM
   java: "java",

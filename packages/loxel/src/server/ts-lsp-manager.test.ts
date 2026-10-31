@@ -8,6 +8,7 @@ import type { ServerWebSocket } from "bun";
 
 import { DOCUMENT_INDENTATION_METHOD, type DocumentIndentation } from "@/api/lsp-indentation-model";
 
+import type { WtLspSession } from "./stdio-lsp-manager";
 import { setReactLanguageId, TsLspManager, toClientUris, toServerUris } from "./ts-lsp-manager";
 import { resolveTypeScriptBinary } from "./typescript-path";
 
@@ -79,6 +80,12 @@ describe("setReactLanguageId", () => {
     expect(jsx.textDocument.languageId).toBe("javascriptreact");
   });
 
+  test("goes by the language id for a file without a React extension", () => {
+    const params = { textDocument: { uri: "loxel://HEAD/a/b.foo", languageId: "tsx" } };
+    expect(setReactLanguageId(params)).toBe(true);
+    expect(params.textDocument.languageId).toBe("typescriptreact");
+  });
+
   test("leaves other documents and correct ids alone", () => {
     expect(setReactLanguageId({ textDocument: { uri: "loxel://HEAD/a.ts" } })).toBe(false);
     const ok = { textDocument: { uri: "loxel://HEAD/a.tsx", languageId: "typescriptreact" } };
@@ -110,6 +117,33 @@ interface Diagnostic {
   message: string;
   code?: number | string;
   range: unknown;
+}
+
+/** Records what the manager writes to the server. */
+class RecordingTsLspManager extends TsLspManager {
+  readonly written: Array<{ method?: string; params?: unknown; id?: unknown; result?: unknown }> =
+    [];
+
+  protected override writeToStdin(session: WtLspSession, data: string): void {
+    this.written.push(JSON.parse(data) as (typeof this.written)[number]);
+    super.writeToStdin(session, data);
+  }
+
+  /** What the manager does with a frame from the server. */
+  serverFrame(ws: ServerWebSocket<unknown>, body: unknown): void {
+    const session = this.sessionOf(ws);
+    this.handleServerFrame(session, JSON.stringify(body));
+  }
+
+  forwarded(method: string): unknown[] {
+    return this.written.filter((m) => m.method === method).map((m) => m.params);
+  }
+
+  private sessionOf(ws: ServerWebSocket<unknown>): WtLspSession {
+    const session = this.sessions.get(ws);
+    if (!session) throw new Error("No session for this socket");
+    return session;
+  }
 }
 
 /** Stands in for the WebSocket and the Monaco LSP client behind it. */
@@ -151,6 +185,34 @@ class FakeClient {
     return uri;
   }
 
+  change(uri: string, version: number, text: string): void {
+    this.send({
+      method: "textDocument/didChange",
+      params: { textDocument: { uri, version }, contentChanges: [{ text }] },
+    });
+  }
+
+  close(uri: string): void {
+    this.send({ method: "textDocument/didClose", params: { textDocument: { uri } } });
+  }
+
+  async hover(uri: string, line: number, character: number): Promise<string> {
+    const result = (await this.request("textDocument/hover", {
+      textDocument: { uri },
+      position: { line, character },
+    })) as { contents?: { value?: string } } | null;
+    return result?.contents?.value ?? "";
+  }
+
+  /** The URIs of the definitions of the symbol at a position. */
+  async definitions(uri: string, line: number, character: number): Promise<string[]> {
+    const result = (await this.request("textDocument/definition", {
+      textDocument: { uri },
+      position: { line, character },
+    })) as Array<{ uri: string }> | null;
+    return (result ?? []).map((d) => d.uri);
+  }
+
   /** What `reportDocumentIndentation` sends for a model. */
   indent(uri: string, indentation: DocumentIndentation): void {
     this.send({
@@ -168,6 +230,15 @@ class FakeClient {
 
   async diagnosticMessages(uri: string): Promise<string[]> {
     return (await this.diagnostics(uri)).map((d) => d.message);
+  }
+
+  async codeActions(uri: string): Promise<unknown> {
+    const start = { line: 0, character: 0 };
+    return this.request("textDocument/codeAction", {
+      textDocument: { uri },
+      range: { start, end: start },
+      context: { diagnostics: [] },
+    });
   }
 
   /** The text each edit of the code action titled `title` inserts, for the diagnostic `code`. */
@@ -256,6 +327,108 @@ describe.skipIf(resolveTypeScriptBinary() === null)("TsLspManager with tsc --lsp
           : [],
       );
       expect(registered.map((r) => r.method)).not.toContain("workspace/didChangeWatchedFiles");
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "gives an extensionless script language features, as long as it is open",
+    async () => {
+      root = await realpath(await mkdtemp(join(tmpdir(), "TsLspScript-")));
+      await mkdir(join(root, "bin"));
+      const script = join(root, "bin", "www");
+      const text = "#!/usr/bin/env node\nconst port = 3000;\nconsole.log(port);\n";
+      await writeFile(script, text);
+
+      const recording = new RecordingTsLspManager();
+      manager = recording;
+      const client = new FakeClient(recording);
+      await client.start(root);
+      const uri = client.open(script, text, "javascript");
+      expect(await client.hover(uri, 2, 13)).toContain("port");
+      expect(await client.definitions(uri, 2, 13)).toEqual([uri]);
+
+      // `didChange` carries no language: it is let through by the `didOpen`.
+      client.change(uri, 2, text.replaceAll("port", "host"));
+      expect(await client.hover(uri, 2, 13)).toContain("host");
+
+      client.close(uri);
+      const before = recording.written.length;
+      client.change(uri, 3, text);
+      expect(recording.written.length).toBe(before);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "gives a TypeScript shebang script TypeScript's checks",
+    async () => {
+      root = await realpath(await mkdtemp(join(tmpdir(), "TsLspTsScript-")));
+      const script = join(root, "tool");
+      const text = '#!/usr/bin/env tsx\nconst n: number = "x";\nconsole.log(n);\n';
+      await writeFile(script, text);
+
+      manager = new TsLspManager();
+      const client = new FakeClient(manager);
+      await client.start(root);
+      const uri = client.open(script, text, "typescript");
+      expect((await client.diagnosticMessages(uri)).join("\n")).toContain(
+        "'string' is not assignable to type 'number'",
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "keeps files with neither a TS/JS/JSON extension nor a script language from TypeScript",
+    async () => {
+      root = await realpath(await mkdtemp(join(tmpdir(), "TsLspOther-")));
+      const recording = new RecordingTsLspManager();
+      manager = recording;
+      const client = new FakeClient(recording);
+      await client.start(root);
+      const uri = client.open(join(root, ".babelrc"), "{}", "json");
+      client.change(uri, 2, "{ }");
+      expect(recording.forwarded("textDocument/didOpen")).toEqual([]);
+      expect(recording.forwarded("textDocument/didChange")).toEqual([]);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "turns automatic type acquisition off in every way TypeScript reads its settings",
+    async () => {
+      root = await realpath(await mkdtemp(join(tmpdir(), "TsLspAta-")));
+      const recording = new RecordingTsLspManager();
+      manager = recording;
+      const client = new FakeClient(recording);
+      await client.start(root);
+      const off = { automaticTypeAcquisitionEnabled: false };
+
+      expect(recording.forwarded("initialize")).toEqual([
+        expect.objectContaining({
+          initializationOptions: { userPreferences: expect.objectContaining(off) },
+        }),
+      ]);
+
+      recording.serverFrame(client.ws, {
+        id: "configuration",
+        method: "workspace/configuration",
+        params: { items: [{ section: "js/ts" }] },
+      });
+      expect(recording.written.find((m) => m.id === "configuration")?.result).toEqual([
+        expect.objectContaining(off),
+      ]);
+
+      // The indentation path replaces the section.
+      const text = "export const a = 1;\n";
+      const uri = client.open(join(root, "a.ts"), text);
+      client.indent(uri, { tabSize: 2, indentSize: 2, insertSpaces: true });
+      await client.diagnostics(uri);
+      await client.codeActions(uri);
+      expect(recording.forwarded("workspace/didChangeConfiguration")).toEqual([
+        { settings: { "js/ts": expect.objectContaining(off) } },
+      ]);
     },
     TEST_TIMEOUT_MS,
   );

@@ -80,7 +80,7 @@ Each file's indentation comes from the first of these that sets it:
 2. The project's [`.editorconfig`](#editorconfig).
 3. A **Per-Extension Override** in **Settings > Editor**.
 4. The file's own content: an existing file keeps the style it's written in, so Enter and Tab don't mix 2-space indents into a 4-space file or spaces into a tab-indented one.
-5. The language's convention, matching its formatter or official style guide: Python, Rust, C#, Kotlin, PHP and justfiles use 4 spaces, and Go (with `go.mod` and `go.work`) and Makefiles use tabs. C, C++ and Objective-C have no single style guide and also use 4 spaces. Makefiles get tabs even when the file's content is mostly indented with spaces, because make requires recipe lines to start with a tab.
+5. The language's convention, matching its formatter or official style guide: Python, Rust, C#, Razor, Kotlin, PHP and justfiles use 4 spaces, and Go (with `go.mod` and `go.work`) and Makefiles use tabs. C, C++ and Objective-C have no single style guide and also use 4 spaces. Makefiles get tabs even when the file's content is mostly indented with spaces, because make requires recipe lines to start with a tab.
 6. **Default Indentation** in **Settings > Editor**, 2 spaces unless you change it.
 
 Each property is looked up on its own, so an `.editorconfig` that only sets `indent_style = space` takes the size from the next source down. A project's `.editorconfig` wins over your per-extension overrides because it's the convention everyone working on the project, and its formatters, follow; your overrides apply wherever a project doesn't set one.
