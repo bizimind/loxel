@@ -43,6 +43,7 @@ import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
 import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
+import { onRepoTrustStatusChange } from "./repo-trust";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
@@ -814,6 +815,7 @@ const yamlLspManager = new YamlLspManager({});
 // A chosen toolchain reaches everything that shares the worktree's resolution (language servers,
 // terminals, format on save, the status bar) without a restart.
 for (const { onOverrideChange, refresh } of toolchainStatusModules) onOverrideChange(refresh);
+onRepoTrustStatusChange(() => broadcastAll({ type: "repo_trust_changed" }));
 const worktreeLspManagerByRoute = new Map(
   worktreeLspManagers.map((manager) => [`/ws/${manager.name}`, manager]),
 );

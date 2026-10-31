@@ -101,6 +101,7 @@ export type ActionId =
   | ToolchainSelectActionId
   | EditorCodeActionId
   | "language.restartServers"
+  | "worktree.manageRepoTrust"
   | "app.settings";
 
 /**
@@ -343,6 +344,12 @@ export const ACTIONS: readonly ActionDef[] = [
     id: "language.restartServers",
     label: "Restart Language Servers",
     category: "language",
+    isEnabled: hasActiveWorktree,
+  },
+  {
+    id: "worktree.manageRepoTrust",
+    label: "Manage Repository Trust",
+    category: "worktree",
     isEnabled: hasActiveWorktree,
   },
 

@@ -454,6 +454,10 @@ export function useWsBridge(): void {
           usePanelNotificationStore.getState().clearFromServer();
           break;
 
+        case "repo_trust_changed":
+          void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
+          break;
+
         case "store_updated":
           if (message.nonce && consumeNonce(message.nonce)) break;
           applyStoreUpdate(message.key, message.state);

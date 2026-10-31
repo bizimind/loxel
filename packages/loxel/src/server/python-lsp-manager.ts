@@ -14,6 +14,7 @@ import {
   pathOutsideWorktree,
   subscribePythonEnv,
 } from "./python-env";
+import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 import {
   type SpawnOptions,
@@ -102,7 +103,7 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
   }
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
+    this.startSession(ws, { wtPath, repoTrusted: isRepoTrusted(wtPath) });
   }
 
   destroySession(ws: ServerWebSocket<unknown>): void {
@@ -133,6 +134,7 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       ws,
       proc,
       wtPath: context.wtPath,
+      repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
       unsubscribeEnv: null,

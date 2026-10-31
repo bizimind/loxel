@@ -79,3 +79,4 @@ Renaming a symbol from a `vendor/` directory edits the vendored copy. `go mod ve
 ## See also
 
 - [Language Intelligence](/docs/language-intelligence) — the features every language server provides, and how servers start and stop per worktree
+- [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code
