@@ -217,6 +217,15 @@ describe("escapeSnippetDollars", () => {
     expect(escaped.result.items[0]?.textEdit.newText).toBe("FOO\\$BAR(${1:x})");
   });
 
+  test("escapes a digit after a $ in a name, and keeps a template's tabstop", () => {
+    const items = (body: string) =>
+      (JSON.parse(body) as { result: { items: { insertText: string }[] } }).result.items;
+    const escape = (insertText: string) =>
+      items(escapeSnippetDollars(frame({ insertText, insertTextFormat: 2 })))[0]?.insertText;
+    expect(escape("f$1(${1:int x})")).toBe("f\\$1(${1:int x})");
+    expect(escape("mk$1<$1>()$0")).toBe("mk\\$1<$1>()$0");
+  });
+
   test("leaves plain text items, other frames and frames with no such $ as they are", () => {
     const plain = frame({ insertText: "my$var", insertTextFormat: 1 });
     expect(JSON.parse(escapeSnippetDollars(plain))).toEqual(JSON.parse(plain));

@@ -128,7 +128,7 @@ function isMissingFile(err: unknown): boolean {
  */
 export function escapeSnippetDollars(body: string): string {
   // Most frames have no such `$`, and parsing them again would be wasted.
-  if (!/\$[^0-9{]/.test(body)) return body;
+  if (!/\$(?![{0])/.test(body)) return body;
   let message: unknown;
   try {
     message = JSON.parse(body);
@@ -151,8 +151,9 @@ export function escapeSnippetDollars(body: string): string {
 const SNIPPET_TEXT_FORMAT = 2;
 
 function escapeDollars(snippet: string): string {
-  // Skips the escapes clangd writes itself, in placeholders: a name cannot hold a backslash.
-  return snippet.replace(/\\[\s\S]|\$(?![0-9{])/g, (match) => (match.length === 2 ? match : "\\$"));
+  // Skips the escapes clangd writes itself, in placeholders (a name cannot hold a backslash), and
+  // its tabstops: `${`, `$0` and the `<$1>` of a template. A name holding `$0` stays ambiguous.
+  return snippet.replace(/\\[\s\S]|\$\{|\$0|<\$1>|\$/g, (match) => (match === "$" ? "\\$" : match));
 }
 
 /** The oldest clangd that takes the flags and compile flags above. */
