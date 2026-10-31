@@ -266,6 +266,23 @@ describe("C# and Razor editing in Monaco", () => {
       expect(editor.getPosition()?.column).toBe(22);
     });
 
+    test("leaves a quote another keydown hook has handled alone", () => {
+      const model = open("csharp", `var s = @"a""`);
+      (model as unknown as InternalTextModel).tokenization.forceTokenization(1);
+      const handled = (e: Event) => e.preventDefault();
+      container.addEventListener("keydown", handled, { capture: true });
+      try {
+        container
+          .querySelector("textarea")!
+          .dispatchEvent(
+            new KeyboardEvent("keydown", { key: '"', bubbles: true, cancelable: true }),
+          );
+      } finally {
+        container.removeEventListener("keydown", handled, { capture: true });
+      }
+      expect(model.getValue()).toBe(`var s = @"a""`);
+    });
+
     test("types an escaped quote on a later line of a verbatim string", () => {
       expect(typeAtEnd(`var s = @"line one\nsay `, `""hi"""`)).toBe(
         `var s = @"line one\nsay ""hi"""`,

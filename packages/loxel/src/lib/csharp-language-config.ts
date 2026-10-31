@@ -101,6 +101,8 @@ export function isQuoteInsideOpenString(
 function keepEscapedQuotesPlain(editor: monaco.editor.ICodeEditor): void {
   editor.onKeyDown((e) => {
     if (e.browserEvent.key !== '"' || e.ctrlKey || e.metaKey || e.altKey) return;
+    // Another hook, such as the triple-quote step-over, has handled this key and moved the cursor.
+    if (e.browserEvent.defaultPrevented) return;
     if (editor.getOption(monaco.editor.EditorOption.readOnly)) return;
     const model = editor.getModel();
     const selections = editor.getSelections();
