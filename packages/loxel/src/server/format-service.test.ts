@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,7 +7,7 @@ import { $ } from "bun";
 
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
 
-import type { LanguageFormatter } from "./language-formatter";
+import type { FormatterFailure, LanguageFormatter } from "./language-formatter";
 
 // Python files reach the shared environment resolution, which reads interpreter overrides from
 // the store database; keep the tests' state out of the real one.
@@ -527,6 +527,123 @@ describe("FormatService language modules", () => {
     };
     const result = await new FormatService().format("x=1\n", join(wt, "a.py"), wt, settings);
     expect(result.content).toBe("ruff format -\n");
+  });
+});
+
+describe("FormatService language failure notices", () => {
+  const MISSING = { command: "loxel-missing-formatter", args: "" };
+  const failing = (script: string) => async (wt: string) => {
+    await writeFile(join(wt, "bad-fmt"), script, { mode: 0o755 });
+    return { command: "./bad-fmt", args: "" };
+  };
+  const exitsOne = failing('#!/bin/sh\necho "the reason" >&2\nexit 1\n');
+
+  function languageWith(
+    formatter: { command: string; args: string },
+    overrides: Partial<LanguageFormatter> = {},
+  ): LanguageFormatter {
+    return { extensions: ["fake"], detect: () => formatter, ...overrides };
+  }
+
+  const format = (language: LanguageFormatter, wt: string, settings = AUTO_DETECT) =>
+    new FormatService([language]).format("x", join(wt, "a.fake"), wt, settings);
+
+  test("a module without the hook keeps the defaults", async () => {
+    const wt = await makeWorktree({});
+    expect(await format(languageWith(MISSING), wt)).toEqual({
+      content: null,
+      notice: 'Format on save skipped: "loxel-missing-formatter" is not installed.',
+    });
+    expect(await format(languageWith(await exitsOne(wt)), wt)).toEqual({ content: null });
+  });
+
+  test("a hook returning undefined keeps the defaults", async () => {
+    const wt = await makeWorktree({});
+    const silent = { failureNotice: () => undefined };
+    expect((await format(languageWith(MISSING, silent), wt)).notice).toBe(
+      'Format on save skipped: "loxel-missing-formatter" is not installed.',
+    );
+    expect(await format(languageWith(await exitsOne(wt), silent), wt)).toEqual({ content: null });
+  });
+
+  test("the hook explains a missing formatter and a non-zero exit, with its stderr", async () => {
+    const wt = await makeWorktree({});
+    const failures: FormatterFailure[] = [];
+    const failureNotice = (failure: FormatterFailure) => {
+      failures.push(failure);
+      return `explained ${failure.kind}`;
+    };
+    const fails = await exitsOne(wt);
+    expect(await format(languageWith(MISSING, { failureNotice }), wt)).toEqual({
+      content: null,
+      notice: "explained not-installed",
+    });
+    expect(await format(languageWith(fails, { failureNotice }), wt)).toEqual({
+      content: null,
+      notice: "explained exited",
+    });
+    expect(failures).toEqual([
+      { kind: "not-installed", command: MISSING.command },
+      { kind: "exited", command: fails.command, exitCode: 1, stderr: "the reason\n" },
+    ]);
+  });
+
+  test("the hook also covers a manual override for its extensions", async () => {
+    const wt = await makeWorktree({});
+    const language = languageWith(MISSING, { failureNotice: () => "explained" });
+    const result = await format(language, wt, {
+      ...AUTO_DETECT,
+      overrides: [{ id: "o", extensions: "fake", command: "loxel-other-missing", args: "" }],
+    });
+    expect(result.notice).toBe("explained");
+  });
+
+  test("a hook that throws does not lose the save", async () => {
+    const wt = await makeWorktree({});
+    const failureNotice = () => {
+      throw new Error("boom");
+    };
+    expect((await format(languageWith(MISSING, { failureNotice }), wt)).notice).toBe(
+      'Format on save skipped: "loxel-missing-formatter" is not installed.',
+    );
+    const fails = await exitsOne(wt);
+    expect(await format(languageWith(fails, { failureNotice }), wt)).toEqual({ content: null });
+  });
+
+  test("a decline shows its notice and asks no later module or rule", async () => {
+    const wt = await makeWorktree({ "rustfmt.toml": "" });
+    const later = mock(() => MISSING);
+    const decline: LanguageFormatter = {
+      extensions: ["rs"],
+      detect: () => ({ notice: "declined, because" }),
+    };
+    const service = new FormatService([decline, { extensions: ["rs"], detect: later }]);
+    const result = await service.format("x", join(wt, "a.rs"), wt, AUTO_DETECT);
+    expect(result).toEqual({ content: null, notice: "declined, because" });
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  test("a decline is not listed as a detected formatter", async () => {
+    const wt = await makeWorktree({});
+    const decline: LanguageFormatter = {
+      extensions: ["fake"],
+      detect: () => ({ notice: "declined" }),
+    };
+    expect(new FormatService([decline]).getDetectedFormatters(wt)).toEqual([]);
+  });
+
+  test("a manual override still runs where the module declines", async () => {
+    const wt = await makeWorktree({});
+    await writeFile(join(wt, "fmt"), "#!/bin/sh\necho overridden\n", { mode: 0o755 });
+    const decline: LanguageFormatter = {
+      extensions: ["fake"],
+      detect: () => ({ notice: "declined" }),
+    };
+    const result = await format(decline, wt, {
+      ...AUTO_DETECT,
+      overrides: [{ id: "o", extensions: "fake", command: "./fmt", args: "" }],
+    });
+    expect(result).toEqual({ content: "overridden\n" });
   });
 });
 

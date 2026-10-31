@@ -333,6 +333,9 @@ export const BUILTIN_FILE_ASSOCIATIONS: FileAssociation[] = [
   fa("**/requirements/*.txt", "pip-requirements"),
   fa("**/constraints*.txt", "pip-requirements"),
 
+  // Cargo's older config name; `config` alone says nothing about the format.
+  fa("**/.cargo/config", "toml"),
+
   // libc++ and libstdc++ headers such as <vector> have no extension. Only those: these directories
   // also hold files like module.modulemap, and anything with an extension resolves on its own.
   fa("**/c++/v1/**/!(*.*)", "cpp"),
@@ -486,6 +489,12 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     id: builtinId("**/.cargo/config.toml"),
     glob: "**/.cargo/config.toml",
     url: "https://json.schemastore.org/cargo-config.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/rust-toolchain.toml"),
+    glob: "**/rust-toolchain.toml",
+    url: "https://json.schemastore.org/rust-toolchain.json",
     enabled: true,
   },
   {

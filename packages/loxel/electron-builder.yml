@@ -87,15 +87,11 @@ mac:
         CFBundleTypeRole: Viewer
         LSHandlerRank: Alternate
         LSItemContentTypes: [public.folder]
+  # No arch lists: they would override --x64 or --arm64 and package the other architecture with
+  # this machine's binaries.
   target:
-    - target: dmg
-      arch:
-        - arm64
-        - x64
-    - target: zip
-      arch:
-        - arm64
-        - x64
+    - dmg
+    - zip
   artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 
 dmg:
