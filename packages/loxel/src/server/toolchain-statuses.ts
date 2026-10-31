@@ -12,8 +12,8 @@ import type { ToolchainStatusModule } from "./toolchain-status-module";
 
 export const toolchainStatusModules: readonly ToolchainStatusModule[] = [
   // This comment keeps the list on one line per entry whatever its length.
-  nodeToolchainStatus,
   goToolchainStatus,
+  nodeToolchainStatus,
   pythonToolchainStatus,
   rustToolchainStatus,
 ];

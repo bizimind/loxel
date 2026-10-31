@@ -11,8 +11,8 @@ import { rustToolchain } from "./rust-toolchain-model";
 
 export const toolchainStatuses = [
   // This comment keeps the list on one line per entry whatever its length.
-  nodeToolchain,
   goToolchain,
+  nodeToolchain,
   pythonToolchain,
   rustToolchain,
 ] as const;

@@ -308,6 +308,21 @@ describe("override", () => {
 });
 
 describe("shared resolution", () => {
+  /**
+   * Writes until `update` arrives: a watch armed a moment ago can miss a single write. Spaced wider
+   * than the watch's debounce, which each write would otherwise restart.
+   */
+  async function writeUntil<T>(update: Promise<T>, write: () => void): Promise<T> {
+    for (;;) {
+      write();
+      const arrived = await Promise.race([
+        update.then(() => true),
+        Bun.sleep(1500).then(() => false),
+      ]);
+      if (arrived) return update;
+    }
+  }
+
   test("listeners hear an edited pin file, and getNodeEnv answers from it", async () => {
     const { wt, home, env } = fixture({ ".nvmrc": "20\n" });
     nvmNode(home, "20.1.0");
@@ -323,8 +338,8 @@ describe("shared resolution", () => {
       const next = new Promise((resolve) => {
         updates.push(resolve);
       });
-      writeFileSync(join(wt, ".nvmrc"), "22\n");
-      expect(await next).toBe("22.1.0");
+      const version = await writeUntil(next, () => writeFileSync(join(wt, ".nvmrc"), "22\n"));
+      expect(version).toBe("22.1.0");
       expect((await getNodeEnv(wt)).env?.version).toBe("22.1.0");
       unsubscribe();
     } finally {
@@ -354,8 +369,8 @@ describe("shared resolution", () => {
       const next = new Promise((resolve) => {
         updates.push(resolve);
       });
-      writeNode(join(bin, "node"), "v99.0.0");
-      expect(await next).toBe("99.0.0");
+      const version = await writeUntil(next, () => writeNode(join(bin, "node"), "v99.0.0"));
+      expect(version).toBe("99.0.0");
       unsubscribe();
     } finally {
       process.env.HOME = previous.HOME;
