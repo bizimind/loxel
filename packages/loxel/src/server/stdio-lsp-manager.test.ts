@@ -13,7 +13,8 @@ import { StdioLspManager, type WtLspContext, type WtLspSession } from "./stdio-l
 
 // A stand-in language server: echoes every frame it reads back as a `test/received`
 // notification, writes whatever a `test/emit` notification carries as its own frame, exits with
-// the code a `test/exit` notification carries, and kills itself on `test/kill`.
+// the code a `test/exit` notification carries, kills itself on `test/kill`, and fills a `test/argv`
+// notification with its arguments.
 const FAKE_SERVER = `
 let buf = Buffer.alloc(0);
 const write = (msg) => {
@@ -32,6 +33,7 @@ for await (const chunk of process.stdin) {
     buf = buf.subarray(end + 4 + length);
     if (msg.method === "test/exit") process.exit(msg.params.code);
     if (msg.method === "test/kill") process.kill(process.pid, "SIGKILL");
+    if (msg.method === "test/argv") msg.params = { argv: process.argv };
     if (msg.method === "test/emit") write(msg.params);
     else write({ jsonrpc: "2.0", method: "test/received", params: msg });
   }
@@ -56,11 +58,11 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
     this.startSession(ws, { wtPath });
   }
 
-  protected resolveBinary(): string {
+  protected resolveBinary(): string | null {
     return process.execPath;
   }
 
-  protected override spawnArgs(): readonly string[] {
+  protected override spawnArgs(_context: WtLspContext): readonly string[] {
     return [this.script];
   }
 
@@ -80,6 +82,20 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
 
   protected override getSessionWorkspace(session: WtLspSession): string {
     return session.wtPath;
+  }
+}
+
+class OptInLspManager extends FakeLspManager {
+  protected override readonly watchedFileGlobs = ["**/.eslintrc*"];
+  protected override readonly watchedIgnoredGlobs = ["build/compile_commands.json"];
+  protected override readonly didSaveOnFileChange = true;
+
+  protected override workspaceConfiguration(
+    _session: WtLspSession,
+    section: string | undefined,
+    scopeUri: string | undefined,
+  ): Promise<unknown> {
+    return Promise.resolve({ section, scopeUri });
   }
 }
 
@@ -149,12 +165,15 @@ afterEach(async () => {
   dir = undefined;
 });
 
-async function setup(wtName = "wt"): Promise<{ client: FakeClient; root: string }> {
+async function setup(
+  wtName = "wt",
+  create: (script: string) => FakeLspManager = (script) => new FakeLspManager(script),
+): Promise<{ client: FakeClient; root: string }> {
   dir = await realpath(await mkdtemp(join(tmpdir(), "stdio-lsp-manager-")));
   const script = join(dir, "fake-server.mjs");
   await writeFile(script, FAKE_SERVER);
   const root = join(dir, wtName);
-  manager = new FakeLspManager(script);
+  manager = create(script);
   const client = new FakeClient(manager);
   manager.start(client.ws, root);
   return { client, root };
@@ -172,6 +191,45 @@ describe("StdioLspManager workspace root", () => {
     expect(init.params?.rootUri).toBe(uri);
     expect(init.params?.rootPath).toBe(root);
     expect(init.params?.workspaceFolders).toEqual([{ uri, name: "my wt #1 50% ü" }]);
+  });
+});
+
+describe("StdioLspManager completion snippets", () => {
+  class NoSnippetsLspManager extends FakeLspManager {
+    protected override readonly disableCompletionSnippets = true;
+  }
+
+  const textDocument = (): Record<string, unknown> => ({
+    completion: {
+      completionItem: { snippetSupport: true, resolveSupport: { properties: ["detail"] } },
+    },
+  });
+
+  test("keeps the client's snippet support by default", async () => {
+    const { client } = await setup();
+    client.send({
+      id: 1,
+      method: "initialize",
+      params: { capabilities: { textDocument: textDocument() } },
+    });
+    const init = await client.serverReceived((f) => f.method === "initialize");
+    expect(init.params?.capabilities).toMatchObject({ textDocument: textDocument() });
+  });
+
+  test("disableCompletionSnippets takes only snippet support out of initialize", async () => {
+    const { client } = await setup("wt", (script) => new NoSnippetsLspManager(script));
+    client.send({
+      id: 1,
+      method: "initialize",
+      params: { capabilities: { textDocument: textDocument() } },
+    });
+    const init = await client.serverReceived((f) => f.method === "initialize");
+    expect(init.params?.capabilities).toMatchObject({
+      textDocument: {
+        completion: { completionItem: { resolveSupport: { properties: ["detail"] } } },
+      },
+    });
+    expect(JSON.stringify(init.params?.capabilities)).not.toContain("snippetSupport");
   });
 });
 
@@ -283,6 +341,171 @@ describe("StdioLspManager watched files", () => {
         },
       } as Frame,
     ]);
+  });
+});
+
+describe("StdioLspManager opt-in hooks", () => {
+  const DID_SAVE = "textDocument/didSave";
+  const setupOptIn = () => setup("wt", (script) => new OptInLspManager(script));
+  let marks = 0;
+  /** Everything sent before now has been read once the server echoes this. */
+  async function drained(client: FakeClient): Promise<void> {
+    const mark = `test/mark-${++marks}`;
+    client.send({ method: mark });
+    await client.serverReceived((f) => f.method === mark);
+  }
+
+  test("workspaceConfiguration receives the request's scopeUri", async () => {
+    const { client } = await setupOptIn();
+    client.emit({
+      id: 5,
+      method: "workspace/configuration",
+      params: { items: [{ scopeUri: "file:///wt/a.ts", section: "" }, { section: "x" }] },
+    });
+    const answer = await client.serverReceived((f) => f.id === 5);
+    expect(answer.result).toEqual([{ section: "", scopeUri: "file:///wt/a.ts" }, { section: "x" }]);
+  });
+
+  test("declared globs forward changes for a server that registers no watchers", async () => {
+    const { client, root } = await setupOptIn();
+    await mkdir(root);
+    await writeFile(join(root, ".eslintrc.json"), "{}");
+    client.send({ method: "initialized", params: {} });
+    manager!.notifyWatchedFilesChanged(root, [join(root, ".eslintrc.json"), join(root, "a.ts")]);
+    const changed = await client.serverReceived((f) => f.method === WATCHED_FILES);
+    expect(changed.params?.changes).toEqual(
+      [FileChangeType.Changed, FileChangeType.Created].map((type) => ({
+        uri: pathToFileURL(join(root, ".eslintrc.json")).href,
+        type,
+      })),
+    );
+  });
+
+  test("ignored paths are forwarded only when a manager's ignored globs ask for them", async () => {
+    const { client, root } = await setupOptIn();
+    await mkdir(join(root, "build"), { recursive: true });
+    await writeFile(join(root, "build", "compile_commands.json"), "[]");
+    client.send({ method: "initialized", params: {} });
+    // On another worktree, and not asked for: neither may reach the batch below.
+    manager!.notifyIgnoredPathChanged(join(dir!, "other"), "build/compile_commands.json");
+    manager!.notifyIgnoredPathChanged(root, "build/main.o");
+    manager!.notifyIgnoredPathChanged(root, "node_modules/x/.eslintrc.json");
+    manager!.notifyIgnoredPathChanged(root, "build/compile_commands.json");
+    const changed = await client.serverReceived((f) => f.method === WATCHED_FILES);
+    expect(changed.params?.changes).toEqual(
+      [FileChangeType.Changed, FileChangeType.Created].map((type) => ({
+        uri: pathToFileURL(join(root, "build", "compile_commands.json")).href,
+        type,
+      })),
+    );
+  });
+
+  test("a manager that did not opt in drops ignored paths and sends no didSave", async () => {
+    const { client, root } = await setup();
+    await mkdir(root);
+    await writeFile(join(root, "a.c"), "");
+    const uri = pathToFileURL(join(root, "a.c")).href;
+    client.send({ method: "textDocument/didOpen", params: { textDocument: { uri, text: "" } } });
+    client.emit({
+      id: 7,
+      method: "client/registerCapability",
+      params: {
+        registrations: [
+          {
+            id: "w1",
+            method: WATCHED_FILES,
+            registerOptions: { watchers: [{ globPattern: "**" }] },
+          },
+        ],
+      },
+    });
+    await client.serverReceived((f) => f.id === 7);
+    manager!.notifyIgnoredPathChanged(root, "build/compile_commands.json");
+    manager!.notifyWatchedFilesChanged(root, [join(root, "a.c")]);
+    const changed = await client.serverReceived((f) => f.method === WATCHED_FILES);
+    // Its server's `**` watcher would have matched the ignored path, had it been forwarded.
+    expect(changed.params?.changes).toEqual(
+      [FileChangeType.Changed, FileChangeType.Created].map((type) => ({ uri, type })),
+    );
+    expect(client.toServer.some((f) => f.method === DID_SAVE)).toBe(false);
+  });
+
+  test("didSave goes out for changed open documents, until they close", async () => {
+    const { client, root } = await setupOptIn();
+    const open = pathToFileURL(join(root, "a b.c")).href;
+    client.send({
+      method: "textDocument/didOpen",
+      params: { textDocument: { uri: open, text: "" } },
+    });
+    await drained(client);
+
+    manager!.notifyWatchedFilesChanged(join(dir!, "other"), [join(root, "a b.c")]);
+    manager!.notifyWatchedFilesChanged(root, [join(root, "closed.c"), join(root, "a b.c")]);
+    const saved = await client.serverReceived((f) => f.method === DID_SAVE);
+    expect(saved.params).toEqual({ textDocument: { uri: open } });
+    await drained(client);
+    expect(client.toServer.filter((f) => f.method === DID_SAVE)).toHaveLength(1);
+
+    client.send({ method: "textDocument/didClose", params: { textDocument: { uri: open } } });
+    await drained(client);
+    manager!.notifyWatchedFilesChanged(root, [join(root, "a b.c")]);
+    await drained(client);
+    expect(client.toServer.filter((f) => f.method === DID_SAVE)).toHaveLength(1);
+  });
+});
+
+describe("StdioLspManager context hooks", () => {
+  class ContextLspManager extends FakeLspManager {
+    constructor(
+      script: string,
+      private readonly failure: string | null,
+      private readonly bin: string | null = process.execPath,
+    ) {
+      super(script);
+    }
+
+    protected override resolveBinary(): string | null {
+      return this.bin;
+    }
+
+    protected override spawnArgs(context: WtLspContext): readonly string[] {
+      return [...super.spawnArgs(context), context.wtPath];
+    }
+
+    protected override serverFailureReason(): string | null {
+      return this.failure;
+    }
+  }
+
+  test("spawnArgs receives the session's context", async () => {
+    const { client, root } = await setup("wt", (script) => new ContextLspManager(script, null));
+    client.send({ method: "test/argv" });
+    const argv = await client.serverReceived((f) => f.method === "test/argv");
+    expect(argv.params?.argv).toContain(root);
+  });
+
+  test("a server that cannot start closes with the manager's reason, cut to fit", async () => {
+    const reason = "é".repeat(100);
+    const { client } = await setup("wt", (script) => new ContextLspManager(script, reason, null));
+    expect(await client.closed).toBe(LSP_START_FAILED_CLOSE_CODE);
+    expect(client.closes[0]?.[1]).toBe("é".repeat(61));
+  });
+
+  test("a failure-reason hook that throws still closes the socket", async () => {
+    class ThrowingLspManager extends ContextLspManager {
+      protected override serverFailureReason(): string | null {
+        throw new Error("boom");
+      }
+    }
+    const { client } = await setup("wt", (script) => new ThrowingLspManager(script, null, null));
+    expect(await client.closed).toBe(LSP_START_FAILED_CLOSE_CODE);
+  });
+
+  test("a server that exits closes with the manager's reason", async () => {
+    const { client } = await setup("wt", (script) => new ContextLspManager(script, "see the log"));
+    client.send({ method: "test/exit", params: { code: 3 } });
+    expect(await client.closed).toBe(LSP_EXITED_CLOSE_CODE);
+    expect(client.closes).toEqual([[LSP_EXITED_CLOSE_CODE, "see the log"]]);
   });
 });
 

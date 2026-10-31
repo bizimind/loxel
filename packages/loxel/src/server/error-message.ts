@@ -1,8 +1,8 @@
 /**
  * Build a user-facing message from a thrown error, preferring the underlying
- * command's own stderr. `Bun.$` ShellErrors carry only the exit code in
- * `message` ("Failed with exit code 255") with the real diagnostic on
- * `stderr`; wrapped errors carry it further down the cause chain.
+ * command's own stderr. `Bun.$` ShellErrors and GitCommandError carry only the
+ * exit code in `message` ("Failed with exit code 255") with the real diagnostic
+ * on `stderr`; wrapped errors carry it further down the cause chain.
  */
 export function describeError(err: unknown, fallback: string): string {
   const parts: string[] = [];
@@ -17,7 +17,7 @@ export function describeError(err: unknown, fallback: string): string {
   return message || fallback;
 }
 
-/** Read a trimmed `stderr` field off an error, if it has one (Bun.$ ShellError). */
+/** Read a trimmed `stderr` field off an error, if it has one. */
 function readStderr(err: Error): string | null {
   if (!("stderr" in err)) return null;
   const raw: unknown = err.stderr;

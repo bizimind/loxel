@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
+import { classifySchemaGlob } from "@/lib/schema-glob";
+
 import {
+  BUILTIN_SCHEMA_DEFAULTS,
   DEFAULT_EDITOR_SETTINGS,
   type EditorSettings,
   type IndentationInputs,
   type ResolvedIndentation,
   resolveIndentation,
+  type SettingsState,
+  useSettingsStore,
 } from "./settings-store";
 
 function settings(overrides: EditorSettings["overrides"] = []): EditorSettings {
@@ -42,6 +47,16 @@ describe("resolveIndentation", () => {
       indentSize: 4,
     });
     expect(indentation(settings(), "/repo/main.go", { language: "go" })).toEqual({
+      tabSize: 4,
+      insertSpaces: false,
+      indentSize: 4,
+    });
+    expect(indentation(settings(), "/repo/go.mod", { language: "go.mod" })).toEqual({
+      tabSize: 4,
+      insertSpaces: false,
+      indentSize: 4,
+    });
+    expect(indentation(settings(), "/repo/go.work", { language: "go.work" })).toEqual({
       tabSize: 4,
       insertSpaces: false,
       indentSize: 4,
@@ -215,5 +230,42 @@ describe("resolveIndentation", () => {
 
   test("reports no override when none matches", () => {
     expect(resolveIndentation(settings(), "/repo/app.ts", { language: null }).override).toBeNull();
+  });
+});
+
+describe("BUILTIN_SCHEMA_DEFAULTS", () => {
+  test("only uses the schema host the privacy policy names", () => {
+    for (const { url } of BUILTIN_SCHEMA_DEFAULTS) {
+      expect(new URL(url).host).toBe("json.schemastore.org");
+    }
+  });
+
+  test.each([
+    ["**/jsconfig.json", { json: true, yaml: false, toml: false }],
+    ["**/lerna.json", { json: true, yaml: false, toml: false }],
+    ["**/pnpm-workspace.yaml", { json: false, yaml: true, toml: false }],
+    // Monaco's JSON worker cannot load the sibling file this schema refers to.
+    ["**/.eslintrc.{yml,yaml}", { json: false, yaml: true, toml: false }],
+    // Without a final extension a glob reaches every language, covering the YAML form.
+    ["**/.prettierrc{,.json,.yml,.yaml}", { json: true, yaml: true, toml: true }],
+    ["**/.lintstagedrc{,.json,.yml,.yaml}", { json: true, yaml: true, toml: true }],
+    ["**/{.babelrc,.babelrc.json,babel.config.json}", { json: true, yaml: true, toml: true }],
+  ])("%s is built in and routes to its languages", (glob, languages) => {
+    expect(BUILTIN_SCHEMA_DEFAULTS.some((schema) => schema.glob === glob)).toBe(true);
+    expect(classifySchemaGlob(glob)).toEqual(languages);
+  });
+});
+
+describe("settings migration", () => {
+  const migrate = useSettingsStore.persist.getOptions().migrate;
+
+  test("v11 settings get the automatic update check turned on", async () => {
+    const migrated = (await migrate?.({ terminal: {} }, 11)) as SettingsState;
+    expect(migrated.autoCheckForUpdates).toBe(true);
+  });
+
+  test("keeps an existing opt-out", async () => {
+    const migrated = (await migrate?.({ autoCheckForUpdates: false }, 11)) as SettingsState;
+    expect(migrated.autoCheckForUpdates).toBe(false);
   });
 });
