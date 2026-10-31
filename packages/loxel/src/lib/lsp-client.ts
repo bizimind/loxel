@@ -66,7 +66,7 @@ export interface LspClientOptions {
   /**
    * Show the errors and warnings the server sends with `window/showMessage` as toasts, each
    * distinct message once while Loxel runs, for a server whose messages are meant for the user
-   * (mypy's setup problems).
+   * (mypy's setup problems, a Kotlin lint tool that is missing or failed).
    */
   showMessages?: boolean;
 }

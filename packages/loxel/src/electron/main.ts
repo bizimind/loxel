@@ -464,6 +464,7 @@ const UPDATE_RESOURCE_DIRS = [
   "renderer",
   "typescript-lib",
   "typeshed-fallback",
+  "clangd-resource",
   "tsgo-lib",
   "jdtls",
 ];
