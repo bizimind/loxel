@@ -150,7 +150,7 @@ describe("Java editing in Monaco", () => {
     });
 
     test("a fourth quote is not treated as completing a delimiter", () => {
-      expect(closingTextBlockAction('String s = """\n    a"""', "")).toBeNull();
+      expect(closingTextBlockAction('String s = """', "")).toBeNull();
     });
 
     test("an escaped backslash before a delimiter keeps later blocks counted", () => {
