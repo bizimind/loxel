@@ -61,7 +61,7 @@ export function rustToolchainTooltip(toolchain: RustToolchain): string {
   const selectedBy = toolchain.toolchainFile ? `Selected by ${toolchain.toolchainFile}` : null;
   if (toolchain.status === "refused") {
     return [
-      `The repository tracks ${toolchain.rustcPath} in git, so Loxel does not run it`,
+      `Loxel uses toolchains from outside the worktree, so it does not run ${toolchain.rustcPath}`,
       ...(selectedBy ? [selectedBy] : []),
     ].join("\n");
   }

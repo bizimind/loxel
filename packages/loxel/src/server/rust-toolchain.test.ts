@@ -723,7 +723,7 @@ describe("rust-analyzer", () => {
   });
 });
 
-describe("the trust rule", () => {
+describe("the toolchain rule", () => {
   test("refuses a toolchain the repository tracks, and never runs it", async () => {
     const fixture = await makeFixture();
     const tracked = await makeToolchain(fixture, join(fixture.wt, "tc"), "9.9.9");
@@ -758,7 +758,7 @@ describe("the trust rule", () => {
     ).toMatchObject({ status: "refused" });
   });
 
-  test("an untracked directory toolchain is the user's own and runs", async () => {
+  test("an untracked toolchain in the worktree is refused and never runs", async () => {
     const fixture = await makeFixture();
     const own = await makeToolchain(fixture, join(fixture.wt, "tc"), "1.80.0");
     Bun.spawnSync(["git", "-C", fixture.wt, "init", "-q"]);
@@ -766,7 +766,68 @@ describe("the trust rule", () => {
 
     expect(
       await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env }),
-    ).toMatchObject({ status: "active", version: "1.80.0" });
+    ).toMatchObject({ status: "refused", rustcPath: join(own, "bin", "rustc") });
+    expect((await fixture.runs()).filter((run) => run.includes(`${own}/bin/`))).toEqual([]);
+  });
+
+  test("an untracked linked toolchain in the worktree is neither offered nor usable", async () => {
+    const fixture = await makeFixture();
+    const local = await makeToolchain(fixture, join(fixture.wt, "tc"), "9.9.9");
+    const stable = await makeToolchain(fixture, join(fixture.root, "tc", STABLE), "1.99.1");
+    Bun.spawnSync(["git", "-C", fixture.wt, "init", "-q"]);
+    await makeRustup(fixture, { active: STABLE, installed: { linked: local, [STABLE]: stable } });
+
+    expect(await listRustToolchains(fixture.wt, { env: fixture.env })).toEqual([
+      { name: STABLE, path: stable, version: "1.99.1" },
+    ]);
+    expect(
+      await resolveRustToolchain(fixture.wt, { chosen: "linked", env: fixture.env }),
+    ).toMatchObject({ source: "default", name: STABLE });
+    expect((await fixture.runs()).filter((run) => run.includes(`${local}/bin/`))).toEqual([]);
+  });
+
+  test("no tool in the worktree is used, tracked or not, also through a link", async () => {
+    const fixture = await makeFixture();
+    Bun.spawnSync(["git", "-C", fixture.wt, "init", "-q"]);
+    const local = join(fixture.wt, "bin");
+    const canary = join(fixture.root, "RAN");
+    for (const tool of ["rustup", "rustc", "cargo", "rustfmt", "cargo-clippy", "rust-analyzer"]) {
+      await writeExecutable(
+        join(local, tool),
+        `#!/bin/sh\ntouch "${canary}"\necho "rustc 9.9.9"\n`,
+      );
+    }
+    await symlink(local, join(fixture.root, "linked-bin"));
+    const rustc = await writeExecutable(
+      join(fixture.bin, "rustc"),
+      `#!/bin/sh\necho "rustc 1.88.0"\n`,
+    );
+    const cargo = await writeExecutable(join(fixture.bin, "cargo"), "#!/bin/sh\n");
+    const PATH = `${local}:${join(fixture.root, "linked-bin")}:${fixture.bin}`;
+
+    expect(
+      await resolveRustToolchain(fixture.wt, { chosen: null, env: { ...fixture.env, PATH } }),
+    ).toMatchObject({
+      status: "active",
+      source: "no-rustup",
+      rustcPath: rustc,
+      tools: { cargo, rustfmt: null, cargoClippy: null, rustAnalyzer: null },
+    });
+    expect(await Bun.file(canary).exists()).toBe(false);
+  });
+
+  test("a rustc is asked outside the worktree, where a version manager's shim reads nothing of it", async () => {
+    const fixture = await makeFixture();
+    await writeExecutable(
+      join(fixture.bin, "rustc"),
+      `#!/bin/sh\n${logLine(fixture.log)}\necho "rustc 1.88.0"\n`,
+    );
+
+    await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env });
+
+    const runs = await fixture.runs();
+    expect(runs.length).toBeGreaterThan(0);
+    for (const run of runs) expect(run.split("|")[2]).toBe("/");
   });
 
   test("a tracked tool of a trusted toolchain is unavailable", async () => {
@@ -991,9 +1052,12 @@ describe("the shared resolution's consistency", () => {
 
   test("a toolchain the repository starts tracking is withdrawn", async () => {
     const fixture = await makeFixture();
-    const own = await makeToolchain(fixture, join(fixture.wt, "tc"), "1.80.0");
+    // Physically outside the worktree, so it runs until a commit makes the link repository content.
+    const outside = await makeToolchain(fixture, join(fixture.root, "outside"), "1.80.0");
+    const link = join(fixture.wt, "tc");
+    await symlink(outside, link);
     Bun.spawnSync(["git", "-C", fixture.wt, "init", "-q"]);
-    await makeRustup(fixture, { active: own });
+    await makeRustup(fixture, { active: link });
 
     await withFixtureEnv(fixture, async () => {
       const off = subscribeRustToolchain(fixture.wt, () => {});

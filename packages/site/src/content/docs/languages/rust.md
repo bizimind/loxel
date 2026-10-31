@@ -20,7 +20,7 @@ With [rustup](https://rustup.rs), Loxel uses the first of:
 
 Loxel never downloads or installs a toolchain or component. If the project pins a toolchain you don't have, the status bar says so and tells you what to run; installing it is up to you, from a terminal.
 
-Loxel never runs a toolchain that is committed to the repository, since running it would run the repository's code. The status bar item shows this in the warning color, and you can choose an installed toolchain instead.
+Loxel uses toolchains from outside the worktree. If a toolchain file names one inside it, or one the repository contains, the status bar item shows this in the warning color, and you can choose an installed toolchain instead.
 
 Editing the worktree's toolchain file, installing or removing a toolchain or component, or changing your rustup default while Loxel is open is picked up automatically.
 

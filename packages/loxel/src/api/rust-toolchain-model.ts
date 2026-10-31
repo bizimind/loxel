@@ -52,7 +52,7 @@ export type RustToolchain =
       name: string;
       toolchainFile: string | null;
     }
-  /** Selected, but the repository ships it, so Loxel runs nothing from it. */
+  /** Selected, but it is in the worktree or the repository ships it, so nothing runs from it. */
   | { status: "refused"; name: string; toolchainFile: string | null; rustcPath: string }
   | {
       status: "none";

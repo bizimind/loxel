@@ -77,7 +77,7 @@ interface WorktreeRustToolchain {
   settled: { toolchain: RustToolchain; chosen: string | null } | null;
   /** True while {@link resolution} has not finished. */
   pending: boolean;
-  /** The settled toolchain failed the trust rule since, so it is not handed out any more. */
+  /** The settled toolchain failed the toolchain rule since, so it is not handed out any more. */
   withdrawn: boolean;
   /** The choice the latest resolution started with. */
   chosen: string | null;
@@ -193,7 +193,7 @@ async function revalidate(wtPath: string, entry: WorktreeRustToolchain): Promise
   const { rustcPath, sysroot, source } = settled.toolchain;
   // Checked as when it was found: an install without rustup has only its `rustc` checked.
   const root = source === "no-rustup" ? null : sysroot;
-  if (!(await isToolchainShipped(wtPath, rustcPath, root))) return;
+  if (!(await isToolchainRepoLocal(wtPath, rustcPath, root))) return;
   // Another caller may have noticed first, or the worktree was unsubscribed meanwhile.
   if (entry.settled !== settled || entry.withdrawn || worktreeToolchains.get(wtPath) !== entry) {
     return;
@@ -257,7 +257,7 @@ export interface ResolveRustToolchainOptions {
 /**
  * Find a worktree's Rust toolchain: the choice when it is still installed, else whatever rustup
  * selects for the worktree's directory, else the `rustc` on the login-shell PATH. Runs nothing the
- * repository ships (see `languages/rust.md`) and never installs anything. Never throws. Uncached;
+ * worktree holds (see `languages/rust.md`) and never installs anything. Never throws. Uncached;
  * Loxel's features share {@link getRustToolchain} instead.
  */
 export async function resolveRustToolchain(
@@ -300,13 +300,13 @@ async function resolvePlain(
   dirs: string[],
   env: SpawnEnv,
 ): Promise<RustToolchain> {
-  const sysroot = await readSysroot(rustcPath, wtPath, env);
+  const sysroot = await readSysroot(rustcPath, env);
   const [version, cargo, rustfmt, cargoClippy, rustAnalyzer] = await Promise.all([
-    rustVersion(rustcPath, wtPath, env),
+    rustVersion(rustcPath, env),
     findTool(wtPath, "cargo", dirs),
     findTool(wtPath, "rustfmt", dirs),
     findTool(wtPath, "cargo-clippy", dirs),
-    findStandaloneAnalyzer(wtPath, dirs),
+    findTool(wtPath, "rust-analyzer", dirs, { skipProxies: true }),
   ]);
   return {
     status: "active",
@@ -363,12 +363,12 @@ async function resolveWithRustup(
     return { status: "none", rustupPath: rustup, detail: firstError(which.stderr) };
   }
   const sysroot = path.dirname(path.dirname(rustcPath));
-  if (await isToolchainShipped(wtPath, rustcPath, sysroot)) {
-    log.warn("Ignoring a Rust toolchain tracked by git", { wtPath, rustcPath });
+  if (await isToolchainRepoLocal(wtPath, rustcPath, sysroot)) {
+    log.warn("Ignoring a Rust toolchain that belongs to the worktree", { wtPath, rustcPath });
     return { status: "refused", name, toolchainFile, rustcPath };
   }
   const [version, tools] = await Promise.all([
-    rustVersion(rustcPath, wtPath, env),
+    rustVersion(rustcPath, env),
     rustupTools(wtPath, rustup, sysroot, dirs, rustupEnv),
   ]);
   return { status: "active", source, name, version, rustcPath, sysroot, toolchainFile, tools };
@@ -387,8 +387,8 @@ async function rustupTools(
     ),
     rustupWhich(rustup, "rust-analyzer", wtPath, rustupEnv).then((real) =>
       real
-        ? rustupTool(wtPath, real, "rust-analyzer", pathDirsOutsideWorktree(dirs, wtPath))
-        : findStandaloneAnalyzer(wtPath, dirs),
+        ? rustupTool(wtPath, real, "rust-analyzer", dirs)
+        : findTool(wtPath, "rust-analyzer", dirs, { skipProxies: true }),
     ),
   ]);
   return {
@@ -411,7 +411,7 @@ async function rustupTool(
   name: string,
   dirs: string[],
 ): Promise<string | null> {
-  if (!real || (await isShippedByRepo(wtPath, real))) return null;
+  if (!real || (await isRepoLocal(wtPath, real))) return null;
   return (await findTool(wtPath, name, dirs)) ?? real;
 }
 
@@ -450,7 +450,7 @@ export async function listRustToolchains(
 }
 
 /**
- * The installed toolchains the trust rule lets Loxel run (one linked with `rustup toolchain link`
+ * The installed toolchains the toolchain rule lets Loxel run (one linked with `rustup toolchain link`
  * can be a directory of a repository). Asked from the filesystem root, where no toolchain file
  * selects anything. Null when rustup could not list them.
  */
@@ -467,8 +467,8 @@ async function listInstalled(
   const choices = await Promise.all(
     parseToolchainList(listed.stdout).map(async ({ name, path: root }) => {
       const rustc = path.join(root, "bin", "rustc");
-      if (await isToolchainShipped(wtPath, rustc, root)) return null;
-      return { name, path: root, version: await rustVersion(rustc, wtPath, env) };
+      if (await isToolchainRepoLocal(wtPath, rustc, root)) return null;
+      return { name, path: root, version: await rustVersion(rustc, env) };
     }),
   );
   return choices.filter((choice) => choice !== null);
@@ -585,17 +585,19 @@ const versions = new Map<string, Promise<string | null>>();
 
 /**
  * The version of a `rustc` (`1.99.1`), or null when it cannot be read. Cached until the file
- * changes; failures are not cached. Only pass one the trust rule accepted: this executes the file.
- * Runs in the worktree, for a version-manager shim that picks its Rust by directory.
+ * changes; failures are not cached. Only pass one that passed {@link isRepoLocal}: this executes
+ * the file. Runs from the filesystem root, so a version-manager shim on `PATH` reads nothing of the
+ * worktree's; such a shim reports its global version.
  */
-async function rustVersion(rustcPath: string, cwd: string, env: SpawnEnv): Promise<string | null> {
-  const key = await fileKey(rustcPath, cwd);
+async function rustVersion(rustcPath: string, env: SpawnEnv): Promise<string | null> {
+  const key = await fileKey(rustcPath);
   if (!key) return null;
   let version = versions.get(key);
   if (!version) {
-    version = runCommand([rustcPath, "--version"], cwd, { ...env, ...RUST_LOXEL_TOOL_ENV }).then(
-      ({ stdout }) => /^rustc (\S+)/m.exec(stdout)?.[1] ?? null,
-    );
+    version = runCommand([rustcPath, "--version"], path.parse(rustcPath).root, {
+      ...env,
+      ...RUST_LOXEL_TOOL_ENV,
+    }).then(({ stdout }) => /^rustc (\S+)/m.exec(stdout)?.[1] ?? null);
     versions.set(key, version);
     void version.then((read) => {
       if (read === null) versions.delete(key);
@@ -604,11 +606,12 @@ async function rustVersion(rustcPath: string, cwd: string, env: SpawnEnv): Promi
   return version;
 }
 
-async function readSysroot(rustcPath: string, cwd: string, env: SpawnEnv): Promise<string | null> {
-  const { exitCode, stdout } = await runCommand([rustcPath, "--print", "sysroot"], cwd, {
-    ...env,
-    ...RUST_LOXEL_TOOL_ENV,
-  });
+async function readSysroot(rustcPath: string, env: SpawnEnv): Promise<string | null> {
+  const { exitCode, stdout } = await runCommand(
+    [rustcPath, "--print", "sysroot"],
+    path.parse(rustcPath).root,
+    { ...env, ...RUST_LOXEL_TOOL_ENV },
+  );
   const sysroot = stdout.trim();
   return exitCode === 0 && path.isAbsolute(sysroot) ? sysroot : null;
 }
@@ -665,7 +668,7 @@ async function readRustupVersion(rustup: string, env: SpawnEnv): Promise<string 
 }
 
 // ---------------------------------------------------------------------------
-// Finding tools, under the trust rule
+// Finding tools, under the toolchain rule
 
 /** PATH, then `$CARGO_HOME/bin`, then `~/.cargo/bin`: where rustup puts its proxies. */
 function searchDirs(env: SpawnEnv): string[] {
@@ -675,35 +678,39 @@ function searchDirs(env: SpawnEnv): string[] {
   return [...new Set(dirs.filter((dir) => path.isAbsolute(dir)))];
 }
 
-/** Entry by entry, so a tracked hit early on PATH does not hide a real tool later. */
-async function findTool(wtPath: string, name: string, dirs: string[]): Promise<string | null> {
-  for (const dir of dirs) {
-    const found = Bun.which(name, { PATH: dir });
-    if (found && !(await isShippedByRepo(wtPath, found))) return found;
+/**
+ * The first usable hit: outside the worktree (see {@link isRepoLocal}), entry by entry, so a hit in
+ * it does not hide a real tool later. `skipProxies` is for a tool a rustup proxy may stand for
+ * without having it.
+ */
+async function findTool(
+  wtPath: string,
+  name: string,
+  dirs: string[],
+  { skipProxies = false } = {},
+): Promise<string | null> {
+  for (const dir of pathOutsideWorktree(dirs.join(path.delimiter), wtPath).split(path.delimiter)) {
+    const found = dir ? Bun.which(name, { PATH: dir }) : null;
+    if (!found || (await isRepoLocal(wtPath, found))) continue;
+    if (skipProxies && (await rustupBehindProxy(found))) continue;
+    return found;
   }
   return null;
-}
-
-function pathDirsOutsideWorktree(dirs: string[], wtPath: string): string[] {
-  return pathOutsideWorktree(dirs.join(path.delimiter), wtPath).split(path.delimiter);
 }
 
 /**
- * A rust-analyzer the user installed on its own: the first on the lookup directories that lives
- * outside the worktree, tracked or not, and is no rustup proxy, which exists without the component
- * and would only fail.
+ * Whether a file or directory belongs to the worktree: physically inside it, tracked or not, or
+ * shipped by its repository. Nothing that does runs. A path that cannot be read counts.
  */
-async function findStandaloneAnalyzer(wtPath: string, dirs: string[]): Promise<string | null> {
-  const realWorktree = await realpath(wtPath);
-  for (const dir of pathDirsOutsideWorktree(dirs, wtPath)) {
-    const found = Bun.which("rust-analyzer", { PATH: dir });
-    if (!found) continue;
-    const real = await realpath(found);
-    if (real === realWorktree || real.startsWith(`${realWorktree}${path.sep}`)) continue;
-    if (await rustupBehindProxy(found)) continue;
-    if (!(await isShippedByRepo(wtPath, found))) return found;
+async function isRepoLocal(wtPath: string, target: string): Promise<boolean> {
+  try {
+    const [realWorktree, real] = await Promise.all([realpath(wtPath), realpath(target)]);
+    if (real === realWorktree || real.startsWith(`${realWorktree}${path.sep}`)) return true;
+    return await isShippedByRepo(wtPath, target);
+  } catch (err) {
+    log.debug("Could not check whether a path belongs to the worktree", { target, error: err });
+    return true;
   }
-  return null;
 }
 
 type RustInstall =
@@ -725,7 +732,7 @@ async function findInstall(wtPath: string, dirs: string[]): Promise<RustInstall>
   if (!rustc) return rustup ? { kind: "rustup", rustup } : { kind: "none" };
   const proxied = await rustupBehindProxy(rustc);
   if (!proxied) return { kind: "plain", rustc };
-  if (proxied !== UNKNOWN_RUSTUP && !(await isShippedByRepo(wtPath, proxied))) {
+  if (proxied !== UNKNOWN_RUSTUP && !(await isRepoLocal(wtPath, proxied))) {
     return { kind: "rustup", rustup: proxied };
   }
   return {
@@ -755,18 +762,19 @@ async function isSameFile(a: string, b: string): Promise<boolean> {
 }
 
 /**
- * The environment trust rule for a toolchain: the compiler, and for a rustup toolchain its whole
- * root, which also holds the tools and libraries it loads. A toolchain file can name one by `path`.
+ * Whether a toolchain may not run: its compiler, or for a rustup toolchain its whole root, which
+ * also holds the tools and libraries it loads, belongs to the worktree. A toolchain file can name
+ * one by `path`, and `rustup toolchain link` can install one.
  */
-async function isToolchainShipped(
+async function isToolchainRepoLocal(
   wtPath: string,
   rustcPath: string,
   sysroot: string | null,
 ): Promise<boolean> {
-  const shipped = await Promise.all(
-    [rustcPath, ...(sysroot ? [sysroot] : [])].map((target) => isShippedByRepo(wtPath, target)),
+  const local = await Promise.all(
+    [rustcPath, ...(sysroot ? [sysroot] : [])].map((target) => isRepoLocal(wtPath, target)),
   );
-  return shipped.some(Boolean);
+  return local.some(Boolean);
 }
 
 // ---------------------------------------------------------------------------

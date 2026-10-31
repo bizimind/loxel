@@ -64,6 +64,8 @@ export interface DiskSyncedContent<T> {
   cacheKey: string;
   /** Whether the active query errored. */
   isError: boolean;
+  /** Whether the active query is waiting for the network (offline). */
+  isPaused: boolean;
   /**
    * Ref the editor must populate with a fn returning its current serialized content. Called only
    * to write it, so an editor may first adjust the content for `reason` (the code editor applies
@@ -231,7 +233,7 @@ export function useDiskSyncedContent<T>(
   }, [editorKey, mergeCallbacks]);
 
   // --- Query ---
-  const { data, dataUpdatedAt, isError, error } = useQuery({
+  const { data, dataUpdatedAt, isError, isPaused, error } = useQuery({
     queryKey: queryKeys.fileContent(
       activeProjectPath,
       filePath,
@@ -430,6 +432,7 @@ export function useDiskSyncedContent<T>(
     isDeleted,
     cacheKey,
     isError,
+    isPaused,
     getSerializedContentRef,
     save,
     saveNow,

@@ -1,4 +1,5 @@
 import type { AnalysisPlugin, AnalysisRecord, TreemapConfig } from "../plugin.ts";
+import { findInstalledBin, SOURCE_GLOBS } from "../project.ts";
 
 function isOxlintOutput(
   v: unknown,
@@ -26,21 +27,30 @@ const plugin: AnalysisPlugin = {
     description: "Lint violations per file",
     vizType: "treemap",
     options: [{ key: "rule", description: "rule name to filter (e.g. no-console)" }],
-    watchGlobs: [
-      "**/*.ts",
-      "**/*.tsx",
-      "**/*.js",
-      "**/*.jsx",
-      ".eslintrc*",
-      "eslint.config*",
-      ".oxlintrc*",
-    ],
+    watchGlobs: [...SOURCE_GLOBS, ".eslintrc*", "eslint.config*", ".oxlintrc*"],
   },
 
-  async generate(workDir, args): Promise<AnalysisRecord[]> {
+  async generate(workDir, _args): Promise<AnalysisRecord[]> {
+    const oxlint = findInstalledBin(workDir, "oxlint");
+    const eslint = findInstalledBin(workDir, "eslint");
+    if (!oxlint && !eslint) {
+      process.stderr.write(
+        "[code-analysis] lint-issues: no results, this project has no linter installed. " +
+          "Install `oxlint` or `eslint` to check it.\n",
+      );
+      return [];
+    }
     // Try oxlint first, fall back to eslint.
-    const records = (await tryOxlint(workDir, args)) ?? (await tryEslint(workDir, args));
-    return records ?? [];
+    const records =
+      (oxlint ? await tryOxlint(workDir, oxlint) : null) ??
+      (eslint ? await tryEslint(workDir, eslint) : null);
+    if (!records) {
+      process.stderr.write(
+        "[code-analysis] lint-issues: no results, no installed linter gave usable output.\n",
+      );
+      return [];
+    }
+    return records;
   },
 
   buildConfig(_workDir, args): TreemapConfig {
@@ -54,22 +64,27 @@ const plugin: AnalysisPlugin = {
   },
 };
 
-async function tryOxlint(
-  workDir: string,
-  _args: Record<string, string>,
-): Promise<AnalysisRecord[] | null> {
-  const proc = Bun.spawn(["bunx", "oxlint", "-f", "json", "."], {
+// Null when the linter did not produce JSON, for example because it found no config.
+async function runLinter(workDir: string, bin: string): Promise<unknown> {
+  const proc = Bun.spawn([bin, "-f", "json", "."], {
     cwd: workDir,
     stdout: "pipe",
-    stderr: "ignore",
+    stderr: "pipe",
   });
-  const text = await new Response(proc.stdout).text();
-  let parsed: unknown;
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
   try {
-    parsed = JSON.parse(text);
+    return JSON.parse(stdout);
   } catch {
+    process.stderr.write(`[code-analysis] lint-issues: ${bin} failed:\n${stderr.trim()}\n`);
     return null;
   }
+}
+
+async function tryOxlint(workDir: string, bin: string): Promise<AnalysisRecord[] | null> {
+  const parsed = await runLinter(workDir, bin);
   if (!isOxlintOutput(parsed)) return null;
 
   return parsed.diagnostics.map((d) => ({
@@ -80,22 +95,8 @@ async function tryOxlint(
   }));
 }
 
-async function tryEslint(
-  workDir: string,
-  _args: Record<string, string>,
-): Promise<AnalysisRecord[] | null> {
-  const proc = Bun.spawn(["bunx", "eslint", "-f", "json", "."], {
-    cwd: workDir,
-    stdout: "pipe",
-    stderr: "ignore",
-  });
-  const text = await new Response(proc.stdout).text();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return null;
-  }
+async function tryEslint(workDir: string, bin: string): Promise<AnalysisRecord[] | null> {
+  const parsed = await runLinter(workDir, bin);
   if (!isEslintOutput(parsed)) return null;
 
   const records: AnalysisRecord[] = [];
