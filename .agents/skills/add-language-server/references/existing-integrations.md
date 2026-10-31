@@ -7,15 +7,15 @@ Quick reference for the quirks of the servers that existed before `docs/language
 | LSP                   | Binary Source | Scope    | Connection | Semantic Tokens | Full-text Sync | Spawn Args      | Init Options                  |
 | --------------------- | ------------- | -------- | ---------- | --------------- | -------------- | --------------- | ----------------------------- |
 | TypeScript (tsc)      | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences                   |
-| YAML                  | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (post-init)        |
+| YAML                  | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (pulled)           |
 | Docker                | source-built  | worktree | lazy       | disabled        | yes            | `start --stdio` | compose, telemetry, Scout off |
 | Terraform             | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
 | Python (basedpyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
 | Python (ruff)         | downloaded    | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
 | Python (mypy)         | project env   | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
 | Astro                 | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
-| XML (LemMinX)         | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | none                          |
-| TOML (Tombi)          | downloaded    | worktree | lazy       | disabled        | no             | `lsp`           | schema map (post-init)        |
+| XML (LemMinX)         | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | downloads off (init options)  |
+| TOML (Tombi)          | downloaded    | worktree | lazy       | disabled        | no             | `lsp --offline` | schema map (post-init)        |
 | Go (gopls)            | built from Go | worktree | lazy       | enabled         | no             | `serve`         | settings (pulled)             |
 
 ## TypeScript — Do Not Use as Template
@@ -66,8 +66,8 @@ Simplest worktree-scoped integration. Clean Bun.build (no plugins), standard cli
 
 ## XML (LemMinX)
 
-Downloaded GraalVM native binary (Java compiled to native — no JRE at runtime). Download script hashes the zip before extraction and restricts unzip to the expected filename. Binary lives in `build/lemminx/lemminx` (subdirectory) because the zip contains a platform-suffixed name (`lemminx-osx-aarch_64`) that gets renamed. Uses `resolveBundledBinary("lemminx", devPath)` with explicit `devPath` since the binary isn't in `node_modules/.bin/`. XML is a Monaco built-in language — no registration or language configuration needed.
+Downloaded GraalVM native binary (Java compiled to native — no JRE at runtime). Download script hashes the zip before extraction and restricts unzip to the expected filename. Binary lives in `build/lemminx/lemminx` (subdirectory) because the zip contains a platform-suffixed name (`lemminx-osx-aarch_64`) that gets renamed. Uses `resolveBundledBinary("lemminx", devPath)` with explicit `devPath` since the binary isn't in `node_modules/.bin/`. XML is a Monaco built-in language — no registration or language configuration needed. Init options turn its downloads off and give it a work directory that Loxel fills with allowed schemas (LANGUAGE_SERVERS.md "Schemas and JSON validation"). A new server that can fetch something a file names needs the same kind of gate.
 
 ## TOML (Tombi) — Schemas Pushed as Editor Configuration
 
-Downloaded Rust binary (tarball, or zip on Windows; static musl builds on Linux), like ruff. Spawned as `tombi lsp`. Gets the Settings > Schemas map like YAML, but per worktree: `updateSchemas()` pushes a `workspace/didChangeConfiguration` `tombi` section (globs converted by `toTombiPatterns`, catalogs and strict mode off) to every initialized session, then an empty `tombi/associateSchema` so Tombi drops its cached diagnostics and asks the client to pull again. Suppresses formatting (format on save owns it), disables semantic tokens (TextMate highlights TOML) and forwards watched files. Tombi asks for `workspace/workspaceFolders`, which the base class answers for every worktree-scoped server. See LANGUAGE_SERVERS.md "TOML (Tombi)".
+Downloaded Rust binary (tarball, or zip on Windows; static musl builds on Linux), like ruff. Spawned as `tombi lsp --offline` with a `TOMBI_CACHE_HOME` that Loxel fills with allowed schemas. Gets the Settings > Schemas map like YAML, but per worktree: `updateSchemas()` pushes a `workspace/didChangeConfiguration` `tombi` section (globs converted by `toTombiPatterns`, catalogs and strict mode off) to every initialized session, then an empty `tombi/associateSchema` so Tombi drops its cached diagnostics and asks the client to pull again. Suppresses formatting (format on save owns it), disables semantic tokens (TextMate highlights TOML) and forwards watched files. Tombi asks for `workspace/workspaceFolders`, which the base class answers for every worktree-scoped server. See LANGUAGE_SERVERS.md "TOML (Tombi)".

@@ -6,6 +6,7 @@ import type { LspName } from "@/api/log-entry-model";
 import {
   LSP_EXITED_CLOSE_CODE,
   LSP_REPLACED_CLOSE_CODE,
+  LSP_RESTART_CLOSE_CODE,
   LSP_START_FAILED_CLOSE_CODE,
 } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
@@ -808,6 +809,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         });
       }
     });
+  }
+
+  /** Have every client reconnect to a fresh server, one that reads its schemas again. */
+  restartSessions(reason: string): void {
+    for (const { ws } of [...this.sessions.values()]) {
+      this.detach(ws);
+      ws.close(LSP_RESTART_CLOSE_CODE, reason);
+    }
   }
 
   /** The close reason for a failed server; a throwing hook must not keep the socket from closing. */

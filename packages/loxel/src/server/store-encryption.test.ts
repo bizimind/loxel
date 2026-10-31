@@ -74,6 +74,8 @@ describe("GET /api/stores/settings", () => {
     teardownProject: () => {},
     shutdown: () => {},
     resolveSchema: async () => ({}),
+    schemaConsent: {} as never,
+    ensureSchemas: async () => {},
     updateYamlSchemas: () => {},
     updateTomlSchemas: () => {},
     formatContent: async () => ({ content: null }),

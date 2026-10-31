@@ -18,14 +18,14 @@ Schemas come from **Settings > Schemas**, the same mappings JSON and YAML files 
 
 Turn a built-in schema off to stop checking files against it, or add your own mapping: a glob ending in `.toml` and the schema's URL or local path. Your mappings take precedence over the built-in ones for the same file. A TOML glob with wildcards, such as `config/*.toml`, applies only to files inside the project, and its `*` also matches files in subfolders. Schemas are downloaded when a file first needs them and cached for a day.
 
-A `#:schema` comment at the top of a file picks its schema directly, by URL or by a path relative to the file, and takes precedence over the settings:
+A `#:schema` comment at the top of a file picks its schema directly, by URL or by a path relative to the file, and takes precedence over the settings. Loxel [asks before downloading](/docs/language-intelligence#schemas-a-file-names) a schema at a URL:
 
 ```toml
 #:schema ./schemas/app.schema.json
 name = "demo"
 ```
 
-Projects that configure Tombi themselves, with a `tombi.toml` or `.tombi.toml` file or a `[tool.tombi]` table in `pyproject.toml`, use that configuration instead of the Schemas settings, so the editor agrees with the `tombi` command line. A `~/.config/tombi/config.toml` of your own does the same for every project. Formatting stays with [format on save](/docs/editor#formatter-auto-detection).
+Projects that configure Tombi themselves, with a `tombi.toml` or `.tombi.toml` file or a `[tool.tombi]` table in `pyproject.toml`, use that configuration instead of the Schemas settings, so the editor agrees with the `tombi` command line. A `~/.config/tombi/config.toml` of your own does the same for every project. Loxel does not download remote schemas or catalogs that such a configuration lists, or look up package versions from registries, so point it at local paths. Formatting stays with [format on save](/docs/editor#formatter-auto-detection).
 
 ---
 

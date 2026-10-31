@@ -80,6 +80,7 @@ The route in [routes.ts](../src/server/routes.ts) reads or upserts the row throu
 | `layout:canonical:<scope>:<worktreePath>`                          | Server (promotion), renderer (legacy layout migration)                                                                 |
 | `external-folders:<worktreePath>`                                  | Server, [external-folders-service.ts](../src/server/external-folders-service.ts); deleted when the worktree is removed |
 | `python-interpreter:<worktreePath>`                                | Server, [python-override-store.ts](../src/server/python-override-store.ts); deleted when the worktree is removed       |
+| `schema-consent`                                                   | Server, [schema-consent.ts](../src/server/schema-consent.ts)                                                           |
 
 ### Multi-window propagation
 

@@ -16,6 +16,7 @@ import { useLogStore } from "@/store/logs";
 import { usePanelBadgeStore } from "@/store/panel-badges";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 import { deriveProject, useProjectStore } from "@/store/projects";
+import { useSchemaConsentStore } from "@/store/schema-consent";
 import { consumeNonce } from "@/store/server-storage";
 import { applyStoreUpdate } from "@/store/store-sync";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
@@ -437,6 +438,10 @@ export function useWsBridge(): void {
           break;
 
         // --- Notification events (global) ---
+
+        case "schema_consent_changed":
+          useSchemaConsentStore.setState(message.data);
+          break;
 
         case "notifications_sync":
           usePanelNotificationStore.getState().syncAll(message.data);

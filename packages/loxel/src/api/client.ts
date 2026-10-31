@@ -36,6 +36,7 @@ import type {
   PlacedThread,
   Review,
 } from "./review-model";
+import type { SchemaConsentDecision } from "./schema-consent-model";
 import type { UpdateState } from "./update-model";
 import type {
   NestedRemoval,
@@ -612,19 +613,24 @@ export async function convertProject(req: ConvertProjectRequest) {
 
 // --- Schema API ---
 
-export interface SchemaSyncResult {
-  json: Array<{ glob: string; url: string; schema: unknown }>;
-  yaml: { synced: boolean };
-  toml: { synced: boolean };
+export async function syncSchemas(schemas: Array<{ glob: string; url: string }>): Promise<void> {
+  await fetchJson("/schemas/sync", { method: "POST", body: JSON.stringify({ schemas }) });
 }
 
-export async function syncSchemas(
-  schemas: Array<{ glob: string; url: string }>,
-): Promise<SchemaSyncResult> {
-  return fetchJson<SchemaSyncResult>("/schemas/sync", {
-    method: "POST",
-    body: JSON.stringify({ schemas }),
-  });
+export async function ensureSchemas(urls: readonly string[]): Promise<void> {
+  await fetchJson("/schemas/ensure", { method: "POST", body: JSON.stringify({ urls }) });
+}
+
+/** Record a decision on a schema URL a project file names; null forgets it. */
+export async function decideSchemaConsent(
+  url: string,
+  decision: SchemaConsentDecision | null,
+): Promise<void> {
+  await fetchJson("/schemas/consent", { method: "POST", body: JSON.stringify({ url, decision }) });
+}
+
+export async function setSchemaNeverFetch(neverFetch: boolean): Promise<void> {
+  await fetchJson("/schemas/never-fetch", { method: "POST", body: JSON.stringify({ neverFetch }) });
 }
 
 export async function resolveSchema(url: string, baseDir?: string): Promise<unknown> {
