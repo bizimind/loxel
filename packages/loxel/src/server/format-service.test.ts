@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -425,6 +426,25 @@ describe("FormatService language modules", () => {
       content: null,
       notice: 'Format on save skipped: "fake-fmt" is not installed.',
     });
+  });
+
+  test("skip does not spawn, and shows its notice if it has one", async () => {
+    const wt = await makeWorktree({});
+    const ran = join(wt, "ran");
+    await mkdir(join(wt, "node_modules/.bin"), { recursive: true });
+    await writeFile(join(wt, "node_modules/.bin/fake-fmt"), `#!/bin/sh\n: > "${ran}"\n`, {
+      mode: 0o755,
+    });
+    const format = (skip: { notice?: string }) =>
+      new FormatService([fakeLanguage({ spawnOptions: () => ({ skip }) })]).format(
+        "x",
+        join(wt, "a.fake"),
+        wt,
+        AUTO_DETECT,
+      );
+    expect(await format({})).toEqual({ content: null });
+    expect(await format({ notice: "why" })).toEqual({ content: null, notice: "why" });
+    expect(existsSync(ran)).toBe(false);
   });
 
   test("spawn options apply to a manual override too", async () => {

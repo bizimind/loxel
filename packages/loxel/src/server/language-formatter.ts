@@ -6,6 +6,12 @@ export interface FileFormatter {
   args: string;
 }
 
+/** A formatter failing in a way its language can explain better than the generic messages can. */
+export type FormatterFailure = { command: string } & (
+  | { kind: "not-installed" }
+  | { kind: "exited"; exitCode: number; stderr: string }
+);
+
 /** How to spawn a formatter. What a module leaves out keeps the default in `LanguageFormatter`. */
 export interface FormatterSpawnOptions {
   /**
@@ -17,6 +23,8 @@ export interface FormatterSpawnOptions {
   env?: Record<string, string>;
   /** Prepended to `PATH`, first wins. Default: the worktree's `node_modules/.bin`. */
   binDirs?: readonly string[];
+  /** Do not spawn at all: the save goes out unformatted, and the user sees `notice` if there is one. */
+  skip?: { notice?: string };
 }
 
 /**
@@ -44,6 +52,13 @@ export interface LanguageFormatter {
     dir: string,
     wtRoot: string,
   ): FormatterSpawnOptions | Promise<FormatterSpawnOptions>;
+  /**
+   * What to tell the user about `failure`, for every command formatting these extensions, manual
+   * overrides included. Undefined keeps the default: a generic notice for a missing formatter,
+   * and none for a non-zero exit, usually a syntax error that would repeat on every save. Of
+   * several modules claiming an extension, the first one's applies.
+   */
+  failureNotice?(failure: FormatterFailure): string | undefined;
 }
 
 /** The default of {@link FormatterSpawnOptions.binDirs}, for a module that adds to it. */

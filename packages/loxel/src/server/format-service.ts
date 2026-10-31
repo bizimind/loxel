@@ -8,6 +8,7 @@ import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-mod
 import type { BackendMode, FormatterBackend } from "./formatter-backends";
 import {
   type FileFormatter,
+  type FormatterFailure,
   type FormatterSpawnOptions,
   type LanguageFormatter,
   nodeModulesBin,
@@ -26,9 +27,10 @@ const FORMAT_TIMEOUT_MS = 5_000;
 
 /**
  * Outcome of `FormatService.format()`. `content` is null when the file is saved unformatted;
- * `notice` then explains failures the user can fix (formatter not installed, timed out). Other
- * failures, typically a syntax error in the buffer that the language server already flags, only
- * go to the server log, since they would otherwise repeat on every save.
+ * `notice` then explains failures the user can fix (formatter not installed, timed out), and what
+ * a language module adds through `failureNotice` or `skip`. Other failures, typically a syntax
+ * error in the buffer that the language server already flags, only go to the server log, since
+ * they would otherwise repeat on every save.
  */
 export interface FormatResult {
   content: string | null;
@@ -317,6 +319,16 @@ export class FormatService {
     };
   }
 
+  /** What the file's language module says about `failure`; its failure must not lose the save. */
+  private languageNotice(ext: string, failure: FormatterFailure): string | undefined {
+    try {
+      return this.languages.find((l) => l.extensions.includes(ext))?.failureNotice?.(failure);
+    } catch (err) {
+      log.warn("Formatter failure notice failed", { ext, error: errorMessage(err) });
+      return undefined;
+    }
+  }
+
   private async formatWithBackend(
     fmt: DetectedFormatter,
     content: string,
@@ -404,6 +416,10 @@ export class FormatService {
     const options = worktreePath
       ? await this.spawnOptions(command, ext, filePath, worktreePath)
       : {};
+    if (options.skip) {
+      log.info("Language module skipped the formatter", { command, filePath });
+      return { content: null, notice: options.skip.notice };
+    }
     // Relative paths are relative to the worktree, so they would not survive another cwd.
     const fromWorktree = (path: string) =>
       worktreePath && options.cwd !== worktreePath ? resolve(worktreePath, path) : path;
@@ -424,7 +440,10 @@ export class FormatService {
       proc = spawnFormatter(argv, options.cwd, env);
     } catch (err) {
       log.warn("Formatter could not be started", { command, filePath, error: errorMessage(err) });
-      return { content: null, notice: spawnFailureNotice(command, err, env.PATH ?? "") };
+      const notice = spawnFailureNotice(command, err, env.PATH ?? "", (failure) =>
+        this.languageNotice(ext, failure),
+      );
+      return { content: null, notice };
     }
 
     try {
@@ -455,7 +474,8 @@ export class FormatService {
           exitCode,
           stderr: stderr.slice(0, 500),
         });
-        return UNFORMATTED;
+        const notice = this.languageNotice(ext, { kind: "exited", command, exitCode, stderr });
+        return notice ? { content: null, notice } : UNFORMATTED;
       }
 
       const formatted = await new Response(proc.stdout).text();
@@ -511,12 +531,20 @@ function isClosedPipe(err: unknown): boolean {
  * Bun.spawn throws ENOENT both when the executable is not on PATH and when it is found but its
  * interpreter is gone (e.g. a venv whose Python was upgraded away).
  */
-function spawnFailureNotice(command: string, err: unknown, PATH: string): string {
+function spawnFailureNotice(
+  command: string,
+  err: unknown,
+  PATH: string,
+  languageNotice: (failure: FormatterFailure) => string | undefined,
+): string {
   const code = err instanceof Error && "code" in err ? String(err.code) : null;
   if (code === "ENOENT" && !Bun.which(command, { PATH })) {
     // It may have been installed since the login-shell PATH was captured; the next save retries.
     void refreshLoginShellEnv();
-    return `Format on save skipped: "${command}" is not installed.`;
+    return (
+      languageNotice({ kind: "not-installed", command }) ??
+      `Format on save skipped: "${command}" is not installed.`
+    );
   }
   const detail = code === "ENOENT" ? "; its interpreter may be missing" : ` (${code ?? "error"})`;
   return `Format on save skipped: "${command}" could not be started${detail}.`;
