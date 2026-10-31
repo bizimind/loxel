@@ -1,5 +1,6 @@
 import { createHighlighter, type Highlighter } from "shiki";
 
+import { JAVA_PROPERTIES_GRAMMAR } from "./java-properties-grammar";
 import { loxelDark } from "./loxel-themes";
 
 // Singleton highlighter instance
@@ -26,8 +27,12 @@ const BUNDLED_LANGUAGES = [
   "go",
   "java",
   "c",
+  "cmake",
   "cpp",
   "csharp",
+  "razor",
+  "objective-c",
+  "objective-cpp",
   "swift",
   "kotlin",
   "ruby",
@@ -45,6 +50,8 @@ const BUNDLED_LANGUAGES = [
   "astro",
   "dotenv",
   "xml",
+  "groovy",
+  "bat",
 ] as const;
 
 /**
@@ -54,7 +61,7 @@ export async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
       themes: [loxelDark, "github-dark"],
-      langs: [...BUNDLED_LANGUAGES],
+      langs: [...BUNDLED_LANGUAGES, JAVA_PROPERTIES_GRAMMAR],
     });
   }
   return highlighterPromise;
@@ -63,7 +70,7 @@ export async function getHighlighter(): Promise<Highlighter> {
 // Special filename to language mapping (case-insensitive)
 export const FILENAME_TO_LANG: Record<string, string> = {
   // Lock files
-  "bun.lock": "json",
+  "bun.lock": "jsonc",
   "bun.lockb": "json",
   "package-lock.json": "json",
   "composer.lock": "json",
@@ -85,6 +92,13 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   matchfile: "ruby",
   guardfile: "ruby",
 
+  // Gradle and Maven (.gradle files and the wrappers' properties resolve by extension)
+  jenkinsfile: "groovy",
+  gradlew: "bash",
+  mvnw: "bash",
+  "gradlew.bat": "bat",
+  "mvnw.cmd": "bat",
+
   // Config files
   pipfile: "toml",
   dockerfile: "dockerfile",
@@ -93,6 +107,10 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   "docker-bake.override.hcl": "dockerbake",
   makefile: "make",
   gnumakefile: "make",
+  "cmakelists.txt": "cmake",
+  "cmakecache.txt": "ini",
+  // One compiler flag per line with no comment syntax, so no grammar fits.
+  "compile_flags.txt": "plaintext",
   justfile: "just",
   ".justfile": "just",
   "go.mod": "go.mod",
@@ -101,19 +119,50 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   "go.work.sum": "go.sum",
   procfile: "yaml",
   caddyfile: "ini",
+  ".classpath": "xml",
+  ".project": "xml",
+  ".factorypath": "xml",
+
+  // .NET XML configuration (the `config` extension alone is not always XML)
+  "app.config": "xml",
+  "applicationhost.config": "xml",
+  "machine.config": "xml",
+  "nuget.config": "xml",
+  "packages.config": "xml",
+  "web.config": "xml",
+  "web.debug.config": "xml",
+  "web.release.config": "xml",
+
+  // JS tool configs whose tools accept comments in JSON (no strict-JSON markers)
+  ".babelrc.json": "jsonc",
+  ".eslintrc.json": "jsonc",
+  ".jshintrc": "jsonc",
+  ".mocharc.json": "jsonc",
+  ".oxfmtrc.json": "jsonc",
+  ".oxlintrc.json": "jsonc",
+  "babel.config.json": "jsonc",
+  "lerna.json": "jsonc",
 
   // RC files (JSON-based)
-  ".babelrc": "json",
-  ".prettierrc": "json",
-  ".eslintrc": "json",
+  ".babelrc": "jsonc",
+  ".c8rc": "json",
+  ".eslintrc": "jsonc",
+  ".nycrc": "json",
   ".stylelintrc": "json",
   ".markdownlintrc": "json",
   ".htmlhintrc": "json",
-  ".swcrc": "json",
+  ".swcrc": "jsonc",
 
-  // RC files (YAML-based)
+  // RC files (YAML-based; the tools parse them as YAML, so their JSON form is valid too)
   ".clang-format": "yaml",
+  "_clang-format": "yaml",
   ".clang-tidy": "yaml",
+  ".csharpierrc": "yaml", // JSON or YAML, and JSON is valid YAML
+  ".clangd": "yaml",
+  ".commitlintrc": "yaml",
+  ".lintstagedrc": "yaml",
+  ".prettierrc": "yaml",
+  ".releaserc": "yaml",
   ".yamllint": "yaml",
 
   // RC files (INI-based)
@@ -132,6 +181,7 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   ".eslintignore": "ini",
   ".npmignore": "ini",
   ".vercelignore": "ini",
+  ".clang-format-ignore": "ini",
 
   // Docs without extension
   readme: "markdown",
@@ -173,12 +223,14 @@ export const EXT_TO_LANG: Record<string, string> = {
   jsonc: "jsonc",
   jsonl: "jsonl",
   ndjson: "jsonl",
+  slnf: "json",
   yaml: "yaml",
   yml: "yaml",
   toml: "toml",
   ini: "ini",
   cfg: "ini",
   conf: "ini",
+  globalconfig: "ini",
   xml: "xml",
   xsd: "xml",
   xsl: "xml",
@@ -189,6 +241,7 @@ export const EXT_TO_LANG: Record<string, string> = {
   csproj: "xml",
   fsproj: "xml",
   vbproj: "xml",
+  slnx: "xml",
   props: "xml",
   targets: "xml",
   nuspec: "xml",
@@ -196,6 +249,9 @@ export const EXT_TO_LANG: Record<string, string> = {
   xaml: "xml",
   axaml: "xml",
   axml: "xml",
+  pom: "xml",
+  fxml: "xml",
+  tld: "xml",
   env: "dotenv",
 
   // Docs
@@ -206,18 +262,45 @@ export const EXT_TO_LANG: Record<string, string> = {
   rs: "rust",
   go: "go",
   c: "c",
-  h: "c",
+  i: "c",
+  // Mostly C++ in practice, and the C++ grammar also covers C. Same choice as VS Code.
+  h: "cpp",
   cpp: "cpp",
   cc: "cpp",
   cxx: "cpp",
+  "c++": "cpp",
+  ii: "cpp",
+  ino: "cpp",
   hpp: "cpp",
+  cake: "csharp",
+  hh: "cpp",
+  hxx: "cpp",
+  "h++": "cpp",
+  inl: "cpp",
+  ipp: "cpp",
+  tpp: "cpp",
+  tcc: "cpp",
+  txx: "cpp",
+  ixx: "cpp",
+  cppm: "cpp",
+  ccm: "cpp",
+  cxxm: "cpp",
+  "c++m": "cpp",
   cs: "csharp",
+  cshtml: "razor",
+  csx: "csharp",
+  razor: "razor",
 
   // JVM
   java: "java",
   kt: "kotlin",
   kts: "kotlin",
   scala: "java",
+
+  // Gradle, Groovy and Java properties
+  groovy: "groovy",
+  gradle: "groovy",
+  properties: "java-properties",
 
   // Scripting
   py: "python",
@@ -228,8 +311,8 @@ export const EXT_TO_LANG: Record<string, string> = {
 
   // Mobile
   swift: "swift",
-  m: "c",
-  mm: "cpp",
+  m: "objective-c",
+  mm: "objective-cpp",
 
   // Shell
   sh: "bash",
@@ -240,6 +323,7 @@ export const EXT_TO_LANG: Record<string, string> = {
   // Config
   dockerfile: "dockerfile",
   mk: "make",
+  cmake: "cmake",
   just: "just",
   graphql: "graphql",
   gql: "graphql",
@@ -255,7 +339,8 @@ export const EXT_TO_LANG: Record<string, string> = {
  * Detect the language from a file path.
  */
 export function detectLanguage(filePath: string): string | null {
-  const filename = filePath.split("/").pop()?.toLowerCase() ?? "";
+  const originalName = filePath.split("/").pop() ?? "";
+  const filename = originalName.toLowerCase();
 
   // Check exact filename match first
   if (FILENAME_TO_LANG[filename]) {
@@ -267,6 +352,9 @@ export function detectLanguage(filePath: string): string | null {
 
   // Handle .env variants (.env, .env.local, .env.production, etc.)
   if (filename === ".env" || filename.startsWith(".env.")) return "dotenv";
+
+  // The one case-sensitive extension: `.C` is C++, `.c` is C.
+  if (originalName.endsWith(".C")) return "cpp";
 
   // Extract extension and look up
   const ext = filename.split(".").pop()?.toLowerCase();

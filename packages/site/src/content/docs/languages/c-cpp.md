@@ -15,7 +15,7 @@ These files are served by [clangd](https://clangd.llvm.org). Besides diagnostics
 
 ## What you need to install
 
-On macOS, clangd ships with Loxel, so these features work with nothing installed. Standard headers such as `<stdio.h>` and `<vector>` come from Apple's developer tools. If you don't have them, Loxel tells you, and `#include`s of those headers show as not found until you install them in a terminal:
+On macOS, clangd ships with Loxel, so these features work with nothing installed. Xcode's clangd isn't supported, and Loxel uses its own. Standard headers such as `<stdio.h>` and `<vector>` come from Apple's developer tools. If you don't have them, Loxel tells you, and `#include`s of those headers show as not found until you install them in a terminal:
 
 ```bash
 xcode-select --install
@@ -62,7 +62,7 @@ Diagnostics:
 
 See clangd's [configuration reference](https://clangd.llvm.org/config) for every option. Your own config at `~/Library/Preferences/clangd/config.yaml` on macOS, or `~/.config/clangd/config.yaml` on Linux, applies to every project.
 
-Loxel leaves out compile flags that make the compiler write output files, and flags that pass options through to it or load them from elsewhere: `-Xclang`, `-Xpreprocessor`, `-Wp,` and `--config`. This does not affect how your project builds, only what clangd sees.
+Loxel leaves out compile flags that make the compiler write output files, and flags that pass options through to it or load them from elsewhere: `-Xpreprocessor`, `-Wp,` and `--config`. This does not affect how your project builds, only what clangd sees.
 
 ## clang-tidy
 

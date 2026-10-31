@@ -52,23 +52,27 @@ Press `Cmd+S` to save immediately. Explicit save is the trigger for format on sa
 
 ## Formatter auto-detection
 
-Loxel detects which formatters are available in the active worktree by inspecting config files, `package.json` and `pyproject.toml`. Detection is per-worktree — switching worktrees picks up that worktree's toolchain.
+Loxel detects which formatters are available in the active worktree by inspecting config files, `package.json`, `pyproject.toml`, `go.mod`, Gradle build files and .NET tool manifests. Detection is per-worktree — switching worktrees picks up that worktree's toolchain.
 
 Supported formatters:
 
-| Formatter      | Detected from                                                            | Formats                                              |
-| -------------- | ------------------------------------------------------------------------ | ---------------------------------------------------- |
-| `prettier`     | A Prettier config file or `prettier` key in `package.json`               | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, GraphQL |
-| `oxfmt`        | An `.oxfmtrc.*` file or an `oxfmt` dependency                            | The same as Prettier, plus TOML                      |
-| `rustfmt`      | `rustfmt.toml`                                                           | `.rs` files                                          |
-| `ruff`         | `ruff.toml`, `.ruff.toml`, a `[tool.ruff]` table, or a `ruff` dependency | `.py` and `.pyi` files                               |
-| `black`        | A `[tool.black]` table in `pyproject.toml`, or a `black` dependency      | `.py` and `.pyi` files                               |
-| `clang-format` | `.clang-format`                                                          | C and C++ files                                      |
-| `deno`         | `deno.json`                                                              | JS and TS files                                      |
+| Formatter       | Detected from                                                            | Formats                                              |
+| --------------- | ------------------------------------------------------------------------ | ---------------------------------------------------- |
+| `prettier`      | A Prettier config file or `prettier` key in `package.json`               | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, GraphQL |
+| `oxfmt`         | An `.oxfmtrc.*` file or an `oxfmt` dependency                            | The same as Prettier, plus TOML                      |
+| `rustfmt`       | `rustfmt.toml`                                                           | `.rs` files                                          |
+| `ruff`          | `ruff.toml`, `.ruff.toml`, a `[tool.ruff]` table, or a `ruff` dependency | `.py` and `.pyi` files                               |
+| `black`         | A `[tool.black]` table in `pyproject.toml`, or a `black` dependency      | `.py` and `.pyi` files                               |
+| `ktfmt/ktlint`  | [A Gradle plugin or `ktlint_*`](/docs/languages/kotlin#format-on-save)   | `.kt` and `.kts` files                               |
+| `clang-format`  | `.clang-format`                                                          | C and C++ files                                      |
+| `deno`          | `deno.json`                                                              | JS and TS files                                      |
+| `golangci-lint` | A `version: "2"` `.golangci.*` config that enables formatters            | `.go` files                                          |
+| `gofmt`         | `go.mod` or `go.work`                                                    | `.go` files                                          |
+| `csharpier`     | A `.csharpierrc*` file, or `csharpier` in a `dotnet-tools.json` manifest | `.cs` and `.csx` files                               |
 
 When a project has both Prettier and oxfmt, Prettier wins for the languages it supports.
 
-Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's Python environment when they're installed there (and the environment isn't committed to git), so the version pinned in your dev dependencies is the one used: a sub-project's own `.venv`, `venv` or `env` first, then the worktree's [Python environment](/docs/languages/python#python-environment), including an interpreter you chose, and files your ruff config excludes are left as they are. The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's Python environment when they're installed there (and the environment isn't committed to git), so the version pinned in your dev dependencies is the one used: a sub-project's own `.venv`, `venv` or `env` first, then the worktree's [Python environment](/docs/languages/python#python-environment), including an interpreter you chose, and files your ruff config excludes are left as they are. Go formatters are also detected from the config closest to the file: see [Go](/docs/languages/go#format-on-save). CSharpier is detected from the config or tool manifest closest to the file too. A `.csproj` or `.editorconfig` alone doesn't turn it on, though CSharpier reads `.editorconfig` for its options when there is no `.csharpierrc`. Loxel runs the version in your tool manifest with `dotnet tool run`, or else a `csharpier` on your `PATH`, and files in `.csharpierignore` are left as they are. Loxel never restores or downloads the tool: if it isn't restored, a notice tells you to run `dotnet tool restore` in a terminal. To use a manifest, `dotnet` on your `PATH` must be the SDK's own, not a version manager's shim. The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
 
 ---
 
@@ -80,7 +84,7 @@ Each file's indentation comes from the first of these that sets it:
 2. The project's [`.editorconfig`](#editorconfig).
 3. A **Per-Extension Override** in **Settings > Editor**.
 4. The file's own content: an existing file keeps the style it's written in, so Enter and Tab don't mix 2-space indents into a 4-space file or spaces into a tab-indented one.
-5. The language's convention, matching its formatter or official style guide: Python, Rust, C#, Kotlin, PHP and justfiles use 4 spaces, and Go (with `go.mod` and `go.work`) and Makefiles use tabs. Makefiles get tabs even when the file's content is mostly indented with spaces, because make requires recipe lines to start with a tab.
+5. The language's convention, matching its formatter or official style guide: Python, Rust, C#, Razor, Kotlin, PHP and justfiles use 4 spaces, and Go (with `go.mod` and `go.work`) and Makefiles use tabs. C, C++ and Objective-C have no single style guide and also use 4 spaces. Makefiles get tabs even when the file's content is mostly indented with spaces, because make requires recipe lines to start with a tab.
 6. **Default Indentation** in **Settings > Editor**, 2 spaces unless you change it.
 
 Each property is looked up on its own, so an `.editorconfig` that only sets `indent_style = space` takes the size from the next source down. A project's `.editorconfig` wins over your per-extension overrides because it's the convention everyone working on the project, and its formatters, follow; your overrides apply wherever a project doesn't set one.
@@ -114,6 +118,14 @@ A newly opened file can be edited once its `.editorconfig` has been read, at mos
 Python source (`.py`), stub (`.pyi`), and `.pyw` files get highlighting and [Python language features](/docs/languages/python). Typing `"""` or `'''` adds the closing quotes, typing the closing quotes steps over them, and pressing Enter after `return`, `pass`, `break`, `continue`, or `raise` dedents the next line.
 
 Project files are recognized too: `pyproject.toml`, `uv.lock`, `poetry.lock`, and `Pipfile` are highlighted as TOML, `Pipfile.lock` as JSON, and `requirements*.txt`, `requirements*.in`, `requirements/*.txt`, and `constraints*.txt` as pip requirements. In the file tree, `.venv`, `venv`, `__pycache__`, and Python tool cache folders show a distinct folder icon. To treat other files as a given language, add a glob in **Settings > File Associations**.
+
+## Gradle and Maven files
+
+`.gradle` and `.groovy` files and `Jenkinsfile` are highlighted as Groovy, including comment toggling and bracket matching. Typing `"""` or `'''` adds the closing quotes, and typing the closing quotes steps over them.
+
+`.properties` files, such as `gradle.properties` and `gradle-wrapper.properties`, get their own highlighting, with `#` and `!` comments. Toggling a comment uses `#`. The `gradlew` and `mvnw` wrapper scripts are highlighted as shell, and `gradlew.bat` and `mvnw.cmd` as batch.
+
+In the file tree, Gradle build and settings files, `gradle.properties`, `libs.versions.toml`, and the `gradlew` scripts show a Gradle icon, `pom.xml` and the `mvnw` scripts a Maven icon, and Groovy files and `Jenkinsfile` a Groovy icon.
 
 ---
 

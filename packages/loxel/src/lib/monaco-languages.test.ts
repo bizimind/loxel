@@ -40,13 +40,17 @@ describe("registerLoxelLanguages", () => {
   test("registers languages Monaco does not ship", () => {
     expect(loxelLanguages.toSorted()).toEqual([
       "astro",
+      "cmake",
       "dockerbake",
       "go.mod",
       "go.sum",
       "go.work",
+      "groovy",
+      "java-properties",
       "jsx",
       "just",
       "make",
+      "objective-cpp",
       "pip-requirements",
       "terraform",
       "toml",
@@ -114,6 +118,10 @@ describe("editing Loxel's languages in Monaco", () => {
     ["terraform", 'name = "a"', '# name = "a"'],
     ["make", "all: build", "# all: build"],
     ["just", "build:", "# build:"],
+    ["groovy", "id 'java'", "// id 'java'"],
+    ["java-properties", "org.gradle.caching=true", "# org.gradle.caching=true"],
+    ["cmake", "project(fmt)", "# project(fmt)"],
+    ["objective-cpp", "int a = 1;", "// int a = 1;"],
     ["go.mod", "require a.b/c v1.0.0", "// require a.b/c v1.0.0"],
     ["go.work", "use ./a", "// use ./a"],
   ])("toggles a line comment in %s", (language, line, commented) => {
@@ -122,14 +130,58 @@ describe("editing Loxel's languages in Monaco", () => {
     expect(model.getValue()).toBe(commented);
   });
 
-  test.each(["tsx", "jsx", "terraform", "make", "just", "go.mod", "go.work"])(
-    "auto-closes brackets in %s",
-    (lang) => {
-      const model = open(lang, "x = ");
-      type("(");
-      expect(model.getValue()).toBe("x = ()");
+  test.each([
+    "tsx",
+    "jsx",
+    "terraform",
+    "make",
+    "just",
+    "cmake",
+    "objective-cpp",
+    "go.mod",
+    "go.work",
+    "groovy",
+    "java-properties",
+  ])("auto-closes brackets in %s", (lang) => {
+    const model = open(lang, "x = ");
+    type("(");
+    expect(model.getValue()).toBe("x = ()");
+  });
+
+  test.each(['"""', "'''"])("auto-closes %s in Groovy", (quotes) => {
+    const model = open("groovy", "def a = ");
+    type(quotes);
+    expect(model.getValue()).toBe(`def a = ${quotes}${quotes}`);
+    expect(editor.getPosition()?.column).toBe("def a = ".length + quotes.length + 1);
+  });
+
+  test("toggles a CMake bracket comment", () => {
+    const model = open("cmake", "project(fmt)");
+    editor.setSelection(model.getFullModelRange());
+    editor.trigger("keyboard", "editor.action.blockComment", null);
+    expect(model.getValue()).toBe("#[[ project(fmt) ]]");
+  });
+
+  test.each(["if(WIN32)", "foreach(f ${FILES})  # all", "ELSE()", "add_library("])(
+    "indents after %p in CMake",
+    (line) => {
+      const model = open("cmake", line);
+      type("\n");
+      expect(model.getLineContent(2)).toBe("    ");
     },
   );
+
+  test.each(["endif()", "project(fmt)", "# if(WIN32)"])("keeps the indent after %p", (line) => {
+    const model = open("cmake", line);
+    type("\n");
+    expect(model.getLineContent(2)).toBe("");
+  });
+
+  test("continues a doc comment on Enter in Objective-C++", () => {
+    const model = open("objective-cpp", "/**");
+    type("\n");
+    expect(model.getLineContent(2)).toBe(" * ");
+  });
 
   test("leaves go.sum alone on toggle line comment", () => {
     const line = "a.b/c v1.0.0 h1:abc=";

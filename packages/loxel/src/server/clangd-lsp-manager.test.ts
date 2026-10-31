@@ -28,7 +28,10 @@ import {
   queryDriverGlobs,
 } from "./clangd-lsp-manager";
 
+/** A clangd the manager will run: Xcode's isn't supported. */
 const CLANGD = Bun.which("clangd");
+const CLANGD_IS_SUPPORTED =
+  CLANGD !== null && !Bun.spawnSync([CLANGD, "--version"]).stdout.toString().includes("Apple");
 const TEST_TIMEOUT_MS = 60_000;
 
 const dirs: string[] = [];
@@ -210,7 +213,7 @@ describe("escapeSnippetDollars", () => {
     const escaped = JSON.parse(
       escapeSnippetDollars(
         frame({
-          insertText: "my$fn(${1:int $a}, $0)",
+          insertText: "my$fn(${1:int \\$a}, $0)",
           insertTextFormat: 2,
           textEdit: { newText: "FOO$BAR(${1:x})" },
         }),
@@ -218,6 +221,15 @@ describe("escapeSnippetDollars", () => {
     ) as { result: { items: { insertText: string; textEdit: { newText: string } }[] } };
     expect(escaped.result.items[0]?.insertText).toBe("my\\$fn(${1:int \\$a}, $0)");
     expect(escaped.result.items[0]?.textEdit.newText).toBe("FOO\\$BAR(${1:x})");
+  });
+
+  test("escapes a digit after a $ in a name, and keeps a template's tabstop", () => {
+    const items = (body: string) =>
+      (JSON.parse(body) as { result: { items: { insertText: string }[] } }).result.items;
+    const escape = (insertText: string) =>
+      items(escapeSnippetDollars(frame({ insertText, insertTextFormat: 2 })))[0]?.insertText;
+    expect(escape("f$1(${1:int x})")).toBe("f\\$1(${1:int x})");
+    expect(escape("mk$1<$1>()$0")).toBe("mk\\$1<$1>()$0");
   });
 
   test("leaves plain text items, other frames and frames with no such $ as they are", () => {
@@ -274,32 +286,43 @@ describe("checkClangd", () => {
     expect(clangdMajorVersion("something else")).toBeNull();
   });
 
-  test("takes version 16 and newer, and one it can't read", async () => {
+  test("takes version 16 and newer, and refuses a version it can't read", async () => {
     const answering = (stdout: string) => async () => ({ code: 0, stdout });
     const check = (stdout: string) => checkClangd("/opt/clangd", "linux", answering(stdout));
     expect(await check(VERSION_OUTPUT("15.0.6"))).toBe("too-old");
     expect(await check(VERSION_OUTPUT("16.0.2"))).toBe("ok");
-    expect(await check("")).toBe("ok");
+    expect(await check("Homebrew clangd version 21.1.0\n")).toBe("ok");
+    expect(await check("")).toBe("unknown");
   });
 
-  test("does not run Apple's stub without the developer tools", async () => {
-    const commands: string[][] = [];
-    const check = await checkClangd("/usr/bin/clangd", "darwin", async (command) => {
-      commands.push(command);
-      return { code: 2, stdout: "" };
-    });
-    expect(check).toBe("not-installed");
-    expect(commands).toEqual([["/usr/bin/xcode-select", "-p"]]);
+  test("refuses Xcode's clangd under any path", async () => {
+    const apple = async () => ({ code: 0, stdout: "Apple clangd version 21.0.0 (clang-2100)\n" });
+    expect(await checkClangd("/opt/somewhere/clangd", "darwin", apple)).toBe("apple");
+    expect(await checkClangd("/opt/somewhere/clangd", "linux", apple)).toBe("apple");
   });
 
-  test("runs other clangds without asking about the developer tools", async () => {
+  test("reads the version of a /usr/bin/clangd on Linux", async () => {
     const commands: string[][] = [];
-    await checkClangd("/opt/homebrew/bin/clangd", "darwin", async (command) => {
+    const run = async (command: string[]) => {
       commands.push(command);
       return { code: 0, stdout: VERSION_OUTPUT("20.1.0") };
-    });
-    expect(commands).toEqual([["/opt/homebrew/bin/clangd", "--version"]]);
+    };
+    expect(await checkClangd("/usr/bin/clangd", "linux", run)).toBe("ok");
+    expect(commands).toEqual([["/usr/bin/clangd", "--version"]]);
   });
+
+  test.skipIf(process.platform !== "darwin")(
+    "does not run Apple's stub, also by a link",
+    async () => {
+      const link = join(await makeDir(), "clangd");
+      await symlink("/usr/bin/clangd", link);
+      const never = async () => {
+        throw new Error("must not run");
+      };
+      expect(await checkClangd("/usr/bin/clangd", "darwin", never)).toBe("apple");
+      expect(await checkClangd(link, "darwin", never)).toBe("apple");
+    },
+  );
 });
 
 describe("ClangdLspManager", () => {
@@ -394,7 +417,7 @@ exec /bin/cat > /dev/null
     process.env.PATH = await makeDir();
     try {
       for (const [platform, command] of [
-        ["darwin", "xcode-select --install"],
+        ["darwin", "brew install llvm"],
         ["linux", "apt install clangd"],
       ] as const) {
         manager = new ClangdLspManager(platform, await makeDir());
@@ -449,238 +472,12 @@ async function exists(path: string): Promise<boolean> {
   return Bun.file(path).exists();
 }
 
-describe.skipIf(!CLANGD || process.platform === "win32")("ClangdLspManager with clangd", () => {
-  async function runClangd(root: string, file: string): Promise<void> {
-    manager?.destroy();
-    manager = new ClangdLspManager(process.platform, await makeDir());
-    const client = new FakeClient(manager);
-    await client.start(root);
-    await client.openAndWaitForDiagnostics(file);
-    await client.shutdown();
-  }
-
-  test(
-    "leaves formatting to format on save",
-    async () => {
-      const root = await makeDir();
-      await writeProject(root, "/usr/bin/c++");
-      manager = new ClangdLspManager(process.platform, await makeDir());
-      const { capabilities } = await new FakeClient(manager).start(root);
-      expect(capabilities.documentFormattingProvider).toBeUndefined();
-      expect(capabilities.documentRangeFormattingProvider).toBeUndefined();
-      expect(capabilities.semanticTokensProvider).toBeDefined();
-      expect(capabilities.hoverProvider).toBeDefined();
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  describe("validates compile flags from project configuration", () => {
-    /** The flags under test, each given the path `written` as its output. */
-    const flagsWriting = (written: string): readonly (readonly string[])[] => [
-      ["--serialize-diagnostics", written],
-      ["-Xclang", "-serialize-diagnostic-file", "-Xclang", written],
-      ["-Xclang", "-diagnostic-log-file", "-Xclang", written],
-      [`-Wp,-serialize-diagnostic-file,${written}`],
-      ["-MJ", written],
-      ["-gen-cdb-fragment-path", written],
-      ["-fmodules", `-fmodules-cache-path=${written}`],
-    ];
-
-    test(
-      "from a compile database",
-      async () => {
-        for (let index = 0; index < flagsWriting("").length; index++) {
-          const root = await makeDir();
-          const written = join(root, "written");
-          const file = await writeProject(root, "/usr/bin/c++", flagsWriting(written)[index]);
-          await runClangd(root, file);
-          expect(await exists(written)).toBe(false);
-        }
-      },
-      TEST_TIMEOUT_MS,
-    );
-
-    test(
-      "from a response file",
-      async () => {
-        const root = await makeDir();
-        const written = join(root, "written");
-        await writeFile(join(root, "flags.rsp"), `--serialize-diagnostics "${written}"\n`);
-        const file = await writeProject(root, "/usr/bin/c++", ["@flags.rsp"]);
-        await runClangd(root, file);
-        expect(await exists(written)).toBe(false);
-      },
-      TEST_TIMEOUT_MS,
-    );
-
-    test(
-      "from compile_flags.txt",
-      async () => {
-        const root = await makeDir();
-        const written = join(root, "written");
-        const file = join(root, "x.cpp");
-        await writeFile(file, "int x = 1;\n");
-        await writeFile(join(root, "compile_flags.txt"), `--serialize-diagnostics\n${written}\n`);
-        await runClangd(root, file);
-        expect(await exists(written)).toBe(false);
-      },
-      TEST_TIMEOUT_MS,
-    );
-
-    test(
-      "from .clangd",
-      async () => {
-        const root = await makeDir();
-        const written = join(root, "written");
-        const file = await writeProject(root, "/usr/bin/c++");
-        await writeFile(
-          join(root, ".clangd"),
-          `CompileFlags:\n  Add: ["--serialize-diagnostics", "${written}"]\n`,
-        );
-        await runClangd(root, file);
-        expect(await exists(written)).toBe(false);
-      },
-      TEST_TIMEOUT_MS,
-    );
-
-    test(
-      "from a config file beside the compiler, or one named by a flag",
-      async () => {
-        const root = await makeDir();
-        const written = join(root, "written");
-        await writeFile(join(root, "clang++.cfg"), `--serialize-diagnostics "${written}"\n`);
-        await writeFile(join(root, "clang++"), "#!/bin/sh\n");
-        await chmod(join(root, "clang++"), 0o755);
-        const beside = await writeProject(root, join(root, "clang++"));
-        await runClangd(root, beside);
-        expect(await exists(written)).toBe(false);
-
-        const named = await writeProject(root, "/usr/bin/c++", [
-          `--config=${join(root, "clang++.cfg")}`,
-        ]);
-        await runClangd(root, named);
-        expect(await exists(written)).toBe(false);
-      },
-      TEST_TIMEOUT_MS,
-    );
-
-    test(
-      "that clangd cannot finish a file with",
-      async () => {
-        const root = await makeDir();
-        const file = await writeProject(root, "/usr/bin/c++", ["-traditional-cpp"]);
-        await runClangd(root, file);
-      },
-      TEST_TIMEOUT_MS,
-    );
-
-    test(
-      "and keeps the flags a project needs",
-      async () => {
-        const root = await makeDir();
-        const file = join(root, "x.cpp");
-        await writeFile(file, "int x = MISSING;\n");
-        await writeFile(join(root, "compile_flags.txt"), "-DMISSING=1\n--serialize-diagnostics\n");
-        manager = new ClangdLspManager(process.platform, await makeDir());
-        const client = new FakeClient(manager);
-        await client.start(root);
-        expect(await client.openAndWaitForDiagnostics(file)).toEqual([]);
-      },
-      TEST_TIMEOUT_MS,
-    );
-  });
-
-  test(
-    "applies the user's own clangd config, even a broken one, and shows no error without one",
-    async () => {
-      const home = await makeDir();
-      const userConfig = join(
-        home,
-        ...(process.platform === "darwin"
-          ? ["Library", "Preferences", "clangd"]
-          : [".config", "clangd"]),
-      );
-      await mkdir(userConfig, { recursive: true });
-      const { HOME, XDG_CONFIG_HOME } = process.env;
-      process.env.HOME = home;
-      delete process.env.XDG_CONFIG_HOME;
-      try {
-        const root = await makeDir();
-        const written = join(root, "written");
-        const file = await writeProject(root, "/usr/bin/c++", ["--serialize-diagnostics", written]);
-        await writeFile(file, "int x = FROM_USER;\n");
-        const open = async (): Promise<unknown[]> => {
-          manager?.destroy();
-          manager = new ClangdLspManager(process.platform, await makeDir());
-          const client = new FakeClient(manager);
-          await client.start(root);
-          return client.openAndWaitForDiagnostics(file);
-        };
-
-        // Only the code's own error: an empty user config does not count as a config error.
-        const undefinedName = await open();
-        expect(JSON.stringify(undefinedName)).toContain("FROM_USER");
-        expect(JSON.stringify(undefinedName)).not.toContain("clangd-config");
-
-        await writeFile(
-          join(userConfig, "config.yaml"),
-          'CompileFlags:\n  Add: ["-DFROM_USER=1"]\n',
-        );
-        expect(await open()).toEqual([]);
-
-        await writeFile(join(userConfig, "config.yaml"), "CompileFlags: [ { unclosed");
-        expect(JSON.stringify(await open())).toContain("FROM_USER");
-        expect(await exists(written)).toBe(false);
-      } finally {
-        process.env.HOME = HOME;
-        if (XDG_CONFIG_HOME === undefined) delete process.env.XDG_CONFIG_HOME;
-        else process.env.XDG_CONFIG_HOME = XDG_CONFIG_HOME;
-      }
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  test(
-    "skips the background index when its directory is a symlink",
-    async () => {
-      const root = await makeDir();
-      const elsewhere = await makeDir();
-      await mkdir(join(root, ".cache", "clangd"), { recursive: true });
-      await symlink(elsewhere, join(root, ".cache", "clangd", "index"));
-      const file = await writeProject(root, "/usr/bin/c++");
-      await runClangd(root, file);
-      expect(await readdir(elsewhere)).toEqual([]);
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  describe("--query-driver", () => {
-    /** An executable named `file` that creates `marker` when it runs. */
-    async function fakeCompiler(file: string, marker: string): Promise<void> {
-      await writeFile(file, `#!/bin/sh\n: > "${marker}"\n`);
-      await chmod(file, 0o755);
-    }
-
-    /** {@link ClangdLspManager} with the same globs over a directory a test can write to. */
-    class ManagerWithCompilers extends ClangdLspManager {
-      constructor(
-        private readonly compilers: string,
-        stateDir: string,
-      ) {
-        super(process.platform, stateDir);
-      }
-
-      protected override spawnArgs(): readonly string[] {
-        return [
-          ...super.spawnArgs({ wtPath: "" }).filter((arg) => !arg.startsWith("--query-driver")),
-          `--query-driver=${queryDriverGlobs([this.compilers])}`,
-        ];
-      }
-    }
-
-    async function runWith(compilers: string, root: string, file: string): Promise<void> {
+describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
+  "ClangdLspManager with clangd",
+  () => {
+    async function runClangd(root: string, file: string): Promise<void> {
       manager?.destroy();
-      manager = new ManagerWithCompilers(compilers, await makeDir());
+      manager = new ClangdLspManager(process.platform, await makeDir());
       const client = new FakeClient(manager);
       await client.start(root);
       await client.openAndWaitForDiagnostics(file);
@@ -688,51 +485,305 @@ describe.skipIf(!CLANGD || process.platform === "win32")("ClangdLspManager with 
     }
 
     test(
-      "runs a compiler matching by name in the directory",
+      "leaves formatting to format on save",
       async () => {
-        const compilers = await makeDir();
         const root = await makeDir();
-        const marker = join(root, "ran");
-        await fakeCompiler(join(compilers, "arm-none-eabi-gcc"), marker);
-        const file = await writeProject(root, join(compilers, "arm-none-eabi-gcc"));
-        await runWith(compilers, root, file);
-        expect(await exists(marker)).toBe(true);
+        await writeProject(root, "/usr/bin/c++");
+        manager = new ClangdLspManager(process.platform, await makeDir());
+        const { capabilities } = await new FakeClient(manager).start(root);
+        expect(capabilities.documentFormattingProvider).toBeUndefined();
+        expect(capabilities.documentRangeFormattingProvider).toBeUndefined();
+        expect(capabilities.semanticTokensProvider).toBeDefined();
+        expect(capabilities.hoverProvider).toBeDefined();
       },
       TEST_TIMEOUT_MS,
     );
 
-    test(
-      "does not run other programs in that directory or below it",
-      async () => {
-        const compilers = await makeDir();
-        const root = await makeDir();
-        const marker = join(root, "ran");
-        await mkdir(join(compilers, "sub"));
-        for (const program of ["evil-compiler", join("sub", "gcc")]) {
-          await fakeCompiler(join(compilers, program), marker);
-          const file = await writeProject(root, join(compilers, program));
-          await runWith(compilers, root, file);
-          expect(await exists(marker)).toBe(false);
-        }
-      },
-      TEST_TIMEOUT_MS,
-    );
+    describe("validates compile flags from project configuration", () => {
+      /** Flags that write on every supported clangd, each given the path `written` as its output. */
+      const flagsWriting = (written: string): readonly (readonly string[])[] => [
+        ["-Xclang", "-diagnostic-log-file", "-Xclang", written],
+        [`-Wp,-diagnostic-log-file,${written}`],
+        ["-Xpreprocessor", "-diagnostic-log-file", "-Xpreprocessor", written],
+        ["-MJ", written],
+        ["-gen-cdb-fragment-path", written],
+        ["-fmodules", `-fmodules-cache-path=${written}`],
+      ];
 
-    test(
-      "does not run compilers in the project, however the database names them",
-      async () => {
-        const root = await makeDir();
-        const marker = join(root, "ran");
-        await fakeCompiler(join(root, "evil-compiler"), marker);
-        await fakeCompiler(join(root, "gcc"), marker);
-        const climbing = `/usr/bin${"/..".repeat(4)}${join(root, "gcc")}`;
-        for (const compiler of ["./evil-compiler", "./gcc", join(root, "gcc"), climbing]) {
-          const file = await writeProject(root, compiler);
+      test(
+        "from a compile database",
+        async () => {
+          for (let index = 0; index < flagsWriting("").length; index++) {
+            const root = await makeDir();
+            const written = join(root, "written");
+            const file = await writeProject(root, "/usr/bin/c++", flagsWriting(written)[index]);
+            await runClangd(root, file);
+            expect(await exists(written)).toBe(false);
+          }
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      test(
+        "from a response file",
+        async () => {
+          const root = await makeDir();
+          const written = join(root, "written");
+          await writeFile(join(root, "flags.rsp"), `-MJ "${written}"\n`);
+          const file = await writeProject(root, "/usr/bin/c++", ["@flags.rsp"]);
           await runClangd(root, file);
-          expect(await exists(marker)).toBe(false);
+          expect(await exists(written)).toBe(false);
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      test(
+        "from compile_flags.txt",
+        async () => {
+          const root = await makeDir();
+          const written = join(root, "written");
+          const file = join(root, "x.cpp");
+          await writeFile(file, "int x = 1;\n");
+          await writeFile(join(root, "compile_flags.txt"), `-MJ\n${written}\n`);
+          await runClangd(root, file);
+          expect(await exists(written)).toBe(false);
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      test(
+        "from .clangd",
+        async () => {
+          const root = await makeDir();
+          const written = join(root, "written");
+          const file = await writeProject(root, "/usr/bin/c++");
+          await writeFile(join(root, ".clangd"), `CompileFlags:\n  Add: ["-MJ", "${written}"]\n`);
+          await runClangd(root, file);
+          expect(await exists(written)).toBe(false);
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      test(
+        "from a config file beside the compiler, or one named by a flag",
+        async () => {
+          const root = await makeDir();
+          const written = join(root, "written");
+          await writeFile(join(root, "clang++.cfg"), `-MJ "${written}"\n`);
+          await writeFile(join(root, "clang++"), "#!/bin/sh\n");
+          await chmod(join(root, "clang++"), 0o755);
+          const beside = await writeProject(root, join(root, "clang++"));
+          await runClangd(root, beside);
+          expect(await exists(written)).toBe(false);
+
+          const named = await writeProject(root, "/usr/bin/c++", [
+            `--config=${join(root, "clang++.cfg")}`,
+          ]);
+          await runClangd(root, named);
+          expect(await exists(written)).toBe(false);
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      test(
+        "that clangd cannot finish a file with",
+        async () => {
+          const root = await makeDir();
+          for (const flags of [["-traditional-cpp"], ["-Xclang", "-fincremental-extensions"]]) {
+            const file = await writeProject(root, "/usr/bin/c++", flags);
+            await runClangd(root, file);
+          }
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      test(
+        "and passes the rest of -Xclang through, with nothing left behind",
+        async () => {
+          const root = await makeDir();
+          await writeFile(join(root, "defines.h"), "#define FROM_INCLUDE 1\n");
+          const file = await writeProject(root, "/usr/bin/c++", [
+            "-Xclang",
+            "-include",
+            "-Xclang",
+            join(root, "defines.h"),
+            "-Xclang",
+            "-diagnostic-log-file",
+            "-Xclang",
+            join(root, "written"),
+          ]);
+          await writeFile(file, "int x = FROM_INCLUDE;\n");
+          manager?.destroy();
+          manager = new ClangdLspManager(process.platform, await makeDir());
+          const client = new FakeClient(manager);
+          await client.start(root);
+          expect(await client.openAndWaitForDiagnostics(file)).toEqual([]);
+          await client.shutdown();
+          expect(await exists(join(root, "written"))).toBe(false);
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      test(
+        "and keeps the flags a project needs",
+        async () => {
+          const root = await makeDir();
+          const file = join(root, "x.cpp");
+          await writeFile(file, "int x = MISSING;\n");
+          await writeFile(join(root, "compile_flags.txt"), "-DMISSING=1\n-MJ\nwritten\n");
+          manager = new ClangdLspManager(process.platform, await makeDir());
+          const client = new FakeClient(manager);
+          await client.start(root);
+          expect(await client.openAndWaitForDiagnostics(file)).toEqual([]);
+        },
+        TEST_TIMEOUT_MS,
+      );
+    });
+
+    test(
+      "applies the user's own clangd config, even a broken one, and shows no error without one",
+      async () => {
+        const home = await makeDir();
+        const userConfig = join(
+          home,
+          ...(process.platform === "darwin"
+            ? ["Library", "Preferences", "clangd"]
+            : [".config", "clangd"]),
+        );
+        await mkdir(userConfig, { recursive: true });
+        const { HOME, XDG_CONFIG_HOME } = process.env;
+        process.env.HOME = home;
+        delete process.env.XDG_CONFIG_HOME;
+        try {
+          const root = await makeDir();
+          const written = join(root, "written");
+          const file = await writeProject(root, "/usr/bin/c++", ["-MJ", written]);
+          await writeFile(file, "int x = FROM_USER;\n");
+          const open = async (): Promise<unknown[]> => {
+            manager?.destroy();
+            manager = new ClangdLspManager(process.platform, await makeDir());
+            const client = new FakeClient(manager);
+            await client.start(root);
+            return client.openAndWaitForDiagnostics(file);
+          };
+
+          // Only the code's own error: an empty user config does not count as a config error.
+          const undefinedName = await open();
+          expect(JSON.stringify(undefinedName)).toContain("FROM_USER");
+          expect(JSON.stringify(undefinedName)).not.toContain("clangd-config");
+
+          await writeFile(
+            join(userConfig, "config.yaml"),
+            'CompileFlags:\n  Add: ["-DFROM_USER=1"]\n',
+          );
+          expect(await open()).toEqual([]);
+
+          await writeFile(join(userConfig, "config.yaml"), "CompileFlags: [ { unclosed");
+          expect(JSON.stringify(await open())).toContain("FROM_USER");
+          expect(await exists(written)).toBe(false);
+        } finally {
+          process.env.HOME = HOME;
+          if (XDG_CONFIG_HOME === undefined) delete process.env.XDG_CONFIG_HOME;
+          else process.env.XDG_CONFIG_HOME = XDG_CONFIG_HOME;
         }
       },
       TEST_TIMEOUT_MS,
     );
-  });
-});
+
+    test(
+      "skips the background index when its directory is a symlink",
+      async () => {
+        const root = await makeDir();
+        const elsewhere = await makeDir();
+        await mkdir(join(root, ".cache", "clangd"), { recursive: true });
+        await symlink(elsewhere, join(root, ".cache", "clangd", "index"));
+        const file = await writeProject(root, "/usr/bin/c++");
+        await runClangd(root, file);
+        expect(await readdir(elsewhere)).toEqual([]);
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    describe("--query-driver", () => {
+      /** An executable named `file` that creates `marker` when it runs. */
+      async function fakeCompiler(file: string, marker: string): Promise<void> {
+        await writeFile(file, `#!/bin/sh\n: > "${marker}"\n`);
+        await chmod(file, 0o755);
+      }
+
+      /** {@link ClangdLspManager} with the same globs over a directory a test can write to. */
+      class ManagerWithCompilers extends ClangdLspManager {
+        constructor(
+          private readonly compilers: string,
+          stateDir: string,
+        ) {
+          super(process.platform, stateDir);
+        }
+
+        protected override spawnArgs(): readonly string[] {
+          return [
+            ...super.spawnArgs({ wtPath: "" }).filter((arg) => !arg.startsWith("--query-driver")),
+            `--query-driver=${queryDriverGlobs([this.compilers])}`,
+          ];
+        }
+      }
+
+      async function runWith(compilers: string, root: string, file: string): Promise<void> {
+        manager?.destroy();
+        manager = new ManagerWithCompilers(compilers, await makeDir());
+        const client = new FakeClient(manager);
+        await client.start(root);
+        await client.openAndWaitForDiagnostics(file);
+        await client.shutdown();
+      }
+
+      test(
+        "runs a compiler matching by name in the directory",
+        async () => {
+          const compilers = await makeDir();
+          const root = await makeDir();
+          const marker = join(root, "ran");
+          await fakeCompiler(join(compilers, "arm-none-eabi-gcc"), marker);
+          const file = await writeProject(root, join(compilers, "arm-none-eabi-gcc"));
+          await runWith(compilers, root, file);
+          expect(await exists(marker)).toBe(true);
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      test(
+        "does not run other programs in that directory or below it",
+        async () => {
+          const compilers = await makeDir();
+          const root = await makeDir();
+          const marker = join(root, "ran");
+          await mkdir(join(compilers, "sub"));
+          for (const program of ["project-compiler", join("sub", "gcc")]) {
+            await fakeCompiler(join(compilers, program), marker);
+            const file = await writeProject(root, join(compilers, program));
+            await runWith(compilers, root, file);
+            expect(await exists(marker)).toBe(false);
+          }
+        },
+        TEST_TIMEOUT_MS,
+      );
+
+      test(
+        "does not run compilers in the project, however the database names them",
+        async () => {
+          const root = await makeDir();
+          const marker = join(root, "ran");
+          await fakeCompiler(join(root, "project-compiler"), marker);
+          await fakeCompiler(join(root, "gcc"), marker);
+          const climbing = `/usr/bin${"/..".repeat(4)}${join(root, "gcc")}`;
+          for (const compiler of ["./project-compiler", "./gcc", join(root, "gcc"), climbing]) {
+            const file = await writeProject(root, compiler);
+            await runClangd(root, file);
+            expect(await exists(marker)).toBe(false);
+          }
+        },
+        TEST_TIMEOUT_MS,
+      );
+    });
+  },
+);

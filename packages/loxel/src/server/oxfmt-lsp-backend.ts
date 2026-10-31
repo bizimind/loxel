@@ -6,6 +6,7 @@ import type { FormatterBackend } from "./formatter-backends";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import { buildSpawnEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("format");
 
@@ -114,13 +115,15 @@ export class OxfmtLspBackend implements FormatterBackend {
     env.PATH = env.PATH ? `${localBin}:${env.PATH}` : localBin;
 
     try {
-      this.proc = Bun.spawn([binary, "--lsp"], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        cwd: this.worktreePath,
-        env,
-      });
+      this.proc = measureSpawn("oxfmt", () =>
+        Bun.spawn([binary, "--lsp"], {
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+          cwd: this.worktreePath,
+          env,
+        }),
+      );
 
       // Start reading stdout for responses
       this.readStdout();

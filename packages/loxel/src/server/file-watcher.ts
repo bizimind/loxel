@@ -351,7 +351,7 @@ export class FileWatcher {
 
   private emitDebounced(event: WatchEvent) {
     if (this.allowedEvents && !this.allowedEvents.has(event)) return;
-    stress.track("git-watch", { event });
+    stress.track("git-watch", event);
 
     const existing = this.debounceTimers.get(event);
     if (existing) {

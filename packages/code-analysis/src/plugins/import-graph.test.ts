@@ -1,26 +1,8 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { withWorkDir } from "../test-workdir.ts";
 import importGraph from "./import-graph.ts";
-
-// Records are relative to the process cwd (like the CLI run from the analyzed tree), and
-// the tmpdir is realpath'd because dependency-cruiser resolves symlinks in targets.
-async function withWorkDir<T>(files: Record<string, string>, fn: (workDir: string) => Promise<T>) {
-  const workDir = await realpath(await mkdtemp(join(tmpdir(), "code-analysis-import-graph-")));
-  const previousCwd = process.cwd();
-  try {
-    await Promise.all(
-      Object.entries(files).map(([name, content]) => Bun.write(join(workDir, name), content)),
-    );
-    process.chdir(workDir);
-    return await fn(workDir);
-  } finally {
-    process.chdir(previousCwd);
-    await rm(workDir, { recursive: true, force: true });
-  }
-}
 
 async function edges(workDir: string): Promise<string[]> {
   const records = await importGraph.generate(workDir, {});
@@ -51,6 +33,98 @@ test("resolves tsconfig paths aliases when the workdir has a tsconfig.json", asy
       expect(await edges(workDir)).toEqual([
         "src/index.ts -> src/lib/other.ts",
         "src/index.ts -> src/lib/util.ts",
+      ]);
+    },
+  );
+});
+
+test("resolves jsconfig paths aliases when the workdir has only a jsconfig.json", async () => {
+  await withWorkDir(
+    {
+      "jsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./src/*"] } } }),
+      "src/index.js": 'import "@/lib/util";\nimport "@/lib/esm.mjs";\nimport "@/lib/cjs.cjs";\n',
+      "src/lib/util.js": "export const util = true;\n",
+      "src/lib/esm.mjs": "export const esm = true;\n",
+      "src/lib/cjs.cjs": "module.exports = {};\n",
+    },
+    async (workDir) => {
+      expect(await edges(workDir)).toEqual([
+        "src/index.js -> src/lib/cjs.cjs",
+        "src/index.js -> src/lib/esm.mjs",
+        "src/index.js -> src/lib/util.js",
+      ]);
+    },
+  );
+});
+
+test("prefers tsconfig.json over jsconfig.json in the same directory", async () => {
+  await withWorkDir(
+    {
+      "tsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./ts/*"] } } }),
+      "jsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./js/*"] } } }),
+      "index.js": 'import "@/util.js";\n',
+      "ts/util.js": "export {};\n",
+      "js/util.js": "export {};\n",
+    },
+    async (workDir) => {
+      expect(await edges(workDir)).toEqual(["index.js -> ts/util.js"]);
+    },
+  );
+});
+
+test("reports paths relative to the workdir, whatever the process cwd", async () => {
+  await withWorkDir({ "a.js": 'import "./b.js";\n', "b.js": "" }, async (workDir) => {
+    expect(process.cwd()).not.toBe(workDir);
+    expect(await edges(workDir)).toEqual(["a.js -> b.js"]);
+  });
+});
+
+test("excludes whole path segments, not names that merely contain them", async () => {
+  await withWorkDir(
+    {
+      "index.js":
+        'import "./distance.js";\nimport "./.github/helper.js";\nimport "./dist/out.js";\n',
+      "distance.js": "",
+      ".github/helper.js": "",
+      "dist/out.js": "",
+    },
+    async (workDir) => {
+      expect(await edges(workDir)).toEqual([
+        "index.js -> .github/helper.js",
+        "index.js -> distance.js",
+      ]);
+    },
+  );
+});
+
+test("scopes the graph to a subdirectory", async () => {
+  await withWorkDir(
+    {
+      "src/a.js": 'import "./b.js";\n',
+      "src/b.js": "",
+      "other/c.js": 'import "./d.js";\n',
+      "other/d.js": "",
+    },
+    async (workDir) => {
+      const records = await importGraph.generate(workDir, { scope: "src" });
+      expect(records.map((r) => r.source)).toEqual(["src/a.js"]);
+    },
+  );
+});
+
+test("resolves aliases from a config in a parent directory", async () => {
+  await withWorkDir(
+    {
+      "jsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./shared/*"] } } }),
+      ".git/HEAD": "",
+      "packages/app/index.js": 'import "./local.js";\nimport "@/util.js";\n',
+      "packages/app/local.js": "",
+      "shared/util.js": "",
+    },
+    async (workDir) => {
+      expect(await edges(join(workDir, "packages/app"))).toEqual([
+        "index.js -> ../../shared/util.js",
+        "index.js -> local.js",
       ]);
     },
   );

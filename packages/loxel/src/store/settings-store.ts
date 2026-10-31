@@ -119,10 +119,14 @@ export interface BuiltinIndentation extends IndentationDefaults {
 
 /**
  * Built-in indentation for languages whose convention, set by their formatter or official style
- * guide, differs from the global default, keyed by resolved (highlighter) language ID. Languages
- * whose common formatters disagree (Java, Swift, C and C++, shell) are left to the default.
+ * guide (for the C family, their main IDEs), differs from the global default, keyed by resolved
+ * (highlighter) language ID. Languages whose common formatters disagree (Java, Swift, shell) are
+ * left to the default.
  */
 export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, BuiltinIndentation> = new Map([
+  // The C family has no single style; 4 is the default of VS Code, CLion and Xcode.
+  ["c", { tabSize: 4, insertSpaces: true }],
+  ["cpp", { tabSize: 4, insertSpaces: true }],
   ["csharp", { tabSize: 4, insertSpaces: true }], // .NET coding conventions, dotnet format
   ["go", { tabSize: 4, insertSpaces: false }], // gofmt
   ["go.mod", { tabSize: 4, insertSpaces: false }], // go mod tidy
@@ -132,8 +136,11 @@ export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, BuiltinIndentatio
   // Recipe lines must start with a tab (`*** missing separator`), whatever the content suggests:
   // space-indented continuation lines can outnumber the recipes. 4 is only the tab's display width.
   ["make", { tabSize: 4, insertSpaces: false, required: true }],
+  ["objective-c", { tabSize: 4, insertSpaces: true }],
+  ["objective-cpp", { tabSize: 4, insertSpaces: true }],
   ["php", { tabSize: 4, insertSpaces: true }], // PSR-12 / PER Coding Style, PHP-CS-Fixer
   ["python", { tabSize: 4, insertSpaces: true }], // PEP 8, ruff, black
+  ["razor", { tabSize: 4, insertSpaces: true }], // ASP.NET Core and Blazor templates
   ["rust", { tabSize: 4, insertSpaces: true }], // rustfmt
 ]);
 
@@ -326,6 +333,14 @@ export const BUILTIN_FILE_ASSOCIATIONS: FileAssociation[] = [
   fa("**/requirements/*.txt", "pip-requirements"),
   fa("**/constraints*.txt", "pip-requirements"),
 
+  // Cargo's older config name; `config` alone says nothing about the format.
+  fa("**/.cargo/config", "toml"),
+
+  // libc++ and libstdc++ headers such as <vector> have no extension. Only those: these directories
+  // also hold files like module.modulemap, and anything with an extension resolves on its own.
+  fa("**/c++/v1/**/!(*.*)", "cpp"),
+  fa("**/include/c++/**/!(*.*)", "cpp"),
+
   // Filename-based defaults (from FILENAME_TO_LANG)
   ...Object.entries(FILENAME_TO_LANG).map(([name, lang]) => fa(`**/${name}`, lang)),
 
@@ -403,6 +418,50 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     enabled: true,
   },
   {
+    id: builtinId("**/jsconfig.json"),
+    glob: "**/jsconfig.json",
+    url: "https://json.schemastore.org/jsconfig.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/{.babelrc,.babelrc.json,babel.config.json}"),
+    glob: "**/{.babelrc,.babelrc.json,babel.config.json}",
+    url: "https://json.schemastore.org/babelrc.json",
+    enabled: true,
+  },
+  // YAML only: this schema `$ref`s a sibling file, which only the YAML server can fetch (Monaco's
+  // JSON worker gets schemas inline and would report the reference as a problem on every file).
+  {
+    id: builtinId("**/.eslintrc.{yml,yaml}"),
+    glob: "**/.eslintrc.{yml,yaml}",
+    url: "https://json.schemastore.org/eslintrc.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/lerna.json"),
+    glob: "**/lerna.json",
+    url: "https://json.schemastore.org/lerna.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/.lintstagedrc{,.json,.yml,.yaml}"),
+    glob: "**/.lintstagedrc{,.json,.yml,.yaml}",
+    url: "https://json.schemastore.org/lintstagedrc.schema.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/pnpm-workspace.yaml"),
+    glob: "**/pnpm-workspace.yaml",
+    url: "https://json.schemastore.org/pnpm-workspace.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/.prettierrc{,.json,.yml,.yaml}"),
+    glob: "**/.prettierrc{,.json,.yml,.yaml}",
+    url: "https://json.schemastore.org/prettierrc.json",
+    enabled: true,
+  },
+  {
     id: builtinId(".github/workflows/*.{yml,yaml}"),
     glob: ".github/workflows/*.{yml,yaml}",
     url: "https://json.schemastore.org/github-workflow",
@@ -430,6 +489,12 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     id: builtinId("**/.cargo/config.toml"),
     glob: "**/.cargo/config.toml",
     url: "https://json.schemastore.org/cargo-config.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/rust-toolchain.toml"),
+    glob: "**/rust-toolchain.toml",
+    url: "https://json.schemastore.org/rust-toolchain.json",
     enabled: true,
   },
   {

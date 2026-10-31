@@ -6,6 +6,7 @@ import { isDirectory } from "@/fs-utils";
 
 import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");
 
@@ -195,6 +196,12 @@ async function lookUpWorktreeRepo(
   return repo === GIT_SPAWN_FAILED || !repo ? repo : { ...repo, realWtPath };
 }
 
+/** Whether git can answer for the repository containing `dir`, the lookup tracked checks rely on. */
+export async function canGitReadRepo(dir: string): Promise<boolean> {
+  const repo = await repoAt(dir);
+  return repo !== null && repo !== GIT_SPAWN_FAILED;
+}
+
 /** The repository containing `dir`, or null when it is in none. */
 async function repoAt(dir: string): Promise<RepoInfo | null | typeof GIT_SPAWN_FAILED> {
   const result = await runGit(dir, ["rev-parse", "--show-toplevel", "--absolute-git-dir"]);
@@ -237,12 +244,14 @@ export async function runGit(
   args: string[],
 ): Promise<{ exitCode: number; stdout: string }> {
   try {
-    const proc = Bun.spawn(["git", "-C", cwd, ...args], {
-      env: readOnlyGitEnv(),
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-    });
+    const proc = measureSpawn("git", () =>
+      Bun.spawn(["git", "-C", cwd, ...args], {
+        env: readOnlyGitEnv(),
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+      }),
+    );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     return { exitCode, stdout };
   } catch {
