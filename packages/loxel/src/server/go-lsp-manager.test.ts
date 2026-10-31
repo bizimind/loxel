@@ -7,8 +7,9 @@ import type { ServerWebSocket } from "bun";
 
 import { LSP_RESTART_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
 import { repeatUntil } from "@/test/repeat-until";
+import "@/test/temp-state-dir";
 
-import { GO_ENV, subscribeGoEnv } from "./go-env";
+import { GO_ENV, refreshGoEnv, subscribeGoEnv } from "./go-env";
 import {
   GO_NOT_FOUND_REASON,
   GoLspManager,
@@ -16,6 +17,7 @@ import {
   goSetupProblem,
   withoutHiddenActions,
 } from "./go-lsp-manager";
+import { setGoChoice } from "./go-toolchain-store";
 
 const roots: string[] = [];
 let manager: GoLspManager | undefined;
@@ -328,6 +330,28 @@ describe("following the toolchain", () => {
   );
 
   test(
+    "restarts gopls when a Go is chosen for the worktree, and runs it first on PATH",
+    async () => {
+      const { wt, client } = await startSession();
+      const root = await makeDir("go-chosen-");
+      await mkdir(join(root, "bin"));
+      await writeExecutable(join(root, "bin", "go"), fakeGo("1.28.1"));
+      setGoChoice(wt, join(root, "bin", "go"));
+      refreshGoEnv(wt);
+      const { code } = await client.untilClosed();
+      expect(code).toBe(LSP_RESTART_CLOSE_CODE);
+      manager?.destroySession(client.ws);
+
+      const next = fakeSocket();
+      manager?.createSession(next.ws, wt);
+      manager?.handleMessage(next.ws, INITIALIZE);
+      const frame = await next.untilFrame((candidate) => candidate.id === 1);
+      expect(JSON.stringify(frame)).toContain(join(root, "bin"));
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
     "restarts gopls when the user's own appears on the PATH, or is reinstalled",
     async () => {
       const { wt, bin, client } = await startSession();
@@ -461,7 +485,7 @@ describe("goSetupProblem", () => {
     ]) {
       const problem = goSetupProblem(frame);
       expect(problem?.kind).toBe("newer-go");
-      expect(problem?.message).toContain("needs Go 1.27.3, and the Go on your PATH is 1.26.10");
+      expect(problem?.message).toContain("needs Go 1.27.3, and the Go in use is 1.26.10");
     }
   });
 

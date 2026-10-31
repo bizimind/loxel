@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
+import "@/test/temp-state-dir";
 
 import { FormatService } from "./format-service";
 import { GO_ENV } from "./go-env";
