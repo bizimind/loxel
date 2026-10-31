@@ -10,7 +10,7 @@ description: >-
 
 Loxel is a desktop IDE for agentic coding. If `LOXEL=1` is set, you are running in one of its terminal panels, in a window the user also uses for editors, diffs, browser panels and other terminals. Use the `loxel` CLI to put things in front of them instead of only describing them.
 
-This skill covers what an agent can do from a Loxel terminal. It does not cover Loxel's built-in coding agent, its settings, or its keyboard shortcuts.
+This skill covers what an agent can do from a Loxel terminal. It does not cover Loxel's settings or its keyboard shortcuts.
 
 ## The user's workspace
 

@@ -26,7 +26,6 @@ Every tool panel has an icon in the tool bars at the window's left and right edg
 | Git              | `Ctrl+Shift+G` |
 | Comments         | `Ctrl+Shift+R` |
 | Logs             | `Ctrl+Shift+L` |
-| Fork Tree        | `Ctrl+Shift+K` |
 | Worktree sidebar | `Ctrl+Alt+B`   |
 
 The **worktree sidebar** to the far left lists your projects and their worktrees. Collapse or expand it with the sidebar button at the left of the top bar, or `Ctrl+Alt+B`. Collapsed, it is a narrow rail of worktree icons; expanded, drag its right edge to resize it (double-click the edge to reset the width).
@@ -41,7 +40,6 @@ The center area is the main content area. Every editor and interactive view open
 - **Code editor** — Monaco-based editor with language server features, format on save, and autosave
 - **Markdown editor** — live preview markdown editing for repo files and drafts
 - **Excalidraw** — whiteboard and diagram editor
-- **Coding agent** — the built-in agent's timeline UI
 - **Terminals** — full-featured terminal tabs
 - **Browser** — web pages, see [Browser panels](#browser-panels)
 - **Media viewer** — images, SVGs, and videos
@@ -50,7 +48,7 @@ Double-click a terminal or file tab's title, right-click the tab and choose **Re
 
 ### Right sidebar
 
-The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads) and the **Fork Tree** of coding agent sessions.
+The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads).
 
 ### Bottom
 
@@ -71,7 +69,7 @@ The status bar runs across the bottom edge of the window and is always visible. 
 - **JDK** — while a Java file is the active editor, the worktree's JDK; click it to choose another (see [JDK detection](/docs/languages/java#jdk-detection))
 - **Rust toolchain** — while a Rust file is the active editor, the worktree's toolchain; click it to choose another (see [Rust toolchain](/docs/languages/rust#rust-toolchain))
 - **Chord progress** — the keys typed so far while a chord shortcut such as `Cmd+\` is waiting for its next key
-- **New panel buttons** — open a new agent, markdown editor, drawing, browser, or terminal
+- **New panel buttons** — open a new markdown editor, drawing, browser, or terminal
 
 ---
 
@@ -113,7 +111,7 @@ You can also split the current panel from the keyboard:
 | Action                    | Shortcut                                                          |
 | ------------------------- | ----------------------------------------------------------------- |
 | Split (same panel type)   | `Cmd+\` then an arrow                                             |
-| Split as a new panel type | `Cmd+\` then `T` / `A` / `M` / `D` / `B`, then an arrow           |
+| Split as a new panel type | `Cmd+\` then `T` / `M` / `D` / `B`, then an arrow                 |
 | New tab in the group      | `Cmd+\` then `Enter` (same type), or the type letter then `Enter` |
 
 ---

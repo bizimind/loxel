@@ -466,11 +466,6 @@ export function useWsBridge(): void {
         case "terminal_exit":
         case "terminal_state":
         case "error":
-        case "agent_event":
-        case "agent_exit":
-        case "agent_sessions":
-        case "agent_replay_done":
-        case "agent_error":
           break;
 
         default: {

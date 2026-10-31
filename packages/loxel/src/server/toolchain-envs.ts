@@ -1,5 +1,5 @@
 /**
- * Every toolchain that contributes to terminal and coding-agent environments: one import and one
+ * Every toolchain that contributes to terminal environments: one import and one
  * entry per toolchain, both sorted. Contributions apply in this order. Only lists belong in this
  * file: a local `git merge` combines parallel additions by itself (`merge=union` in
  * `.gitattributes`). GitHub's own merge ignores that and reports a conflict when two branches

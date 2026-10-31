@@ -1,14 +1,11 @@
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeftRightIcon,
-  BotIcon,
-  BugPlayIcon,
   DatabaseIcon,
   FileDiffIcon,
   FileTextIcon,
   FolderTreeIcon,
   GitBranchIcon,
-  GitForkIcon,
   GlobeIcon,
   ImageIcon,
   MessageSquareIcon,
@@ -26,15 +23,7 @@ export type PanelZone = "left" | "bottom" | "right" | "center";
  * Center-only IDs (diff, editor) exist for backward compatibility with
  * persisted dockview layouts and the ALLOWED_ZONES map.
  */
-export type PanelId =
-  | "changes"
-  | "projectFiles"
-  | "git"
-  | "diff"
-  | "editor"
-  | "comments"
-  | "logs"
-  | "forkTree";
+export type PanelId = "changes" | "projectFiles" | "git" | "diff" | "editor" | "comments" | "logs";
 
 export interface SidebarPanelDef {
   id: PanelId;
@@ -102,15 +91,6 @@ export const SIDEBAR_PANELS: readonly SidebarPanelDef[] = [
     allowedZones: ["left", "bottom", "right"],
     defaultActive: false,
   },
-  {
-    id: "forkTree",
-    label: "Fork Tree",
-    icon: GitForkIcon,
-    defaultZone: "right",
-    allowedZones: ["left", "right"],
-    defaultActive: false,
-    dockviewTitle: "Forks",
-  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -154,35 +134,6 @@ export interface CenterPanelDef {
  */
 export const CENTER_PANELS = [
   // Order determines quickstart menu order (entries with quickstartLabel).
-  // Original quickstart order: Agent, Plan, Terminal, Drawing, Browser.
-  {
-    type: "agent",
-    idPrefix: "agent-",
-    component: "codingAgent",
-    tabComponent: "codingAgentTab",
-    icon: BotIcon,
-    quickstartLabel: "New Agent",
-    actionId: "panel.new.agent" as const,
-    createEvent: "loxel-create-agent",
-    openEvent: null,
-    titlePrefix: "Agent",
-    kind: "connected-process" as const,
-    singleton: false,
-  },
-  {
-    type: "agentDevTools",
-    idPrefix: "agentdevtools-",
-    component: "agentDevTools",
-    tabComponent: "agentDevToolsTab",
-    icon: BugPlayIcon,
-    quickstartLabel: null,
-    actionId: null,
-    createEvent: "loxel-open-agent-devtools",
-    openEvent: "loxel-open-agent-devtools",
-    titlePrefix: "DevTools",
-    kind: "state-view" as const,
-    singleton: false,
-  },
   {
     type: "editor",
     idPrefix: "editor-",

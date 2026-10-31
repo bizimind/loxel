@@ -2,7 +2,7 @@
 
 An IDE built for the agentic coding era. Designed around the reality that developers now work across multiple tasks in parallel — with AI agents exploring, writing, and iterating on code — while humans plan, review, and steer.
 
-Loxel packages the things critical for agentic work into a single interface: fast project and worktree switching, planning and ideation tools, code review for AI-generated work, integrated terminals for running agents and commands, and an opinionated coding agent harness — all in a flexible, dockable panel system.
+Loxel packages the things critical for agentic work into a single interface: fast project and worktree switching, planning and ideation tools, code review for AI-generated work, and integrated terminals for running agents and commands — all in a flexible, dockable panel system.
 
 The user documentation lives in the site package ([`packages/site/src/content/docs/`](../site/src/content/docs/), published at https://bizimind.io/docs). This README is the entry point for working on the app itself.
 
@@ -15,16 +15,15 @@ Coding agents change how developers work. Instead of writing every line yourself
 - **Orientation** — understand what changed, where you are, and what the agent did — fast
 - **Review before commit** — inspect, comment on, and iterate on AI work before it becomes a PR
 - **Planning** — sketch ideas, write plans, and (in the future) use AI to communicate them more clearly
-- **Agent interaction** — run and monitor coding agents directly, with a UI built for their workflows
+- **Agent interaction** — run the coding agents you already use (Claude Code, Codex, opencode, ...) in Loxel terminals, one per task
 
 Loxel is built around these needs.
 
 ## Core Concepts
 
 - **Projects and worktrees** — manage several repositories and their worktrees (bare or regular repos, managed by `wt` under `.worktrees/`) from one window and switch between them instantly. Each project + worktree combination keeps its own panel layout, and dirty status is visible across all worktrees of a repo. See [Worktrees & Projects](../site/src/content/docs/worktrees-and-projects.md).
-- **Panels** — a Dockview layout with center panels (editors, diffs, markdown, Excalidraw, coding agent, terminals, browser) and dockable tool panels in the left, right and bottom zones (project files, changes, comments, fork tree, git graph, logs). Everything is reachable from the keyboard and remappable. See [Panel Layout](../site/src/content/docs/panel-layout.md) and [Keyboard Shortcuts](../site/src/content/docs/reference-keybindings.md).
+- **Panels** — a Dockview layout with center panels (editors, diffs, markdown, Excalidraw, terminals, browser) and dockable tool panels in the left, right and bottom zones (project files, changes, comments, git graph, logs). Everything is reachable from the keyboard and remappable. See [Panel Layout](../site/src/content/docs/panel-layout.md) and [Keyboard Shortcuts](../site/src/content/docs/reference-keybindings.md).
 - **Planning** — a rich markdown editor (Milkdown) and an Excalidraw canvas, saved to disk with autosave. New files start as Drafts outside the repo and can be dragged into it. See [Drafts](../site/src/content/docs/drafts.md).
-- **Coding agent** — a timeline UI for the built-in agent from `packages/coding-agent`, with inline questions and approvals. Sessions are scoped per project + worktree and keep running across navigation. See [Coding Agent](../site/src/content/docs/coding-agent.md).
 - **Terminals** — xterm.js terminals backed by server-side PTYs, for CLI agents (Claude Code, Codex, etc.) and everyday commands. Sessions survive project and worktree switches, and `loxel terminal` opens a terminal panel and runs a command in it. See [Terminals](../site/src/content/docs/terminals.md).
 - **Code review** — local review sessions with comment threads anchored to code ranges that survive edits, stored per repo and shared across its worktrees. See [Code Review](../site/src/content/docs/code-review.md).
 - **Diff viewer** — side-by-side (JetBrains-style synchronized scrolling), split and unified Monaco diffs with intra-line highlights, for git changes and for comparing any two files with both sides editable. See [Diff Viewer](../site/src/content/docs/diff-viewer.md).
@@ -38,7 +37,7 @@ Loxel is built around these needs.
 
 Three processes:
 
-- **Server** (Bun, `src/server/`, entry `src/server/index.ts`) — REST API and WebSocket (file watching, terminal I/O, agent events, log streaming, LSP proxies), git commands, PTY sessions, in-process coding agent sessions (`agent-manager.ts`, via the `@bizimind/coding-agent` `Session` API), language server subprocesses, SQLite storage, and static serving of the built renderer. One server per mode (port 7433 prod, 7434 dev) is shared by every window.
+- **Server** (Bun, `src/server/`, entry `src/server/index.ts`) — REST API and WebSocket (file watching, terminal I/O, log streaming, LSP proxies), git commands, PTY sessions, language server subprocesses, SQLite storage, and static serving of the built renderer. One server per mode (port 7433 prod, 7434 dev) is shared by every window.
 - **Renderer** (React 19, Vite, `src/`) — Zustand stores (`src/store/`) persisted to the server, TanStack Query for server data (`src/queries/`), shared request/response and WebSocket models (`src/api/`), Monaco, xterm.js, Dockview, Milkdown and Excalidraw components (`src/components/`).
 - **Electron shell** (`src/electron/`) — spawns or reuses the server, opens windows on its URL, and handles native integrations. See [docs/ELECTRON.md](docs/ELECTRON.md).
 
@@ -123,7 +122,6 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 - [docs/LANGUAGE_SERVERS.md](docs/LANGUAGE_SERVERS.md) — language-server managers and routing (watched files, pulled configuration, on-disk workspace edits), repository trust, URI schemes, formatting, toolchain status items, JSON/YAML/TOML schemas, highlighting and editing behavior; per-language detail in docs/languages/ ([Python](docs/languages/python.md): environment, interpreter choice and trust rule, mypy in place of basedpyright's type checks; [TypeScript](docs/languages/typescript.md): its manager and diagnostics; [TOML](docs/languages/toml.md): Tombi)
 - [docs/TERMINALS.md](docs/TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, login-shell environment capture, toolchain environments (Python activation), the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
 - [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
-- [docs/CODING_AGENT_INTEGRATION.md](docs/CODING_AGENT_INTEGRATION.md) — hosting coding-agent sessions in the server, their tools' environment (toolchain activation), event buffering, rewind and fork, devtools, model settings
 - [docs/DIFF_VIEW_SPEC.md](docs/DIFF_VIEW_SPEC.md) — diff views: components shared by git diffs and file comparisons, synchronized scrolling, intra-line highlights, gutter connectors
 - [docs/FILES_TREE.md](docs/FILES_TREE.md) — the shared `FilesTree` component: path identity, expansion, focus, reveal
 - [docs/PROJECT_EXPLORER.md](docs/PROJECT_EXPLORER.md) — the Project Files panel: path model, Drafts and Others sections, reveal

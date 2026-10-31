@@ -44,8 +44,6 @@ const syncTargets: Record<string, SyncTarget> = {
     getState: () => {
       const s = useSettingsStore.getState();
       return {
-        models: s.models,
-        codingAgent: s.codingAgent,
         layout: s.layout,
         terminal: s.terminal,
         editor: s.editor,

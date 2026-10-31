@@ -225,9 +225,6 @@ importers:
       '@base-ui/react':
         specifier: ^1.8.0
         version: 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@bizimind/coding-agent':
-        specifier: workspace:*
-        version: link:../coding-agent
       '@bizimind/localdb-sdk':
         specifier: workspace:*
         version: link:../localdb-sdk

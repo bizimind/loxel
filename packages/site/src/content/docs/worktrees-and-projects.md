@@ -25,7 +25,7 @@ Loxel pre-fills both lists from what the repository contains: `.env` files, dire
 | `pyproject.toml` with a `[tool.uv]` table | `uv sync`                                                                                   |
 | `requirements*.txt` files                 | `uv venv && uv pip install -r ...`, or with `python3 -m venv .venv` when uv isn't installed |
 
-Every worktree gets its own Python environment, since a virtual environment can't be shared between checkouts. Once it exists, the [Python language servers](/docs/languages/python#python-environment), new terminals and the [coding agent's commands](/docs/coding-agent#commands-the-agent-runs) in that worktree use it.
+Every worktree gets its own Python environment, since a virtual environment can't be shared between checkouts. Once it exists, the [Python language servers](/docs/languages/python#python-environment) and new terminals in that worktree use it.
 
 A .NET repository also gets `dotnet restore` when a solution or project sits at its root, and `dotnet tool restore` when it has a local tool manifest, since each worktree restores its own dependencies.
 
@@ -136,5 +136,5 @@ The switch is immediate: Loxel saves the outgoing worktree's layout and restores
 
 - [Getting Started](/docs/getting-started) — first-time walkthrough for adding a project and creating your first worktree
 - [Panel Layout](/docs/panel-layout) — the layout zones, rearranging panels, and keyboard navigation
-- [Coding Agent](/docs/coding-agent) — agent sessions are scoped per worktree
+- [Terminals](/docs/terminals#tui-agents) — running a coding agent in each worktree
 - [Drafts](/docs/drafts) — draft files are also scoped per project + worktree

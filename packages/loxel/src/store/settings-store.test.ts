@@ -269,3 +269,89 @@ describe("settings migration", () => {
     expect(migrated.autoCheckForUpdates).toBe(false);
   });
 });
+
+describe("settings migration v13: the built-in coding agent is gone", () => {
+  const migrate = useSettingsStore.persist.getOptions().migrate;
+
+  const run = async (state: Record<string, unknown>, version = 12) =>
+    (await migrate?.(state, version)) as unknown as Record<string, unknown>;
+
+  test("drops the model library and the agent settings, and keeps the rest", async () => {
+    const migrated = await run({
+      models: [{ id: "1", modelId: "m", provider: "openrouter", apiKey: "enc:v1:abc" }],
+      codingAgent: { baseModelId: "1", functionOverrides: {} },
+      autoCheckForUpdates: false,
+      terminal: { scrollbackLines: 123 },
+    });
+    expect(migrated).not.toHaveProperty("models");
+    expect(migrated).not.toHaveProperty("codingAgent");
+    expect(migrated.autoCheckForUpdates).toBe(false);
+    expect(migrated.terminal).toEqual({ scrollbackLines: 123 });
+  });
+
+  test("takes the Fork Tree out of every zone", async () => {
+    const migrated = await run({
+      layout: {
+        zoneDefaults: { left: false, bottom: false, right: false },
+        zonePanelOrder: {
+          left: ["changes", "forkTree"],
+          bottom: ["git"],
+          right: ["forkTree", "comments"],
+        },
+      },
+    });
+    expect(migrated.layout).toEqual({
+      zoneDefaults: { left: false, bottom: false, right: false },
+      zonePanelOrder: { left: ["changes"], bottom: ["git"], right: ["comments"] },
+    });
+  });
+
+  test("a zone that opened with the Fork Tree opens with its next panel, or closed", async () => {
+    const migrated = await run({
+      layout: {
+        zoneDefaults: {
+          left: { activePanel: "changes", size: 250 },
+          bottom: { activePanel: "forkTree", size: 200 },
+          right: { activePanel: "forkTree", size: 300 },
+        },
+        zonePanelOrder: {
+          left: ["changes"],
+          bottom: ["forkTree"],
+          right: ["forkTree", "comments", "logs"],
+        },
+      },
+    });
+    expect(migrated.layout).toEqual({
+      zoneDefaults: {
+        left: { activePanel: "changes", size: 250 },
+        bottom: false,
+        right: { activePanel: "comments", size: 300 },
+      },
+      zonePanelOrder: { left: ["changes"], bottom: [], right: ["comments", "logs"] },
+    });
+  });
+
+  test("a row from the oldest versions comes out clean too", async () => {
+    const migrated = await run(
+      {
+        codingAgent: { openrouterApiKey: "sk-plain", plannerModel: "m" },
+        layout: {
+          zoneDefaults: { left: false, bottom: false, right: false },
+          zonePanelOrder: { left: [], bottom: ["terminal"], right: ["forkTree"] },
+        },
+      },
+      1,
+    );
+    expect(migrated).not.toHaveProperty("models");
+    expect(migrated).not.toHaveProperty("codingAgent");
+    expect(migrated.layout).toEqual({
+      zoneDefaults: { left: false, bottom: false, right: false },
+      zonePanelOrder: { left: [], bottom: [], right: [] },
+    });
+    expect(migrated.autoCheckForUpdates).toBe(true);
+  });
+
+  test("tolerates a row without a layout", async () => {
+    expect(await run({ models: [] })).toEqual(expect.not.objectContaining({ models: [] }));
+  });
+});

@@ -30,7 +30,7 @@ Only the owner holds the server's child-process handle, so only the owner reacts
 Electron never kills the server on quit (`before-quit` does nothing), because other windows may still be connected. The server shuts itself down instead (`src/server/server.ts`):
 
 - When the last app client disconnects, it shuts down after 30 seconds unless a client reconnects first.
-- If detached terminal or agent sessions are still alive at that point, it waits 5 minutes instead, so clients can reattach (for example after the machine wakes from sleep), then destroys the orphaned terminals and shuts down.
+- If detached terminal sessions are still alive at that point, it waits 5 minutes instead, so clients can reattach (for example after the machine wakes from sleep), then destroys the orphaned terminals and shuts down.
 
 The renderer's WebSocket client reconnects on its own, so windows survive a server restart. On reconnect it compares the server version with the one it first saw and reloads the page when it changed.
 
@@ -38,13 +38,13 @@ The renderer's WebSocket client reconnects on its own, so windows survive a serv
 
 The server keeps state at these scopes (`src/server/server-state.ts`):
 
-| Scope                       | Lifetime                             | Shared across windows?                                                                                                                             |
-| --------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ProjectState`              | per registered repo, server lifetime | Yes — one watcher, review database and worktree status list per repo                                                                               |
-| `WorktreeResources`         | first subscriber to last             | Yes — file services and undo/redo history are shared by every window on the worktree                                                               |
-| `ClientState`               | per app WebSocket connection         | No — its terminals, subscriptions and window ID belong to that connection                                                                          |
-| Terminal and agent sessions | create to destroy                    | No — output goes to the owning connection; sessions detach on disconnect and can be reattached                                                     |
-| Language-server sessions    | per language-server WebSocket        | Partly — worktree-scoped managers keep one process per worktree path (see [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)); only YAML is per connection |
+| Scope                    | Lifetime                             | Shared across windows?                                                                                                                             |
+| ------------------------ | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ProjectState`           | per registered repo, server lifetime | Yes — one watcher, review database and worktree status list per repo                                                                               |
+| `WorktreeResources`      | first subscriber to last             | Yes — file services and undo/redo history are shared by every window on the worktree                                                               |
+| `ClientState`            | per app WebSocket connection         | No — its terminals, subscriptions and window ID belong to that connection                                                                          |
+| Terminal sessions        | create to destroy                    | No — output goes to the owning connection; sessions detach on disconnect and can be reattached                                                     |
+| Language-server sessions | per language-server WebSocket        | Partly — worktree-scoped managers keep one process per worktree path (see [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md)); only YAML is per connection |
 
 Undo/redo is per worktree, so two windows on the same worktree share one history; that matches the single filesystem they both edit.
 

@@ -265,7 +265,6 @@ export const stress = createStressDetector({
   "fs-flush": { rate: 25 },
   "git-watch": { rate: 25 },
   "status-event": { rate: 10 },
-  "agent-event": { rate: 100 },
   "pty-output": { rate: 250 },
   "api-request": { rate: 50 },
   "ts-completions": { rate: 20 },

@@ -29,7 +29,7 @@ Click the Go item, or run **Go: Select Toolchain**, to choose which Go a worktre
 - **Enter a path to Go**, a `go` binary or a `GOROOT`. `~/` works. A Go inside the worktree, or one a repository tracks, is refused.
 - Every Go found on your machine, with its version and path: the `go` on your `PATH` or behind a version manager's shim, `~/sdk/go*`, `/usr/local/go`, Homebrew's `go` and `go@*`, mise and asdf installs, and toolchains in your module cache.
 
-The list only shows what is already on your machine, and Loxel never downloads a Go. The choice applies to that worktree only and is remembered. gopls and format on save follow it right away. New terminals and the coding agent's commands in that worktree get the chosen Go's `bin` first on `PATH`. On macOS, a login shell's startup can move another directory ahead of it in a terminal.
+The list only shows what is already on your machine, and Loxel never downloads a Go. The choice applies to that worktree only and is remembered. gopls and format on save follow it right away. New terminals in that worktree get the chosen Go's `bin` first on `PATH`. On macOS, a login shell's startup can move another directory ahead of it in a terminal.
 
 ## Toolchains your project asks for
 

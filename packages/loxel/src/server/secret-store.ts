@@ -11,12 +11,28 @@ const PREFIX = "enc:v1:";
 
 let key: Buffer | null = null;
 
+/**
+ * Takes the key for this run. Without one secret storage is unavailable, and the server carries on:
+ * nothing else it does depends on secrets.
+ */
 export async function initSecretStore(): Promise<void> {
-  key = await loadOrCreateKey();
+  try {
+    key = await loadOrCreateKey();
+    if (!key) log.warn("Secret storage is unavailable: no data encryption key was provided");
+  } catch (error) {
+    key = null;
+    log.warn("Secret storage is unavailable: could not load the data encryption key", { error });
+  }
+}
+
+export function isSecretStoreAvailable(): boolean {
+  return key !== null;
 }
 
 function requireKey(): Buffer {
-  if (!key) throw new Error("Secret store not initialized — call initSecretStore() first");
+  if (!key) {
+    throw new Error("Secret storage is unavailable: this run has no data encryption key");
+  }
   return key;
 }
 

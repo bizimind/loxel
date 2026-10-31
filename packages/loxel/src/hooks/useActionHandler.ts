@@ -269,9 +269,6 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "toggle.logs":
         toggleSidebarPanel("logs");
         break;
-      case "toggle.forkTree":
-        toggleSidebarPanel("forkTree");
-        break;
 
       // -- Worktree sidebar expand/collapse --
       case "sidebar.worktree.toggle":
@@ -423,7 +420,6 @@ export function useActionHandler(): (actionId: ActionId) => void {
         break;
 
       // -- Panel creation (handled above via getCreateEventForAction early return) --
-      case "panel.new.agent":
       case "panel.new.browser":
       case "panel.new.drawing":
       case "panel.new.markdown":

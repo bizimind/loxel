@@ -1,7 +1,6 @@
 /**
  * Activating a worktree's resolved Python environment in a spawn environment through variables
- * only, what a venv's `activate` script exports. Shared by terminal shells and the built-in coding
- * agent's tool subprocesses.
+ * only, what a venv's `activate` script exports.
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
