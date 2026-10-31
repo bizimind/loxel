@@ -17,7 +17,7 @@ import { mapWithConcurrency } from "./git-commands";
 import { logger } from "./logger";
 import { pathOutsideWorktree } from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
-import { isInside, isShippedByRepo, runGit } from "./shipped-by-repo";
+import { canGitReadRepo, isInside, isShippedByRepo, runGit } from "./shipped-by-repo";
 
 const log = logger.child("server");
 
@@ -43,6 +43,16 @@ type SpawnEnv = Record<string, string | undefined>;
 export interface DotnetOptions {
   /** Environment for `PATH` and `DOTNET_ROOT`. Defaults to the login-shell spawn environment. */
   env?: SpawnEnv;
+}
+
+/** Where a `dotnet` will run, for the SDK check. */
+export interface DotnetRunOptions extends DotnetOptions {
+  cwd?: string;
+  /**
+   * Check only the `global.json` applying to `cwd`, for a run that starts nothing elsewhere in the
+   * worktree. It skips listing them all through git, which a run on every save should not pay for.
+   */
+  applyingOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +114,7 @@ export interface PreparedDotnet {
  */
 export async function prepareDotnet(
   worktreePath: string,
-  options: DotnetOptions & { cwd?: string } = {},
+  options: DotnetRunOptions = {},
 ): Promise<PreparedDotnet | null> {
   const env = options.env ?? buildSpawnEnv();
   if (!(await isDotnetSafeToRun(worktreePath, options))) return null;
@@ -135,11 +145,19 @@ function dotnetSpawnEnv(wtPath: string, env: SpawnEnv): SpawnEnv {
  */
 export async function isDotnetSafeToRun(
   worktreePath: string,
-  options: DotnetOptions & { cwd?: string } = {},
+  options: DotnetRunOptions = {},
 ): Promise<boolean> {
   const wtPath = path.resolve(worktreePath);
   try {
     const applying = await findGlobalJson(options.cwd ?? wtPath);
+    if (options.applyingOnly) {
+      if (!applying) return true;
+      const info = await readGlobalJson(wtPath, applying, options);
+      if (!isGlobalJsonSafe(info)) return false;
+      // A repository git cannot read reports nothing as tracked, which says nothing about `paths`.
+      if (!info.sdkPaths?.length) return true;
+      return (await canGitReadRepo(wtPath)) || !findFileAbove(".git", wtPath);
+    }
     // Later callers run dotnet from project directories, whose global.json can differ.
     // `icase`: on a case-insensitive disk the host opens any casing of the name.
     const listed = await gitListFiles(wtPath, [`:(glob,icase)**/${GLOBAL_JSON}`]);

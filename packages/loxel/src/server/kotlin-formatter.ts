@@ -44,7 +44,10 @@ const KTLINT_PLUGINS = [
   "org.jmailen.gradle:kotlinter-gradle",
 ];
 
-const BUILD_SCRIPTS = ["build.gradle.kts", "build.gradle"];
+const BUILD_SCRIPTS = [
+  ["build.gradle.kts", "kotlin"],
+  ["build.gradle", "groovy"],
+] as const;
 const VERSION_CATALOG = join("gradle", "libs.versions.toml");
 /** Every signal fits well below this; a larger file is not read, so a save cannot stall on it. */
 const MAX_SIGNAL_FILE_SIZE = 1_024 * 1_024;
@@ -91,7 +94,7 @@ function detectKotlinFormatter(
   // A `root = true` file ends the search ktlint itself does, so what lies above it does not apply.
   let editorconfigApplies = true;
   for (const dir of dirs) {
-    const declared = [...buildScripts(dir), readCode(join(dir, VERSION_CATALOG), "#")];
+    const declared = [...buildScripts(dir), readCode(join(dir, VERSION_CATALOG), "toml")];
     if (declared.some((text) => declaresPlugin(text, KTFMT_PLUGIN))) return ktfmtFor(dirs);
     const editorconfig = editorconfigApplies ? readText(join(dir, ".editorconfig")) : "";
     if (KTLINT_PROPERTY.test(editorconfig)) return KTLINT;
@@ -154,22 +157,23 @@ function declaresPlugin(text: string, id: string): boolean {
 }
 
 function buildScripts(dir: string): string[] {
-  return BUILD_SCRIPTS.map((name) => readCode(join(dir, name), "//"));
+  return BUILD_SCRIPTS.map(([name, syntax]) => readCode(join(dir, name), syntax));
 }
 
 /** The text of a file with its comments removed, so a commented-out plugin does not count. */
-function readCode(path: string, lineComment: "//" | "#"): string {
+function readCode(path: string, syntax: "kotlin" | "groovy" | "toml"): string {
   const text = readText(path);
-  return lineComment === "#" ? text.replace(/#.*$/gm, "") : withoutComments(text);
+  return syntax === "toml" ? text.replace(/#.*$/gm, "") : withoutComments(text, syntax);
 }
 
 const STRING_LITERAL = /"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'/y;
 
 /**
  * Removes Kotlin and Groovy comments. It has to know about strings: `"https://x"` holds no line
- * comment, and in `"**\/*.kt"` the `/*` opens no block comment. Kotlin's block comments nest.
+ * comment, and in `"**\/*.kt"` the `/*` opens no block comment. Kotlin's block comments nest,
+ * while Groovy's end at the first closing delimiter, wherever a `/*` appears inside them.
  */
-function withoutComments(script: string): string {
+function withoutComments(script: string, syntax: "kotlin" | "groovy"): string {
   let code = "";
   let i = 0;
   while (i < script.length) {
@@ -177,7 +181,7 @@ function withoutComments(script: string): string {
       const lineEnd = script.indexOf("\n", i);
       i = lineEnd === -1 ? script.length : lineEnd;
     } else if (script.startsWith("/*", i)) {
-      i = endOfBlockComment(script, i);
+      i = syntax === "kotlin" ? endOfNestedBlockComment(script, i) : endOfBlockComment(script, i);
     } else {
       STRING_LITERAL.lastIndex = i;
       const literal = STRING_LITERAL.exec(script)?.[0] ?? script.charAt(i);
@@ -189,6 +193,11 @@ function withoutComments(script: string): string {
 }
 
 function endOfBlockComment(script: string, start: number): number {
+  const close = script.indexOf("*/", start + 2);
+  return close === -1 ? script.length : close + 2;
+}
+
+function endOfNestedBlockComment(script: string, start: number): number {
   let depth = 0;
   let i = start;
   while (i < script.length) {

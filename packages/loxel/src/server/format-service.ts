@@ -29,9 +29,9 @@ const FORMAT_TIMEOUT_MS = 5_000;
 /**
  * Outcome of `FormatService.format()`. `content` is null when the file is saved unformatted;
  * `notice` then explains failures the user can fix (formatter not installed, timed out), and what
- * a language module adds through `failureNotice` or a decline. Other failures, typically a syntax
- * error in the buffer that the language server already flags, only go to the server log, since
- * they would otherwise repeat on every save.
+ * a language module adds through `failureNotice`, a decline or `skip`. Other failures, typically a
+ * syntax error in the buffer that the language server already flags, only go to the server log,
+ * since they would otherwise repeat on every save.
  */
 export interface FormatResult {
   content: string | null;
@@ -425,6 +425,10 @@ export class FormatService {
     const options = worktreePath
       ? await this.spawnOptions(command, ext, filePath, worktreePath)
       : {};
+    if (options.skip) {
+      log.info("Language module skipped the formatter", { command, filePath });
+      return { content: null, notice: options.skip.notice };
+    }
     // Relative paths are relative to the worktree, so they would not survive another cwd.
     const fromWorktree = (path: string) =>
       worktreePath && options.cwd !== worktreePath ? resolve(worktreePath, path) : path;
