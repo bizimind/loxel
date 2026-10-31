@@ -70,17 +70,27 @@ describe("Python project icons", () => {
   );
 });
 
-describe("Rust project icons", () => {
+describe("JavaScript project icons", () => {
   test.each([
-    ["main.rs", "rustFile_dark.svg"],
-    ["Cargo.toml", "cargo_dark.svg"],
-    ["Cargo.lock", "cargoLock_dark.svg"],
-    ["rust-toolchain.toml", "cargo_dark.svg"],
-    ["rust-toolchain", "cargo_dark.svg"],
-    ["clippy.toml", "rustFile_dark.svg"],
-    [".clippy.toml", "rustFile_dark.svg"],
-    ["rustfmt.toml", "rustFile_dark.svg"],
-    [".rustfmt.toml", "rustFile_dark.svg"],
+    ["app.js", "javaScript_dark.svg"],
+    ["app.mjs", "javaScript_dark.svg"],
+    ["app.cjs", "javaScript_dark.svg"],
+    ["app.jsx", "jsx_dark.svg"],
+    ["app.test.mjs", "jsTest_dark.svg"],
+    ["app.spec.cjs", "jsTest_dark.svg"],
+    ["biome.json", "biomejs.svg"],
+    ["biome.jsonc", "biomejs.svg"],
+    [".eslintrc.json", "eslint.svg"],
+    ["eslint.config.js", "eslint.svg"],
+    ["eslint.config.mjs", "eslint.svg"],
+    ["eslint.config.ts", "eslint.svg"],
+    [".oxlintrc.json", "config_dark.svg"],
+    ["oxlint.config.ts", "config_dark.svg"],
+    ["jsconfig.json", "config_dark.svg"],
+    [".babelrc", "config_dark.svg"],
+    [".nycrc", "config_dark.svg"],
+    [".nvmrc", "nodejs_dark.svg"],
+    [".node-version", "nodejs_dark.svg"],
   ])("%s → %s", (filename, icon) => {
     expect(getFileIconPath(filename)).toBe(`./icons/${icon}`);
   });

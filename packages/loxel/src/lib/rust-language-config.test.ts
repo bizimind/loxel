@@ -197,6 +197,17 @@ describe("Rust editing in Monaco", () => {
       expect(typeShowingCursor(before, "/")).toBe(after);
     });
 
+    test("keeps the outer close when ending a comment nested in a doc comment", () => {
+      expect(typeShowingCursor("", "/** outer /* inner */")).toBe("/** outer /* inner */| */");
+    });
+
+    test.each([
+      ["/** a /* b */ c *| */", "/** a /* b */ c */|"],
+      ["/** a /** b */ *| */", "/** a /** b */ */|"],
+    ])("replaces the auto-closed end after a closed nested comment: %p", (before, after) => {
+      expect(typeShowingCursor(before, "/")).toBe(after);
+    });
+
     test("leaves a plain block comment alone", () => {
       expect(typeShowingCursor("/* a *| */", "/")).toBe("/* a */| */");
     });

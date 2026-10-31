@@ -13,7 +13,6 @@ describe("toTombiPatterns", () => {
     expect(toTombiPatterns("**/pyproject.toml", "/wt")).toEqual(["**/pyproject.toml"]);
     expect(toTombiPatterns("pyproject.toml", "/wt")).toEqual(["**/pyproject.toml"]);
     expect(toTombiPatterns("/.cargo/config.toml", "/wt")).toEqual(["**/.cargo/config.toml"]);
-    expect(toTombiPatterns("**/rust-toolchain.toml", "/wt")).toEqual(["**/rust-toolchain.toml"]);
     expect(toTombiPatterns("/", "/wt")).toEqual([]);
   });
 

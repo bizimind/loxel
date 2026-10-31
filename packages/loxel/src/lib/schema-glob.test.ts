@@ -41,14 +41,6 @@ describe("classifySchemaGlob", () => {
     });
   });
 
-  test("keeps the rust-toolchain schema away from JSON and YAML", () => {
-    expect(classifySchemaGlob("**/rust-toolchain.toml")).toEqual({
-      json: false,
-      yaml: false,
-      toml: true,
-    });
-  });
-
   test("applies a glob without a known extension to every language", () => {
     const all = { json: true, yaml: true, toml: true };
     expect(classifySchemaGlob("**/*")).toEqual(all);

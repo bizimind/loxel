@@ -89,8 +89,29 @@ interface InternalTextModel {
   };
 }
 
-/** An open block doc comment whose text ends in the `*` of a closing `*\/` being typed. */
-const BLOCK_DOC_BEFORE_CLOSE = /\/\*(?:\*|[*!].*\*)$/;
+/**
+ * Whether `before` ends in the `*` of a `*\/` that closes a block doc comment. Rust block comments
+ * nest and `*\/` closes the innermost open one, so a plain `/*` opened inside the doc comment ends
+ * the check: its close is the user's own, and the auto-closed one still belongs to the doc comment.
+ */
+function endsInBlockDocClose(before: string): boolean {
+  if (!before.endsWith("*")) return false;
+  /** For each block comment still open at the end of `before`, whether it is a doc comment. */
+  const open: boolean[] = [];
+  let i = 0;
+  while (i < before.length) {
+    if (open.length > 0 && before.startsWith("*/", i)) {
+      open.pop();
+      i += 2;
+    } else if (before.startsWith("/*", i)) {
+      open.push(before[i + 2] === "*" || before[i + 2] === "!");
+      i += 2;
+    } else {
+      i += 1;
+    }
+  }
+  return open.at(-1) === true;
+}
 
 /**
  * Monaco overtypes only the first character of a multi-character auto-closed pair, so finishing an
@@ -110,7 +131,7 @@ function overtypeBlockCommentClose(editor: monaco.editor.ICodeEditor): void {
     const { lineNumber, column } = selection.getPosition();
     const line = model.getLineContent(lineNumber);
     const before = line.slice(0, column - 1);
-    if (!BLOCK_DOC_BEFORE_CLOSE.test(before)) return;
+    if (!endsInBlockDocClose(before)) return;
     if (!line.slice(column - 1).startsWith(BLOCK_COMMENT_CLOSE)) return;
     // A comment's text in a string: nothing auto-closed there, so this ` */` is the user's own.
     const { tokenization } = model as unknown as InternalTextModel;

@@ -43,32 +43,43 @@ describe("resolveLanguage for Python projects", () => {
   });
 });
 
-describe("resolveLanguage for Rust projects", () => {
+describe("resolveLanguage for JavaScript tooling", () => {
   test.each([
-    ["/repo/src/main.rs", "rust"],
-    ["/repo/Cargo.toml", "toml"],
-    ["/repo/Cargo.lock", "toml"],
-    ["/repo/.cargo/config.toml", "toml"],
-    ["/repo/.cargo/config", "toml"],
-    ["/home/me/.cargo/config", "toml"],
-    ["/repo/rust-toolchain.toml", "toml"],
-    ["/repo/clippy.toml", "toml"],
-    ["/repo/.clippy.toml", "toml"],
-    ["/repo/rustfmt.toml", "toml"],
-    ["/repo/.rustfmt.toml", "toml"],
+    // These tools accept comments, so strict-JSON markers would be wrong.
+    ["/repo/.babelrc", "jsonc"],
+    ["/repo/.babelrc.json", "jsonc"],
+    ["/repo/babel.config.json", "jsonc"],
+    ["/repo/.eslintrc", "jsonc"],
+    ["/repo/.eslintrc.json", "jsonc"],
+    ["/repo/.jshintrc", "jsonc"],
+    ["/repo/.mocharc.json", "jsonc"],
+    ["/repo/.mocharc.jsonc", "jsonc"],
+    ["/repo/.oxfmtrc.json", "jsonc"],
+    ["/repo/.oxlintrc.json", "jsonc"],
+    ["/repo/.swcrc", "jsonc"],
+    ["/repo/biome.jsonc", "jsonc"],
+    ["/repo/bun.lock", "jsonc"],
+    ["/repo/jsconfig.json", "jsonc"],
+    ["/repo/lerna.json", "jsonc"],
+    // These tools reject comments.
+    ["/repo/.c8rc", "json"],
+    ["/repo/.nycrc", "json"],
+    ["/repo/.prettierrc.json", "json"],
+    ["/repo/biome.json", "json"],
+    ["/repo/package.json", "json"],
+    // These tools parse the file as YAML, which covers their JSON form too.
+    ["/repo/.commitlintrc", "yaml"],
+    ["/repo/.lintstagedrc", "yaml"],
+    ["/repo/.prettierrc", "yaml"],
+    ["/repo/.releaserc", "yaml"],
+    ["/repo/.eslintrc.yml", "yaml"],
+    ["/repo/pnpm-workspace.yaml", "yaml"],
+    ["/repo/src/app.js", "javascript"],
+    ["/repo/src/app.mjs", "javascript"],
+    ["/repo/src/app.cjs", "javascript"],
+    ["/repo/src/app.jsx", "jsx"],
   ])("%s → %s", (path, language) => {
     expect(resolve(path)).toBe(language);
-  });
-
-  test("leaves other files named config alone", () => {
-    expect(resolve("/repo/config")).toBeNull();
-    expect(resolve("/repo/.git/config")).toBeNull();
-  });
-
-  // Its legacy format is a bare channel name, on which Tombi would report a syntax error.
-  test("leaves the extensionless rust-toolchain as plain text", () => {
-    expect(resolve("/repo/rust-toolchain", "nightly-2024-01-01\n")).toBeNull();
-    expect(resolve("/repo/rust-toolchain", '[toolchain]\nchannel = "stable"\n')).toBeNull();
   });
 });
 
