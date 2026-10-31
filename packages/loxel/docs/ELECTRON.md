@@ -39,4 +39,6 @@ Browser panels host a `<webview>` per tab. `will-attach-webview` in `src/electro
 
 ## Build and release
 
-`pnpm run build:app` compiles the standalone server, builds the renderer and packages the app with electron-builder into `release/` (`build:app:local` builds an unpacked arm64 app only). `release-loxel.yml` releases on every merge to main that touches `packages/loxel/**`; see the [README](../README.md#releases).
+`pnpm run build:app` compiles the standalone server, builds the renderer and packages the app with electron-builder into `release/`, on macOS for this machine's architecture (`build:app:local` builds an unpacked arm64 app only). `release-loxel.yml` releases on every merge to main that touches `packages/loxel/**`; see the [README](../README.md#releases).
+
+The server, language server scripts and Go builds all produce binaries for the machine they run on, so each macOS architecture builds on a runner of that architecture. [check-binary-arch.ts](../scripts/check-binary-arch.ts) reads the header of every file in the app and the update archive and fails the release if a binary doesn't match.
