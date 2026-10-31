@@ -18,7 +18,7 @@ import {
   useFormatOnSave,
 } from "@/hooks/use-disk-synced-content";
 import { useFirstLoadGate } from "@/hooks/useFirstLoadGate";
-import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { computeLineEdits } from "@/lib/compute-line-edits";
 import { detectIndentation } from "@/lib/detect-indentation";
 import { applyEditorConfigOnSave } from "@/lib/editorconfig-save-actions";
@@ -27,7 +27,7 @@ import { validateStrictJson } from "@/lib/json-strict-validator";
 import { fileSchemeLanguages } from "@/lib/lsp-clients";
 import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
-import { resolveLanguage } from "@/lib/resolve-language";
+import { languageNeedsContent, resolveLanguage } from "@/lib/resolve-language";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
 import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
@@ -214,6 +214,8 @@ export function CodeEditorPanel({
     diskContent,
     editorFileState,
     isDeleted,
+    isError,
+    isPaused,
     saveNow,
     recreateFile,
     saveOptionsRef,
@@ -242,6 +244,18 @@ export function CodeEditorPanel({
   const resolvedLangRef = useRef(resolvedLang);
   resolvedLangRef.current = resolvedLang;
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
+  // A model's URI scheme and first language decide which language servers get it, so a file only
+  // its content can name a language for (a shebang script) waits for that content, unless it cannot
+  // come: an error, or a query paused offline.
+  // Latched: losing that content to a refetch must not dispose the editor and its unsaved edits.
+  const canCreateModelRef = useRef(false);
+  canCreateModelRef.current ||=
+    diskContent !== null ||
+    isError ||
+    isPaused ||
+    !languageNeedsContent(filePath, fileAssociations);
+  const canCreateModel = canCreateModelRef.current;
+  const waitedForContent = useRef(!canCreateModel);
 
   // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
   const editorConfigQuery = useQuery({
@@ -302,6 +316,7 @@ export function CodeEditorPanel({
 
   // Mount editor once
   useEffect(() => {
+    if (!canCreateModel) return;
     const container = containerRef.current;
     if (!container) return;
 
@@ -354,6 +369,12 @@ export function CodeEditorPanel({
     });
 
     editorRef.current = editor;
+    if (waitedForContent.current) {
+      // `usePanelActivationFocus` found no editor when the panel opened.
+      if (isActivatedPanel(panelApi)) editor.focus();
+      // The content arrived with the model, so the disk-content effect below finds nothing to do.
+      if (diskContent !== null) setDetectedIndentation(detectIndentation(diskContent));
+    }
     // After `create`: the first editor flips the global `detectIndentation`, which resets models.
     model.updateOptions(indentationRef.current.indentation);
     setEol(model.getEOL() === "\r\n" ? "CRLF" : "LF");
@@ -546,9 +567,9 @@ export function CodeEditorPanel({
       editor.dispose();
       editorModel?.dispose();
     };
-    // Mount-only effect
+    // Mount-only effect, once the model can be created
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canCreateModel]);
 
   // Update content from disk — only when editor state is clean.
   // Reads state live from the store (not the ref) because useEffect runs after paint,
