@@ -99,7 +99,7 @@ Status and working-tree diffs run with `-c diff.ignoreSubmodules=dirty` (`SUBMOD
 
 When the user does enable fsmonitor, daemon count scales with Git directories, not just top-level worktrees. Git reuses one daemon via `<gitdir>/fsmonitor--daemon.ipc`; a high count alone is not evidence of a leak.
 
-Language servers may run their own watchers; basedpyright, ruff, TypeScript and Tombi instead receive the worktree watcher's changes (the shared Python environment resolution also watches environments, see [languages/python.md](languages/python.md#python-environment)). Worktree teardown stops the language servers rooted at the removed worktree along with its other watchers.
+Language servers may run their own watchers; basedpyright, ruff, mypy, Kotlin lint, TypeScript and Tombi instead receive the worktree watcher's changes (the shared Python environment resolution also watches environments, see [languages/python.md](languages/python.md#python-environment)). Worktree teardown stops the language servers rooted at the removed worktree along with its other watchers.
 
 ## Review checklist
 
