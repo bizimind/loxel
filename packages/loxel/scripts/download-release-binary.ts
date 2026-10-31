@@ -36,20 +36,6 @@ export interface ReleaseBinary {
   outBinary: string;
 }
 
-/** Download `url` into memory and check it against its pinned SHA256. Throws on a mismatch. */
-export async function downloadVerified(url: string, sha256: string): Promise<Uint8Array> {
-  console.log(`Downloading ${url}`);
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
-
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  const actualHash = createHash("sha256").update(bytes).digest("hex");
-  if (actualHash !== sha256) {
-    throw new Error(`SHA256 mismatch!\n  expected: ${sha256}\n  actual:   ${actualHash}`);
-  }
-  return bytes;
-}
-
 /** Download, verify and extract `member`, unless `outBinary` already exists. Throws on failure. */
 export async function downloadReleaseBinary({
   name,
@@ -66,7 +52,15 @@ export async function downloadReleaseBinary({
   const outDir = path.dirname(outBinary);
   mkdirSync(outDir, { recursive: true });
 
-  const bytes = await downloadVerified(url, sha256);
+  console.log(`Downloading ${url}`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const actualHash = createHash("sha256").update(bytes).digest("hex");
+  if (actualHash !== sha256) {
+    throw new Error(`SHA256 mismatch!\n  expected: ${sha256}\n  actual:   ${actualHash}`);
+  }
 
   // Extract in a scratch directory of its own, so nothing but the binary reaches `outDir`.
   const scratch = mkdtempSync(path.join(outDir, `${name}-download-`));

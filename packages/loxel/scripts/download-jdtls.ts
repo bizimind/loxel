@@ -1,12 +1,13 @@
 /**
  * Downloads Eclipse JDT LS into `packages/loxel/build/jdtls/`. It is one archive for every
- * platform, shipped as released. The Java it runs on comes from `build-jdtls-runtime.ts`.
+ * platform, shipped as released. It runs on the user's JDK.
  */
 
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
-import { BUILD_DIR, downloadVerified } from "./download-release-binary";
+import { BUILD_DIR } from "./download-release-binary";
 
 const VERSION = "1.63.0";
 const ARCHIVE = `jdt-language-server-${VERSION}-202610191322.tar.gz`;
@@ -24,10 +25,15 @@ if (
   process.exit(0);
 }
 
-const bytes = await downloadVerified(
-  `https://download.eclipse.org/jdtls/milestones/${VERSION}/${ARCHIVE}`,
-  SHA256,
-);
+const url = `https://download.eclipse.org/jdtls/milestones/${VERSION}/${ARCHIVE}`;
+console.log(`Downloading ${url}`);
+const res = await fetch(url);
+if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+const bytes = new Uint8Array(await res.arrayBuffer());
+const actualHash = createHash("sha256").update(bytes).digest("hex");
+if (actualHash !== SHA256) {
+  throw new Error(`SHA256 mismatch!\n  expected: ${SHA256}\n  actual:   ${actualHash}`);
+}
 
 mkdirSync(BUILD_DIR, { recursive: true });
 const scratch = mkdtempSync(path.join(BUILD_DIR, "jdtls-download-"));

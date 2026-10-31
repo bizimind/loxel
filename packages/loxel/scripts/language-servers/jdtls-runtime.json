@@ -1,9 +1,0 @@
-{
-  "script": "build-jdtls-runtime.ts",
-  "resources": ["jdtls-runtime"],
-  "sign": ["jdtls-runtime/bin/java", "jdtls-runtime/lib/jspawnhelper"],
-  "license": "GPL-2.0-only WITH Classpath-exception-2.0",
-  "source": "https://github.com/adoptium/jdk25u/tree/jdk-25.0.5+8",
-  "licenseFile": "licenses/jdtls-runtime.txt",
-  "note": "Eclipse Temurin, reduced with jlink. Each module's notices are in its legal/ directory."
-}

@@ -6,7 +6,8 @@
  * on any outbound attempt.
  *
  *   pnpm -C packages/loxel run build:server:standalone
- *   bun scripts/network-audit/audit-jdtls.ts [--control]
+ *   JAVA_HOME=<a JDK 25+ whose java allows DYLD, as Temurin's does> \\
+ *     bun scripts/network-audit/audit-jdtls.ts [--control]
  *
  * `--control` runs the server without the JVM flag that keeps host names from resolving. It is the
  * positive control and must fail, by attempting to reach the hosts jdtls contacts by default.
@@ -33,7 +34,7 @@ import { $ } from "bun";
 
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const BUILD = path.join(LOXEL, "build");
-const REQUEST_TIMEOUT_MS = 120_000;
+const REQUEST_TIMEOUT_MS = 60_000;
 
 const { values } = parseArgs({
   options: {
@@ -154,6 +155,9 @@ class LspClient {
     private readonly ws: WebSocket,
     readonly root: string,
   ) {
+    ws.addEventListener("close", ({ code, reason }) => {
+      if (code !== 1000) console.error(`     the server's socket closed: ${code} ${reason}`);
+    });
     ws.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data)) as RpcMessage;
       if (message.method === undefined && message.id !== undefined) {
@@ -295,12 +299,20 @@ const serverPath = path.join(work, "loxel-server");
 copyFileSync(path.join(BUILD, "loxel-server"), serverPath);
 await $`codesign -s - -f ${serverPath}`.quiet();
 symlinkSync(path.join(BUILD, "jdtls"), path.join(work, "jdtls"));
-const realJava = path.join(BUILD, "jdtls-runtime", "bin", "java");
+if (!process.env.JAVA_HOME) throw new Error("Set JAVA_HOME to a JDK 25 or newer");
+const realHome = process.env.JAVA_HOME;
+const realJava = path.join(realHome, "bin", "java");
+let auditedHome = realHome;
 if (values.control) {
-  const bin = path.join(work, "jdtls-runtime", "bin");
-  mkdirSync(bin, { recursive: true });
-  const wrapper = path.join(bin, "java");
-  // /bin/sh is a system binary, so the dynamic linker drops the logger's variables going through it.
+  // The same JDK, with a `java` that drops the flag on the way.
+  auditedHome = path.join(work, "control-jdk");
+  mkdirSync(path.join(auditedHome, "bin"), { recursive: true });
+  for (const entry of ["release", "lib", "conf", "legal"]) {
+    symlinkSync(path.join(realHome, entry), path.join(auditedHome, entry));
+  }
+  symlinkSync(path.join(realHome, "bin", "javac"), path.join(auditedHome, "bin", "javac"));
+  const wrapper = path.join(auditedHome, "bin", "java");
+  // bash is a system binary, so the dynamic linker drops the logger's variables going through it.
   writeFileSync(
     wrapper,
     `#!/bin/bash
@@ -311,9 +323,11 @@ exec '${realJava}' "\${args[@]}"
 `,
   );
   chmodSync(wrapper, 0o755);
-} else {
-  symlinkSync(path.join(BUILD, "jdtls-runtime"), path.join(work, "jdtls-runtime"));
 }
+
+const auditHome = path.join(work, "home");
+mkdirSync(path.join(auditHome, ".jdks"), { recursive: true });
+symlinkSync(auditedHome, path.join(auditHome, ".jdks", "audited"));
 
 const markers = path.join(work, "markers");
 mkdirSync(markers);
@@ -483,6 +497,9 @@ const server = Bun.spawn([serverPath], {
     ...process.env,
     CONNECT_LOG: logPath,
     DYLD_INSERT_LIBRARIES: dylib,
+    // The server finds the audited JDK among the install locations of a home of its own.
+    HOME: auditHome,
+    JAVA_HOME: "",
     LOXEL_DEK_FILE: dekFile,
     LOXEL_SERVE_PORT: String(port),
     LOXEL_STATE_DIR: path.join(work, "state"),

@@ -6,6 +6,7 @@ import {
 
 import {
   getJavaEnvResolution,
+  type JavaEnvUpdate,
   listJavaRuntimes,
   normalizeJavaOverride,
   refreshAllJavaEnvs,
@@ -13,6 +14,7 @@ import {
   resolveJavaEnv,
   subscribeJavaEnv,
 } from "./java-env";
+import { JDTLS_MIN_JAVA } from "./java-lsp-manager";
 import {
   getJavaOverride,
   javaOverrideStoreKey,
@@ -67,9 +69,29 @@ async function handleJavaOverride(
   return json(await javaEnvResponse(wtPath));
 }
 
+/**
+ * Like {@link subscribeJavaEnv}, and also reports a change when a JDK that can run the language
+ * server appears or goes, though the worktree's own JDK stays: a client whose server could not start
+ * for lack of one tries again on that message.
+ */
+function subscribeJavaStatus(
+  wtPath: string,
+  listener: (update: JavaEnvUpdate) => void,
+): () => void {
+  let couldRun: boolean | null = null;
+  return subscribeJavaEnv(wtPath, (update) => {
+    void listJavaRuntimes(wtPath).then((runtimes) => {
+      const canRun = runtimes.some((runtime) => runtime.majorVersion >= JDTLS_MIN_JAVA);
+      const crossed = couldRun !== null && couldRun !== canRun;
+      couldRun = canRun;
+      listener({ ...update, changed: update.changed || crossed });
+    });
+  });
+}
+
 export const javaToolchainStatus: ToolchainStatusModule = {
   toolchain: javaToolchain,
-  subscribe: subscribeJavaEnv,
+  subscribe: subscribeJavaStatus,
   refresh: refreshJavaEnv,
   refreshAll: refreshAllJavaEnvs,
   onOverrideChange: onJavaOverrideChange,

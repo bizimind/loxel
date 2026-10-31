@@ -1,8 +1,44 @@
 ---
 title: Java
-description: The JDK Loxel uses for each worktree, how it is found, and how to choose another.
+description: Java language features from Eclipse JDT LS, running on your JDK 25 or newer, and the JDK Loxel uses for each worktree.
 order: 13.5
 ---
+
+The Java server starts the first time you open a `.java` file, and stops when none remain open. Loxel bundles [Eclipse JDT LS](https://github.com/eclipse-jdtls/eclipse.jdt.ls), and the server makes no network requests.
+
+## Java 25 or newer
+
+The server needs a JDK 25 or newer on your machine to run. If your project is on an older Java, install JDK 25 or newer alongside your project's JDK: the server runs on the newest one, and your code is still checked against the JDK of the worktree (see [JDK detection](#jdk-detection)). Without one, the Java server stops and the status bar says what to install. Installing a JDK while Loxel is open brings it back.
+
+Maven and Gradle projects aren't loaded yet. The server starts with project import off, and what you get depends on the folder you open.
+
+## Folders without a build file
+
+Java files in a folder with no `pom.xml` or Gradle build get the full set of features for the code in that folder:
+
+- Syntax and type errors as you type
+- Hover, go-to-definition, go-to-implementation and references across files
+- Rename across files, including renaming a class and its file
+- Completion, including types you have not imported yet, `sysout`-style templates and argument placeholders
+- Quick fixes and refactorings: add imports, organize imports, add unimplemented methods, generate getters and setters, surround with try/catch, extract to a variable, field or constant
+- Document and workspace symbols, inlay hints for parameter names, folding and semantic highlighting
+- **Format Document**
+
+The source folder comes from the first Java file found in the folder, so a project with several source folders has one of them treated as source. `.jar` files under `lib/` are on the classpath.
+
+## Maven and Gradle projects
+
+In a folder with a build file, Java files are treated as separate files outside any project. They show a note saying so, and get:
+
+- Syntax errors, but no type errors
+- Completion, code actions, document symbols, references within the file, folding and semantic highlighting
+- **Format Document**
+
+Go-to-definition, rename, workspace symbols and hover on your own types need the project to be loaded, so they do not work there yet. Nothing from the build runs: not the build scripts, wrappers, plugins or annotation processors.
+
+## JDK classes
+
+Hover on a JDK class shows its documentation when the JDK includes its sources (`src.zip`), and only its signature otherwise. Most JDK distributions include them; some Linux packages put them in a separate package. Go-to-definition into JDK classes is not available yet.
 
 ## JDK detection
 

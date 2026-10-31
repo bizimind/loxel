@@ -4,20 +4,20 @@ Quick reference for the quirks of the servers that existed before `docs/language
 
 ## Integration Matrix
 
-| LSP                   | Binary Source | Scope    | Connection | Semantic Tokens | Full-text Sync | Spawn Args      | Init Options                  |
-| --------------------- | ------------- | -------- | ---------- | --------------- | -------------- | --------------- | ----------------------------- |
-| TypeScript (tsc)      | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences                   |
-| YAML                  | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (post-init)        |
-| Docker                | source-built  | worktree | lazy       | disabled        | yes            | `start --stdio` | compose, telemetry, Scout off |
-| Terraform             | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
-| Python (basedpyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
-| Python (ruff)         | downloaded    | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
-| Python (mypy)         | project env   | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
-| Astro                 | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
-| XML (LemMinX)         | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | none                          |
-| TOML (Tombi)          | downloaded    | worktree | lazy       | disabled        | no             | `lsp`           | schema map (post-init)        |
-| Go (gopls)            | built from Go | worktree | lazy       | enabled         | no             | `serve`         | settings (pulled)             |
-| Java (jdtls)          | downloaded    | worktree | lazy       | enabled         | no             | JVM flags       | import off (init and pushed)  |
+| LSP                   | Binary Source        | Scope    | Connection | Semantic Tokens | Full-text Sync | Spawn Args      | Init Options                  |
+| --------------------- | -------------------- | -------- | ---------- | --------------- | -------------- | --------------- | ----------------------------- |
+| TypeScript (tsc)      | copy script          | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences                   |
+| YAML                  | Bun-built            | global   | always     | enabled         | no             | `--stdio`       | schema map (post-init)        |
+| Docker                | source-built         | worktree | lazy       | disabled        | yes            | `start --stdio` | compose, telemetry, Scout off |
+| Terraform             | downloaded           | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
+| Python (basedpyright) | Bun-built            | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
+| Python (ruff)         | downloaded           | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
+| Python (mypy)         | project env          | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
+| Astro                 | Bun-built            | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
+| XML (LemMinX)         | downloaded           | worktree | lazy       | enabled         | no             | `--stdio`       | none                          |
+| TOML (Tombi)          | downloaded           | worktree | lazy       | disabled        | no             | `lsp`           | schema map (post-init)        |
+| Go (gopls)            | built from Go        | worktree | lazy       | enabled         | no             | `serve`         | settings (pulled)             |
+| Java (jdtls)          | downloaded, user JDK | worktree | lazy       | enabled         | no             | JVM flags       | import off (init and pushed)  |
 
 ## TypeScript — Do Not Use as Template
 

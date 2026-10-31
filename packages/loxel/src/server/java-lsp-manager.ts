@@ -11,9 +11,11 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { JavaRuntime } from "@/api/java-env-model";
 import { isRecord } from "@/lib/is-record";
 
 import { config, hash12 } from "./config";
+import { getJavaEnv, javaExecutable, listJavaRuntimes, subscribeJavaEnv } from "./java-env";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import {
@@ -26,7 +28,7 @@ import {
 const JDTLS_STATE_DIR = path.join(config.stateDir, "jdtls");
 
 /** Settings every session starts with: Maven and Gradle project import stay off. */
-export const JAVA_SETTINGS = {
+const JAVA_SETTINGS = {
   import: { maven: { enabled: false }, gradle: { enabled: false }, exclusions: ["**"] },
   autobuild: { enabled: false },
   telemetry: { enabled: false },
@@ -37,6 +39,9 @@ export const JAVA_SETTINGS = {
 
 /** Directories never worth starting from when looking for a Java file. */
 const NOT_SOURCE_DIRS = new Set(["node_modules", "build", "target", "out", "bin"]);
+/** What jdtls itself runs on. A project on an older Java also needs a JDK of its own level. */
+export const JDTLS_MIN_JAVA = 25;
+const NO_JDK_REASON = `Java needs JDK ${JDTLS_MIN_JAVA} or newer for its language server. Install one alongside your project's JDK.`;
 /** Where looking for a Java file stops, in a repository with none near the top. */
 const MAX_SCANNED_DIRS = 20_000;
 /** Longest a new server waits for the previous one to let go of its workspace directory. */
@@ -51,26 +56,14 @@ const EMPTY_ACTION_TITLE = "Ignore compiler problem(s)";
 const TAB_SIZE_SECTION = "java.format.tabSize";
 const INSERT_SPACES_SECTION = "java.format.insertSpaces";
 
-interface BundledJdtls {
-  java: string;
-  home: string;
-}
-
-/** The bundled runtime and server, next to `loxel-server` or, in development, in `build/`. */
-function resolveBundledJdtls(): BundledJdtls | null {
-  const java = process.platform === "win32" ? "java.exe" : "java";
+/** The bundled server, next to `loxel-server` or, in development, in `build/`. */
+function resolveBundledJdtls(): string | null {
   for (const dir of [
     path.dirname(process.execPath),
     path.resolve(import.meta.dir, "../../build"),
   ]) {
-    const javaPath = path.join(dir, "jdtls-runtime", "bin", java);
     const home = path.join(dir, "jdtls");
-    if (
-      Bun.file(javaPath).size &&
-      Bun.file(path.join(home, sharedConfigDir(), "config.ini")).size
-    ) {
-      return { java: javaPath, home };
-    }
+    if (Bun.file(path.join(home, sharedConfigDir(), "config.ini")).size) return home;
   }
   return null;
 }
@@ -232,8 +225,50 @@ export function dropUnusableActions(message: Record<string, unknown>): boolean {
   return true;
 }
 
+/** An entry of `java.configuration.runtimes`. */
+export interface JavaRuntimeSetting {
+  name: string;
+  path: string;
+  sources?: string;
+  default?: true;
+}
+
 /**
- * Manages Eclipse JDT LS child processes, one per worktree, running on the bundled Java runtime.
+ * One runtime per Java level, for projects at each level to compile against, each with its sources
+ * where the JDK has them, which is where hover documentation comes from. `runtimes` is newest first;
+ * `chosen`, the worktree's JDK, takes its level's place and is the default.
+ */
+export function javaRuntimesSetting(
+  runtimes: readonly JavaRuntime[],
+  chosen: JavaRuntime | null,
+): JavaRuntimeSetting[] {
+  const byLevel = new Map<number, JavaRuntime>();
+  for (const runtime of runtimes) {
+    if (!byLevel.has(runtime.majorVersion)) byLevel.set(runtime.majorVersion, runtime);
+  }
+  if (chosen) byLevel.set(chosen.majorVersion, chosen);
+  return [...byLevel.values()].map((runtime) => {
+    const { majorVersion, path: home } = runtime;
+    const setting: JavaRuntimeSetting = {
+      name: majorVersion === 8 ? "JavaSE-1.8" : `JavaSE-${majorVersion}`,
+      path: home,
+    };
+    // Java 8 keeps them at the top of the JDK.
+    const sources = path.join(home, ...(majorVersion === 8 ? [] : ["lib"]), "src.zip");
+    if (existsSync(sources)) setting.sources = sources;
+    if (chosen?.path === home) setting.default = true;
+    return setting;
+  });
+}
+
+/** The settings of a session, as `initialize` and `workspace/didChangeConfiguration` carry them. */
+export function javaSettings(runtimes: readonly JavaRuntimeSetting[]): Record<string, unknown> {
+  return { ...JAVA_SETTINGS, configuration: { runtimes } };
+}
+
+/**
+ * Manages Eclipse JDT LS child processes, one per worktree. The server is bundled and runs on the
+ * newest JDK of the user's that is new enough, which is never a project's to choose.
  * Maven and Gradle project import is off and the server makes no network requests; see
  * `docs/languages/java.md`.
  */
@@ -242,6 +277,10 @@ export class JavaLspManager extends WorktreeLspManager {
 
   /** By worktree: the file `initialize` names, found while the session's frames are held. */
   private readonly triggerFiles = new Map<string, string | null>();
+  /** By worktree: the settings of the server being started, and the last ones pushed to it. */
+  private readonly runtimeSettings = new Map<string, JavaRuntimeSetting[]>();
+  /** Each session's subscription to the machine's JDKs. */
+  private readonly jdkSubscriptions = new Map<WtLspSession, () => void>();
   /** By worktree: when its server was last started, to tell its log from earlier ones. */
   private readonly startedAt = new Map<string, number>();
   /** By worktree: the exit of its closed server, until that server is gone. */
@@ -252,6 +291,7 @@ export class JavaLspManager extends WorktreeLspManager {
   }
 
   protected async resolveBinary(context: WtLspContext): Promise<string | null> {
+    this.startedAt.delete(context.wtPath);
     // A workspace directory takes one server at a time, and a replaced server is still exiting.
     const previous = this.exiting.get(context.wtPath);
     if (previous) {
@@ -265,27 +305,45 @@ export class JavaLspManager extends WorktreeLspManager {
       clearTimeout(timer);
     }
     this.triggerFiles.set(context.wtPath, await firstJavaFile(context.wtPath));
-    return resolveBundledJdtls()?.java ?? null;
+    const { java, runtimes } = await this.findJdks(context.wtPath);
+    this.runtimeSettings.set(context.wtPath, runtimes);
+    return resolveBundledJdtls() && java;
+  }
+
+  /** The `java` to run the server on, by absolute path, and the runtimes to give it. */
+  private async findJdks(
+    wtPath: string,
+  ): Promise<{ java: string | null; runtimes: JavaRuntimeSetting[] }> {
+    const [runtimes, chosen] = await Promise.all([listJavaRuntimes(wtPath), getJavaEnv(wtPath)]);
+    const host = runtimes.find((runtime) => runtime.majorVersion >= JDTLS_MIN_JAVA);
+    return {
+      java: host ? javaExecutable(host.path) : null,
+      runtimes: javaRuntimesSetting(runtimes, chosen),
+    };
   }
 
   protected override spawnArgs(context: WtLspContext): readonly string[] {
-    const bundled = resolveBundledJdtls();
-    if (!bundled) throw new Error("jdtls is not bundled");
-    const configuration = jdtlsConfigurationDir(bundled.home);
+    const home = resolveBundledJdtls();
+    if (!home) throw new Error("jdtls is not bundled");
+    const configuration = jdtlsConfigurationDir(home);
     const data = jdtlsDataDir(context.wtPath);
     const hosts = path.join(JDTLS_STATE_DIR, "hosts");
     mkdirSync(configuration, { recursive: true });
     mkdirSync(data, { recursive: true });
     writeFileSync(hosts, "127.0.0.1 localhost\n");
     this.startedAt.set(context.wtPath, Date.now());
-    return jdtlsArgs({ home: bundled.home, configuration, data, hosts });
+    return jdtlsArgs({ home, configuration, data, hosts });
   }
 
   protected override serverFailureReason(context: WtLspContext): string | null {
-    const bundled = resolveBundledJdtls();
-    if (!bundled) return "The Java language server is missing from this build of Loxel";
-    const since = this.startedAt.get(context.wtPath) ?? Date.now();
-    const message = latestLogMessage(jdtlsConfigurationDir(bundled.home), since);
+    const home = resolveBundledJdtls();
+    if (!home) return "The Java language server is missing from this build of Loxel";
+    // No server was started, so there is no log of its own to read.
+    if (!this.startedAt.has(context.wtPath)) return NO_JDK_REASON;
+    const message = latestLogMessage(
+      jdtlsConfigurationDir(home),
+      this.startedAt.get(context.wtPath) ?? 0,
+    );
     return message ? `Java language server: ${message}` : null;
   }
 
@@ -300,11 +358,14 @@ export class JavaLspManager extends WorktreeLspManager {
 
   protected override getInitializationOptions(session: WtLspSession): Record<string, unknown> {
     const trigger = this.triggerFiles.get(session.wtPath);
-    return { settings: { java: JAVA_SETTINGS }, ...(trigger ? { triggerFiles: [trigger] } : {}) };
+    const java = javaSettings(this.runtimeSettings.get(session.wtPath) ?? []);
+    return { settings: { java }, ...(trigger ? { triggerFiles: [trigger] } : {}) };
   }
 
   protected override onSessionClosed(session: WtLspSession): void {
     const { proc, wtPath } = session;
+    this.jdkSubscriptions.get(session)?.();
+    this.jdkSubscriptions.delete(session);
     const exited = proc.exited.then(() => {
       if (this.exiting.get(wtPath) === exited) this.exiting.delete(wtPath);
       // The worktree went away while its server ran, which could write until it stopped.
@@ -314,12 +375,32 @@ export class JavaLspManager extends WorktreeLspManager {
   }
 
   protected override onClientInitialized(session: WtLspSession): void {
+    this.pushSettings(session);
+    // The first update also reports the JDKs read a moment ago; only a difference is pushed.
+    this.jdkSubscriptions.set(
+      session,
+      subscribeJavaEnv(session.wtPath, () => void this.followJdks(session)),
+    );
+    void getJavaEnv(session.wtPath);
+  }
+
+  /** Give a running server the JDKs installed, removed or chosen since it started. */
+  private async followJdks(session: WtLspSession): Promise<void> {
+    const { runtimes } = await this.findJdks(session.wtPath);
+    const previous = this.runtimeSettings.get(session.wtPath);
+    if (JSON.stringify(runtimes) === JSON.stringify(previous)) return;
+    this.runtimeSettings.set(session.wtPath, runtimes);
+    if (this.isSessionLive(session)) this.pushSettings(session);
+  }
+
+  private pushSettings(session: WtLspSession): void {
+    const java = javaSettings(this.runtimeSettings.get(session.wtPath) ?? []);
     this.writeToStdin(
       session,
       JSON.stringify({
         jsonrpc: "2.0",
         method: "workspace/didChangeConfiguration",
-        params: { settings: { java: JAVA_SETTINGS } },
+        params: { settings: { java } },
       }),
     );
   }

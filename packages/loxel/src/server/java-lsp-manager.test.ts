@@ -8,7 +8,8 @@ import {
   dropWillRename,
   firstJavaFile,
   indentationOf,
-  JAVA_SETTINGS,
+  javaRuntimesSetting,
+  javaSettings,
   jdtlsArgs,
   jdtlsDataDir,
   latestLogMessage,
@@ -18,12 +19,43 @@ import { fileUri } from "./lsp-file-uri";
 const scratch = mkdtempSync(path.join(tmpdir(), "java-lsp-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-describe("JAVA_SETTINGS", () => {
+describe("javaSettings", () => {
   test("starts with project import off", () => {
-    expect(JAVA_SETTINGS.import.maven.enabled).toBe(false);
-    expect(JAVA_SETTINGS.import.gradle.enabled).toBe(false);
-    expect(JAVA_SETTINGS.import.exclusions).toEqual(["**"]);
-    expect(JAVA_SETTINGS.autobuild.enabled).toBe(false);
+    expect(javaSettings([])).toMatchObject({
+      import: { maven: { enabled: false }, gradle: { enabled: false }, exclusions: ["**"] },
+      autobuild: { enabled: false },
+    });
+  });
+});
+
+describe("javaRuntimesSetting", () => {
+  const jdk = (majorVersion: number, name: string) => ({
+    path: path.join(scratch, "jdks", name),
+    majorVersion,
+    version: String(majorVersion),
+    implementor: null,
+  });
+  const jdk25 = jdk(25, "25");
+  const jdk21a = jdk(21, "21a");
+  const jdk21b = jdk(21, "21b");
+  const jdk8 = jdk(8, "8");
+  mkdirSync(path.join(jdk25.path, "lib"), { recursive: true });
+  writeFileSync(path.join(jdk25.path, "lib", "src.zip"), "");
+  mkdirSync(jdk8.path, { recursive: true });
+  writeFileSync(path.join(jdk8.path, "src.zip"), "");
+
+  test("gives each level its newest JDK, with sources where they exist", () => {
+    expect(javaRuntimesSetting([jdk25, jdk21a, jdk21b, jdk8], null)).toEqual([
+      { name: "JavaSE-25", path: jdk25.path, sources: path.join(jdk25.path, "lib", "src.zip") },
+      { name: "JavaSE-21", path: jdk21a.path },
+      { name: "JavaSE-1.8", path: jdk8.path, sources: path.join(jdk8.path, "src.zip") },
+    ]);
+  });
+
+  test("makes the worktree's JDK the default, in its level's place", () => {
+    const [newest, level21] = javaRuntimesSetting([jdk25, jdk21a, jdk21b], jdk21b);
+    expect(newest?.default).toBeUndefined();
+    expect(level21).toEqual({ name: "JavaSE-21", path: jdk21b.path, default: true });
   });
 });
 
