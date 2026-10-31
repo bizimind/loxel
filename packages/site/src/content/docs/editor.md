@@ -52,7 +52,7 @@ Press `Cmd+S` to save immediately. Explicit save is the trigger for format on sa
 
 ## Formatter auto-detection
 
-Loxel detects which formatters are available in the active worktree by inspecting config files, `package.json`, `pyproject.toml`, `go.mod` and .NET tool manifests. Detection is per-worktree — switching worktrees picks up that worktree's toolchain.
+Loxel detects which formatters are available in the active worktree by inspecting config files, `package.json`, `pyproject.toml`, `go.mod`, Gradle build files and .NET tool manifests. Detection is per-worktree — switching worktrees picks up that worktree's toolchain.
 
 Supported formatters:
 
@@ -63,6 +63,7 @@ Supported formatters:
 | `rustfmt`       | `rustfmt.toml`                                                           | `.rs` files                                          |
 | `ruff`          | `ruff.toml`, `.ruff.toml`, a `[tool.ruff]` table, or a `ruff` dependency | `.py` and `.pyi` files                               |
 | `black`         | A `[tool.black]` table in `pyproject.toml`, or a `black` dependency      | `.py` and `.pyi` files                               |
+| `ktfmt/ktlint`  | [A Gradle plugin or `ktlint_*`](/docs/languages/kotlin#format-on-save)   | `.kt` and `.kts` files                               |
 | `clang-format`  | `.clang-format`                                                          | C and C++ files                                      |
 | `deno`          | `deno.json`                                                              | JS and TS files                                      |
 | `golangci-lint` | A `version: "2"` `.golangci.*` config that enables formatters            | `.go` files                                          |

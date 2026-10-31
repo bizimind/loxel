@@ -8,6 +8,7 @@ import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-mod
 import type { BackendMode, FormatterBackend } from "./formatter-backends";
 import {
   type FileFormatter,
+  type FormatterDecline,
   type FormatterFailure,
   type FormatterSpawnOptions,
   type LanguageFormatter,
@@ -28,9 +29,9 @@ const FORMAT_TIMEOUT_MS = 5_000;
 /**
  * Outcome of `FormatService.format()`. `content` is null when the file is saved unformatted;
  * `notice` then explains failures the user can fix (formatter not installed, timed out), and what
- * a language module adds through `failureNotice` or `skip`. Other failures, typically a syntax
- * error in the buffer that the language server already flags, only go to the server log, since
- * they would otherwise repeat on every save.
+ * a language module adds through `failureNotice`, a decline or `skip`. Other failures, typically a
+ * syntax error in the buffer that the language server already flags, only go to the server log,
+ * since they would otherwise repeat on every save.
  */
 export interface FormatResult {
   content: string | null;
@@ -230,6 +231,10 @@ export class FormatService {
       log.debug("No formatter found", { filePath, ext });
       return UNFORMATTED;
     }
+    if ("notice" in fmt) {
+      log.info("Language module declined to format", { filePath, notice: fmt.notice });
+      return { content: null, notice: fmt.notice };
+    }
     log.info("Formatting with auto-detected formatter", { command: fmt.command, filePath });
     if (fmt.backendMode !== "command") {
       return this.formatWithBackend(fmt, content, filePath, worktreePath);
@@ -245,7 +250,9 @@ export class FormatService {
     const formatters = [...this.detectFormatters(worktreePath)];
     for (const language of this.languages) {
       const detected = detectFormatter(language, worktreePath, worktreePath);
-      if (detected) formatters.push(toDetectedFormatter(detected, language));
+      if (detected && !("notice" in detected)) {
+        formatters.push(toDetectedFormatter(detected, language));
+      }
     }
     return formatters.map((f) => ({ command: f.command, extensions: [...f.extensions] }));
   }
@@ -276,19 +283,21 @@ export class FormatService {
 
   /**
    * The auto-detected formatter for a file: per file from the language modules claiming its
-   * extension, else from the worktree root's config.
+   * extension, else from the worktree root's config. A module's decline ends the search.
    */
   private findDetectedFormatter(
     ext: string,
     filePath: string,
     worktreePath: string,
-  ): DetectedFormatter | undefined {
+  ): DetectedFormatter | FormatterDecline | undefined {
     const dir = fileDir(filePath, worktreePath);
     for (const language of this.languages) {
       const detected =
         language.extensions.includes(ext) &&
         detectFormatter(language, dir, worktreePath, basename(filePath));
-      if (detected) return toDetectedFormatter(detected, language);
+      if (detected) {
+        return "notice" in detected ? detected : toDetectedFormatter(detected, language);
+      }
     }
     return this.detectFormatters(worktreePath).find((f) => f.extensions.has(ext));
   }
@@ -573,7 +582,7 @@ function detectFormatter(
   dir: string,
   wtRoot: string,
   fileName?: string,
-): FileFormatter | null {
+): FileFormatter | FormatterDecline | null {
   try {
     return language.detect(dir, wtRoot, fileName);
   } catch (err) {

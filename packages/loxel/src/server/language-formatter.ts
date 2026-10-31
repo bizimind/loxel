@@ -6,6 +6,14 @@ export interface FileFormatter {
   args: string;
 }
 
+/**
+ * What `detect` returns instead of a formatter when a project calls for one Loxel deliberately will
+ * not run. The save goes out unformatted, later modules are not asked, and the user sees `notice`.
+ */
+export interface FormatterDecline {
+  notice: string;
+}
+
 /** A formatter failing in a way its language can explain better than the generic messages can. */
 export type FormatterFailure = { command: string } & (
   | { kind: "not-installed" }
@@ -41,7 +49,7 @@ export interface LanguageFormatter {
    * over a language removes its rule there. Runs on every save. `fileName` is the base name of the
    * file being saved, absent when Settings lists the worktree's formatters.
    */
-  detect(dir: string, wtRoot: string, fileName?: string): FileFormatter | null;
+  detect(dir: string, wtRoot: string, fileName?: string): FileFormatter | FormatterDecline | null;
   /**
    * How to spawn `command` for files in `dir`. Runs for every command formatting these extensions,
    * manual overrides included, so an override gets the same `cwd`, `env` and `PATH`. Of several

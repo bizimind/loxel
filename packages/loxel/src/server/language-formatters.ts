@@ -6,6 +6,7 @@
  */
 import { csharpFormatter } from "./csharp-formatter";
 import { goFormatter } from "./go-formatter";
+import { kotlinFormatter } from "./kotlin-formatter";
 import type { LanguageFormatter } from "./language-formatter";
 import { pythonFormatter } from "./python-formatter";
 
@@ -13,5 +14,6 @@ export const languageFormatters: readonly LanguageFormatter[] = [
   // This comment keeps the formatter from joining the entries onto one line.
   csharpFormatter,
   goFormatter,
+  kotlinFormatter,
   pythonFormatter,
 ];
