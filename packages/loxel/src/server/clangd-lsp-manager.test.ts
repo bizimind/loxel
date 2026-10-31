@@ -286,26 +286,28 @@ describe("checkClangd", () => {
     expect(await checkClangd("/opt/somewhere/clangd", "linux", apple)).toBe("apple");
   });
 
-  test("does not run Apple's stub, also through a link, and does on Linux", async () => {
+  test("reads the version of a /usr/bin/clangd on Linux", async () => {
     const commands: string[][] = [];
     const run = async (command: string[]) => {
       commands.push(command);
       return { code: 0, stdout: VERSION_OUTPUT("20.1.0") };
     };
-    expect(await checkClangd("/usr/bin/clangd", "darwin", run)).toBe("apple");
-    expect(commands).toEqual([]);
     expect(await checkClangd("/usr/bin/clangd", "linux", run)).toBe("ok");
     expect(commands).toEqual([["/usr/bin/clangd", "--version"]]);
   });
 
-  test.skipIf(process.platform !== "darwin")("sees through a link to Apple's stub", async () => {
-    const link = join(await makeDir(), "clangd");
-    await symlink("/usr/bin/clangd", link);
-    const never = async () => {
-      throw new Error("must not run");
-    };
-    expect(await checkClangd(link, "darwin", never)).toBe("apple");
-  });
+  test.skipIf(process.platform !== "darwin")(
+    "does not run Apple's stub, also by a link",
+    async () => {
+      const link = join(await makeDir(), "clangd");
+      await symlink("/usr/bin/clangd", link);
+      const never = async () => {
+        throw new Error("must not run");
+      };
+      expect(await checkClangd("/usr/bin/clangd", "darwin", never)).toBe("apple");
+      expect(await checkClangd(link, "darwin", never)).toBe("apple");
+    },
+  );
 });
 
 describe("ClangdLspManager", () => {
@@ -407,15 +409,13 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
     );
 
     describe("validates compile flags from project configuration", () => {
-      /** The flags under test, each given the path `written` as its output. */
+      /** Flags that write on every supported clangd, each given the path `written` as its output. */
       const flagsWriting = (written: string): readonly (readonly string[])[] => [
-        ["--serialize-diagnostics", written],
-        ["-Xclang", "-serialize-diagnostic-file", "-Xclang", written],
         ["-Xclang", "-diagnostic-log-file", "-Xclang", written],
-        [`-Wp,-serialize-diagnostic-file,${written}`],
+        [`-Wp,-diagnostic-log-file,${written}`],
+        ["-Xpreprocessor", "-diagnostic-log-file", "-Xpreprocessor", written],
         ["-MJ", written],
         ["-gen-cdb-fragment-path", written],
-        ["-Xclang", `-dump-minimization-hints=${written}`],
         ["-fmodules", `-fmodules-cache-path=${written}`],
       ];
 
@@ -438,7 +438,7 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
         async () => {
           const root = await makeDir();
           const written = join(root, "written");
-          await writeFile(join(root, "flags.rsp"), `--serialize-diagnostics "${written}"\n`);
+          await writeFile(join(root, "flags.rsp"), `-MJ "${written}"\n`);
           const file = await writeProject(root, "/usr/bin/c++", ["@flags.rsp"]);
           await runClangd(root, file);
           expect(await exists(written)).toBe(false);
@@ -453,7 +453,7 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
           const written = join(root, "written");
           const file = join(root, "x.cpp");
           await writeFile(file, "int x = 1;\n");
-          await writeFile(join(root, "compile_flags.txt"), `--serialize-diagnostics\n${written}\n`);
+          await writeFile(join(root, "compile_flags.txt"), `-MJ\n${written}\n`);
           await runClangd(root, file);
           expect(await exists(written)).toBe(false);
         },
@@ -466,10 +466,7 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
           const root = await makeDir();
           const written = join(root, "written");
           const file = await writeProject(root, "/usr/bin/c++");
-          await writeFile(
-            join(root, ".clangd"),
-            `CompileFlags:\n  Add: ["--serialize-diagnostics", "${written}"]\n`,
-          );
+          await writeFile(join(root, ".clangd"), `CompileFlags:\n  Add: ["-MJ", "${written}"]\n`);
           await runClangd(root, file);
           expect(await exists(written)).toBe(false);
         },
@@ -481,7 +478,7 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
         async () => {
           const root = await makeDir();
           const written = join(root, "written");
-          await writeFile(join(root, "clang++.cfg"), `--serialize-diagnostics "${written}"\n`);
+          await writeFile(join(root, "clang++.cfg"), `-MJ "${written}"\n`);
           await writeFile(join(root, "clang++"), "#!/bin/sh\n");
           await chmod(join(root, "clang++"), 0o755);
           const beside = await writeProject(root, join(root, "clang++"));
@@ -520,7 +517,7 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
             "-Xclang",
             join(root, "defines.h"),
             "-Xclang",
-            "-serialize-diagnostic-file",
+            "-diagnostic-log-file",
             "-Xclang",
             join(root, "written"),
           ]);
@@ -542,10 +539,7 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
           const root = await makeDir();
           const file = join(root, "x.cpp");
           await writeFile(file, "int x = MISSING;\n");
-          await writeFile(
-            join(root, "compile_flags.txt"),
-            "-DMISSING=1\n--serialize-diagnostics\n",
-          );
+          await writeFile(join(root, "compile_flags.txt"), "-DMISSING=1\n-MJ\nwritten\n");
           manager = new ClangdLspManager(process.platform, await makeDir());
           const client = new FakeClient(manager);
           await client.start(root);
@@ -572,10 +566,7 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
         try {
           const root = await makeDir();
           const written = join(root, "written");
-          const file = await writeProject(root, "/usr/bin/c++", [
-            "--serialize-diagnostics",
-            written,
-          ]);
+          const file = await writeProject(root, "/usr/bin/c++", ["-MJ", written]);
           await writeFile(file, "int x = FROM_USER;\n");
           const open = async (): Promise<unknown[]> => {
             manager?.destroy();
