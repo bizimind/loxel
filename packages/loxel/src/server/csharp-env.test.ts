@@ -264,6 +264,42 @@ describe("isDotnetSafeToRun", () => {
     expect(await isDotnetSafeToRun(wt, { env: { PATH: "" } })).toBe(false);
   });
 
+  test("applyingOnly checks the file applying to cwd, not the others below the root", async () => {
+    const { wt } = await makeRoot();
+    await trackedSdk(join(wt, "vendor"));
+    await mkdir(join(wt, "svc"), { recursive: true });
+    const env = { PATH: "" };
+    expect(await isDotnetSafeToRun(wt, { env, cwd: join(wt, "svc") })).toBe(false);
+    expect(await isDotnetSafeToRun(wt, { env, cwd: join(wt, "svc"), applyingOnly: true })).toBe(
+      true,
+    );
+    const vendor = { env, cwd: join(wt, "vendor"), applyingOnly: true };
+    expect(await isDotnetSafeToRun(wt, vendor)).toBe(false);
+  });
+
+  test("applyingOnly refuses sdk.paths when git cannot read the repository", async () => {
+    const { wt } = await makeRoot();
+    await trackedSdk(wt);
+    await rm(join(wt, ".git", "HEAD"));
+    expect(await isDotnetSafeToRun(wt, { env: { PATH: "" }, applyingOnly: true })).toBe(false);
+  });
+
+  test("applyingOnly agrees with the full check on a repository set as bare", async () => {
+    const { wt } = await makeRoot();
+    await trackedSdk(wt);
+    await git(wt, "config", "core.bare", "true");
+    const env = { PATH: "" };
+    expect(await isDotnetSafeToRun(wt, { env })).toBe(false);
+    expect(await isDotnetSafeToRun(wt, { env, applyingOnly: true })).toBe(false);
+  });
+
+  test("applyingOnly needs no git for a global.json without sdk.paths", async () => {
+    const { wt } = await makeRoot();
+    await write(join(wt, "global.json"), '{"sdk":{"version":"10.0.100"}}');
+    await rm(join(wt, ".git", "HEAD"));
+    expect(await isDotnetSafeToRun(wt, { env: { PATH: "" }, applyingOnly: true })).toBe(true);
+  });
+
   test("with an untracked SDK a build script installed, and with one not installed", async () => {
     const { wt } = await makeRoot();
     await write(join(wt, ".gitignore"), ".dotnet/\n");
