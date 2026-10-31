@@ -161,7 +161,8 @@ class LspClient {
     ws.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data)) as RpcMessage;
       if (message.method === undefined && message.id !== undefined) {
-        this.pending.get(message.id)?.(message);
+        const resolve = this.pending.get(message.id);
+        if (typeof resolve === "function") resolve(message);
         return;
       }
       this.messages.push(message);

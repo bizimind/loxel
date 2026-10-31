@@ -5,15 +5,13 @@ import { useWorktreeStore } from "@/store/worktrees";
 import { createJavaServerRecovery } from "./java-server-recovery";
 import { createLspClient } from "./lsp-client";
 
-const ROUTE = "ws/java-lsp";
-
 // Eclipse JDT LS, on the user's JDK.
-const javaLspClient = createLspClient({ route: ROUTE, name: "Java", languageId: "java" });
+const javaLspClient = createLspClient({ route: "ws/java-lsp", name: "Java", languageId: "java" });
 
 wsClient.subscribe(
   createJavaServerRecovery({
     client: javaLspClient,
-    stoppedServer: () => useLspStatusStore.getState().stopped.get(ROUTE),
+    stoppedServer: () => useLspStatusStore.getState().stopped.get("ws/java-lsp"),
     activeWorktree: () => useWorktreeStore.getState().activeWorktreePath,
   }),
 );
