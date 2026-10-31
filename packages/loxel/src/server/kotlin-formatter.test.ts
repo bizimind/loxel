@@ -168,6 +168,37 @@ describe("kotlinFormatter detection", () => {
     expect(detect(wt)).toBeNull();
   });
 
+  describe("a /* inside a Groovy block comment does not nest", () => {
+    const header = "/*\n * Formats src/*.kt files\n */\n";
+
+    test("the script after the comment still counts", async () => {
+      const wt = await makeWorktree({
+        "build.gradle": 'plugins { id "org.jlleitschuh.gradle.ktlint" }\n',
+        "app/build.gradle": `${header}apply plugin: "${KTFMT_ID}"\n`,
+      });
+      expect(detect(wt, "app/src")?.command).toBe("ktfmt");
+    });
+
+    test("a ktfmt setting after the comment still declines", async () => {
+      const wt = await makeWorktree({
+        "app/build.gradle": `${header}apply plugin: "${KTFMT_ID}"\nktfmt { maxWidth = 120 }\n`,
+      });
+      expect(detect(wt, "app/src")?.notice).toContain("maxWidth");
+    });
+
+    test("text after the first */ is code, unlike in Kotlin", async () => {
+      const groovy = await makeWorktree({
+        "build.gradle": `/* outer /* inner */ apply plugin: "${KTFMT_ID}"\n`,
+      });
+      expect(detect(groovy)?.command).toBe("ktfmt");
+    });
+
+    test("an unclosed comment hides the rest of the script", async () => {
+      const wt = await makeWorktree({ "build.gradle": `/* apply plugin: "${KTFMT_ID}"\n` });
+      expect(detect(wt)).toBeNull();
+    });
+  });
+
   test("an apostrophe in a comment or a glob in a string does not confuse comment removal", async () => {
     const wt = await makeWorktree({
       "build.gradle.kts": `/* don't */ include("**/*.kt")\napply(plugin = "${KTFMT_ID}")\nktfmt { maxWidth.set(120) }\nexclude("**/*.kts")\n`,

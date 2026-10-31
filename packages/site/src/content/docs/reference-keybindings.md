@@ -113,6 +113,7 @@ Back/forward work like a browser's history, across all projects. Worktree number
 | Refactor…                  | `Ctrl+Alt+R`                            |
 | Go: Refresh Toolchain      | unbound — command palette or status bar |
 | Python: Select Interpreter | unbound — command palette or status bar |
+| Java: Select JDK           | unbound — command palette or status bar |
 | Rust: Select Toolchain     | unbound — command palette or status bar |
 | Restart Language Servers   | unbound — command palette               |
 | Manage Repository Trust    | unbound — command palette or status bar |
