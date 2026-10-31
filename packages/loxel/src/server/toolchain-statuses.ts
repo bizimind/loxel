@@ -1,4 +1,5 @@
 import { goToolchainStatus } from "./go-toolchain-status";
+import { javaToolchainStatus } from "./java-toolchain-status";
 /**
  * Every language's toolchain status module: one import and one entry per module, both sorted. Only
  * lists belong in this file: a local `git merge` combines parallel additions by itself
@@ -13,6 +14,7 @@ import type { ToolchainStatusModule } from "./toolchain-status-module";
 export const toolchainStatusModules: readonly ToolchainStatusModule[] = [
   // This comment keeps the list on one line per entry whatever its length.
   goToolchainStatus,
+  javaToolchainStatus,
   nodeToolchainStatus,
   pythonToolchainStatus,
   rustToolchainStatus,

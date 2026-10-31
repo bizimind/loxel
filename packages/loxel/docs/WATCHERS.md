@@ -15,6 +15,7 @@ How the server keeps project files, Git status, refs, logs, worktrees, drafts an
 | Git fsmonitor              | Git (user config)                                                | one daemon per Git directory                  | Git status acceleration, only if the user enables it                                                                          |
 | Language servers           | LSP managers                                                     | implementation-specific                       | diagnostics and language features                                                                                             |
 | Python environment         | `python-env.ts` shared resolution (`subscribePythonEnv`)         | candidate and resolved envs, flat             | the interpreter and installed packages for basedpyright, ruff, terminals, the coding agent, format on save and the status bar |
+| JDKs                       | `java-env.ts` one shared watch (`subscribeJavaEnv`)              | JDK install locations and homes, flat         | the worktree's JDK and the machine's JDKs, once a worktree has asked for them                                                 |
 | Rust toolchain             | `rust-toolchain.ts` shared resolution (`subscribeRustToolchain`) | toolchain files and rustup's toolchains, flat | the toolchain for the status bar                                                                                              |
 
 For a bare project, the project Git directory is also the repository root and therefore contains `.worktrees`. Classification must stay allowlist-based and anchored at the beginning of the reported path; a catch-all would treat source edits and dependency writes as Git metadata.
@@ -99,7 +100,7 @@ Status and working-tree diffs run with `-c diff.ignoreSubmodules=dirty` (`SUBMOD
 
 When the user does enable fsmonitor, daemon count scales with Git directories, not just top-level worktrees. Git reuses one daemon via `<gitdir>/fsmonitor--daemon.ipc`; a high count alone is not evidence of a leak.
 
-Language servers may run their own watchers; basedpyright, ruff, TypeScript and Tombi instead receive the worktree watcher's changes (the shared Python environment resolution also watches environments, see [languages/python.md](languages/python.md#python-environment)). Worktree teardown stops the language servers rooted at the removed worktree along with its other watchers.
+Language servers may run their own watchers; basedpyright, ruff, mypy, Kotlin lint, TypeScript and Tombi instead receive the worktree watcher's changes (the shared Python environment resolution also watches environments, see [languages/python.md](languages/python.md#python-environment)). Worktree teardown stops the language servers rooted at the removed worktree along with its other watchers.
 
 ## Review checklist
 

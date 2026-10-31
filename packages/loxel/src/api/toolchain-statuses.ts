@@ -1,4 +1,5 @@
 import { goToolchain } from "./go-env-model";
+import { javaToolchain } from "./java-env-model";
 /**
  * Every language with a toolchain status item: one import and one entry per language, both sorted.
  * Only lists belong in this file: a local `git merge` combines parallel additions by itself
@@ -12,6 +13,7 @@ import { rustToolchain } from "./rust-toolchain-model";
 export const toolchainStatuses = [
   // This comment keeps the list on one line per entry whatever its length.
   goToolchain,
+  javaToolchain,
   nodeToolchain,
   pythonToolchain,
   rustToolchain,
