@@ -11,7 +11,6 @@ A monorepo (pnpm + Bun) built around [Loxel](packages/loxel), an IDE for the age
 | [channel-worker](packages/channel-worker)       | Cloudflare Worker relay for WebSocket channels (Durable Objects, WorkOS JWT auth)                              |
 | [cli-common](packages/cli-common)               | Shared CLI utilities: output modes, formatters, logging, self-update                                           |
 | [code-analysis](packages/code-analysis)         | Code analysis CLI with live treemap and import-graph visualizations                                            |
-| [coding-agent](packages/coding-agent)           | Coding agent runtime (SDK + stdio JSON protocol) with tools, plan mode, approvals, and persistent sessions     |
 | [excalidraw](packages/excalidraw)               | CLI for agents to create, edit, query, and render Excalidraw diagrams                                          |
 | [localdb-sdk](packages/localdb-sdk)             | SQLite-backed structured database SDK with typed columns, views, and formulas                                  |
 | [logger](packages/logger)                       | Structured Axiom logging with error serialization and sensitive-data redaction                                 |
