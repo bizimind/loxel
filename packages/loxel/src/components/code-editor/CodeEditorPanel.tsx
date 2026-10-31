@@ -215,6 +215,7 @@ export function CodeEditorPanel({
     editorFileState,
     isDeleted,
     isError,
+    isPaused,
     saveNow,
     recreateFile,
     saveOptionsRef,
@@ -244,11 +245,15 @@ export function CodeEditorPanel({
   resolvedLangRef.current = resolvedLang;
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
   // A model's URI scheme and first language decide which language servers get it, so a file only
-  // its content can name a language for (a shebang script) waits for that content.
+  // its content can name a language for (a shebang script) waits for that content, unless it cannot
+  // come: an error, or a query paused offline.
   // Latched: losing that content to a refetch must not dispose the editor and its unsaved edits.
   const canCreateModelRef = useRef(false);
   canCreateModelRef.current ||=
-    diskContent !== null || isError || !languageNeedsContent(filePath, fileAssociations);
+    diskContent !== null ||
+    isError ||
+    isPaused ||
+    !languageNeedsContent(filePath, fileAssociations);
   const canCreateModel = canCreateModelRef.current;
   const waitedForContent = useRef(!canCreateModel);
 
