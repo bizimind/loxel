@@ -44,9 +44,10 @@ export interface LanguageFormatter {
   /**
    * The formatter for files in `dir`, a directory inside the worktree `wtRoot`. Null leaves the
    * file to the next module claiming its extension, then to `DETECTION_RULES`, so a module taking
-   * over a language removes its rule there. Runs on every save.
+   * over a language removes its rule there. Runs on every save. `fileName` is the base name of the
+   * file being saved, absent when Settings lists the worktree's formatters.
    */
-  detect(dir: string, wtRoot: string): FileFormatter | FormatterDecline | null;
+  detect(dir: string, wtRoot: string, fileName?: string): FileFormatter | FormatterDecline | null;
   /**
    * How to spawn `command` for files in `dir`. Runs for every command formatting these extensions,
    * manual overrides included, so an override gets the same `cwd`, `env` and `PATH`. Of several
