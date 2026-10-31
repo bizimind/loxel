@@ -1,6 +1,6 @@
 ---
 title: Go
-description: Go language features from gopls, with navigation, rename, quick fixes, inlay hints and go.mod support.
+description: Go language features from gopls, with navigation, rename, quick fixes, inlay hints, go.mod support and format on save.
 order: 13.5
 ---
 
@@ -22,6 +22,14 @@ Loxel does not download modules or Go toolchains. You do that from a terminal, a
 - **`go.mod` needs a newer Go than the one installed.** The module does not load. Install the version the warning names, then run **Restart Language Servers**.
 
 **Run go mod tidy** and **Create vendor directory** work once the modules they need are in the module cache. Checking for module upgrades and `go get` quick fixes are not offered, since they need the network; run those commands in a terminal.
+
+## Format on save
+
+Files in a Go module or workspace (a `go.mod` or `go.work` in the file's folder or a parent) are formatted with `gofmt` when you save. If the closest `.golangci.yml`, `.golangci.yaml`, `.golangci.toml` or `.golangci.json` has `version: "2"` and enables formatters under `formatters.enable`, and `golangci-lint` v2 is installed, Loxel runs `golangci-lint fmt` with that config instead, so your gci sections, gofumpt rules and other formatter settings apply. A config in a nested module replaces the root's, as it does for `golangci-lint` itself, so a nested config that enables no formatters means `gofmt` there.
+
+Loxel leaves some files alone: those in `vendor/` and `testdata/`, those your config's `formatters.exclusions.paths` excludes, and `.go` files with no module or selecting config above them. If a pattern in `formatters.exclusions.paths` is too complex for Loxel to evaluate, files under that config are left alone too. To format those, or to use `goimports` or `gofumpt` on their own, add a manual override in **Settings > Editor**.
+
+If `golangci-lint` can't load the config, or your installed version is older than v2, the file is saved unformatted. Run `golangci-lint version` and `golangci-lint config verify` in a terminal to see why. A file with a syntax error is also saved as it is. Formatting never downloads anything.
 
 ## Monorepos and build tags
 
