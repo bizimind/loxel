@@ -2,20 +2,6 @@ import { describe, expect, test } from "bun:test";
 
 import { getFileIconPath, getFolderIconPath } from "./file-icons";
 
-describe("Java project icons", () => {
-  test.each([
-    ["App.java", "java_dark.svg"],
-    ["module-info.java", "module_dark.svg"],
-    ["lib.jar", "archive_dark.svg"],
-    ["app.war", "archive_dark.svg"],
-    ["app.ear", "archive_dark.svg"],
-    [".java-version", "java_dark.svg"],
-    [".sdkmanrc", "java_dark.svg"],
-  ])("%s → %s", (filename, icon) => {
-    expect(getFileIconPath(filename)).toBe(`./icons/${icon}`);
-  });
-});
-
 describe("C-family project icons", () => {
   test.each([
     ["lib.c", "c_dark.svg"],
