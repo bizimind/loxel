@@ -1,5 +1,13 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -163,17 +171,34 @@ describe("a repository cannot claim trust", () => {
 
   test("another repository cloned at a trusted path starts untrusted", () => {
     const repo = makeRepo("repo");
+    const gitDir = join(repo, ".git");
     setRepoTrusted(repo, true);
-    rmSync(repo, { recursive: true });
-    makeRepo("repo");
+    const before = statSync(gitDir);
+    // Without a real birth time, a filesystem that reuses inodes could not tell the two apart.
+    expect(before.birthtimeMs).toBeGreaterThan(0);
+
+    // A clone takes longer than a clock tick; recreate until this directory is really another one.
+    let after = before;
+    while (after.ino === before.ino && after.birthtimeMs === before.birthtimeMs) {
+      rmSync(repo, { recursive: true });
+      makeRepo("repo");
+      after = statSync(gitDir);
+    }
     expect(isRepoTrusted(repo)).toBe(false);
   });
 
   test("ordinary git activity keeps trust", () => {
     const repo = makeRepo("repo");
+    const gitDir = join(repo, ".git");
     setRepoTrusted(repo, true);
-    writeFileSync(join(repo, ".git", "index"), "changed");
-    rmSync(join(repo, ".git", "index"));
+    const before = statSync(gitDir);
+    // Until the directory's change time moves, which a birth time falling back to it would follow.
+    let changes = 0;
+    while (statSync(gitDir).ctimeMs === before.ctimeMs) {
+      writeFileSync(join(gitDir, `index-${changes}.lock`), "");
+      rmSync(join(gitDir, `index-${changes}.lock`));
+      changes += 1;
+    }
     expect(isRepoTrusted(repo)).toBe(true);
   });
 
