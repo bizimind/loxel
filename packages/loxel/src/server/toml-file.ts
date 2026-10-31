@@ -1,11 +1,18 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 import { isRecord } from "@/lib/is-record";
 
-/** The top-level table of the TOML file at `path`, or undefined when it is missing or unparsable. */
+/** A config file is far smaller than this; a read blocks the server, so larger ones are skipped. */
+const MAX_TOML_BYTES = 1024 * 1024;
+
+/**
+ * The top-level table of the TOML file at `path`, or undefined when it is missing, unparsable, or
+ * not a regular file of at most {@link MAX_TOML_BYTES} (reading a FIFO would never return).
+ */
 export function readToml(path: string): Record<string, unknown> | undefined {
-  if (!existsSync(path)) return undefined;
   try {
+    const stat = statSync(path);
+    if (!stat.isFile() || stat.size > MAX_TOML_BYTES) return undefined;
     return parseToml(readFileSync(path, "utf-8"));
   } catch {
     return undefined;

@@ -6,7 +6,7 @@ import { delimiter, dirname, join } from "node:path";
 import type { PythonEnv } from "@/api/python-env-model";
 import { until } from "@/test/until";
 
-import type { EnvChange, ToolchainEnvContributor } from "./toolchain-env-contributor";
+import type { EnvChange, SpawnEnv, ToolchainEnvContributor } from "./toolchain-env-contributor";
 
 // Interpreter overrides live in the store database; keep the tests' state out of the real one.
 const root = await realpath(await mkdtemp(join(tmpdir(), "loxel-agent-env-")));
@@ -104,6 +104,24 @@ describe("buildAgentEnv", () => {
     const tracked = await agentEnvFor(wt, venv);
     expect(tracked.PATH).toBe(plain.PATH);
     expect(tracked.VIRTUAL_ENV).toBeUndefined();
+  });
+});
+
+describe("buildAgentEnv PATH check", () => {
+  test("leaves out a toolchain whose PATH entry the shell would interpret", () => {
+    const refused = (env: SpawnEnv) => {
+      env.PATH = `/wt-$name/bin:${env.PATH}`;
+      env.TOOLCHAIN = "refused";
+      return undefined;
+    };
+    const accepted = (env: SpawnEnv) => {
+      env.PATH = `/wt-name/bin:${env.PATH}`;
+      env.TOOLCHAIN = "accepted";
+      return undefined;
+    };
+    const env = buildAgentEnv([accepted, refused]);
+    expect(env.PATH?.split(":")[0]).toBe("/wt-name/bin");
+    expect(env.TOOLCHAIN).toBe("accepted");
   });
 });
 
