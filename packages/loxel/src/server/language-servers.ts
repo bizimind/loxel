@@ -8,6 +8,7 @@
 import { AstroLspManager } from "./astro-lsp-manager";
 import { config } from "./config";
 import { DockerLspManager } from "./docker-lsp-manager";
+import { GoLspManager } from "./go-lsp-manager";
 import { MypyLspManager } from "./mypy-lsp-manager";
 import { PythonLspManager } from "./python-lsp-manager";
 import { RuffLspManager } from "./ruff-lsp-manager";
@@ -26,6 +27,7 @@ export const xmlLspManager = new XmlLspManager(config.lemminxWorkDir);
 export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   new AstroLspManager(),
   new DockerLspManager(),
+  new GoLspManager(),
   new PythonLspManager(mypyLspManager),
   // After Python, which hears from it while it shuts down.
   mypyLspManager,

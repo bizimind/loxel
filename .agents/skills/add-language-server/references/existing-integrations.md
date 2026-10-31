@@ -16,6 +16,7 @@ Quick reference for the quirks of the servers that existed before `docs/language
 | Astro                 | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
 | XML (LemMinX)         | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | downloads off (init options)  |
 | TOML (Tombi)          | downloaded    | worktree | lazy       | disabled        | no             | `lsp --offline` | schema map (post-init)        |
+| Go (gopls)            | built from Go | worktree | lazy       | enabled         | no             | `serve`         | settings (pulled)             |
 
 ## TypeScript — Do Not Use as Template
 
