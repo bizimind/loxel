@@ -19,6 +19,7 @@ import {
   withWatchedFilesCapability,
 } from "./lsp-watched-files";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 import {
   createStderrThrottle,
   STDERR_THROTTLE_CAPACITY,
@@ -68,6 +69,9 @@ interface LspContentChange {
   text: string;
 }
 
+/** How long a server has to exit after SIGTERM before it gets SIGKILL; a hung one never exits. */
+export const SERVER_STOP_GRACE_MS = 3000;
+
 /** A WebSocket close frame's limit on its reason, in UTF-8 bytes (RFC 6455). */
 const MAX_CLOSE_REASON_BYTES = 123;
 
@@ -104,6 +108,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private readonly watchedFiles = new Map<TSession, WatchedFilesForwarder>();
   /** Each session's open document URIs, tracked when {@link didSaveOnFileChange}. */
   private readonly openDocuments = new Map<TSession, Set<string>>();
+  /** Servers told to stop that have not exited yet, whichever session they belonged to. */
+  private readonly stopping = new Set<Promise<unknown>>();
   protected readonly log: ReturnType<typeof logger.child>;
 
   constructor(readonly name: LspName) {
@@ -187,13 +193,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     this.sessions.delete(ws);
   }
 
-  destroy(): void {
+  /** Stop every session. Settles once every server stopped so far has exited. */
+  async destroy(): Promise<void> {
     for (const session of this.sessions.values()) {
       this.killSession(session);
     }
     this.sessions.clear();
     this._sessionsByKey.clear();
     this._pendingFrames.clear();
+    await Promise.all(this.stopping);
   }
 
   // ---------------------------------------------------------------------------
@@ -338,7 +346,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * `typescript.tsdk` path. For servers that expect push-based config via
    * `workspace/didChangeConfiguration` after initialization, use
    * {@link onClientInitialized}; for servers that pull it, use
-   * {@link workspaceConfiguration}.
+   * {@link workspaceConfiguration}. A throw closes the session as a start failure, so a server
+   * never starts without the settings meant for it.
    */
   protected getInitializationOptions(_session: TSession): Record<string, unknown> | null {
     return null;
@@ -407,7 +416,13 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
             if (!msg.params.workspaceFolders)
               msg.params.workspaceFolders = workspaceFolders(workspace);
           }
-          const initOpts = this.getInitializationOptions(session);
+          let initOpts: Record<string, unknown> | null;
+          try {
+            initOpts = this.getInitializationOptions(session);
+          } catch (err) {
+            this.failStart(session, err);
+            return;
+          }
           if (initOpts) {
             msg.params ??= {};
             msg.params.initializationOptions = mergeInitOptions(
@@ -694,7 +709,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         this.spawnSession(ws, context, resolved);
         const session = this.sessions.get(ws);
         if (!session) return;
-        for (const frame of frames) this.handleClientData(session, frame);
+        for (const frame of frames) {
+          // A frame can end the session (see `failStart`); the rest then have nowhere to go.
+          if (!this.isSessionLive(session)) break;
+          this.handleClientData(session, frame);
+        }
       });
   }
 
@@ -728,23 +747,25 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     const opts = this.spawnOptions(context);
     this.log.info(`Spawning ${this.name} ${args.join(" ")}: ${bin}`);
 
-    const proc = Bun.spawn([bin, ...args], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: opts.cwd,
-      // Login-shell environment, so servers that run user tools (basedpyright's
-      // interpreter probe, terraform-ls's `terraform`) find the user's PATH
-      // even when Loxel was launched from Finder.
-      env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },
-    });
+    const proc = measureSpawn("lsp", () =>
+      Bun.spawn([bin, ...args], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        cwd: opts.cwd,
+        // Login-shell environment, so servers that run user tools (basedpyright's
+        // interpreter probe, terraform-ls's `terraform`) find the user's PATH
+        // even when Loxel was launched from Finder.
+        env: { ...buildSpawnEnv(), NODE_OPTIONS: "", ...opts.env },
+      }),
+    );
 
     // Until it is in `sessions` nothing else would kill the process (`detach` finds the session there).
     let session: TSession;
     try {
       session = this.buildSession(ws, proc, context);
     } catch (err) {
-      proc.kill();
+      this.stopProcess(proc);
       throw err;
     }
     this.sessions.set(ws, session);
@@ -805,6 +826,20 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
         });
       }
     });
+  }
+
+  /** End a running session that cannot go on, the way a server that cannot start ends. */
+  private failStart(session: TSession, err: unknown): void {
+    this.log.error(`${this.name} failed to start`, { error: err });
+    const { ws } = session;
+    this.detach(ws);
+    try {
+      ws.close(LSP_START_FAILED_CLOSE_CODE, closeReason(`${this.name} failed to start`));
+    } catch (closeErr) {
+      this.log.debug("close() on a failed server's WebSocket threw (already closed)", {
+        error: closeErr,
+      });
+    }
   }
 
   /** The close reason for a failed server; a throwing hook must not keep the socket from closing. */
@@ -879,11 +914,28 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   private killSession(session: TSession): void {
     this.releaseSession(session);
-    try {
-      session.proc.kill();
-    } catch {
-      // Already dead
-    }
+    this.stopProcess(session.proc);
+  }
+
+  /** Ask the server to exit, and force it after {@link SERVER_STOP_GRACE_MS} if it has not. */
+  private stopProcess(proc: Subprocess): void {
+    const signal = (name: "SIGTERM" | "SIGKILL"): void => {
+      try {
+        proc.kill(name);
+      } catch {
+        // Already dead
+      }
+    };
+    signal("SIGTERM");
+    const forceKill = setTimeout(() => {
+      this.log.warn(`${this.name} did not exit after SIGTERM, sending SIGKILL`);
+      signal("SIGKILL");
+    }, SERVER_STOP_GRACE_MS);
+    const stopped = proc.exited.finally(() => {
+      clearTimeout(forceKill);
+      this.stopping.delete(stopped);
+    });
+    this.stopping.add(stopped);
   }
 
   private releaseSession(session: TSession): void {

@@ -4,8 +4,8 @@ import { frontendLog } from "./frontend-logger";
 
 const log = frontendLog.child("ui");
 
-/** Languages whose configuration auto-closes `"""` / `'''` (the others are set in `monaco-languages.ts`). */
-const TRIPLE_QUOTE_LANGUAGES = new Set(["python", "toml", "groovy"]);
+/** Languages whose configuration auto-closes `"""` / `'''` (TOML's is set in `monaco-languages.ts`). */
+const TRIPLE_QUOTE_LANGUAGES = new Set(["python", "toml", "kotlin"]);
 
 /**
  * Enter after a block-ending statement dedents the next line. Lines whose code (before any
@@ -52,6 +52,11 @@ export function isInsideTripleQuote(line: string, column: number, quote: string)
   let end = offset;
   while (end < line.length && line[end] === quote) end += 1;
   return start < offset && offset < end && end - start === 3;
+}
+
+/** Adds a language, whose configuration auto-closes `"""` or `'''`, to the step-over below. */
+export function stepOverTripleQuotesIn(language: string): void {
+  TRIPLE_QUOTE_LANGUAGES.add(language);
 }
 
 /**

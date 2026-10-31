@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import type { FileSink } from "bun";
 
@@ -8,6 +8,8 @@ import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-mod
 import type { BackendMode, FormatterBackend } from "./formatter-backends";
 import {
   type FileFormatter,
+  type FormatterDecline,
+  type FormatterFailure,
   type FormatterSpawnOptions,
   type LanguageFormatter,
   nodeModulesBin,
@@ -17,6 +19,7 @@ import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
 import { PrettierLibBackend } from "./prettier-lib-backend";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("format");
 
@@ -25,9 +28,10 @@ const FORMAT_TIMEOUT_MS = 5_000;
 
 /**
  * Outcome of `FormatService.format()`. `content` is null when the file is saved unformatted;
- * `notice` then explains failures the user can fix (formatter not installed, timed out). Other
- * failures, typically a syntax error in the buffer that the language server already flags, only
- * go to the server log, since they would otherwise repeat on every save.
+ * `notice` then explains failures the user can fix (formatter not installed, timed out), and what
+ * a language module adds through `failureNotice` or a decline. Other failures, typically a syntax
+ * error in the buffer that the language server already flags, only go to the server log, since
+ * they would otherwise repeat on every save.
  */
 export interface FormatResult {
   content: string | null;
@@ -227,6 +231,10 @@ export class FormatService {
       log.debug("No formatter found", { filePath, ext });
       return UNFORMATTED;
     }
+    if ("notice" in fmt) {
+      log.info("Language module declined to format", { filePath, notice: fmt.notice });
+      return { content: null, notice: fmt.notice };
+    }
     log.info("Formatting with auto-detected formatter", { command: fmt.command, filePath });
     if (fmt.backendMode !== "command") {
       return this.formatWithBackend(fmt, content, filePath, worktreePath);
@@ -242,7 +250,9 @@ export class FormatService {
     const formatters = [...this.detectFormatters(worktreePath)];
     for (const language of this.languages) {
       const detected = detectFormatter(language, worktreePath, worktreePath);
-      if (detected) formatters.push(toDetectedFormatter(detected, language));
+      if (detected && !("notice" in detected)) {
+        formatters.push(toDetectedFormatter(detected, language));
+      }
     }
     return formatters.map((f) => ({ command: f.command, extensions: [...f.extensions] }));
   }
@@ -273,18 +283,21 @@ export class FormatService {
 
   /**
    * The auto-detected formatter for a file: per file from the language modules claiming its
-   * extension, else from the worktree root's config.
+   * extension, else from the worktree root's config. A module's decline ends the search.
    */
   private findDetectedFormatter(
     ext: string,
     filePath: string,
     worktreePath: string,
-  ): DetectedFormatter | undefined {
+  ): DetectedFormatter | FormatterDecline | undefined {
     const dir = fileDir(filePath, worktreePath);
     for (const language of this.languages) {
       const detected =
-        language.extensions.includes(ext) && detectFormatter(language, dir, worktreePath);
-      if (detected) return toDetectedFormatter(detected, language);
+        language.extensions.includes(ext) &&
+        detectFormatter(language, dir, worktreePath, basename(filePath));
+      if (detected) {
+        return "notice" in detected ? detected : toDetectedFormatter(detected, language);
+      }
     }
     return this.detectFormatters(worktreePath).find((f) => f.extensions.has(ext));
   }
@@ -313,6 +326,16 @@ export class FormatService {
       cwd: options?.cwd ?? worktreePath,
       binDirs: options?.binDirs ?? [nodeModulesBin(worktreePath)],
     };
+  }
+
+  /** What the file's language module says about `failure`; its failure must not lose the save. */
+  private languageNotice(ext: string, failure: FormatterFailure): string | undefined {
+    try {
+      return this.languages.find((l) => l.extensions.includes(ext))?.failureNotice?.(failure);
+    } catch (err) {
+      log.warn("Formatter failure notice failed", { ext, error: errorMessage(err) });
+      return undefined;
+    }
   }
 
   private async formatWithBackend(
@@ -422,7 +445,10 @@ export class FormatService {
       proc = spawnFormatter(argv, options.cwd, env);
     } catch (err) {
       log.warn("Formatter could not be started", { command, filePath, error: errorMessage(err) });
-      return { content: null, notice: spawnFailureNotice(command, err, env.PATH ?? "") };
+      const notice = spawnFailureNotice(command, err, env.PATH ?? "", (failure) =>
+        this.languageNotice(ext, failure),
+      );
+      return { content: null, notice };
     }
 
     try {
@@ -453,7 +479,8 @@ export class FormatService {
           exitCode,
           stderr: stderr.slice(0, 500),
         });
-        return UNFORMATTED;
+        const notice = this.languageNotice(ext, { kind: "exited", command, exitCode, stderr });
+        return notice ? { content: null, notice } : UNFORMATTED;
       }
 
       const formatted = await new Response(proc.stdout).text();
@@ -475,7 +502,9 @@ function spawnFormatter(
   cwd: string | undefined,
   env: Record<string, string | undefined>,
 ) {
-  return Bun.spawn(argv, { stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd, env });
+  return measureSpawn("formatter", () =>
+    Bun.spawn(argv, { stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd, env }),
+  );
 }
 
 /**
@@ -507,12 +536,20 @@ function isClosedPipe(err: unknown): boolean {
  * Bun.spawn throws ENOENT both when the executable is not on PATH and when it is found but its
  * interpreter is gone (e.g. a venv whose Python was upgraded away).
  */
-function spawnFailureNotice(command: string, err: unknown, PATH: string): string {
+function spawnFailureNotice(
+  command: string,
+  err: unknown,
+  PATH: string,
+  languageNotice: (failure: FormatterFailure) => string | undefined,
+): string {
   const code = err instanceof Error && "code" in err ? String(err.code) : null;
   if (code === "ENOENT" && !Bun.which(command, { PATH })) {
     // It may have been installed since the login-shell PATH was captured; the next save retries.
     void refreshLoginShellEnv();
-    return `Format on save skipped: "${command}" is not installed.`;
+    return (
+      languageNotice({ kind: "not-installed", command }) ??
+      `Format on save skipped: "${command}" is not installed.`
+    );
   }
   const detail = code === "ENOENT" ? "; its interpreter may be missing" : ` (${code ?? "error"})`;
   return `Format on save skipped: "${command}" could not be started${detail}.`;
@@ -540,9 +577,10 @@ function detectFormatter(
   language: LanguageFormatter,
   dir: string,
   wtRoot: string,
-): FileFormatter | null {
+  fileName?: string,
+): FileFormatter | FormatterDecline | null {
   try {
-    return language.detect(dir, wtRoot);
+    return language.detect(dir, wtRoot, fileName);
   } catch (err) {
     log.warn("Formatter detection failed", { dir, error: errorMessage(err) });
     return null;

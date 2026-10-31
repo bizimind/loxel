@@ -45,7 +45,7 @@ describe("language-server binary manifests", () => {
   const dir = path.join(LOXEL, "scripts/language-servers");
 
   test("each names a script that exists", async () => {
-    for (const file of readdirSync(dir)) {
+    for (const file of readdirSync(dir).filter((name) => name.endsWith(".json"))) {
       const manifest = (await Bun.file(path.join(dir, file)).json()) as { script: string };
       expect(existsSync(path.join(LOXEL, "scripts", manifest.script))).toBe(true);
     }

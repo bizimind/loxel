@@ -97,7 +97,7 @@ For a move with source `external`, `handleFileMoved` opens the new tab with a `m
 
 ## Code editor (Monaco)
 
-[CodeEditorPanel.tsx](../src/components/code-editor/CodeEditorPanel.tsx) creates one Monaco editor per panel on mount and reuses or creates the model for the file's URI:
+[CodeEditorPanel.tsx](../src/components/code-editor/CodeEditorPanel.tsx) creates one Monaco editor per panel on mount (for a file only its content can name a language for, once that content has loaded or the query has failed or paused offline, see [URI schemes](LANGUAGE_SERVERS.md#uri-schemes)) and reuses or creates the model for the file's URI:
 
 - `file://<abs path>` for languages whose language server needs real disk paths (`yaml`, `json`, `dockerfile`, `dockerbake`, `terraform`, `astro`, `xml`, `python`, `toml`).
 - `loxel://HEAD/<abs path>` for everything else. These and the `file://` ones are the live models of editor tabs, always without a fragment ([live-editor-model.ts](../src/lib/live-editor-model.ts) `editorFilePath`); the diff views' models use `loxel://<ref>/<path>#<side>` for git diffs (working-tree sides included, as `loxel://HEAD/<path>#<side>`) and `loxel://compare/<abs path>#<panel id>-<side>` for compare panels (see [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md#components-and-data-sources)).

@@ -2,6 +2,37 @@ import { describe, expect, test } from "bun:test";
 
 import { getFileIconPath, getFolderIconPath } from "./file-icons";
 
+describe("C-family project icons", () => {
+  test.each([
+    ["lib.c", "c_dark.svg"],
+    ["lib.i", "c_dark.svg"],
+    ["View.m", "c_dark.svg"],
+    ["app.C", "cpp_dark.svg"],
+    ["app.c++", "cpp_dark.svg"],
+    ["app.ii", "cpp_dark.svg"],
+    ["Bridge.mm", "cpp_dark.svg"],
+    ["a.h++", "h_dark.svg"],
+    ["a.inl", "h_dark.svg"],
+    ["a.ipp", "h_dark.svg"],
+    ["a.tpp", "h_dark.svg"],
+    ["a.tcc", "h_dark.svg"],
+    ["a.txx", "h_dark.svg"],
+    ["makefile", "makefile_dark.svg"],
+    ["CMakePresets.json", "CMake_dark.svg"],
+    ["CMakeUserPresets.json", "CMake_dark.svg"],
+    [".clangd", "config_dark.svg"],
+    [".clang-format", "config_dark.svg"],
+    ["_clang-format", "config_dark.svg"],
+    [".clang-tidy", "config_dark.svg"],
+    [".clang-format-ignore", "ignored_dark.svg"],
+    ["compile_commands.json", "config_dark.svg"],
+    ["compile_flags.txt", "config_dark.svg"],
+    ["vcpkg.json", "config_dark.svg"],
+  ])("%s → %s", (filename, icon) => {
+    expect(getFileIconPath(filename)).toBe(`./icons/${icon}`);
+  });
+});
+
 describe("Go project icons", () => {
   test.each([
     ["main.go", "go_dark.svg"],
@@ -57,6 +88,32 @@ describe("Gradle, Maven and Groovy icons", () => {
     ["script.kts", "kotlinScript_dark.svg"],
     ["other.properties", "properties_dark.svg"],
     ["other.xml", "xml_dark.svg"],
+  ])("%s → %s", (filename, icon) => {
+    expect(getFileIconPath(filename)).toBe(`./icons/${icon}`);
+  });
+});
+
+describe("JavaScript project icons", () => {
+  test.each([
+    ["app.js", "javaScript_dark.svg"],
+    ["app.mjs", "javaScript_dark.svg"],
+    ["app.cjs", "javaScript_dark.svg"],
+    ["app.jsx", "jsx_dark.svg"],
+    ["app.test.mjs", "jsTest_dark.svg"],
+    ["app.spec.cjs", "jsTest_dark.svg"],
+    ["biome.json", "biomejs.svg"],
+    ["biome.jsonc", "biomejs.svg"],
+    [".eslintrc.json", "eslint.svg"],
+    ["eslint.config.js", "eslint.svg"],
+    ["eslint.config.mjs", "eslint.svg"],
+    ["eslint.config.ts", "eslint.svg"],
+    [".oxlintrc.json", "config_dark.svg"],
+    ["oxlint.config.ts", "config_dark.svg"],
+    ["jsconfig.json", "config_dark.svg"],
+    [".babelrc", "config_dark.svg"],
+    [".nycrc", "config_dark.svg"],
+    [".nvmrc", "nodejs_dark.svg"],
+    [".node-version", "nodejs_dark.svg"],
   ])("%s → %s", (filename, icon) => {
     expect(getFileIconPath(filename)).toBe(`./icons/${icon}`);
   });

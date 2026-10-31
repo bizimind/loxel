@@ -1,3 +1,4 @@
+export { mapWithConcurrency } from "./concurrency";
 export {
   getCommitDiff,
   getRangeDiff,
@@ -37,6 +38,8 @@ export {
   unstageFiles,
   unstageHunk,
 } from "./staging";
+export { GitCommandError, gitText, runGit } from "./run-git";
+export type { GitResult, RunGitOptions } from "./run-git";
 export { getStatus } from "./status";
 export { validatePath } from "./validation";
 export {

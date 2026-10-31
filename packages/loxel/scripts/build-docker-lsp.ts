@@ -17,28 +17,12 @@ import path from "node:path";
 
 import { $ } from "bun";
 
-import { BUILD_DIR, downloadReleaseBinary } from "./download-release-binary";
+import { BUILD_DIR } from "./download-release-binary";
+import { ensureGoToolchain, GO_VERSION } from "./go-toolchain";
 
 const VERSION = "v0.20.1";
 const MODULE = "github.com/docker/docker-language-server";
 const MODULE_HASH = "h1:kuhe8i2RshkBgVGujAfoquc/XMbM9LZJbewfwhdQ9Sk=";
-
-const GO_VERSION = "1.27.3";
-/** Pinned SHA256 digests from https://go.dev/dl/?mode=json */
-const GO_SHA256: Record<string, string> = {
-  "darwin-amd64": "b6f8e931e4ab497fcde6da8ae4499a58f9d258e55c8a80824a516eae5950a750",
-  "darwin-arm64": "dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2",
-  "linux-amd64": "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40",
-  "linux-arm64": "a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49",
-  "windows-amd64": "f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff",
-  "windows-arm64": "c507872ff21f8a7cd3c1c217b059c6f7271a4a9d8e692810ef9dd3e1f601197c",
-};
-
-function goPlatform(): string {
-  const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "amd64" : process.arch;
-  const os = process.platform === "win32" ? "windows" : process.platform;
-  return `${os}-${arch}`;
-}
 
 const ext = process.platform === "win32" ? ".exe" : "";
 const outBinary = path.join(BUILD_DIR, `docker-language-server${ext}`);
@@ -53,19 +37,7 @@ if (existsSync(outBinary) && (await stamped.exists()) && (await stamped.text()) 
 }
 rmSync(stampFile, { force: true });
 
-const platform = goPlatform();
-const goSha256 = GO_SHA256[platform];
-if (!goSha256) throw new Error(`No pinned Go toolchain for platform ${platform}`);
-
-const goRoot = path.join(BUILD_DIR, `go-${GO_VERSION}`);
-await downloadReleaseBinary({
-  name: "go",
-  url: `https://go.dev/dl/go${GO_VERSION}.${platform}${ext ? ".zip" : ".tar.gz"}`,
-  sha256: goSha256,
-  member: "go",
-  outBinary: goRoot,
-});
-const go = path.join(goRoot, "bin", `go${ext}`);
+const { goRoot, go } = await ensureGoToolchain();
 
 // Nothing from the caller's Go environment may weaken module verification or change the target;
 // the hash check below only covers the main module, and the checksum database all its dependencies.
