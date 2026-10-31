@@ -5,6 +5,7 @@
  * two branches insert at the same spot; merging main locally then needs no edits.
  */
 import { goToolchainStatus } from "./go-toolchain-status";
+import { javaToolchainStatus } from "./java-toolchain-status";
 import { pythonToolchainStatus } from "./python-toolchain-status";
 import { rustToolchainStatus } from "./rust-toolchain-status";
 import type { ToolchainStatusModule } from "./toolchain-status-module";
@@ -12,6 +13,7 @@ import type { ToolchainStatusModule } from "./toolchain-status-module";
 export const toolchainStatusModules: readonly ToolchainStatusModule[] = [
   // This comment keeps the list on one line per entry whatever its length.
   goToolchainStatus,
+  javaToolchainStatus,
   pythonToolchainStatus,
   rustToolchainStatus,
 ];

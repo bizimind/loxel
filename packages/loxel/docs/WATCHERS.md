@@ -16,6 +16,7 @@ How the server keeps project files, Git status, refs, logs, worktrees, drafts an
 | Language servers           | LSP managers                                                     | implementation-specific                       | diagnostics and language features                                                                                             |
 | Python environment         | `python-env.ts` shared resolution (`subscribePythonEnv`)         | candidate and resolved envs, flat             | the interpreter and installed packages for basedpyright, ruff, terminals, the coding agent, format on save and the status bar |
 | Rust toolchain             | `rust-toolchain.ts` shared resolution (`subscribeRustToolchain`) | toolchain files and rustup's toolchains, flat | the toolchain for the status bar                                                                                              |
+| JDKs                       | `java-env.ts` one shared watch (`subscribeJavaEnv`)              | JDK install locations and homes, flat         | the worktree's JDK and the machine's JDKs, once a worktree has asked for them                                                 |
 
 For a bare project, the project Git directory is also the repository root and therefore contains `.worktrees`. Classification must stay allowlist-based and anchored at the beginning of the reported path; a catch-all would treat source edits and dependency writes as Git metadata.
 
