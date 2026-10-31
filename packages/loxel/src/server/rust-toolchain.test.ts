@@ -154,6 +154,12 @@ case "$1 $2" in
         .join("\n      ")}
     esac; fi
     echo "${whichDir}/bin/rustc" ;;
+  "which rust-analyzer")
+    rustc="$("$0" which rustc)"
+    analyzer="\${rustc%/*}/rust-analyzer"
+    if [ -x "$analyzer" ]; then echo "$analyzer"; else
+      echo "error: unknown binary 'rust-analyzer' in toolchain" >&2; exit 1
+    fi ;;
   *) echo "error: unexpected command: $*" >&2; exit 1 ;;
 esac
 `;
@@ -162,6 +168,7 @@ esac
   await symlink("rustup", join(fixture.bin, "cargo"));
   await symlink("rustup", join(fixture.bin, "rustfmt"));
   await symlink("rustup", join(fixture.bin, "cargo-clippy"));
+  await symlink("rustup", join(fixture.bin, "rust-analyzer"));
   return rustup;
 }
 
@@ -293,6 +300,7 @@ describe("resolveRustToolchain", () => {
         rustfmt: join(fixture.bin, "rustfmt"),
         // The proxy exists, but this toolchain does not have the component.
         cargoClippy: null,
+        rustAnalyzer: null,
         rustSrc: true,
       },
     });
@@ -413,7 +421,7 @@ describe("resolveRustToolchain", () => {
       rustcPath: rustc,
       sysroot,
       toolchainFile: null,
-      tools: { cargo, rustfmt: null, cargoClippy: null, rustSrc: true },
+      tools: { cargo, rustfmt: null, cargoClippy: null, rustAnalyzer: null, rustSrc: true },
     });
     expect(await listRustToolchains(fixture.wt, { env: fixture.env })).toEqual([]);
   });
@@ -583,6 +591,80 @@ exit 1
     const [first] = await fixture.runs();
     expect(first).toStartWith("HOME=");
     expect(first).not.toBe(`HOME=${fixture.rustupHome}`);
+  });
+});
+
+describe("rust-analyzer", () => {
+  test("rustup's proxy does not count when the toolchain lacks the component", async () => {
+    const fixture = await makeFixture();
+    const dir = await makeToolchain(fixture, join(fixture.root, "tc", STABLE), "1.99.1");
+    await makeRustup(fixture, { active: STABLE, installed: { [STABLE]: dir } });
+
+    expect(
+      await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env }),
+    ).toMatchObject({ status: "active", tools: { rustAnalyzer: null } });
+    for (const run of await fixture.runs()) expect(run.startsWith("0|")).toBe(true);
+  });
+
+  test("is the proxy when the toolchain has the component, asked for the chosen toolchain", async () => {
+    const fixture = await makeFixture();
+    const stable = await makeToolchain(fixture, join(fixture.root, "tc", STABLE), "1.99.1");
+    const pinned = await makeToolchain(fixture, join(fixture.root, "tc", PINNED), "1.90.0", {
+      tools: ["cargo", "rust-analyzer"],
+    });
+    await makeRustup(fixture, {
+      active: STABLE,
+      installed: { [STABLE]: stable, [PINNED]: pinned },
+    });
+
+    const resolve = (chosen: string | null) =>
+      resolveRustToolchain(fixture.wt, { chosen, env: fixture.env });
+    expect(await resolve(PINNED)).toMatchObject({
+      tools: { rustAnalyzer: join(fixture.bin, "rust-analyzer") },
+    });
+    expect(await resolve(null)).toMatchObject({ tools: { rustAnalyzer: null } });
+  });
+
+  test("is the toolchain's own when no proxy is found", async () => {
+    const fixture = await makeFixture();
+    const dir = await makeToolchain(fixture, join(fixture.root, "tc", STABLE), "1.99.1", {
+      tools: ["rust-analyzer"],
+    });
+    await makeRustup(fixture, { active: STABLE, installed: { [STABLE]: dir } });
+    await rm(join(fixture.bin, "rust-analyzer"));
+
+    expect(
+      await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env }),
+    ).toMatchObject({ tools: { rustAnalyzer: join(dir, "bin", "rust-analyzer") } });
+  });
+
+  test("a tracked rust-analyzer in a toolchain is unavailable", async () => {
+    const fixture = await makeFixture();
+    const dir = await makeToolchain(fixture, join(fixture.root, "tc", STABLE), "1.99.1");
+    await writeExecutable(join(fixture.wt, "rust-analyzer"), "#!/bin/sh\n");
+    await symlink(join(fixture.wt, "rust-analyzer"), join(dir, "bin", "rust-analyzer"));
+    track(fixture.wt, "rust-analyzer");
+    await makeRustup(fixture, { active: STABLE, installed: { [STABLE]: dir } });
+
+    expect(
+      await resolveRustToolchain(fixture.wt, { chosen: null, env: fixture.env }),
+    ).toMatchObject({ status: "active", tools: { rustAnalyzer: null } });
+  });
+
+  test("without rustup it is the PATH binary, skipping a tracked one", async () => {
+    const fixture = await makeFixture();
+    await writeExecutable(join(fixture.bin, "rustc"), `#!/bin/sh\necho "rustc 1.88.0"\n`);
+    const committed = join(fixture.wt, "bin");
+    await writeExecutable(join(committed, "rust-analyzer"), "#!/bin/sh\n");
+    track(fixture.wt, "bin");
+    const real = await writeExecutable(join(fixture.bin, "rust-analyzer"), "#!/bin/sh\n");
+
+    expect(
+      await resolveRustToolchain(fixture.wt, {
+        chosen: null,
+        env: { ...fixture.env, PATH: `${committed}:${fixture.bin}` },
+      }),
+    ).toMatchObject({ source: "no-rustup", tools: { rustAnalyzer: real } });
   });
 });
 
@@ -970,7 +1052,7 @@ describe("watchRustToolchain", () => {
       rustcPath: join(dir, "bin", "rustc"),
       sysroot: dir,
       toolchainFile: null,
-      tools: { cargo: null, rustfmt: null, cargoClippy: null, rustSrc: false },
+      tools: { cargo: null, rustfmt: null, cargoClippy: null, rustAnalyzer: null, rustSrc: false },
     } as const;
     await reportsChange(fixture.wt, current, fixture.env, (attempt) =>
       writeFile(join(dir, "lib", "rustlib", "components"), `rust-src ${attempt}\n`),

@@ -23,6 +23,7 @@ export interface RustTools {
   cargo: string | null;
   rustfmt: string | null;
   cargoClippy: string | null;
+  rustAnalyzer: string | null;
   /** The `rust-src` component (the standard library's sources) is installed. */
   rustSrc: boolean;
 }

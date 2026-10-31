@@ -22,7 +22,7 @@ const COMMAND_TIMEOUT_MS = 10_000;
 /** Quiet period after the last filesystem event before re-resolving (rustup writes in bursts). */
 const WATCH_DEBOUNCE_MS = 1000;
 const TOOLCHAIN_FILES = ["rust-toolchain", "rust-toolchain.toml"];
-const PLAIN_TOOLS = ["rustc", "cargo", "rustfmt", "cargo-clippy"];
+const PLAIN_TOOLS = ["rustc", "cargo", "rustfmt", "cargo-clippy", "rust-analyzer"];
 
 /**
  * Keeps rustup from installing anything for a process Loxel itself starts: without it, `rustc`,
@@ -300,11 +300,12 @@ async function resolvePlain(
   env: SpawnEnv,
 ): Promise<RustToolchain> {
   const sysroot = await readSysroot(rustcPath, wtPath, env);
-  const [version, cargo, rustfmt, cargoClippy] = await Promise.all([
+  const [version, cargo, rustfmt, cargoClippy, rustAnalyzer] = await Promise.all([
     rustVersion(rustcPath, wtPath, env),
     findTool(wtPath, "cargo", dirs),
     findTool(wtPath, "rustfmt", dirs),
     findTool(wtPath, "cargo-clippy", dirs),
+    findTool(wtPath, "rust-analyzer", dirs),
   ]);
   return {
     status: "active",
@@ -314,7 +315,7 @@ async function resolvePlain(
     rustcPath,
     sysroot,
     toolchainFile: null,
-    tools: { cargo, rustfmt, cargoClippy, rustSrc: hasRustSrc(sysroot) },
+    tools: { cargo, rustfmt, cargoClippy, rustAnalyzer, rustSrc: hasRustSrc(sysroot) },
   };
 }
 
@@ -367,37 +368,60 @@ async function resolveWithRustup(
   }
   const [version, tools] = await Promise.all([
     rustVersion(rustcPath, wtPath, env),
-    rustupTools(wtPath, sysroot, dirs),
+    rustupTools(wtPath, rustup, sysroot, dirs, rustupEnv),
   ]);
   return { status: "active", source, name, version, rustcPath, sysroot, toolchainFile, tools };
 }
 
-async function rustupTools(wtPath: string, sysroot: string, dirs: string[]): Promise<RustTools> {
-  const [cargo, rustfmt, cargoClippy] = await Promise.all(
-    ["cargo", "rustfmt", "cargo-clippy"].map((name) => rustupTool(wtPath, sysroot, name, dirs)),
-  );
+async function rustupTools(
+  wtPath: string,
+  rustup: string,
+  sysroot: string,
+  dirs: string[],
+  rustupEnv: SpawnEnv,
+): Promise<RustTools> {
+  const [cargo, rustfmt, cargoClippy, rustAnalyzer] = await Promise.all([
+    ...["cargo", "rustfmt", "cargo-clippy"].map((name) =>
+      rustupTool(wtPath, Bun.which(name, { PATH: path.join(sysroot, "bin") }), name, dirs),
+    ),
+    rustupWhich(rustup, "rust-analyzer", wtPath, rustupEnv).then((real) =>
+      rustupTool(wtPath, real, "rust-analyzer", dirs),
+    ),
+  ]);
   return {
     cargo: cargo ?? null,
     rustfmt: rustfmt ?? null,
     cargoClippy: cargoClippy ?? null,
+    rustAnalyzer: rustAnalyzer ?? null,
     rustSrc: hasRustSrc(sysroot),
   };
 }
 
 /**
- * A tool of a rustup toolchain, when the toolchain has it (the proxy exists whether or not the
- * component is installed): the proxy, which sets up the toolchain's environment for what the tool
- * runs in turn, or else the tool itself.
+ * A tool of a rustup toolchain, given what the toolchain itself has (the proxy exists whether or not
+ * the component is installed, and then only fails): the proxy, which sets up the toolchain's
+ * environment for what the tool runs in turn, or else the tool itself.
  */
 async function rustupTool(
   wtPath: string,
-  sysroot: string,
+  real: string | null,
   name: string,
   dirs: string[],
 ): Promise<string | null> {
-  const real = Bun.which(name, { PATH: path.join(sysroot, "bin") });
   if (!real || (await isShippedByRepo(wtPath, real))) return null;
   return (await findTool(wtPath, name, dirs)) ?? real;
+}
+
+/** The tool's path in the worktree's toolchain, or null when the toolchain does not have it. */
+async function rustupWhich(
+  rustup: string,
+  name: string,
+  wtPath: string,
+  rustupEnv: SpawnEnv,
+): Promise<string | null> {
+  const { exitCode, stdout } = await runRustup(rustup, ["which", name], wtPath, rustupEnv);
+  const found = stdout.trim().split("\n")[0]?.trim() ?? "";
+  return exitCode === 0 && path.isAbsolute(found) ? found : null;
 }
 
 /** Where the standard library's sources are, in rustup's `rust-src` and in distro packages. */

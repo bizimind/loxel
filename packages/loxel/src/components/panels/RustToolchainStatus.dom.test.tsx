@@ -14,7 +14,13 @@ const ACTIVE: RustToolchainResponse = {
     rustcPath: "/rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc",
     sysroot: "/rustup/toolchains/stable-aarch64-apple-darwin",
     toolchainFile: null,
-    tools: { cargo: "/cargo/bin/cargo", rustfmt: null, cargoClippy: null, rustSrc: false },
+    tools: {
+      cargo: "/cargo/bin/cargo",
+      rustfmt: null,
+      cargoClippy: null,
+      rustAnalyzer: null,
+      rustSrc: false,
+    },
   },
   chosen: null,
 };
