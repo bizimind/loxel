@@ -1,10 +1,10 @@
 ---
 title: JavaScript
-description: JavaScript projects, jsconfig.json, type checking plain JavaScript, and tool configuration files.
+description: JavaScript projects, jsconfig.json, type checking plain JavaScript, the Node version, and tool configuration files.
 order: 13.5
 ---
 
-<!-- Later headings go after "Type checking JavaScript", in this order: "Linters" (ESLint, oxlint, Biome), "Node version". "Tool configuration files" stays last. -->
+<!-- Later headings go after "Type checking JavaScript", before "Node version": "Linters" (ESLint, oxlint, Biome). "Tool configuration files" stays last. -->
 
 JavaScript files use the same language server as [TypeScript](/docs/languages/typescript), so `.js`, `.mjs`, `.cjs` and `.jsx` files get the same hover, navigation, completions and refactors. Types for your packages come from what is installed: install your dependencies, and the `@types` packages of those that ship no types.
 
@@ -73,6 +73,34 @@ In a JavaScript project:
 ## Scripts without an extension
 
 A file with no extension gets the same features when its first line names a JavaScript or TypeScript runner, as in `bin/www`: `#!/usr/bin/env node`, `#!/usr/bin/env -S node --no-warnings`, `nodejs` and `bun` open as JavaScript, and `tsx` and `ts-node`, including through `npx`, as TypeScript. A file association in [settings](/docs/reference-env-files-cli-settings) works for any other name.
+
+---
+
+## Node version
+
+While a JavaScript or TypeScript file is the active editor, the status bar shows the Node version the worktree uses, for example `Node 22.11.0 (nvm)`. Hover it to see the full path and how it was found.
+
+Loxel picks the first of these that applies:
+
+1. The version you chose for this worktree.
+2. The version the worktree's root folder pins, matched against what your version managers have installed. A partial pin such as `22` takes the highest installed match.
+3. `node` on your login-shell `PATH`.
+
+If a project has several pin files, the first one in this list counts:
+
+- `.nvmrc`, for example `22`, `v22.1.0`, `lts/*`, `lts/iron` or `node`
+- `.node-version`
+- a `nodejs` line in `.tool-versions`
+- `node` under `[tools]` in `mise.toml`, then `.mise.toml`
+- `volta.node` in `package.json`
+
+The `engines` field in `package.json` does not select a version. Pins apply to the whole worktree: a subfolder's own pin file is not read.
+
+Versions are found for nvm, fnm, Volta, asdf, mise and n, including custom locations set with their environment variables such as `NVM_DIR` or `FNM_DIR`. Installing a version or editing a pin file updates the status bar right away, with no restart.
+
+Loxel never installs Node. If the pinned version is not installed, the status bar item turns to its warning color, Loxel uses `node` from `PATH`, and the tooltip says what to run in a terminal, for example `nvm install 22`.
+
+Click the item, or run **Node: Select Version** from the command palette (`Cmd+Shift+P`), to choose an installed version for this worktree, or to go back to automatic detection. The list shows what your version managers have installed and the `node` on `PATH`.
 
 ---
 

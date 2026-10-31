@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +30,17 @@ describe("isShippedByRepo", () => {
     expect(await isShippedByRepo(root, join(root, "tracked", "tool"))).toBe(true);
     expect(await isShippedByRepo(root, join(root, "tracked"))).toBe(true);
     expect(await isShippedByRepo(root, join(root, "built", "tool"))).toBe(false);
+  });
+
+  test("does not start the repository's configured file system monitor", async () => {
+    const root = await makeRepo();
+    const canary = join(root, "monitor-ran");
+    const monitor = join(root, "built", "monitor");
+    await writeFile(monitor, `#!/bin/sh\ntouch "${canary}"\n`);
+    await chmod(monitor, 0o755);
+    Bun.spawnSync(["git", "-C", root, "config", "core.fsmonitor", monitor]);
+    await isShippedByRepo(root, join(root, "tracked", "tool"));
+    expect(await Bun.file(canary).exists()).toBe(false);
   });
 
   test("follows an untracked symlink to a tracked target", async () => {
