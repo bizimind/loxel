@@ -20,6 +20,8 @@ Without a config file, the server only knows the files you have open and what th
 
 Each file uses the nearest `jsconfig.json` or `tsconfig.json` above it, so subdirectories can have their own.
 
+With a `jsconfig.json` at the project root, Loxel also checks the whole project and shows the errors in the code editor and on both sides of a diff. A root `tsconfig.json` takes priority. Options TypeScript 7 removed show as errors on the `jsconfig.json`; remove them first, because this check reports no type errors until you do.
+
 `baseUrl` no longer resolves imports in TypeScript 7. Use `paths` instead, with paths relative to the config file:
 
 ```json
