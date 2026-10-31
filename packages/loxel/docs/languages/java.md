@@ -1,6 +1,63 @@
 # Java
 
-The per-worktree JDK choice every Java feature shares. Shared language-server architecture: [LANGUAGE_SERVERS.md](../LANGUAGE_SERVERS.md).
+Java files are served by Eclipse JDT LS (jdtls), which Loxel bundles and runs on the user's JDK, and every Java feature shares one per-worktree JDK choice. Shared language-server architecture: [LANGUAGE_SERVERS.md](../LANGUAGE_SERVERS.md).
+
+## Manager
+
+| Manager                                                     | Binary                    | Args        | Scope    | Flags and config                                                                                                                                                  |
+| ----------------------------------------------------------- | ------------------------- | ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [java-lsp-manager.ts](../../src/server/java-lsp-manager.ts) | the user's JDK 25+ `java` | `jdtlsArgs` | worktree | watched files; settings at `initialize` and pushed after `initialized` and when JDKs change; per-file indentation pulled; drops `willRename` and two code actions |
+
+## Binary
+
+[download-jdtls.ts](../../scripts/download-jdtls.ts) fetches the jdtls release, one archive for every platform, unmodified apart from an added `LICENSE` and `NOTICE` at its top level, about 53 MiB. The `jdtls` directory is in `UPDATE_RESOURCE_DIRS`, since stale jars next to new ones would break the server. The macOS natives inside its jars are signed by the Eclipse Foundation, and natives for other platforms stay inside jars, so no foreign binary sits loose in the app.
+
+## Choosing the JVM
+
+jdtls itself needs Java 25, although `bin/jdtls.py` says 21: on 21 the JVM exits with code 13 without answering `initialize`, and the reason is only in a log. `resolveBinary` runs the newest entry of `listJavaRuntimes` at that level or above, by absolute path through `javaExecutable`, which the [trust rule](#jdk-detection) has already passed. There is no `PATH` lookup and nothing else runs a `java`. Without one it starts nothing and `serverFailureReason` says what to install.
+
+The client then stops. `subscribeJavaStatus` in [java-toolchain-status.ts](../../src/server/java-toolchain-status.ts) reports a change when a JDK that can run the server appears or goes, even though the worktree's own JDK stays the same, and [java-server-recovery.ts](../../src/lib/java-server-recovery.ts) reconnects the Java client on that message if it stopped because it could not start, so installing one brings the server back. A client stopped for another reason stays stopped, in particular one another window took over.
+
+## Java levels
+
+`javaRuntimesSetting` turns `listJavaRuntimes` into `java.configuration.runtimes`: the newest JDK of each level, with `sources` from its `src.zip`, which is where hover documentation comes from. The worktree's JDK from `getJavaEnv` takes its level's place and is `default`, so the JVM's own level does not decide what a project compiles against. The manager follows `subscribeJavaEnv` and pushes the setting when it differs, so a JDK installed or chosen while the server runs applies without a restart.
+
+## Starting the server
+
+The JDK's `java` runs directly, with `-jar` on the launcher and no shell.
+
+- `-configuration` is writable, in `<state>/jdtls/configuration/<core plugin file name>`, because the signed app is not. `osgi.sharedConfiguration.area` points read-only at the bundled `config_<platform>`.
+- `-data` is per worktree path, `<state>/jdtls/data/<hash>`, since two same-named projects in one directory collide. It is deleted when the worktree is removed, in Loxel or from outside it, or when the server exits if it was still running then. A moved worktree starts a new one. A new server waits for the previous one on its worktree to exit first, since the directory takes one server at a time, and the JVM's working directory is this directory rather than the worktree.
+- `serverFailureReason` reports the last `!MESSAGE` of the newest log written since the server started in the configuration directory, which is the only place a JVM that cannot start explains why.
+- `-Xmx1G` with `ParallelGC` tuned to return memory. Resident memory is about 900 MB on a project of 300 files, most of it not heap: a cap of 512 MB saves 50 MB and one of 256 MB starts slower and still leaves 640 MB.
+
+## Project import off
+
+The server starts with project import off and makes no network requests.
+
+- `java.import.maven.enabled` and `java.import.gradle.enabled` are false, `java.import.exclusions` is `["**"]` and `java.autobuild.enabled` is false. Each session gets them in `initializationOptions`, because jdtls reads those before its first import, and again through `workspace/didChangeConfiguration`. `notifyConfigurationChanged` sends `settings: null`, which jdtls ignores.
+- `-Djava.import.generatesMetadataFilesAtProjectRoot=false` is a JVM property, not a setting; as a setting it does nothing.
+- `-Djdk.net.hosts.file` points at a file naming only `localhost`.
+- [audit-jdtls.ts](../../scripts/network-audit/audit-jdtls.ts) checks all of this through the built `loxel-server`, on opening files and on every command a user can reach, with `--control` as its positive control. Run it after changing the pin or the manager.
+
+Each folder gets one invisible project. jdtls infers its source root from the first Java file it hears about, and `initialize` comes before any file opens, so `firstJavaFile`, a pruned walk that runs while the session's frames are held, passes one as `triggerFiles`. A file with a build file in its folder or above stays outside any project, and reports "non-project file" or "not on the classpath", "only syntax errors are reported". [JavaRuntimeStatus.tsx](../../src/components/panels/JavaRuntimeStatus.tsx) says so in the status bar while such a file is active, from `POST /api/java-env/build-file`, where `nearestBuildTool` looks for the same build files without reading or running them.
+
+## Client capabilities
+
+`extendedClientCapabilities` is not sent, so code actions come back with `data` and resolve to plain edits. jdtls resolves only the actions of its latest answer.
+
+- `workspace.fileOperations.willRename` is removed from the `initialize` response. jdtls's rename edit already holds every reference, and `WorkspaceEditApplier` asks `willRenameFiles` for each rename operation in an edit, so a class rename would be applied twice.
+- `dropUnusableActions` removes the actions that run `java.action.applyRefactoringCommand`, a client command that needs a prompt, and `Ignore compiler problem(s)`, which has neither an edit nor a command.
+- Lenses are off (`referencesCodeLens`, `implementationCodeLens`), since their commands are the client's own in VS Code.
+- `language/status`, `language/eventNotification` and the other custom notifications reach the client, which drops them with a debug log. `ServiceReady` does not mean analysis finished, so tests wait for diagnostics on an opened file.
+
+## Settings it pulls
+
+jdtls pulls only `java.format.tabSize` and `java.format.insertSpaces`, per file, to indent the code it generates. `workspaceConfiguration` answers from the file's first indented line.
+
+## Watched files
+
+jdtls registers its watchers after `ServiceReady`, as `**/*.java`-style globs, absolute globs, and `{baseUri, pattern}` entries in `file:/` single-slash form. The base forwards all three. Changes from `git checkout` and agents reach it the same way.
 
 ## JDK detection
 

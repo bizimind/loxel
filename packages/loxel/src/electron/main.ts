@@ -466,6 +466,7 @@ const UPDATE_RESOURCE_DIRS = [
   "typeshed-fallback",
   "clangd-resource",
   "tsgo-lib",
+  "jdtls",
 ];
 
 /** Compute SHA256 hash of a file synchronously. */

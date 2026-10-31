@@ -27,6 +27,8 @@ const PROTECTED_SEGMENTS = new Set([
   ".pixi",
   ".conda",
   ".git",
+  ".gradle",
+  ".m2",
   ".worktrees",
 ]);
 
