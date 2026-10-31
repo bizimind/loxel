@@ -239,7 +239,8 @@ export async function runGit(
 ): Promise<{ exitCode: number; stdout: string }> {
   try {
     const proc = measureSpawn("git", () =>
-      Bun.spawn(["git", "-C", cwd, ...args], {
+      // These read-only questions never start a file system monitor the repository configures.
+      Bun.spawn(["git", "-C", cwd, "-c", "core.fsmonitor=false", ...args], {
         env: readOnlyGitEnv(),
         stdin: "ignore",
         stdout: "pipe",

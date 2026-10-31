@@ -126,7 +126,7 @@ Each rule has a `BackendMode` from [formatter-backends.ts](../src/server/formatt
 
 ## Toolchain status items
 
-A language whose toolchain the user can see and choose (Python's interpreter) gets a status bar item, a picker, a command and routes through one seam. The shared code loops over three lists, each one import and one entry per language, and knows no language:
+A language whose toolchain the user can see and choose (Python's interpreter, Node's version) gets a status bar item, a picker, a command and routes through one seam. The shared code loops over three lists, each one import and one entry per language, and knows no language:
 
 - [toolchain-statuses.ts](../src/api/toolchain-statuses.ts) lists each language's `ToolchainStatusDescriptor` ([toolchain-status-model.ts](../src/api/toolchain-status-model.ts)): its id, Monaco languages, changed message and select action. It is static because [ws-protocol.ts](../src/api/ws-protocol.ts) and the [action registry](../src/store/keybindings/action-registry.ts) derive literal types from it. Every select action is unbound by default, enabled while a worktree is active.
 - [server/toolchain-statuses.ts](../src/server/toolchain-statuses.ts) lists each language's `ToolchainStatusModule` ([toolchain-status-module.ts](../src/server/toolchain-status-module.ts)): subscribe, refresh, the stored choice and its routes. [server.ts](../src/server/server.ts) holds a subscription per worktree, broadcasts the changed message when `changed`, and refreshes on a new choice or login-shell capture. [routes.ts](../src/server/routes.ts) validates the worktree for each route, then calls the module's handler, and deletes the stored choice with the worktree.
