@@ -19,9 +19,11 @@ import { changeIndentation } from "@/lib/indentation-status";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { restartLanguageServers } from "@/lib/lsp-client";
 import { navigateToNotification } from "@/lib/notification-navigation";
+import { manageRepoTrust } from "@/lib/repo-trust-dialog";
 import { getActiveEditorFile, getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { renameActiveTab } from "@/lib/tab-rename";
 import { toolchainStatusItems } from "@/lib/toolchain-status-items";
+import { getActiveWt } from "@/store/active-worktree";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
 import type { ActionId, SplitPanelType } from "@/store/keybindings/action-registry";
@@ -410,6 +412,9 @@ export function useActionHandler(): (actionId: ActionId) => void {
         break;
       case "language.restartServers":
         restartLanguageServers();
+        break;
+      case "worktree.manageRepoTrust":
+        void manageRepoTrust(getActiveWt());
         break;
 
       // -- App --

@@ -12,3 +12,5 @@ Kotlin source (`.kt`) and script (`.kts`) files get highlighting and 4-space ind
 - Backticks pair, so typing `` ` `` adds the closing one, and pressing it with text selected wraps the selection. Handy for identifiers such as test names.
 - Typing `/**` adds the closing `*/`. Pressing Enter inside a KDoc comment continues it with a new `*` line.
 - Pressing Enter after a lambda's parameters, as in `list.map { x ->`, indents the next line.
+
+See [Repository Trust](/docs/repository-trust) for how a language feature asks before running a repository's code.

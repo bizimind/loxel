@@ -181,6 +181,7 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "codeAction.sourceAction": ["Ctrl+Alt+S"],
   "codeAction.refactor": ["Ctrl+Alt+R"],
   "language.restartServers": [],
+  "worktree.manageRepoTrust": [],
   "app.settings": ["Cmd+Comma"],
 });
 
