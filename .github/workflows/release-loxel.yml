@@ -125,7 +125,7 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     outputs:
       sha256_darwin-arm64: ${{ steps.sha.outputs.sha256_darwin-arm64 }}
       sha256_darwin-x64: ${{ steps.sha.outputs.sha256_darwin-x64 }}
@@ -189,6 +189,7 @@ jobs:
           cp packages/loxel/build/loxel-server staging/
           cp -R packages/loxel/build/language-servers/. staging/
           cp -r packages/loxel/dist staging/renderer
+          bun packages/loxel/scripts/check-binary-arch.ts "$PLATFORM" staging
           tar czf "$ARCHIVE" -C staging .
 
           echo "archive=$ARCHIVE" >> $GITHUB_OUTPUT
@@ -219,13 +220,15 @@ jobs:
     needs: [check-and-bump, build-frontend]
     strategy:
       matrix:
+        # Each on its own architecture: `bun build --compile`, the language server downloads and the
+        # Go builds all produce binaries for the machine they run on.
         include:
           - os: blacksmith-6vcpu-macos-latest
             arch: arm64
-          - os: blacksmith-6vcpu-macos-latest
+          - os: macos-15-intel
             arch: x64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     outputs:
       sha256_dmg_arm64: ${{ steps.sha.outputs.sha256_dmg_arm64 }}
       sha256_dmg_x64: ${{ steps.sha.outputs.sha256_dmg_x64 }}
@@ -316,6 +319,10 @@ jobs:
           APPLE_API_KEY: /tmp/AuthKey.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+      - name: Check binary architectures
+        run: bun packages/loxel/scripts/check-binary-arch.ts darwin-${{ matrix.arch }} packages/loxel/release
 
       - name: Calculate checksum
         id: sha
