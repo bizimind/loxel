@@ -53,12 +53,6 @@ declare module "monaco-editor/languages/definitions/hcl/hcl.js" {
   export const conf: languages.LanguageConfiguration;
 }
 
-declare module "monaco-editor/languages/definitions/java/java.js" {
-  import type { languages } from "monaco-editor";
-
-  export const conf: languages.LanguageConfiguration;
-}
-
 declare module "monaco-editor/languages/definitions/ini/ini.js" {
   import type { languages } from "monaco-editor";
 
