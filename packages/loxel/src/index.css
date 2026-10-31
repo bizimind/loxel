@@ -96,6 +96,7 @@
   --muted: oklch(0.97 0.001 106.424);
   --muted-foreground: oklch(0.553 0.013 58.071);
   --destructive: oklch(0.577 0.245 27.325);
+  --warning: #9a6700;
   --border: oklch(0.923 0.003 48.717);
   --input: oklch(0.923 0.003 48.717);
   --ring: oklch(0.709 0.01 56.259);
@@ -209,6 +210,7 @@
 
   /* Destructive - JetBrains error red */
   --destructive: #fa6675;
+  --warning: #d6bf55;
 
   /* Borders */
   --border: var(--surface-3);
@@ -292,6 +294,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
