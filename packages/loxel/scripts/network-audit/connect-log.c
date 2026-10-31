@@ -96,11 +96,12 @@ static int my_connectx(int fd, const sa_endpoints_t *e, sae_associd_t assoc, uns
                        const struct iovec *iov, unsigned int iovcnt, size_t *len,
                        sae_connid_t *conn) {
   char what[256];
-  if (e && describe(e->sae_dstaddr, what, sizeof what)) {
+  if (describe(e ? e->sae_dstaddr : NULL, what, sizeof what)) {
     logline("connectx", what, "BLOCKED");
     errno = ECONNREFUSED;
     return -1;
   }
+  logline("connectx", what, "local");
   return connectx(fd, e, assoc, flags, iov, iovcnt, len, conn);
 }
 DYLD_INTERPOSE(my_connectx, connectx)
