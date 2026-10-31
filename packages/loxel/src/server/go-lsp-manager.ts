@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises";
+import { statSync } from "node:fs";
 import path from "node:path";
 
 import type { ServerWebSocket, Subprocess } from "bun";
@@ -15,18 +15,14 @@ import {
   goToolPath,
   refreshGoEnv,
   subscribeGoEnv,
-  trustedGoTool,
 } from "./go-env";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
-import { measureSpawn } from "./spawn-metrics";
 import {
   type SpawnOptions,
   WorktreeLspManager,
   type WtLspContext,
   type WtLspSession,
 } from "./stdio-lsp-manager";
-
-const VERSION_TIMEOUT_MS = 5_000;
 
 /** What the user is told when `go` is missing. */
 export const GO_NOT_FOUND_REASON = `${GO_NOT_FOUND}. Install Go, then restart the server.`;
@@ -201,63 +197,19 @@ export interface GoSetupProblem {
   message: string;
 }
 
-/** A gopls binary and the version it reported, null when it did not. */
-export interface GoplsPick {
+/** A gopls binary, and what tells a reinstall at the same path. */
+interface GoplsPick {
   path: string;
-  version: string | null;
+  stamp: string;
 }
 
-/** Versions by binary, valid while the file is the same one. */
-const goplsVersions = new Map<string, { stamp: string; version: string | null }>();
-
-/** The version `gopls version` reports, asked once per binary. */
-async function goplsVersion(binary: string, wtPath: string): Promise<string | null> {
+function fileStamp(file: string): string {
   try {
-    const info = await stat(binary);
-    const stamp = `${info.dev}:${info.ino}:${info.mtimeMs}:${info.size}`;
-    const known = goplsVersions.get(binary);
-    if (known?.stamp === stamp) return known.version;
-    const proc = measureSpawn("gopls", () =>
-      Bun.spawn([binary, "version"], {
-        cwd: wtPath,
-        env: { ...buildSpawnEnv(), ...goSpawnEnv(wtPath, null) },
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "ignore",
-        timeout: VERSION_TIMEOUT_MS,
-      }),
-    );
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    const match = /\bgopls v(\d+\.\d+\.\d+\S*)/.exec(stdout);
-    const version = exitCode === 0 && match?.[1] ? match[1] : null;
-    // Killed, perhaps a timeout while the OS scans a new binary: that says nothing about the file.
-    if (proc.signalCode === null) goplsVersions.set(binary, { stamp, version });
-    return version;
+    const info = statSync(file);
+    return `${info.dev}:${info.ino}:${info.mtimeMs}:${info.size}`;
   } catch {
-    return null;
+    return "";
   }
-}
-
-/**
- * The gopls to run for a worktree: the user's on the PATH when it is trusted and at or above
- * `bundled`, since a gopls built with an older Go cannot fully analyze a newer language version.
- * Otherwise `bundled`.
- */
-export async function pickGopls(wtPath: string, bundled: string | null): Promise<GoplsPick | null> {
-  const bundledPick = bundled && { path: bundled, version: await goplsVersion(bundled, wtPath) };
-  // Also keeps a version manager's shim from running here, even to report its version.
-  const own = await trustedGoTool(wtPath, GOPLS);
-  const ownVersion = own && (await goplsVersion(own, wtPath));
-  if (
-    own &&
-    ownVersion &&
-    bundledPick &&
-    bundledPick.version &&
-    Bun.semver.order(ownVersion, bundledPick.version) >= 0
-  ) {
-    return { path: own, version: ownVersion };
-  }
-  return bundledPick || null;
 }
 
 /** What a gopls session was started with, which a restart follows. */
@@ -272,8 +224,7 @@ function isSameRun(a: GoplsRun, b: GoplsRun): boolean {
     a.go?.version === b.go?.version &&
     a.go?.goroot === b.go?.goroot &&
     a.gopls.path === b.gopls.path &&
-    // A version that could not be read before is no change of binary.
-    (a.gopls.version === b.gopls.version || !a.gopls.version || !b.gopls.version)
+    a.gopls.stamp === b.gopls.stamp
   );
 }
 
@@ -319,7 +270,7 @@ export class GoLspManager extends WorktreeLspManager {
       this.withoutGo.add(context);
       return null;
     }
-    const gopls = await this.pick(wtPath);
+    const gopls = this.pick(env);
     if (gopls) this.spawned.set(context, { go: env, gopls });
     return gopls?.path ?? null;
   }
@@ -364,23 +315,21 @@ export class GoLspManager extends WorktreeLspManager {
     this.watches.delete(session);
   }
 
-  private async pick(wtPath: string): Promise<GoplsPick | null> {
+  /** The user's gopls, or the bundled one when they have none. */
+  private pick(env: GoEnv): GoplsPick | null {
     const dev = path.resolve(import.meta.dir, "../../build", GOPLS);
     const bundled = this.resolveBundledBinary(GOPLS, dev);
-    // With nothing bundled that is the first on the plain PATH, which can reach into the worktree.
+    // With nothing bundled that is the first on the plain PATH, which `env.gopls` already refused.
     const onPlainPath = bundled === Bun.which(GOPLS, { PATH: buildSpawnEnv().PATH ?? "" });
-    return pickGopls(wtPath, onPlainPath ? await trustedGoTool(wtPath, GOPLS) : bundled);
+    const binary = env.gopls ?? (onPlainPath ? null : bundled);
+    return binary ? { path: binary, stamp: fileStamp(binary) } : null;
   }
 
   /**
    * Restart the session's gopls when the worktree's `go` or the gopls to use changed: it does not
    * recover by itself from a newer Go appearing, and keeps analyzing with what it first saw.
    */
-  private async restartIfChanged(
-    session: WtLspSession,
-    watch: SessionWatch,
-    env: GoEnv | null,
-  ): Promise<void> {
+  private restartIfChanged(session: WtLspSession, watch: SessionWatch, env: GoEnv | null): void {
     if (!watch.run || !this.isSessionLive(session)) return;
     if (!env) {
       // Gone may be an install in progress, so the running gopls keeps serving. But a `go` still
@@ -390,8 +339,8 @@ export class GoLspManager extends WorktreeLspManager {
     }
     // Not answering may be an install in progress too; the status item says so meanwhile.
     if (!env.version) return;
-    const gopls = await this.pick(session.wtPath);
-    if (!gopls || !this.isSessionLive(session)) return;
+    const gopls = this.pick(env);
+    if (!gopls) return;
     const next = { go: env, gopls };
     if (isSameRun(watch.run, next)) return;
     this.log.info("Restarting gopls for a different go or gopls", {

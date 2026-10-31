@@ -16,6 +16,7 @@ const REAL_PATH = process.env.PATH;
 const LOOKUP_WITHOUT_DEADLINE_MS = 600_000;
 /** Always on the spawn PATH; listed last so a real tool there cannot shadow the fakes. */
 const LOCAL_BIN = join(homedir(), ".local", "bin");
+const GIT = Bun.which("git");
 
 /** Reports which binary ran, from where and how, using only shell builtins: `PATH` is a test's. */
 function reportScript(name: string): string {
@@ -61,6 +62,8 @@ beforeEach(async () => {
   wt = join(temp, "wt");
   await mkdir(tools);
   await mkdir(wt);
+  // The Go resolution's trust check runs git.
+  if (GIT) await symlink(GIT, join(tools, "git"));
   process.env.PATH = `${tools}:${LOCAL_BIN}`;
 });
 
@@ -318,7 +321,7 @@ describe("goFormatter binaries", () => {
     await install(
       tools,
       "go",
-      `#!/bin/sh\n[ "$GOTOOLCHAIN" = local ] && [ "$1 $2" = "env GOROOT" ] && echo "${goroot}"\n`,
+      `#!/bin/sh\n[ "$GOTOOLCHAIN" = local ] && [ "$1 $2" = "env -json" ] && echo '{"GOROOT":"${goroot}"}'\n`,
     );
     await addFiles({ "go.mod": "module m\n", "a.go": "" });
     const service = new FormatService([goFormatterWith(LOOKUP_WITHOUT_DEADLINE_MS)]);
@@ -336,7 +339,7 @@ describe("goFormatter binaries", () => {
     ["relative", () => "goroot"],
   ])("a GOROOT %s is not used", async (_, goroot) => {
     const ran = join(temp, "ran");
-    await install(tools, "go", `#!/bin/sh\n: > "${ran}"\necho "${goroot(wt)}"\n`);
+    await install(tools, "go", `#!/bin/sh\n: > "${ran}"\necho '{"GOROOT":"${goroot(wt)}"}'\n`);
     const formatter = goFormatterWith(LOOKUP_WITHOUT_DEADLINE_MS);
     const options = await formatter.spawnOptions?.("gofmt", wt, wt);
     expect(options?.binDirs).toEqual([]);
@@ -357,11 +360,56 @@ describe("goFormatter binaries", () => {
 
   test("a go failing to report GOROOT adds nothing", async () => {
     const ran = join(temp, "ran");
-    await install(tools, "go", `#!/bin/sh\n: > "${ran}"\necho /opt/go\nexit 1\n`);
+    await install(tools, "go", `#!/bin/sh\n: > "${ran}"\necho '{"GOROOT":"/opt/go"}'\nexit 1\n`);
     const formatter = goFormatterWith(LOOKUP_WITHOUT_DEADLINE_MS);
     const options = await formatter.spawnOptions?.("gofmt", wt, wt);
     expect(options?.binDirs).toEqual([]);
     expect(existsSync(ran)).toBe(true);
+  });
+
+  describe("with a version manager on the PATH", () => {
+    /** A stand-in that notes where it runs, and whether a project's version file was in reach. */
+    const standIn = (name: string, log: string, canary: string, body = "") =>
+      `#!/bin/sh\necho "${name} $PWD" >> "${log}"\nif [ -f .tool-versions ]; then : > "${canary}"; fi\n${body}\n`;
+
+    async function setupManager() {
+      const shims = join(temp, "shims");
+      const goroot = join(temp, "goroot");
+      const log = join(temp, "shim-runs");
+      const canary = join(temp, "canary");
+      await writeFile(log, "");
+      await install(shims, "go", standIn("go", log, canary, `echo '{"GOROOT":"${goroot}"}'`));
+      await install(shims, "gofmt", standIn("gofmt", log, canary));
+      await install(shims, GOLANGCI, standIn(GOLANGCI, log, canary));
+      await install(join(goroot, "bin"), "go", `#!/bin/sh\necho '{"GOROOT":"${goroot}"}'\n`);
+      await install(join(goroot, "bin"), "gofmt", reportScript("goroot-gofmt"));
+      await addFiles({ "go.mod": "module m\n", ".tool-versions": "golang 1.0\n", "a.go": "" });
+      process.env.PATH = `${shims}:${tools}:${LOCAL_BIN}`;
+      return { log, canary };
+    }
+
+    const saveWithLookup = () =>
+      new FormatService([goFormatterWith(LOOKUP_WITHOUT_DEADLINE_MS)]).format(
+        "package main\n",
+        join(wt, "a.go"),
+        wt,
+        DEFAULT_FORMATTING_SETTINGS,
+      );
+
+    test("formats with the Go it stands for, running it only from the home directory", async () => {
+      const { log, canary } = await setupManager();
+      expect((await saveWithLookup()).content).toStartWith("goroot-gofmt ");
+      expect(existsSync(canary)).toBe(false);
+      expect(await Bun.file(log).text()).toBe(`go ${homedir()}\n`);
+    });
+
+    test("does not take golangci-lint from it, so gofmt formats instead", async () => {
+      const { log, canary } = await setupManager();
+      await addFiles({ ".golangci.yml": V2_CONFIG });
+      expect((await saveWithLookup()).content).toStartWith("goroot-gofmt ");
+      expect(existsSync(canary)).toBe(false);
+      expect(await Bun.file(log).text()).toBe(`go ${homedir()}\n`);
+    });
   });
 
   test("a go that never answers does not hold up the save", async () => {

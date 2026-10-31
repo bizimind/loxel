@@ -14,6 +14,7 @@ const ENV: GoEnv = {
   gomod: "/wt-a/go.mod",
   gowork: null,
   goflags: null,
+  gopls: null,
   newerGoNeeded: null,
   newerToolchainSuggested: null,
 };
@@ -65,7 +66,15 @@ describe("GoToolchainStatus", () => {
     expect(button.title).toContain("/usr/local/go/bin/go");
     expect(button.title).toContain("GOROOT: /usr/local/go");
     expect(button.title).toContain("Module: /wt-a/go.mod");
+    expect(button.title).toContain("gopls: bundled with Loxel");
     expect(button.className).toContain("text-muted-foreground");
+  });
+
+  test("names the user's gopls when that is the one in use", async () => {
+    response = { env: { ...ENV, gopls: "/home/me/go/bin/gopls" } };
+    renderStatus();
+    const button = await screen.findByRole("button", { name: "Go 1.27.3" });
+    expect(button.title).toContain("gopls: /home/me/go/bin/gopls");
   });
 
   test("warns when go is missing", async () => {

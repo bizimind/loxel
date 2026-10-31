@@ -1,16 +1,13 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { isDirectory } from "@/fs-utils";
 import { isRecord } from "@/lib/is-record";
 
-import { GO_ENV } from "./go-env";
+import { getGoEnv, goSpawnEnv } from "./go-env";
 import { dirsUpToRoot, type FileFormatter, type LanguageFormatter } from "./language-formatter";
 import { logger } from "./logger";
-import { pathOutsideWorktree } from "./python-env";
-import { buildSpawnEnv } from "./shell-env";
 import { isInside } from "./shipped-by-repo";
-import { measureSpawn } from "./spawn-metrics";
 import { parseToml, recordAt } from "./toml-file";
 
 const log = logger.child("format");
@@ -49,12 +46,13 @@ export function goFormatterWith(gorootLookupTimeoutMs: number): LanguageFormatte
     spawnOptions: async (command, dir, wtRoot) => {
       // gofumpt and goimports read go.mod from the cwd only.
       const cwd = existingDir(dir, wtRoot);
-      const PATH = pathForTools(wtRoot);
-      const needsGoroot = command === "gofmt" && !Bun.which(command, { PATH });
-      const gorootBin = needsGoroot
-        ? await findGorootBin(PATH, cwd, wtRoot, gorootLookupTimeoutMs)
-        : undefined;
-      return { cwd, env: { ...GO_ENV, PATH }, binDirs: gorootBin ? [gorootBin] : [] };
+      const env = goSpawnEnv(wtRoot, null);
+      const onPath = (tool: string) => Bun.which(tool, { PATH: env.PATH });
+      const goroot =
+        onPath(command) && onPath("go")
+          ? undefined
+          : await gorootWithin(wtRoot, gorootLookupTimeoutMs);
+      return { cwd, env, binDirs: goroot ? [join(goroot, "bin")] : [] };
     },
   };
 }
@@ -86,7 +84,7 @@ function detectGoFormatter(
   if (configPath && config && enablesFormatters(config)) {
     if (fileName && isExcluded(config, configPath, join(dir, fileName), dirs, root)) return null;
     const configArg = configArgFrom(existingDir(dir, root), configPath);
-    if (configArg && Bun.which(GOLANGCI_LINT, { PATH: pathForTools(root) })) {
+    if (configArg && Bun.which(GOLANGCI_LINT, { PATH: goSpawnEnv(root, null).PATH })) {
       // Explicit, since its own search can leave the worktree.
       return { command: GOLANGCI_LINT, args: `fmt --stdin --config ${configArg}` };
     }
@@ -227,59 +225,18 @@ function existingDir(dir: string, wtRoot: string): string {
 }
 
 /**
- * The login-shell `PATH` without the worktree's directories, so what runs is never in the
- * repository. Relative entries go too: the cwd is the file's directory, so they could reach it.
+ * The worktree's GOROOT from the shared Go resolution, within `timeoutMs` so it cannot hold up a
+ * save, unless it is in the worktree.
  */
-function pathForTools(wtRoot: string): string {
-  return pathOutsideWorktree(buildSpawnEnv().PATH ?? "", wtRoot)
-    .split(delimiter)
-    .filter(isAbsolute)
-    .join(delimiter);
-}
-
-/**
- * Where gofmt is when `PATH` has `go` but not it, as under a `go` wrapper or a toolchain manager's
- * shim. `GO_ENV` keeps a newer `toolchain` line in `go.mod` from starting a download.
- */
-async function findGorootBin(
-  PATH: string,
-  cwd: string,
-  wtRoot: string,
-  timeoutMs: number,
-): Promise<string | undefined> {
-  if (!Bun.which("go", { PATH })) return undefined;
+async function gorootWithin(wtRoot: string, timeoutMs: number): Promise<string | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const proc = measureSpawn("formatter", () =>
-      Bun.spawn(["go", "env", "GOROOT"], {
-        cwd,
-        env: { ...buildSpawnEnv(), ...GO_ENV, PATH },
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "ignore",
-      }),
-    );
-    // Races both reads: a child of a wrapper can keep stdout open after the wrapper is killed.
-    const finished = await Promise.race([
-      Promise.all([new Response(proc.stdout).text(), proc.exited]),
-      new Promise<null>((done) => {
-        timer = setTimeout(() => done(null), timeoutMs);
-      }),
-    ]);
-    if (!finished) {
-      proc.kill("SIGKILL");
-      return undefined;
-    }
-    const [stdout, exitCode] = finished;
-    const goroot = stdout.trim();
-    if (exitCode !== 0 || !isAbsolute(goroot) || isInside(goroot, resolve(wtRoot))) {
-      return undefined;
-    }
-    return join(goroot, "bin");
-  } catch (err) {
-    log.debug("Could not look up GOROOT", { error: err });
-    return undefined;
-  } finally {
-    clearTimeout(timer);
-  }
+  const env = await Promise.race([
+    getGoEnv(wtRoot),
+    new Promise<null>((done) => {
+      timer = setTimeout(() => done(null), timeoutMs);
+    }),
+  ]);
+  clearTimeout(timer);
+  const goroot = env?.goroot;
+  return goroot && isAbsolute(goroot) && !isInside(goroot, resolve(wtRoot)) ? goroot : undefined;
 }

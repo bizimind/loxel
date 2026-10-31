@@ -100,6 +100,7 @@ describe("getGoEnv", () => {
       gomod: null,
       gowork: null,
       goflags: "-mod=mod",
+      gopls: null,
       newerGoNeeded: null,
       newerToolchainSuggested: null,
     });
@@ -234,6 +235,19 @@ describe("goToolPath", () => {
     for (const refused of [join(wt, "bin"), link, "bin", "../sibling"]) {
       expect(dirs).not.toContain(refused);
     }
+  });
+});
+
+describe("the user's gopls", () => {
+  test("is named when found and trusted, and not when it is not", async () => {
+    const { wt, bin } = await setup();
+    expect((await getGoEnv(wt))?.gopls).toBeNull();
+    await writeExecutable(join(bin, "gopls"), "#!/bin/sh\n");
+    expect((await getGoEnv(wt))?.gopls).toBe(join(bin, "gopls"));
+    await rm(join(bin, "gopls"));
+    await writeExecutable(join(wt, "gopls"), "#!/bin/sh\n");
+    await symlink(join(wt, "gopls"), join(bin, "gopls"));
+    expect((await getGoEnv(wt))?.gopls).toBeNull();
   });
 });
 

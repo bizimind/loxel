@@ -21,6 +21,8 @@ export interface GoEnv {
   /** The workspace file `go` uses at the worktree root; null outside any workspace. */
   gowork: string | null;
   goflags: string | null;
+  /** The user's `gopls` on that PATH, which Loxel runs; null when it runs the one it bundles. */
+  gopls: string | null;
   /** The root file's `go` line, when it is newer than this Go: the project does not load. */
   newerGoNeeded: GoProjectVersion | null;
   /** The root file's `toolchain` line, when it is newer than this Go: the project still loads. */

@@ -184,19 +184,14 @@ export function goToolPath(wtPath: string): string {
     .join(path.delimiter);
 }
 
-/**
- * A version manager's shim, which chooses what to run by looking at its working directory. asdf,
- * mise and goenv all keep theirs in a directory of this name. So in a worktree it is the repository
- * that would choose, and shims only ever run from the home directory: a project's version-manager
- * pin is not followed.
- */
+/** A version manager's shim: asdf, mise and goenv all keep theirs in a directory of this name. */
 function isShim(binary: string): boolean {
   return path.basename(path.dirname(binary)) === "shims";
 }
 
 /**
- * What to set in the environment of anything that runs `go` for a worktree: no shim is left for it
- * to run, and the Go that `env`'s shim stands for comes first.
+ * What to set in the environment of anything that runs `go` for a worktree, without shim
+ * directories, and with the Go that `env`'s shim stands for first.
  */
 export function goSpawnEnv(
   wtPath: string,
@@ -265,6 +260,7 @@ async function resolveGoEnv(wtPath: string): Promise<GoEnv | null> {
       gomod: projectFile(reported.GOMOD),
       gowork: projectFile(reported.GOWORK),
       goflags: reported.GOFLAGS ?? null,
+      gopls: await trustedGoTool(wtPath, GOPLS),
       newerGoNeeded: newerThanInstalled(project.go),
       newerToolchainSuggested: newerThanInstalled(project.toolchain),
     };
@@ -290,6 +286,7 @@ async function goEnvVariables(
         stdout: "pipe",
         stderr: "ignore",
         timeout: GO_ENV_TIMEOUT_MS,
+        killSignal: "SIGKILL",
       }),
     );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);

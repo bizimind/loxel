@@ -14,7 +14,6 @@ import {
   GoLspManager,
   GOPLS_SETTINGS,
   goSetupProblem,
-  pickGopls,
   withoutHiddenActions,
 } from "./go-lsp-manager";
 
@@ -44,10 +43,6 @@ async function writeExecutable(file: string, script: string): Promise<void> {
 
 // Stands in for gopls: asks for each section, then reports the answers and its environment.
 const FAKE_GOPLS = `#!${process.execPath}
-if (process.argv[2] === "version") {
-  console.log("golang.org/x/tools/gopls v0.24.0");
-  process.exit(0);
-}
 let buffer = "";
 const send = (msg) => {
   const body = JSON.stringify(msg);
@@ -68,6 +63,7 @@ process.stdin.on("data", (chunk) => {
         id: msg.id,
         result: {
           args: process.argv.slice(2),
+          self: process.argv[1],
           path: process.env.PATH,
           goEnv: [process.env.GOPROXY, process.env.GOTOOLCHAIN, process.env.GOSUMDB, process.env.GONOPROXY],
           clientConfiguration: msg.params.capabilities.workspace.configuration,
@@ -301,12 +297,6 @@ const fakeGo = (version: string) => `#!/bin/sh
 echo '{"GOVERSION":"go${version}"}'
 `;
 
-/** Stands in for `gopls version`, noting each run in `log`. */
-const fakeGoplsVersion = (version: string, log = "/dev/null") => `#!/bin/sh
-echo run >> "${log}"
-echo "golang.org/x/tools/gopls v${version}"
-`;
-
 describe("following the toolchain", () => {
   const TIMEOUT_MS = 30_000;
 
@@ -338,13 +328,25 @@ describe("following the toolchain", () => {
   );
 
   test(
-    "restarts gopls when a gopls at or above the bundled one appears on the PATH",
+    "restarts gopls when the user's own appears on the PATH, or is reinstalled",
     async () => {
-      const { bin, client } = await startSession();
+      const { wt, bin, client } = await startSession();
+      await writeExecutable(join(bin, "gopls"), FAKE_GOPLS);
       const { code } = await repeatUntil(client.untilClosed(), () =>
-        writeExecutable(join(bin, "gopls"), fakeGoplsVersion("9.9.9")),
+        writeExecutable(join(bin, "gopls"), FAKE_GOPLS),
       );
       expect(code).toBe(LSP_RESTART_CLOSE_CODE);
+      manager?.destroySession(client.ws);
+
+      const next = fakeSocket();
+      manager?.createSession(next.ws, wt);
+      manager?.handleMessage(next.ws, INITIALIZE);
+      await next.untilFrame((frame) => frame.id === 1);
+      const { code: reinstalled } = await repeatUntil(next.untilClosed(), async () => {
+        await rm(join(bin, "gopls"));
+        await writeExecutable(join(bin, "gopls"), FAKE_GOPLS);
+      });
+      expect(reinstalled).toBe(LSP_RESTART_CLOSE_CODE);
     },
     TIMEOUT_MS,
   );
@@ -385,78 +387,56 @@ describe("following the toolchain", () => {
   );
 });
 
-describe("pickGopls", () => {
-  async function setup(bundledVersion: string) {
+describe("which gopls runs", () => {
+  async function runningGopls(prepare: (wt: string, bin: string) => Promise<void>) {
     const wt = await makeDir("go-wt-");
     const bin = await makeDir("go-bin-");
+    await writeExecutable(join(bin, "go"), fakeGo("1.27.3"));
     const bundled = join(await makeDir("bundled-"), "gopls");
-    await writeExecutable(bundled, fakeGoplsVersion(bundledVersion));
+    await writeExecutable(bundled, FAKE_GOPLS);
     await restrictPath(bin);
-    return { wt, bin, bundled };
+    await prepare(wt, bin);
+    manager = new TestGoLspManager(bundled);
+    const client = fakeSocket();
+    manager.createSession(client.ws, wt);
+    manager.handleMessage(client.ws, INITIALIZE);
+    const { result } = (await client.untilFrame((frame) => frame.id === 1)) as {
+      result: { self: string };
+    };
+    return { self: result.self, bin, bundled };
   }
 
-  test("takes the user's gopls at or above the bundled version", async () => {
-    const { wt, bin, bundled } = await setup("0.24.0");
-    const own = join(bin, "gopls");
-    await writeExecutable(own, fakeGoplsVersion("0.24.0"));
-    expect(await pickGopls(wt, bundled)).toEqual({ path: own, version: "0.24.0" });
-    await writeExecutable(own, fakeGoplsVersion("0.25.1"));
-    expect(await pickGopls(wt, bundled)).toEqual({ path: own, version: "0.25.1" });
+  test("the bundled one when the user has none", async () => {
+    const { self, bundled } = await runningGopls(async () => {});
+    expect(self).toBe(bundled);
   });
 
-  test("takes the bundled gopls over an older or silent one, or with none on the PATH", async () => {
-    const { wt, bin, bundled } = await setup("0.24.0");
-    const expected = { path: bundled, version: "0.24.0" };
-    expect(await pickGopls(wt, bundled)).toEqual(expected);
-    await writeExecutable(join(bin, "gopls"), fakeGoplsVersion("0.23.9"));
-    expect(await pickGopls(wt, bundled)).toEqual(expected);
-    await writeExecutable(join(bin, "gopls"), "#!/bin/sh\nexit 1\n");
-    expect(await pickGopls(wt, bundled)).toEqual(expected);
+  test("the user's, without asking its version", async () => {
+    const { self, bin } = await runningGopls(async (_wt, dir) => {
+      await writeExecutable(join(dir, "gopls"), FAKE_GOPLS);
+    });
+    expect(self).toBe(join(bin, "gopls"));
   });
 
-  test("does not run a version manager's shim, even for its version", async () => {
-    const { wt, bin, bundled } = await setup("0.24.0");
+  test("the bundled one over a gopls in the worktree, however it is reached", async () => {
+    const { self, bundled } = await runningGopls(async (wt, dir) => {
+      await writeExecutable(join(wt, "gopls"), FAKE_GOPLS);
+      await symlink(join(wt, "gopls"), join(dir, "gopls"));
+    });
+    expect(self).toBe(bundled);
+  });
+
+  test("the bundled one over a version manager's shim, which does not run", async () => {
     const log = join(await makeDir("gopls-log-"), "runs");
     await writeFile(log, "");
-    const shims = join(bin, "shims");
-    await mkdir(shims);
-    await writeExecutable(join(shims, "gopls"), fakeGoplsVersion("9.9.9", log));
-    await restrictPath(shims, bin);
-    expect((await pickGopls(wt, bundled))?.path).toBe(bundled);
+    const { self, bundled } = await runningGopls(async (_wt, dir) => {
+      const shims = join(dir, "shims");
+      await mkdir(shims);
+      await writeExecutable(join(shims, "gopls"), `#!/bin/sh\necho run >> "${log}"\n`);
+      await restrictPath(shims, dir);
+    });
+    expect(self).toBe(bundled);
     expect(await Bun.file(log).text()).toBe("");
-  });
-
-  test("asks again after a run that was killed", async () => {
-    const { wt, bin, bundled } = await setup("0.24.0");
-    const marker = join(await makeDir("gopls-log-"), "ran");
-    await writeExecutable(
-      join(bin, "gopls"),
-      `#!/bin/sh\nif [ ! -e "${marker}" ]; then : > "${marker}"; kill -9 $$; fi\necho "golang.org/x/tools/gopls v0.25.0"\n`,
-    );
-    expect((await pickGopls(wt, bundled))?.path).toBe(bundled);
-    expect((await pickGopls(wt, bundled))?.version).toBe("0.25.0");
-  });
-
-  test("refuses a gopls in the worktree, however it is reached", async () => {
-    const { wt, bin, bundled } = await setup("0.24.0");
-    await mkdir(join(wt, "bin"));
-    await writeExecutable(join(wt, "bin", "gopls"), fakeGoplsVersion("9.9.9"));
-    await symlink(join(wt, "bin", "gopls"), join(bin, "gopls"));
-    expect((await pickGopls(wt, bundled))?.path).toBe(bundled);
-  });
-
-  test("asks each binary its version once, and again after it is replaced", async () => {
-    const { wt, bin, bundled } = await setup("0.24.0");
-    const log = join(await makeDir("gopls-log-"), "runs");
-    await writeFile(log, "");
-    const own = join(bin, "gopls");
-    await writeExecutable(own, fakeGoplsVersion("0.25.0", log));
-    await pickGopls(wt, bundled);
-    await pickGopls(wt, bundled);
-    expect(await Bun.file(log).text()).toBe("run\n");
-    await rm(own);
-    await writeExecutable(own, fakeGoplsVersion("0.25.1 ", log));
-    expect((await pickGopls(wt, bundled))?.version).toBe("0.25.1");
   });
 });
 

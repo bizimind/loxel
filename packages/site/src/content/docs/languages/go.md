@@ -4,11 +4,11 @@ description: Go language features from gopls, with navigation, rename, quick fix
 order: 13.5
 ---
 
-The Go server starts the first time you open a `.go`, `go.mod`, `go.sum` or `go.work` file, and stops when none remain open. Loxel bundles [gopls](https://go.dev/gopls/), but Go itself must be installed and on your `PATH`, because gopls runs `go` to understand a project. If it is missing, the status bar shows gopls as stopped, and hovering it says why. Install Go, then click the Go item or the gopls item in the status bar.
+The Go server starts the first time you open a `.go`, `go.mod`, `go.sum` or `go.work` file, and stops when none remain open. Loxel uses your own [gopls](https://go.dev/gopls/) or bundles one, but Go itself must be installed and on your `PATH`, because gopls runs `go` to understand a project. If it is missing, the status bar shows gopls as stopped, and hovering it says why. Install Go, then click the Go item or the gopls item in the status bar.
 
 ## Go in the status bar
 
-While a `.go`, `go.mod`, `go.work` or `go.sum` file is active, the status bar shows the Go your project uses, such as **Go 1.27.3**. Hover it for the path of `go`, `GOROOT`, and the module or workspace file. Loxel uses the first `go` on your login shell's `PATH`, and ignores any inside the project. With a version manager such as asdf, mise or goenv, that is its global version: a pin for one project is not followed.
+While a `.go`, `go.mod`, `go.work` or `go.sum` file is active, the status bar shows the Go your project uses, such as **Go 1.27.3**. Hover it for the path of `go`, `GOROOT`, the module or workspace file, and the gopls in use. Loxel uses the first `go` on your login shell's `PATH`, and ignores any inside the project. With a version manager such as asdf, mise or goenv, that is its global version: a pin for one project is not followed.
 
 It turns to a warning in these cases:
 
@@ -37,7 +37,7 @@ Loxel does not download modules or Go toolchains. You do that from a terminal, a
 
 **Run go mod tidy** and **Create vendor directory** work once the modules they need are in the module cache. Checking for module upgrades and `go get` quick fixes are not offered, since they need the network; run those commands in a terminal.
 
-If you keep a newer `gopls` on your `PATH`, at or above the version Loxel bundles, Loxel uses that one.
+If `gopls` is on your `PATH`, Loxel uses it, at any version. Otherwise it uses the one it bundles. Hover the Go item to see which is in use.
 
 ## Format on save
 
