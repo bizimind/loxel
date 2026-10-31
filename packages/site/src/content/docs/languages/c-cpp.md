@@ -13,14 +13,17 @@ These files are served by [clangd](https://clangd.llvm.org). Besides diagnostics
 - **Quick fixes and refactorings** (`Cmd+.`): fix a typo clang recognizes, remove an unused include, replace `auto` with the deduced type, and more.
 - **Project-wide search**: references, rename and Go to Symbol cover the whole project once clangd has indexed it in the background.
 
-## Install clangd
+## What you need to install
 
-Loxel uses the `clangd` on your shell's `PATH`, version 16 or newer:
+On macOS, clangd ships with Loxel, so these features work with nothing installed. Standard headers such as `<stdio.h>` and `<vector>` come from Apple's developer tools. If you don't have them, Loxel tells you, and `#include`s of those headers show as not found until you install them in a terminal:
 
-- **macOS**: Xcode or its Command Line Tools include it (`xcode-select --install`).
-- **Linux**: install your distribution's package, for example `sudo apt install clangd`, or `clangd-16` or newer where the default package is older.
+```bash
+xcode-select --install
+```
 
-If it was missing when you opened a file, the status bar says so; install it, then click that message to restart the server.
+Then run **Restart Language Servers** from the command palette. Loxel never installs them for you.
+
+On Linux, Loxel uses the `clangd` on your shell's `PATH`, version 16 or newer. Install your distribution's package, for example `sudo apt install clangd`, or `clangd-16` or newer where the default package is older. If it was missing when you opened a file, the status bar says so; install it, then click that message to restart the server.
 
 C and C++ language features are not available on Windows yet.
 

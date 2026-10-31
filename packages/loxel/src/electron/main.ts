@@ -460,7 +460,13 @@ function parsePendingUpdate(raw: string): PendingUpdate {
  * `tsgo-lib` is the preview-era directory, included so the migration removes it on success while
  * retaining a rollback path if installation fails.
  */
-const UPDATE_RESOURCE_DIRS = ["renderer", "typescript-lib", "typeshed-fallback", "tsgo-lib"];
+const UPDATE_RESOURCE_DIRS = [
+  "renderer",
+  "typescript-lib",
+  "typeshed-fallback",
+  "clangd-resource",
+  "tsgo-lib",
+];
 
 /** Compute SHA256 hash of a file synchronously. */
 function sha256File(filePath: string): string {

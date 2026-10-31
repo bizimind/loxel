@@ -10,7 +10,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -53,6 +53,8 @@ async function makeDir(): Promise<string> {
 /** Just enough of a language client to start the server and wait for a file's diagnostics. */
 class FakeClient {
   readonly ws: ServerWebSocket<unknown>;
+  /** The `window/showMessage` texts the server has sent, for the app to show. */
+  readonly shownMessages: string[] = [];
   /** The socket's close, for a server that never starts. */
   readonly closed: Promise<{ code?: number; reason?: string }>;
   private nextId = 1;
@@ -114,9 +116,13 @@ class FakeClient {
     const message = JSON.parse(data) as {
       id?: number;
       method?: string;
-      params?: { uri?: string; diagnostics?: unknown[] };
+      params?: { uri?: string; diagnostics?: unknown[]; message?: string };
       result?: unknown;
     };
+    if (message.method === "window/showMessage" && message.params?.message) {
+      this.shownMessages.push(message.params.message);
+      return;
+    }
     if (message.method === "textDocument/publishDiagnostics" && message.params?.uri) {
       this.diagnosticsWaiters.get(message.params.uri)?.(message.params.diagnostics ?? []);
       return;
@@ -304,6 +310,82 @@ describe("ClangdLspManager", () => {
     expect(await client.closed).toEqual({
       code: LSP_START_FAILED_CLOSE_CODE,
       reason: "clangd is not available on Windows yet",
+    });
+  });
+
+  describe.skipIf(process.platform === "win32")("what clangd starts with", () => {
+    /** Run a stand-in clangd from a new directory, and return how it was started. */
+    async function launch(options: {
+      developerTools: boolean;
+      resourceDir: boolean;
+    }): Promise<{ args: string[]; path: string; client: FakeClient; bin: string }> {
+      manager?.destroy();
+      const bin = await makeDir();
+      const record = join(bin, "launch.txt");
+      await writeFile(
+        join(bin, "git"),
+        `#!/bin/sh\necho "$PATH" > "${join(bin, "git-path.txt")}"\n`,
+      );
+      await chmod(join(bin, "git"), 0o755);
+      const answer = '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}';
+      await writeFile(
+        join(bin, "clangd"),
+        `#!/bin/sh
+if [ "$1" = --version ]; then echo "clangd version 23.1.0"; exit 0; fi
+{ echo "PATH=$PATH"; printf '%s\\n' "$@"; } > "${record}"
+printf 'Content-Length: ${answer.length}\\r\\n\\r\\n%s' '${answer}'
+exec /bin/cat > /dev/null
+`,
+      );
+      await chmod(join(bin, "clangd"), 0o755);
+      if (options.resourceDir) await mkdir(join(bin, "clangd-resource"));
+      const { PATH } = process.env;
+      // `~/.local/bin` is named because the spawn environment puts it first otherwise, and it may
+      // hold a `git` of its own.
+      process.env.PATH = `${bin}:${join(homedir(), ".local", "bin")}:/usr/bin:/bin`;
+      try {
+        manager = new ClangdLspManager(
+          "darwin",
+          await makeDir(),
+          async () => options.developerTools,
+        );
+        const client = new FakeClient(manager);
+        await client.start(await makeDir());
+        const [pathLine = "", ...args] = (await readFile(record, "utf8")).trim().split("\n");
+        return { args, path: pathLine.replace("PATH=", ""), client, bin };
+      } finally {
+        process.env.PATH = PATH;
+      }
+    }
+
+    test("gives the bundled clangd its headers, and a clangd without them none", async () => {
+      const bundled = await launch({ developerTools: true, resourceDir: true });
+      expect(bundled.args).toContain(`--resource-dir=${join(bundled.bin, "clangd-resource")}`);
+
+      const fromPath = await launch({ developerTools: true, resourceDir: false });
+      expect(fromPath.args.filter((arg) => arg.startsWith("--resource-dir"))).toEqual([]);
+    });
+
+    test("leaves Apple's stubs alone with the developer tools installed", async () => {
+      const { args, path, client } = await launch({ developerTools: true, resourceDir: true });
+      expect(args.join(" ")).toContain("/usr/bin/*clang*");
+      expect(path.split(":")).toContain("/usr/bin");
+      expect(client.shownMessages).toEqual([]);
+    });
+
+    test("keeps clangd from Apple's stubs without the developer tools, and says what to run", async () => {
+      const { args, path, client, bin } = await launch({
+        developerTools: false,
+        resourceDir: true,
+      });
+      expect(args.join(" ")).not.toContain("/usr/bin/");
+      expect(path.split(":")).not.toContain("/usr/bin");
+      // The check for the index directory runs git before clangd starts.
+      expect((await readFile(join(bin, "git-path.txt"), "utf8")).trim().split(":")).not.toContain(
+        "/usr/bin",
+      );
+      expect(client.shownMessages).toHaveLength(1);
+      expect(client.shownMessages[0]).toContain("xcode-select --install");
     });
   });
 

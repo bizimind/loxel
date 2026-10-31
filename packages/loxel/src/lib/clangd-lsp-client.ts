@@ -6,4 +6,5 @@ export default createLspClient({
   route: "ws/clangd-lsp",
   name: "clangd",
   languageId: ["c", "cpp", "objective-c"],
+  showMessages: true,
 });

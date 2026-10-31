@@ -1,7 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join, normalize } from "node:path";
 
 import { isRecord } from "@/lib/is-record";
 
@@ -18,8 +18,10 @@ import {
 
 const log = logger.child("clangd-lsp");
 
+/** Holds Apple's stubs, such as `xcrun` and `clang`, that offer to install the developer tools. */
+const APPLE_STUB_DIR = "/usr/bin";
 /** System directories whose compilers `--query-driver` may run for their include paths. */
-const QUERY_DRIVER_DIRS = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"];
+const QUERY_DRIVER_DIRS = [APPLE_STUB_DIR, "/usr/local/bin", "/opt/homebrew/bin"];
 const QUERY_DRIVER_COMPILERS = ["*gcc*", "*g++*", "*clang*"];
 
 /**
@@ -152,20 +154,27 @@ function escapeDollars(snippet: string): string {
 /** The oldest clangd that takes the flags and compile flags above. */
 const MIN_CLANGD_MAJOR = 16;
 /** Apple's stub, which runs the clangd of the active developer tools or offers to install them. */
-const APPLE_CLANGD_STUB = "/usr/bin/clangd";
+const APPLE_CLANGD_STUB = `${APPLE_STUB_DIR}/clangd`;
+/** Beside the bundled binary, holding the compiler headers its release keeps in `lib/clang/<major>`. */
+const BUNDLED_RESOURCE_DIR = "clangd-resource";
+/** `window/showMessage`'s warning type. */
+const MESSAGE_TYPE_WARNING = 2;
+const NO_DEVELOPER_TOOLS_MESSAGE =
+  "Standard headers need Apple's developer tools: run xcode-select --install in a terminal, then Restart Language Servers";
 const PROBE_TIMEOUT_MS = 10_000;
 
 /** A command's exit code and output; a code of null means it could not run or timed out. */
 async function probe(
   command: string[],
   timeoutMs: number = PROBE_TIMEOUT_MS,
+  env: Record<string, string | undefined> = buildSpawnEnv(),
 ): Promise<{ code: number | null; stdout: string }> {
   try {
     const proc = Bun.spawn(command, {
       stdin: "ignore",
       stdout: "pipe",
       stderr: "ignore",
-      env: buildSpawnEnv(),
+      env,
       timeout: timeoutMs,
     });
     const stdout = await new Response(proc.stdout).text();
@@ -192,10 +201,15 @@ function installHint(platform: NodeJS.Platform): string {
 
 export type ClangdCheck = "ok" | "not-installed" | "too-old";
 
+/** Whether the developer tools are installed. Unlike Apple's stubs, this raises no dialog. */
+export async function hasDeveloperTools(run: typeof probe = probe): Promise<boolean> {
+  return (await run(["/usr/bin/xcode-select", "-p"])).code === 0;
+}
+
 /**
  * Whether a clangd found on `PATH` can serve. Running Apple's stub without the developer tools
- * would raise macOS's install dialog at every retry, and `xcode-select -p` tells without doing so.
- * A clangd too old for the flags exits at once. A version that can't be read is left to start.
+ * would raise macOS's install dialog at every retry. A clangd too old for the flags exits at once.
+ * A version that can't be read is left to start.
  */
 export async function checkClangd(
   binary: string,
@@ -203,8 +217,7 @@ export async function checkClangd(
   run: typeof probe = probe,
 ): Promise<ClangdCheck> {
   if (platform === "darwin" && binary === APPLE_CLANGD_STUB) {
-    const { code } = await run(["/usr/bin/xcode-select", "-p"]);
-    if (code !== 0) return "not-installed";
+    if (!(await hasDeveloperTools(run))) return "not-installed";
   }
   const major = clangdMajorVersion((await run([binary, "--version"])).stdout);
   return major !== null && major < MIN_CLANGD_MAJOR ? "too-old" : "ok";
@@ -219,7 +232,7 @@ const INDEX_CHECK_TIMEOUT_MS = 3000;
  * Whether clangd's index directory, `.cache/clangd/index` beside a compile database, or a parent of
  * it up to `.cache`, is a symlink: at the worktree's root or tracked by git at any depth. clangd
  * follows such a link, so the index would be written outside the project tree. A git check that
- * does not finish counts as yes: the worktree only loses the index.
+ * does not finish, or finds no git, counts as yes: the worktree only loses the index.
  */
 export async function indexDirectoryIsSymlink(
   wtPath: string,
@@ -238,15 +251,37 @@ export async function indexDirectoryIsSymlink(
     ["git", "-c", "core.fsmonitor=false", "-C", wtPath, "ls-files", "-s", "-z", "--", ...pathspecs],
     INDEX_CHECK_TIMEOUT_MS,
   );
-  // Git exits with an error outside a repository; a null code is a timeout.
+  // Git exits with an error outside a repository; a null code is a timeout or no git to run.
   if (code === null) return true;
   return code === 0 && stdout.split("\0").some((line) => line.startsWith(TRACKED_SYMLINK_MODE));
+}
+
+function withoutAppleStubs(pathVariable: string | undefined): string {
+  return (pathVariable ?? "")
+    .split(delimiter)
+    .filter((dir) => normalize(`${dir}/`) !== `${APPLE_STUB_DIR}/`)
+    .join(delimiter);
+}
+
+/** `probe`, for a Mac where a program found in Apple's stub directory would offer an install. */
+const probeWithoutAppleStubs: typeof probe = (command, timeoutMs) => {
+  const env = buildSpawnEnv();
+  return probe(command, timeoutMs, { ...env, PATH: withoutAppleStubs(env.PATH) });
+};
+
+/** What a worktree's clangd starts with, worked out when its binary resolves. */
+interface ClangdLaunch {
+  withoutIndex: boolean;
+  /** The bundled binary's headers. A clangd from `PATH` has its own, which must match it. */
+  resourceDir: string | null;
+  /** False on a Mac where running Apple's stubs would offer to install the developer tools. */
+  developerTools: boolean;
 }
 
 /**
  * Manages clangd child processes, one per worktree, for C, C++ and Objective-C. clangd finds each
  * file's compile command itself, per file, so monorepos with several compile databases work without
- * `--compile-commands-dir`. The binary comes from the login-shell PATH.
+ * `--compile-commands-dir`. The binary is the bundled one, else the login-shell PATH's.
  */
 export class ClangdLspManager extends WorktreeLspManager {
   // Format on save owns formatting.
@@ -257,12 +292,12 @@ export class ClangdLspManager extends WorktreeLspManager {
 
   /** Why clangd won't start for a worktree, per worktree since each starts on its own. */
   private readonly failureReasons = new Map<string, string>();
-  /** Worktrees clangd runs in without its background index. */
-  private readonly withoutIndex = new Set<string>();
+  private readonly launches = new Map<string, ClangdLaunch>();
 
   constructor(
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly stateDir: string = config.stateDir,
+    private readonly findDeveloperTools: () => Promise<boolean> = hasDeveloperTools,
   ) {
     super("clangd-lsp");
   }
@@ -280,14 +315,22 @@ export class ClangdLspManager extends WorktreeLspManager {
     }
     const check = await checkClangd(binary, this.platform);
     if (check === "ok") {
-      if (await indexDirectoryIsSymlink(context.wtPath)) {
-        this.log.info("Background index off: its directory is a symlink", {
+      const developerTools = this.platform !== "darwin" || (await this.findDeveloperTools());
+      const withoutIndex = await indexDirectoryIsSymlink(
+        context.wtPath,
+        developerTools ? probe : probeWithoutAppleStubs,
+      );
+      if (withoutIndex) {
+        this.log.info("Background index off: its directory is or may be a symlink", {
           wtPath: context.wtPath,
         });
-        this.withoutIndex.add(context.wtPath);
-      } else {
-        this.withoutIndex.delete(context.wtPath);
       }
+      const resourceDir = join(dirname(binary), BUNDLED_RESOURCE_DIR);
+      this.launches.set(context.wtPath, {
+        withoutIndex,
+        resourceDir: existsSync(resourceDir) ? resourceDir : null,
+        developerTools,
+      });
       return binary;
     }
     this.log.warn(`Not starting ${binary}`, { check });
@@ -305,14 +348,20 @@ export class ClangdLspManager extends WorktreeLspManager {
   }
 
   protected override spawnArgs(context: WtLspContext): readonly string[] {
+    const launch = this.launches.get(context.wtPath);
     return [
       // Otherwise on by default. Skipped so index files aren't written outside the project tree.
-      ...(this.withoutIndex.has(context.wtPath) ? ["--background-index=false"] : []),
+      ...(launch?.withoutIndex ? ["--background-index=false"] : []),
+      ...(launch?.resourceDir ? [`--resource-dir=${launch.resourceDir}`] : []),
       // The defaults cap results: references at 1000 and renames at 50 files.
       "--limit-references=0",
       "--rename-file-limit=0",
       "--header-insertion-decorators=0",
-      `--query-driver=${queryDriverGlobs()}`,
+      `--query-driver=${queryDriverGlobs(
+        launch?.developerTools === false
+          ? QUERY_DRIVER_DIRS.filter((dir) => dir !== APPLE_STUB_DIR)
+          : QUERY_DRIVER_DIRS,
+      )}`,
     ];
   }
 
@@ -320,10 +369,28 @@ export class ClangdLspManager extends WorktreeLspManager {
     super.handleServerFrame(session, escapeSnippetDollars(body));
   }
 
+  protected override onClientInitialized(session: WtLspSession): void {
+    if (this.launches.get(session.wtPath)?.developerTools !== false) return;
+    session.ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "window/showMessage",
+        params: { type: MESSAGE_TYPE_WARNING, message: NO_DEVELOPER_TOOLS_MESSAGE },
+      }),
+    );
+  }
+
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
+    const env = buildSpawnEnv();
     return {
       ...super.spawnOptions(context),
-      env: prepareClangdUserConfig(this.stateDir, this.platform, buildSpawnEnv()),
+      env: {
+        ...prepareClangdUserConfig(this.stateDir, this.platform, env),
+        // clangd runs `xcrun` at startup to find the SDK, and carries on without it if not on PATH.
+        ...(this.launches.get(context.wtPath)?.developerTools === false
+          ? { PATH: withoutAppleStubs(env.PATH) }
+          : {}),
+      },
     };
   }
 }
