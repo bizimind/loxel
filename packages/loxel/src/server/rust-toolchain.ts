@@ -587,8 +587,7 @@ const versions = new Map<string, Promise<string | null>>();
 /**
  * The version of a `rustc` (`1.99.1`), or null when it cannot be read. Cached until the file
  * changes; failures are not cached. Only pass one that passed {@link isRepoLocal}: this executes
- * the file. Runs from the filesystem root, so a version-manager shim on `PATH` reads nothing of the
- * worktree's; such a shim reports its global version.
+ * the file. Runs from the filesystem root, so no file in the worktree selects anything for it.
  */
 async function rustVersion(rustcPath: string, env: SpawnEnv): Promise<string | null> {
   const key = await fileKey(rustcPath);

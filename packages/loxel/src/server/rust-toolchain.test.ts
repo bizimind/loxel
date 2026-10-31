@@ -819,7 +819,7 @@ describe("the toolchain rule", () => {
     expect(await Bun.file(canary).exists()).toBe(false);
   });
 
-  test("a rustc is asked outside the worktree, where a version manager's shim reads nothing of it", async () => {
+  test("a rustc is asked from outside the worktree", async () => {
     const fixture = await makeFixture();
     await writeExecutable(
       join(fixture.bin, "rustc"),
