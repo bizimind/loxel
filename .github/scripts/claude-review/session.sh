@@ -99,9 +99,9 @@ save() {
     # A cancelled run can leave a truncated last line; keep whatever parses.
     stats="$(jq -cR 'fromjson?' "$output" | jq -sc '[.[] | select(.type == "result")] as $r
       | [.[] | select(.type == "rate_limit_event") | .rate_limit_info.unifiedWindows] as $w
-      # Window usage in percent at the first and last snapshot; null if it reset mid-run.
+      # Window usage in percent (0.1 resolution) at the first and last snapshot; null if it reset mid-run.
       | def snap(k): try (if ($w | length) > 1 and $w[0][k].resetsAt == $w[-1][k].resetsAt
-          then {start: ($w[0][k].utilization * 100 | round), end: ($w[-1][k].utilization * 100 | round),
+          then {start: ($w[0][k].utilization * 1000 | round / 10), end: ($w[-1][k].utilization * 1000 | round / 10),
                 reset: $w[-1][k].resetsAt} else null end) catch null;
       if ($r | length) == 0 then null else {
           costUsd: ($r | map(.total_cost_usd // 0) | max), turns: ($r | map(.num_turns // 0) | add),

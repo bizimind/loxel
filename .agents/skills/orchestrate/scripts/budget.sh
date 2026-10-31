@@ -50,7 +50,8 @@ snapshot() {
     def window: {pct: (.utilization // 0), resetsAt: .resets_at,
       minutesToReset: ((.resets_at | epoch) as $e | if $e then (($e - now) / 60 | floor | [., 0] | max) else null end)};
     # Measured per-review cost when the cache has enough runs, else the Oct 2026 measurements.
-    (if $r.runs >= 5 and $r.sevenDay.median != null
+    # A zero median (sub-1% reviews recorded at whole-percent resolution) is not a real measurement.
+    (if $r.runs >= 5 and ($r.sevenDay.median // 0) > 0
      then {d7: $r.sevenDay.median, d7p95: $r.sevenDay.p95, source: "measured"}
      else {d7: 1, d7p95: 2, source: "defaults"} end) as $cost
     | (($u.seven_day // {}) | window) as $d7
