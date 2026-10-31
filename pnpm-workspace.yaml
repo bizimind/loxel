@@ -18,7 +18,6 @@ minimumReleaseAgeExclude:
 overrides:
   # sass is a build-time tool mislisted as a runtime dep; drops chokidar@3 -> braces (CVE-2026-93687)
   "@excalidraw/excalidraw>sass": "-"
-  "@ai-sdk/provider-utils@>=4.0.0 <4.0.33": "4.0.33"
   "brace-expansion@<1.1.21": "1.1.21"
   "brace-expansion@>=2.0.0 <2.1.7": "2.1.7"
   "brace-expansion@>=4.0.0 <5.0.12": "5.0.12"

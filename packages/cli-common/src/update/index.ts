@@ -36,13 +36,13 @@ export {
  * Configuration for a CLI's update system.
  */
 export interface UpdateConfig {
-  /** The package name (e.g., "ccm", "wt", "remote-claude") */
+  /** The package name (e.g., "wt", "code-analysis") */
   packageName: string;
   /** Full manifest URL or auto-derived from packageName if not specified */
   manifestUrl?: string;
   /** Function to get the current version */
   getCurrentVersion: () => string;
-  /** Enable caching (like wt) or always fetch fresh (like ccm) */
+  /** Enable caching (like wt) or always fetch fresh */
   cacheEnabled?: boolean;
   /** Cache directory (defaults to ~/.local/state/loxel/<packageName>) */
   cacheDir?: string;
