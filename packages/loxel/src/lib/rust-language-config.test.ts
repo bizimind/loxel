@@ -182,6 +182,21 @@ describe("Rust editing in Monaco", () => {
       expect(typeShowingCursor("/** a| */", "/")).toBe("/** a/| */");
     });
 
+    test.each([
+      ["let x = 1; ", "/** n */", "let x = 1; /** n */|"],
+      ["fn f(| x: i32)", "/** doc */", "fn f(/** doc */| x: i32)"],
+      ["impl T { |}", "/** doc */", "impl T { /** doc */|}"],
+    ])("replaces the auto-closed end of a mid-line comment: %p", (before, typed, after) => {
+      expect(typeShowingCursor(before, typed)).toBe(after);
+    });
+
+    test.each([
+      ['let s = "/** x *| */";', 'let s = "/** x */| */";'],
+      ['let a = "/*! y *| */";', 'let a = "/*! y */| */";'],
+    ])("keeps what the user typed in a string: %p", (before, after) => {
+      expect(typeShowingCursor(before, "/")).toBe(after);
+    });
+
     test("leaves a plain block comment alone", () => {
       expect(typeShowingCursor("/* a *| */", "/")).toBe("/* a */| */");
     });

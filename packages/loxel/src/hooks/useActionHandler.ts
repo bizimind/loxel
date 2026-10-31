@@ -6,6 +6,7 @@ import type { IDockviewPanel } from "dockview-react";
 import { useCallback } from "react";
 
 import type { PanelPlacement, SplitDirection } from "@/api/panel-placement-model";
+import { isToolchainSelectAction } from "@/api/toolchain-status-model";
 import { runEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import {
@@ -18,9 +19,9 @@ import { changeIndentation } from "@/lib/indentation-status";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { restartLanguageServers } from "@/lib/lsp-client";
 import { navigateToNotification } from "@/lib/notification-navigation";
-import { selectPythonInterpreter } from "@/lib/python-interpreter";
 import { getActiveEditorFile, getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { renameActiveTab } from "@/lib/tab-rename";
+import { toolchainStatusItems } from "@/lib/toolchain-status-items";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
 import type { ActionId, SplitPanelType } from "@/store/keybindings/action-registry";
@@ -129,6 +130,15 @@ export function useActionHandler(): (actionId: ActionId) => void {
     if (isSplitAction(actionId)) {
       const { direction, type } = parseSplitAction(actionId);
       splitActivePanel(direction, type);
+      return;
+    }
+
+    if (isToolchainSelectAction(actionId)) {
+      // The worktree of the file being edited, which the status bar item shows.
+      const wtPath =
+        getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
+      const item = toolchainStatusItems.find((i) => i.toolchain.selectAction.id === actionId);
+      if (wtPath && item) void item.select(wtPath);
       return;
     }
 
@@ -390,15 +400,6 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "editor.changeIndentation":
         void changeIndentation();
         break;
-
-      // -- Languages --
-      case "python.selectInterpreter": {
-        // The worktree of the file being edited, which the status bar item shows.
-        const wtPath =
-          getActiveEditorFile()?.worktreePath ?? useWorktreeStore.getState().activeWorktreePath;
-        if (wtPath) void selectPythonInterpreter(wtPath);
-        break;
-      }
 
       case "codeAction.quickFix":
       case "codeAction.fixAll":

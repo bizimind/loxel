@@ -75,6 +75,20 @@ export function extendRustConfiguration(
   };
 }
 
+/** Monaco's `StandardTokenType.String`, which monaco.d.ts does not expose. */
+const STRING_TOKEN = 2;
+
+/** Internal model surface (not in monaco.d.ts) that tells whether a position is in a string. */
+interface InternalTextModel {
+  tokenization: {
+    forceTokenization(lineNumber: number): void;
+    getLineTokens(lineNumber: number): {
+      findTokenIndexAtOffset(offset: number): number;
+      getStandardTokenType(tokenIndex: number): number;
+    };
+  };
+}
+
 /** An open block doc comment whose text ends in the `*` of a closing `*\/` being typed. */
 const BLOCK_DOC_BEFORE_CLOSE = /\/\*(?:\*|[*!].*\*)$/;
 
@@ -98,6 +112,12 @@ function overtypeBlockCommentClose(editor: monaco.editor.ICodeEditor): void {
     const before = line.slice(0, column - 1);
     if (!BLOCK_DOC_BEFORE_CLOSE.test(before)) return;
     if (!line.slice(column - 1).startsWith(BLOCK_COMMENT_CLOSE)) return;
+    // A comment's text in a string: nothing auto-closed there, so this ` */` is the user's own.
+    const { tokenization } = model as unknown as InternalTextModel;
+    tokenization.forceTokenization(lineNumber);
+    const tokens = tokenization.getLineTokens(lineNumber);
+    const tokenIndex = tokens.findTokenIndexAtOffset(column - 1);
+    if (tokens.getStandardTokenType(tokenIndex) === STRING_TOKEN) return;
     e.preventDefault();
     e.stopPropagation();
     const end = column + 1;

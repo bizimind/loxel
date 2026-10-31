@@ -2,14 +2,13 @@ import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 
-import { $ } from "bun";
-
 import type { StatusInfo, WorktreeEntry, WorktreeStatusInfo } from "@/api/git-models";
 
 import { logger } from "../logger";
 import { INTERNAL_WORKTREE_PREFIX } from "../worktree-utils";
 import { mapWithConcurrency } from "./concurrency";
 import { readOnlyGitEnv } from "./git-env";
+import { gitText } from "./run-git";
 import { getStatus } from "./status";
 
 const log = logger.child("git");
@@ -70,7 +69,7 @@ export function parseWorktreeListOutput(output: string): WorktreeEntry[] {
 
 /** `git worktree list`, parsed. Unlike {@link getWorktrees} it does not stat each directory. */
 export async function listWorktrees(cwd: string): Promise<WorktreeEntry[]> {
-  const result = await $`git -C ${cwd} worktree list --porcelain`.env(readOnlyGitEnv()).text();
+  const result = await gitText(["worktree", "list", "--porcelain"], { cwd, env: readOnlyGitEnv() });
   return parseWorktreeListOutput(result);
 }
 
