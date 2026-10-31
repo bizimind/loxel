@@ -27,6 +27,8 @@ Loxel pre-fills both lists from what the repository contains: `.env` files, dire
 
 Every worktree gets its own Python environment, since a virtual environment can't be shared between checkouts. Once it exists, the [Python language servers](/docs/languages/python#python-environment), new terminals and the [coding agent's commands](/docs/coding-agent#commands-the-agent-runs) in that worktree use it.
 
+A .NET repository also gets `dotnet restore` when a solution or project sits at its root, and `dotnet tool restore` when it has a local tool manifest, since each worktree restores its own dependencies.
+
 ### Detect
 
 Enter a path or browse to a folder on disk and Loxel will inspect it. The result is one of three classifications: bare repo, regular repo, or a non-repo folder. No changes are made at this step — it's read-only.

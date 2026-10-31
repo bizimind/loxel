@@ -75,4 +75,53 @@ describe("scanSetupSuggestions", () => {
       commands: ["pnpm i --frozen-lockfile", "direnv allow", "uv sync"],
     });
   });
+
+  test("suggests dotnet restore for a root solution or project, with dotnet not on PATH", async () => {
+    for (const file of ["App.sln", "App.slnx", "App.csproj"]) {
+      await rm(join(root, "project"), { recursive: true, force: true });
+      const dir = await project({ [file]: "" });
+      expect((await scanSetupSuggestions(dir, "")).commands).toEqual(["dotnet restore"]);
+    }
+  });
+
+  test("does not suggest dotnet restore for files in subfolders or other extensions", async () => {
+    const dir = await project({ "App.slnf": "", "App.csproj.bak": "" });
+    await mkdir(join(dir, "src"));
+    await writeFile(join(dir, "src", "App.csproj"), "");
+    expect((await scanSetupSuggestions(dir, "")).commands).toEqual([]);
+  });
+
+  test("names the only solution when the root holds several candidates", async () => {
+    const dir = await project({ "App.sln": "", "App.csproj": "" });
+    expect((await scanSetupSuggestions(dir, "")).commands).toEqual(["dotnet restore App.sln"]);
+
+    const quoted = await project({ "My App.sln": "" });
+    await rm(join(quoted, "App.sln"));
+    expect((await scanSetupSuggestions(quoted, "")).commands).toEqual([]);
+  });
+
+  test("suggests no restore when plain dotnet restore could not choose", async () => {
+    const solutions = await project({ "App.sln": "", "App.slnx": "" });
+    expect((await scanSetupSuggestions(solutions, "")).commands).toEqual([]);
+
+    await rm(solutions, { recursive: true });
+    const projects = await project({ "A.csproj": "", "B.csproj": "" });
+    expect((await scanSetupSuggestions(projects, "")).commands).toEqual([]);
+  });
+
+  test("suggests dotnet tool restore for a tool manifest, first", async () => {
+    const rootManifest = await project({ "dotnet-tools.json": "{}" });
+    expect((await scanSetupSuggestions(rootManifest, "")).commands).toEqual([
+      "dotnet tool restore",
+    ]);
+
+    await rm(rootManifest, { recursive: true });
+    const dir = await project({ "App.sln": "" });
+    await mkdir(join(dir, ".config"));
+    await writeFile(join(dir, ".config", "dotnet-tools.json"), "{}");
+    expect((await scanSetupSuggestions(dir, "")).commands).toEqual([
+      "dotnet tool restore",
+      "dotnet restore",
+    ]);
+  });
 });
