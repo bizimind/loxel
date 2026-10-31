@@ -109,6 +109,9 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   "go.work.sum": "go.sum",
   procfile: "yaml",
   caddyfile: "ini",
+  ".classpath": "xml",
+  ".project": "xml",
+  ".factorypath": "xml",
 
   // .NET XML configuration (the `config` extension alone is not always XML)
   "app.config": "xml",
@@ -236,6 +239,9 @@ export const EXT_TO_LANG: Record<string, string> = {
   xaml: "xml",
   axaml: "xml",
   axml: "xml",
+  pom: "xml",
+  fxml: "xml",
+  tld: "xml",
   env: "dotenv",
 
   // Docs
