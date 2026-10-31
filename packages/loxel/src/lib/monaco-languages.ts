@@ -1,6 +1,8 @@
 import * as monaco from "monaco-editor";
 import { conf as cppConf } from "monaco-editor/languages/definitions/cpp/cpp.js";
 import { conf as hclConf } from "monaco-editor/languages/definitions/hcl/hcl.js";
+import { conf as iniConf } from "monaco-editor/languages/definitions/ini/ini.js";
+import { conf as javaConf } from "monaco-editor/languages/definitions/java/java.js";
 import { conf as javascriptConf } from "monaco-editor/languages/definitions/javascript/javascript.js";
 import { conf as typescriptConf } from "monaco-editor/languages/definitions/typescript/typescript.js";
 
@@ -8,6 +10,7 @@ import { extendCFamilyConfiguration } from "./c-language-config";
 import { registerGoProjectFileLanguages } from "./go-monarch";
 import { registerDockerBakeMonarch } from "./hcl-monarch";
 import { registerPipRequirementsLanguage } from "./pip-requirements-monarch";
+import { stepOverTripleQuotesIn } from "./python-language-config";
 
 const TOML_CONFIGURATION: monaco.languages.LanguageConfiguration = {
   comments: { lineComment: "#" },
@@ -85,6 +88,15 @@ const HASH_COMMENT_SCRIPT_CONFIGURATION: monaco.languages.LanguageConfiguration 
   ],
 };
 
+const GROOVY_CONFIGURATION: monaco.languages.LanguageConfiguration = {
+  ...javaConf,
+  autoClosingPairs: [
+    { open: '"""', close: '"""', notIn: ["comment"] },
+    { open: "'''", close: "'''", notIn: ["comment"] },
+    ...(javaConf.autoClosingPairs ?? []),
+  ],
+};
+
 const CMAKE_CONFIGURATION: monaco.languages.LanguageConfiguration = {
   ...HASH_COMMENT_SCRIPT_CONFIGURATION,
   comments: { lineComment: "#", blockComment: ["#[[", "]]"] },
@@ -147,6 +159,19 @@ const LOXEL_LANGUAGES: {
     configuration: HASH_COMMENT_SCRIPT_CONFIGURATION,
   },
   {
+    language: { id: "groovy", extensions: [".groovy", ".gradle"], aliases: ["Groovy", "groovy"] },
+    configuration: GROOVY_CONFIGURATION,
+  },
+  // Its own ID rather than Monaco's `ini`, so it gets the grammar in java-properties-grammar.ts.
+  {
+    language: {
+      id: "java-properties",
+      extensions: [".properties"],
+      aliases: ["Java Properties", "properties"],
+    },
+    configuration: iniConf,
+  },
+  {
     language: {
       id: "cmake",
       extensions: [".cmake"],
@@ -167,6 +192,7 @@ export function registerLoxelLanguages(): void {
     monaco.languages.register(language);
     monaco.languages.setLanguageConfiguration(language.id, configuration);
   }
+  stepOverTripleQuotesIn("groovy");
   // Shiki has no grammar for docker-bake, Go's project files or pip requirements, so they get
   // Monarch tokenizers.
   registerDockerBakeMonarch();

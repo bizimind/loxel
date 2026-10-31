@@ -68,6 +68,7 @@ import type {
 } from "./server-state";
 import { LOGIN_SHELL_ENV_WAIT_MS, onLoginShellEnvChange, resolveLoginShellEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
+import { SERVER_STOP_GRACE_MS } from "./stdio-lsp-manager";
 import { recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
 import type { TerminalSpawnOptions } from "./terminal-manager";
@@ -1334,6 +1335,8 @@ const server = Bun.serve<WsData>({
     },
 
     message(ws, message) {
+      // Shutdown waits for language servers to exit: nothing may start again behind its teardown.
+      if (shuttingDown) return;
       if (ws.data?.type === "yaml-lsp") {
         if (typeof message === "string") yamlLspManager.handleMessage(ws, message);
         return;
@@ -1381,6 +1384,8 @@ if (projects.size === 0) log.info("No projects registered, waiting for project s
 
 const perfMonitor = createServerPerfMonitor();
 
+const SHUTDOWN_LSP_WAIT_MS = SERVER_STOP_GRACE_MS + 1000;
+
 function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -1403,14 +1408,19 @@ function shutdown(exitCode = 0) {
   terminalManager.destroyAll();
   agentManager.destroyAll().catch(() => {});
   formatService.destroy();
-  yamlLspManager.destroy();
-  for (const manager of worktreeLspManagers) manager.destroy();
+  const lspServersStopped = Promise.all(
+    [yamlLspManager, ...worktreeLspManagers].map((manager) => manager.destroy()),
+  );
   gitExecClient.stop();
   perfMonitor.dispose();
   stress.dispose();
-  logger.shutdown();
   server.stop();
-  process.exit(exitCode);
+  // Exiting would cancel the SIGKILL of a server that ignores SIGTERM. Bounded, for a process that
+  // not even SIGKILL ends right away (stuck in the kernel).
+  void Promise.race([lspServersStopped, Bun.sleep(SHUTDOWN_LSP_WAIT_MS)]).finally(() => {
+    logger.shutdown();
+    process.exit(exitCode);
+  });
 }
 
 process.on("SIGINT", () => shutdown());

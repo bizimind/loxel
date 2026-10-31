@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
+import { classifySchemaGlob } from "@/lib/schema-glob";
+
 import {
+  BUILTIN_SCHEMA_DEFAULTS,
   DEFAULT_EDITOR_SETTINGS,
   type EditorSettings,
   type IndentationInputs,
@@ -227,6 +230,29 @@ describe("resolveIndentation", () => {
 
   test("reports no override when none matches", () => {
     expect(resolveIndentation(settings(), "/repo/app.ts", { language: null }).override).toBeNull();
+  });
+});
+
+describe("BUILTIN_SCHEMA_DEFAULTS", () => {
+  test("only uses the schema host the privacy policy names", () => {
+    for (const { url } of BUILTIN_SCHEMA_DEFAULTS) {
+      expect(new URL(url).host).toBe("json.schemastore.org");
+    }
+  });
+
+  test.each([
+    ["**/jsconfig.json", { json: true, yaml: false, toml: false }],
+    ["**/lerna.json", { json: true, yaml: false, toml: false }],
+    ["**/pnpm-workspace.yaml", { json: false, yaml: true, toml: false }],
+    // Monaco's JSON worker cannot load the sibling file this schema refers to.
+    ["**/.eslintrc.{yml,yaml}", { json: false, yaml: true, toml: false }],
+    // Without a final extension a glob reaches every language, covering the YAML form.
+    ["**/.prettierrc{,.json,.yml,.yaml}", { json: true, yaml: true, toml: true }],
+    ["**/.lintstagedrc{,.json,.yml,.yaml}", { json: true, yaml: true, toml: true }],
+    ["**/{.babelrc,.babelrc.json,babel.config.json}", { json: true, yaml: true, toml: true }],
+  ])("%s is built in and routes to its languages", (glob, languages) => {
+    expect(BUILTIN_SCHEMA_DEFAULTS.some((schema) => schema.glob === glob)).toBe(true);
+    expect(classifySchemaGlob(glob)).toEqual(languages);
   });
 });
 

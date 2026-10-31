@@ -203,6 +203,22 @@ describe("TerminalManager toolchain environments", () => {
     expect(asked).toEqual([]);
   });
 
+  test("starts without a toolchain whose PATH entry the shell would interpret", async () => {
+    process.env.SHELL = "/bin/sh";
+    const manager = createManager([
+      contributor(async () => (env) => {
+        env.PATH = `/wt-$name/bin:${env.PATH}`;
+        env.LOXEL_TEST_TOOLCHAIN = "applied";
+      }),
+    ]);
+    const { sink, outputText } = createRecordingSink();
+    await manager.attach(crypto.randomUUID(), sink, {
+      ...attachOptions,
+      command: 'echo "toolchain-[$LOXEL_TEST_TOOLCHAIN]"',
+    });
+    await until(() => outputText().includes("toolchain-[]"));
+  });
+
   test("concurrent starts share one shell, and one closed while starting never runs", async () => {
     process.env.SHELL = "/bin/sh";
     let release = () => {};

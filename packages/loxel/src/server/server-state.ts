@@ -149,7 +149,8 @@ export interface WorktreeLspServer {
   handleMessage(ws: ServerWebSocket<unknown>, data: string): void;
   notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void;
   notifyIgnoredPathChanged?(wtPath: string, relPath: string): void;
-  destroy(): void;
+  /** May settle once its processes have exited; server shutdown waits for that. */
+  destroy(): void | Promise<void>;
 }
 
 export interface WorktreeLspData {

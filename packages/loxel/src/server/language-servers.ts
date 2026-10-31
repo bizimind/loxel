@@ -6,6 +6,7 @@
  * conflict when two branches insert at the same spot; merging main locally then needs no edits.
  */
 import { AstroLspManager } from "./astro-lsp-manager";
+import { ClangdLspManager } from "./clangd-lsp-manager";
 import { DockerLspManager } from "./docker-lsp-manager";
 import { GoLspManager } from "./go-lsp-manager";
 import { JavaLspManager } from "./java-lsp-manager";
@@ -25,6 +26,7 @@ export const tomlLspManager = new TomlLspManager({});
 
 export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   new AstroLspManager(),
+  new ClangdLspManager(),
   new DockerLspManager(),
   new JavaLspManager(),
   new GoLspManager(),
