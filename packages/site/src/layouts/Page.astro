@@ -1,0 +1,17 @@
+---
+import type { MarkdownLayoutProps } from "astro";
+import Base from "./Base.astro";
+
+type Props = MarkdownLayoutProps<{ title: string; description?: string }>;
+
+const { frontmatter } = Astro.props;
+---
+
+<Base title={frontmatter.title} description={frontmatter.description}>
+  <div class="max-w-3xl mx-auto px-4 sm:px-6 py-12">
+    <article class="prose max-w-none [&_table]:block [&_table]:overflow-x-auto">
+      <h1>{frontmatter.title}</h1>
+      <slot />
+    </article>
+  </div>
+</Base>
