@@ -22,7 +22,7 @@ Loxel looks in the file's folder and up to the root of the worktree, so each pro
 - **ktfmt:** the `com.ncorti.ktfmt.gradle` plugin in `build.gradle.kts`, `build.gradle` or `gradle/libs.versions.toml`.
 - **ktlint:** a `ktlint_*` property in `.editorconfig`, or the `org.jlleitschuh.gradle.ktlint` or `org.jmailen.kotlinter` plugin in those Gradle files.
 
-The folder closest to the file decides, and ktfmt wins when one folder has both. A project with neither isn't formatted, not even one with a `[*.{kt,kts}]` section in `.editorconfig`; add a manual override in **Settings > Editor** if you want it formatted anyway. Spotless isn't detected.
+The folder closest to the file decides, and ktfmt wins when one folder has both. A project with neither isn't formatted, not even one with a `[*.{kt,kts}]` section in `.editorconfig`; add a manual override in **Settings > Editor** if you want it formatted anyway. Spotless isn't detected, and neither are settings or plugins applied only from a convention plugin in `buildSrc` or `build-logic`: a ktfmt plugin found elsewhere then uses the default style.
 
 Install the formatter yourself: Loxel runs it from your `PATH`, never from inside the worktree, and doesn't download anything. If it's missing, the save goes through unformatted and Loxel tells you what to run.
 
