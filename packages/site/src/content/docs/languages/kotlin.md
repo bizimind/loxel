@@ -48,3 +48,5 @@ Install the tools yourself: Loxel runs them from your `PATH`, never from inside 
 Findings reflect saved files. A tool checks a file when you open it, and an open file again when it changes on disk or a config changes. Files you don't have open aren't checked, so a project-wide run in your terminal or CI can find more.
 
 Detekt rule sets from plugins don't run here, and baselines aren't applied, so a finding your build has baselined still shows in the editor.
+
+See [Repository Trust](/docs/repository-trust) for how a language feature asks before running a repository's code.

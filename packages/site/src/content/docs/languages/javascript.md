@@ -103,3 +103,4 @@ Turn one off in **Settings > Schemas** to stop checking files against it. Other 
 
 - [TypeScript](/docs/languages/typescript) — the shared language server and how outside changes reach it
 - [Language Intelligence](/docs/language-intelligence) — the features every language server provides, and how servers start and stop per worktree
+- [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code

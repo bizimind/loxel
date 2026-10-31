@@ -114,7 +114,9 @@ export type WsMessage =
   | { type: "notification_panel_dismissed"; panelId: string }
   | { type: "notifications_cleared" }
   | { type: "notifications_sync"; data: readonly ServerNotification[] }
-  | { type: "store_updated"; key: string; state: Record<string, unknown>; nonce?: string };
+  | { type: "store_updated"; key: string; state: Record<string, unknown>; nonce?: string }
+  // Some repository's trust or restrictions changed (global, like the worktrees sharing it)
+  | { type: "repo_trust_changed" };
 
 /** Terminal notification sequences Loxel understands; see docs/TERMINALS.md#notifications. */
 export const NOTIFICATION_SEQUENCES = ["osc9", "osc777", "osc99"] as const;

@@ -60,7 +60,7 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
   }
 
   start(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
+    this.startSession(ws, { wtPath, repoTrusted: false });
   }
 
   protected resolveBinary(): string | null | Promise<string | null> {
@@ -80,6 +80,7 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
       ws,
       proc,
       wtPath: context.wtPath,
+      repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
     };

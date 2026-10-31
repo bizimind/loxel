@@ -32,6 +32,8 @@ export function useWsSubscription(activeWorktreePath: string | null): void {
 
   useEffect(() => {
     return wsClient.onReconnect(() => {
+      // A restarted server has forgotten what ran restricted, and trust may have changed meanwhile.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
       const wt = useWorktreeStore.getState().activeWorktreePath;
       if (wt) {
         wsClient.subscribeWorktree(wt);

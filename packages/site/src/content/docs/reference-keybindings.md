@@ -116,6 +116,7 @@ Back/forward work like a browser's history, across all projects. Worktree number
 | Java: Select JDK           | unbound — command palette or status bar |
 | Rust: Select Toolchain     | unbound — command palette or status bar |
 | Restart Language Servers   | unbound — command palette               |
+| Manage Repository Trust    | unbound — command palette or status bar |
 
 The code action shortcuts work in a code editor whose language server offers that kind of action, and the command palette lists them only then. When several servers offer one (Ruff and the type checker for Python), Fix All and Organize Imports apply the only fix offered or let you pick, and the others list every server's actions.
 

@@ -7,6 +7,7 @@ import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
 import { logger } from "./logger";
 import { getPythonEnv, getPythonEnvNow, isSamePythonEnv, subscribePythonEnv } from "./python-env";
+import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 import { isEnvShippedByRepo, isShippedByRepo } from "./shipped-by-repo";
 import { measureSpawn } from "./spawn-metrics";
@@ -55,7 +56,7 @@ export class RuffLspManager extends StdioLspManager<RuffLspSession, WtLspContext
   }
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
+    this.startSession(ws, { wtPath, repoTrusted: isRepoTrusted(wtPath) });
   }
 
   destroySession(ws: ServerWebSocket<unknown>): void {
@@ -99,6 +100,7 @@ export class RuffLspManager extends StdioLspManager<RuffLspSession, WtLspContext
       ws,
       proc,
       wtPath: context.wtPath,
+      repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
       ruff: spawned?.pick ?? null,

@@ -722,7 +722,9 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
 
         protected override spawnArgs(): readonly string[] {
           return [
-            ...super.spawnArgs({ wtPath: "" }).filter((arg) => !arg.startsWith("--query-driver")),
+            ...super
+              .spawnArgs({ wtPath: "", repoTrusted: false })
+              .filter((arg) => !arg.startsWith("--query-driver")),
             `--query-driver=${queryDriverGlobs([this.compilers])}`,
           ];
         }

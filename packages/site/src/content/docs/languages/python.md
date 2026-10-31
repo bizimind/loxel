@@ -99,3 +99,4 @@ If mypy is configured but not installed in the project's environment, Loxel says
 - [Editor](/docs/editor) — format on save
 - [Terminals](/docs/terminals) — new terminals start with the worktree's Python environment active
 - [Coding Agent](/docs/coding-agent#commands-the-agent-runs) — the built-in agent's commands run with the worktree's Python environment active
+- [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code

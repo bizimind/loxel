@@ -13,3 +13,4 @@ Changes made outside the editor reach it without a restart: a `git checkout`, an
 ## See also
 
 - [Language Intelligence](/docs/language-intelligence) — the features every language server provides, and how servers start and stop per worktree
+- [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code

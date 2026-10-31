@@ -81,3 +81,4 @@ Formatting stays with [format on save](/docs/editor#formatter-auto-detection), w
 ## See also
 
 - [Language Intelligence](/docs/language-intelligence) — the features every language server provides, and how servers start and stop per worktree
+- [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code

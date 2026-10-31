@@ -33,3 +33,4 @@ Projects that configure Tombi themselves, with a `tombi.toml` or `.tombi.toml` f
 ## See also
 
 - [Language Intelligence](/docs/language-intelligence) — the features every language server provides, and how servers start and stop per worktree
+- [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code

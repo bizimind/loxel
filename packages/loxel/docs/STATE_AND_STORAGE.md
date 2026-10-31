@@ -73,15 +73,16 @@ The route in [routes.ts](../src/server/routes.ts) reads or upserts the row throu
 
 `stores.db` is a single table `stores(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)`, opened lazily in WAL mode with a 5-second busy timeout. Key namespaces in use:
 
-| Key                                                                | Writer                                                                                                                 |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `settings`, `keybindings`, `ui`, `search`, `worktrees`, `projects` | Renderer, via `createServerStorage`                                                                                    |
-| `layout:session:<windowId>:<scope>:<worktreePath>`                 | Renderer, via `PersistedLayout`                                                                                        |
-| `layout:canonical:<scope>:<worktreePath>`                          | Server (promotion), renderer (legacy layout migration)                                                                 |
-| `external-folders:<worktreePath>`                                  | Server, [external-folders-service.ts](../src/server/external-folders-service.ts); deleted when the worktree is removed |
-| `python-interpreter:<worktreePath>`                                | Server, [python-override-store.ts](../src/server/python-override-store.ts); deleted when the worktree is removed       |
-| `java-home:<worktreePath>`                                         | Server, [java-override-store.ts](../src/server/java-override-store.ts); deleted when the worktree is removed           |
-| `rust-toolchain:<worktreePath>`                                    | Server, [rust-toolchain-store.ts](../src/server/rust-toolchain-store.ts); deleted when the worktree is removed         |
+| Key                                                                | Writer                                                                                                                     |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `settings`, `keybindings`, `ui`, `search`, `worktrees`, `projects` | Renderer, via `createServerStorage`                                                                                        |
+| `layout:session:<windowId>:<scope>:<worktreePath>`                 | Renderer, via `PersistedLayout`                                                                                            |
+| `layout:canonical:<scope>:<worktreePath>`                          | Server (promotion), renderer (legacy layout migration)                                                                     |
+| `external-folders:<worktreePath>`                                  | Server, [external-folders-service.ts](../src/server/external-folders-service.ts); deleted when the worktree is removed     |
+| `python-interpreter:<worktreePath>`                                | Server, [python-override-store.ts](../src/server/python-override-store.ts); deleted when the worktree is removed           |
+| `java-home:<worktreePath>`                                         | Server, [java-override-store.ts](../src/server/java-override-store.ts); deleted when the worktree is removed               |
+| `rust-toolchain:<worktreePath>`                                    | Server, [rust-toolchain-store.ts](../src/server/rust-toolchain-store.ts); deleted when the worktree is removed             |
+| `repo-trust:<git or folder id>`                                    | Server, [repo-trust.ts](../src/server/repo-trust.ts); the generic store route refuses it, and removing a worktree keeps it |
 
 ### Multi-window propagation
 
@@ -160,7 +161,7 @@ The renderer uses browser storage only where state is per window or must exist b
 
 ## Invariants
 
-- **One writer per row.** Each persisted store key belongs to exactly one zustand store, and each `layout:session:<windowId>` row to one window. Server-owned keys (`external-folders:*`, `python-interpreter:*`, `java-home:*`, `rust-toolchain:*`, canonical promotion) are never written by persist. Writes replace the whole value, so two windows writing the same key concurrently resolve as last write wins.
+- **One writer per row.** Each persisted store key belongs to exactly one zustand store, and each `layout:session:<windowId>` row to one window. Server-owned keys (`external-folders:*`, `python-interpreter:*`, `java-home:*`, `rust-toolchain:*`, `repo-trust:*`, canonical promotion) are never written by persist. Writes replace the whole value, so two windows writing the same key concurrently resolve as last write wins.
 - **One process per state directory.** Only the server opens the SQLite files, and there is one server per state directory (see [SHARED_SERVER.md](SHARED_SERVER.md)). Electron main touches only `data-encryption-key.enc` and, when applying an update, `updates/` (see [SHARED_SERVER.md](SHARED_SERVER.md)).
 - **Never persist** runtime server data (worktree lists, Git state, the project list from `projects.db`), per-window state (active worktree, window ID), non-JSON values without a `partialize`/`merge`/`deserialize` round trip (for example `Set`s in `ui.ts`), or secrets outside a field the server encrypts. Anything persisted is broadcast to all windows.
 - **Settings stay client-owned.** The server receives settings as request parameters; the only server code that interprets a client store's contents for its own behavior is `terminal-settings.ts` and the automatic update check in `update.ts`, which act with no request to carry the setting (the `/api/stores/:key` route and layout promotion handle rows on the client's behalf), and persisted-shape changes must keep them working. Do not add further server readers of client store contents.
