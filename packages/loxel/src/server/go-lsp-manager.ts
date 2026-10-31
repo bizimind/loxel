@@ -1,8 +1,21 @@
+import { statSync } from "node:fs";
 import path from "node:path";
 
+import type { ServerWebSocket, Subprocess } from "bun";
+
+import { GO_NOT_FOUND, type GoEnv } from "@/api/go-env-model";
+import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
-import { pathOutsideWorktree } from "./python-env";
+import {
+  GO,
+  getGoEnv,
+  GOPLS,
+  goSpawnEnv,
+  goToolPath,
+  refreshGoEnv,
+  subscribeGoEnv,
+} from "./go-env";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import {
   type SpawnOptions,
@@ -11,18 +24,8 @@ import {
   type WtLspSession,
 } from "./stdio-lsp-manager";
 
-const GOPLS = process.platform === "win32" ? "gopls.exe" : "gopls";
-
-/**
- * Set in gopls's environment: Loxel works from what is on the machine, and the user downloads
- * modules and toolchains from a terminal. Without the last two, `go` still reaches the checksum
- * database for a module with no `go.sum` entry and hosts named by `GOPRIVATE` directly.
- */
-export const GO_ENV = { GOPROXY: "off", GOTOOLCHAIN: "local", GOSUMDB: "off", GONOPROXY: "none" };
-
 /** What the user is told when `go` is missing. */
-export const GO_NOT_FOUND_REASON =
-  "Go is not installed or not on your PATH. Install Go, then restart the server.";
+export const GO_NOT_FOUND_REASON = `${GO_NOT_FOUND}. Install Go, then restart the server.`;
 
 /** Answered for the `gopls` section of `workspace/configuration`. */
 export const GOPLS_SETTINGS = {
@@ -170,7 +173,7 @@ export function goSetupProblem(body: string): GoSetupProblem | null {
     const [, needed, running] = newerGo;
     return {
       kind: "newer-go",
-      message: `This project needs Go ${needed}, and the Go on your PATH is ${running}. Loxel does not install Go toolchains: install Go ${needed}, ${RESTART}`,
+      message: `This project needs Go ${needed}, and the Go on your PATH is ${running}. Loxel does not download Go toolchains; gopls restarts once Go ${needed} is on your PATH.`,
     };
   }
   if (isRecord(frame.error)) {
@@ -189,19 +192,53 @@ export function goSetupProblem(body: string): GoSetupProblem | null {
   };
 }
 
-/** The login-shell PATH without the worktree's directories, which `go` and gopls run tools from. */
-function goPath(wtPath: string): string {
-  return pathOutsideWorktree(buildSpawnEnv().PATH ?? "", wtPath);
-}
-
 export interface GoSetupProblem {
   kind: "newer-go" | "missing-module" | "command-needs-module";
   message: string;
 }
 
+/** A gopls binary, and what tells a reinstall at the same path. */
+interface GoplsPick {
+  path: string;
+  stamp: string;
+}
+
+function fileStamp(file: string): string {
+  try {
+    const info = statSync(file);
+    return `${info.dev}:${info.ino}:${info.mtimeMs}:${info.size}`;
+  } catch {
+    return "";
+  }
+}
+
+/** What a gopls session was started with, which a restart follows. */
+interface GoplsRun {
+  go: Pick<GoEnv, "binary" | "version" | "goroot"> | null;
+  gopls: GoplsPick;
+}
+
+function isSameRun(a: GoplsRun, b: GoplsRun): boolean {
+  return (
+    a.go?.binary === b.go?.binary &&
+    a.go?.version === b.go?.version &&
+    a.go?.goroot === b.go?.goroot &&
+    a.gopls.path === b.gopls.path &&
+    a.gopls.stamp === b.gopls.stamp
+  );
+}
+
+interface SessionWatch {
+  run: GoplsRun | null;
+  unsubscribe: () => void;
+  /** One check at a time, so the last resolution decides. */
+  checking: Promise<void>;
+}
+
 /**
  * Manages gopls (`gopls serve`) child processes, one per worktree. gopls runs `go` for everything
- * it knows about a project, so a session starts only where `go` is found.
+ * it knows about a project, so a session starts only where `go` is found, and restarts when the
+ * worktree's `go` or the gopls to use changes, which it does not notice by itself.
  */
 export class GoLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
@@ -209,23 +246,39 @@ export class GoLspManager extends WorktreeLspManager {
   private readonly reported = new WeakMap<WtLspSession, Set<string>>();
   /** Worktrees last told to install a newer Go, which may be in a directory new to the PATH. */
   private readonly waitingForNewerGo = new Set<string>();
+  /** Starts that found no usable `go`. */
+  private readonly withoutGo = new WeakSet<WtLspContext>();
+  /** What each start runs, from `resolveBinary` on. */
+  private readonly spawned = new WeakMap<WtLspContext, GoplsRun>();
+  private readonly watches = new WeakMap<WtLspSession, SessionWatch>();
 
   constructor() {
     super("go-lsp");
   }
 
   protected async resolveBinary(context: WtLspContext): Promise<string | null> {
-    if (this.waitingForNewerGo.delete(context.wtPath)) await refreshLoginShellEnv();
-    if (!goOnPath(context.wtPath)) {
+    const { wtPath } = context;
+    if (this.waitingForNewerGo.delete(wtPath)) await refreshLoginShellEnv();
+    let env = await getGoEnv(wtPath);
+    if (!env) {
       // It may have been installed since the login-shell PATH was captured.
       await refreshLoginShellEnv();
-      if (!goOnPath(context.wtPath)) return null;
+      refreshGoEnv(wtPath);
+      env = await getGoEnv(wtPath);
     }
-    return this.resolveBundledBinary(GOPLS, path.resolve(import.meta.dir, "../../build", GOPLS));
+    if (!env) {
+      this.withoutGo.add(context);
+      return null;
+    }
+    const gopls = this.pick(env);
+    if (gopls) this.spawned.set(context, { go: env, gopls });
+    return gopls?.path ?? null;
   }
 
   protected override serverFailureReason(context: WtLspContext): string | null {
-    return goOnPath(context.wtPath) ? null : GO_NOT_FOUND_REASON;
+    const { wtPath } = context;
+    const found = Bun.which(GO, { PATH: goToolPath(wtPath) }) !== null;
+    return found && !this.withoutGo.has(context) ? null : GO_NOT_FOUND_REASON;
   }
 
   protected override spawnArgs(): readonly string[] {
@@ -233,7 +286,74 @@ export class GoLspManager extends WorktreeLspManager {
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
-    return { cwd: context.wtPath, env: { PATH: goPath(context.wtPath), ...GO_ENV } };
+    const go = this.spawned.get(context)?.go ?? null;
+    return { cwd: context.wtPath, env: goSpawnEnv(context.wtPath, go) };
+  }
+
+  protected override buildSession(
+    ws: ServerWebSocket<unknown>,
+    proc: Subprocess,
+    context: WtLspContext,
+  ): WtLspSession {
+    const session = super.buildSession(ws, proc, context);
+    const { wtPath } = context;
+    const watch: SessionWatch = {
+      run: this.spawned.get(context) ?? null,
+      unsubscribe: subscribeGoEnv(wtPath, ({ env }) => {
+        watch.checking = watch.checking.then(() => this.restartIfChanged(session, watch, env));
+      }),
+      checking: Promise.resolve(),
+    };
+    this.watches.set(session, watch);
+    // A change that landed while the binary was picked and spawned was heard by no one.
+    watch.checking = getGoEnv(wtPath).then((env) => this.restartIfChanged(session, watch, env));
+    return session;
+  }
+
+  protected override onSessionClosed(session: WtLspSession): void {
+    this.watches.get(session)?.unsubscribe();
+    this.watches.delete(session);
+  }
+
+  /** The user's gopls, or the bundled one when they have none. */
+  private pick(env: GoEnv): GoplsPick | null {
+    const dev = path.resolve(import.meta.dir, "../../build", GOPLS);
+    const bundled = this.resolveBundledBinary(GOPLS, dev);
+    // With nothing bundled that is the first on the plain PATH, which `env.gopls` already refused.
+    const onPlainPath = bundled === Bun.which(GOPLS, { PATH: buildSpawnEnv().PATH ?? "" });
+    const binary = env.gopls ?? (onPlainPath ? null : bundled);
+    return binary ? { path: binary, stamp: fileStamp(binary) } : null;
+  }
+
+  /**
+   * Restart the session's gopls when the worktree's `go` or the gopls to use changed: it does not
+   * recover by itself from a newer Go appearing, and keeps analyzing with what it first saw.
+   */
+  private restartIfChanged(session: WtLspSession, watch: SessionWatch, env: GoEnv | null): void {
+    if (!watch.run || !this.isSessionLive(session)) return;
+    if (!env) {
+      // Gone may be an install in progress, so the running gopls keeps serving. But a `go` still
+      // there was refused, and gopls would find it: the restart stops it with the reason.
+      if (Bun.which(GO, { PATH: goSpawnEnv(session.wtPath, null).PATH })) this.restart(session);
+      return;
+    }
+    // Not answering may be an install in progress too; the status item says so meanwhile.
+    if (!env.version) return;
+    const gopls = this.pick(env);
+    if (!gopls) return;
+    const next = { go: env, gopls };
+    if (isSameRun(watch.run, next)) return;
+    this.log.info("Restarting gopls for a different go or gopls", {
+      wtPath: session.wtPath,
+      from: { go: watch.run.go?.version, gopls: watch.run.gopls.path },
+      to: { go: env.version, gopls: gopls.path },
+    });
+    this.restart(session);
+  }
+
+  private restart({ ws }: WtLspSession): void {
+    this.detach(ws);
+    ws.close(LSP_RESTART_CLOSE_CODE, "go or gopls changed; reconnect");
   }
 
   // gopls does not finish loading a workspace until this request is answered, whatever the section.
@@ -260,8 +380,4 @@ export class GoLspManager extends WorktreeLspManager {
     const params = { type: MESSAGE_TYPE_WARNING, message };
     session.ws.send(JSON.stringify({ jsonrpc: "2.0", method: "window/showMessage", params }));
   }
-}
-
-function goOnPath(wtPath: string): boolean {
-  return Bun.which("go", { PATH: goPath(wtPath) }) !== null;
 }
