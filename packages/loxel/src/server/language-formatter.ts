@@ -31,6 +31,8 @@ export interface FormatterSpawnOptions {
   env?: Record<string, string>;
   /** Prepended to `PATH`, first wins. Default: the worktree's `node_modules/.bin`. */
   binDirs?: readonly string[];
+  /** Do not spawn at all: the save goes out unformatted, and the user sees `notice` if there is one. */
+  skip?: { notice?: string };
 }
 
 /**

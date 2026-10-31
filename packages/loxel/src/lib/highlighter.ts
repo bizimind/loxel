@@ -1,5 +1,6 @@
 import { createHighlighter, type Highlighter } from "shiki";
 
+import { JAVA_PROPERTIES_GRAMMAR } from "./java-properties-grammar";
 import { loxelDark } from "./loxel-themes";
 
 // Singleton highlighter instance
@@ -49,6 +50,8 @@ const BUNDLED_LANGUAGES = [
   "astro",
   "dotenv",
   "xml",
+  "groovy",
+  "bat",
 ] as const;
 
 /**
@@ -58,7 +61,7 @@ export async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
       themes: [loxelDark, "github-dark"],
-      langs: [...BUNDLED_LANGUAGES],
+      langs: [...BUNDLED_LANGUAGES, JAVA_PROPERTIES_GRAMMAR],
     });
   }
   return highlighterPromise;
@@ -88,6 +91,13 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   appfile: "ruby",
   matchfile: "ruby",
   guardfile: "ruby",
+
+  // Gradle and Maven (.gradle files and the wrappers' properties resolve by extension)
+  jenkinsfile: "groovy",
+  gradlew: "bash",
+  mvnw: "bash",
+  "gradlew.bat": "bat",
+  "mvnw.cmd": "bat",
 
   // Config files
   pipfile: "toml",
@@ -286,6 +296,11 @@ export const EXT_TO_LANG: Record<string, string> = {
   kt: "kotlin",
   kts: "kotlin",
   scala: "java",
+
+  // Gradle, Groovy and Java properties
+  groovy: "groovy",
+  gradle: "groovy",
+  properties: "java-properties",
 
   // Scripting
   py: "python",
