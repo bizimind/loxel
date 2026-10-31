@@ -47,7 +47,10 @@ async function handleJavaEnvCandidates(wtPath: string): Promise<Response> {
 }
 
 // POST /api/java-env/override — Choose a worktree's JDK, or (null) return to detection
-async function handleJavaOverride(wtPath: string, body: Record<string, unknown>): Promise<Response> {
+async function handleJavaOverride(
+  wtPath: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
   const { javaHome } = body;
   if (javaHome !== null && typeof javaHome !== "string") {
     return error("javaHome must be a string or null", 400);
@@ -72,10 +75,7 @@ export const javaToolchainStatus: ToolchainStatusModule = {
   onOverrideChange: onJavaOverrideChange,
   overrideStoreKey: javaOverrideStoreKey,
   routes: {
-    GET: {
-      "/api/java-env": handleJavaEnv,
-      "/api/java-env/candidates": handleJavaEnvCandidates,
-    },
+    GET: { "/api/java-env": handleJavaEnv, "/api/java-env/candidates": handleJavaEnvCandidates },
     POST: { "/api/java-env/override": handleJavaOverride },
   },
 };
