@@ -71,6 +71,7 @@ import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
 import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
+import { SETTINGS_STORE_KEY, stripLegacyAgentSettings } from "./persisted-settings";
 import * as projectStore from "./project-store";
 import {
   childWorktreeOptions,
@@ -91,12 +92,6 @@ import { scanSetupSuggestions } from "./setup-suggestions";
 import { buildSpawnEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 import * as storeDb from "./store-db";
-import {
-  decryptModelKeys,
-  encryptModelKeys,
-  hasPlaintextModelKeys,
-  isEncryptedStoreKey,
-} from "./store-encryption";
 import { stress } from "./stress-detector";
 import { toolchainStatusModules } from "./toolchain-statuses";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
@@ -3478,26 +3473,24 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
   const storeKeyMatch = pathname.match(/^\/api\/stores\/([^/]+)$/);
   if (storeKeyMatch?.[1]) {
     const storeKey = decodeURIComponent(storeKeyMatch[1]);
-    const isSettings = isEncryptedStoreKey(storeKey);
+    const isSettings = storeKey === SETTINGS_STORE_KEY;
     try {
       if (method === "GET") {
-        let value = storeDb.getStore(storeKey);
-        if (isSettings && value && hasPlaintextModelKeys(value)) {
-          // Rows written before API keys were encrypted at rest are migrated on first read.
-          value = encryptModelKeys(value);
-          storeDb.putStore(storeKey, value);
-        }
-        return json({ value: isSettings && value ? decryptModelKeys(value) : value });
+        const value = storeDb.getStore(storeKey);
+        if (!isSettings || !value) return json({ value });
+        const stripped = stripLegacyAgentSettings(value);
+        if (stripped !== value) storeDb.putStore(storeKey, stripped);
+        return json({ value: stripped });
       }
       if (method === "PUT") {
         if (isRepoTrustStoreKey(storeKey)) return error("Not writable through this route", 403);
         const body = await parseBody(req);
         if (typeof body.value !== "string") return error("Missing 'value' string in body", 400);
-        const stored = isSettings ? encryptModelKeys(body.value) : body.value;
+        const stored = isSettings ? stripLegacyAgentSettings(body.value) : body.value;
         storeDb.putStore(storeKey, stored);
-        // Broadcast to all clients for cross-tab sync (broadcast plaintext state)
+        // Broadcast to all clients for cross-tab sync
         try {
-          const parsed = JSON.parse(body.value);
+          const parsed = JSON.parse(stored);
           if (parsed?.state && typeof parsed.state === "object") {
             const nonce = typeof body.nonce === "string" ? body.nonce : undefined;
             ctx.broadcastAll({

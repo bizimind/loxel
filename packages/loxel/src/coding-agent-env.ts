@@ -4,7 +4,7 @@
  * mistaken for an agent.
  */
 export const CODING_AGENT_ENV_VARS = [
-  // Cross-agent convention (GitHub Copilot, v0, Loxel's own agent, ...)
+  // Cross-agent convention (GitHub Copilot, v0, ...)
   "AI_AGENT",
   // Claude Code
   "CLAUDECODE",

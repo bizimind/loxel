@@ -4,7 +4,6 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type { EditorConfigProperties } from "@/api/editorconfig-model";
 import {
   DEFAULT_SCROLLBACK_LINES,
-  type AgentSessionOptions,
   DEFAULT_NOTIFICATION_SEQUENCES,
   type NotificationSequences,
 } from "@/api/ws-protocol";
@@ -20,50 +19,6 @@ import { serverSettingsStorage } from "./server-storage";
 
 export type SidebarPanelId = Exclude<PanelId, "diff" | "editor">;
 export type SidebarZone = "left" | "bottom" | "right";
-
-export interface ApiKeyError {
-  err: string;
-}
-
-export function isApiKeyError(apiKey: string | ApiKeyError): apiKey is ApiKeyError {
-  return typeof apiKey === "object" && apiKey !== null && "err" in apiKey;
-}
-
-export interface ModelEntry {
-  id: string;
-  label: string;
-  provider: "openrouter";
-  modelId: string;
-  apiKey: string | ApiKeyError;
-}
-
-export type AgentFunction =
-  | "planner"
-  | "executor"
-  | "fallback"
-  | "judge"
-  | "websearch"
-  | "websearchFallback";
-
-export const AGENT_FUNCTIONS: { key: AgentFunction; label: string }[] = [
-  { key: "planner", label: "Planner" },
-  { key: "executor", label: "Executor" },
-  { key: "fallback", label: "Fallback" },
-  { key: "judge", label: "Judge" },
-  { key: "websearch", label: "WebSearch" },
-  { key: "websearchFallback", label: "WS Fallback" },
-];
-
-export interface CodingAgentSettings {
-  /** ID of the model used for all functions by default. */
-  baseModelId: string;
-  /** Per-function overrides. Values are ModelEntry IDs. Absent = use base model. */
-  functionOverrides: Partial<Record<AgentFunction, string>>;
-  /** Default session mode for new agent sessions. */
-  defaultMode?: "execute" | "plan";
-  /** Default tool profile for new agent sessions. */
-  defaultProfile?: "execute" | "plan" | "minimal";
-}
 
 export interface TerminalSettings {
   /** Maximum number of lines kept in terminal scrollback history. */
@@ -530,8 +485,6 @@ export const selectEffectiveSchemas = createBuiltinMergeSelector(
 
 type SettingsSection =
   | "general"
-  | "codingAgent"
-  | "models"
   | "keybindings"
   | "layout"
   | "terminal"
@@ -541,8 +494,6 @@ type SettingsSection =
   | "worktrees";
 
 export interface SettingsState {
-  models: ModelEntry[];
-  codingAgent: CodingAgentSettings;
   layout: LayoutSettings;
   terminal: TerminalSettings;
   editor: EditorSettings;
@@ -558,17 +509,6 @@ export interface SettingsState {
   // Transient UI state (not persisted)
   isOpen: boolean;
   activeSection: SettingsSection;
-
-  // Model actions
-  addModel: (model: Omit<ModelEntry, "id">) => void;
-  updateModel: (id: string, updates: Partial<Omit<ModelEntry, "id">>) => void;
-  removeModel: (id: string) => void;
-
-  // Coding agent actions
-  setBaseModelId: (modelId: string) => void;
-  setFunctionOverride: (fn: AgentFunction, modelId: string | null) => void;
-  setDefaultMode: (mode: CodingAgentSettings["defaultMode"]) => void;
-  setDefaultProfile: (profile: CodingAgentSettings["defaultProfile"]) => void;
 
   // Terminal actions
   updateTerminal: (partial: Partial<TerminalSettings>) => void;
@@ -638,6 +578,35 @@ const DEFAULT_LAYOUT: LayoutSettings = {
   zonePanelOrder: buildDefaultZonePanelOrder(),
 };
 
+/**
+ * Takes a removed panel out of persisted layout settings: its zone opens with the zone's first
+ * remaining panel instead, or closed when none remain.
+ */
+function stripPanelFromLayout(layout: unknown, panelId: string): void {
+  if (typeof layout !== "object" || layout === null) return;
+  const { zonePanelOrder, zoneDefaults } = layout as Record<string, unknown>;
+  const order =
+    typeof zonePanelOrder === "object" && zonePanelOrder !== null
+      ? (zonePanelOrder as Record<string, unknown>)
+      : {};
+  const remaining = (zone: string): unknown[] => {
+    const panels = order[zone];
+    return Array.isArray(panels) ? panels.filter((id) => id !== panelId) : [];
+  };
+  for (const zone of Object.keys(order)) {
+    if (Array.isArray(order[zone])) order[zone] = remaining(zone);
+  }
+  if (typeof zoneDefaults !== "object" || zoneDefaults === null) return;
+  const defaults = zoneDefaults as Record<string, unknown>;
+  for (const [zone, value] of Object.entries(defaults)) {
+    if (typeof value !== "object" || value === null) continue;
+    const zoneDefault = value as Record<string, unknown>;
+    if (zoneDefault.activePanel !== panelId) continue;
+    const [first] = remaining(zone);
+    defaults[zone] = first === undefined ? false : { ...zoneDefault, activePanel: first };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -645,8 +614,6 @@ const DEFAULT_LAYOUT: LayoutSettings = {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      models: [],
-      codingAgent: { baseModelId: "", functionOverrides: {} },
       layout: structuredClone(DEFAULT_LAYOUT),
       terminal: {
         scrollbackLines: DEFAULT_TERMINAL_SCROLLBACK,
@@ -661,54 +628,6 @@ export const useSettingsStore = create<SettingsState>()(
 
       isOpen: false,
       activeSection: "general",
-
-      // -- Model CRUD --
-
-      addModel: (model) =>
-        set((s) => ({ models: [...s.models, { ...model, id: crypto.randomUUID() }] })),
-
-      updateModel: (id, updates) =>
-        set((s) => ({ models: s.models.map((m) => (m.id === id ? { ...m, ...updates } : m)) })),
-
-      removeModel: (id) =>
-        set((s) => {
-          const models = s.models.filter((m) => m.id !== id);
-          const codingAgent = { ...s.codingAgent };
-
-          // Clear dangling references
-          if (codingAgent.baseModelId === id) {
-            codingAgent.baseModelId = "";
-          }
-          const overrides = { ...codingAgent.functionOverrides };
-          for (const [fn, modelId] of Object.entries(overrides)) {
-            if (modelId === id) delete overrides[fn as AgentFunction];
-          }
-          codingAgent.functionOverrides = overrides;
-
-          return { models, codingAgent };
-        }),
-
-      // -- Coding agent --
-
-      setBaseModelId: (modelId) =>
-        set((s) => ({ codingAgent: { ...s.codingAgent, baseModelId: modelId } })),
-
-      setFunctionOverride: (fn, modelId) =>
-        set((s) => {
-          const overrides = { ...s.codingAgent.functionOverrides };
-          if (modelId) {
-            overrides[fn] = modelId;
-          } else {
-            delete overrides[fn];
-          }
-          return { codingAgent: { ...s.codingAgent, functionOverrides: overrides } };
-        }),
-
-      setDefaultMode: (mode) =>
-        set((s) => ({ codingAgent: { ...s.codingAgent, defaultMode: mode } })),
-
-      setDefaultProfile: (profile) =>
-        set((s) => ({ codingAgent: { ...s.codingAgent, defaultProfile: profile } })),
 
       // -- Terminal --
 
@@ -925,8 +844,6 @@ export const useSettingsStore = create<SettingsState>()(
       name: `${STORAGE_PREFIX}-settings`,
       storage: createJSONStorage(() => serverSettingsStorage),
       partialize: (state) => ({
-        models: state.models,
-        codingAgent: state.codingAgent,
         layout: state.layout,
         terminal: state.terminal,
         editor: state.editor,
@@ -935,7 +852,7 @@ export const useSettingsStore = create<SettingsState>()(
         autoRevealInExplorer: state.autoRevealInExplorer,
         autoCheckForUpdates: state.autoCheckForUpdates,
       }),
-      version: 12,
+      version: 13,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -960,64 +877,6 @@ export const useSettingsStore = create<SettingsState>()(
             layout.zonePanelOrder = order;
             delete layout.panelDefaultZones;
           }
-        }
-
-        if (version <= 1) {
-          // v1 → v2: flat CodingAgentSettings → models library + baseModelId + overrides
-          const oldAgent =
-            typeof state.codingAgent === "object" && state.codingAgent !== null
-              ? (state.codingAgent as Record<string, string>)
-              : undefined;
-          const models: ModelEntry[] = [];
-
-          const apiKey = oldAgent?.openrouterApiKey ?? "";
-          if (apiKey) {
-            let baseModelId: string;
-            const modelFields = [
-              oldAgent?.plannerModel,
-              oldAgent?.executorModel,
-              oldAgent?.fallbackModel,
-              oldAgent?.judgeModel,
-              oldAgent?.websearchModel,
-              oldAgent?.websearchFallbackModel,
-            ].filter((v): v is string => Boolean(v));
-            const uniqueModelIds = [...new Set(modelFields)];
-
-            for (const modelId of uniqueModelIds) {
-              models.push({
-                id: crypto.randomUUID(),
-                label: modelId,
-                provider: "openrouter",
-                modelId,
-                apiKey,
-              });
-            }
-
-            const baseModelModelId = oldAgent?.plannerModel || uniqueModelIds[0] || "";
-            const baseEntry = models.find((m) => m.modelId === baseModelModelId);
-            baseModelId = baseEntry?.id ?? "";
-
-            const functionOverrides: Partial<Record<AgentFunction, string>> = {};
-            const fnMapping: [AgentFunction, string][] = [
-              ["planner", oldAgent?.plannerModel || ""],
-              ["executor", oldAgent?.executorModel || ""],
-              ["fallback", oldAgent?.fallbackModel || ""],
-              ["judge", oldAgent?.judgeModel || ""],
-              ["websearch", oldAgent?.websearchModel || ""],
-              ["websearchFallback", oldAgent?.websearchFallbackModel || ""],
-            ];
-            for (const [fn, mId] of fnMapping) {
-              if (mId && mId !== baseModelModelId) {
-                const entry = models.find((m) => m.modelId === mId);
-                if (entry) functionOverrides[fn] = entry.id;
-              }
-            }
-
-            state.codingAgent = { baseModelId, functionOverrides };
-          } else {
-            state.codingAgent = { baseModelId: "", functionOverrides: {} };
-          }
-          state.models = models;
         }
 
         if (version <= 2) {
@@ -1111,6 +970,14 @@ export const useSettingsStore = create<SettingsState>()(
           }
         }
 
+        if (version <= 12) {
+          // v12 → v13: the built-in coding agent was removed. Its settings, and the steps that
+          // used to shape them, are gone for rows of every older version.
+          delete state.models;
+          delete state.codingAgent;
+          stripPanelFromLayout(state.layout, "forkTree");
+        }
+
         // zustand migrations receive unknown and must return the store type.
         // Structural guards above ensure each field is valid before narrowing.
         return state as unknown as SettingsState;
@@ -1122,42 +989,6 @@ export const useSettingsStore = create<SettingsState>()(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Map AgentFunction keys to ModelRouterOptions property names (casing differs for webSearch). */
-const ROUTER_KEY_MAP: Record<AgentFunction, string> = {
-  planner: "planner",
-  executor: "executor",
-  fallback: "fallback",
-  judge: "judge",
-  websearch: "webSearch",
-  websearchFallback: "webSearchFallback",
-};
-
-/** Resolve model library + agent config into typed SDK session options. */
-export function buildSessionOptions(
-  settings: CodingAgentSettings,
-  models: ModelEntry[],
-): AgentSessionOptions | Record<string, never> {
-  const lookup = new Map(models.map((m) => [m.id, m]));
-  const baseEntry = lookup.get(settings.baseModelId);
-  if (!baseEntry || isApiKeyError(baseEntry.apiKey)) return {};
-
-  const base = { modelId: baseEntry.modelId, apiKey: baseEntry.apiKey };
-  const modelConfig: Record<string, { modelId: string; apiKey: string }> = { base };
-
-  for (const [fn, routerKey] of Object.entries(ROUTER_KEY_MAP)) {
-    const overrideId = settings.functionOverrides[fn as AgentFunction];
-    const entry = overrideId ? lookup.get(overrideId) : undefined;
-    if (entry && !isApiKeyError(entry.apiKey)) {
-      modelConfig[routerKey] = { modelId: entry.modelId, apiKey: entry.apiKey };
-    }
-  }
-
-  const result: AgentSessionOptions = { models: modelConfig };
-  if (settings.defaultMode) result.mode = settings.defaultMode;
-  if (settings.defaultProfile) result.profile = settings.defaultProfile;
-  return result;
-}
 
 /** Resolved layout config for use by createDefaultLayout. */
 export interface EffectiveLayoutConfig {

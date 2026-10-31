@@ -3,46 +3,50 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { app, dialog, safeStorage } from "electron";
+import { safeStorage } from "electron";
 
 import { IS_DEV } from "./env";
 
-const STATE_DIR = IS_DEV
-  ? path.join(os.homedir(), ".local", "state", "loxel", "loxel-dev")
-  : path.join(os.homedir(), ".local", "state", "loxel", "loxel");
+const STATE_DIR =
+  process.env.LOXEL_STATE_DIR ??
+  path.join(os.homedir(), ".local", "state", "loxel", IS_DEV ? "loxel-dev" : "loxel");
 const DEK_FILE = path.join(STATE_DIR, "data-encryption-key.enc");
 
 let cached: string | null = null;
 
-export function loadOrCreateDek(): string {
+/**
+ * The data encryption key to hand the server, or null when the system keychain can't protect one.
+ * Loxel runs without it: the server then reports secret storage as unavailable.
+ */
+export function loadOrCreateDek(): string | null {
   if (cached) return cached;
 
   if (!safeStorage.isEncryptionAvailable()) {
-    dialog.showErrorBox(
-      "Encryption Unavailable",
-      "System keychain encryption is not available. Loxel cannot start without secure key storage.",
-    );
-    app.exit(1);
-    throw new Error("safeStorage not available");
+    console.warn("[electron] System keychain encryption is unavailable; no data encryption key");
+    return null;
   }
 
-  let dekBase64: string;
-  if (fs.existsSync(DEK_FILE)) {
-    try {
-      const encrypted = fs.readFileSync(DEK_FILE);
-      dekBase64 = safeStorage.decryptString(encrypted);
-      const decoded = Buffer.from(dekBase64, "base64");
-      if (decoded.length !== 32) throw new Error(`Invalid DEK length: ${decoded.length}`);
-    } catch (err) {
-      console.warn("[electron] Failed to decrypt DEK file, generating new key:", err);
-      dekBase64 = generateAndStoreDek();
-    }
-  } else {
-    dekBase64 = generateAndStoreDek();
+  try {
+    cached = readDek() ?? generateAndStoreDek();
+  } catch (err) {
+    console.warn("[electron] Failed to create a data encryption key:", err);
+    return null;
   }
+  return cached;
+}
 
-  cached = dekBase64;
-  return dekBase64;
+/** The stored key, or null when there is none or it can't be decrypted. */
+function readDek(): string | null {
+  if (!fs.existsSync(DEK_FILE)) return null;
+  try {
+    const dekBase64 = safeStorage.decryptString(fs.readFileSync(DEK_FILE));
+    const decoded = Buffer.from(dekBase64, "base64");
+    if (decoded.length !== 32) throw new Error(`Invalid DEK length: ${decoded.length}`);
+    return dekBase64;
+  } catch (err) {
+    console.warn("[electron] Failed to decrypt DEK file, generating new key:", err);
+    return null;
+  }
 }
 
 function generateAndStoreDek(): string {

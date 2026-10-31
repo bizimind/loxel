@@ -27,8 +27,8 @@ For most cases, Detect + Add is the fastest path. If you're planning to run mult
 Loxel's interface is divided into five areas:
 
 - **Left sidebar** — the Project Files and Changes panels (`Cmd+Shift+E`, `Cmd+Shift+C`). The worktree sidebar with your projects and worktrees sits to its left (`Ctrl+Alt+B`).
-- **Center** — editors, diff views, terminals, browsers, and agent panels. This is your main workspace.
-- **Right sidebar** — the Comments panel (`Ctrl+Shift+R`) and the agent Fork Tree; drag any tool panel here.
+- **Center** — editors, diff views, terminals, and browsers. This is your main workspace.
+- **Right sidebar** — the Comments panel (`Ctrl+Shift+R`); drag any tool panel here.
 - **Bottom** — the Git panel with the commit graph (`Ctrl+Shift+G`) and the Logs panel.
 - **Status bar** — active branch, upstream tracking (`↑ X ↓ Y`), and working tree counts.
 
@@ -61,7 +61,7 @@ When you're ready to start a parallel task without touching your current working
 - Click **Add worktree** under the project in the worktree sidebar.
 - Press `Ctrl+Alt+N` from anywhere in the app.
 
-Type a name for the worktree and press `Enter`. The new worktree appears in the sidebar; click it to switch to it — it has a clean working tree, its own editor layout, and its own agent sessions.
+Type a name for the worktree and press `Enter`. The new worktree appears in the sidebar; click it to switch to it — it has a clean working tree, its own editor layout, and its own terminals.
 
 Switch back to your previous worktree by clicking it in the sidebar, or use `Ctrl+Alt+[` / `Ctrl+Alt+]` to go back and forward through the worktrees you visited. Your layout and open files are restored exactly as you left them.
 

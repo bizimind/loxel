@@ -2,7 +2,7 @@
  * Server-side in-memory notification store.
  *
  * Generic notification model — not tied to terminals. Future notification sources
- * (CI, coding-agent, etc.) can use the same system by adding new source kinds.
+ * (CI, etc.) can use the same system by adding new source kinds.
  *
  * Ephemeral: state is lost on server restart (matches current notification behavior).
  * All connected clients are kept in sync via WS broadcasts from the caller.

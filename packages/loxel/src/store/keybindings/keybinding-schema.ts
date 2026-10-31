@@ -49,7 +49,6 @@ const DIRECTION_KEYS: Record<SplitDirection, string> = {
 
 const SPLIT_TYPE_KEYS: Record<SplitPanelType, string> = {
   terminal: "T",
-  agent: "A",
   editor: "M",
   excalidraw: "D",
   browser: "B",
@@ -92,7 +91,6 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "panel.new.terminal": ["Cmd+T", "Ctrl+Shift+Backtick", newTabChord("terminal")],
   "panel.new.markdown": ["Cmd+Shift+M", "Cmd+N", newTabChord("editor")],
   "panel.new.drawing": ["Cmd+Shift+D", newTabChord("excalidraw")],
-  "panel.new.agent": ["Cmd+Shift+A", newTabChord("agent")],
   "panel.new.browser": ["Cmd+Shift+B", newTabChord("browser")],
   "panel.newTab": [`${SPLIT_LEADER} Enter`],
   "panel.open.localdb": [],
@@ -127,7 +125,6 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "toggle.git": ["Ctrl+Shift+G"],
   "toggle.comments": ["Ctrl+Shift+R"],
   "toggle.logs": ["Ctrl+Shift+L"],
-  "toggle.forkTree": ["Ctrl+Shift+K"],
   "sidebar.worktree.toggle": ["Ctrl+Alt+B"],
   // Context-aware: collapses/expands the worktree sidebar or side zone that holds focus
   "sidebar.toggleFocused": ["Ctrl+Shift+Space"],

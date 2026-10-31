@@ -64,7 +64,7 @@ The choice comes down to one question: do you need multiple worktrees to coexist
 
 A **regular repo** has one working tree. Switching tasks means checking out a different branch — disturbing your current state.
 
-A **bare repo** has no working tree of its own. Each worktree is an independent checkout in its own directory. You switch contexts by switching worktrees — no checkout conflicts, and each worktree has its own layout and agent sessions in Loxel.
+A **bare repo** has no working tree of its own. Each worktree is an independent checkout in its own directory. You switch contexts by switching worktrees — no checkout conflicts, and each worktree has its own layout and terminals in Loxel.
 
 If you're directing multiple agents across parallel workstreams, bare is the right structure. See [Worktrees & Projects](/docs/worktrees-and-projects) for the full mechanics.
 
@@ -74,4 +74,4 @@ If you're directing multiple agents across parallel workstreams, bare is the rig
 
 - [Getting Started](/docs/getting-started) — first worktree, panel tour, and your first change
 - [Guide: Parallel Workstreams](/docs/guide-parallel-workstreams) — running multiple agents on parallel worktrees
-- [Coding Agent](/docs/coding-agent) — the built-in agent setup and configuration
+- [Terminals](/docs/terminals#tui-agents) — running your coding agents in Loxel

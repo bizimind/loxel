@@ -1,7 +1,6 @@
 /**
- * What one toolchain adds to the environment of new terminal shells and of the built-in coding
- * agent's tool subprocesses. Contributors are listed in `toolchain-envs.ts`. See
- * docs/TERMINALS.md and docs/CODING_AGENT_INTEGRATION.md.
+ * What one toolchain adds to the environment of new terminal shells. Contributors are listed in
+ * `toolchain-envs.ts`. See docs/TERMINALS.md.
  */
 import path from "node:path";
 
@@ -10,9 +9,6 @@ import { logger } from "./logger";
 const log = logger.child("server");
 
 export type SpawnEnv = Record<string, string | undefined>;
-
-/** Changes a spawn environment; runs on every agent spawn, so it must be synchronous. */
-export type EnvChange = (env: SpawnEnv) => undefined;
 
 /** Changes a new shell's environment. Unlike the resolution before it, this is not timed out. */
 export type TerminalEnvChange = (env: SpawnEnv, shell: string) => void | Promise<void>;
@@ -39,16 +35,6 @@ export interface ToolchainEnvContributor {
    * set here is not guaranteed to stay first.
    */
   resolveForTerminal: (worktreePath: string) => Promise<TerminalEnvChange | null>;
-  /** What the agent's commands in this worktree get now, or null. A session does not wait for it. */
-  resolveForAgent: (workspaceRoot: string) => Promise<EnvChange | null>;
-  /**
-   * Calls `listener` whenever the answer of `resolveForAgent` changes, with what resolves the new
-   * answer. Calls resolve one at a time, in the order heard. Returns the unsubscribe function.
-   */
-  subscribeForAgent: (
-    workspaceRoot: string,
-    listener: (resolve: () => Promise<EnvChange | null>) => void,
-  ) => () => void;
 }
 
 /**
@@ -60,7 +46,7 @@ export interface ToolchainEnvContributor {
 const SHELL_EVAL_CHARS = /["$`\\]/;
 const IS_WINDOWS = process.platform === "win32";
 
-/** The agent's environment is built per spawn, so each refused directory is logged once. */
+/** New shells keep hitting a refused directory, so each one is logged once. */
 const loggedRefusals = new Set<string>();
 
 function pathEntries(env: SpawnEnv): string[] {

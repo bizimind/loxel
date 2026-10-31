@@ -24,7 +24,6 @@ export type ActionId =
   | "panel.new.terminal"
   | "panel.new.markdown"
   | "panel.new.drawing"
-  | "panel.new.agent"
   | "panel.new.browser"
   | "panel.open.localdb"
   | "panel.close"
@@ -60,7 +59,6 @@ export type ActionId =
   | "toggle.git"
   | "toggle.comments"
   | "toggle.logs"
-  | "toggle.forkTree"
   | "nav.project"
   | "nav.worktree"
   | "nav.commandPalette"
@@ -110,7 +108,6 @@ export type ActionId =
  */
 export const SPLIT_PANEL_TYPES = [
   { type: "terminal", label: "Terminal" },
-  { type: "agent", label: "Agent" },
   { type: "editor", label: "Markdown" },
   { type: "excalidraw", label: "Drawing" },
   { type: "browser", label: "Browser" },
@@ -170,7 +167,6 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "panel.new.terminal", label: "New Terminal", category: "panel" },
   { id: "panel.new.markdown", label: "New Markdown Editor", category: "panel" },
   { id: "panel.new.drawing", label: "New Drawing", category: "panel" },
-  { id: "panel.new.agent", label: "New Agent", category: "panel" },
   { id: "panel.new.browser", label: "New Browser", category: "panel" },
   { id: "panel.open.localdb", label: "Open Database", category: "panel" },
 
@@ -234,7 +230,6 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "toggle.git", label: "Toggle Git", category: "toggle" },
   { id: "toggle.comments", label: "Toggle Comments", category: "toggle" },
   { id: "toggle.logs", label: "Toggle Logs", category: "toggle" },
-  { id: "toggle.forkTree", label: "Toggle Fork Tree", category: "toggle" },
 
   // Navigation
   { id: "nav.project", label: "Switch Project", category: "nav" },

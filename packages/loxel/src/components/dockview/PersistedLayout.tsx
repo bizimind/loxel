@@ -7,6 +7,8 @@ import { STORAGE_PREFIX } from "@/lib/env";
 import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
 import { IS_FIRST_WINDOW, WINDOW_ID } from "@/lib/window-id";
 
+import { dropUnregisteredPanels } from "./drop-unregistered-panels";
+
 interface PersistedLayout {
   version: number;
   data: SerializedDockview;
@@ -144,7 +146,7 @@ async function fetchLayout(
 /**
  * Module-level flag set by the OUTER PersistedLayout during its swap cycle.
  * The center dockview's onDidRemovePanel handler checks this to avoid
- * destroying terminal PTYs and detaching agents during worktree switches
+ * destroying terminal PTYs during worktree switches
  * (the outer clear unmounts CenterHost, which fires removal events).
  */
 let outerSwapping = false;
@@ -168,6 +170,8 @@ export function PersistedLayoutComponent({
   performClear,
   apiRef: externalApiRef,
   swappingRef: externalSwappingRef,
+  components,
+  tabComponents,
   ...dockviewProps
 }: PersistedLayoutProps) {
   const internalApiRef = useRef<DockviewApi | null>(null);
@@ -264,7 +268,8 @@ export function PersistedLayoutComponent({
     (async () => {
       const layout = await fetchLayout(storagePrefix, layoutKey, layoutVersion);
       if (cancelled) return;
-      initialLayoutRef.current = layout;
+      initialLayoutRef.current =
+        layout && dropUnregisteredPanels(layout, { components, tabComponents });
       setHydrated(true);
     })();
     return () => {
@@ -344,7 +349,7 @@ export function PersistedLayoutComponent({
         const fetched = await fetchLayout(storagePrefix, newKey, layoutVersion);
         if (cancelled) return;
         if (fetched) {
-          dvApi.fromJSON(fetched);
+          dvApi.fromJSON(dropUnregisteredPanels(fetched, { components, tabComponents }));
           sourceWasServer = true;
         } else {
           createDefaultRef.current(dvApi);
@@ -369,6 +374,8 @@ export function PersistedLayoutComponent({
     flushPendingSave,
     settleAfterRestore,
     externalSwappingRef,
+    components,
+    tabComponents,
   ]);
 
   const onReady = useCallback(
@@ -407,5 +414,12 @@ export function PersistedLayoutComponent({
 
   if (!hydrated) return null;
 
-  return <DockviewReact {...dockviewProps} onReady={onReady} />;
+  return (
+    <DockviewReact
+      {...dockviewProps}
+      components={components}
+      tabComponents={tabComponents}
+      onReady={onReady}
+    />
+  );
 }

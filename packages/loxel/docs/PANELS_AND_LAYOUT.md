@@ -9,7 +9,7 @@ For keyboard focus navigation, `activatePanel()` and find-in-panel, see [KEYBIND
 The window body is [App.tsx](../src/App.tsx): the worktree sidebar, the left tools bar, the **outer** dockview, the right tools bar, and the status bar underneath. The outer dockview is only mounted while a worktree is active.
 
 - **Outer dockview** (`storagePrefix="outer"`): holds the sidebar tool panels in three zones (left, bottom, right) plus one `centerHost` panel. Every outer group header is hidden ([`applyHiddenHeaders`](../src/components/dockview/default-layout.ts)); the tools bars are the tab strip. The `centerHost` group is locked (`no-drop-target`).
-- **Center dockview** (`storagePrefix="center"`): [CenterHost.tsx](../src/components/dockview/CenterHost.tsx) renders a second dockview inside `centerHost`. It holds all content panels (editors, terminals, agents, browsers, …), has visible tabs, splits freely, and shows `CenterWatermark` (the quickstart list) when empty.
+- **Center dockview** (`storagePrefix="center"`): [CenterHost.tsx](../src/components/dockview/CenterHost.tsx) renders a second dockview inside `centerHost`. It holds all content panels (editors, terminals, browsers, …), has visible tabs, splits freely, and shows `CenterWatermark` (the quickstart list) when empty.
 
 Both registries live in [panels.tsx](../src/components/dockview/panels.tsx): `outerComponents`, `centerComponents` and `centerTabComponents`. `wrapPanelComponents` wraps every component in a [PanelErrorBoundary](../src/components/dockview/panel-error-boundary.tsx) (logs the error, shows the panel's icon and a retry button) and a full-size flex column, so panels never do this themselves.
 
@@ -27,7 +27,7 @@ Where to look:
 
 [panel-config.ts](../src/store/panel-config.ts) is the single source of truth for both kinds of panel.
 
-**Sidebar (tool) panels** are `SIDEBAR_PANELS`: `projectFiles`, `changes`, `git`, `comments`, `logs`, `forkTree`. Each has a `defaultZone`, `allowedZones` (drag constraint; `forkTree` cannot go to the bottom), `defaultActive`, a toolbar `icon`/`label` and an optional `dockviewTitle`. A sidebar panel's dockview id, component key and `PanelId` are the same string, and each exists at most once. Derived exports: `ALLOWED_ZONES`, `DEFAULT_TOOLBAR_ENTRIES`, `DEFAULT_ACTIVE_*`, `ZONE_DIRECTION_MAP`, `ZONE_INITIAL_SIZES`. `PanelId` also includes `diff` and `editor` (center-only) for old persisted layouts and `ALLOWED_ZONES`.
+**Sidebar (tool) panels** are `SIDEBAR_PANELS`: `projectFiles`, `changes`, `git`, `comments`, `logs`. Each has a `defaultZone`, `allowedZones` (drag constraint), `defaultActive`, a toolbar `icon`/`label` and an optional `dockviewTitle`. A sidebar panel's dockview id, component key and `PanelId` are the same string, and each exists at most once. Derived exports: `ALLOWED_ZONES`, `DEFAULT_TOOLBAR_ENTRIES`, `DEFAULT_ACTIVE_*`, `ZONE_DIRECTION_MAP`, `ZONE_INITIAL_SIZES`. `PanelId` also includes `diff` and `editor` (center-only) for old persisted layouts and `ALLOWED_ZONES`.
 
 **Center panels** are `CENTER_PANELS` (`CenterPanelDef`): `type`, `idPrefix` (or exact id for singletons), dockview `component` and `tabComponent` keys, `icon`, `quickstartLabel` (shown in the watermark when non-null), `actionId` (the `panel.new.*` action), `createEvent` / `openEvent` (window event names), `titlePrefix`, `kind` (`connected-process`, `file-editor`, `state-view`) and `singleton`. `getCenterPanelDef(panelId)` classifies a dockview id by prefix (exact match for singletons); `isCenterPanel`, `QUICKSTART_PANELS` and `getCreateEventForAction` are derived from it.
 
@@ -39,19 +39,17 @@ Drop rules are enforced in `setupOuterDockview` (`onWillShowOverlay`): no edge d
 
 ## Panel identity and reuse
 
-| Type            | Dockview id                 | Key params                                   | Open behavior                                                |
-| --------------- | --------------------------- | -------------------------------------------- | ------------------------------------------------------------ |
-| `terminal`      | `terminal-<terminalId>`     | `terminalId`, `worktreePath`, `cwd?`         | Always new                                                   |
-| `agent`         | `agent-<sessionId>`         | `sessionId`, `worktreePath`, fork params     | New; forks reuse the tab with the same `forkedSessionId`     |
-| `browser`       | `browser-<uuid>`            | `url`, `faviconUrl`                          | Always new; `renderer: "always"`                             |
-| `editor` (md)   | `editor-<filePath>`         | `filePath`, `worktreePath`, `line`, `column` | Reuse by path                                                |
-| `codeEditor`    | `codeeditor-<filePath>`     | `filePath`, `worktreePath`, `line`, `column` | Reuse by path; `line`/`column` pushed via `updateParameters` |
-| `excalidraw`    | `drawing-<filePath>`        | `filePath`, `worktreePath`                   | Reuse by path                                                |
-| `media`         | `media-<filePath>`          | `filePath`, `worktreePath`                   | Reuse by path                                                |
-| `agentDevTools` | `agentdevtools-<sessionId>` | `sessionId`                                  | Reuse by session; opens to the right of its agent tab        |
-| `diff`          | `diff`                      | none                                         | Singleton                                                    |
-| `compare`       | `compare-<uuid>`            | `oldPath`, `newPath`, `worktreePath`         | Always new; a split duplicates the comparison                |
-| `localDb`       | `localdb-main`              | none                                         | Singleton                                                    |
+| Type          | Dockview id             | Key params                                   | Open behavior                                                |
+| ------------- | ----------------------- | -------------------------------------------- | ------------------------------------------------------------ |
+| `terminal`    | `terminal-<terminalId>` | `terminalId`, `worktreePath`, `cwd?`         | Always new                                                   |
+| `browser`     | `browser-<uuid>`        | `url`, `faviconUrl`                          | Always new; `renderer: "always"`                             |
+| `editor` (md) | `editor-<filePath>`     | `filePath`, `worktreePath`, `line`, `column` | Reuse by path                                                |
+| `codeEditor`  | `codeeditor-<filePath>` | `filePath`, `worktreePath`, `line`, `column` | Reuse by path; `line`/`column` pushed via `updateParameters` |
+| `excalidraw`  | `drawing-<filePath>`    | `filePath`, `worktreePath`                   | Reuse by path                                                |
+| `media`       | `media-<filePath>`      | `filePath`, `worktreePath`                   | Reuse by path                                                |
+| `diff`        | `diff`                  | none                                         | Singleton                                                    |
+| `compare`     | `compare-<uuid>`        | `oldPath`, `newPath`, `worktreePath`         | Always new; a split duplicates the comparison                |
+| `localDb`     | `localdb-main`          | none                                         | Singleton                                                    |
 
 File-backed ids embed the absolute path, so a file has at most one editor tab per worktree layout; compare panels can show it again (see [EDITOR.md](EDITOR.md#several-editors-of-one-file)). Reuse always goes through `activatePanel()`, never `panel.api.setActive()` (see [KEYBINDINGS.md](KEYBINDINGS.md#focus-navigation) and the browser note in [ELECTRON.md](ELECTRON.md#browser-panels)).
 
@@ -75,7 +73,7 @@ Creation is decoupled through typed window events. [loxel-events.ts](../src/lib/
 
 - `handleFileMoved` (on `loxel-file-moved` after an in-app rename, or on the server's `file_moved` for a rename or move made anywhere) replaces the old tab with one for the new path at the same index, keeps it visible only if it was, never changes the active group, and migrates editor/drawing caches; a move whose unsaved edits cannot be carried over leaves the old tab in place, marked deleted (see [EDITOR.md](EDITOR.md#moved-files)). Covered by [panel-creators.test.ts](../src/lib/panel-creators.test.ts).
 - `handleFileDeleted` closes tabs for the path and anything under it. This is only for in-app deletes; a file deleted externally keeps its tab, marked as deleted (see [EDITOR.md](EDITOR.md#deleted-files)).
-- `CenterHost`'s `onDidRemovePanel` owns close-side effects: terminals send `terminal_destroy` and unregister notifications, agents send `agent_detach`, DevTools drop their session, and files outside the worktree send `close_external_file`. It is skipped while either layout is swapping, so a worktree switch does not kill PTYs or agents.
+- `CenterHost`'s `onDidRemovePanel` owns close-side effects: terminals send `terminal_destroy` and unregister notifications, and files outside the worktree send `close_external_file`. It is skipped while either layout is swapping, so a worktree switch does not kill PTYs.
 
 ## Tabs and context menus
 
@@ -88,7 +86,7 @@ Title source differs by kind. File-backed tabs ([editor-tab.tsx](../src/componen
 ## Focus and activation
 
 - [usePanelActive.ts](../src/hooks/usePanelActive.ts): whether the panel is its group's active tab (defaults to `true` when given no API).
-- [usePanelActivationFocus.ts](../src/hooks/usePanelActivationFocus.ts): calls the panel's focus function when the panel is both active in its group and in the active group (dockview's `setActive` does not move DOM focus), including after moves, and registers it in [panel-focus.ts](../src/lib/panel-focus.ts) so keyboard navigation can re-focus an already-active panel. Used by the code, markdown and drawing editors, terminal, browser and agent panels; `ProjectFilesPanel` registers with `registerPanelFocus` directly.
+- [usePanelActivationFocus.ts](../src/hooks/usePanelActivationFocus.ts): calls the panel's focus function when the panel is both active in its group and in the active group (dockview's `setActive` does not move DOM focus), including after moves, and registers it in [panel-focus.ts](../src/lib/panel-focus.ts) so keyboard navigation can re-focus an already-active panel. Used by the code, markdown and drawing editors, terminal and browser panels; `ProjectFilesPanel` registers with `registerPanelFocus` directly.
 - [useZoomFactor.ts](../src/hooks/useZoomFactor.ts): Electron page zoom factor, used by [TopBar.tsx](../src/components/panels/TopBar.tsx) to keep the traffic-light inset fixed. The top bar's first button toggles the worktree sidebar (`toggleWorktreeSidebar`), so it stays in place whichever state the sidebar is in.
 - [useWindowFullScreen.ts](../src/hooks/useWindowFullScreen.ts): whether the window is in macOS native fullscreen (main forwards `enter-full-screen` / `leave-full-screen`; the initial state is a sync IPC read). [TopBar.tsx](../src/components/panels/TopBar.tsx) drops the traffic-light inset while fullscreen, since macOS hides the traffic lights there.
 
@@ -125,7 +123,7 @@ A collapsed zone keeps its group: `collapseZone` pins its size to 0 with constra
 
 [PersistedLayout.tsx](../src/components/dockview/PersistedLayout.tsx) wraps `DockviewReact` for both dockviews; `layoutKey` is the active worktree path.
 
-- **Storage** (per-window session and canonical keys, restore order, debounced saves, promotion on window close, crash recovery) is owned by [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md#layout-persistence). A version mismatch discards the saved layout (`LAYOUT_VERSION` in `default-layout.ts` for the outer layout, `CENTER_LAYOUT_VERSION` in `CenterHost.tsx`).
+- **Storage** (per-window session and canonical keys, restore order, debounced saves, promotion on window close, crash recovery) is owned by [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md#layout-persistence). [drop-unregistered-panels.ts](../src/components/dockview/drop-unregistered-panels.ts) removes panels whose content or tab component is no longer registered from every layout it loads, and groups that leaves empty, so removing a panel type needs no version bump: dockview throws on an unknown component, which would lose the whole layout. A version mismatch discards the saved layout (`LAYOUT_VERSION` in `default-layout.ts` for the outer layout, `CENTER_LAYOUT_VERSION` in `CenterHost.tsx`).
 - **Defaults.** When nothing is saved, `createDefaultLayout` runs: the outer default is built from `SIDEBAR_PANELS` and the user's layout settings (`getEffectiveLayoutConfig` in [settings-store.ts](../src/store/settings-store.ts)), the center default is empty.
 - **What is persisted** is only the dockview JSON (ids, params, titles, groups, sizes). The tools-bar store is rebuilt from it: `syncSidebarFromLayout` derives zone entries and sizes from the outer layout, and `syncTerminalsFromLayout` rebuilds terminal bookkeeping after every center restore.
 

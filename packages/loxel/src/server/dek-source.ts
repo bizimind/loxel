@@ -7,7 +7,8 @@ const log = logger.child("keychain");
 const KEY_BYTES = 32;
 
 export interface DekSource {
-  loadKey(): Promise<Buffer>;
+  /** Resolves to null when the source has no key to give; throws when it fails to give one. */
+  loadKey(): Promise<Buffer | null>;
 }
 
 export function createDekSource(): DekSource {
@@ -40,12 +41,14 @@ class DevDekSource implements DekSource {
 }
 
 class StdinDekSource implements DekSource {
-  async loadKey(): Promise<Buffer> {
+  async loadKey(): Promise<Buffer | null> {
     using reader = createInterface(process.stdin);
 
+    // Electron closes stdin without writing a key when the system keychain is unavailable.
     const lineOrError = await Promise.race([
-      new Promise<string>((resolve) => {
+      new Promise<string | null>((resolve) => {
         reader.once("line", resolve);
+        reader.once("close", () => resolve(null));
       }),
       setTimeout(10_000, new Error(`No DEK received on stdin within 10s`), { ref: false }),
     ]);
@@ -53,6 +56,8 @@ class StdinDekSource implements DekSource {
     if (lineOrError instanceof Error) {
       throw lineOrError;
     }
+
+    if (!lineOrError) return null;
 
     const key = Buffer.from(lineOrError, "base64");
     log.info("Loaded data encryption key from stdin");

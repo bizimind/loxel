@@ -109,5 +109,5 @@ Review sessions live in a SQLite file at `~/.local/state/loxel/loxel/comments/{r
 ## See also
 
 - [Diff Viewer](/docs/diff-viewer) — the diff context where comments are anchored; covers split/unified modes and synchronized scrolling
-- [Coding Agent](/docs/coding-agent) — the agent that produces the code you review; iterations feed back into the same review session
+- [Terminals](/docs/terminals#tui-agents) — running the agents that produce the code you review; iterations feed back into the same review session
 - [Guide: Reviewing Agent Code](/docs/guide-reviewing-agent-code) — end-to-end walkthrough of the review workflow

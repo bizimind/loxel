@@ -6,7 +6,7 @@ order: 14
 
 All shortcuts use the "Loxel Default" template and are fully customizable in Settings > Keybindings (`Cmd+,`). Shortcuts use macOS key names; `Cmd` is the Command key.
 
-For context on what each feature does, see [Terminals](/docs/terminals), [Drafts](/docs/drafts), [Coding Agent](/docs/coding-agent), [Editor](/docs/editor), [Worktrees & Projects](/docs/worktrees-and-projects), [Panel Layout](/docs/panel-layout), [Git](/docs/git), and [Diff Viewer](/docs/diff-viewer).
+For context on what each feature does, see [Terminals](/docs/terminals), [Drafts](/docs/drafts), [Editor](/docs/editor), [Worktrees & Projects](/docs/worktrees-and-projects), [Panel Layout](/docs/panel-layout), [Git](/docs/git), and [Diff Viewer](/docs/diff-viewer).
 
 ---
 
@@ -17,7 +17,6 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 | New terminal                       | `Cmd+T` or `` Ctrl+Shift+` ``                                |
 | New markdown draft                 | `Cmd+Shift+M` or `Cmd+N`                                     |
 | New drawing                        | `Cmd+Shift+D`                                                |
-| New agent                          | `Cmd+Shift+A`                                                |
 | New browser                        | `Cmd+Shift+B`                                                |
 | New tab of the active panel's type | `Cmd+\` then `Enter`                                         |
 | Close panel                        | `Cmd+W`                                                      |
@@ -31,12 +30,12 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 
 Splits are chords: press `Cmd+\`, release, then press the next key. The status bar shows the keys typed so far; `Esc` cancels.
 
-| Action                                  | Shortcut                                                                                        |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Split the active panel (same type)      | `Cmd+\` then an arrow                                                                           |
-| Split as a new panel type               | `Cmd+\` then `T` terminal / `A` agent / `M` markdown / `D` drawing / `B` browser, then an arrow |
-| Open a panel type as a tab in the group | `Cmd+\` then the type letter, then `Enter`                                                      |
-| Move the active tab into a new split    | `Cmd+\` then `Shift+Arrow`                                                                      |
+| Action                                  | Shortcut                                                                            |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| Split the active panel (same type)      | `Cmd+\` then an arrow                                                               |
+| Split as a new panel type               | `Cmd+\` then `T` terminal / `M` markdown / `D` drawing / `B` browser, then an arrow |
+| Open a panel type as a tab in the group | `Cmd+\` then the type letter, then `Enter`                                          |
+| Move the active tab into a new split    | `Cmd+\` then `Shift+Arrow`                                                          |
 
 ---
 
@@ -76,7 +75,6 @@ In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G`
 | Git              | `Ctrl+Shift+G` |
 | Comments         | `Ctrl+Shift+R` |
 | Logs             | `Ctrl+Shift+L` |
-| Fork Tree        | `Ctrl+Shift+K` |
 | Worktree sidebar | `Ctrl+Alt+B`   |
 
 ---

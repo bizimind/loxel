@@ -15,8 +15,6 @@ import { delimiter, join } from "node:path";
 import type { GoEnv } from "@/api/go-env-model";
 import { repeatUntil } from "@/test/repeat-until";
 
-import type { EnvChange } from "./toolchain-env-contributor";
-
 // Choices live in the store database; keep the tests' state out of the real one.
 const stateRoot = await realpath(await mkdtemp(join(tmpdir(), "loxel-go-choice-")));
 process.env.LOXEL_STATE_DIR = join(stateRoot, "state");
@@ -574,7 +572,6 @@ describe("goToolchainEnv", () => {
     await cacheToolchain("1.26.3");
     await writeFile(join(wt, "go.mod"), "module x\n\ngo 1.26.3\n");
     expect(await goToolchainEnv.resolveForTerminal(wt)).toBeNull();
-    expect(await goToolchainEnv.resolveForAgent(wt)).toBeNull();
     expect(await calls()).toEqual([]);
   });
 
@@ -586,11 +583,6 @@ describe("goToolchainEnv", () => {
     const env = { PATH: `/usr/bin${delimiter}${join(root, "bin")}`, HOME: "/h" };
     await change?.(env, "/bin/zsh");
     expect(env).toEqual({ PATH: `${join(root, "bin")}${delimiter}/usr/bin`, HOME: "/h" });
-
-    const agentChange = await goToolchainEnv.resolveForAgent(wt);
-    const agentEnv = { PATH: "/usr/bin" };
-    agentChange?.(agentEnv);
-    expect(agentEnv).toEqual({ PATH: `${join(root, "bin")}${delimiter}/usr/bin` });
   });
 
   test("changes nothing when the chosen Go is gone", async () => {
@@ -599,20 +591,6 @@ describe("goToolchainEnv", () => {
     setGoChoice(wt, go);
     await rm(go);
     expect(await goToolchainEnv.resolveForTerminal(wt)).toBeNull();
-  });
-
-  test("tells the agent when the choice changes", async () => {
-    const { wt, installGo } = await setup();
-    const root = await makeDir("go-chosen-");
-    const resolved = new Promise<() => Promise<EnvChange | null>>((done) => {
-      cleanups.push(goToolchainEnv.subscribeForAgent(wt, done));
-    });
-    setGoChoice(wt, await installGo("1.24.1", root));
-    await getGoEnv(wt);
-    const change = await (await resolved)();
-    const env = { PATH: "/usr/bin" };
-    change?.(env);
-    expect(env.PATH.split(delimiter)[0]).toBe(join(root, "bin"));
   });
 });
 

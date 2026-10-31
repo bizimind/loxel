@@ -1,5 +1,3 @@
-import type { SessionConfig } from "@bizimind/coding-agent";
-
 import type { OpenTerminalRequest } from "@/open-request";
 
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
@@ -9,50 +7,6 @@ import type { PanelOpenOptions } from "./panel-placement-model";
 import type { DirEntry } from "./project-files-model";
 import type { ToolchainChangedMessage } from "./toolchain-status-model";
 import type { UpdateState } from "./update-model";
-
-export type AgentStatus = "starting" | "ready" | "running" | "waiting" | "exited";
-
-/** Options for creating a new coding-agent session, derived from SessionConfig. */
-export type AgentSessionOptions = Pick<
-  SessionConfig,
-  "models" | "mode" | "profile" | "declaredTools"
->;
-
-/** Derive agent session status from a protocol event type. Returns undefined if no status change. */
-export function deriveAgentStatus(eventType: string): AgentStatus | undefined {
-  switch (eventType) {
-    case "session.started":
-    case "session.resumed":
-    case "session.rewound":
-    case "run.completed":
-    case "run.failed":
-    case "run.cancelled":
-    case "plan.mode.entered":
-    case "plan.mode.exited":
-      return "ready";
-    case "run.started":
-    case "human.input.response":
-    case "approval.granted":
-    case "approval.denied":
-      return "running";
-    case "human.input.requested":
-    case "approval.requested":
-      return "waiting";
-    default:
-      return undefined;
-  }
-}
-
-/** Minimal protocol event shape forwarded from the coding-agent subprocess. */
-export interface AgentEventPayload {
-  type: string;
-  session_id: string;
-  run_id?: string;
-  request_id?: string;
-  timestamp: string;
-  payload: Record<string, unknown>;
-  [key: string]: unknown;
-}
 
 /**
  * Who moved a file: Loxel (a file operation in any window) or another process. Only moves from
@@ -95,15 +49,6 @@ export type WsMessage =
   | { type: "error"; message: string }
   | { type: "terminal_exit"; id: string; exitCode: number }
   | ({ type: "terminal_state" } & TerminalState)
-  | { type: "agent_event"; id: string; seq: number; event: AgentEventPayload }
-  | { type: "agent_exit"; id: string; exitCode: number }
-  | {
-      type: "agent_sessions";
-      scopeKey: string;
-      sessions: Array<{ id: string; status: string; codingAgentSessionId: string | null }>;
-    }
-  | { type: "agent_replay_done"; id: string }
-  | { type: "agent_error"; id: string; message: string }
   | { type: "log_entries"; data: LogEntry[] }
   | { type: "log_error_count"; delta: number }
   | { type: "log_error_snapshot"; total: number }
@@ -240,21 +185,6 @@ export type WsClientMessage =
    * `terminal_state` carried `syncOffset`; acks for an older sync are ignored.
    */
   | { type: "terminal_ack"; id: string; syncOffset: number; bytes: number }
-  | {
-      type: "agent_create";
-      id: string;
-      scopeKey: string;
-      workspaceRoot: string;
-      sessionOptions?: AgentSessionOptions;
-      /** If set, resume this existing forked coding-agent session instead of starting a new one. */
-      forkedSessionId?: string;
-      /** If set with forkedSessionId, rewind to this message (the fork point). */
-      forkPointMessageId?: string;
-    }
-  | { type: "agent_request"; id: string; request: Record<string, unknown> }
-  | { type: "agent_destroy"; id: string }
-  | { type: "agent_detach"; id: string }
-  | { type: "agent_list"; scopeKey: string }
   // External files
   | { type: "close_external_file"; worktreePath: string; filePath: string }
   | { type: "register_external_files"; worktreePath: string; filePaths: string[] }

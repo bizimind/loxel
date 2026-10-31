@@ -62,7 +62,7 @@ Loxel moves the file and any open editor for it keeps working — no need to reo
 
 ## Workflow example
 
-A common pattern when working with the coding agent:
+A common pattern when working with a coding agent:
 
 1. `Cmd+N` — open a markdown draft and outline the approach
 2. Point the agent at the draft — paste its contents or its path into the prompt
@@ -76,5 +76,5 @@ The same works for architecture diagrams: `Cmd+Shift+D`, sketch the system, drag
 ## See also
 
 - [Editor](/docs/editor) — autosave behavior that applies equally to drafts; format on save
-- [Coding Agent](/docs/coding-agent) — handing draft context documents to the agent
+- [Terminals](/docs/terminals#tui-agents) — running the agent you hand draft context documents to
 - [Worktrees & Projects](/docs/worktrees-and-projects) — drafts are scoped per project + worktree, just like layout state

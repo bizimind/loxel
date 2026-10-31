@@ -9,7 +9,6 @@ import type { ServerWebSocket } from "bun";
 import type { StatusInfo, WorktreeEntry } from "@/api/git-models";
 import type { DirEntry } from "@/api/project-files-model";
 import type {
-  AgentEventPayload,
   FileMoveSource,
   TerminalSpawnTarget,
   WsClientMessage,
@@ -22,7 +21,6 @@ import {
   parseBinaryHeader,
 } from "@/api/ws-protocol";
 
-import { AgentManager } from "./agent-manager";
 import { config, getDetachedDir, hash12 } from "./config";
 import { DetachedFilesService } from "./detached-files-service";
 import { ExternalFilesService } from "./external-files-service";
@@ -788,7 +786,6 @@ let shuttingDown = false;
 
 const clients = new Map<ServerWebSocket<WsData>, ClientState>();
 const terminalOwners = new Map<string, ServerWebSocket<WsData>>();
-const agentOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
 const terminalManager = new TerminalManager({
   isSequenceEnabled: isNotificationSequenceEnabled,
@@ -809,7 +806,6 @@ const terminalManager = new TerminalManager({
     terminalOwners.delete(session.id);
   },
 });
-const agentManager = new AgentManager();
 const notificationStore = new NotificationStore();
 const schemaService = new SchemaService();
 const formatService = new FormatService();
@@ -955,82 +951,6 @@ function handleJsonMessage(ws: ServerWebSocket<WsData>, msg: WsClientMessage) {
       break;
     }
 
-    case "agent_create": {
-      const existingOwner = agentOwners.get(msg.id);
-      if (existingOwner && existingOwner !== ws) {
-        agentManager.detach(msg.id);
-      }
-
-      agentOwners.set(msg.id, ws);
-
-      const onEvent = (id: string, event: AgentEventPayload, seq: number) => {
-        const owner = agentOwners.get(id);
-        if (owner) sendTo(owner, { type: "agent_event", id, seq, event });
-      };
-      const onExit = (id: string, exitCode: number) => {
-        const owner = agentOwners.get(id);
-        if (owner) sendTo(owner, { type: "agent_exit", id, exitCode });
-      };
-
-      // Three distinct paths: reattach existing, create from fork, or create new
-      const reconnected = agentManager.reconnectClient(msg.id, onEvent, onExit);
-      if (!reconnected) {
-        const baseOptions = {
-          workspaceRoot: msg.workspaceRoot,
-          scopeKey: msg.scopeKey,
-          sessionOptions: msg.sessionOptions,
-        };
-        if (msg.forkedSessionId) {
-          agentManager.createFromFork(
-            msg.id,
-            {
-              ...baseOptions,
-              forkedSessionId: msg.forkedSessionId,
-              forkPointMessageId: msg.forkPointMessageId,
-            },
-            onEvent,
-            onExit,
-          );
-        } else {
-          agentManager.create(msg.id, baseOptions, onEvent, onExit);
-        }
-      }
-
-      sendTo(ws, { type: "agent_replay_done", id: msg.id });
-      break;
-    }
-
-    case "agent_request": {
-      if (agentOwners.get(msg.id) !== ws) break;
-      const sent = agentManager.sendRequest(msg.id, msg.request);
-      if (!sent) {
-        sendTo(ws, { type: "agent_error", id: msg.id, message: "Session not found or exited" });
-      }
-      break;
-    }
-
-    case "agent_destroy": {
-      if (agentOwners.get(msg.id) !== ws) break;
-      agentOwners.delete(msg.id);
-      agentManager.destroy(msg.id).catch((err: unknown) => {
-        log.error(`Failed to destroy agent session ${msg.id.slice(0, 8)}`, { error: err });
-      });
-      break;
-    }
-
-    case "agent_detach": {
-      if (agentOwners.get(msg.id) !== ws) break;
-      agentOwners.delete(msg.id);
-      agentManager.detach(msg.id);
-      break;
-    }
-
-    case "agent_list": {
-      const sessions = agentManager.getSessionsByScope(msg.scopeKey);
-      sendTo(ws, { type: "agent_sessions", scopeKey: msg.scopeKey, sessions });
-      break;
-    }
-
     // --- Notifications ---
 
     case "notification_dismiss": {
@@ -1096,19 +1016,9 @@ function createTerminalSink(ws: ServerWebSocket<WsData>, id: string): TerminalSi
   };
 }
 
-/** Detach (not destroy) all agent sessions owned by this client. */
-function detachClientAgents(ws: ServerWebSocket<WsData>) {
-  for (const [id, owner] of agentOwners) {
-    if (owner === ws) {
-      agentManager.detach(id);
-      agentOwners.delete(id);
-    }
-  }
-}
-
 // --- Startup ---
 
-// Load encryption key from Keychain (macOS) — must complete before any secret access
+// Take the encryption key from Electron, if it has one, before any secret access.
 await initSecretStore();
 
 // Resolve the login shell env for spawned tools (hooks, terminals, language servers) while the
@@ -1305,14 +1215,13 @@ const server = Bun.serve<WsData>({
       }
       unsubscribeAllWorktrees(ws);
       detachClientTerminals(ws);
-      detachClientAgents(ws);
       logSubscribers.delete(ws);
       clients.delete(ws);
       if (lastFocusedClient === ws) lastFocusedClient = null;
       log.debug(`Client disconnected (${clients.size} remaining)`);
 
       if (clients.size === 0 && !idleShutdownTimer && !shuttingDown) {
-        const hasOrphans = terminalManager.hasOrphanSessions() || agentManager.hasOrphanSessions();
+        const hasOrphans = terminalManager.hasOrphanSessions();
         if (hasOrphans) {
           // Orphaned sessions exist — give clients time to reconnect (e.g. after hibernation wake)
           // before destroying them and shutting down
@@ -1408,7 +1317,6 @@ function shutdown(exitCode = 0) {
   }
 
   terminalManager.destroyAll();
-  agentManager.destroyAll().catch(() => {});
   formatService.destroy();
   const lspServersStopped = Promise.all(
     [yamlLspManager, ...worktreeLspManagers].map((manager) => manager.destroy()),
