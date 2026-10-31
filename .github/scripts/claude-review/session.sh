@@ -106,7 +106,7 @@ save() {
       if ($r | length) == 0 then null else {
           costUsd: ($r | map(.total_cost_usd // 0) | max), turns: ($r | map(.num_turns // 0) | add),
           minutes: ($r | map(.duration_ms // 0) | add / 60000 | round),
-          h5: snap("five_hour"), d7: snap("seven_day")
+          d7: snap("seven_day")
         } end')" || stats="null"
   fi
   jq -n --arg session "$SESSION_ID" --arg last "$target" --argjson stats "$stats" \
