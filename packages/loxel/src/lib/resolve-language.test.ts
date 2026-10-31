@@ -38,6 +38,10 @@ describe("resolveLanguage for Python projects", () => {
     expect(resolve("/repo/notes.txt")).toBeNull();
   });
 
+  test("sniffs extensionless Kotlin scripts by shebang", () => {
+    expect(resolve("/repo/bin/deploy", "#!/usr/bin/env kotlin\nprintln(1)\n")).toBe("kotlin");
+  });
+
   test("sniffs extensionless Python scripts by shebang", () => {
     expect(resolve("/repo/bin/manage", "#!/usr/bin/env python3\nprint(1)\n")).toBe("python");
   });
