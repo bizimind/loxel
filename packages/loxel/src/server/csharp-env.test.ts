@@ -277,6 +277,20 @@ describe("isDotnetSafeToRun", () => {
     expect(await isDotnetSafeToRun(wt, vendor)).toBe(false);
   });
 
+  test("applyingOnly refuses sdk.paths when git cannot read the repository", async () => {
+    const { wt } = await makeRoot();
+    await trackedSdk(wt);
+    await rm(join(wt, ".git", "HEAD"));
+    expect(await isDotnetSafeToRun(wt, { env: { PATH: "" }, applyingOnly: true })).toBe(false);
+  });
+
+  test("applyingOnly needs no git for a global.json without sdk.paths", async () => {
+    const { wt } = await makeRoot();
+    await write(join(wt, "global.json"), '{"sdk":{"version":"10.0.100"}}');
+    await rm(join(wt, ".git", "HEAD"));
+    expect(await isDotnetSafeToRun(wt, { env: { PATH: "" }, applyingOnly: true })).toBe(true);
+  });
+
   test("with an untracked SDK a build script installed, and with one not installed", async () => {
     const { wt } = await makeRoot();
     await write(join(wt, ".gitignore"), ".dotnet/\n");

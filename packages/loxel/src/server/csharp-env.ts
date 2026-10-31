@@ -151,7 +151,13 @@ export async function isDotnetSafeToRun(
   try {
     const applying = await findGlobalJson(options.cwd ?? wtPath);
     if (options.applyingOnly) {
-      return !applying || isGlobalJsonSafe(await readGlobalJson(wtPath, applying, options));
+      if (!applying) return true;
+      const info = await readGlobalJson(wtPath, applying, options);
+      if (!isGlobalJsonSafe(info)) return false;
+      // A repository git cannot read reports nothing as tracked, which says nothing about `paths`.
+      if (!info.sdkPaths?.length) return true;
+      const { exitCode } = await runGit(wtPath, ["rev-parse", "--git-dir"]);
+      return exitCode === 0 || !findFileAbove(".git", wtPath);
     }
     // Later callers run dotnet from project directories, whose global.json can differ.
     // `icase`: on a case-insensitive disk the host opens any casing of the name.
