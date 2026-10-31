@@ -626,7 +626,7 @@ describe.skipIf(!CLANGD || process.platform === "win32")("ClangdLspManager with 
         const root = await makeDir();
         const marker = join(root, "ran");
         await mkdir(join(compilers, "sub"));
-        for (const program of ["evil-compiler", join("sub", "gcc")]) {
+        for (const program of ["project-compiler", join("sub", "gcc")]) {
           await fakeCompiler(join(compilers, program), marker);
           const file = await writeProject(root, join(compilers, program));
           await runWith(compilers, root, file);
@@ -641,10 +641,10 @@ describe.skipIf(!CLANGD || process.platform === "win32")("ClangdLspManager with 
       async () => {
         const root = await makeDir();
         const marker = join(root, "ran");
-        await fakeCompiler(join(root, "evil-compiler"), marker);
+        await fakeCompiler(join(root, "project-compiler"), marker);
         await fakeCompiler(join(root, "gcc"), marker);
         const climbing = `/usr/bin${"/..".repeat(4)}${join(root, "gcc")}`;
-        for (const compiler of ["./evil-compiler", "./gcc", join(root, "gcc"), climbing]) {
+        for (const compiler of ["./project-compiler", "./gcc", join(root, "gcc"), climbing]) {
           const file = await writeProject(root, compiler);
           await runClangd(root, file);
           expect(await exists(marker)).toBe(false);
