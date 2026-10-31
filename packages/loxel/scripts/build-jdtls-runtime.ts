@@ -96,4 +96,4 @@ try {
   rmSync(scratch, { recursive: true, force: true });
 }
 await Bun.write(versionFile, VERSION);
-console.log(`Installed: ${outDir}`);
+console.log(`Installed: ${outDir} (${(await Bun.$`du -sh ${outDir}`.text()).split("\t")[0]})`);
