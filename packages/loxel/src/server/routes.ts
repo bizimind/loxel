@@ -31,7 +31,6 @@ import {
 import type { DiffInfo } from "@/api/diff-model";
 import type { EditorConfigResponse } from "@/api/editorconfig-model";
 import type { FileOperationResult } from "@/api/file-operations-model";
-import type { JavaEnvCandidatesResponse, JavaEnvResponse } from "@/api/java-env-model";
 import type { LogLevel } from "@/api/log-entry-model";
 import { isLogCategory, LOG_LEVEL_PRIORITY } from "@/api/log-entry-model";
 import type { PanelPlacement } from "@/api/panel-placement-model";
@@ -43,12 +42,6 @@ import type {
   ScanSuggestionsResult,
   WorkspaceSetup,
 } from "@/api/project-model";
-import type {
-  PythonEnv,
-  PythonEnvCandidatesResponse,
-  PythonEnvResponse,
-  PythonInterpreter,
-} from "@/api/python-env-model";
 import type { SearchMatch } from "@/api/search-model";
 import type {
   NestedRemoval,
@@ -74,13 +67,6 @@ import type { HistoryStep } from "./file-operations-service";
 import { listFolderApps } from "./folder-apps";
 import type { FormatResult } from "./format-service";
 import * as git from "./git-commands";
-import {
-  getJavaEnvResolution,
-  listJavaRuntimes,
-  normalizeJavaOverride,
-  resolveJavaEnv,
-} from "./java-env";
-import { getJavaOverride, javaOverrideStoreKey, setJavaOverride } from "./java-override-store";
 import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
@@ -96,19 +82,13 @@ import {
   type ProjectWorktree,
   type WorktreeMetaUpdate,
 } from "./project-worktrees";
-import { getPythonEnv, listPythonEnvs, normalizePythonOverride } from "./python-env";
-import {
-  getPythonOverride,
-  pythonOverrideStoreKey,
-  setPythonOverride,
-} from "./python-override-store";
-import { pythonVersion } from "./python-version";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
 import { listOthers, worktreeTree } from "./server-state";
 import { scanSetupSuggestions } from "./setup-suggestions";
 import { buildSpawnEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 import * as storeDb from "./store-db";
 import {
   decryptModelKeys,
@@ -117,6 +97,7 @@ import {
   isEncryptedStoreKey,
 } from "./store-encryption";
 import { stress } from "./stress-detector";
+import { toolchainStatusModules } from "./toolchain-statuses";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
 import { getCurrentVersion } from "./version";
 import { findWorkspacePackages } from "./worktree-utils";
@@ -1064,9 +1045,9 @@ async function handleEditorConfig(req: Request, ctx: RouteContext): Promise<Resp
 
 /**
  * The worktree path of a `wt` query parameter, once it is known to be a real worktree of its
- * project: resolving a Python environment may run `poetry` in the directory.
+ * project: resolving a language's toolchain may run tools in the directory.
  */
-async function resolvePythonWorktree(req: Request, ctx: RouteContext): Promise<string | Response> {
+async function worktreeFromQuery(req: Request, ctx: RouteContext): Promise<string | Response> {
   const resolved = resolveWorktreeFromReq(req, ctx);
   if (resolved instanceof Response) return resolved;
   return validatedWorktreePath(resolved.wtPath, resolved.cwd);
@@ -1082,119 +1063,34 @@ async function validatedWorktreePath(wtPath: string, cwd: string): Promise<strin
   return absolute;
 }
 
-async function withVersion(env: PythonEnv, wtPath: string): Promise<PythonInterpreter> {
-  return { ...env, version: await pythonVersion(env.pythonPath, wtPath) };
-}
+/** Every language toolchain's GET routes, given the validated worktree of their `wt` parameter. */
+const toolchainGetRoutes = Object.fromEntries(
+  toolchainStatusModules
+    .flatMap(({ routes: { GET } }) => Object.entries(GET))
+    .map(([route, handle]): [string, RouteHandler] => [
+      route,
+      async (req, ctx) => {
+        const wtPath = await worktreeFromQuery(req, ctx);
+        return wtPath instanceof Response ? wtPath : handle(wtPath);
+      },
+    ]),
+);
 
-async function pythonEnvResponse(wtPath: string): Promise<PythonEnvResponse> {
-  const env = await getPythonEnv(wtPath);
-  return { env: env && (await withVersion(env, wtPath)), overridePath: getPythonOverride(wtPath) };
-}
-
-// GET /api/python-env?wt= — The Python interpreter Loxel uses for a worktree
-async function handlePythonEnv(req: Request, ctx: RouteContext): Promise<Response> {
-  const wtPath = await resolvePythonWorktree(req, ctx);
-  if (wtPath instanceof Response) return wtPath;
-  return json(await pythonEnvResponse(wtPath));
-}
-
-// GET /api/python-env/candidates?wt= — Interpreters the user can choose for a worktree
-async function handlePythonEnvCandidates(req: Request, ctx: RouteContext): Promise<Response> {
-  const wtPath = await resolvePythonWorktree(req, ctx);
-  if (wtPath instanceof Response) return wtPath;
-  const { candidates, automatic } = await listPythonEnvs(wtPath);
-  const response: PythonEnvCandidatesResponse = {
-    candidates: await Promise.all(candidates.map((env) => withVersion(env, wtPath))),
-    automaticPath: automatic?.pythonPath ?? null,
-    overridePath: getPythonOverride(wtPath),
-  };
-  return json(response);
-}
-
-// POST /api/python-env/override — Choose a worktree's interpreter, or (null) return to detection
-async function handlePythonOverride(req: Request, ctx: RouteContext): Promise<Response> {
-  const body = await parseBody(req);
-  const resolved = resolveProjectFromBody(body, ctx);
-  if (resolved instanceof Response) return resolved;
-  const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
-  if (wtPath instanceof Response) return wtPath;
-  const { pythonPath } = body;
-  if (pythonPath !== null && typeof pythonPath !== "string") {
-    return error("pythonPath must be a string or null", 400);
-  }
-  let chosen: string | null = null;
-  if (pythonPath !== null) {
-    try {
-      chosen = await normalizePythonOverride(wtPath, pythonPath);
-    } catch (err) {
-      return error(err instanceof Error ? err.message : "Invalid Python interpreter", 400);
-    }
-    // Language servers and terminals will run it, so take only what answers like a Python.
-    if (!(await pythonVersion(chosen, wtPath))) {
-      return error(`${chosen} did not report a Python version; is it a Python interpreter?`, 400);
-    }
-  }
-  setPythonOverride(wtPath, chosen);
-  return json(await pythonEnvResponse(wtPath));
-}
-
-/** The worktree path of a `wt` query parameter, once it is known to be a real worktree. */
-async function resolveJavaWorktree(req: Request, ctx: RouteContext): Promise<string | Response> {
-  const resolved = resolveWorktreeFromReq(req, ctx);
-  if (resolved instanceof Response) return resolved;
-  return validatedWorktreePath(resolved.wtPath, resolved.cwd);
-}
-
-async function javaEnvResponse(wtPath: string): Promise<JavaEnvResponse> {
-  const { env, ignoredJavaHome } = await getJavaEnvResolution(wtPath);
-  return { env, overridePath: getJavaOverride(wtPath), ignoredJavaHome };
-}
-
-// GET /api/java-env?wt= — The JDK Loxel uses for a worktree
-async function handleJavaEnv(req: Request, ctx: RouteContext): Promise<Response> {
-  const wtPath = await resolveJavaWorktree(req, ctx);
-  if (wtPath instanceof Response) return wtPath;
-  return json(await javaEnvResponse(wtPath));
-}
-
-// GET /api/java-env/candidates?wt= — JDKs the user can choose for a worktree
-async function handleJavaEnvCandidates(req: Request, ctx: RouteContext): Promise<Response> {
-  const wtPath = await resolveJavaWorktree(req, ctx);
-  if (wtPath instanceof Response) return wtPath;
-  const [candidates, automatic] = await Promise.all([
-    listJavaRuntimes(wtPath),
-    resolveJavaEnv(wtPath, { overridePath: null }),
-  ]);
-  const response: JavaEnvCandidatesResponse = {
-    candidates,
-    automatic: automatic.env,
-    overridePath: getJavaOverride(wtPath),
-  };
-  return json(response);
-}
-
-// POST /api/java-env/override — Choose a worktree's JDK, or (null) return to detection
-async function handleJavaOverride(req: Request, ctx: RouteContext): Promise<Response> {
-  const body = await parseBody(req);
-  const resolved = resolveProjectFromBody(body, ctx);
-  if (resolved instanceof Response) return resolved;
-  const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
-  if (wtPath instanceof Response) return wtPath;
-  const { javaHome } = body;
-  if (javaHome !== null && typeof javaHome !== "string") {
-    return error("javaHome must be a string or null", 400);
-  }
-  let chosen: string | null = null;
-  if (javaHome !== null) {
-    try {
-      chosen = await normalizeJavaOverride(wtPath, javaHome);
-    } catch (err) {
-      return error(err instanceof Error ? err.message : "Invalid JDK", 400);
-    }
-  }
-  setJavaOverride(wtPath, chosen);
-  return json(await javaEnvResponse(wtPath));
-}
+/** Every language toolchain's POST routes, given the validated worktree of `worktreePath`. */
+const toolchainPostRoutes = Object.fromEntries(
+  toolchainStatusModules
+    .flatMap(({ routes: { POST } }) => Object.entries(POST))
+    .map(([route, handle]): [string, RouteHandler] => [
+      route,
+      async (req, ctx) => {
+        const body = await parseBody(req);
+        const resolved = resolveProjectFromBody(body, ctx);
+        if (resolved instanceof Response) return resolved;
+        const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
+        return wtPath instanceof Response ? wtPath : handle(wtPath, body);
+      },
+    ]),
+);
 
 // ---------------------------------------------------------------------------
 // Service-dependent routes: files panel
@@ -1811,10 +1707,12 @@ function validateCloneUrl(url: string): void {
 }
 
 async function createInitialCommit(bareRepoPath: string): Promise<void> {
-  const result = Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "Initial commit"], {
-    cwd: bareRepoPath,
-    env: { ...process.env, GIT_DIR: bareRepoPath, GIT_WORK_TREE: bareRepoPath },
-  });
+  const result = measureSpawn("git commit", () =>
+    Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "Initial commit"], {
+      cwd: bareRepoPath,
+      env: { ...process.env, GIT_DIR: bareRepoPath, GIT_WORK_TREE: bareRepoPath },
+    }),
+  );
   if (result.exitCode !== 0) {
     throw new Error(`Failed to create initial commit: ${result.stderr.toString()}`);
   }
@@ -1917,7 +1815,9 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   mkdirSync(projectDir, { recursive: true });
 
   if (setup === "single") {
-    const result = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: projectDir });
+    const result = measureSpawn("git init", () =>
+      Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: projectDir }),
+    );
     if (result.exitCode !== 0) return error("git init failed", 500);
   } else {
     await initBareRepo(projectDir, "main");
@@ -1965,7 +1865,9 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   if (setup === "single") {
     const repoName = repoNameFromUrl(url);
     const clonedPath = join(destDir, repoName);
-    const result = Bun.spawnSync(["git", "clone", "--", url, clonedPath]);
+    const result = measureSpawn("git clone", () =>
+      Bun.spawnSync(["git", "clone", "--", url, clonedPath]),
+    );
     if (result.exitCode !== 0) {
       return error(`git clone failed: ${result.stderr.toString()}`, 500);
     }
@@ -1985,7 +1887,9 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   const repoName = repoNameFromUrl(url);
   const bareDir = join(destDir, `${repoName}.git`);
 
-  const result = Bun.spawnSync(["git", "clone", "--bare", "--", url, bareDir]);
+  const result = measureSpawn("git clone", () =>
+    Bun.spawnSync(["git", "clone", "--bare", "--", url, bareDir]),
+  );
   if (result.exitCode !== 0) {
     return error(`git clone --bare failed: ${result.stderr.toString()}`, 500);
   }
@@ -2037,7 +1941,9 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
   }
 
   if (setup === "single") {
-    const result = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath });
+    const result = measureSpawn("git init", () =>
+      Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath }),
+    );
     if (result.exitCode !== 0) return error("git init failed", 500);
   } else {
     // For non-empty directories: init as regular repo first, then convert to bare.
@@ -2047,13 +1953,17 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     const hasFiles = entries.some((e) => !e.startsWith("."));
 
     if (hasFiles) {
-      const initResult = Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath });
+      const initResult = measureSpawn("git init", () =>
+        Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath }),
+      );
       if (initResult.exitCode !== 0) return error("git init failed", 500);
-      const addResult = Bun.spawnSync(["git", "add", "."], { cwd: dirPath });
+      const addResult = measureSpawn("git add", () =>
+        Bun.spawnSync(["git", "add", "."], { cwd: dirPath }),
+      );
       if (addResult.exitCode !== 0) return error("git add failed", 500);
-      const commitResult = Bun.spawnSync(["git", "commit", "-m", "Initial commit"], {
-        cwd: dirPath,
-      });
+      const commitResult = measureSpawn("git commit", () =>
+        Bun.spawnSync(["git", "commit", "-m", "Initial commit"], { cwd: dirPath }),
+      );
       if (commitResult.exitCode !== 0) {
         return error(`git commit failed: ${commitResult.stderr.toString()}`, 500);
       }
@@ -2537,10 +2447,11 @@ async function removeOneWorktree(
     wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
     ctx.completeWorktreeRemoval(wtPath);
     // A worktree later created at the same path starts with an empty Others section and its own
-    // Python interpreter and JDK detection.
+    // toolchain detection.
     storeDb.deleteStore(externalFoldersStoreKey(wtPath));
-    storeDb.deleteStore(pythonOverrideStoreKey(wtPath));
-    storeDb.deleteStore(javaOverrideStoreKey(wtPath));
+    for (const { overrideStoreKey } of toolchainStatusModules) {
+      storeDb.deleteStore(overrideStoreKey(wtPath));
+    }
     return result;
   } catch (err) {
     try {
@@ -3185,7 +3096,9 @@ async function handleSearch(req: Request, ctx: RouteContext): Promise<Response> 
   }
 
   try {
-    const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() });
+    const proc = measureSpawn("rg", () =>
+      Bun.spawn(args, { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() }),
+    );
     const result = await collectSearchMatches(proc, maxResults, req.signal);
     const exitCode = await proc.exited;
 
@@ -3280,9 +3193,12 @@ const BINARY_EXTENSIONS = new Set([
 async function collectWorktreeFileIndex(
   wtPath: string,
 ): Promise<{ dirs: string[]; extensions: string[] }> {
-  const proc = Bun.spawn(
-    ["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath],
-    { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() },
+  const proc = measureSpawn("rg", () =>
+    Bun.spawn(["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: buildSpawnEnv(),
+    }),
   );
   const text = await new Response(proc.stdout).text();
   await proc.exited;
@@ -3324,9 +3240,12 @@ const FILE_INDEX_MAX_FILES = 100_000;
 
 /** Use ripgrep --files to collect all relative file paths in the worktree for quick-open search. */
 async function collectFileList(wtPath: string): Promise<{ files: string[]; truncated: boolean }> {
-  const proc = Bun.spawn(
-    ["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath],
-    { stdout: "pipe", stderr: "pipe", env: buildSpawnEnv() },
+  const proc = measureSpawn("rg", () =>
+    Bun.spawn(["rg", "--files", "--hidden", "--glob", "!.git/", "--sort", "path", wtPath], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: buildSpawnEnv(),
+    }),
   );
   const text = await new Response(proc.stdout).text();
   await proc.exited;
@@ -3394,10 +3313,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/version": handleGetVersion,
     "/api/update/status": handleGetUpdateStatus,
     "/api/detected-formatters": handleDetectedFormatters,
-    "/api/python-env": handlePythonEnv,
-    "/api/python-env/candidates": handlePythonEnvCandidates,
-    "/api/java-env": handleJavaEnv,
-    "/api/java-env/candidates": handleJavaEnvCandidates,
+    ...toolchainGetRoutes,
     "/api/editorconfig": handleEditorConfig,
   },
   POST: {
@@ -3451,8 +3367,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/open": handleOpen,
     "/api/external-folders/add": handleExternalFolderAdd,
     "/api/external-folders/remove": handleExternalFolderRemove,
-    "/api/python-env/override": handlePythonOverride,
-    "/api/java-env/override": handleJavaOverride,
+    ...toolchainPostRoutes,
   },
 };
 
@@ -3464,7 +3379,7 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
   const url = new URL(req.url);
   const method = req.method;
   const pathname = url.pathname;
-  stress.track("api-request", { method, path: pathname });
+  stress.track("api-request", `${method} ${pathname}`);
 
   // Static route table — checked first so dynamic patterns don't shadow named routes
   const handler = routes[method]?.[pathname];

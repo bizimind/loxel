@@ -1,3 +1,5 @@
+import type { ToolchainStatusDescriptor } from "./toolchain-status-model";
+
 /** Where a worktree's JDK was found, listed in resolution order. */
 export type JavaEnvSource =
   | "override"
@@ -47,3 +49,10 @@ export interface JavaOverrideRequest {
   worktreePath: string;
   javaHome: string | null;
 }
+
+export const javaToolchain = {
+  id: "java",
+  languageIds: ["java"],
+  changedMessage: "java_env_changed",
+  selectAction: { id: "java.selectRuntime", label: "Java: Select JDK" },
+} as const satisfies ToolchainStatusDescriptor;

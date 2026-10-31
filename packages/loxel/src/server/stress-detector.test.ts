@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { LogFn } from "./stress-detector";
+import type { LogFn, StressCheckpointConfig } from "./stress-detector";
 import { createStressDetector } from "./stress-detector";
 
 interface LogCall {
@@ -9,242 +9,221 @@ interface LogCall {
   ctx: Record<string, unknown>;
 }
 
-function setup(checkpoints: Parameters<typeof createStressDetector>[0]) {
+function setup(checkpoints: Record<string, StressCheckpointConfig>) {
   const logs: LogCall[] = [];
   const logFn: LogFn = (level, msg, ctx) => logs.push({ level, msg, ctx });
-  const detector = createStressDetector(checkpoints, logFn);
-  return { detector, logs };
+  let time = 1_000_000;
+  const detector = createStressDetector(checkpoints, { logFn, now: () => time });
+  return {
+    detector,
+    logs,
+    advance: (ms: number) => {
+      time += ms;
+    },
+    fire: (name: string, times: number, key?: string) => {
+      for (let i = 0; i < times; i++) detector.track(name, key);
+    },
+  };
 }
+
+const summaries = (logs: LogCall[]) => logs.filter((l) => l.msg.includes("back to normal"));
 
 describe("stress-detector", () => {
   test("track on unknown checkpoint is a no-op", () => {
     const { detector, logs } = setup({ known: { rate: 5 } });
     detector.track("unknown");
-    detector.track("unknown", { foo: 1 });
+    detector.track("unknown", "foo");
     expect(logs).toHaveLength(0);
     detector.dispose();
   });
 
-  test("rate-only: no logs below warn threshold", () => {
-    const { detector, logs } = setup({ test: { rate: 10, windowMs: 60_000 } });
-    // warnThreshold = floor(10 * 0.5) = 5
-    for (let i = 0; i < 5; i++) {
-      detector.track("test");
-    }
+  test("no logs at or below the warn threshold", () => {
+    const { detector, logs, fire } = setup({ test: { rate: 10 } });
+    fire("test", 5); // warnThreshold = floor(10 * 0.5) = 5
     expect(logs).toHaveLength(0);
     detector.dispose();
   });
 
-  test("rate-only: warn at 50%, error at 100%", () => {
-    const { detector, logs } = setup({ test: { rate: 10, windowMs: 60_000 } });
-    // warnThreshold = 5, error threshold = 10
-    for (let i = 0; i < 11; i++) {
-      detector.track("test");
-    }
+  test("warns entering an elevated rate and errors escalating to a high one", () => {
+    const { detector, logs, fire } = setup({ test: { rate: 10 } });
+    fire("test", 11);
     expect(logs).toHaveLength(2);
     expect(logs[0]!.level).toBe("warn");
     expect(logs[0]!.msg).toContain("[stress]");
-    expect(logs[0]!.ctx.count).toBe(6); // first call > 5
+    expect(logs[0]!.ctx.count).toBe(6);
     expect(logs[0]!.ctx.warnThreshold).toBe(5);
-
     expect(logs[1]!.level).toBe("error");
-    expect(logs[1]!.ctx.count).toBe(11); // first call > 10
+    expect(logs[1]!.ctx.count).toBe(11);
     expect(logs[1]!.ctx.threshold).toBe(10);
     detector.dispose();
   });
 
-  test("alerts only once per window", () => {
-    const { detector, logs } = setup({ test: { rate: 5, windowMs: 60_000 } });
-    for (let i = 0; i < 20; i++) {
-      detector.track("test");
+  test("a sustained high rate logs its entry once, not once per window", () => {
+    const { detector, logs, fire, advance } = setup({ test: { rate: 5, windowMs: 1000 } });
+    for (let window = 0; window < 60; window++) {
+      fire("test", 20);
+      advance(1000);
     }
-    // Should have exactly 1 warn + 1 error, not repeated
-    expect(logs).toHaveLength(2);
-    expect(logs[0]!.level).toBe("warn");
-    expect(logs[1]!.level).toBe("error");
+    expect(logs.map((l) => l.level)).toEqual(["warn", "error"]);
     detector.dispose();
   });
 
-  test("rate+params: different params are independent", () => {
-    const { detector, logs } = setup({ test: { rate: 10, windowMs: 60_000 } });
-    const paramsA = { type: "a" };
-    const paramsB = { type: "b" };
-
-    // 4 calls each — below per-param warn threshold (5) but global is 8
-    for (let i = 0; i < 4; i++) {
-      detector.track("test", paramsA);
-      detector.track("test", paramsB);
-    }
-    // Global: 8 calls > warn(5), no error(10). Per-param: 4 each < warn(5).
-    // So: 1 global warn only.
-    const warns = logs.filter((l) => l.level === "warn");
-    const errors = logs.filter((l) => l.level === "error");
-    expect(warns).toHaveLength(1);
-    expect(warns[0]!.ctx.params).toBeUndefined(); // global counter has no params
-    expect(errors).toHaveLength(0);
+  test("a sustained elevated rate escalates when it later goes high", () => {
+    const { detector, logs, fire, advance } = setup({ test: { rate: 10, windowMs: 1000 } });
+    fire("test", 6);
+    advance(1000);
+    fire("test", 6);
+    expect(logs.map((l) => l.level)).toEqual(["warn"]);
+    advance(1000);
+    fire("test", 11);
+    expect(logs.map((l) => l.level)).toEqual(["warn", "error"]);
     detector.dispose();
   });
 
-  test("rate+params: identical params trigger per-param alert", () => {
-    const { detector, logs } = setup({ test: { rate: 5, windowMs: 60_000 } });
-    const params = { type: "loop" };
-
-    for (let i = 0; i < 8; i++) {
-      detector.track("test", params);
-    }
-    // Both global and per-param should have warn + error = 4 total logs
-    const warns = logs.filter((l) => l.level === "warn");
-    const errors = logs.filter((l) => l.level === "error");
-    expect(warns).toHaveLength(2); // global warn + param warn
-    expect(errors).toHaveLength(2); // global error + param error
-
-    // Param logs should include the params context
-    const paramLogs = logs.filter((l) => l.ctx.params !== undefined);
-    expect(paramLogs).toHaveLength(2); // param warn + param error
-    expect(paramLogs[0]!.ctx.params).toEqual({ type: "loop" });
-    detector.dispose();
-  });
-
-  test("window reset clears counters and allows new alerts (no cooldown)", async () => {
-    // cooldownWindows: 0 disables cooldown so alerts fire again in next window
-    const { detector, logs } = setup({ test: { rate: 3, windowMs: 1, cooldownWindows: 0 } });
-
-    // Exceed threshold — should get warn + error
-    for (let i = 0; i < 5; i++) {
-      detector.track("test");
-    }
+  test("summarises once when the rate has stayed low for calmWindows", () => {
+    const { detector, logs, fire, advance } = setup({
+      test: { rate: 10, windowMs: 1000, calmWindows: 3 },
+    });
+    fire("test", 30);
+    advance(1000);
+    fire("test", 8); // still above the warn threshold: last hot moment
+    advance(1000);
     expect(logs).toHaveLength(2);
 
-    // Wait for window to elapse
-    await Bun.sleep(5);
-
-    // New window — should be able to alert again
-    for (let i = 0; i < 5; i++) {
-      detector.track("test");
+    for (let window = 0; window < 3; window++) {
+      fire("test", 1);
+      advance(1000);
     }
-    expect(logs).toHaveLength(4); // 2 from first window + 2 from second
+    fire("test", 1); // closes the third calm window
+    const summary = summaries(logs);
+    expect(summary).toHaveLength(1);
+    expect(summary[0]!.level).toBe("warn");
+    expect(summary[0]!.ctx).toMatchObject({ level: "high", peakCount: 30, durationMs: 1000 });
+    detector.dispose();
+  });
+
+  test("a brief dip does not end the episode", () => {
+    const { detector, logs, fire, advance } = setup({
+      test: { rate: 10, windowMs: 1000, calmWindows: 3 },
+    });
+    for (let burst = 0; burst < 10; burst++) {
+      fire("test", 11);
+      advance(1000);
+      fire("test", 1);
+      advance(1000);
+    }
+    expect(logs.map((l) => l.level)).toEqual(["warn", "error"]);
+    detector.dispose();
+  });
+
+  test("a new episode logs again after the previous one ended", () => {
+    const { detector, logs, fire, advance } = setup({
+      test: { rate: 5, windowMs: 1000, calmWindows: 1 },
+    });
+    fire("test", 6);
+    advance(2000);
+    detector.sweep();
+    expect(summaries(logs)).toHaveLength(1);
+    fire("test", 6);
+    expect(logs.map((l) => l.level)).toEqual(["warn", "error", "warn", "warn", "error"]);
+    detector.dispose();
+  });
+
+  test("sweep ends the episode of a rate that stopped entirely", () => {
+    const { detector, logs, fire, advance } = setup({
+      test: { rate: 5, windowMs: 1000, calmWindows: 5 },
+    });
+    fire("test", 6);
+    advance(4000);
+    detector.sweep();
+    expect(summaries(logs)).toHaveLength(0);
+    advance(2000);
+    detector.sweep();
+    expect(summaries(logs)).toHaveLength(1);
+    detector.dispose();
+  });
+
+  test("rate+key: different keys are independent", () => {
+    const { detector, logs, fire } = setup({ test: { rate: 10 } });
+    fire("test", 4, "a");
+    fire("test", 4, "b");
+    // Global: 8 calls > warn(5), no error(10). Per key: 4 each < warn(5).
+    expect(logs.map((l) => l.level)).toEqual(["warn"]);
+    expect(logs[0]!.ctx.key).toBeUndefined();
+    detector.dispose();
+  });
+
+  test("rate+key: an identical key triggers its own alert", () => {
+    const { detector, logs, fire } = setup({ test: { rate: 5 } });
+    fire("test", 8, "loop");
+    expect(logs.filter((l) => l.level === "warn")).toHaveLength(2);
+    expect(logs.filter((l) => l.level === "error")).toHaveLength(2);
+    const keyed = logs.filter((l) => l.ctx.key !== undefined);
+    expect(keyed).toHaveLength(2);
+    expect(keyed[0]!.ctx.key).toBe("loop");
+    detector.dispose();
+  });
+
+  test("rate+key: a key's episode survives window rollover and is summarised once", () => {
+    const { detector, logs, fire, advance } = setup({
+      test: { rate: 5, windowMs: 1000, calmWindows: 2 },
+    });
+    for (let window = 0; window < 5; window++) {
+      fire("test", 8, "loop");
+      advance(1000);
+    }
+    expect(logs.filter((l) => l.ctx.key === "loop")).toHaveLength(2);
+    advance(2000);
+    detector.sweep();
+    const keyed = summaries(logs).filter((l) => l.ctx.key === "loop");
+    expect(keyed).toHaveLength(1);
+    expect(keyed[0]!.ctx.peakCount).toBe(8);
+    detector.dispose();
+  });
+
+  test("rate+key: a sweep mid-window does not lose a key's count", () => {
+    const { detector, logs, fire, advance } = setup({ test: { rate: 100, windowMs: 1000 } });
+    // Aligns the window, so the sweep below lands inside it.
+    detector.track("test");
+    fire("test", 40, "loop");
+    advance(500);
+    detector.sweep();
+    fire("test", 20, "loop");
+    expect(logs.filter((l) => l.ctx.key === "loop")).toHaveLength(1);
     detector.dispose();
   });
 
   test("custom warnRatio", () => {
-    const { detector, logs } = setup({ test: { rate: 10, windowMs: 60_000, warnRatio: 0.3 } });
-    // warnThreshold = floor(10 * 0.3) = 3
-    for (let i = 0; i < 4; i++) {
-      detector.track("test");
-    }
+    const { detector, logs, fire } = setup({ test: { rate: 10, warnRatio: 0.3 } });
+    fire("test", 4);
     expect(logs).toHaveLength(1);
     expect(logs[0]!.level).toBe("warn");
     expect(logs[0]!.ctx.warnThreshold).toBe(3);
     detector.dispose();
   });
 
-  test("param cap prevents unbounded growth", () => {
-    const { detector, logs } = setup({ test: { rate: 1000, windowMs: 60_000 } });
-
-    // Create 600 unique param sets — should cap at 500 internal entries
-    for (let i = 0; i < 600; i++) {
-      detector.track("test", { id: i });
-    }
+  test("key cap prevents unbounded growth", () => {
+    const { detector, logs } = setup({ test: { rate: 1000 } });
+    for (let i = 0; i < 600; i++) detector.track("test", String(i));
     // Should not OOM or throw. Global still tracks all 600 calls (warn at 501).
-    const globalWarn = logs.find((l) => l.level === "warn" && !l.ctx.params);
+    const globalWarn = logs.find((l) => l.level === "warn" && l.ctx.key === undefined);
     expect(globalWarn).toBeDefined();
     detector.dispose();
   });
 
   test("dispose makes subsequent tracks no-ops", () => {
-    const { detector, logs } = setup({ test: { rate: 5, windowMs: 60_000 } });
+    const { detector, logs, fire } = setup({ test: { rate: 5 } });
     detector.dispose();
-    for (let i = 0; i < 20; i++) {
-      detector.track("test");
-    }
+    fire("test", 20);
     expect(logs).toHaveLength(0);
   });
 
   test("multiple checkpoints are independent", () => {
-    const { detector, logs } = setup({
-      a: { rate: 3, windowMs: 60_000 },
-      b: { rate: 100, windowMs: 60_000 },
-    });
-
-    for (let i = 0; i < 5; i++) {
-      detector.track("a");
-      detector.track("b");
-    }
-    // 'a' should have warn + error (5 > 3), 'b' should have nothing (5 < 50 warn)
-    const aLogs = logs.filter((l) => l.ctx.checkpoint === "a");
-    const bLogs = logs.filter((l) => l.ctx.checkpoint === "b");
-    expect(aLogs).toHaveLength(2);
-    expect(bLogs).toHaveLength(0);
-    detector.dispose();
-  });
-
-  // --- Cooldown tests ---
-
-  test("cooldown suppresses logs after error alert", async () => {
-    // cooldownWindows: 2 — suppress for 2 windows after error
-    // Use 50ms windows (not 1ms) so the track loop never straddles a window boundary on slow CI
-    const { detector, logs } = setup({ test: { rate: 3, windowMs: 50, cooldownWindows: 2 } });
-
-    // Window 1: exceed threshold → warn + error, enters cooldown (remaining=2)
-    for (let i = 0; i < 5; i++) {
-      detector.track("test");
-    }
-    expect(logs).toHaveLength(2);
-
-    // Window 2: cooldown decrements 2→1, logs suppressed
-    await Bun.sleep(60);
-    for (let i = 0; i < 5; i++) {
-      detector.track("test");
-    }
-    expect(logs).toHaveLength(2); // still 2, cooldown suppressed
-
-    // Window 3: cooldown decrements 1→0, summary emitted, then new alerts fire
-    await Bun.sleep(60);
-    for (let i = 0; i < 5; i++) {
-      detector.track("test");
-    }
-    const summaryLogs = logs.filter((l) => l.msg.includes("Cooldown ended"));
-    expect(summaryLogs).toHaveLength(1);
-    expect(summaryLogs[0]!.ctx.peakCount).toBeGreaterThan(0);
-    expect(summaryLogs[0]!.ctx.durationMs).toBeGreaterThan(0);
-    // summary + new warn + new error = 3 new logs
-    expect(logs).toHaveLength(5); // 2 original + 1 summary + 2 new alerts
-    detector.dispose();
-  });
-
-  test("cooldown tracks peak count across suppressed windows", async () => {
-    // cooldownWindows: 2 so we get a full suppressed window to observe peak
-    // Use 50ms windows (not 1ms) so the track loop never straddles a window boundary on slow CI
-    const { detector, logs } = setup({ test: { rate: 3, windowMs: 50, cooldownWindows: 2 } });
-
-    // Window 1: trigger error with 5 calls → cooldown starts, peak=5
-    for (let i = 0; i < 5; i++) {
-      detector.track("test");
-    }
-
-    // Window 2: in cooldown (2→1), fire 10 calls — should update peak to 10
-    await Bun.sleep(60);
-    for (let i = 0; i < 10; i++) {
-      detector.track("test");
-    }
-
-    // Window 3: cooldown expires (1→0) — summary emitted with peak from window 2
-    await Bun.sleep(60);
-    detector.track("test"); // triggers window boundary → summary
-
-    const summary = logs.find((l) => l.msg.includes("Cooldown ended"));
-    expect(summary).toBeDefined();
-    expect(summary!.ctx.peakCount).toBe(10);
-    detector.dispose();
-  });
-
-  test("cooldownWindows: 0 disables cooldown", () => {
-    const { detector, logs } = setup({ test: { rate: 5, windowMs: 60_000, cooldownWindows: 0 } });
-    for (let i = 0; i < 20; i++) {
-      detector.track("test");
-    }
-    // No cooldown — just the normal warn + error
-    expect(logs).toHaveLength(2);
+    const { detector, logs, fire } = setup({ a: { rate: 3 }, b: { rate: 100 } });
+    fire("a", 5);
+    fire("b", 5);
+    expect(logs.filter((l) => l.ctx.checkpoint === "a")).toHaveLength(2);
+    expect(logs.filter((l) => l.ctx.checkpoint === "b")).toHaveLength(0);
     detector.dispose();
   });
 });

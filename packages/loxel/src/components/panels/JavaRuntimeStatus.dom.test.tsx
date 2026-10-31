@@ -13,13 +13,13 @@ const JDK: NonNullable<JavaEnvResponse["env"]> = {
   implementor: "Eclipse Adoptium",
 };
 
-const originalClient = await import("@/api/client");
+const originalClient = await import("@/api/java-env-client");
 const getJavaEnv = jest.fn(async (_wtPath: string): Promise<JavaEnvResponse> => ({
   env: JDK,
   overridePath: null,
   ignoredJavaHome: null,
 }));
-mock.module("@/api/client", () => ({ ...originalClient, getJavaEnv }));
+mock.module("@/api/java-env-client", () => ({ ...originalClient, getJavaEnv }));
 
 const originalRuntime = await import("@/lib/java-runtime");
 const selectJavaRuntime = jest.fn(async (_wtPath: string) => {});

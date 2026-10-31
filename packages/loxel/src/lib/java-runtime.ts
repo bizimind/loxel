@@ -1,10 +1,9 @@
-import * as api from "@/api/client";
-import type { JavaEnvSource, JavaRuntime } from "@/api/java-env-model";
+import { getJavaEnvCandidates, setJavaOverride } from "@/api/java-env-client";
+import { type JavaEnvSource, type JavaRuntime, javaToolchain } from "@/api/java-env-model";
 import { showToast } from "@/components/ui/toast";
-import { queryKeys } from "@/queries/query-keys";
-import { queryClient } from "@/query-client";
+import { setToolchainStatusData } from "@/queries/use-toolchain-status";
 import { type QuickPickItem, requestQuickPick, requestTextInput } from "@/store/command-palette";
-import { deriveProject, useProjectStore } from "@/store/projects";
+import { useProjectStore } from "@/store/projects";
 
 import { abbreviateHomePath } from "./home-path";
 
@@ -49,7 +48,7 @@ export function javaEnvSourceDescription(source: JavaEnvSource): string {
  */
 export async function selectJavaRuntime(wtPath: string): Promise<void> {
   const { homeDir } = useProjectStore.getState();
-  const state = api.getJavaEnvCandidates(wtPath);
+  const state = getJavaEnvCandidates(wtPath);
   const items = state.then(({ candidates, automatic, overridePath }) => {
     const list: QuickPickItem[] = [
       { id: ENTER_PATH_ID, label: "Enter JDK path…" },
@@ -83,9 +82,8 @@ export async function selectJavaRuntime(wtPath: string): Promise<void> {
   }
 
   try {
-    const response = await api.setJavaOverride({ worktreePath: wtPath, javaHome });
-    const projectPath = deriveProject(wtPath, useProjectStore.getState().projects)?.path ?? null;
-    queryClient.setQueryData(queryKeys.javaEnv(projectPath, wtPath), response);
+    const response = await setJavaOverride({ worktreePath: wtPath, javaHome });
+    setToolchainStatusData(javaToolchain, wtPath, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the JDK");
   }

@@ -5,7 +5,7 @@ import { frontendLog } from "./frontend-logger";
 const log = frontendLog.child("ui");
 
 /** Languages whose configuration auto-closes `"""` / `'''` (TOML's is set in `monaco-languages.ts`). */
-const TRIPLE_QUOTE_LANGUAGES = new Set(["python", "toml"]);
+const TRIPLE_QUOTE_LANGUAGES = new Set(["python", "toml", "kotlin"]);
 
 /**
  * Enter after a block-ending statement dedents the next line. Lines whose code (before any
@@ -87,7 +87,7 @@ function overtypeTripleQuotes(editor: monaco.editor.ICodeEditor): void {
  *
  * Resolves once ours is registered, or failed to (logged), after the first Python model.
  */
-export function registerPythonLanguageConfiguration(): Promise<void> {
+export function registerLanguageConfiguration(): Promise<void> {
   monaco.editor.onDidCreateEditor(overtypeTripleQuotes);
   return new Promise((resolve) => {
     monaco.languages.onLanguageEncountered("python", () => {

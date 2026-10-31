@@ -107,7 +107,7 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 - [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, what ships in the app bundle versus in-app updates, browser panels, macOS integration
 - [docs/SHARED_SERVER.md](docs/SHARED_SERVER.md) — how all windows share one Bun server: discover-or-spawn, ownership, idle shutdown, state scopes
 - [docs/STATE_AND_STORAGE.md](docs/STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
-- [docs/WATCHERS.md](docs/WATCHERS.md) — filesystem and git watchers, their ownership and the status refresh pipeline
+- [docs/WATCHERS.md](docs/WATCHERS.md) — filesystem and git watchers, their ownership, the status refresh pipeline and the tests that lock it
 - [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) — macOS code signing and the provisioning profile behind passkeys
 
 **Workspace**
@@ -120,10 +120,10 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 **Features**
 
 - [docs/EDITOR.md](docs/EDITOR.md) — Monaco and markdown editors, peek widgets, EditorConfig, indentation and its status item, disk sync and saving, file operations, drafts, Others files, localdb, search
-- [docs/LANGUAGE_SERVERS.md](docs/LANGUAGE_SERVERS.md) — language-server managers and routing (watched files, pulled configuration, on-disk workspace edits), URI schemes, formatting, JSON/YAML/TOML schemas, highlighting and editing behavior; per-language detail in docs/languages/ ([Python](docs/languages/python.md): environment, interpreter choice and trust rule, mypy in place of basedpyright's type checks; [Java](docs/languages/java.md): JDK detection and choice; [TypeScript](docs/languages/typescript.md): its manager and diagnostics; [TOML](docs/languages/toml.md): Tombi)
-- [docs/TERMINALS.md](docs/TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, login-shell environment capture, Python environment activation, the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
+- [docs/LANGUAGE_SERVERS.md](docs/LANGUAGE_SERVERS.md) — language-server managers and routing (watched files, pulled configuration, on-disk workspace edits), URI schemes, formatting, toolchain status items, JSON/YAML/TOML schemas, highlighting and editing behavior; per-language detail in docs/languages/ ([Python](docs/languages/python.md): environment, interpreter choice and trust rule, mypy in place of basedpyright's type checks; [TypeScript](docs/languages/typescript.md): its manager and diagnostics; [TOML](docs/languages/toml.md): Tombi)
+- [docs/TERMINALS.md](docs/TERMINALS.md) — server-side terminal emulator with attach, snapshot and resume, login-shell environment capture, toolchain environments (Python activation), the terminal WebSocket protocol, xterm.js client, notifications, the `loxel` CLI
 - [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md) — review and comment storage, content anchoring and placement, rendering in diffs, export
-- [docs/CODING_AGENT_INTEGRATION.md](docs/CODING_AGENT_INTEGRATION.md) — hosting coding-agent sessions in the server, their tools' environment (Python activation), event buffering, rewind and fork, devtools, model settings
+- [docs/CODING_AGENT_INTEGRATION.md](docs/CODING_AGENT_INTEGRATION.md) — hosting coding-agent sessions in the server, their tools' environment (toolchain activation), event buffering, rewind and fork, devtools, model settings
 - [docs/DIFF_VIEW_SPEC.md](docs/DIFF_VIEW_SPEC.md) — diff views: components shared by git diffs and file comparisons, synchronized scrolling, intra-line highlights, gutter connectors
 - [docs/FILES_TREE.md](docs/FILES_TREE.md) — the shared `FilesTree` component: path identity, expansion, focus, reveal
 - [docs/PROJECT_EXPLORER.md](docs/PROJECT_EXPLORER.md) — the Project Files panel: path model, Drafts and Others sections, reveal

@@ -139,6 +139,13 @@ describe("reading a JDK", () => {
     }
   });
 
+  test("a release file that is a pipe does not qualify and does not hang", async () => {
+    await setup();
+    const jdk = await makeJdk(join(root, "jdk"), { release: false });
+    Bun.spawnSync(["mkfifo", join(jdk, "release")]);
+    expect((await resolveJavaEnv(wt, isolated({ overridePath: jdk }))).env).toBeNull();
+  });
+
   test("never runs anything from a JDK", async () => {
     await setup();
     const jdk = await makeJdk(join(root, "jdk"));

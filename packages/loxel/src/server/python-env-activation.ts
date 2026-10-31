@@ -9,7 +9,7 @@ import path from "node:path";
 import type { PythonEnv } from "@/api/python-env-model";
 
 import { logger } from "./logger";
-import { isShippedByRepo } from "./python-env";
+import { isShippedByRepo } from "./shipped-by-repo";
 
 const log = logger.child("server");
 

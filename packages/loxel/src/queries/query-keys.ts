@@ -38,14 +38,10 @@ export const queryKeys = {
     ["detachedFiles", projectPath, wtPath] as const,
   externalFiles: (projectPath: string | null, wtPath: string | null) =>
     ["externalFiles", projectPath, wtPath] as const,
-  pythonEnv: (projectPath: string | null, wtPath: string | null) =>
-    ["pythonEnv", projectPath, wtPath] as const,
-  /** Prefix key for every worktree's Python interpreter. */
-  pythonEnvAll: () => ["pythonEnv"] as const,
-  javaEnv: (projectPath: string | null, wtPath: string | null) =>
-    ["javaEnv", projectPath, wtPath] as const,
-  /** Prefix key for every worktree's JDK. */
-  javaEnvAll: () => ["javaEnv"] as const,
+  toolchainStatus: (toolchainId: string, projectPath: string | null, wtPath: string | null) =>
+    ["toolchainStatus", projectPath, wtPath, toolchainId] as const,
+  /** Prefix key for every worktree's status of every language toolchain. */
+  toolchainStatusAll: () => ["toolchainStatus"] as const,
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
   openInApps: (path: string) => ["openInApps", path] as const,

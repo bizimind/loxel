@@ -8,8 +8,8 @@ import { isDirectory } from "@/fs-utils";
 
 import { getJavaOverride } from "./java-override-store";
 import { logger } from "./logger";
-import { isEnvShippedByRepo, isShippedByRepo } from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
+import { isEnvShippedByRepo, isShippedByRepo } from "./shipped-by-repo";
 
 const log = logger.child("server");
 
@@ -593,8 +593,10 @@ async function readJdk(home: string): Promise<JavaRuntime | null> {
 
   let release: Map<string, string>;
   try {
-    const file = Bun.file(path.join(home, "release"));
-    if (!(await file.exists())) return null;
+    const releasePath = path.join(home, "release");
+    // Before the trust rule, so a pipe in a repository must not be able to hang resolution.
+    if (!(await stat(releasePath)).isFile()) return null;
+    const file = Bun.file(releasePath);
     release = parseReleaseFile(await file.slice(0, RELEASE_FILE_MAX_BYTES).text());
   } catch {
     return null;
@@ -635,7 +637,7 @@ async function isExecutableFile(filePath: string): Promise<boolean> {
 }
 
 /**
- * The environment trust rule of `python-env.ts`, for the JDK at `home`: refused when git tracks any
+ * The environment trust rule of `shipped-by-repo.ts`, for the JDK at `home`: refused when git tracks any
  * file in it, or its `java`, or what that resolves to. Also refused when the home is the worktree
  * or holds it: the rule then looks only at a Python environment's own entries, and a JDK that shares
  * a directory with the repository would load the repository's files. `dir` is the path it was found

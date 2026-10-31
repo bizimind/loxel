@@ -77,7 +77,7 @@ Symbols flagged as unused by the language server are dimmed in the editor, and d
 
 ## Other languages
 
-Each language server is independent of the others. A language with more to say has its own page in the docs navigation, such as [TypeScript](/docs/languages/typescript), [Python](/docs/languages/python), [Java](/docs/languages/java) and [TOML](/docs/languages/toml). These have none:
+Each language server is independent of the others. A language with more to say has its own page in the docs navigation, such as [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python) and [TOML](/docs/languages/toml). These have none:
 
 | Language  | When it starts             | File types                                                       |
 | --------- | -------------------------- | ---------------------------------------------------------------- |
@@ -88,6 +88,8 @@ Each language server is independent of the others. A language with more to say h
 | XML       | First matching file opened | `.xml`, `.xsd`, `.xsl`, `.xslt`, `.plist`, and other XML formats |
 
 YAML starts with Loxel and stays running. The others start the first time you open a matching file and stop automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
+
+The Docker language server itself sends nothing to Docker's services: no telemetry, crash reports, vulnerability scans or image lookups. Bake files get hover, completion and diagnostics. Dockerfile lint warnings come from `docker buildx` when the Docker CLI is installed; it runs with your own Docker setup, which can contact the registry of a base image (Docker Hub for most images), as `docker build` does. If your active builder is remote, the Dockerfile and build context go to that builder, also as with any `docker build`. Lint warnings are not available with a Docker daemon reached over TCP on another machine.
 
 ---
 

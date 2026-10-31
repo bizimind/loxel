@@ -35,8 +35,7 @@ import { FileOperationsHistory, FileOperationsService } from "./file-operations-
 import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
-import { refreshAllJavaEnvs, refreshJavaEnv, subscribeJavaEnv } from "./java-env";
-import { onJavaOverrideChange } from "./java-override-store";
+import { gitExecClient } from "./git-exec-client";
 import { tomlLspManager, worktreeLspManagers } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
@@ -44,13 +43,6 @@ import { NotificationStore } from "./notification-store";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
 import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
-import {
-  getPythonEnv,
-  refreshAllPythonEnvs,
-  refreshPythonEnv,
-  subscribePythonEnv,
-} from "./python-env";
-import { onPythonOverrideChange } from "./python-override-store";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
 import { ReviewDb, getGitAuthorName } from "./review-db";
@@ -74,12 +66,15 @@ import type {
   WsData,
 } from "./server-state";
 import { LOGIN_SHELL_ENV_WAIT_MS, onLoginShellEnvChange, resolveLoginShellEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 import { recoverOrphanLayoutSessions } from "./store-db";
 import { stress } from "./stress-detector";
 import type { TerminalSpawnOptions } from "./terminal-manager";
 import { TerminalManager } from "./terminal-manager";
 import type { TerminalSink } from "./terminal-session";
 import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
+import { toolchainEnvs } from "./toolchain-envs";
+import { toolchainStatusModules } from "./toolchain-statuses";
 import { WorktreeStatusTracker } from "./worktree-status-tracker";
 import { INTERNAL_WORKTREE_PREFIX } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
@@ -159,10 +154,12 @@ async function pruneOrphanedTempWorktrees(cwd: string): Promise<void> {
     );
     for (const wt of orphans) {
       try {
-        Bun.spawnSync(["git", "-C", cwd, "worktree", "remove", "--force", wt.path], {
-          stdout: "ignore",
-          stderr: "ignore",
-        });
+        measureSpawn("git worktree", () =>
+          Bun.spawnSync(["git", "-C", cwd, "worktree", "remove", "--force", wt.path], {
+            stdout: "ignore",
+            stderr: "ignore",
+          }),
+        );
       } catch (err) {
         log.warn(`Failed to remove temp worktree ${wt.path}`, { error: err });
       }
@@ -180,7 +177,7 @@ async function pruneOrphanedTempWorktrees(cwd: string): Promise<void> {
 
 /** Send a message to all subscribers of a specific worktree (with dedup). */
 function broadcastToSubscribers(wtPath: string, message: WsMessage) {
-  stress.track("broadcast", { type: message.type });
+  stress.track("broadcast", message.type);
   const resources = wtResources.get(wtPath);
   if (!resources || resources.subscribers.size === 0) return;
   const data = JSON.stringify(message);
@@ -191,7 +188,7 @@ function broadcastToSubscribers(wtPath: string, message: WsMessage) {
 
 /** Send a message to all subscribers of any worktree under a project. */
 function broadcastToProject(projectPath: string, message: WsMessage) {
-  stress.track("broadcast", { type: message.type });
+  stress.track("broadcast", message.type);
   const data = JSON.stringify(message);
   const sent = new Set<ServerWebSocket<WsData>>();
   for (const resources of wtResources.values()) {
@@ -207,7 +204,7 @@ function broadcastToProject(projectPath: string, message: WsMessage) {
 
 /** Send a message to ALL connected clients. */
 function broadcastAll(message: WsMessage) {
-  stress.track("broadcast", { type: message.type });
+  stress.track("broadcast", message.type);
   const data = JSON.stringify(message);
   for (const client of clients.keys()) {
     client.send(data);
@@ -324,7 +321,7 @@ function broadcastOthers(wtPath: string): void {
 function requestStatusRefresh(wtPath: string): void {
   const resources = wtResources.get(wtPath);
   if (!resources || suspendedWorktrees.has(wtPath)) return;
-  stress.track("status-event", { wtPath });
+  stress.track("status-event", wtPath);
   void resources.filesService.refreshGitStatus();
 }
 
@@ -434,7 +431,12 @@ function createFilesService(
       onFileMoved: (oldPath, newPath, source) =>
         broadcastFileMoved(wtPath, oldPath, newPath, source),
       onPathsChanged: (paths) => notifyLspWatchedFiles(wtPath, paths),
-      onIgnoredPathChanged: (relPath) => nodeModulesChanges.add(relPath),
+      onIgnoredPathChanged: (relPath) => {
+        nodeModulesChanges.add(relPath);
+        for (const manager of worktreeLspManagers) {
+          manager.notifyIgnoredPathChanged?.(wtPath, relPath);
+        }
+      },
     },
   );
   return service;
@@ -516,14 +518,12 @@ async function subscribeWorktree(ws: ServerWebSocket<WsData>, wtPath: string): P
     externalFilesService,
     externalFoldersService,
     subscribers: new Set([ws]),
-    // The status bar's interpreter follows environments created or removed on disk.
-    unsubscribePythonEnv: subscribePythonEnv(wtPath, ({ changed }) => {
-      if (changed) broadcastToSubscribers(wtPath, { type: "python_env_changed", wtPath });
-    }),
-    // Likewise the status bar's JDK, once something has asked for it.
-    unsubscribeJavaEnv: subscribeJavaEnv(wtPath, ({ changed }) => {
-      if (changed) broadcastToSubscribers(wtPath, { type: "java_env_changed", wtPath });
-    }),
+    // The status bar's toolchains follow what is created or removed on disk.
+    unsubscribeToolchainStatuses: toolchainStatusModules.map(({ toolchain, subscribe }) =>
+      subscribe(wtPath, ({ changed }) => {
+        if (changed) broadcastToSubscribers(wtPath, { type: toolchain.changedMessage, wtPath });
+      }),
+    ),
   };
 
   wtResources.set(wtPath, resources);
@@ -581,8 +581,7 @@ function teardownWorktreeResources(wtPath: string, resources: WorktreeResources)
   resources.detachedFilesService.stop();
   resources.externalFilesService.stop();
   resources.externalFoldersService.stop();
-  resources.unsubscribePythonEnv();
-  resources.unsubscribeJavaEnv();
+  for (const unsubscribe of resources.unsubscribeToolchainStatuses) unsubscribe();
   formatService.invalidateCache(wtPath);
   wtResources.delete(wtPath);
   log.info(`Worktree resources torn down: ${wtPath}`);
@@ -789,7 +788,7 @@ const agentOwners = new Map<string, ServerWebSocket<WsData>>();
 const logSubscribers = new Set<ServerWebSocket<WsData>>();
 const terminalManager = new TerminalManager({
   isSequenceEnabled: isNotificationSequenceEnabled,
-  pythonEnvFor: (worktreePath) => getPythonEnv(worktreePath),
+  toolchainEnvs,
   onNotification: (session, payload) => {
     const notification = notificationStore.add({
       source: { kind: "terminal", panelId: session.id, worktreePath: session.worktreePath },
@@ -811,10 +810,9 @@ const notificationStore = new NotificationStore();
 const schemaService = new SchemaService();
 const formatService = new FormatService();
 const yamlLspManager = new YamlLspManager({});
-// A chosen interpreter reaches everything that shares the worktree's resolution (language
-// servers, terminals, format on save, the status bar) without a restart.
-onPythonOverrideChange(refreshPythonEnv);
-onJavaOverrideChange(refreshJavaEnv);
+// A chosen toolchain reaches everything that shares the worktree's resolution (language servers,
+// terminals, format on save, the status bar) without a restart.
+for (const { onOverrideChange, refresh } of toolchainStatusModules) onOverrideChange(refresh);
 const worktreeLspManagerByRoute = new Map(
   worktreeLspManagers.map((manager) => [`/ws/${manager.name}`, manager]),
 );
@@ -1109,10 +1107,11 @@ function detachClientAgents(ws: ServerWebSocket<WsData>) {
 await initSecretStore();
 
 // Resolve the login shell env for spawned tools (hooks, terminals, language servers) while the
-// projects load; serving waits for it below. Python environments resolved before a capture (with
-// the inherited PATH, or an older capture's) resolve again when it changed what they read.
-onLoginShellEnvChange((names) => refreshAllPythonEnvs(names));
-onLoginShellEnvChange((names) => refreshAllJavaEnvs(names));
+// projects load; serving waits for it below. Toolchains resolved before a capture (with the
+// inherited PATH, or an older capture's) resolve again when it changed what they read.
+for (const { refreshAll } of toolchainStatusModules) {
+  onLoginShellEnvChange((names) => refreshAll(names));
+}
 const loginShellEnv = resolveLoginShellEnv();
 
 const repoArg = process.argv[2];
@@ -1404,6 +1403,7 @@ function shutdown(exitCode = 0) {
   formatService.destroy();
   yamlLspManager.destroy();
   for (const manager of worktreeLspManagers) manager.destroy();
+  gitExecClient.stop();
   perfMonitor.dispose();
   stress.dispose();
   logger.shutdown();
