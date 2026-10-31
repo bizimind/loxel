@@ -8,7 +8,7 @@ C, C++ and Objective-C files are served by clangd. Shared language-server archit
 | --------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------- |
 | [clangd-lsp-manager.ts](../../src/server/clangd-lsp-manager.ts) | `clangd` | `--limit-references=0 --rename-file-limit=0 --header-insertion-decorators=0 --query-driver=<globs>` | worktree | suppresses formatting and range formatting; validates compile flags from project configuration before starting clangd |
 
-[clangd-lsp-client.ts](../../src/lib/clangd-lsp-client.ts) binds the Monaco languages `c`, `cpp` and `objective-c`. clangd ignores `languageId` and takes each file's language from its compile command, so Objective-C++ (`.mm`, highlighted as `cpp`) needs no ID of its own.
+[clangd-lsp-client.ts](../../src/lib/clangd-lsp-client.ts) binds the Monaco languages `c`, `cpp`, `objective-c` and `objective-cpp`. clangd ignores `languageId` and takes each file's language from its compile command.
 
 ## clangd
 
