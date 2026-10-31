@@ -15,6 +15,7 @@ import type { OscPayload } from "@/lib/osc-notification-parser";
 import { parseOsc777, parseOsc9, parseOsc99 } from "@/lib/osc-notification-parser";
 
 import { logger } from "./logger";
+import { measureSpawn } from "./spawn-metrics";
 import { stress } from "./stress-detector";
 
 const log = logger.child("terminal");
@@ -184,15 +185,17 @@ export class TerminalSession {
     this.registerNotificationHandlers();
 
     const command = options.command ?? [process.env.SHELL || "/bin/bash", "-il"];
-    this.proc = Bun.spawn(command, {
-      cwd: options.cwd,
-      env: options.env,
-      terminal: {
-        cols: size.cols,
-        rows: size.rows,
-        data: (_terminal, data) => this.onPtyData(data),
-      },
-    });
+    this.proc = measureSpawn("terminal", () =>
+      Bun.spawn(command, {
+        cwd: options.cwd,
+        env: options.env,
+        terminal: {
+          cols: size.cols,
+          rows: size.rows,
+          data: (_terminal, data) => this.onPtyData(data),
+        },
+      }),
+    );
     this.exited = this.proc.exited;
     this.exited
       .then((exitCode) => this.onExited(exitCode))

@@ -118,4 +118,20 @@ When changing watcher behavior, verify:
 - similarly prefixed and external-`WT_DIR` projects are not confused;
 - deleted paths are treated as expected lifecycle races while other failures retain useful error context.
 
+## Sync invariant tests
+
+Three invariants must survive any change to this pipeline. Each has a suite against real temporary repositories, in both bare and regular layouts, and a smoke test and a renderer test cover the two ends:
+
+| Suite                                                                   | Locks                                                                                         |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| [sync-worktrees.test.ts](../src/server/sync-worktrees.test.ts)          | the worktree list follows `wt` and `git worktree`: add, move, metadata, branch switch, remove |
+| [sync-working-tree.test.ts](../src/server/sync-working-tree.test.ts)    | status and tree follow edits, staging, commits and `.gitignore`; read-only git emits nothing  |
+| [sync-git-history.test.ts](../src/server/sync-git-history.test.ts)      | the commit graph follows commits, branches, rebases, fetches and force-pushes                 |
+| [sync-server-smoke.test.ts](../src/server/sync-server-smoke.test.ts)    | one pass through all three against a real server process                                      |
+| [ws-bridge-sync.dom.test.ts](../src/queries/ws-bridge-sync.dom.test.ts) | which queries each git, worktree and file-tree message writes or invalidates in the renderer  |
+
+The first three use [git-sync-harness.ts](../src/test/git-sync-harness.ts), which wires the real watchers and services the way `initializeProject` and `subscribeWorktree` do and captures what they would broadcast, plus what a client reads back after each message. A change to that wiring in `server.ts` has to be mirrored there; the smoke test runs a real server, for one pass, and is the only check of `server.ts` itself.
+
+These tests never wait on time. A native watch arms asynchronously and gives no signal, so `SyncProject` repeats a write until one is delivered. Absence is asserted with a sentinel: a later operation known to emit a different event (`git config` emits only `worktrees`, a new tag only `refs` and `log`). Watcher events are delivered in order and debounced alike, so whatever an earlier operation caused arrives before the sentinel's event; a ref sentinel tags twice, since commits emit what it waits for. Intended behavior that does not hold yet is a `test.todo` naming its issue; running with `--todo` shows it failing.
+
 Native watcher behavior is platform-specific. The lifecycle and feedback-loop integration tests need real macOS FSEvents access and cannot be meaningfully validated inside a restricted filesystem sandbox.

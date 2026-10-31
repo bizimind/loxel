@@ -1,5 +1,7 @@
 import type { PlacedThread } from "@/api/review-model";
 
+import { detectLanguage } from "./highlighter";
+
 interface ThreadsToMarkdownOptions {
   reviewNames: string[];
   placedThreadsByFile: Map<string, PlacedThread[]>;
@@ -102,7 +104,7 @@ function renderThread(lines: string[], thread: PlacedThread, singleAuthor: boole
 
   // Code context
   if (thread.contentAnchor.content.length > 0) {
-    const lang = inferLanguage(thread.filePath);
+    const lang = detectLanguage(thread.filePath) ?? "";
     lines.push("");
     lines.push(`\`\`\`${lang}`);
     for (const codeLine of thread.contentAnchor.content) {
@@ -125,7 +127,7 @@ function renderLostThread(lines: string[], thread: PlacedThread, singleAuthor: b
 
   // Code context from anchor
   if (thread.contentAnchor.content.length > 0) {
-    const lang = inferLanguage(thread.filePath);
+    const lang = detectLanguage(thread.filePath) ?? "";
     lines.push("");
     lines.push(`\`\`\`${lang}`);
     for (const codeLine of thread.contentAnchor.content) {
@@ -204,44 +206,4 @@ function collectAllThreads(
   }
   all.push(...lostThreads);
   return all;
-}
-
-const EXTENSION_LANGUAGE: Record<string, string> = {
-  ts: "typescript",
-  tsx: "tsx",
-  js: "javascript",
-  jsx: "jsx",
-  py: "python",
-  rb: "ruby",
-  go: "go",
-  rs: "rust",
-  java: "java",
-  kt: "kotlin",
-  kts: "kotlin",
-  swift: "swift",
-  css: "css",
-  scss: "scss",
-  html: "html",
-  json: "json",
-  yaml: "yaml",
-  yml: "yaml",
-  md: "markdown",
-  sql: "sql",
-  sh: "bash",
-  zsh: "bash",
-  c: "c",
-  cpp: "cpp",
-  h: "c",
-  hpp: "cpp",
-  cs: "csharp",
-  php: "php",
-  toml: "toml",
-  xml: "xml",
-  graphql: "graphql",
-  gql: "graphql",
-};
-
-function inferLanguage(filePath: string): string {
-  const ext = filePath.split(".").pop()?.toLowerCase();
-  return ext ? (EXTENSION_LANGUAGE[ext] ?? "") : "";
 }
