@@ -24,7 +24,7 @@ export async function git(workDir: string, ...args: string[]): Promise<void> {
   if (exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${stderr}`);
 }
 
-/** Installs a shell script as a tool of the project at dir, standing in for the real one. */
+/** Installs a shell script as a tool of the project at dir, standing in for the real one or wrapping it. */
 export async function installFakeBin(dir: string, name: string, script: string): Promise<string> {
   const bin = join(dir, "node_modules", ".bin", name);
   await Bun.write(bin, `#!/bin/sh\n${script}\n`);

@@ -1,5 +1,4 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 
 import { git, installFakeBin, withWorkDir } from "../test-workdir.ts";
@@ -52,8 +51,7 @@ test("type-issues checks a jsconfig-only project with the real compiler", async 
       "node_modules/dep/index.js": '/** @type {number} */\nmodule.exports = "text";\n',
     },
     async (workDir) => {
-      await mkdir(join(workDir, "node_modules/.bin"));
-      await symlink(REAL_TSC, join(workDir, "node_modules/.bin/tsc"));
+      await installFakeBin(workDir, "tsc", `exec "${REAL_TSC}" "$@"`);
       const records = await typeIssues.generate(workDir, {});
       expect(records.map((r) => [r.path, r.code])).toEqual([["src/index.mjs", "TS2322"]]);
     },
