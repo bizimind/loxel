@@ -20,9 +20,9 @@ const ACTIVE: RustToolchainResponse = {
 };
 
 let response = ACTIVE;
-const originalClient = await import("@/api/client");
+const originalClient = await import("@/api/rust-toolchain-client");
 const getRustToolchain = jest.fn(async (_wtPath: string) => response);
-mock.module("@/api/client", () => ({ ...originalClient, getRustToolchain }));
+mock.module("@/api/rust-toolchain-client", () => ({ ...originalClient, getRustToolchain }));
 
 const originalLib = await import("@/lib/rust-toolchain");
 const selectRustToolchain = jest.fn(async (_wtPath: string) => {});

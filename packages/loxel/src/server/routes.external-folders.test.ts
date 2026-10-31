@@ -67,8 +67,7 @@ describe("Others folders routes", () => {
       externalFilesService,
       externalFoldersService,
       subscribers: new Set(),
-      unsubscribePythonEnv: () => {},
-      unsubscribeRustToolchain: () => {},
+      unsubscribeToolchainStatuses: [],
     };
 
     sent = [];

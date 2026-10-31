@@ -1,15 +1,14 @@
-import * as api from "@/api/client";
-import type {
-  RustToolchain,
-  RustToolchainChoice,
-  RustToolchainResponse,
-  RustToolchainSource,
+import { getRustToolchainCandidates, setRustToolchainChoice } from "@/api/rust-toolchain-client";
+import {
+  type RustToolchain,
+  type RustToolchainChoice,
+  type RustToolchainSource,
+  rustToolchain,
 } from "@/api/rust-toolchain-model";
 import { showToast } from "@/components/ui/toast";
-import { queryKeys } from "@/queries/query-keys";
-import { queryClient } from "@/query-client";
+import { setToolchainStatusData } from "@/queries/use-toolchain-status";
 import { type QuickPickItem, requestQuickPick } from "@/store/command-palette";
-import { deriveProject, useProjectStore } from "@/store/projects";
+import { useProjectStore } from "@/store/projects";
 
 import { abbreviateHomePath } from "./home-path";
 
@@ -92,7 +91,7 @@ function choiceItem(choice: RustToolchainChoice, chosen: string | null, home: st
  */
 export async function selectRustToolchain(wtPath: string): Promise<void> {
   const { homeDir } = useProjectStore.getState();
-  const items = api.getRustToolchainCandidates(wtPath).then(({ candidates, automatic, chosen }) => {
+  const items = getRustToolchainCandidates(wtPath).then(({ candidates, automatic, chosen }) => {
     const list: QuickPickItem[] = [
       {
         id: AUTOMATIC_ID,
@@ -110,12 +109,8 @@ export async function selectRustToolchain(wtPath: string): Promise<void> {
 
   try {
     const toolchain = picked === AUTOMATIC_ID ? null : picked;
-    const response: RustToolchainResponse = await api.setRustToolchainChoice({
-      worktreePath: wtPath,
-      toolchain,
-    });
-    const projectPath = deriveProject(wtPath, useProjectStore.getState().projects)?.path ?? null;
-    queryClient.setQueryData(queryKeys.rustToolchain(projectPath, wtPath), response);
+    const response = await setRustToolchainChoice({ worktreePath: wtPath, toolchain });
+    setToolchainStatusData(rustToolchain, wtPath, response);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not set the Rust toolchain");
   }

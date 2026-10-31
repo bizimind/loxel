@@ -5,6 +5,8 @@
 
 import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
+import type { ToolchainSelectActionId } from "@/api/toolchain-status-model";
+import { toolchainStatuses } from "@/api/toolchain-statuses";
 import type { EditorCodeActionId } from "@/lib/editor-code-actions";
 import { canRunEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
@@ -96,8 +98,7 @@ export type ActionId =
   | "tree.open"
   | "tree.rename"
   | "editor.changeIndentation"
-  | "python.selectInterpreter"
-  | "rust.selectToolchain"
+  | ToolchainSelectActionId
   | EditorCodeActionId
   | "language.restartServers"
   | "app.settings";
@@ -317,18 +318,12 @@ export const ACTIONS: readonly ActionDef[] = [
   },
 
   // Languages
-  {
-    id: "python.selectInterpreter",
-    label: "Python: Select Interpreter",
+  ...toolchainStatuses.map(({ selectAction: { id, label } }): ActionDef => ({
+    id,
+    label,
     category: "language",
     isEnabled: hasActiveWorktree,
-  },
-  {
-    id: "rust.selectToolchain",
-    label: "Rust: Select Toolchain",
-    category: "language",
-    isEnabled: hasActiveWorktree,
-  },
+  })),
   // Code actions of the focused editor's language servers, enabled only where one offers the kind
   ...(
     [

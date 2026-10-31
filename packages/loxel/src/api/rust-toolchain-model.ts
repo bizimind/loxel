@@ -1,3 +1,5 @@
+import type { ToolchainStatusDescriptor } from "./toolchain-status-model";
+
 /** Why a toolchain is the active one for a worktree. */
 export type RustToolchainSource =
   /** The user chose it for the worktree in Loxel. */
@@ -87,3 +89,10 @@ export interface RustToolchainChoiceRequest {
   worktreePath: string;
   toolchain: string | null;
 }
+
+export const rustToolchain = {
+  id: "rust",
+  languageIds: ["rust"],
+  changedMessage: "rust_toolchain_changed",
+  selectAction: { id: "rust.selectToolchain", label: "Rust: Select Toolchain" },
+} as const satisfies ToolchainStatusDescriptor;

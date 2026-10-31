@@ -11,17 +11,12 @@ import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import { coversFile, findMypyConfig, isMypyConfigFile, type MypyConfig } from "./mypy-config";
 import { MypyDaemon, type MypyDiagnostic } from "./mypy-daemon";
-import {
-  getPythonEnv,
-  isEnvShippedByRepo,
-  isShippedByRepo,
-  pathOutsideWorktree,
-  subscribePythonEnv,
-} from "./python-env";
+import { getPythonEnv, pathOutsideWorktree, subscribePythonEnv } from "./python-env";
 import { pythonEnvActivation, setPythonEnvVars } from "./python-env-activation";
 import type { ExternalTypeChecker } from "./python-lsp-manager";
 import type { WorktreeLspServer } from "./server-state";
 import { buildSpawnEnv } from "./shell-env";
+import { isEnvShippedByRepo, isShippedByRepo } from "./shipped-by-repo";
 
 const log = logger.child("mypy-lsp");
 

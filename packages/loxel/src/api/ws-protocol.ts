@@ -7,6 +7,7 @@ import type { LogEntry } from "./log-entry-model";
 import type { ServerNotification } from "./notification-model";
 import type { PanelOpenOptions } from "./panel-placement-model";
 import type { DirEntry } from "./project-files-model";
+import type { ToolchainChangedMessage } from "./toolchain-status-model";
 import type { UpdateState } from "./update-model";
 
 export type AgentStatus = "starting" | "ready" | "running" | "waiting" | "exited";
@@ -74,9 +75,7 @@ export type WsMessage =
   | { type: "detached_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
-  /** The worktree's Python interpreter may have changed (re-detected, or its override changed). */
-  | { type: "python_env_changed"; wtPath: string }
-  | { type: "rust_toolchain_changed"; wtPath: string }
+  | ToolchainChangedMessage
   | { type: "open_url"; wtPath: string; data: { url: string } & PanelOpenOptions }
   // Window-scoped (sent to the window the user is working in)
   | { type: "open_file"; data: { filePath: string } & PanelOpenOptions }

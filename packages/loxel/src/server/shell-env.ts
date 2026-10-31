@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import { logger } from "./logger";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");
 
@@ -168,13 +169,15 @@ export async function captureLoginShellEnv(
 ): Promise<CaptureResult> {
   const sentinel = `__LOXEL_ENV_${randomUUID().replaceAll("-", "")}__`;
   const script = `printf %s ${sentinel}; env -0 2>/dev/null || printf "PATH=%s\\0" "$PATH"; printf %s ${sentinel}`;
-  const proc = Bun.spawn([shell, "-l", "-i", "-c", `/bin/sh -c '${script}'`], {
-    env,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "ignore",
-    detached: true,
-  });
+  const proc = measureSpawn("shell-env", () =>
+    Bun.spawn([shell, "-l", "-i", "-c", `/bin/sh -c '${script}'`], {
+      env,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      detached: true,
+    }),
+  );
   const reader = proc.stdout.getReader();
   let aborted = false;
   // Stays armed after the output arrived, for a shell that hangs in its logout files.

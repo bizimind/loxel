@@ -1,2 +1,7 @@
-# One line per server: local merges combine parallel additions. GitHub's own merge ignores this.
+# One line per entry: local merges combine parallel additions. GitHub's own merge ignores this.
+packages/loxel/src/api/toolchain-statuses.ts merge=union
+packages/loxel/src/lib/toolchain-status-items.ts merge=union
+packages/loxel/src/server/language-formatters.ts merge=union
 packages/loxel/src/server/language-servers.ts merge=union
+packages/loxel/src/server/toolchain-envs.ts merge=union
+packages/loxel/src/server/toolchain-statuses.ts merge=union

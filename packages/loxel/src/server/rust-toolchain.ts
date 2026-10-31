@@ -12,9 +12,9 @@ import type {
 import { isDirectory } from "@/fs-utils";
 
 import { logger } from "./logger";
-import { isShippedByRepo } from "./python-env";
 import { getRustChoice } from "./rust-toolchain-store";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
+import { isShippedByRepo } from "./shipped-by-repo";
 
 const log = logger.child("server");
 

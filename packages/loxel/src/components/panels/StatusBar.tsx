@@ -19,14 +19,13 @@ import {
   createEditor,
   createTerminal,
 } from "@/lib/panel-creators";
+import { toolchainStatusItems } from "@/lib/toolchain-status-items";
 import { useStatusQuery } from "@/queries/use-repo-queries";
 import { toKeyBinding } from "@/store/keybindings/key-combo";
 import { usePendingChordStore } from "@/store/keybindings/pending-chord";
 
 import { IndentationStatus } from "./IndentationStatus";
 import { LanguageServerStatus } from "./LanguageServerStatus";
-import { PythonInterpreterStatus } from "./PythonInterpreterStatus";
-import { RustToolchainStatus } from "./RustToolchainStatus";
 
 /** Shows the keystrokes of a chord in progress, like "⌘\ … waiting for the next key". */
 function PendingChordIndicator() {
@@ -112,9 +111,9 @@ export function StatusBar() {
 
       <IndentationStatus />
 
-      <PythonInterpreterStatus />
-
-      <RustToolchainStatus />
+      {toolchainStatusItems.map(({ toolchain, StatusItem }) => (
+        <StatusItem key={toolchain.id} />
+      ))}
 
       <LanguageServerStatus />
 
