@@ -10,6 +10,7 @@ import { logger } from "./logger";
 import { getPythonOverride } from "./python-override-store";
 import { buildSpawnEnv } from "./shell-env";
 import { isEnvShippedByRepo, isInside, isShippedByRepo, runGit } from "./shipped-by-repo";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");
 
@@ -680,14 +681,16 @@ async function toolEnv(wtPath: string, env: SpawnEnv, tool: EnvTool): Promise<Py
   // launched with.
   const { VIRTUAL_ENV: _venv, CONDA_PREFIX: _conda, PIPENV_ACTIVE: _pipenv, ...toolEnvVars } = env;
   try {
-    const proc = Bun.spawn([executable, ...tool.args], {
-      cwd: wtPath,
-      env: toolEnvVars,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-      timeout: ENV_TOOL_TIMEOUT_MS,
-    });
+    const proc = measureSpawn("python-env", () =>
+      Bun.spawn([executable, ...tool.args], {
+        cwd: wtPath,
+        env: toolEnvVars,
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+        timeout: ENV_TOOL_TIMEOUT_MS,
+      }),
+    );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     // Exits non-zero when the project has no environment yet.
     const envPath = stdout.trim().split("\n").at(-1)?.trim();

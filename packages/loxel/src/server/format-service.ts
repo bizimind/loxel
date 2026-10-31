@@ -17,6 +17,7 @@ import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
 import { PrettierLibBackend } from "./prettier-lib-backend";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("format");
 
@@ -475,7 +476,9 @@ function spawnFormatter(
   cwd: string | undefined,
   env: Record<string, string | undefined>,
 ) {
-  return Bun.spawn(argv, { stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd, env });
+  return measureSpawn("formatter", () =>
+    Bun.spawn(argv, { stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd, env }),
+  );
 }
 
 /**

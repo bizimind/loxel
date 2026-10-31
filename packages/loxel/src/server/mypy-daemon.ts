@@ -12,6 +12,7 @@ import { isRecord } from "@/lib/is-record";
 
 import { config } from "./config";
 import { logger } from "./logger";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("mypy-lsp");
 
@@ -99,28 +100,30 @@ export class MypyDaemon {
           "--no-error-summary",
           "--no-color-output",
         ];
-    const proc = Bun.spawn(
-      [
-        this.options.dmypy,
-        "--status-file",
-        this.statusFile,
-        "run",
-        "--timeout",
-        String(DAEMON_IDLE_TIMEOUT_S),
-        "--",
-        "--python-executable",
-        this.options.pythonPath,
-        ...output,
-        ...targets,
-      ],
-      {
-        cwd: this.root,
-        env: this.options.env,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-        timeout: RUN_TIMEOUT_MS,
-      },
+    const proc = measureSpawn("mypy", () =>
+      Bun.spawn(
+        [
+          this.options.dmypy,
+          "--status-file",
+          this.statusFile,
+          "run",
+          "--timeout",
+          String(DAEMON_IDLE_TIMEOUT_S),
+          "--",
+          "--python-executable",
+          this.options.pythonPath,
+          ...output,
+          ...targets,
+        ],
+        {
+          cwd: this.root,
+          env: this.options.env,
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
+          timeout: RUN_TIMEOUT_MS,
+        },
+      ),
     );
     this.running = proc;
     const [stdout, stderr, exitCode] = await Promise.all([
@@ -191,14 +194,16 @@ export class MypyDaemon {
 
   private async supportsJsonOutput(): Promise<boolean> {
     try {
-      const proc = Bun.spawn([this.options.dmypy, "--version"], {
-        cwd: this.root,
-        env: this.options.env,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "ignore",
-        timeout: VERSION_TIMEOUT_MS,
-      });
+      const proc = measureSpawn("mypy", () =>
+        Bun.spawn([this.options.dmypy, "--version"], {
+          cwd: this.root,
+          env: this.options.env,
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "ignore",
+          timeout: VERSION_TIMEOUT_MS,
+        }),
+      );
       const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
       const version = /(\d+\.\d+(?:\.\d+)?)/.exec(stdout)?.[1];
       log.info("Using mypy", { root: this.root, dmypy: this.options.dmypy, version });

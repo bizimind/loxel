@@ -15,9 +15,9 @@ const ENV: PythonEnvResponse = {
   overridePath: null,
 };
 
-const originalClient = await import("@/api/client");
+const originalClient = await import("@/api/python-env-client");
 const getPythonEnv = jest.fn(async (_wtPath: string) => ENV);
-mock.module("@/api/client", () => ({ ...originalClient, getPythonEnv }));
+mock.module("@/api/python-env-client", () => ({ ...originalClient, getPythonEnv }));
 
 const originalInterpreter = await import("@/lib/python-interpreter");
 const selectPythonInterpreter = jest.fn(async (_wtPath: string) => {});

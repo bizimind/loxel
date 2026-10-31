@@ -97,6 +97,75 @@ describe("resolveLanguage for build files", () => {
   });
 });
 
+describe("resolveLanguage for C-family projects", () => {
+  test.each([
+    ["/repo/src/lib.c", "c"],
+    ["/repo/build/lib.i", "c"],
+    ["/repo/src/app.C", "cpp"],
+    ["/repo/include/fmt/base.h", "cpp"],
+    ["/repo/include/WINDOWS.H", "cpp"],
+    ["/repo/src/app.CPP", "cpp"],
+    ["/repo/build/app.ii", "cpp"],
+    ["/repo/sketch.ino", "cpp"],
+    ...["cpp", "cc", "cxx", "c++"].map((ext) => [`/repo/src/a.${ext}`, "cpp"]),
+    ...["hpp", "hh", "hxx", "h++", "inl", "ipp", "tpp", "tcc", "txx"].map((ext) => [
+      `/repo/include/a.${ext}`,
+      "cpp",
+    ]),
+    ...["ixx", "cppm", "ccm", "cxxm", "c++m"].map((ext) => [`/repo/mod/a.${ext}`, "cpp"]),
+    ["/repo/ios/View.m", "objective-c"],
+    ["/repo/ios/Bridge.mm", "objective-cpp"],
+    ["/repo/CMakeLists.txt", "cmake"],
+    ["/repo/cmake/Modules.cmake", "cmake"],
+    ["/repo/build/CMakeCache.txt", "ini"],
+    ["/repo/CMakePresets.json", "json"],
+    ["/repo/compile_commands.json", "json"],
+    ["/repo/compile_flags.txt", "plaintext"],
+    ["/repo/.clangd", "yaml"],
+    ["/repo/.clang-format", "yaml"],
+    ["/repo/_clang-format", "yaml"],
+    ["/repo/.clang-tidy", "yaml"],
+    ["/repo/.clang-format-ignore", "ini"],
+  ])("%s → %s", (path, language) => {
+    expect(resolve(path)).toBe(language);
+  });
+
+  const XCODE_LIBCXX =
+    "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1";
+
+  test.each([
+    `${XCODE_LIBCXX}/vector`,
+    `${XCODE_LIBCXX}/__config`,
+    `${XCODE_LIBCXX}/experimental/simd`,
+    "/usr/include/c++/13/vector",
+    "/usr/include/c++/13/ext/random",
+    "/usr/lib/llvm-18/include/c++/v1/vector",
+    "/opt/homebrew/opt/llvm/include/c++/v1/string_view",
+    "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/map",
+  ])("treats the standard library header %s as C++", (path) => {
+    expect(resolve(path)).toBe("cpp");
+  });
+
+  test.each([
+    [`${XCODE_LIBCXX}/module.modulemap`, null],
+    [`${XCODE_LIBCXX}/libcxx.imp`, null],
+    [`${XCODE_LIBCXX}/__vector/vector.h`, "cpp"],
+    ["/usr/include/c++/13/bits/vector.tcc", "cpp"],
+    ["/repo/include/c++/notes.md", "markdown"],
+    ["/repo/include/c++/gen.py", "python"],
+    ["/repo/c++/v1/data.json", "json"],
+    ["/repo/src/vector", null],
+    ["/repo/include/vector", null],
+  ])("resolves %s on its own", (path, language) => {
+    expect(resolve(path)).toBe(language);
+  });
+
+  test("a user association still decides `.C` files", () => {
+    const associations = [{ id: "a", glob: "**/*.C", language: "c", enabled: true }];
+    expect(resolveLanguage("/repo/app.C", associations)).toBe("c");
+  });
+});
+
 describe("resolveLanguage for Go project files", () => {
   test.each([
     ["/repo/go.mod", "go.mod"],
