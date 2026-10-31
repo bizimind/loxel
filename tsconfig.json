@@ -5,7 +5,6 @@
     { "path": "./packages/channel" },
     { "path": "./packages/channel-worker" },
     { "path": "./packages/cli-common" },
-    { "path": "./packages/coding-agent" },
     { "path": "./packages/excalidraw" },
     { "path": "./packages/logger" },
     { "path": "./packages/loxel" },

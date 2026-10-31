@@ -17,16 +17,15 @@ All logs use the same schema, written by `@bizimind/logger` (`packages/logger`) 
 Current emitters:
 
 - `channel-worker` — Cloudflare Worker; dataset set in `packages/channel-worker/wrangler.toml`
-- `coding-agent` — CLI runtime, only when `AXIOM_TOKEN` and `AXIOM_DATASET` are set; adds `fields.component` = `"cli-runtime"`
 
-The loxel IDE server does not send logs to Axiom (it writes local NDJSON files, see `packages/loxel/README.md`). Older data may contain sources from removed packages (e.g. `ccm-daemon`, `ccm-mobile`).
+The loxel IDE server does not send logs to Axiom (it writes local NDJSON files, see `packages/loxel/README.md`). Older data may contain sources from removed packages (e.g. `coding-agent`, `ccm-daemon`, `ccm-mobile`).
 
 Key fields:
 
 - `message` - log message
 - `level` - log level: `"debug"`, `"info"`, `"warn"`, `"error"`
-- `fields.source` - source identifier (e.g. `"channel-worker"`, `"coding-agent"`)
-- `fields.*` - structured context passed at the call site (e.g. `fields.channelId`, `fields.component`)
+- `fields.source` - source identifier (e.g. `"channel-worker"`)
+- `fields.*` - structured context passed at the call site (e.g. `fields.channelId`)
 - `fields.error.name` - error class name (e.g. `"TypeError"`)
 - `fields.error.message` - error message text
 - `fields.error.cause.*` - recursive error cause chain
@@ -62,7 +61,6 @@ axiom query "<APL_QUERY>" --start-time="-<N>h" [-f table|json]
 
 ```apl
 ['loxel'] | where ['fields.source'] == 'channel-worker'
-['loxel'] | where ['fields.source'] == 'coding-agent'
 ['loxel'] | where level == 'error'
 ['loxel'] | where message contains 'hook'
 ['loxel'] | where message startswith 'Channel'
@@ -122,12 +120,6 @@ Use `isnotnull()`:
 
 ```
 axiom query "['loxel'] | where level == 'error' | project _time, message, ['fields.error.name'], ['fields.error.message'], ['fields.source'] | sort by _time desc | take 20" --start-time="-24h" -f table
-```
-
-### Coding agent errors
-
-```
-axiom query "['loxel'] | where ['fields.source'] == 'coding-agent' | where level == 'error' | project _time, message, ['fields.error.name'], ['fields.error.message'] | sort by _time desc | take 20" --start-time="-24h" -f table
 ```
 
 ### Error rate over time
