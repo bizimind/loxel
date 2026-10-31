@@ -284,6 +284,15 @@ describe("isDotnetSafeToRun", () => {
     expect(await isDotnetSafeToRun(wt, { env: { PATH: "" }, applyingOnly: true })).toBe(false);
   });
 
+  test("applyingOnly agrees with the full check on a repository set as bare", async () => {
+    const { wt } = await makeRoot();
+    await trackedSdk(wt);
+    await git(wt, "config", "core.bare", "true");
+    const env = { PATH: "" };
+    expect(await isDotnetSafeToRun(wt, { env })).toBe(false);
+    expect(await isDotnetSafeToRun(wt, { env, applyingOnly: true })).toBe(false);
+  });
+
   test("applyingOnly needs no git for a global.json without sdk.paths", async () => {
     const { wt } = await makeRoot();
     await write(join(wt, "global.json"), '{"sdk":{"version":"10.0.100"}}');

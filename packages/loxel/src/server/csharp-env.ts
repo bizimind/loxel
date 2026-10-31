@@ -17,7 +17,7 @@ import { mapWithConcurrency } from "./git-commands";
 import { logger } from "./logger";
 import { pathOutsideWorktree } from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
-import { isInside, isShippedByRepo, runGit } from "./shipped-by-repo";
+import { canGitReadRepo, isInside, isShippedByRepo, runGit } from "./shipped-by-repo";
 
 const log = logger.child("server");
 
@@ -156,8 +156,7 @@ export async function isDotnetSafeToRun(
       if (!isGlobalJsonSafe(info)) return false;
       // A repository git cannot read reports nothing as tracked, which says nothing about `paths`.
       if (!info.sdkPaths?.length) return true;
-      const { exitCode } = await runGit(wtPath, ["rev-parse", "--git-dir"]);
-      return exitCode === 0 || !findFileAbove(".git", wtPath);
+      return (await canGitReadRepo(wtPath)) || !findFileAbove(".git", wtPath);
     }
     // Later callers run dotnet from project directories, whose global.json can differ.
     // `icase`: on a case-insensitive disk the host opens any casing of the name.
