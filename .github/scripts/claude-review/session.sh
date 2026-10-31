@@ -106,7 +106,9 @@ save() {
       if ($r | length) == 0 then null else {
           costUsd: ($r | map(.total_cost_usd // 0) | max), turns: ($r | map(.num_turns // 0) | add),
           minutes: ($r | map(.duration_ms // 0) | add / 60000 | round),
-          d7: snap("seven_day")
+          # five_hour is recorded only to observe it: the plan dropped its 5-hour limit on 2026-10-31,
+          # so budgeting uses seven_day alone, but the response headers still reported the window then.
+          h5: snap("five_hour"), d7: snap("seven_day")
         } end')" || stats="null"
   fi
   jq -n --arg session "$SESSION_ID" --arg last "$target" --argjson stats "$stats" \
