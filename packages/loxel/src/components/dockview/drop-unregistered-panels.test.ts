@@ -115,6 +115,37 @@ describe("dropUnregisteredPanels", () => {
     expect(result.activeGroup).toBeUndefined();
   });
 
+  test("prunes floating and popout windows, dropping the ones it empties", () => {
+    const position = { left: 0, top: 0, width: 100, height: 100 };
+    const saved: SerializedDockview = {
+      ...layout(
+        [leaf("g1", ["t1"], 1000)],
+        [panel("t1", "terminal"), panel("e1", "editor"), panel("agent-1", "codingAgent")],
+        "float",
+      ),
+      floatingGroups: [
+        { data: leaf("float", ["agent-1", "e1"], 0, "agent-1").data, position },
+        { data: leaf("gone", ["agent-1"], 0).data, position },
+        {
+          grid: {
+            root: { type: "branch", data: [leaf("nested", ["agent-1"], 100)] },
+            width: 100,
+            height: 100,
+            orientation: "HORIZONTAL",
+          } as NonNullable<NonNullable<SerializedDockview["floatingGroups"]>[number]["grid"]>,
+          position,
+        },
+      ],
+      popoutGroups: [{ data: leaf("pop", ["agent-1"], 0).data, position }],
+    };
+    const result = dropUnregisteredPanels(saved, REGISTERED);
+    expect(result.floatingGroups).toEqual([
+      { data: { id: "float", views: ["e1"], activeView: "e1" }, position },
+    ]);
+    expect(result.popoutGroups).toEqual([]);
+    expect(result.activeGroup).toBe("float");
+  });
+
   test("forgets a maximized node, whose location may have moved", () => {
     const saved = layout(
       [leaf("g1", ["t1"], 500), leaf("g2", ["agent-1"], 500)],

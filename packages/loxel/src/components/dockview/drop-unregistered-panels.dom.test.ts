@@ -56,4 +56,32 @@ describe("a layout with panels no longer registered", () => {
     expect(dockview.activeGroup?.id).toBe("g1");
     dockview.dispose();
   });
+
+  test("leaves no empty floating window behind", () => {
+    const dockview = new DockviewComponent(document.createElement("div"), {
+      createComponent: (): IContentRenderer => ({
+        element: document.createElement("div"),
+        init: () => {},
+      }),
+    });
+    const saved = {
+      grid: {
+        root: { type: "branch", data: [leaf("g1", ["t1"], 1000)] },
+        width: 1000,
+        height: 800,
+        orientation: "HORIZONTAL",
+      },
+      panels: { t1: panel("t1", "terminal"), "agent-1": panel("agent-1", "codingAgent") },
+      floatingGroups: [
+        {
+          data: leaf("float", ["agent-1"], 0).data,
+          position: { left: 0, top: 0, width: 100, height: 100 },
+        },
+      ],
+    } as SerializedDockview;
+
+    dockview.fromJSON(dropUnregisteredPanels(saved, { components }));
+    expect(dockview.groups.map((g) => g.id)).toEqual(["g1"]);
+    dockview.dispose();
+  });
 });
