@@ -6,6 +6,7 @@ Exceptions:
 
 - astro.svg depicts the Astro logo and is not part of the theme. Its 128x128 geometry follows the drawing in the devicon project (MIT, https://github.com/devicons/devicon).
 - folderExcluded_dark.svg is not part of the theme. It is a recolored copy of folder_dark.svg made for Loxel.
+- maven_dark.svg is not part of the theme. It is unmodified from IntelliJ Community (Apache-2.0, section 2), with its notice also in LICENSE-intellij-community.
 
 1. vscode-jetbrains-icon-theme
 https://github.com/peakoss/vscode-jetbrains-icon-theme

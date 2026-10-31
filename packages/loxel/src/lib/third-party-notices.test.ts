@@ -124,6 +124,33 @@ describe("readEntries", () => {
   });
 });
 
+describe("readEntries platforms", () => {
+  test("leaves out a language server that does not ship on this platform", async () => {
+    const servers = path.join(root, "scripts", "language-servers");
+    mkdirSync(path.join(servers, "licenses"), { recursive: true });
+    writeFileSync(path.join(servers, "licenses", "x.txt"), "text");
+    writeFileSync(path.join(root, "scripts", "download-x.ts"), "");
+    const manifest = (platforms: string[]): string =>
+      JSON.stringify({
+        script: "download-x.ts",
+        platforms,
+        license: "MIT",
+        source: "https://example.com",
+        licenseFile: "licenses/x.txt",
+      });
+    writeFileSync(path.join(servers, "here.json"), manifest([process.platform]));
+    writeFileSync(path.join(servers, "elsewhere.json"), manifest(["no-such-platform"]));
+    writeFileSync(
+      path.join(root, "third-party.json"),
+      JSON.stringify({ languageServers: "scripts/language-servers" }),
+    );
+
+    const entries = await readEntries(root);
+
+    expect(entries.map((entry) => entry.name)).toEqual(["here"]);
+  });
+});
+
 describe("collectNpmPackages", () => {
   test("walks dependencies and workspace packages, not dev dependencies", async () => {
     const product = path.join(root, "packages", "product");

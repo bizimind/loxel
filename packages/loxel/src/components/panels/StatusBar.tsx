@@ -26,6 +26,7 @@ import { usePendingChordStore } from "@/store/keybindings/pending-chord";
 
 import { IndentationStatus } from "./IndentationStatus";
 import { LanguageServerStatus } from "./LanguageServerStatus";
+import { RepoTrustStatus } from "./RepoTrustStatus";
 
 /** Shows the keystrokes of a chord in progress, like "⌘\ … waiting for the next key". */
 function PendingChordIndicator() {
@@ -116,6 +117,8 @@ export function StatusBar() {
       ))}
 
       <LanguageServerStatus />
+
+      <RepoTrustStatus />
 
       <PendingChordIndicator />
 

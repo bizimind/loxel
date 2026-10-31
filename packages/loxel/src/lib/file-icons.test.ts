@@ -69,3 +69,52 @@ describe("Python project icons", () => {
     },
   );
 });
+
+describe("Gradle, Maven and Groovy icons", () => {
+  test.each([
+    ["build.gradle", "gradle.svg"],
+    ["settings.gradle", "gradle.svg"],
+    ["build.gradle.kts", "gradle.svg"],
+    ["settings.gradle.kts", "gradle.svg"],
+    ["gradle.properties", "gradle.svg"],
+    ["gradlew", "gradle.svg"],
+    ["gradlew.bat", "gradle.svg"],
+    ["libs.versions.toml", "gradle.svg"],
+    ["pom.xml", "maven_dark.svg"],
+    ["mvnw", "maven_dark.svg"],
+    ["mvnw.cmd", "maven_dark.svg"],
+    ["Util.groovy", "groovy.svg"],
+    ["Jenkinsfile", "groovy.svg"],
+    ["script.kts", "kotlinScript_dark.svg"],
+    ["other.properties", "properties_dark.svg"],
+    ["other.xml", "xml_dark.svg"],
+  ])("%s → %s", (filename, icon) => {
+    expect(getFileIconPath(filename)).toBe(`./icons/${icon}`);
+  });
+});
+
+describe("JavaScript project icons", () => {
+  test.each([
+    ["app.js", "javaScript_dark.svg"],
+    ["app.mjs", "javaScript_dark.svg"],
+    ["app.cjs", "javaScript_dark.svg"],
+    ["app.jsx", "jsx_dark.svg"],
+    ["app.test.mjs", "jsTest_dark.svg"],
+    ["app.spec.cjs", "jsTest_dark.svg"],
+    ["biome.json", "biomejs.svg"],
+    ["biome.jsonc", "biomejs.svg"],
+    [".eslintrc.json", "eslint.svg"],
+    ["eslint.config.js", "eslint.svg"],
+    ["eslint.config.mjs", "eslint.svg"],
+    ["eslint.config.ts", "eslint.svg"],
+    [".oxlintrc.json", "config_dark.svg"],
+    ["oxlint.config.ts", "config_dark.svg"],
+    ["jsconfig.json", "config_dark.svg"],
+    [".babelrc", "config_dark.svg"],
+    [".nycrc", "config_dark.svg"],
+    [".nvmrc", "nodejs_dark.svg"],
+    [".node-version", "nodejs_dark.svg"],
+  ])("%s → %s", (filename, icon) => {
+    expect(getFileIconPath(filename)).toBe(`./icons/${icon}`);
+  });
+});

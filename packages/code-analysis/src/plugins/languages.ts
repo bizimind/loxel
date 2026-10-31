@@ -1,6 +1,7 @@
-import { join } from "node:path";
+import { basename } from "node:path";
 
 import type { AnalysisPlugin, AnalysisRecord, TreemapConfig } from "../plugin.ts";
+import { listProjectFiles } from "../project.ts";
 
 const plugin: AnalysisPlugin = {
   meta: {
@@ -11,44 +12,13 @@ const plugin: AnalysisPlugin = {
   },
 
   async generate(workDir, _args): Promise<AnalysisRecord[]> {
-    const proc = Bun.spawn(
-      [
-        "find",
-        ".",
-        "-type",
-        "f",
-        "-not",
-        "-path",
-        "*/node_modules/*",
-        "-not",
-        "-path",
-        "*/.git/*",
-        "-not",
-        "-path",
-        "*/dist/*",
-      ],
-      { cwd: workDir, stdout: "pipe", stderr: "ignore" },
-    );
-    const text = await new Response(proc.stdout).text();
-    const files = text.trim().split("\n").filter(Boolean);
-
-    const records: AnalysisRecord[] = [];
-    await Promise.all(
-      files.map(async (rel) => {
-        const clean = rel.replace(/^\.\//, "");
-        const abs = join(workDir, clean);
-        const f = Bun.file(abs);
-        const stat: number | null = await f
-          .exists()
-          .then((ok) => (ok ? f.size : null))
-          .catch(() => null);
-        if (stat === null) return;
-        const dotIdx = clean.lastIndexOf(".");
-        const ext = dotIdx !== -1 ? clean.slice(dotIdx + 1) : "(no ext)";
-        records.push({ path: `${ext}/${clean}`, bytes: stat, ext });
-      }),
-    );
-    return records;
+    const files = await listProjectFiles(workDir);
+    return files.map(({ path, bytes }) => {
+      const name = basename(path);
+      const dotIdx = name.lastIndexOf(".");
+      const ext = dotIdx !== -1 ? name.slice(dotIdx + 1) : "(no ext)";
+      return { path: `${ext}/${path}`, bytes, ext };
+    });
   },
 
   buildConfig(_workDir, _args): TreemapConfig {

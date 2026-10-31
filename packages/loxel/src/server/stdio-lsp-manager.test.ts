@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +9,12 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import { LSP_EXITED_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
 
 import { FileChangeType } from "./lsp-watched-files";
-import { StdioLspManager, type WtLspContext, type WtLspSession } from "./stdio-lsp-manager";
+import {
+  SERVER_STOP_GRACE_MS,
+  StdioLspManager,
+  type WtLspContext,
+  type WtLspSession,
+} from "./stdio-lsp-manager";
 
 // A stand-in language server: echoes every frame it reads back as a `test/received`
 // notification, writes whatever a `test/emit` notification carries as its own frame, exits with
@@ -55,10 +60,10 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
   }
 
   start(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
+    this.startSession(ws, { wtPath, repoTrusted: false });
   }
 
-  protected resolveBinary(): string | null {
+  protected resolveBinary(): string | null | Promise<string | null> {
     return process.execPath;
   }
 
@@ -75,6 +80,7 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
       ws,
       proc,
       wtPath: context.wtPath,
+      repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
     };
@@ -159,7 +165,8 @@ let dir: string | undefined;
 let manager: FakeLspManager | undefined;
 
 afterEach(async () => {
-  manager?.destroy();
+  jest.useRealTimers();
+  await manager?.destroy();
   manager = undefined;
   if (dir) await rm(dir, { recursive: true, force: true });
   dir = undefined;
@@ -548,6 +555,147 @@ describe("StdioLspManager spawn failures", () => {
     // The next connection for the worktree finds no session left to replace.
     manager.start(new FakeClient(manager).ws, dir);
     expect(first.closes).toHaveLength(1);
+  });
+});
+
+describe("StdioLspManager initialization options", () => {
+  class ThrowingOptionsManager extends FakeLspManager {
+    readonly written: string[] = [];
+
+    protected override writeToStdin(session: WtLspSession, json: string): void {
+      this.written.push(json);
+      super.writeToStdin(session, json);
+    }
+
+    protected override getSessionKey(context: WtLspContext): string {
+      return context.wtPath;
+    }
+
+    protected override getInitializationOptions(): Record<string, unknown> {
+      throw new Error("no settings");
+    }
+  }
+
+  /** Resolves its binary only when told to, so frames queue up before the session exists. */
+  class SlowThrowingOptionsManager extends ThrowingOptionsManager {
+    framesHandled = 0;
+    private readonly binary = Promise.withResolvers<string>();
+
+    protected override resolveBinary(): Promise<string> {
+      return this.binary.promise;
+    }
+
+    protected override handleClientData(session: WtLspSession, data: string): void {
+      this.framesHandled += 1;
+      super.handleClientData(session, data);
+    }
+
+    resolve(): void {
+      this.binary.resolve(process.execPath);
+    }
+  }
+
+  test("a hook that throws closes the session as a start failure, without initialize", async () => {
+    let throwing: ThrowingOptionsManager | undefined;
+    const { client, root } = await setup("wt", (script) => {
+      throwing = new ThrowingOptionsManager(script);
+      return throwing;
+    });
+
+    client.send({ id: 1, method: "initialize", params: { capabilities: {} } });
+
+    expect(client.closes).toEqual([[LSP_START_FAILED_CLOSE_CODE, "python-lsp failed to start"]]);
+    expect(throwing!.written).toEqual([]);
+
+    // The next connection for the worktree finds no session left to replace.
+    manager!.start(new FakeClient(manager!).ws, root);
+    expect(client.closes).toHaveLength(1);
+  });
+
+  test("frames queued behind the initialize that failed are dropped", async () => {
+    let slow: SlowThrowingOptionsManager | undefined;
+    const { client } = await setup("wt", (script) => {
+      slow = new SlowThrowingOptionsManager(script);
+      return slow;
+    });
+    client.send({ id: 1, method: "initialize", params: { capabilities: {} } });
+    client.send({ method: "initialized" });
+
+    slow!.resolve();
+
+    expect(await client.closed).toBe(LSP_START_FAILED_CLOSE_CODE);
+    expect(slow!.framesHandled).toBe(1);
+  });
+});
+
+describe("StdioLspManager stopping a server", () => {
+  class ProcLspManager extends FakeLspManager {
+    proc: Subprocess | undefined;
+    ws: ServerWebSocket<unknown> | undefined;
+
+    protected override buildSession(
+      ws: ServerWebSocket<unknown>,
+      proc: Subprocess,
+      context: WtLspContext,
+    ): WtLspSession {
+      this.proc = proc;
+      this.ws = ws;
+      return super.buildSession(ws, proc, context);
+    }
+  }
+
+  /** A running server; the frame it answers shows it has passed `preamble`. */
+  async function startServer(preamble: string): Promise<ProcLspManager & { proc: Subprocess }> {
+    dir = await realpath(await mkdtemp(join(tmpdir(), "stdio-lsp-manager-")));
+    const script = join(dir, "fake-server.mjs");
+    await writeFile(script, preamble + FAKE_SERVER);
+    const procManager = new ProcLspManager(script);
+    manager = procManager;
+    const client = new FakeClient(procManager);
+    procManager.start(client.ws, dir);
+    client.send({ method: "test/ready" });
+    await client.serverReceived((f) => f.method === "test/ready");
+    return procManager as ProcLspManager & { proc: Subprocess };
+  }
+
+  test("a server that ignores SIGTERM gets SIGKILL after the grace period", async () => {
+    const stubborn = await startServer('process.on("SIGTERM", () => {});\n');
+    const kill = spyOn(stubborn.proc, "kill");
+    jest.useFakeTimers();
+
+    const destroyed = stubborn.destroy();
+    expect(kill.mock.calls).toEqual([["SIGTERM"]]);
+    jest.advanceTimersByTime(SERVER_STOP_GRACE_MS - 1);
+    expect(kill.mock.calls).toEqual([["SIGTERM"]]);
+    jest.advanceTimersByTime(1);
+    expect(kill.mock.calls).toEqual([["SIGTERM"], ["SIGKILL"]]);
+
+    await destroyed;
+    expect(stubborn.proc.signalCode).toBe("SIGKILL");
+  });
+
+  test("a server that exits on SIGTERM gets nothing more", async () => {
+    const polite = await startServer("");
+    const kill = spyOn(polite.proc, "kill");
+    jest.useFakeTimers();
+
+    await polite.destroy();
+    jest.advanceTimersByTime(SERVER_STOP_GRACE_MS);
+
+    expect(polite.proc.signalCode).toBe("SIGTERM");
+    expect(kill.mock.calls).toEqual([["SIGTERM"]]);
+  });
+
+  test("a detached server is forced too, and destroy waits for it", async () => {
+    const stubborn = await startServer('process.on("SIGTERM", () => {});\n');
+    jest.useFakeTimers();
+
+    stubborn.detach(stubborn.ws!);
+    const destroyed = stubborn.destroy();
+    jest.advanceTimersByTime(SERVER_STOP_GRACE_MS);
+
+    await destroyed;
+    expect(stubborn.proc.signalCode).toBe("SIGKILL");
   });
 });
 

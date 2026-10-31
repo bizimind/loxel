@@ -95,7 +95,11 @@ export function parseEntry(raw: unknown, baseDir: string, where: string): Notice
   };
 }
 
-async function readLanguageServerEntry(dir: string, file: string): Promise<NoticeEntry> {
+/** The manifest's entry; validated on every platform, but none where the binary does not ship. */
+async function readLanguageServerEntry(
+  dir: string,
+  file: string,
+): Promise<NoticeEntry | undefined> {
   const raw: unknown = await Bun.file(path.join(dir, file)).json();
   if (!isRecord(raw)) throw new Error(`${file}: not an object`);
   const entry = parseEntry({ ...raw, name: path.basename(file, ".json") }, dir, file);
@@ -105,6 +109,8 @@ async function readLanguageServerEntry(dir: string, file: string): Promise<Notic
   if (pinned !== undefined && !entry.source.includes(pinned)) {
     throw new Error(`${file}: source must name the version ${raw.script} pins (${pinned})`);
   }
+  const { platforms } = raw;
+  if (Array.isArray(platforms) && !platforms.includes(process.platform)) return undefined;
   return entry;
 }
 
@@ -119,7 +125,8 @@ export async function readEntries(packageDir: string): Promise<NoticeEntry[]> {
   if (typeof config.languageServers === "string") {
     const dir = path.resolve(packageDir, config.languageServers);
     const files = readdirSync(dir).filter((file) => file.endsWith(".json"));
-    entries.push(...(await Promise.all(files.map((file) => readLanguageServerEntry(dir, file)))));
+    const manifests = await Promise.all(files.map((file) => readLanguageServerEntry(dir, file)));
+    entries.push(...manifests.flatMap((manifest) => manifest ?? []));
   }
   return entries.toSorted((a, b) => a.name.localeCompare(b.name, "en"));
 }

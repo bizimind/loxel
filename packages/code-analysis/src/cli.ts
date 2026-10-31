@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { createResult, formatTable, runAction } from "@bizimind/cli-common";
@@ -167,7 +168,8 @@ program
       // Apply defaults and validate required options
       const args = resolveArgs(plugin, rawArgs);
 
-      const workDir = resolve(opts.workdir ?? process.cwd());
+      // Real, because tools report paths from the real cwd of the process they run in.
+      const workDir = realpathSync(resolve(opts.workdir ?? process.cwd()));
 
       if (opts.web) {
         const rawPort = parseInt(opts.port, 10);

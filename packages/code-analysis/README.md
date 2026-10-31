@@ -83,9 +83,19 @@ A bare name that is not a built-in id is reported as an unknown plugin. A plugin
 
 ## Built-in plugins
 
+### Which files count
+
+`loc` and `languages` count what git sees in `--workdir`: tracked files and untracked files that are not ignored, so ignored build output and dependencies stay out. A `node_modules` directory stays out even if it is not ignored yet, unless its files are committed. Outside a git repository, or when `--workdir` is itself ignored, they count every file except `node_modules`, `.git`, and `dist`.
+
+### Which tools run
+
+`lint-issues` and `type-issues` run only tools the project has installed, from `node_modules/.bin` in `--workdir` or a parent directory up to the git repository root (outside a repository, `--workdir` alone). They never download a tool. Without one the result is empty and a message on stderr says what to install. Running a project's linter runs its config, so use these two plugins only on projects you trust.
+
+---
+
 ### `loc` — Lines of code
 
-Treemap of source file sizes by line count. Covers `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`. Excludes `node_modules`, `.git`, and `dist`.
+Treemap of source file sizes by line count. Covers `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`. Counts the [project's files](#which-files-count).
 
 ```bash
 code-analysis -p loc
@@ -96,7 +106,7 @@ code-analysis -p loc -w packages/my-package
 
 ### `languages` — File size by language
 
-Treemap grouped by file extension, sized by bytes. The top-level nodes are extensions (`ts`, `json`, `md`, …); children are the files. Excludes `node_modules`, `.git`, and `dist`.
+Treemap grouped by file extension, sized by bytes. The top-level nodes are extensions (`ts`, `json`, `md`, …); children are the files. Counts the [project's files](#which-files-count).
 
 ```bash
 code-analysis -p languages
@@ -138,7 +148,7 @@ code-analysis -p lint-issues
 code-analysis -p lint-issues -a rule=no-console
 ```
 
-Tries **oxlint** first (`bunx oxlint -f json`), falls back to **ESLint** (`bunx eslint -f json`).
+Tries the project's **oxlint** first (`oxlint -f json`), falls back to its **ESLint** (`eslint -f json`). See [which tools run](#which-tools-run).
 
 **Options:** `rule` — rule name as it appears in the linter output (e.g. `no-console`, `typescript/no-explicit-any`).
 
@@ -146,7 +156,7 @@ Tries **oxlint** first (`bunx oxlint -f json`), falls back to **ESLint** (`bunx 
 
 ### `type-issues` — TypeScript type errors
 
-Treemap of TypeScript errors per file, sized by error count.
+Treemap of TypeScript errors per file, sized by error count. Works for TypeScript and plain JavaScript projects.
 
 ```bash
 # All type errors
@@ -156,7 +166,7 @@ code-analysis -p type-issues
 code-analysis -p type-issues -a code=TS2345
 ```
 
-Runs `bunx tsc --noEmit`, falling back to the preview-era `tsgo` command for projects that have not migrated yet.
+Runs the project's `tsc --noEmit`, falling back to the preview-era `tsgo` command for projects that have not migrated yet. See [which tools run](#which-tools-run). It checks the nearest `tsconfig.json` or `jsconfig.json`, looking in `--workdir` and then up to the git repository root; `tsconfig.json` wins when a directory has both. Errors outside `--workdir` or inside `node_modules` are not counted, which matters for the latter under a `jsconfig.json` because its defaults make `tsc` look into JavaScript dependencies.
 
 **Options:** `code` — TypeScript error code (e.g. `TS2345`, `TS7006`).
 
@@ -164,7 +174,7 @@ Runs `bunx tsc --noEmit`, falling back to the preview-era `tsgo` command for pro
 
 ### `import-graph` — Import dependency graph
 
-Force-directed network graph of import edges between source files, built with dependency-cruiser. Nodes are files; edges are imports. `node_modules` are not followed; `.git` and `dist` are excluded. Only imports that resolve to a file in the tree are kept: core modules and bare package imports (or anything else dependency-cruiser cannot resolve) are dropped rather than shown as dangling nodes. When `--workdir` contains a `tsconfig.json`, its `paths` aliases (for example `@/*`) are resolved so aliased imports produce real edges.
+Force-directed network graph of import edges between source files, built with dependency-cruiser. Nodes are files; edges are imports. `node_modules` are not followed; `.git` and `dist` are excluded. Only imports that resolve to a file in the tree are kept: core modules and bare package imports (or anything else dependency-cruiser cannot resolve) are dropped rather than shown as dangling nodes. `paths` aliases (for example `@/*`) from the nearest `tsconfig.json` or `jsconfig.json` are resolved so aliased imports produce real edges; the config is found as in `type-issues`.
 
 ```bash
 # Full graph

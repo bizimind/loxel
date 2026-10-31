@@ -82,6 +82,7 @@ import {
   type ProjectWorktree,
   type WorktreeMetaUpdate,
 } from "./project-worktrees";
+import { getRepoTrustStatus, isRepoTrustStoreKey, setRepoTrusted } from "./repo-trust";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
@@ -549,6 +550,12 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
   return json({ lines });
 }
 
+/** A project's file is data, never a page of this server: media tags and fetches ignore these. */
+const RAW_FILE_HEADERS = {
+  "Content-Security-Policy": "sandbox",
+  "X-Content-Type-Options": "nosniff",
+};
+
 // GET /api/file-raw - Serve raw binary file content with correct Content-Type
 async function handleFileRaw(req: Request, ctx: RouteContext): Promise<Response> {
   const url = new URL(req.url);
@@ -595,12 +602,13 @@ async function handleFileRaw(req: Request, ctx: RouteContext): Promise<Response>
           "Accept-Ranges": "bytes",
           "Content-Length": String(end - start + 1),
           "Content-Type": file.type,
+          ...RAW_FILE_HEADERS,
         },
       });
     }
   }
 
-  return new Response(file, { headers: { "Accept-Ranges": "bytes" } });
+  return new Response(file, { headers: { "Accept-Ranges": "bytes", ...RAW_FILE_HEADERS } });
 }
 
 // GET /api/media-frame - Serve HTML wrapper page for media content in a sandboxed iframe
@@ -1091,6 +1099,22 @@ const toolchainPostRoutes = Object.fromEntries(
       },
     ]),
 );
+
+async function handleGetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
+  const wtPath = await worktreeFromQuery(req, ctx);
+  return wtPath instanceof Response ? wtPath : json(getRepoTrustStatus(wtPath));
+}
+
+async function handleSetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  if (typeof body.trusted !== "boolean") return error("Missing 'trusted' boolean in body", 400);
+  const resolved = resolveProjectFromBody(body, ctx);
+  if (resolved instanceof Response) return resolved;
+  const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
+  if (wtPath instanceof Response) return wtPath;
+  setRepoTrusted(wtPath, body.trusted);
+  return json(getRepoTrustStatus(wtPath));
+}
 
 // ---------------------------------------------------------------------------
 // Service-dependent routes: files panel
@@ -3314,6 +3338,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/update/status": handleGetUpdateStatus,
     "/api/detected-formatters": handleDetectedFormatters,
     ...toolchainGetRoutes,
+    "/api/repo-trust": handleGetRepoTrust,
     "/api/editorconfig": handleEditorConfig,
   },
   POST: {
@@ -3368,6 +3393,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/external-folders/add": handleExternalFolderAdd,
     "/api/external-folders/remove": handleExternalFolderRemove,
     ...toolchainPostRoutes,
+    "/api/repo-trust": handleSetRepoTrust,
   },
 };
 
@@ -3464,6 +3490,7 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
         return json({ value: isSettings && value ? decryptModelKeys(value) : value });
       }
       if (method === "PUT") {
+        if (isRepoTrustStoreKey(storeKey)) return error("Not writable through this route", 403);
         const body = await parseBody(req);
         if (typeof body.value !== "string") return error("Missing 'value' string in body", 400);
         const stored = isSettings ? encryptModelKeys(body.value) : body.value;
