@@ -70,7 +70,6 @@ The status bar runs across the bottom edge of the window and is always visible. 
 - **Python interpreter** — while a Python file is the active editor, the worktree's interpreter; click it to choose another (see [Python environment](/docs/languages/python#python-environment))
 - **JDK** — while a Java file is the active editor, the worktree's JDK; click it to choose another (see [JDK detection](/docs/languages/java#jdk-detection))
 - **Rust toolchain** — while a Rust file is the active editor, the worktree's toolchain; click it to choose another (see [Rust toolchain](/docs/languages/rust#rust-toolchain))
-- **JDK** — while a Java file is the active editor, the worktree's JDK; click it to choose another (see [JDK detection](/docs/languages/java#jdk-detection))
 - **Chord progress** — the keys typed so far while a chord shortcut such as `Cmd+\` is waiting for its next key
 - **New panel buttons** — open a new agent, markdown editor, drawing, browser, or terminal
 

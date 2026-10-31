@@ -29,8 +29,8 @@ export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   new AstroLspManager(),
   new ClangdLspManager(),
   new DockerLspManager(),
-  new JavaLspManager(),
   new GoLspManager(),
+  new JavaLspManager(),
   new KotlinLintLspManager(),
   new PythonLspManager(mypyLspManager),
   // After Python, which hears from it while it shuts down.
