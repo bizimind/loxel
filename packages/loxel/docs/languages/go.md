@@ -1,6 +1,6 @@
 # Go
 
-Go files are served by gopls. Shared language-server architecture: [LANGUAGE_SERVERS.md](../LANGUAGE_SERVERS.md).
+Go files are served by gopls and formatted by gofmt or golangci-lint. Shared language-server architecture: [LANGUAGE_SERVERS.md](../LANGUAGE_SERVERS.md).
 
 ## Manager
 
@@ -55,6 +55,15 @@ gopls pulls settings with `workspace/configuration` and must get an answer: an e
 
 - `source.doc`, `source.assembly`, `source.freesymbols`, `source.splitPackage` and `gopls.doc.features` start a local web page and announce it with `window/showDocument` or an info `showMessage`, which Loxel does not act on.
 - `gopls.go_get_package`, `gopls.add_dependency`, the upgrade commands and vulncheck look modules up online.
+
+## Format on save
+
+[go-formatter.ts](../../src/server/go-formatter.ts) is the Go `LanguageFormatter` ([Formatting](../LANGUAGE_SERVERS.md#formatting)). The nearest `.golangci.*` decides alone, since golangci-lint never merges configs: `version: "2"` with a non-empty `formatters.enable`, and the binary on `PATH`, selects `golangci-lint fmt --stdin`. Otherwise `gofmt` runs inside a module or workspace, and nothing outside one. A config without formatters is still the nearest config, so the walk does not continue to a parent's. `gofmt` needs a module rather than running everywhere so that a repository with no Go module lists no Go formatter in Settings.
+
+- `--config` is always passed, because golangci-lint's own search can leave the worktree. It is relative to the physical cwd because the seam's args are split on whitespace; a path that still has whitespace, possible only through a symlinked directory, means `gofmt` instead.
+- stdin input is always `<standard input>` to golangci-lint, so it ignores `formatters.exclusions.paths`. `isExcluded` matches them itself, relative to `run.relative-path-mode`'s base. Go regular expressions are translated to JavaScript ones. A pattern with no equivalent, or estimated to backtrack for too long on the server's thread for that path, is logged and counts as excluding the file: leaving a file alone is easier to notice and undo than rewriting one the project excludes.
+- The cwd is the file's directory, because gofumpt and goimports read `go.mod` from the cwd only. `PATH` is the login-shell one without the worktree's directories or relative entries, so `detect` and the spawn agree and nothing from the repository runs. A manual override given as a path into the worktree is the user's explicit choice and still runs.
+- `GO_ENV` is set for every Go formatter, since golangci-lint runs `go`. `detect` is synchronous, so the `go env GOROOT` lookup for a `gofmt` missing from `PATH` (a `go` wrapper) is in `spawnOptions`. `GOTOOLCHAIN=local` keeps that lookup from starting a toolchain download. These were checked at the socket level, with re-signed copies of `go` and `gofmt` because the official binaries are hardened against `DYLD_INSERT_LIBRARIES`.
 
 ## Other behavior
 

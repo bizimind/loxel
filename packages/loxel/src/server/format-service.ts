@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import type { FileSink } from "bun";
 
@@ -284,7 +284,8 @@ export class FormatService {
     const dir = fileDir(filePath, worktreePath);
     for (const language of this.languages) {
       const detected =
-        language.extensions.includes(ext) && detectFormatter(language, dir, worktreePath);
+        language.extensions.includes(ext) &&
+        detectFormatter(language, dir, worktreePath, basename(filePath));
       if (detected) return toDetectedFormatter(detected, language);
     }
     return this.detectFormatters(worktreePath).find((f) => f.extensions.has(ext));
@@ -543,9 +544,10 @@ function detectFormatter(
   language: LanguageFormatter,
   dir: string,
   wtRoot: string,
+  fileName?: string,
 ): FileFormatter | null {
   try {
-    return language.detect(dir, wtRoot);
+    return language.detect(dir, wtRoot, fileName);
   } catch (err) {
     log.warn("Formatter detection failed", { dir, error: errorMessage(err) });
     return null;
