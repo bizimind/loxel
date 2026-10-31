@@ -11,7 +11,7 @@ import { pythonFormatter } from "./python-formatter";
 
 export const languageFormatters: readonly LanguageFormatter[] = [
   // This comment keeps the formatter from joining the entries onto one line.
-  kotlinFormatter,
   goFormatter,
+  kotlinFormatter,
   pythonFormatter,
 ];

@@ -208,8 +208,7 @@ function endOfBlockComment(script: string, start: number): number {
 
 /**
  * The file's text, empty when it cannot be read (a missing file is the usual case) or is not a
- * reasonably sized regular file: these files come from the repository, a read blocks the server,
- * and a committed symlink can lead anywhere, such as `/dev/zero`.
+ * regular file of a reasonable size: detection runs synchronously on every save.
  */
 function readText(path: string): string {
   try {
