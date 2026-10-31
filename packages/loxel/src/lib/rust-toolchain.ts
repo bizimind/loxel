@@ -12,8 +12,9 @@ import { useProjectStore } from "@/store/projects";
 
 import { abbreviateHomePath } from "./home-path";
 
-// A picker id that cannot collide with a toolchain name, which rustup refuses with a `#`.
-const AUTOMATIC_ID = "#automatic";
+// Picker ids: `rustup toolchain link` accepts any name, so a toolchain's id has its own prefix.
+const AUTOMATIC_ID = "automatic";
+const TOOLCHAIN_ID_PREFIX = "toolchain:";
 
 const SOURCE_DESCRIPTIONS: Record<RustToolchainSource, string> = {
   chosen: "Chosen for this worktree",
@@ -77,7 +78,7 @@ export function rustToolchainTooltip(toolchain: RustToolchain): string {
 
 function choiceItem(choice: RustToolchainChoice, chosen: string | null, home: string | null) {
   return {
-    id: choice.name,
+    id: `${TOOLCHAIN_ID_PREFIX}${choice.name}`,
     label: versionLabel(choice.version, choice.name),
     description: abbreviateHomePath(choice.path, home),
     current: choice.name === chosen,
@@ -108,7 +109,7 @@ export async function selectRustToolchain(wtPath: string): Promise<void> {
   if (picked === null) return;
 
   try {
-    const toolchain = picked === AUTOMATIC_ID ? null : picked;
+    const toolchain = picked === AUTOMATIC_ID ? null : picked.slice(TOOLCHAIN_ID_PREFIX.length);
     const response = await setRustToolchainChoice({ worktreePath: wtPath, toolchain });
     setToolchainStatusData(rustToolchain, wtPath, response);
   } catch (err) {

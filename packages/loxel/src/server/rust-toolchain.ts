@@ -16,7 +16,7 @@ import { pathOutsideWorktree } from "./python-env";
 import { isVersionManagerShim } from "./rust-tool-shim";
 import { getRustChoice } from "./rust-toolchain-store";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
-import { isShippedByRepo } from "./shipped-by-repo";
+import { isInside, isShippedByRepo } from "./shipped-by-repo";
 
 const log = logger.child("server");
 
@@ -708,7 +708,7 @@ async function findTool(
 async function isRepoLocal(wtPath: string, target: string): Promise<boolean> {
   try {
     const [realWorktree, real] = await Promise.all([realpath(wtPath), realpath(target)]);
-    if (real === realWorktree || real.startsWith(`${realWorktree}${path.sep}`)) return true;
+    if (isInside(real, realWorktree)) return true;
     return await isShippedByRepo(wtPath, target);
   } catch (err) {
     log.debug("Could not check whether a path belongs to the worktree", { target, error: err });
