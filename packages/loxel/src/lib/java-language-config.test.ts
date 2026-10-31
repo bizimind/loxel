@@ -4,7 +4,7 @@ import { shikiToMonaco } from "@shikijs/monaco";
 import * as monaco from "monaco-editor";
 
 import { getHighlighter } from "./highlighter";
-import { registerLanguageConfiguration } from "./java-language-config";
+import { closingTextBlockAction, registerLanguageConfiguration } from "./java-language-config";
 import { registerLanguageConfiguration as registerPythonLanguageConfiguration } from "./python-language-config";
 
 /** Internal model surface (not in monaco.d.ts) used to tokenize synchronously. */
@@ -136,6 +136,25 @@ describe("Java editing in Monaco", () => {
       expect(typeAtEnd('String s = """\n    a\n    ', '"""')).toBe(
         'String s = """\n    a\n    """',
       );
+    });
+
+    test("an escaped backslash before the closing delimiter does not escape it", () => {
+      const open = 'String s = """\n    C:\\\\Users\\\\';
+      expect(typeAtEnd(open, '"""')).toBe(`${open}"""`);
+      expect(typeAtEnd("String s = ", '"""\nC:\\\\"""')).toBe('String s = """\n    C:\\\\"""');
+    });
+
+    test("an escaped backslash before a delimiter keeps later blocks counted", () => {
+      const first = 'String a = """\n    C:\\\\""";\nString b = ';
+      expect(typeAtEnd(first, '"""')).toBe(`${first}""""""`);
+      expect(typeAtEnd(`${first}"""\n    x\n    `, '"""')).toBe(`${first}"""\n    x\n    """`);
+    });
+
+    test("an escaped quote does not complete a closing delimiter", () => {
+      const open = 'String s = """\n    a\\"';
+      expect(closingTextBlockAction(`${open}"`, "")).toBeNull();
+      expect(closingTextBlockAction(`${open}""`, "")).toBeNull();
+      expect(closingTextBlockAction('String s = """\n    a\\\\""', "")).toBe("insert");
     });
 
     test("a quote typed before the closing delimiter stays in the content", () => {

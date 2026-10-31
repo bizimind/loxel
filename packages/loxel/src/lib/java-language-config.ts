@@ -58,10 +58,11 @@ export function closingTextBlockAction(
   textBefore: string,
   textAfter: string,
 ): "collapse" | "insert" | null {
-  if (!/(?:^|[^"\\])""$/.test(textBefore)) return null;
+  // A quote is escaped by an odd run of backslashes: `\\` is an escaped backslash, not an escape.
+  if (!/(?:^|[^"\\])(?:\\\\)*""$/.test(textBefore)) return null;
   // Java strings only span lines as text blocks, so an odd count of delimiters means inside one.
   // A `"""` in a comment or a one-line string can miscount, which only falls back to Monaco's typing.
-  if ((textBefore.match(/(?<!\\)"""/g)?.length ?? 0) % 2 === 0) return null;
+  if ((textBefore.match(/(?<!(?:^|[^\\])\\(?:\\\\)*)"""/g)?.length ?? 0) % 2 === 0) return null;
   if (/^"""(?!")/.test(textAfter)) return "collapse";
   return textAfter.startsWith('"') ? null : "insert";
 }
