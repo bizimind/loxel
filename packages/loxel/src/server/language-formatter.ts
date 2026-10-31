@@ -6,6 +6,20 @@ export interface FileFormatter {
   args: string;
 }
 
+/**
+ * What `detect` returns instead of a formatter when a project calls for one Loxel deliberately will
+ * not run. The save goes out unformatted, later modules are not asked, and the user sees `notice`.
+ */
+export interface FormatterDecline {
+  notice: string;
+}
+
+/** A formatter failing in a way its language can explain better than the generic messages can. */
+export type FormatterFailure = { command: string } & (
+  | { kind: "not-installed" }
+  | { kind: "exited"; exitCode: number; stderr: string }
+);
+
 /** How to spawn a formatter. What a module leaves out keeps the default in `LanguageFormatter`. */
 export interface FormatterSpawnOptions {
   /**
@@ -32,7 +46,7 @@ export interface LanguageFormatter {
    * file to the next module claiming its extension, then to `DETECTION_RULES`, so a module taking
    * over a language removes its rule there. Runs on every save.
    */
-  detect(dir: string, wtRoot: string): FileFormatter | null;
+  detect(dir: string, wtRoot: string): FileFormatter | FormatterDecline | null;
   /**
    * How to spawn `command` for files in `dir`. Runs for every command formatting these extensions,
    * manual overrides included, so an override gets the same `cwd`, `env` and `PATH`. Of several
@@ -43,6 +57,13 @@ export interface LanguageFormatter {
     dir: string,
     wtRoot: string,
   ): FormatterSpawnOptions | Promise<FormatterSpawnOptions>;
+  /**
+   * What to tell the user about `failure`, for every command formatting these extensions, manual
+   * overrides included. Undefined keeps the default: a generic notice for a missing formatter,
+   * and none for a non-zero exit, usually a syntax error that would repeat on every save. Of
+   * several modules claiming an extension, the first one's applies.
+   */
+  failureNotice?(failure: FormatterFailure): string | undefined;
 }
 
 /** The default of {@link FormatterSpawnOptions.binDirs}, for a module that adds to it. */
