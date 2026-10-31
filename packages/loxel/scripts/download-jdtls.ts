@@ -34,7 +34,7 @@ try {
   await Bun.$`mkdir ${extracted} && tar -xf ${archivePath} -C ${extracted}`;
   // The archive has no top-level notices; each plugin carries its own.
   copyFileSync(
-    path.join(import.meta.dir, "..", "licenses", "jdtls.txt"),
+    path.join(import.meta.dir, "language-servers", "licenses", "jdtls.txt"),
     path.join(extracted, "LICENSE"),
   );
   await Bun.write(

@@ -30,9 +30,9 @@ export interface ReleaseBinary {
   name: string;
   url: string;
   sha256: string;
-  /** Path of the binary inside the archive. */
+  /** Path of the binary inside the archive, or of a directory holding a whole toolchain. */
   member: string;
-  /** Where the binary is installed. */
+  /** Where it is installed. */
   outBinary: string;
 }
 
@@ -50,7 +50,7 @@ export async function downloadVerified(url: string, sha256: string): Promise<Uin
   return bytes;
 }
 
-/** Download, verify and extract the binary, unless `outBinary` already exists. Throws on failure. */
+/** Download, verify and extract `member`, unless `outBinary` already exists. Throws on failure. */
 export async function downloadReleaseBinary({
   name,
   url,

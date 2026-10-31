@@ -45,7 +45,7 @@ function resolveBundledJdtls(): BundledJdtls | null {
   ]) {
     const javaPath = path.join(dir, "jdtls-runtime", "bin", java);
     const home = path.join(dir, "jdtls");
-    if (Bun.file(javaPath).size && Bun.file(path.join(home, "config_win", "config.ini")).size) {
+    if (Bun.file(javaPath).size && Bun.file(path.join(home, sharedConfigDir(), "config.ini")).size) {
       return { java: javaPath, home };
     }
   }
@@ -116,26 +116,23 @@ function dropUnusableActions(message: Record<string, unknown>): boolean {
 export class JavaLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
 
-  private spawnContext: WtLspContext | null = null;
-
   constructor() {
     super("java-lsp");
   }
 
-  protected resolveBinary(context: WtLspContext): string | null {
-    this.spawnContext = context;
+  protected resolveBinary(): string | null {
     return resolveBundledJdtls()?.java ?? null;
   }
 
-  protected override spawnArgs(): readonly string[] {
+  protected override spawnArgs(context: WtLspContext): readonly string[] {
     const bundled = resolveBundledJdtls();
-    if (!bundled || !this.spawnContext) throw new Error("jdtls is not bundled");
+    if (!bundled) throw new Error("jdtls is not bundled");
     const plugins = readdirSync(path.join(bundled.home, "plugins"));
     const launcher = plugins.find((name) => name.startsWith("org.eclipse.equinox.launcher_"));
     const core = plugins.find((name) => name.startsWith("org.eclipse.jdt.ls.core_"));
     if (!launcher || !core) throw new Error(`Incomplete jdtls at ${bundled.home}`);
     const configuration = path.join(JDTLS_STATE_DIR, "configuration", core);
-    const data = jdtlsDataDir(this.spawnContext.wtPath);
+    const data = jdtlsDataDir(context.wtPath);
     const hosts = path.join(JDTLS_STATE_DIR, "hosts");
     mkdirSync(configuration, { recursive: true });
     mkdirSync(data, { recursive: true });

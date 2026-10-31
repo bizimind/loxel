@@ -39,15 +39,19 @@ export const SUBMODULE_GITLINK_ONLY = ["-c", "diff.ignoreSubmodules=dirty"];
  * all. Git ignores it wherever the lock is mandatory, so it is a no-op for mutating commands —
  * but it is only set here, on the read-only modules, to keep that guarantee explicit.
  *
- * Returned as a fresh object because Bun's `$.env()` REPLACES the child environment instead of
+ * Returned as a fresh object because a spawn's `env` REPLACES the child environment instead of
  * merging into it: without spreading `process.env` git would lose `PATH`/`HOME` and fail in ways
  * that no unit test observes.
  */
 export function readOnlyGitEnv(): Record<string, string> {
+  return { ...inheritedGitEnv(), GIT_OPTIONAL_LOCKS: "0" };
+}
+
+/** The server's current environment, for commands with no special needs. */
+export function inheritedGitEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
   }
-  env.GIT_OPTIONAL_LOCKS = "0";
   return env;
 }

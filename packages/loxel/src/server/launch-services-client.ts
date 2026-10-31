@@ -21,6 +21,7 @@ import {
 } from "./launch-services-protocol";
 import type { HelperOp, HelperRequest, RawAppList } from "./launch-services-protocol";
 import { logger } from "./logger";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("launch-services");
 
@@ -184,7 +185,9 @@ export class LaunchServicesClient {
   private ensureHelper(): Helper {
     if (this.helper) return this.helper;
 
-    const proc = Bun.spawn(this.command, { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+    const proc = measureSpawn("launch-services", () =>
+      Bun.spawn(this.command, { stdin: "pipe", stdout: "pipe", stderr: "inherit" }),
+    );
     const helper: Helper = { proc, pending: new Map() };
     this.helper = helper;
     log.debug(`Started LaunchServices helper (pid ${proc.pid})`);
