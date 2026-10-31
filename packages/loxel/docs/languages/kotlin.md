@@ -10,7 +10,7 @@ Kotlin (`.kt`, `.kts`) has no language server module yet. Shared language-server
 
 [kotlin-formatter.ts](../../src/server/kotlin-formatter.ts) is the `LanguageFormatter` for `.kt` and `.kts` (seam: [Formatting](../LANGUAGE_SERVERS.md#formatting)). Spotless and running Gradle or Maven are out of scope: both would run build code on save, with a cold run measured at 12-88 s and build output on stdout.
 
-Detection reads files as text with comments removed and runs nothing, skipping anything that is not a regular file of at most 1 MiB, since detection is synchronous. Walking from the file's directory to the worktree root, the nearest directory with a signal decides, and within one directory ktfmt beats ktlint, since formatting is ktfmt's only job while ktlint may be there just to lint:
+Detection reads files as text with comments removed, by each file's own rules (block comments nest in `.kts` and not in Groovy), and runs nothing, skipping anything that is not a regular file of at most 1 MiB, since detection is synchronous. Walking from the file's directory to the worktree root, the nearest directory with a signal decides, and within one directory ktfmt beats ktlint, since formatting is ktfmt's only job while ktlint may be there just to lint:
 
 - **ktfmt:** `com.ncorti.ktfmt.gradle` in `build.gradle.kts`, `build.gradle` or `gradle/libs.versions.toml`.
 - **ktlint:** a `ktlint_*` property in `.editorconfig` (properties above a `root = true` file do not count, as in ktlint's own lookup), or `org.jlleitschuh.gradle.ktlint` or `org.jmailen.kotlinter` in the same Gradle files.
