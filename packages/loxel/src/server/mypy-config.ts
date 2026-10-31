@@ -3,9 +3,10 @@
  * from a directory: in each directory, `mypy.ini`, `.mypy.ini`, then a `pyproject.toml` with a
  * `[tool.mypy]` table, then a `setup.cfg` with a `[mypy]` section.
  */
-import { readFileSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import path from "node:path";
 
+import { readConfigFile } from "./config-file-read";
 import { parseToml, recordAt } from "./toml-file";
 
 /** The file names mypy reads its configuration from, in the order it tries them per directory. */
@@ -91,12 +92,8 @@ function readConfig(file: string): ParsedConfig {
 }
 
 function parseConfig(file: string): ParsedConfig {
-  let text: string;
-  try {
-    text = readFileSync(file, "utf-8");
-  } catch {
-    return null;
-  }
+  const text = readConfigFile(file);
+  if (text === undefined) return null;
   const name = path.basename(file);
   if (name === "pyproject.toml") {
     const toml = parseToml(text);

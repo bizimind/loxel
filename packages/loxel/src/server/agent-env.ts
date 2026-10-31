@@ -7,7 +7,12 @@ import path from "node:path";
 
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
-import type { EnvChange, SpawnEnv, ToolchainEnvContributor } from "./toolchain-env-contributor";
+import {
+  commitToolchainEnvChange,
+  type EnvChange,
+  type SpawnEnv,
+  type ToolchainEnvContributor,
+} from "./toolchain-env-contributor";
 import { toolchainEnvs } from "./toolchain-envs";
 
 const log = logger.child("agent");
@@ -20,8 +25,11 @@ const log = logger.child("agent");
 export function buildAgentEnv(changes: Iterable<EnvChange | null>): SpawnEnv {
   const env: SpawnEnv = { ...buildSpawnEnv(), AI_AGENT: "loxel" };
   for (const change of changes) {
+    if (!change) continue;
     try {
-      change?.(env);
+      const changed = { ...env };
+      change(changed);
+      commitToolchainEnvChange(env, changed);
     } catch (err) {
       log.warn("Could not apply a toolchain's environment for the agent", { error: err });
     }

@@ -11,10 +11,11 @@ import { logger } from "./logger";
 import { buildShellSpawnEnv } from "./shell-env";
 import type { TerminalSink } from "./terminal-session";
 import { TerminalSession } from "./terminal-session";
-import type {
-  TerminalEnvChange,
-  TerminalToolchainSettings,
-  ToolchainEnvContributor,
+import {
+  commitToolchainEnvChange,
+  type TerminalEnvChange,
+  type TerminalToolchainSettings,
+  type ToolchainEnvContributor,
 } from "./toolchain-env-contributor";
 
 const log = logger.child("terminal");
@@ -182,8 +183,11 @@ export class TerminalManager {
     );
     clearTimeout(timer);
     for (const [index, change] of changes.entries()) {
+      if (!change) continue;
       try {
-        await change?.(env, terminalShell());
+        const changed = { ...env };
+        await change(changed, terminalShell());
+        commitToolchainEnvChange(env, changed);
       } catch (err) {
         log.warn(`Could not activate the ${contributors[index]?.name} environment in a terminal`, {
           worktreePath,
