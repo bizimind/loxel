@@ -45,6 +45,7 @@ const SHEBANG_MAP: Record<string, string> = {
   fish: "bash",
   python: "python",
   python3: "python",
+  kotlin: "kotlin",
   node: "javascript",
   bun: "javascript",
   deno: "typescript",

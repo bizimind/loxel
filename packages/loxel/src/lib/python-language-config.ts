@@ -5,7 +5,7 @@ import { frontendLog } from "./frontend-logger";
 const log = frontendLog.child("ui");
 
 /** Languages whose configuration auto-closes `"""` / `'''` (TOML's is set in `monaco-languages.ts`, Java's in `java-language-config.ts`). */
-const TRIPLE_QUOTE_LANGUAGES = new Set(["python", "toml", "java"]);
+const TRIPLE_QUOTE_LANGUAGES = new Set(["python", "toml", "kotlin", "java"]);
 
 /**
  * Enter after a block-ending statement dedents the next line. Lines whose code (before any
