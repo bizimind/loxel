@@ -9,7 +9,7 @@ import { isDirectory } from "@/fs-utils";
 import { getJavaOverride } from "./java-override-store";
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
-import { isEnvShippedByRepo, isShippedByRepo } from "./shipped-by-repo";
+import { isEnvShippedByRepo, isInside, isShippedByRepo } from "./shipped-by-repo";
 
 const log = logger.child("server");
 
@@ -646,8 +646,7 @@ async function isExecutableFile(filePath: string): Promise<boolean> {
 async function isJdkShippedByRepo(wtPath: string, home: string, dir = home): Promise<boolean> {
   const realOrSelf = (target: string) => realpath(target).catch(() => target);
   const [realWtPath, realHome] = await Promise.all([realOrSelf(wtPath), realOrSelf(home)]);
-  const fromHome = path.relative(realHome, realWtPath);
-  if (!path.isAbsolute(fromHome) && fromHome.split(path.sep)[0] !== "..") return true;
+  if (isInside(realWtPath, realHome)) return true;
   if (dir !== home && (await isShippedByRepo(wtPath, dir))) return true;
   return isEnvShippedByRepo(wtPath, home, javaExecutable(home));
 }
