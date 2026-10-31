@@ -425,7 +425,7 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     url: "https://json.schemastore.org/babelrc.json",
     enabled: true,
   },
-  // YAML only: this schema `$ref`s a sibling file, which only the YAML server can fetch (Monaco's
+  // YAML only: this schema `$ref`s a sibling file, which only the YAML server can ask for (Monaco's
   // JSON worker gets schemas inline and would report the reference as a problem on every file).
   {
     id: builtinId("**/.eslintrc.{yml,yaml}"),

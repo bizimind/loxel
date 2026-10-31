@@ -20,4 +20,4 @@ An `.eslintrc` can also be YAML, but stays `jsonc`: the JSON form is the common 
 
 A tool has one row, with one glob covering its file names (`**/.prettierrc{,.json,.yml,.yaml}`), so it has one toggle and the JSON route fetches its schema once. A glob without a final extension routes to JSON, YAML and TOML (see [Schemas and JSON validation](../LANGUAGE_SERVERS.md#schemas-and-json-validation)); the server for the file's language is the one that applies it.
 
-ESLint's schema is YAML-only (`**/.eslintrc.{yml,yaml}`): it `$ref`s the sibling `partial-eslint-plugins.json`, which the YAML server fetches itself, while Monaco gets schemas inline with requests off and would report the reference on every file.
+ESLint's schema is YAML-only (`**/.eslintrc.{yml,yaml}`): it `$ref`s the sibling `partial-eslint-plugins.json`, which Loxel fetches when the YAML server asks for it, while Monaco gets schemas inline with requests off and would report the reference on every file.
