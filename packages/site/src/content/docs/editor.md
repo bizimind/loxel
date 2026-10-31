@@ -52,23 +52,25 @@ Press `Cmd+S` to save immediately. Explicit save is the trigger for format on sa
 
 ## Formatter auto-detection
 
-Loxel detects which formatters are available in the active worktree by inspecting config files, `package.json` and `pyproject.toml`. Detection is per-worktree — switching worktrees picks up that worktree's toolchain.
+Loxel detects which formatters are available in the active worktree by inspecting config files, `package.json`, `pyproject.toml` and `go.mod`. Detection is per-worktree — switching worktrees picks up that worktree's toolchain.
 
 Supported formatters:
 
-| Formatter      | Detected from                                                            | Formats                                              |
-| -------------- | ------------------------------------------------------------------------ | ---------------------------------------------------- |
-| `prettier`     | A Prettier config file or `prettier` key in `package.json`               | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, GraphQL |
-| `oxfmt`        | An `.oxfmtrc.*` file or an `oxfmt` dependency                            | The same as Prettier, plus TOML                      |
-| `rustfmt`      | `rustfmt.toml`                                                           | `.rs` files                                          |
-| `ruff`         | `ruff.toml`, `.ruff.toml`, a `[tool.ruff]` table, or a `ruff` dependency | `.py` and `.pyi` files                               |
-| `black`        | A `[tool.black]` table in `pyproject.toml`, or a `black` dependency      | `.py` and `.pyi` files                               |
-| `clang-format` | `.clang-format`                                                          | C and C++ files                                      |
-| `deno`         | `deno.json`                                                              | JS and TS files                                      |
+| Formatter       | Detected from                                                            | Formats                                              |
+| --------------- | ------------------------------------------------------------------------ | ---------------------------------------------------- |
+| `prettier`      | A Prettier config file or `prettier` key in `package.json`               | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, GraphQL |
+| `oxfmt`         | An `.oxfmtrc.*` file or an `oxfmt` dependency                            | The same as Prettier, plus TOML                      |
+| `rustfmt`       | `rustfmt.toml`                                                           | `.rs` files                                          |
+| `ruff`          | `ruff.toml`, `.ruff.toml`, a `[tool.ruff]` table, or a `ruff` dependency | `.py` and `.pyi` files                               |
+| `black`         | A `[tool.black]` table in `pyproject.toml`, or a `black` dependency      | `.py` and `.pyi` files                               |
+| `clang-format`  | `.clang-format`                                                          | C and C++ files                                      |
+| `deno`          | `deno.json`                                                              | JS and TS files                                      |
+| `golangci-lint` | A `version: "2"` `.golangci.*` config that enables formatters            | `.go` files                                          |
+| `gofmt`         | `go.mod` or `go.work`                                                    | `.go` files                                          |
 
 When a project has both Prettier and oxfmt, Prettier wins for the languages it supports.
 
-Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's Python environment when they're installed there (and the environment isn't committed to git), so the version pinned in your dev dependencies is the one used: a sub-project's own `.venv`, `venv` or `env` first, then the worktree's [Python environment](/docs/languages/python#python-environment), including an interpreter you chose, and files your ruff config excludes are left as they are. The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's Python environment when they're installed there (and the environment isn't committed to git), so the version pinned in your dev dependencies is the one used: a sub-project's own `.venv`, `venv` or `env` first, then the worktree's [Python environment](/docs/languages/python#python-environment), including an interpreter you chose, and files your ruff config excludes are left as they are. Go formatters are also detected from the config closest to the file: see [Go](/docs/languages/go#format-on-save). The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
 
 ---
 
