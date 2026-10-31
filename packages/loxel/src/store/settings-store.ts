@@ -140,6 +140,7 @@ export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, BuiltinIndentatio
   ["objective-cpp", { tabSize: 4, insertSpaces: true }],
   ["php", { tabSize: 4, insertSpaces: true }], // PSR-12 / PER Coding Style, PHP-CS-Fixer
   ["python", { tabSize: 4, insertSpaces: true }], // PEP 8, ruff, black
+  ["razor", { tabSize: 4, insertSpaces: true }], // ASP.NET Core and Blazor templates
   ["rust", { tabSize: 4, insertSpaces: true }], // rustfmt
 ]);
 
@@ -411,6 +412,50 @@ export const BUILTIN_SCHEMA_DEFAULTS: SchemaMapping[] = [
     id: builtinId("**/package.json"),
     glob: "**/package.json",
     url: "https://json.schemastore.org/package",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/jsconfig.json"),
+    glob: "**/jsconfig.json",
+    url: "https://json.schemastore.org/jsconfig.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/{.babelrc,.babelrc.json,babel.config.json}"),
+    glob: "**/{.babelrc,.babelrc.json,babel.config.json}",
+    url: "https://json.schemastore.org/babelrc.json",
+    enabled: true,
+  },
+  // YAML only: this schema `$ref`s a sibling file, which only the YAML server can fetch (Monaco's
+  // JSON worker gets schemas inline and would report the reference as a problem on every file).
+  {
+    id: builtinId("**/.eslintrc.{yml,yaml}"),
+    glob: "**/.eslintrc.{yml,yaml}",
+    url: "https://json.schemastore.org/eslintrc.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/lerna.json"),
+    glob: "**/lerna.json",
+    url: "https://json.schemastore.org/lerna.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/.lintstagedrc{,.json,.yml,.yaml}"),
+    glob: "**/.lintstagedrc{,.json,.yml,.yaml}",
+    url: "https://json.schemastore.org/lintstagedrc.schema.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/pnpm-workspace.yaml"),
+    glob: "**/pnpm-workspace.yaml",
+    url: "https://json.schemastore.org/pnpm-workspace.json",
+    enabled: true,
+  },
+  {
+    id: builtinId("**/.prettierrc{,.json,.yml,.yaml}"),
+    glob: "**/.prettierrc{,.json,.yml,.yaml}",
+    url: "https://json.schemastore.org/prettierrc.json",
     enabled: true,
   },
   {
