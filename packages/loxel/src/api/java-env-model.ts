@@ -50,6 +50,18 @@ export interface JavaOverrideRequest {
   javaHome: string | null;
 }
 
+/** `POST /api/java-env/build-file` body: a file of the worktree. */
+export interface JavaBuildFileRequest {
+  worktreePath: string;
+  filePath: string;
+}
+
+/** `POST /api/java-env/build-file` response: the build tool of the file's nearest build file. */
+export interface JavaBuildFileResponse {
+  /** Null when no folder from the file up to the worktree holds a build file. */
+  buildTool: "Maven" | "Gradle" | null;
+}
+
 export const javaToolchain = {
   id: "java",
   languageIds: ["java"],

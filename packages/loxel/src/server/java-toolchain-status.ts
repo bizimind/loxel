@@ -1,4 +1,8 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+
 import {
+  type JavaBuildFileResponse,
   type JavaEnvCandidatesResponse,
   type JavaEnvResponse,
   javaToolchain,
@@ -14,7 +18,7 @@ import {
   resolveJavaEnv,
   subscribeJavaEnv,
 } from "./java-env";
-import { JDTLS_MIN_JAVA } from "./java-lsp-manager";
+import { canRunJdtls, jdtlsHostCrossed } from "./java-lsp-manager";
 import {
   getJavaOverride,
   javaOverrideStoreKey,
@@ -22,6 +26,7 @@ import {
   setJavaOverride,
 } from "./java-override-store";
 import { error, json } from "./response-helpers";
+import { isInside } from "./shipped-by-repo";
 import type { ToolchainStatusModule } from "./toolchain-status-module";
 
 async function javaEnvResponse(wtPath: string): Promise<JavaEnvResponse> {
@@ -69,6 +74,41 @@ async function handleJavaOverride(
   return json(await javaEnvResponse(wtPath));
 }
 
+const BUILD_FILES = [
+  ["pom.xml", "Maven"],
+  ["build.gradle", "Gradle"],
+  ["build.gradle.kts", "Gradle"],
+  ["settings.gradle", "Gradle"],
+  ["settings.gradle.kts", "Gradle"],
+] as const;
+
+/** The tool of the nearest build file from `filePath`'s folder up to the worktree; nothing is run. */
+export function nearestBuildTool(
+  wtPath: string,
+  filePath: string,
+): JavaBuildFileResponse["buildTool"] {
+  let dir = path.dirname(filePath);
+  while (isInside(dir, wtPath)) {
+    for (const [name, tool] of BUILD_FILES) {
+      if (existsSync(path.join(dir, name))) return tool;
+    }
+    if (dir === wtPath) break;
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+// POST /api/java-env/build-file — The build tool of the project a Java file belongs to
+async function handleJavaBuildFile(
+  wtPath: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const { filePath } = body;
+  if (typeof filePath !== "string") return error("filePath must be a string", 400);
+  const response: JavaBuildFileResponse = { buildTool: nearestBuildTool(wtPath, filePath) };
+  return json(response);
+}
+
 /**
  * Like {@link subscribeJavaEnv}, and also reports a change when a JDK that can run the language
  * server appears or goes, though the worktree's own JDK stays: a client whose server could not start
@@ -81,8 +121,8 @@ function subscribeJavaStatus(
   let couldRun: boolean | null = null;
   return subscribeJavaEnv(wtPath, (update) => {
     void listJavaRuntimes(wtPath).then((runtimes) => {
-      const canRun = runtimes.some((runtime) => runtime.majorVersion >= JDTLS_MIN_JAVA);
-      const crossed = couldRun !== null && couldRun !== canRun;
+      const canRun = canRunJdtls(runtimes);
+      const crossed = jdtlsHostCrossed(couldRun, canRun);
       couldRun = canRun;
       listener({ ...update, changed: update.changed || crossed });
     });
@@ -98,6 +138,9 @@ export const javaToolchainStatus: ToolchainStatusModule = {
   overrideStoreKey: javaOverrideStoreKey,
   routes: {
     GET: { "/api/java-env": handleJavaEnv, "/api/java-env/candidates": handleJavaEnvCandidates },
-    POST: { "/api/java-env/override": handleJavaOverride },
+    POST: {
+      "/api/java-env/build-file": handleJavaBuildFile,
+      "/api/java-env/override": handleJavaOverride,
+    },
   },
 };

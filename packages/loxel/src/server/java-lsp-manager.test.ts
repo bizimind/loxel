@@ -4,12 +4,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  canRunJdtls,
   dropUnusableActions,
   dropWillRename,
   firstJavaFile,
   indentationOf,
   javaRuntimesSetting,
   javaSettings,
+  jdtlsHostCrossed,
   jdtlsArgs,
   jdtlsDataDir,
   latestLogMessage,
@@ -18,6 +20,32 @@ import { fileUri } from "./lsp-file-uri";
 
 const scratch = mkdtempSync(path.join(tmpdir(), "java-lsp-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+describe("jdtlsHostCrossed", () => {
+  test("reports only a change after the first look", () => {
+    expect(jdtlsHostCrossed(null, true)).toBe(false);
+    expect(jdtlsHostCrossed(null, false)).toBe(false);
+    expect(jdtlsHostCrossed(false, true)).toBe(true);
+    expect(jdtlsHostCrossed(true, false)).toBe(true);
+    expect(jdtlsHostCrossed(true, true)).toBe(false);
+  });
+});
+
+describe("canRunJdtls", () => {
+  const runtime = (majorVersion: number) => ({
+    path: "/jdk",
+    majorVersion,
+    version: String(majorVersion),
+    implementor: null,
+  });
+
+  test("takes Java 25 or newer", () => {
+    expect(canRunJdtls([])).toBe(false);
+    expect(canRunJdtls([runtime(21), runtime(17)])).toBe(false);
+    expect(canRunJdtls([runtime(25)])).toBe(true);
+    expect(canRunJdtls([runtime(26), runtime(8)])).toBe(true);
+  });
+});
 
 describe("javaSettings", () => {
   test("starts with project import off", () => {

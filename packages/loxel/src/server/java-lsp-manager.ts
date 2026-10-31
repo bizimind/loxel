@@ -40,7 +40,7 @@ const JAVA_SETTINGS = {
 /** Directories never worth starting from when looking for a Java file. */
 const NOT_SOURCE_DIRS = new Set(["node_modules", "build", "target", "out", "bin"]);
 /** What jdtls itself runs on. A project on an older Java also needs a JDK of its own level. */
-export const JDTLS_MIN_JAVA = 25;
+const JDTLS_MIN_JAVA = 25;
 const NO_JDK_REASON = `Java needs JDK ${JDTLS_MIN_JAVA} or newer for its language server. Install one alongside your project's JDK.`;
 /** Where looking for a Java file stops, in a repository with none near the top. */
 const MAX_SCANNED_DIRS = 20_000;
@@ -223,6 +223,16 @@ export function dropUnusableActions(message: Record<string, unknown>): boolean {
   if (usable.length === message.result.length) return false;
   message.result = usable;
   return true;
+}
+
+/** Whether one of `runtimes` can run the server. */
+export function canRunJdtls(runtimes: readonly JavaRuntime[]): boolean {
+  return runtimes.some((runtime) => runtime.majorVersion >= JDTLS_MIN_JAVA);
+}
+
+/** A JDK that can run the server appeared or went; the first look (`before` null) is neither. */
+export function jdtlsHostCrossed(before: boolean | null, now: boolean): boolean {
+  return before !== null && before !== now;
 }
 
 /** An entry of `java.configuration.runtimes`. */

@@ -1,12 +1,21 @@
 import { wsClient } from "@/api/client";
-import { javaToolchain } from "@/api/java-env-model";
+import { useLspStatusStore } from "@/store/lsp-status";
+import { useWorktreeStore } from "@/store/worktrees";
 
-import { createLspClient, restartStoppedLanguageServers } from "./lsp-client";
+import { createJavaServerRecovery } from "./java-server-recovery";
+import { createLspClient } from "./lsp-client";
 
-// A server that could not start for lack of a new enough JDK comes back when one is installed.
-wsClient.subscribe((message) => {
-  if (message.type === javaToolchain.changedMessage) restartStoppedLanguageServers();
-});
+const ROUTE = "ws/java-lsp";
 
 // Eclipse JDT LS, on the user's JDK.
-export default createLspClient({ route: "ws/java-lsp", name: "Java", languageId: "java" });
+const javaLspClient = createLspClient({ route: ROUTE, name: "Java", languageId: "java" });
+
+wsClient.subscribe(
+  createJavaServerRecovery({
+    client: javaLspClient,
+    stoppedServer: () => useLspStatusStore.getState().stopped.get(ROUTE),
+    activeWorktree: () => useWorktreeStore.getState().activeWorktreePath,
+  }),
+);
+
+export default javaLspClient;

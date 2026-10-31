@@ -16,7 +16,7 @@ Java files are served by Eclipse JDT LS (jdtls), which Loxel bundles and runs on
 
 jdtls itself needs Java 25, although `bin/jdtls.py` says 21: on 21 the JVM exits with code 13 without answering `initialize`, and the reason is only in a log. `resolveBinary` runs the newest entry of `listJavaRuntimes` at that level or above, by absolute path through `javaExecutable`, which the [trust rule](#jdk-detection) has already passed. There is no `PATH` lookup and nothing else runs a `java`. Without one it starts nothing and `serverFailureReason` says what to install.
 
-The client then stops. `subscribeJavaStatus` in [java-toolchain-status.ts](../../src/server/java-toolchain-status.ts) reports a change when a JDK that can run the server appears or goes, even though the worktree's own JDK stays the same, and [java-lsp-client.ts](../../src/lib/java-lsp-client.ts) restarts stopped servers on that message, so installing one brings the server back.
+The client then stops. `subscribeJavaStatus` in [java-toolchain-status.ts](../../src/server/java-toolchain-status.ts) reports a change when a JDK that can run the server appears or goes, even though the worktree's own JDK stays the same, and [java-server-recovery.ts](../../src/lib/java-server-recovery.ts) reconnects the Java client on that message if it stopped because it could not start, so installing one brings the server back. A client stopped for another reason stays stopped, in particular one another window took over.
 
 ## Java levels
 
@@ -40,7 +40,7 @@ The server starts with project import off and makes no network requests.
 - `-Djdk.net.hosts.file` points at a file naming only `localhost`.
 - [audit-jdtls.ts](../../scripts/network-audit/audit-jdtls.ts) checks all of this through the built `loxel-server`, on opening files and on every command a user can reach, with `--control` as its positive control. Run it after changing the pin or the manager.
 
-Each folder gets one invisible project. jdtls infers its source root from the first Java file it hears about, and `initialize` comes before any file opens, so `firstJavaFile`, a pruned walk that runs while the session's frames are held, passes one as `triggerFiles`. A folder with a build file stays outside any project, and its files report "non-project file, only syntax errors are reported".
+Each folder gets one invisible project. jdtls infers its source root from the first Java file it hears about, and `initialize` comes before any file opens, so `firstJavaFile`, a pruned walk that runs while the session's frames are held, passes one as `triggerFiles`. A file with a build file in its folder or above stays outside any project, and reports "non-project file" or "not on the classpath", "only syntax errors are reported". [JavaRuntimeStatus.tsx](../../src/components/panels/JavaRuntimeStatus.tsx) says so in the status bar while such a file is active, from `POST /api/java-env/build-file`, where `nearestBuildTool` looks for the same build files without reading or running them.
 
 ## Client capabilities
 

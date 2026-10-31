@@ -10,11 +10,11 @@ The Java server starts the first time you open a `.java` file, and stops when no
 
 The server needs a JDK 25 or newer on your machine to run. If your project is on an older Java, install JDK 25 or newer alongside your project's JDK: the server runs on the newest one, and your code is still checked against the JDK of the worktree (see [JDK detection](#jdk-detection)). Without one, the Java server stops and the status bar says what to install. Installing a JDK while Loxel is open brings it back.
 
-Maven and Gradle projects aren't loaded yet. The server starts with project import off, and what you get depends on the folder you open.
+Maven and Gradle projects aren't loaded. The server starts with project import off, and what you get depends on the folder a file is in.
 
 ## Folders without a build file
 
-Java files in a folder with no `pom.xml` or Gradle build get the full set of features for the code in that folder:
+Java files with no `pom.xml` or Gradle build in their folder or above it get the full set of features for the code in that folder:
 
 - Syntax and type errors as you type
 - Hover, go-to-definition, go-to-implementation and references across files
@@ -28,7 +28,7 @@ The source folder comes from the first Java file found in the folder, so a proje
 
 ## Maven and Gradle projects
 
-In a folder with a build file, Java files are treated as separate files outside any project. They show a note saying so, and get:
+A Java file with a `pom.xml` or Gradle build in its folder or a folder above it is treated as a separate file outside any project. The status bar says so while it is the active editor, and the file gets:
 
 - Syntax errors, but no type errors
 - Completion, code actions, document symbols, references within the file, folding and semantic highlighting
