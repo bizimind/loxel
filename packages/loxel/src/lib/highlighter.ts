@@ -66,7 +66,7 @@ export async function getHighlighter(): Promise<Highlighter> {
 // Special filename to language mapping (case-insensitive)
 export const FILENAME_TO_LANG: Record<string, string> = {
   // Lock files
-  "bun.lock": "json",
+  "bun.lock": "jsonc",
   "bun.lockb": "json",
   "package-lock.json": "json",
   "composer.lock": "json",
@@ -112,20 +112,35 @@ export const FILENAME_TO_LANG: Record<string, string> = {
   ".project": "xml",
   ".factorypath": "xml",
 
+  // JS tool configs whose tools accept comments in JSON (no strict-JSON markers)
+  ".babelrc.json": "jsonc",
+  ".eslintrc.json": "jsonc",
+  ".jshintrc": "jsonc",
+  ".mocharc.json": "jsonc",
+  ".oxfmtrc.json": "jsonc",
+  ".oxlintrc.json": "jsonc",
+  "babel.config.json": "jsonc",
+  "lerna.json": "jsonc",
+
   // RC files (JSON-based)
-  ".babelrc": "json",
-  ".prettierrc": "json",
-  ".eslintrc": "json",
+  ".babelrc": "jsonc",
+  ".c8rc": "json",
+  ".eslintrc": "jsonc",
+  ".nycrc": "json",
   ".stylelintrc": "json",
   ".markdownlintrc": "json",
   ".htmlhintrc": "json",
-  ".swcrc": "json",
+  ".swcrc": "jsonc",
 
-  // RC files (YAML-based)
+  // RC files (YAML-based; the tools parse them as YAML, so their JSON form is valid too)
   ".clang-format": "yaml",
   "_clang-format": "yaml",
   ".clang-tidy": "yaml",
   ".clangd": "yaml",
+  ".commitlintrc": "yaml",
+  ".lintstagedrc": "yaml",
+  ".prettierrc": "yaml",
+  ".releaserc": "yaml",
   ".yamllint": "yaml",
 
   // RC files (INI-based)
