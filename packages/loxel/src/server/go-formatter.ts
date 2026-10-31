@@ -39,7 +39,7 @@ const GOROOT_LOOKUP_TIMEOUT_MS = 2_000;
 const MAX_MATCH_COST = 10_000_000;
 
 /** Go syntax that compiles in JavaScript with another meaning, or is not Go's at all. */
-const UNTRANSLATABLE_REGEX = /\[\[:|\[\^?\]|\\[pPQC1-9]|\(\?<?[=!]/;
+const UNTRANSLATABLE_REGEX = /\[:\^?[a-z]+:\]|\[\^?\]|\\[pPQC1-9]|\\x\{|\(\?<?[=!]/;
 
 /** Exported for tests, which need a lookup that a loaded machine cannot time out. */
 export function goFormatterWith(gorootLookupTimeoutMs: number): LanguageFormatter {

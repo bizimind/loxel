@@ -225,6 +225,9 @@ describe("goFormatter exclusions", () => {
   test.each([
     ["a repeated group", "(a+)+$"],
     ["a POSIX class", "^[[:alpha:]]+\\.go$"],
+    ["a POSIX class after a negation", "^[^[:alpha:]]+\\.go$"],
+    ["a POSIX class after another element", "^[a-z[:digit:]]+\\.go$"],
+    ["a braced hex escape", "\\x{7A}"],
     ["a Unicode class", "\\pL+\\.go$"],
     ["a quoted literal", "\\Qa.b\\E"],
     ["a class starting with ]", "^[^]]+\\.go$"],
