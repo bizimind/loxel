@@ -1,4 +1,5 @@
 import { realpathSync, statSync, watch, type FSWatcher } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 import type { GoEnv, GoProjectVersion } from "@/api/go-env-model";
@@ -22,13 +23,14 @@ const log = logger.child("server");
  */
 export const GO_ENV = { GOPROXY: "off", GOTOOLCHAIN: "local", GOSUMDB: "off", GONOPROXY: "none" };
 
-const GO = process.platform === "win32" ? "go.exe" : "go";
-const GOPLS = process.platform === "win32" ? "gopls.exe" : "gopls";
+export const GO = process.platform === "win32" ? "go.exe" : "go";
+export const GOPLS = process.platform === "win32" ? "gopls.exe" : "gopls";
 const GO_ENV_TIMEOUT_MS = 10_000;
 const WATCH_DEBOUNCE_MS = 1000;
 /** Far above any real `go.mod`; the repository decides what this file is. */
 const MAX_PROJECT_FILE_BYTES = 1024 * 1024;
 const PROJECT_FILES = ["go.work", "go.mod"] as const;
+const GO_ENV_NAMES = ["GOVERSION", "GOROOT", "GOPATH", "GOMODCACHE", "GOMOD", "GOWORK", "GOFLAGS"];
 
 /** Login-shell variables that resolution reads, directly or through `go`. */
 const RESOLUTION_ENV_VAR = /^(PATH|GO[A-Z0-9_]+)$/;
@@ -182,33 +184,73 @@ export function goToolPath(wtPath: string): string {
     .join(path.delimiter);
 }
 
-/** What to set in the environment of anything that runs `go` for a worktree. */
-export function goSpawnEnv(wtPath: string): Record<string, string> {
-  return { PATH: goToolPath(wtPath), ...GO_ENV };
+/**
+ * A version manager's shim, which chooses what to run by looking at its working directory. asdf,
+ * mise and goenv all keep theirs in a directory of this name. So in a worktree it is the repository
+ * that would choose, and shims only ever run from the home directory: a project's version-manager
+ * pin is not followed.
+ */
+function isShim(binary: string): boolean {
+  return path.basename(path.dirname(binary)) === "shims";
 }
 
 /**
- * The first `name` on {@link goToolPath}, unless it is in the worktree through a symlink or tracked
- * by a repository. A refused one is not passed over for a later one, since what runs `go` would
- * still find it first.
+ * What to set in the environment of anything that runs `go` for a worktree: no shim is left for it
+ * to run, and the Go that `env`'s shim stands for comes first.
+ */
+export function goSpawnEnv(
+  wtPath: string,
+  env: Pick<GoEnv, "binary" | "goroot"> | null,
+): Record<string, string> {
+  const dirs = goToolPath(wtPath)
+    .split(path.delimiter)
+    .filter((dir) => path.basename(dir) !== "shims");
+  const first = env?.goroot && isShim(env.binary) ? [path.join(env.goroot, "bin")] : [];
+  return { PATH: [...first, ...dirs].join(path.delimiter), ...GO_ENV };
+}
+
+/** The first `name` on {@link goToolPath}, unless the repository could have provided it. */
+async function trustedOnPath(wtPath: string, name: string): Promise<string | null> {
+  const binary = Bun.which(name, { PATH: goToolPath(wtPath) });
+  return binary && (await isTrustedBinary(wtPath, binary)) ? binary : null;
+}
+
+async function isTrustedBinary(wtPath: string, binary: string): Promise<boolean> {
+  const inWorktree = isInside(realpathOr(binary), realpathOr(wtPath));
+  if (!inWorktree && !(await isShippedByRepo(wtPath, binary))) return true;
+  log.warn("Ignoring a Go tool that the repository ships", { wtPath, binary });
+  return false;
+}
+
+/**
+ * A tool to run in a worktree: the first `name` on {@link goToolPath}, unless it is a shim, is in the
+ * worktree through a symlink or is tracked by a repository. A refused one is not passed over for a
+ * later one, since what runs `go` would still find it first.
  */
 export async function trustedGoTool(wtPath: string, name: string): Promise<string | null> {
-  const binary = Bun.which(name, { PATH: goToolPath(wtPath) });
-  if (!binary) return null;
-  const inWorktree = isInside(realpathOr(binary), realpathOr(wtPath));
-  if (inWorktree || (await isShippedByRepo(wtPath, binary))) {
-    log.warn("Ignoring a Go tool that the repository ships", { wtPath, binary });
-    return null;
-  }
-  return binary;
+  const binary = await trustedOnPath(wtPath, name);
+  return binary && !isShim(binary) ? binary : null;
+}
+
+/**
+ * The Go a shim stands for, found from the home directory: the `go` in the GOROOT it reports. Null
+ * when it names none that can be trusted, since nothing else on the PATH has been checked.
+ */
+async function goBehindShim(wtPath: string, shim: string): Promise<string | null> {
+  const { GOROOT } = await goEnvVariables(shim, homedir(), wtPath, ["GOROOT"]);
+  if (!GOROOT || !path.isAbsolute(GOROOT)) return null;
+  const go = Bun.which(GO, { PATH: path.join(GOROOT, "bin") });
+  return go && (await isTrustedBinary(wtPath, go)) ? go : null;
 }
 
 async function resolveGoEnv(wtPath: string): Promise<GoEnv | null> {
   try {
-    const binary = await trustedGoTool(wtPath, GO);
+    const binary = await trustedOnPath(wtPath, GO);
     if (!binary) return null;
+    const go = isShim(binary) ? await goBehindShim(wtPath, binary) : binary;
+    if (!go) return null;
     const [reported, project] = await Promise.all([
-      goEnvVariables(binary, wtPath),
+      goEnvVariables(go, wtPath, wtPath, GO_ENV_NAMES),
       readProjectVersions(wtPath),
     ]);
     const version = versionFromGoVersion(reported.GOVERSION);
@@ -217,7 +259,7 @@ async function resolveGoEnv(wtPath: string): Promise<GoEnv | null> {
     return {
       binary,
       version,
-      goroot: reported.GOROOT ?? null,
+      goroot: go === binary ? (reported.GOROOT ?? null) : path.dirname(path.dirname(go)),
       gopath: reported.GOPATH ?? null,
       gomodcache: reported.GOMODCACHE ?? null,
       gomod: projectFile(reported.GOMOD),
@@ -232,32 +274,23 @@ async function resolveGoEnv(wtPath: string): Promise<GoEnv | null> {
   }
 }
 
-/** The variables `go env` reports with a value; empty when it fails. */
-async function goEnvVariables(binary: string, wtPath: string): Promise<Record<string, string>> {
+/** The variables `go env` reports with a value, run in `cwd`; empty when it fails. */
+async function goEnvVariables(
+  binary: string,
+  cwd: string,
+  wtPath: string,
+  names: readonly string[],
+): Promise<Record<string, string>> {
   try {
     const proc = measureSpawn("go", () =>
-      Bun.spawn(
-        [
-          binary,
-          "env",
-          "-json",
-          "GOVERSION",
-          "GOROOT",
-          "GOPATH",
-          "GOMODCACHE",
-          "GOMOD",
-          "GOWORK",
-          "GOFLAGS",
-        ],
-        {
-          cwd: wtPath,
-          env: { ...buildSpawnEnv(), ...goSpawnEnv(wtPath) },
-          stdin: "ignore",
-          stdout: "pipe",
-          stderr: "ignore",
-          timeout: GO_ENV_TIMEOUT_MS,
-        },
-      ),
+      Bun.spawn([binary, "env", "-json", ...names], {
+        cwd,
+        env: { ...buildSpawnEnv(), ...goSpawnEnv(wtPath, null) },
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+        timeout: GO_ENV_TIMEOUT_MS,
+      }),
     );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     if (exitCode !== 0) return {};
@@ -269,7 +302,7 @@ async function goEnvVariables(binary: string, wtPath: string): Promise<Record<st
     }
     return variables;
   } catch (err) {
-    log.debug("go env failed", { binary, wtPath, error: err });
+    log.debug("go env failed", { binary, cwd, error: err });
     return {};
   }
 }

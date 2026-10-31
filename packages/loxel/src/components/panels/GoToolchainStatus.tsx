@@ -18,7 +18,7 @@ function goTooltip(env: GoEnv | null): string {
     env.gomod && `Module: ${env.gomod}`,
     !env.gowork && !env.gomod && "No go.mod or go.work at the worktree root",
     needed &&
-      `${needed.file} needs Go ${needed.version}, and the Go on your PATH is ${env.version}. Loxel does not install Go: install Go ${needed.version}`,
+      `${needed.file} needs Go ${needed.version}, and the Go on your PATH is ${env.version}. Loxel does not download Go`,
     suggested &&
       `${suggested.file} suggests Go ${suggested.version}. Loxel does not download it and uses Go ${env.version}`,
     CHECK_AGAIN,

@@ -307,16 +307,6 @@ echo run >> "${log}"
 echo "golang.org/x/tools/gopls v${version}"
 `;
 
-/** Settles with the worktree's next finished resolution. */
-function untilResolved(wt: string): Promise<void> {
-  return new Promise((resolve) => {
-    const unsubscribe = subscribeGoEnv(wt, () => {
-      unsubscribe();
-      resolve();
-    });
-  });
-}
-
 describe("following the toolchain", () => {
   const TIMEOUT_MS = 30_000;
 
@@ -360,15 +350,15 @@ describe("following the toolchain", () => {
   );
 
   test(
-    "leaves gopls alone when only an older gopls appears on the PATH",
+    "restarts gopls when its go is refused, since gopls would find that one",
     async () => {
       const { wt, bin, client } = await startSession();
-      await repeatUntil(untilResolved(wt), () =>
-        writeExecutable(join(bin, "gopls"), fakeGoplsVersion("0.1.0")),
-      );
-      // The manager's check of that resolution runs the same steps as this, and started first.
-      await pickGopls(wt, null);
-      expect(client.closedWith()).toBeUndefined();
+      await writeExecutable(join(wt, "go"), fakeGo("1.28.1"));
+      const { code } = await repeatUntil(client.untilClosed(), async () => {
+        await rm(join(bin, "go"), { force: true });
+        await symlink(join(wt, "go"), join(bin, "go"));
+      });
+      expect(code).toBe(LSP_RESTART_CLOSE_CODE);
     },
     TIMEOUT_MS,
   );
@@ -385,6 +375,7 @@ describe("following the toolchain", () => {
         });
       });
       await repeatUntil(gone, () => rm(join(bin, "go"), { force: true }));
+      expect(client.closedWith()).toBeUndefined();
       const { code } = await repeatUntil(client.untilClosed(), () =>
         writeExecutable(join(bin, "go"), fakeGo("1.28.1")),
       );
@@ -421,6 +412,29 @@ describe("pickGopls", () => {
     expect(await pickGopls(wt, bundled)).toEqual(expected);
     await writeExecutable(join(bin, "gopls"), "#!/bin/sh\nexit 1\n");
     expect(await pickGopls(wt, bundled)).toEqual(expected);
+  });
+
+  test("does not run a version manager's shim, even for its version", async () => {
+    const { wt, bin, bundled } = await setup("0.24.0");
+    const log = join(await makeDir("gopls-log-"), "runs");
+    await writeFile(log, "");
+    const shims = join(bin, "shims");
+    await mkdir(shims);
+    await writeExecutable(join(shims, "gopls"), fakeGoplsVersion("9.9.9", log));
+    await restrictPath(shims, bin);
+    expect((await pickGopls(wt, bundled))?.path).toBe(bundled);
+    expect(await Bun.file(log).text()).toBe("");
+  });
+
+  test("asks again after a run that was killed", async () => {
+    const { wt, bin, bundled } = await setup("0.24.0");
+    const marker = join(await makeDir("gopls-log-"), "ran");
+    await writeExecutable(
+      join(bin, "gopls"),
+      `#!/bin/sh\nif [ ! -e "${marker}" ]; then : > "${marker}"; kill -9 $$; fi\necho "golang.org/x/tools/gopls v0.25.0"\n`,
+    );
+    expect((await pickGopls(wt, bundled))?.path).toBe(bundled);
+    expect((await pickGopls(wt, bundled))?.version).toBe("0.25.0");
   });
 
   test("refuses a gopls in the worktree, however it is reached", async () => {

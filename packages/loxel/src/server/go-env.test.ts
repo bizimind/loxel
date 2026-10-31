@@ -9,7 +9,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import type { GoEnv } from "@/api/go-env-model";
@@ -20,6 +20,7 @@ import {
   compareGoVersions,
   GO_ENV,
   getGoEnv,
+  goSpawnEnv,
   goToolPath,
   refreshAllGoEnvs,
   subscribeGoEnv,
@@ -154,6 +155,69 @@ describe("getGoEnv", () => {
     await Bun.spawn(["mkfifo", join(wt, "go.mod")]).exited;
     await symlink("/dev/zero", join(wt, "go.work"));
     expect((await getGoEnv(wt))?.newerGoNeeded).toBeNull();
+  });
+});
+
+describe("a version manager's shim", () => {
+  /** A shim on the PATH before anything else, naming `goroot` and noting its runs. */
+  async function setupShimIn(context: Awaited<ReturnType<typeof setup>>, goroot: string | null) {
+    await rm(join(context.bin, "go"));
+    const shims = join(await makeDir("go-manager-"), "shims");
+    await mkdir(shims);
+    const reported = goroot ? `"GOROOT":"${goroot}",` : "";
+    await writeExecutable(
+      join(shims, "go"),
+      `#!/bin/sh\necho "shim $PWD" >> "${context.log}"\necho '{${reported}"GOVERSION":"go1.20.1"}'\n`,
+    );
+    process.env.PATH = [shims, context.bin, context.gitDir].join(delimiter);
+    return { ...context, shims };
+  }
+  const setupShim = async (goroot: string | null) => setupShimIn(await setup(), goroot);
+
+  test("runs only from the home directory, and the real Go runs in the worktree", async () => {
+    const goroot = await makeDir("go-root-");
+    await mkdir(join(goroot, "bin"));
+    const { wt, shims, log, calls } = await setupShim(goroot);
+    await writeExecutable(join(goroot, "bin", "go"), fakeGo("1.27.3", log));
+    expect(await getGoEnv(wt)).toMatchObject({ binary: join(shims, "go"), version: "1.27.3" });
+    const [first, second, ...rest] = await calls();
+    expect(first).toBe(`shim ${homedir()}`);
+    expect(second?.startsWith(`${wt}|env -json GOVERSION`)).toBe(true);
+    expect(rest).toEqual([]);
+  });
+
+  test("counts as no go, and does not run in the worktree, when it names no GOROOT", async () => {
+    const { wt, calls } = await setupShim(null);
+    expect(await getGoEnv(wt)).toBeNull();
+    expect(await calls()).toEqual([`shim ${homedir()}`]);
+  });
+
+  test("does not run the go of a GOROOT in the worktree", async () => {
+    const context = await setup();
+    const { wt, log, calls } = context;
+    const goroot = join(wt, "goroot");
+    await setupShimIn(context, goroot);
+    await mkdir(join(goroot, "bin"), { recursive: true });
+    await writeExecutable(join(goroot, "bin", "go"), fakeGo("1.27.3", log));
+    expect(await getGoEnv(wt)).toBeNull();
+    expect(await calls()).toEqual([`shim ${homedir()}`]);
+  });
+
+  test("is no tool to run in a worktree, and is left off what go can run", async () => {
+    const { wt, shims, bin } = await setupShim("/goroot");
+    await writeExecutable(join(shims, "gopls"), "#!/bin/sh\n");
+    expect(await trustedGoTool(wt, "gopls")).toBeNull();
+    const env = { binary: join(shims, "go"), goroot: "/goroot" };
+    const dirs = goSpawnEnv(wt, env).PATH?.split(delimiter) ?? [];
+    expect(dirs[0]).toBe(join("/goroot", "bin"));
+    expect(dirs).toContain(bin);
+    expect(dirs).not.toContain(shims);
+  });
+
+  test("a go that is no shim stays first, whatever GOROOT it reports", async () => {
+    const { wt, bin } = await setup();
+    const env = { binary: join(bin, "go"), goroot: "/stale" };
+    expect(goSpawnEnv(wt, env).PATH?.split(delimiter)).not.toContain(join("/stale", "bin"));
   });
 });
 
