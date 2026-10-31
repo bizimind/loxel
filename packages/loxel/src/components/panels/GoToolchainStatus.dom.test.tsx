@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, jest, mock, test } from "bun:test";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import type { GoEnv, GoEnvResponse } from "@/api/go-env-model";
 
@@ -106,13 +106,7 @@ describe("GoToolchainStatus", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Go 1.27.3" }));
     await refreshGoEnv.mock.results[0]?.value;
     expect(refreshGoEnv).toHaveBeenCalledWith("/wt-a");
-    await new Promise<void>((resolve) => {
-      const wait = () => {
-        if (restartStoppedLanguageServers.mock.calls.length > 0) resolve();
-        else queueMicrotask(wait);
-      };
-      wait();
-    });
+    await waitFor(() => expect(restartStoppedLanguageServers).toHaveBeenCalled());
   });
 
   test("clicking while Go is still missing restarts nothing", async () => {
