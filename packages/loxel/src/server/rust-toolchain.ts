@@ -12,6 +12,7 @@ import type {
 import { isDirectory } from "@/fs-utils";
 
 import { logger } from "./logger";
+import { pathOutsideWorktree } from "./python-env";
 import { getRustChoice } from "./rust-toolchain-store";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import { isShippedByRepo } from "./shipped-by-repo";
@@ -22,7 +23,7 @@ const COMMAND_TIMEOUT_MS = 10_000;
 /** Quiet period after the last filesystem event before re-resolving (rustup writes in bursts). */
 const WATCH_DEBOUNCE_MS = 1000;
 const TOOLCHAIN_FILES = ["rust-toolchain", "rust-toolchain.toml"];
-const PLAIN_TOOLS = ["rustc", "cargo", "rustfmt", "cargo-clippy", "rust-analyzer"];
+const PLAIN_TOOLS = ["rustc", "cargo", "rustfmt", "cargo-clippy"];
 
 /**
  * Keeps rustup from installing anything for a process Loxel itself starts: without it, `rustc`,
@@ -305,7 +306,7 @@ async function resolvePlain(
     findTool(wtPath, "cargo", dirs),
     findTool(wtPath, "rustfmt", dirs),
     findTool(wtPath, "cargo-clippy", dirs),
-    findTool(wtPath, "rust-analyzer", dirs),
+    findStandaloneAnalyzer(wtPath, dirs),
   ]);
   return {
     status: "active",
@@ -385,7 +386,9 @@ async function rustupTools(
       rustupTool(wtPath, Bun.which(name, { PATH: path.join(sysroot, "bin") }), name, dirs),
     ),
     rustupWhich(rustup, "rust-analyzer", wtPath, rustupEnv).then((real) =>
-      rustupTool(wtPath, real, "rust-analyzer", dirs),
+      real
+        ? rustupTool(wtPath, real, "rust-analyzer", pathDirsOutsideWorktree(dirs, wtPath))
+        : findStandaloneAnalyzer(wtPath, dirs),
     ),
   ]);
   return {
@@ -681,6 +684,28 @@ async function findTool(wtPath: string, name: string, dirs: string[]): Promise<s
   return null;
 }
 
+function pathDirsOutsideWorktree(dirs: string[], wtPath: string): string[] {
+  return pathOutsideWorktree(dirs.join(path.delimiter), wtPath).split(path.delimiter);
+}
+
+/**
+ * A rust-analyzer the user installed on its own: the first on the lookup directories that lives
+ * outside the worktree, tracked or not, and is no rustup proxy, which exists without the component
+ * and would only fail.
+ */
+async function findStandaloneAnalyzer(wtPath: string, dirs: string[]): Promise<string | null> {
+  const realWorktree = await realpath(wtPath);
+  for (const dir of pathDirsOutsideWorktree(dirs, wtPath)) {
+    const found = Bun.which("rust-analyzer", { PATH: dir });
+    if (!found) continue;
+    const real = await realpath(found);
+    if (real === realWorktree || real.startsWith(`${realWorktree}${path.sep}`)) continue;
+    if (await rustupBehindProxy(found)) continue;
+    if (!(await isShippedByRepo(wtPath, found))) return found;
+  }
+  return null;
+}
+
 type RustInstall =
   | { kind: "rustup"; rustup: string }
   | { kind: "plain"; rustc: string }
@@ -853,6 +878,11 @@ function watchTargets(
     add(path.dirname(current.toolchainFile), path.basename(current.toolchainFile));
   }
   if (current.status !== "active") return targets;
+  // A rust-analyzer installed or removed on its own, with or without rustup.
+  const analyzerDirs = current.tools.rustAnalyzer
+    ? [path.dirname(current.tools.rustAnalyzer)]
+    : searchDirs(env).filter(isDirectory);
+  for (const dir of analyzerDirs) add(dir, "rust-analyzer");
   // `rustup component add` and `rustup update` keep the toolchain's directory and write here.
   if (current.sysroot) {
     const rustlib = path.join(current.sysroot, "lib", "rustlib");

@@ -651,6 +651,61 @@ describe("rust-analyzer", () => {
     ).toMatchObject({ status: "active", tools: { rustAnalyzer: null } });
   });
 
+  test("a standalone one on PATH counts when the toolchain lacks the component", async () => {
+    const fixture = await makeFixture();
+    const dir = await makeToolchain(fixture, join(fixture.root, "tc", STABLE), "1.99.1");
+    await makeRustup(fixture, { active: STABLE, installed: { [STABLE]: dir } });
+    const standalone = await writeExecutable(
+      join(fixture.root, "brew", "rust-analyzer"),
+      "#!/bin/sh\n",
+    );
+
+    // After rustup's proxy on PATH, which does not count.
+    expect(
+      await resolveRustToolchain(fixture.wt, {
+        chosen: null,
+        env: { ...fixture.env, PATH: `${fixture.bin}:${dirname(standalone)}` },
+      }),
+    ).toMatchObject({ status: "active", tools: { rustAnalyzer: standalone } });
+  });
+
+  test("an untracked one in the worktree does not count, with or without rustup", async () => {
+    const fixture = await makeFixture();
+    Bun.spawnSync(["git", "-C", fixture.wt, "init", "-q"]);
+    const local = join(fixture.wt, "bin");
+    await writeExecutable(join(local, "rust-analyzer"), "#!/bin/sh\n");
+    // A PATH entry can also reach the worktree through a link.
+    await symlink(local, join(fixture.root, "linked-bin"));
+    const PATH = `${local}:${join(fixture.root, "linked-bin")}:${fixture.bin}`;
+    const dir = await makeToolchain(fixture, join(fixture.root, "tc", STABLE), "1.99.1");
+    await makeRustup(fixture, { active: STABLE, installed: { [STABLE]: dir } });
+
+    expect(
+      await resolveRustToolchain(fixture.wt, { chosen: null, env: { ...fixture.env, PATH } }),
+    ).toMatchObject({ source: "default", tools: { rustAnalyzer: null } });
+
+    await rm(join(fixture.bin, "rustc"));
+    await rm(join(fixture.bin, "rustup"));
+    await writeExecutable(join(fixture.bin, "rustc"), `#!/bin/sh\necho "rustc 1.88.0"\n`);
+    expect(
+      await resolveRustToolchain(fixture.wt, { chosen: null, env: { ...fixture.env, PATH } }),
+    ).toMatchObject({ source: "no-rustup", tools: { rustAnalyzer: null } });
+  });
+
+  test("a rustup proxy after a plain rustc on PATH does not count", async () => {
+    const fixture = await makeFixture();
+    await makeRustup(fixture, { active: STABLE });
+    const brew = join(fixture.root, "brew");
+    await writeExecutable(join(brew, "rustc"), `#!/bin/sh\necho "rustc 1.88.0"\n`);
+
+    expect(
+      await resolveRustToolchain(fixture.wt, {
+        chosen: null,
+        env: { ...fixture.env, PATH: `${brew}:${fixture.bin}` },
+      }),
+    ).toMatchObject({ source: "no-rustup", tools: { rustAnalyzer: null } });
+  });
+
   test("without rustup it is the PATH binary, skipping a tracked one", async () => {
     const fixture = await makeFixture();
     await writeExecutable(join(fixture.bin, "rustc"), `#!/bin/sh\necho "rustc 1.88.0"\n`);
@@ -1065,6 +1120,25 @@ describe("watchRustToolchain", () => {
     await reportsChange(fixture.wt, none, fixture.env, async () => {
       await rm(join(fixture.bin, "rustc"), { force: true });
       await writeFile(join(fixture.bin, "rustc"), "");
+    });
+  });
+
+  test("reports a standalone rust-analyzer appearing on PATH", async () => {
+    const fixture = await makeFixture();
+    const dir = await makeToolchain(fixture, join(fixture.root, "tc", STABLE), "1.99.1");
+    const current = {
+      status: "active",
+      source: "default",
+      name: STABLE,
+      version: "1.99.1",
+      rustcPath: join(dir, "bin", "rustc"),
+      sysroot: dir,
+      toolchainFile: null,
+      tools: { cargo: null, rustfmt: null, cargoClippy: null, rustAnalyzer: null, rustSrc: false },
+    } as const;
+    await reportsChange(fixture.wt, current, fixture.env, async () => {
+      await rm(join(fixture.bin, "rust-analyzer"), { force: true });
+      await writeFile(join(fixture.bin, "rust-analyzer"), "");
     });
   });
 
