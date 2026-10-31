@@ -1,6 +1,7 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import type { GoEnv } from "@/api/go-env-model";
 import { isDirectory } from "@/fs-utils";
 import { isRecord } from "@/lib/is-record";
 
@@ -46,13 +47,13 @@ export function goFormatterWith(gorootLookupTimeoutMs: number): LanguageFormatte
     spawnOptions: async (command, dir, wtRoot) => {
       // gofumpt and goimports read go.mod from the cwd only.
       const cwd = existingDir(dir, wtRoot);
-      const env = goSpawnEnv(wtRoot, null);
+      const go = await goEnvWithin(wtRoot, gorootLookupTimeoutMs);
+      const goroot = usableGoroot(go, wtRoot);
+      // A chosen or cached Go comes first on this PATH, so the formatter runs from it too.
+      const env = goSpawnEnv(wtRoot, goroot ? go : null);
       const onPath = (tool: string) => Bun.which(tool, { PATH: env.PATH });
-      const goroot =
-        onPath(command) && onPath("go")
-          ? undefined
-          : await gorootWithin(wtRoot, gorootLookupTimeoutMs);
-      return { cwd, env, binDirs: goroot ? [join(goroot, "bin")] : [] };
+      const missing = !onPath(command) || !onPath("go");
+      return { cwd, env, binDirs: goroot && missing ? [join(goroot, "bin")] : [] };
     },
   };
 }
@@ -224,11 +225,8 @@ function existingDir(dir: string, wtRoot: string): string {
   return dirsUpToRoot(dir, wtRoot).find(isDirectory) ?? wtRoot;
 }
 
-/**
- * The worktree's GOROOT from the shared Go resolution, within `timeoutMs` so it cannot hold up a
- * save, unless it is in the worktree.
- */
-async function gorootWithin(wtRoot: string, timeoutMs: number): Promise<string | undefined> {
+/** The worktree's Go from the shared resolution, within `timeoutMs` so it cannot hold up a save. */
+async function goEnvWithin(wtRoot: string, timeoutMs: number): Promise<GoEnv | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const env = await Promise.race([
     getGoEnv(wtRoot),
@@ -237,6 +235,11 @@ async function gorootWithin(wtRoot: string, timeoutMs: number): Promise<string |
     }),
   ]);
   clearTimeout(timer);
+  return env;
+}
+
+/** The GOROOT of `env`, unless it is in the worktree. */
+function usableGoroot(env: GoEnv | null, wtRoot: string): string | undefined {
   const goroot = env?.goroot;
   return goroot && isAbsolute(goroot) && !isInside(goroot, resolve(wtRoot)) ? goroot : undefined;
 }

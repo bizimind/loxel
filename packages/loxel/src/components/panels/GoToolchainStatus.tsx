@@ -1,17 +1,34 @@
 import { getGoEnv } from "@/api/go-env-client";
-import { GO_NOT_FOUND, type GoEnv, goToolchain } from "@/api/go-env-model";
-import { refreshGoToolchain } from "@/lib/go-toolchain";
+import { GO_NOT_FOUND, type GoEnv, type GoEnvResponse, goToolchain } from "@/api/go-env-model";
+import { selectGoToolchain } from "@/lib/go-toolchain";
 import { useActiveToolchainStatus } from "@/queries/use-toolchain-status";
 
 import { ToolchainStatusButton } from "./ToolchainStatusButton";
 
-const CHECK_AGAIN = "Click to check again";
+const CLICK_TO_SELECT = "Click to select a Go toolchain, or to look for Go again";
+const DOWNLOAD_IN_TERMINAL = "Running `go version` in the project from a terminal downloads it";
 
-function goTooltip(env: GoEnv | null): string {
-  if (!env) return `${GO_NOT_FOUND}\nLoxel does not install Go\n${CHECK_AGAIN}`;
+const SOURCE_NOTES: Record<GoEnv["source"], string | null> = {
+  path: null,
+  chosen: "Chosen for this worktree",
+  "module-cache": "From the module cache, where a terminal downloaded it for this project",
+};
+
+function goTooltip({ env, chosen }: GoEnvResponse): string {
+  const chosenUnusable =
+    chosen !== null &&
+    env?.source !== "chosen" &&
+    `The chosen Go ${chosen} cannot be used, so detection is in use`;
+  if (!env) {
+    return [GO_NOT_FOUND, chosenUnusable, "Loxel does not install Go", CLICK_TO_SELECT]
+      .filter(Boolean)
+      .join("\n");
+  }
   const { newerGoNeeded: needed, newerToolchainSuggested: suggested } = env;
   return [
     env.binary,
+    SOURCE_NOTES[env.source],
+    chosenUnusable,
     !env.version && "This go did not report its version",
     env.goroot && `GOROOT: ${env.goroot}`,
     env.gowork && `Workspace: ${env.gowork}`,
@@ -19,10 +36,10 @@ function goTooltip(env: GoEnv | null): string {
     !env.gowork && !env.gomod && "No go.mod or go.work at the worktree root",
     `gopls: ${env.gopls ?? "bundled with Loxel"}`,
     needed &&
-      `${needed.file} needs Go ${needed.version}, and the Go on your PATH is ${env.version}. Loxel does not download Go`,
+      `${needed.file} needs Go ${needed.version}, and the Go in use is ${env.version}. Loxel does not download Go. ${DOWNLOAD_IN_TERMINAL}`,
     suggested &&
-      `${suggested.file} suggests Go ${suggested.version}. Loxel does not download it and uses Go ${env.version}`,
-    CHECK_AGAIN,
+      `${suggested.file} suggests Go ${suggested.version}. Loxel does not download it and uses Go ${env.version}. ${DOWNLOAD_IN_TERMINAL}`,
+    CLICK_TO_SELECT,
   ]
     .filter(Boolean)
     .join("\n");
@@ -35,20 +52,23 @@ function goLabel(env: GoEnv | null): string {
 
 /**
  * The Go toolchain of the active editor's worktree, shown while that editor holds a Go file.
- * Clicking it looks for Go again.
+ * Clicking it opens the toolchain picker, which also looks for Go again.
  */
 export function GoToolchainStatus() {
   const active = useActiveToolchainStatus(goToolchain, getGoEnv);
-  const env = active?.status.env;
 
-  if (!active || env === undefined) return null;
+  if (!active) return null;
+
+  const { wtPath, status } = active;
+  const { env, chosen } = status;
+  const chosenUnusable = chosen !== null && env?.source !== "chosen";
 
   return (
     <ToolchainStatusButton
       label={goLabel(env)}
-      tooltip={goTooltip(env)}
-      warning={!env?.version || env.newerGoNeeded !== null}
-      onSelect={() => void refreshGoToolchain(active.wtPath)}
+      tooltip={goTooltip(status)}
+      warning={!env?.version || env.newerGoNeeded !== null || chosenUnusable}
+      onSelect={() => void selectGoToolchain(wtPath)}
     />
   );
 }

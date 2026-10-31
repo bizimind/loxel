@@ -14,6 +14,7 @@ import { delimiter, join } from "node:path";
 
 import type { GoEnv } from "@/api/go-env-model";
 import { repeatUntil } from "@/test/repeat-until";
+import "@/test/temp-state-dir";
 
 import {
   canChangeGoEnv,
@@ -93,10 +94,12 @@ describe("getGoEnv", () => {
     const { wt, bin, calls } = await setup();
     expect(await getGoEnv(wt)).toEqual({
       binary: join(bin, "go"),
+      source: "path",
       version: "1.27.3",
       goroot: "/goroot",
       gopath: "/gopath",
       gomodcache: "/gopath/pkg/mod",
+      toolchainPlatform: null,
       gomod: null,
       gowork: null,
       goflags: "-mod=mod",
@@ -106,7 +109,7 @@ describe("getGoEnv", () => {
     });
     const offline = [GO_ENV.GOPROXY, GO_ENV.GOTOOLCHAIN, GO_ENV.GOSUMDB, GO_ENV.GONOPROXY];
     expect(await calls()).toEqual([
-      `${wt}|env -json GOVERSION GOROOT GOPATH GOMODCACHE GOMOD GOWORK GOFLAGS|${offline.join("|")}`,
+      `${wt}|env -json GOVERSION GOROOT GOPATH GOMODCACHE GOMOD GOWORK GOFLAGS GOHOSTOS GOHOSTARCH|${offline.join("|")}`,
     ]);
   });
 
@@ -208,7 +211,7 @@ describe("a version manager's shim", () => {
     const { wt, shims, bin } = await setupShim("/goroot");
     await writeExecutable(join(shims, "gopls"), "#!/bin/sh\n");
     expect(await trustedGoTool(wt, "gopls")).toBeNull();
-    const env = { binary: join(shims, "go"), goroot: "/goroot" };
+    const env = { binary: join(shims, "go"), goroot: "/goroot", source: "path" } as const;
     const dirs = goSpawnEnv(wt, env).PATH?.split(delimiter) ?? [];
     expect(dirs[0]).toBe(join("/goroot", "bin"));
     expect(dirs).toContain(bin);
@@ -217,7 +220,7 @@ describe("a version manager's shim", () => {
 
   test("a go that is no shim stays first, whatever GOROOT it reports", async () => {
     const { wt, bin } = await setup();
-    const env = { binary: join(bin, "go"), goroot: "/stale" };
+    const env = { binary: join(bin, "go"), goroot: "/stale", source: "path" } as const;
     expect(goSpawnEnv(wt, env).PATH?.split(delimiter)).not.toContain(join("/stale", "bin"));
   });
 });
