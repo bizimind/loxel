@@ -77,7 +77,7 @@ Symbols flagged as unused by the language server are dimmed in the editor, and d
 
 ## Other languages
 
-Each language server is independent of the others. A language with more to say has its own page in the docs navigation, such as [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python) and [TOML](/docs/languages/toml). These have none:
+Each language server is independent of the others. A language with more to say has its own page in the docs navigation, such as [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python), [TOML](/docs/languages/toml) and [Kotlin](/docs/languages/kotlin). These have none:
 
 | Language  | When it starts             | File types                                                       |
 | --------- | -------------------------- | ---------------------------------------------------------------- |
