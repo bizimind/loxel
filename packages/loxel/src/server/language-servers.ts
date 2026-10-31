@@ -12,6 +12,7 @@ import { GoLspManager } from "./go-lsp-manager";
 import { MypyLspManager } from "./mypy-lsp-manager";
 import { PythonLspManager } from "./python-lsp-manager";
 import { RuffLspManager } from "./ruff-lsp-manager";
+import { RustLspManager } from "./rust-lsp-manager";
 import type { WorktreeLspServer } from "./server-state";
 import { TerraformLspManager } from "./terraform-lsp-manager";
 import { TomlLspManager } from "./toml-lsp-manager";
@@ -32,6 +33,7 @@ export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   // After Python, which hears from it while it shuts down.
   mypyLspManager,
   new RuffLspManager(),
+  new RustLspManager(),
   new TerraformLspManager(),
   tomlLspManager,
   new TsLspManager(),
