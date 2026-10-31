@@ -6,9 +6,11 @@
  */
 import { goToolchain } from "./go-env-model";
 import { pythonToolchain } from "./python-env-model";
+import { rustToolchain } from "./rust-toolchain-model";
 
 export const toolchainStatuses = [
   // This comment keeps the list on one line per entry whatever its length.
   goToolchain,
   pythonToolchain,
+  rustToolchain,
 ] as const;
