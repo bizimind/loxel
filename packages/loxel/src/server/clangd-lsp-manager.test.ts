@@ -204,7 +204,7 @@ describe("escapeSnippetDollars", () => {
     const escaped = JSON.parse(
       escapeSnippetDollars(
         frame({
-          insertText: "my$fn(${1:int $a}, $0)",
+          insertText: "my$fn(${1:int \\$a}, $0)",
           insertTextFormat: 2,
           textEdit: { newText: "FOO$BAR(${1:x})" },
         }),

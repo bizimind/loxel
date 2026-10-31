@@ -119,7 +119,8 @@ function isMissingFile(err: unknown): boolean {
 
 /**
  * Escape the `$` signs in a completion result's snippets that are not clangd's own tabstops. clangd
- * writes names into snippets as they are, so a `my$fn` would insert the snippet variable `$fn`.
+ * escapes placeholders but writes names as they are, so a `my$fn` would insert the snippet variable
+ * `$fn`.
  */
 export function escapeSnippetDollars(body: string): string {
   // Most frames have no such `$`, and parsing them again would be wasted.
@@ -146,7 +147,8 @@ export function escapeSnippetDollars(body: string): string {
 const SNIPPET_TEXT_FORMAT = 2;
 
 function escapeDollars(snippet: string): string {
-  return snippet.replace(/\$(?![0-9{])/g, "\\$");
+  // Skips the escapes clangd writes itself, in placeholders: a name cannot hold a backslash.
+  return snippet.replace(/\\[\s\S]|\$(?![0-9{])/g, (match) => (match.length === 2 ? match : "\\$"));
 }
 
 /** The oldest clangd that takes the flags and compile flags above. */
