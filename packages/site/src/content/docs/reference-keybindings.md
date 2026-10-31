@@ -111,6 +111,7 @@ Back/forward work like a browser's history, across all projects. Worktree number
 | Organize Imports           | `Shift+Alt+O`                           |
 | Source Action…             | `Ctrl+Alt+S`                            |
 | Refactor…                  | `Ctrl+Alt+R`                            |
+| Go: Refresh Toolchain      | unbound — command palette or status bar |
 | Python: Select Interpreter | unbound — command palette or status bar |
 | Restart Language Servers   | unbound — command palette               |
 
