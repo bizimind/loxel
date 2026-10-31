@@ -30,6 +30,10 @@ Forked from [`@vscode/monaco-lsp-client`](https://github.com/microsoft/monaco-ed
 
 `src/types.ts` holds the LSP 3.17 protocol typings generated upstream; do not edit it by hand.
 
+## License
+
+MIT, as upstream: see [LICENSE](LICENSE).
+
 ## Usage
 
 Workspace-only and private; add `"@bizimind/monaco-lsp-client": "workspace:*"`.

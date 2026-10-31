@@ -1,6 +1,6 @@
 /**
- * JetBrains-style file and folder icon mappings.
- * Derived from vscode-jetbrains-icon-theme (theme-dark.json).
+ * File and folder icon mappings, derived from vscode-jetbrains-icon-theme (theme-dark.json).
+ * See public/icons/LICENSE for where the icons come from.
  */
 
 /** Exact filename to SVG icon filename */

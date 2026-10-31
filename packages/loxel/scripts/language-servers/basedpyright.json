@@ -1,4 +1,8 @@
 {
   "script": "build-basedpyright-lsp.ts",
-  "resources": ["basedpyright-langserver", "typeshed-fallback"]
+  "resources": ["basedpyright-langserver", "typeshed-fallback"],
+  "license": "MIT",
+  "source": "https://github.com/DetachHead/basedpyright",
+  "npm": ["basedpyright"],
+  "note": "Includes typeshed (Apache-2.0 and MIT), with its LICENSE in the typeshed-fallback directory next to this file."
 }

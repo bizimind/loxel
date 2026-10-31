@@ -17,6 +17,13 @@ import { $ } from "bun";
 const packageRoot = path.resolve(import.meta.dirname, "..");
 const profile = path.join(packageRoot, "build", "embedded.provisionprofile");
 
+// electron-builder.yml ships Chromium's license list from Electron's npm package, which downloads
+// its dist/ only on demand. electron-builder would skip a missing file with just a warning.
+const electronDir = path.join(packageRoot, "node_modules", "electron");
+const chromiumLicenses = path.join(electronDir, "dist", "LICENSES.chromium.html");
+if (!fs.existsSync(chromiumLicenses)) await $`node install.js`.cwd(electronDir);
+if (!fs.existsSync(chromiumLicenses)) throw new Error(`Missing ${chromiumLicenses} after install`);
+
 const args = Bun.argv.slice(2);
 if (args.some((arg) => arg.startsWith("--config.mac.provisioningProfile"))) {
   console.log("[build-app] using the provisioning profile given on the command line");

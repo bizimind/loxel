@@ -40,3 +40,5 @@ Check the license before adding a dependency, vendored code, font, template or b
 | GPL, AGPL, SSPL, share-alike, non-commercial, none              | Ask the user first                                                                                    |
 
 Keep attributions with what they credit: the upstream `LICENSE` next to vendored assets, as in `packages/loxel/public/icons/LICENSE`, and the CC BY 4.0 credit to 37signals at the bottom of the privacy policy.
+
+The build generates `THIRD_PARTY_NOTICES.txt` for the app, `wt` and `code-analysis` from their npm dependencies. A new bundled binary or language server needs `license`, `source` and `licenseFile` in its manifest (`scripts/language-servers/`); a new font, icon set or vendored code needs an entry in `packages/loxel/third-party.json`. The build fails on a manifest without them.

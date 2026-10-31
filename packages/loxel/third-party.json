@@ -1,0 +1,44 @@
+{
+  "languageServers": "scripts/language-servers",
+  "entries": [
+    {
+      "name": "Electron",
+      "license": "MIT",
+      "source": "https://github.com/electron/electron",
+      "licenseFile": "scripts/third-party/electron-LICENSE.txt",
+      "note": "Electron includes Chromium and other components, whose licenses are in LICENSES.chromium.html next to this file."
+    },
+    {
+      "name": "File and folder icons",
+      "license": "MIT AND Apache-2.0",
+      "source": "https://github.com/peakoss/vscode-jetbrains-icon-theme",
+      "licenseFile": "public/icons/LICENSE"
+    },
+    {
+      "name": "Inter font",
+      "license": "OFL-1.1",
+      "source": "https://github.com/rsms/inter",
+      "licenseFile": "public/fonts/OFL-Inter.txt"
+    },
+    {
+      "name": "JetBrains Mono font",
+      "license": "OFL-1.1",
+      "source": "https://github.com/JetBrains/JetBrainsMono",
+      "licenseFile": "public/fonts/OFL-JetBrainsMono.txt"
+    },
+    {
+      "name": "Tailwind CSS base styles",
+      "license": "MIT",
+      "source": "https://github.com/tailwindlabs/tailwindcss",
+      "npm": ["tailwindcss"],
+      "note": "Tailwind's generated styles are compiled into the app's stylesheet."
+    },
+    {
+      "name": "monaco-lsp-client",
+      "license": "MIT",
+      "source": "https://github.com/microsoft/monaco-editor/tree/main/monaco-lsp-client",
+      "licenseFile": "../monaco-lsp-client/LICENSE",
+      "note": "Modified fork; its README lists the changes."
+    }
+  ]
+}

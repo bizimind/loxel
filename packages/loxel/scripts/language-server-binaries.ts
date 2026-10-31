@@ -2,8 +2,10 @@
  * Builds and stages what ships next to `loxel-server` for language servers. Each binary is one
  * manifest in scripts/language-servers/, so a new one edits no shared file:
  *
- *   { "script": "download-x.ts", "resources": ["x"], "sign"?: ["dir/executable"], "platforms"?: ["darwin"] }
+ *   { "script": "download-x.ts", "resources": ["x"], "sign"?: ["dir/executable"],
+ *     "platforms"?: ["darwin"], ...notice fields }
  *
+ * The notice fields (license, source, and licenseFile or npm) are read by third-party-notices.ts.
  * `script` (in scripts/) writes `resources` (paths under build/). Each resource is staged by its
  * base name in build/language-servers/, which electron-builder.yml `extraResources` and the release
  * workflow's update archive copy as a whole. A manifest with `platforms` does not exist elsewhere.

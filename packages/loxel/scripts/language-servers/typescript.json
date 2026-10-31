@@ -1,1 +1,8 @@
-{ "script": "copy-typescript.ts", "resources": ["typescript-lib"], "sign": ["typescript-lib/tsc"] }
+{
+  "script": "copy-typescript.ts",
+  "resources": ["typescript-lib"],
+  "sign": ["typescript-lib/tsc"],
+  "license": "Apache-2.0",
+  "source": "https://github.com/microsoft/typescript-go",
+  "npm": ["@typescript/native"]
+}
