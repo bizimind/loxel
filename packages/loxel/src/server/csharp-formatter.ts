@@ -233,7 +233,7 @@ async function isUsableEntry(dir: string, command: string, root: string): Promis
 function csharpFailureNotice(failure: FormatterFailure): string | undefined {
   if (failure.kind === "not-installed") {
     return failure.command === CSHARPIER
-      ? "Format on save skipped: this project uses CSharpier, which is not on your PATH. Add it to the project's tool manifest and run `dotnet tool restore`, or install it with `dotnet tool install -g csharpier`."
+      ? "Format on save skipped: this project uses CSharpier, which is not on your PATH. Install it with `dotnet tool install -g csharpier`."
       : undefined;
   }
   return isDotnet(failure.command) && failure.stderr.includes(NOT_RESTORED_HINT)
