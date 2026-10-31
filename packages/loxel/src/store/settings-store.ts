@@ -119,17 +119,25 @@ export interface BuiltinIndentation extends IndentationDefaults {
 
 /**
  * Built-in indentation for languages whose convention, set by their formatter or official style
- * guide, differs from the global default, keyed by resolved (highlighter) language ID. Languages
- * whose common formatters disagree (Java, Swift, C and C++, shell) are left to the default.
+ * guide (for the C family, their main IDEs), differs from the global default, keyed by resolved
+ * (highlighter) language ID. Languages whose common formatters disagree (Java, Swift, shell) are
+ * left to the default.
  */
 export const BUILTIN_LANGUAGE_INDENTATION: ReadonlyMap<string, BuiltinIndentation> = new Map([
+  // The C family has no single style; 4 is the default of VS Code, CLion and Xcode.
+  ["c", { tabSize: 4, insertSpaces: true }],
+  ["cpp", { tabSize: 4, insertSpaces: true }],
   ["csharp", { tabSize: 4, insertSpaces: true }], // .NET coding conventions, dotnet format
   ["go", { tabSize: 4, insertSpaces: false }], // gofmt
+  ["go.mod", { tabSize: 4, insertSpaces: false }], // go mod tidy
+  ["go.work", { tabSize: 4, insertSpaces: false }], // go work use
   ["just", { tabSize: 4, insertSpaces: true }], // just --fmt
   ["kotlin", { tabSize: 4, insertSpaces: true }], // Kotlin coding conventions, ktlint
   // Recipe lines must start with a tab (`*** missing separator`), whatever the content suggests:
   // space-indented continuation lines can outnumber the recipes. 4 is only the tab's display width.
   ["make", { tabSize: 4, insertSpaces: false, required: true }],
+  ["objective-c", { tabSize: 4, insertSpaces: true }],
+  ["objective-cpp", { tabSize: 4, insertSpaces: true }],
   ["php", { tabSize: 4, insertSpaces: true }], // PSR-12 / PER Coding Style, PHP-CS-Fixer
   ["python", { tabSize: 4, insertSpaces: true }], // PEP 8, ruff, black
   ["rust", { tabSize: 4, insertSpaces: true }], // rustfmt
@@ -323,6 +331,11 @@ export const BUILTIN_FILE_ASSOCIATIONS: FileAssociation[] = [
   fa("**/requirements*.in", "pip-requirements"),
   fa("**/requirements/*.txt", "pip-requirements"),
   fa("**/constraints*.txt", "pip-requirements"),
+
+  // libc++ and libstdc++ headers such as <vector> have no extension. Only those: these directories
+  // also hold files like module.modulemap, and anything with an extension resolves on its own.
+  fa("**/c++/v1/**/!(*.*)", "cpp"),
+  fa("**/include/c++/**/!(*.*)", "cpp"),
 
   // Filename-based defaults (from FILENAME_TO_LANG)
   ...Object.entries(FILENAME_TO_LANG).map(([name, lang]) => fa(`**/${name}`, lang)),

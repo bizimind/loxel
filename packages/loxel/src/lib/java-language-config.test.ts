@@ -5,7 +5,7 @@ import * as monaco from "monaco-editor";
 
 import { getHighlighter } from "./highlighter";
 import { registerLanguageConfiguration } from "./java-language-config";
-import { registerPythonLanguageConfiguration } from "./python-language-config";
+import { registerLanguageConfiguration as registerPythonLanguageConfiguration } from "./python-language-config";
 
 /** Internal model surface (not in monaco.d.ts) used to tokenize synchronously. */
 interface InternalTextModel {

@@ -20,7 +20,6 @@ import { registerLoxelLanguages } from "./monaco-languages";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
 import { isWithin } from "./project-file-helpers";
-import { registerPythonLanguageConfiguration } from "./python-language-config";
 import { connectTsLsp } from "./ts-lsp-client";
 import { connectYamlLsp } from "./yaml-lsp-client";
 
@@ -63,8 +62,16 @@ registerMonacoThemes();
 // registration and shikiToMonaco's TextMate tokenizers work for them.
 registerLoxelLanguages();
 
-// Docstring auto-close and dedent after block-ending statements, on top of Monaco's built-in config.
-void registerPythonLanguageConfiguration();
+// Editing behavior on top of Monaco's built-in configs: each `<language>-language-config.ts`
+// registers its own, so a new one edits no shared file.
+for (const register of Object.values(
+  import.meta.glob<() => void>("./*-language-config.ts", {
+    eager: true,
+    import: "registerLanguageConfiguration",
+  }),
+)) {
+  register();
+}
 
 // Bridge Shiki's TextMate grammars into Monaco for VS Code-quality highlighting.
 // This replaces Monarch tokenizers for all Shiki-bundled languages (TS, JS, HTML,

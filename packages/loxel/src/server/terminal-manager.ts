@@ -3,24 +3,27 @@
  * `loxel terminal`), tracks orphaned sessions, and owns the shell environment. See
  * docs/TERMINALS.md.
  */
-import type { PythonEnv } from "@/api/python-env-model";
 import type { NotificationSequence } from "@/api/ws-protocol";
 import { CODING_AGENT_ENV_VARS } from "@/coding-agent-env";
 import type { OscPayload } from "@/lib/osc-notification-parser";
 
 import { logger } from "./logger";
 import { buildShellSpawnEnv } from "./shell-env";
-import { activatePythonEnv } from "./terminal-python-env";
 import type { TerminalSink } from "./terminal-session";
 import { TerminalSession } from "./terminal-session";
+import type {
+  TerminalEnvChange,
+  TerminalToolchainSettings,
+  ToolchainEnvContributor,
+} from "./toolchain-env-contributor";
 
 const log = logger.child("terminal");
 const textEncoder = new TextEncoder();
 
-/** How long a new shell waits for its Python environment before starting without it. */
-const PYTHON_ENV_TIMEOUT_MS = 3000;
+/** How long a new shell waits for its toolchains' environments before starting without them. */
+const TOOLCHAIN_ENV_TIMEOUT_MS = 3000;
 
-export interface TerminalSpawnOptions {
+export interface TerminalSpawnOptions extends TerminalToolchainSettings {
   cols: number;
   rows: number;
   /** Applied only when the session is spawned. */
@@ -29,8 +32,6 @@ export interface TerminalSpawnOptions {
   worktreePath?: string;
   /** Applied only when the session is spawned. */
   envOverrides?: Record<string, string>;
-  /** Activate the worktree's Python environment; defaults to true. Applied only when spawned. */
-  activatePythonEnv?: boolean;
   scrollbackLines?: number;
   /**
    * Typed into the shell as if the user had entered it. Applied only by the call that spawns the
@@ -51,8 +52,8 @@ export interface TerminalManagerHooks {
   onNotification: (session: TerminalSession, payload: OscPayload) => void;
   /** Called after the session has been removed. */
   onExit: (session: TerminalSession, exitCode: number) => void;
-  /** The Python environment to activate in a new shell for this worktree; null for none. */
-  pythonEnvFor: (worktreePath: string) => Promise<PythonEnv | null>;
+  /** What contributes to a new shell's environment, applied in this order. */
+  toolchainEnvs: readonly ToolchainEnvContributor[];
 }
 
 /** Build terminal-specific env: login shell PATH + TERM fallback. */
@@ -63,6 +64,27 @@ function buildTerminalEnv(): Record<string, string | undefined> {
   // as an agent's, or their own `loxel` commands would open without focus.
   for (const name of CODING_AGENT_ENV_VARS) delete env[name];
   return env;
+}
+
+/** What `contributor` adds to a new shell in this worktree; null when it fails or runs out of time. */
+async function resolveToolchainEnv(
+  contributor: ToolchainEnvContributor,
+  worktreePath: string,
+  timedOut: Promise<"timeout">,
+): Promise<TerminalEnvChange | null> {
+  try {
+    const change = await Promise.race([contributor.resolveForTerminal(worktreePath), timedOut]);
+    if (change !== "timeout") return change;
+    log.warn(`${contributor.name} environment took too long; starting the terminal without it`, {
+      worktreePath,
+    });
+  } catch (err) {
+    log.warn(`Could not activate the ${contributor.name} environment in a terminal`, {
+      worktreePath,
+      error: err,
+    });
+  }
+  return null;
 }
 
 /** A shell waiting for its environment, and what reached it meanwhile. */
@@ -145,28 +167,29 @@ export class TerminalManager {
   ): Promise<Record<string, string | undefined>> {
     const env = buildTerminalEnv();
     if (options.envOverrides) Object.assign(env, options.envOverrides);
-    if (options.activatePythonEnv === false) return env;
     const worktreePath = options.worktreePath ?? options.cwd;
+    const contributors = this.hooks.toolchainEnvs.filter(
+      (contributor) => contributor.enabledInTerminal?.(options) ?? true,
+    );
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), PYTHON_ENV_TIMEOUT_MS);
+      timer = setTimeout(() => resolve("timeout"), TOOLCHAIN_ENV_TIMEOUT_MS);
     });
-    try {
-      const pythonEnv = await Promise.race([this.hooks.pythonEnvFor(worktreePath), timedOut]);
-      if (pythonEnv === "timeout") {
-        log.warn("Python environment took too long; starting the terminal without it", {
+    // Resolved side by side, so a slow toolchain costs the others no time, and applied in list
+    // order, since several can change the same variable.
+    const changes = await Promise.all(
+      contributors.map((contributor) => resolveToolchainEnv(contributor, worktreePath, timedOut)),
+    );
+    clearTimeout(timer);
+    for (const [index, change] of changes.entries()) {
+      try {
+        await change?.(env, terminalShell());
+      } catch (err) {
+        log.warn(`Could not activate the ${contributors[index]?.name} environment in a terminal`, {
           worktreePath,
+          error: err,
         });
-      } else if (pythonEnv) {
-        await activatePythonEnv(env, pythonEnv, terminalShell(), worktreePath);
       }
-    } catch (err) {
-      log.warn("Could not activate the Python environment in a terminal", {
-        worktreePath,
-        error: err,
-      });
-    } finally {
-      clearTimeout(timer);
     }
     return env;
   }

@@ -1,100 +1,126 @@
 /**
  * The environment of the built-in coding agent's tool subprocesses (Bash, Grep, background tasks):
- * the login-shell spawn environment, marked as an agent's, with the worktree's Python environment
- * activated and kept current as it re-resolves. See docs/CODING_AGENT_INTEGRATION.md.
+ * the login-shell spawn environment, marked as an agent's, with the worktree's toolchains activated
+ * and kept current as they re-resolve. See docs/CODING_AGENT_INTEGRATION.md.
  */
 import path from "node:path";
 
-import type { PythonEnv } from "@/api/python-env-model";
-
 import { logger } from "./logger";
-import { getPythonEnvNow, subscribePythonEnv } from "./python-env";
-import {
-  type PythonEnvActivation,
-  pythonEnvActivation,
-  setPythonEnvVars,
-} from "./python-env-activation";
 import { buildSpawnEnv } from "./shell-env";
+import type { EnvChange, SpawnEnv, ToolchainEnvContributor } from "./toolchain-env-contributor";
+import { toolchainEnvs } from "./toolchain-envs";
 
 const log = logger.child("agent");
 
-type Env = Record<string, string | undefined>;
-
 /**
  * The agent's environment: the spawn environment as it is now, `AI_AGENT=loxel` (the cross-agent
- * marker that tells tools such as the `loxel` CLI an agent ran them), and `activation` applied like
- * a terminal's. The agent's commands run in a non-login `$SHELL -c`, which skips the login startup
- * that reorders a terminal's PATH, so a venv also gets `VIRTUAL_ENV` without the zsh shim. A shell's
- * non-login startup (zsh's `.zshenv`, fish's `config.fish`) can still put directories ahead of the
- * environment's `bin`; see issue #776.
+ * marker that tells tools such as the `loxel` CLI an agent ran them), and `changes` applied in
+ * order.
  */
-export function buildAgentEnv(activation: PythonEnvActivation | null): Env {
-  const env: Env = { ...buildSpawnEnv(), AI_AGENT: "loxel" };
-  if (activation) setPythonEnvVars(env, activation, { virtualEnv: true });
+export function buildAgentEnv(changes: Iterable<EnvChange | null>): SpawnEnv {
+  const env: SpawnEnv = { ...buildSpawnEnv(), AI_AGENT: "loxel" };
+  for (const change of changes) {
+    try {
+      change?.(env);
+    } catch (err) {
+      log.warn("Could not apply a toolchain's environment for the agent", { error: err });
+    }
+  }
   return env;
 }
 
 /**
- * One agent session's environment, following the workspace's shared Python resolution: starts
- * without the Python environment rather than waiting for it, applies the last finished resolution
- * when it lands, and every one after it (a `uv sync` that created `.venv`, a pick in the
- * interpreter picker, an environment that now fails the trust rule). A workspace root that is not
- * an absolute path (no worktree) gets no Python environment.
+ * One agent session's environment, following each toolchain's resolution: starts without a
+ * toolchain's environment rather than waiting for it, applies its last finished resolution when it
+ * lands, and every one after it (a `uv sync` that created `.venv`, a pick in the interpreter picker,
+ * an environment that now fails the trust rule). A workspace root that is not an absolute path (no
+ * worktree) gets no toolchain environment.
  */
 export class AgentEnv {
-  private activation: PythonEnvActivation | null = null;
-  private unsubscribe: (() => void) | null = null;
-  /** Resolutions apply one at a time, in the order they were heard, so the latest one wins. */
-  private updating: Promise<void> = Promise.resolve();
+  /** Keyed in contribution order, which setting a key keeps. */
+  private readonly changes: Map<ToolchainEnvContributor, EnvChange | null>;
+  private readonly unsubscribes: (() => void)[] = [];
+  private disposed = false;
+  /**
+   * A toolchain's resolutions apply one at a time, in the order they were heard, so the latest one
+   * wins; a slow toolchain holds up only its own.
+   */
+  private readonly updating = new Map<ToolchainEnvContributor, Promise<void>>();
 
-  constructor(private readonly workspaceRoot: string) {
+  constructor(
+    private readonly workspaceRoot: string,
+    contributors: readonly ToolchainEnvContributor[] = toolchainEnvs,
+  ) {
+    this.changes = new Map(contributors.map((contributor) => [contributor, null]));
     if (!path.isAbsolute(workspaceRoot)) return;
-    let heard = false;
-    this.unsubscribe = subscribePythonEnv(workspaceRoot, ({ env }) => {
-      heard = true;
-      this.updating = this.updating.then(() => this.apply(env));
-    });
-    this.updating = getPythonEnvNow(workspaceRoot).then(
-      // A resolution heard meanwhile is at least as new.
-      (env) => (heard ? undefined : this.apply(env)),
-      (err: unknown) => {
-        log.warn("Could not resolve the Python environment for the agent", {
+    for (const contributor of contributors) {
+      try {
+        this.follow(contributor);
+      } catch (err) {
+        log.warn(`Could not follow the ${contributor.name} environment for the agent`, {
           workspaceRoot,
           error: err,
         });
-      },
-    );
+      }
+    }
   }
 
   /**
    * The environment for the next spawn; pass as `SessionConfig.env`. Built at each call, so a
    * login-shell environment captured after the session started applies too.
    */
-  readonly get = (): Env => buildAgentEnv(this.activation);
+  readonly get = (): SpawnEnv => buildAgentEnv(this.changes.values());
 
   /** Settles once every resolution heard so far, including the initial answer, has been applied. */
   async settled(): Promise<void> {
-    let updating: Promise<void>;
-    do {
-      updating = this.updating;
-      await updating;
-    } while (updating !== this.updating);
+    for (const contributor of this.updating.keys()) {
+      let updating: Promise<void> | undefined;
+      do {
+        updating = this.updating.get(contributor);
+        await updating;
+      } while (updating !== this.updating.get(contributor));
+    }
   }
 
-  /** Stop following the resolution; the current activation stays. */
+  /** Stop following the resolutions; the current environment stays. */
   dispose(): void {
-    this.unsubscribe?.();
-    this.unsubscribe = null;
+    this.disposed = true;
+    for (const unsubscribe of this.unsubscribes.splice(0)) unsubscribe();
   }
 
-  private async apply(pythonEnv: PythonEnv | null): Promise<void> {
+  private follow(contributor: ToolchainEnvContributor): void {
+    let heard = false;
+    this.unsubscribes.push(
+      contributor.subscribeForAgent(this.workspaceRoot, (resolve) => {
+        heard = true;
+        const previous = this.updating.get(contributor);
+        this.updating.set(
+          contributor,
+          (previous ?? Promise.resolve()).then(() => this.apply(contributor, resolve)),
+        );
+      }),
+    );
+    this.updating.set(
+      contributor,
+      this.apply(
+        contributor,
+        () => contributor.resolveForAgent(this.workspaceRoot),
+        // A resolution heard meanwhile is at least as new.
+        () => heard,
+      ),
+    );
+  }
+
+  private async apply(
+    contributor: ToolchainEnvContributor,
+    resolve: () => Promise<EnvChange | null>,
+    isSuperseded: () => boolean = () => false,
+  ): Promise<void> {
     try {
-      const activation = pythonEnv
-        ? await pythonEnvActivation(pythonEnv, this.workspaceRoot)
-        : null;
-      if (this.unsubscribe) this.activation = activation;
+      const change = await resolve();
+      if (!this.disposed && !isSuperseded()) this.changes.set(contributor, change);
     } catch (err) {
-      log.warn("Could not activate the Python environment for the agent", {
+      log.warn(`Could not activate the ${contributor.name} environment for the agent`, {
         workspaceRoot: this.workspaceRoot,
         error: err,
       });
