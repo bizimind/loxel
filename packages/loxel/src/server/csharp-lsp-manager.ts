@@ -897,7 +897,9 @@ async function toolchainStamp(wtPath: string): Promise<string> {
     dotnet,
     Bun.which(CSHARP_LS, search),
     path.join(dotnetGlobalToolsDir(env), CSHARP_LS),
-    path.join(toolsHome, "toolResolverCache"),
+    // Written as `<cache version>/<package id>`; a directory's stamp misses a file rewritten in place.
+    path.join(toolsHome, "toolResolverCache", "1"),
+    path.join(toolsHome, "toolResolverCache", "1", CSHARP_LS),
     ...(install ? [path.join(install, "sdk"), path.join(install, "shared", NETCORE_APP)] : []),
     env.DOTNET_ROOT ? path.join(env.DOTNET_ROOT, "shared", NETCORE_APP) : null,
     path.join(wtPath, "global.json"),

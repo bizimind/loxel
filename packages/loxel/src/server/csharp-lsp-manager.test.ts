@@ -134,6 +134,7 @@ case "$1" in
   --list-runtimes) echo "Microsoft.NETCore.App ${runtime} [${dotnetRoot}/shared/Microsoft.NETCore.App]" ;;
   --list-sdks) echo "${sdks} [${dotnetRoot}/sdk]" ;;
   --version) [ -f global.json ] && exit 145; echo "${sdks}" ;;
+  tool) [ -f "$HOME/.dotnet/toolResolverCache/1/csharp-ls" ] && echo "csharp-ls, 0.28.0.0" ;;
 esac
 `,
   );
@@ -534,6 +535,21 @@ describe.skipIf(process.platform === "win32")("CSharpLspManager", () => {
       // The stand-in `dotnet` runs no tool, so this one is told what to do.
       await socket.untilMessage("dotnet tool restore");
       expect(await Bun.file(dotnetRuns).text()).toContain("tool run csharp-ls -- --version");
+    });
+
+    test("a dotnet tool restore opens the gate, with the local tool cache already there", async () => {
+      await installToolchain();
+      await mkdir(join(process.env.HOME ?? "", ".dotnet", "toolResolverCache", "1"), {
+        recursive: true,
+      });
+      const wt = await makeRestoredRepo({
+        ".config/dotnet-tools.json":
+          '{"version":1,"tools":{"csharp-ls":{"version":"0.28.0","commands":["csharp-ls"]}}}',
+      });
+      const held = connect(wt);
+      await held.untilMessage("dotnet tool restore");
+      await write(join(process.env.HOME ?? "", ".dotnet", "toolResolverCache", "1", "csharp-ls"));
+      expect((await held.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
     });
 
     test("one solution at the root is what loads, with no word about others", async () => {
