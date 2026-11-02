@@ -38,7 +38,7 @@ Completion lists what is already imported. For a type from a namespace you haven
 ## Which projects load
 
 - One solution at the repository's root is what loads.
-- With several solutions and no single one at the root, csharp-ls loads the first by path and a notice names it. Files outside it get syntax highlighting only.
+- With several solutions and no single one at the root, csharp-ls loads the first by path and a notice names it. Files outside it get syntax highlighting only. [Choose another](#choosing-a-solution) to load it instead.
 - With no solution, every project in the repository loads.
 - A project in what loads that isn't restored still loads, and a notice names it: references to its packages show as errors until you run `dotnet restore`.
 - A project csharp-ls can't load gets a notice naming it, and its files may have fewer features.
@@ -47,6 +47,21 @@ Completion lists what is already imported. For a type from a namespace you haven
 After a `dotnet restore`, or when `obj` goes away, the server restarts to pick up the change. A large solution takes a little while to load again.
 
 A `.cs` file outside any loaded project, or in a repository with no project at all, gets syntax highlighting only.
+
+## Status bar
+
+While a C# file is the active editor in a repository with a project, the status bar shows what is loaded, such as `C#: Polly.sln`, or the missing step, in the warning color: `C#: Not trusted`, `C#: Not restored`, `C#: csharp-ls missing`, `C#: csharp-ls too old`, `C#: csharp-ls failed`, `C#: .NET missing` or `C#: Load failed`. Hover it for the loaded solution and the .NET SDK version, or for what to do, including the command to run in a terminal. It updates by itself when you trust the repository, run `dotnet restore` or install csharp-ls.
+
+## Choosing a solution
+
+Click the item, or run **C#: Select Solution** from the command palette (`Cmd+Shift+P`), to choose what loads:
+
+- **Use automatic detection** goes back to the rules above.
+- Any `.sln`, `.slnx` or `.slnf` in the worktree that git doesn't ignore loads that solution or solution filter. A single `.csproj` can't be chosen: a project that no solution lists loads only in a repository with no solution.
+
+The choice applies right away, restarting the server. It's saved per worktree, survives restarts and goes away with the worktree. If the chosen file disappears, automatic detection takes over and the item turns the warning color, until the file returns or you choose again.
+
+Choosing doesn't change what is needed: an untrusted repository still loads nothing, and the picker says so.
 
 ## Scope
 

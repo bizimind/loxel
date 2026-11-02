@@ -11,6 +11,7 @@ import type { EditorCodeActionId } from "@/lib/editor-code-actions";
 import { canRunEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
+import { getFocusedHardRefreshTarget } from "@/lib/hard-refresh-targets";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { canRenameActiveTab } from "@/lib/tab-rename";
 import { useEditorIndentationStore } from "@/store/editor-indentation";
@@ -30,6 +31,7 @@ export type ActionId =
   | "panel.reopenClosed"
   | "panel.newTab"
   | "panel.rename"
+  | "browser.hardRefresh"
   | `panel.split.${SplitDirection}`
   | `panel.split.${SplitPanelType}.${SplitDirection}`
   | "panel.next"
@@ -143,6 +145,11 @@ export interface ActionDef {
    * key resolves as unbound and reaches the focused widget (terminal, editor, …).
    */
   isEnabled?: () => boolean;
+  /**
+   * An action this one may hold the same key as, which then runs whichever of the two is enabled
+   * where focus is (this one, if both are). For a key that means different things by focus.
+   */
+  sharesKeyWith?: ActionId;
 }
 
 /** Whether the active center panel is a code editor tab (one that publishes its indentation). */
@@ -178,9 +185,18 @@ export const ACTIONS: readonly ActionDef[] = [
   // New tab of the active panel's type, in its group
   { id: "panel.newTab", label: "New Tab (Same Type)", category: "panel" },
 
-  // Inline rename of the active center tab; when that tab isn't renameable the key reaches the
-  // focused widget.
+  // Inline rename of the active center tab; when that tab isn't renameable the key is left to
+  // what focus holds: a browser panel's hard refresh, or the focused widget.
   { id: "panel.rename", label: "Rename Tab", category: "panel", isEnabled: canRenameActiveTab },
+
+  // Reload the focused browser panel's page, bypassing the cache.
+  {
+    id: "browser.hardRefresh",
+    label: "Hard Refresh Browser Tab",
+    category: "panel",
+    isEnabled: () => getFocusedHardRefreshTarget() !== undefined,
+    sharesKeyWith: "panel.rename",
+  },
 
   // Split — new panel of the active panel's type, or of a specific type
   ...SPLIT_DIRECTIONS.map((dir): ActionDef => ({
@@ -360,6 +376,11 @@ const actionDefMap = new Map<ActionId, ActionDef>(ACTIONS.map((a) => [a.id, a]))
 
 export function getActionDef(id: ActionId): ActionDef | undefined {
   return actionDefMap.get(id);
+}
+
+/** Whether one of the two actions declares that they may hold the same key. */
+export function canShareBinding(a: ActionId, b: ActionId): boolean {
+  return getActionDef(a)?.sharesKeyWith === b || getActionDef(b)?.sharesKeyWith === a;
 }
 
 export function getActionsByCategory(category: ActionCategory): ActionDef[] {

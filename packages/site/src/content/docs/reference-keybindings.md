@@ -22,8 +22,11 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 | Close panel                        | `Cmd+W`                                                      |
 | Reopen closed tab                  | `Cmd+Shift+T`                                                |
 | Rename the active tab              | `Cmd+Shift+R`                                                |
+| Hard refresh a browser tab         | `Cmd+Shift+R` while the browser tab has focus                |
 | Next / previous tab                | `Cmd+Shift+]` / `Cmd+Shift+[`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Focus panel 1–9                    | `Cmd+1` – `Cmd+9`                                            |
+
+`Cmd+Shift+R` depends on focus: in a browser tab, its page or its toolbar, it reloads the page and bypasses the cache; anywhere else it renames the active tab. Settings > Keybindings lists them as **Hard Refresh Browser Tab** and **Rename Tab**, and remapping one leaves the other on `Cmd+Shift+R`.
 
 ---
 
@@ -103,20 +106,22 @@ Back/forward work like a browser's history, across all projects. Worktree number
 
 ## Languages
 
-| Action                     | Shortcut                                |
-| -------------------------- | --------------------------------------- |
-| Quick Fix…                 | `Cmd+.`                                 |
-| Fix All                    | `Ctrl+Shift+.`                          |
-| Organize Imports           | `Shift+Alt+O`                           |
-| Source Action…             | `Ctrl+Alt+S`                            |
-| Refactor…                  | `Ctrl+Alt+R`                            |
-| Go: Select Toolchain       | unbound — command palette or status bar |
-| Node: Select Version       | unbound — command palette or status bar |
-| Python: Select Interpreter | unbound — command palette or status bar |
-| Java: Select JDK           | unbound — command palette or status bar |
-| Rust: Select Toolchain     | unbound — command palette or status bar |
-| Restart Language Servers   | unbound — command palette               |
-| Manage Repository Trust    | unbound — command palette or status bar |
+| Action                         | Shortcut                                |
+| ------------------------------ | --------------------------------------- |
+| Quick Fix…                     | `Cmd+.`                                 |
+| Fix All                        | `Ctrl+Shift+.`                          |
+| Organize Imports               | `Shift+Alt+O`                           |
+| Source Action…                 | `Ctrl+Alt+S`                            |
+| Refactor…                      | `Ctrl+Alt+R`                            |
+| C#: Select Solution            | unbound — command palette or status bar |
+| C/C++: Select Compile Database | unbound — command palette or status bar |
+| Go: Select Toolchain           | unbound — command palette or status bar |
+| Node: Select Version           | unbound — command palette or status bar |
+| Python: Select Interpreter     | unbound — command palette or status bar |
+| Java: Select JDK               | unbound — command palette or status bar |
+| Rust: Select Toolchain         | unbound — command palette or status bar |
+| Restart Language Servers       | unbound — command palette               |
+| Manage Repository Trust        | unbound — command palette or status bar |
 
 The code action shortcuts work in a code editor whose language server offers that kind of action, and the command palette lists them only then. When several servers offer one (Ruff and the type checker for Python), Fix All and Organize Imports apply the only fix offered or let you pick, and the others list every server's actions.
 

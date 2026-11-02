@@ -71,6 +71,9 @@ export const INDEX_DIRECTORY_DEBOUNCE_MS = 100;
 /** A `git checkout` writes the worktree first and its index last, and git's answer reads the index. */
 export const INDEX_DIRECTORY_RECHECK_MS = 3000;
 
+/** Enough to take a build's several writes of its database together. */
+export const DATABASES_DEBOUNCE_MS = 200;
+
 export interface ClangdFileChangeActions {
   /** Have clangd check its open documents' inputs: dependencies and compile commands. */
   recheck(): void;
@@ -85,6 +88,8 @@ export interface ClangdFileChangeActions {
    * each file's content, and that takes under a second even on a project of hundreds of files.
    */
   refreshIndex(): void;
+  /** A compile database or `.clangd` appeared, changed or went, so which one applies may differ. */
+  databasesChanged(): void;
 }
 
 /**
@@ -122,6 +127,10 @@ export class ClangdFileChanges {
     if (this.disposed) return;
     const changes = new Set(relPaths.map(classifyChange));
     if (changes.has("source")) this.sourcesChanged();
+    if (changes.has("database") || changes.has("config")) {
+      const changed = () => this.actions.databasesChanged();
+      this.schedule("databases", DATABASES_DEBOUNCE_MS, changed);
+    }
     if (changes.has("database")) {
       this.schedule("database", CACHED_FILE_DELAY_MS, () => this.actions.recheck());
       this.schedule("missing-database", MISSING_DATABASE_DELAY_MS, () => this.actions.recheck());

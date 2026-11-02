@@ -59,6 +59,14 @@ Maven and Gradle projects load through `trustedJavaSettings`, with the exclusion
 
 `-Djava.import.generatesMetadataFilesAtProjectRoot=false` applies here too, so `.project`, `.classpath`, `.settings` and `.factorypath` stay out of the tree. `target/`, `bin/` and `.gradle/` are written, as a build would.
 
+## Terminals
+
+[java-toolchain-env.ts](../../src/server/java-toolchain-env.ts) is Java's [toolchain contributor](../TERMINALS.md#toolchain-environments). It contributes only when `getJavaEnv` answers with `source: "override"`, as Go's does for a chosen Go, and with no setting, like Go's and Node's.
+
+- **Detection changes nothing.** `resolveJavaEnv` takes the newest JDK and reads no version pins, while the shell's `java` or `JAVA_HOME` may be what a project builds with, so a detected JDK would change a working build. It also means a new shell with no choice reads one store key and starts no process, in every repository.
+- **A choice that stops qualifying.** Resolution falls through to detection, so `source` differs and the shell keeps its `JAVA_HOME`, stale or not.
+- **Which JDKs.** The resolver's [trust rule](#jdk-detection) already refuses one with files git tracks. On top of that, `isJdkInWorktree` refuses one whose home or `bin` is in the worktree, by real path, unless `isRepoTrusted`, and `reportRepoRestriction` says so. `commitToolchainEnvChange` checks the path's characters and leaves the whole contribution out, `JAVA_HOME` included. A path holding `PATH`'s delimiter is left out too.
+
 ## Client capabilities
 
 `extendedClientCapabilities` holds only `classFileContentsSupport` (see [Library sources](#library-sources)), so code actions come back with `data` and resolve to plain edits. jdtls resolves only the actions of its latest answer.

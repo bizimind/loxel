@@ -1,14 +1,21 @@
 import { readdirSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ServerWebSocket } from "bun";
+import { z } from "zod";
 
 import { LSP_REPLACED_CLOSE_CODE } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
 import { getGoEnv, goSpawnEnv, realpathOr, subscribeGoEnv, trustedGoTool } from "./go-env";
 import { isSkippedGoDir } from "./go-formatter";
+import {
+  golangciLintCodeActions,
+  type GolangciLintCodeAction,
+  rangesTouch,
+} from "./golangci-lint-code-actions";
 import {
   findGolangciConfig,
   type GolangciConfigVerdict,
@@ -45,6 +52,16 @@ const PACKAGE_EXCLUDED = /^typechecking error: build constraints exclude all Go 
 
 const REPO_TRUST_RESTRICTION = "golangci-lint doesn't run.";
 
+const POSITION = z.object({ line: z.number(), character: z.number() });
+const CodeActionParamsSchema = z.object({
+  textDocument: z.object({ uri: z.string() }),
+  range: z.object({ start: POSITION, end: POSITION }),
+  context: z.object({ only: z.array(z.string()).nullish() }).nullish(),
+});
+
+/** The language server protocol's `TextDocumentSyncKind.Full`. */
+const TEXT_DOCUMENT_SYNC_FULL = 1;
+
 /** `window/showMessage` types. */
 const MESSAGE_TYPE = { error: 1, warning: 2 } as const;
 
@@ -77,18 +94,35 @@ interface GolangciLintSession {
   wtPath: string;
   /** The last answer for this worktree, to tell a change of trust from another repository's. */
   trusted: boolean;
-  /** Open Go files, by absolute path. */
-  openFiles: Set<string>;
+  /** The buffer of each open Go file, by absolute path. */
+  openFiles: Map<string, OpenFile>;
   /** Package directories to check on the next run. */
   pending: Set<string>;
   timer: ReturnType<typeof setTimeout> | null;
   running: boolean;
   /** What the last conclusive run covering each file reported on it. */
-  reports: Map<string, GolangciLintDiagnostic[]>;
+  reports: Map<string, FileReport>;
   notices: Set<string>;
   /** Stops the running tool when the session ends or trust goes. */
   abort: AbortController;
   unsubscribeGoEnv: () => void;
+}
+
+interface OpenFile {
+  text: string;
+  version: number;
+}
+
+/** A file as it was before a run. */
+interface FileSnapshot {
+  bytes: Buffer;
+  mtimeMs: number | null;
+}
+
+interface FileReport {
+  diagnostics: GolangciLintDiagnostic[];
+  /** The bytes that run read, when that is known: the file was open and did not change during it. */
+  checked: Buffer | null;
 }
 
 /** Package directories that one process checks: same working directory, same config. */
@@ -101,8 +135,8 @@ interface RunGroup {
 /**
  * golangci-lint diagnostics for Go projects configured for it, served as a language server on its
  * own route so they reach the editor through the ordinary client. golangci-lint has no language
- * server, so this one is in-process: it answers the handshake, follows which Go files are open, and
- * runs the machine's golangci-lint v2 ({@link runGolangciLint}) on saved files.
+ * server, so this one is in-process: it answers the handshake, follows the open Go files, and runs
+ * the machine's golangci-lint v2 ({@link runGolangciLint}) on saved files.
  *
  * It runs only in a trusted repository, on a config it accepts ({@link judgeGolangciConfig}). A run
  * covers the package directories of files that opened or changed, coalesced and debounced, with the
@@ -111,6 +145,9 @@ interface RunGroup {
  *
  * A run replaces diagnostics only for files in its own packages, and only when it got through: a
  * compile error hides issues in other packages, so a run that hit one leaves what was there.
+ *
+ * golangci-lint reads files from disk, and its fixes are byte offsets into what it read. So code
+ * actions are offered only while the buffer, the file and what the run read are the same bytes.
  */
 export class GolangciLintLspManager implements WorktreeLspServer {
   readonly name = "golangci-lint-lsp";
@@ -138,7 +175,7 @@ export class GolangciLintLspManager implements WorktreeLspServer {
       ws,
       wtPath,
       trusted: isRepoTrusted(wtPath),
-      openFiles: new Set(),
+      openFiles: new Map(),
       pending: new Set(),
       timer: null,
       running: false,
@@ -172,15 +209,22 @@ export class GolangciLintLspManager implements WorktreeLspServer {
     if (!isRecord(message) || typeof message.method !== "string") return;
     const { id, method, params } = message;
     if (typeof id === "number" || typeof id === "string") {
-      this.answerRequest(session, id, method);
+      this.answerRequest(session, id, method, params);
       return;
     }
     const uri = isRecord(params) && isRecord(params.textDocument) ? params.textDocument.uri : null;
     const file = typeof uri === "string" ? goFileOf(uri, session.wtPath) : null;
     if (!file) return;
     if (method === "textDocument/didOpen") {
-      session.openFiles.add(file);
+      session.openFiles.set(file, { text: documentText(params), version: documentVersion(params) });
       this.schedule(session, [path.dirname(file)]);
+    } else if (method === "textDocument/didChange") {
+      if (session.openFiles.has(file)) {
+        session.openFiles.set(file, {
+          text: changedText(params),
+          version: documentVersion(params),
+        });
+      }
     } else if (method === "textDocument/didClose") {
       session.openFiles.delete(file);
     }
@@ -213,21 +257,63 @@ export class GolangciLintLspManager implements WorktreeLspServer {
 
   // ---------------------------------------------------------------------------
 
-  private answerRequest(session: GolangciLintSession, id: number | string, method: string): void {
+  private answerRequest(
+    session: GolangciLintSession,
+    id: number | string,
+    method: string,
+    params: unknown,
+  ): void {
     if (method === "initialize") {
-      // Only open and close matter: golangci-lint checks files as they are on disk.
+      // Runs don't follow the buffer, since golangci-lint reads the disk: the whole text after each
+      // change is only what tells whether a fix still fits it.
       this.send(session, {
         id,
         result: {
-          capabilities: { textDocumentSync: { openClose: true, change: 0 } },
+          capabilities: {
+            textDocumentSync: { openClose: true, change: TEXT_DOCUMENT_SYNC_FULL },
+            codeActionProvider: { codeActionKinds: ["quickfix"] },
+          },
           serverInfo: { name: "golangci-lint" },
         },
       });
+    } else if (method === "textDocument/codeAction") {
+      void this.codeActions(session, params).then(
+        (result) => this.send(session, { id, result }),
+        (err: unknown) => {
+          log.warn("Could not answer a code action request", { error: err });
+          this.send(session, { id, result: [] });
+        },
+      );
     } else if (method === "shutdown") {
       this.send(session, { id, result: null });
     } else {
       this.send(session, { id, error: { code: -32601, message: `Unhandled method ${method}` } });
     }
+  }
+
+  /** Quick fixes under the requested range, while what the run read is still what's there. */
+  private async codeActions(
+    session: GolangciLintSession,
+    params: unknown,
+  ): Promise<GolangciLintCodeAction[]> {
+    const request = CodeActionParamsSchema.safeParse(params);
+    if (!request.success) return [];
+    const { textDocument, range, context } = request.data;
+    const only = context?.only;
+    if (only && !only.some((kind) => kind === "" || kind === "quickfix")) return [];
+    const file = goFileOf(textDocument.uri, session.wtPath);
+    const report = file === null ? undefined : session.reports.get(file);
+    if (file === null || !report?.checked) return [];
+    const diagnostics = report.diagnostics.filter((d) => rangesTouch(d.range, range));
+    if (diagnostics.length === 0) return [];
+    const onDisk = await readBytes(file);
+    // As of now, after that wait: an edit or a newer run may have come in during it.
+    const buffer = session.openFiles.get(file);
+    if (session.reports.get(file) !== report || buffer === undefined || !onDisk) return [];
+    if (!report.checked.equals(onDisk) || !report.checked.equals(Buffer.from(buffer.text)))
+      return [];
+    const document = { uri: textDocument.uri, version: buffer.version };
+    return golangciLintCodeActions(document, report.checked, diagnostics);
   }
 
   private followTrust(): void {
@@ -344,6 +430,8 @@ export class GolangciLintLspManager implements WorktreeLspServer {
       this.clearDirs(session, group.dirs);
       return;
     }
+    const before = await readOpenFiles(session, group.dirs);
+    if (abort.signal.aborted || !this.isLive(session)) return;
     // Last, so that what runs is what was read, and trust is as of now.
     const verdict = judgeGolangciConfig(group.config);
     if (verdict !== "runnable") {
@@ -382,14 +470,20 @@ export class GolangciLintLspManager implements WorktreeLspServer {
     if (issues.some((issue) => issue.FromLinter === "typecheck")) return;
     const excludedDir = excluded === undefined ? undefined : realpathOr(excluded);
     const scope = group.dirs.filter((dir) => realpathOr(dir) !== excludedDir);
-    await this.publishRun(session, scope, issues, abort.signal);
+    await this.publishRun(session, scope, issues, before, abort.signal);
   }
 
-  /** Make `issues` what the files in `dirs` report, and publish each that changes. */
+  /**
+   * Make `issues` what the files in `dirs` report, and publish each that changes. A file with the
+   * same bytes and time before and after the run is what the run read: the time tells a change that
+   * was undone during it. `before` has the files open as it started, and one that opened since gets
+   * a run of its own.
+   */
   private async publishRun(
     session: GolangciLintSession,
     dirs: readonly string[],
     issues: readonly GolangciLintIssue[],
+    before: ReadonlyMap<string, FileSnapshot>,
     signal: AbortSignal,
   ): Promise<void> {
     // Reported paths have no symlinks; the session's are as the client named them.
@@ -403,15 +497,23 @@ export class GolangciLintLspManager implements WorktreeLspServer {
       list.push(issue);
       byFile.set(file, list);
     }
-    const diagnostics = await Promise.all(
+    const reports = await Promise.all(
       [...byFile].map(async ([file, list]) => {
-        const lines = await readLines(file);
-        return [file, list.map((issue) => toGolangciLintDiagnostic(issue, lines))] as const;
+        const bytes = await readBytes(file);
+        const lines = bytes ? new TextDecoder().decode(bytes).split(/\r?\n/) : [];
+        const snapshot = before.get(file);
+        const unchanged =
+          bytes && snapshot?.bytes.equals(bytes) && (await mtimeOf(file)) === snapshot.mtimeMs;
+        const report: FileReport = {
+          diagnostics: list.map((issue) => toGolangciLintDiagnostic(issue, lines)),
+          checked: unchanged ? bytes : null,
+        };
+        return [file, report] as const;
       }),
     );
     if (signal.aborted || !this.isLive(session)) return;
     this.clearDirs(session, dirs, new Set(byFile.keys()));
-    for (const [file, list] of diagnostics) this.publish(session, file, list);
+    for (const [file, report] of reports) this.publish(session, file, report);
   }
 
   /** Clear what was reported on files in `dirs`, apart from `except`. */
@@ -422,20 +524,17 @@ export class GolangciLintLspManager implements WorktreeLspServer {
   ): void {
     const cleared = new Set(dirs);
     for (const file of [...session.reports.keys()]) {
-      if (cleared.has(path.dirname(file)) && !except?.has(file)) this.publish(session, file, []);
+      if (cleared.has(path.dirname(file)) && !except?.has(file)) this.publish(session, file, null);
     }
   }
 
-  private publish(
-    session: GolangciLintSession,
-    file: string,
-    diagnostics: GolangciLintDiagnostic[],
-  ): void {
-    if (diagnostics.length > 0) session.reports.set(file, diagnostics);
+  /** Publish what `file` reports now, with null for nothing. */
+  private publish(session: GolangciLintSession, file: string, report: FileReport | null): void {
+    if (report) session.reports.set(file, report);
     else session.reports.delete(file);
     this.send(session, {
       method: "textDocument/publishDiagnostics",
-      params: { uri: fileUri(file), diagnostics },
+      params: { uri: fileUri(file), diagnostics: report?.diagnostics ?? [] },
     });
   }
 
@@ -470,7 +569,7 @@ export class GolangciLintLspManager implements WorktreeLspServer {
 }
 
 function openDirs(session: GolangciLintSession): string[] {
-  return [...new Set([...session.openFiles].map((file) => path.dirname(file)))];
+  return [...new Set([...session.openFiles.keys()].map((file) => path.dirname(file)))];
 }
 
 /** The path of a Go file in the worktree; a config applies only to what is under it. */
@@ -506,10 +605,56 @@ function packageArg(module: string, dir: string): string {
   return relative ? `./${relative}/` : "./";
 }
 
-async function readLines(file: string): Promise<string[]> {
+/** The file's bytes, which a fix's offsets count and which a buffer can be compared with. */
+async function readBytes(file: string): Promise<Buffer | null> {
   try {
-    return (await Bun.file(file).text()).split(/\r?\n/);
+    return Buffer.from(await Bun.file(file).arrayBuffer());
   } catch {
-    return [];
+    return null;
   }
+}
+
+async function readOpenFiles(
+  session: GolangciLintSession,
+  dirs: readonly string[],
+): Promise<Map<string, FileSnapshot>> {
+  const inRun = new Set(dirs);
+  const files = [...session.openFiles.keys()].filter((file) => inRun.has(path.dirname(file)));
+  const read = await Promise.all(
+    files.map(async (file) => {
+      // The time first, so a write between the two shows as a change after the run.
+      const mtimeMs = await mtimeOf(file);
+      return [file, mtimeMs, await readBytes(file)] as const;
+    }),
+  );
+  return new Map(
+    read.flatMap(([file, mtimeMs, bytes]) => (bytes ? [[file, { bytes, mtimeMs }] as const] : [])),
+  );
+}
+
+async function mtimeOf(file: string): Promise<number | null> {
+  try {
+    return (await stat(file)).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/** The version a `didOpen` or `didChange` names, which the client checks an edit against. */
+function documentVersion(params: unknown): number {
+  const document = isRecord(params) ? params.textDocument : null;
+  return isRecord(document) && typeof document.version === "number" ? document.version : 0;
+}
+
+/** The text a `didOpen` carries. */
+function documentText(params: unknown): string {
+  const document = isRecord(params) ? params.textDocument : null;
+  return isRecord(document) && typeof document.text === "string" ? document.text : "";
+}
+
+/** The text a `didChange` leaves, under full sync: its last change holds all of it. */
+function changedText(params: unknown): string {
+  const changes = isRecord(params) ? params.contentChanges : null;
+  const last = Array.isArray(changes) ? (changes.at(-1) as unknown) : null;
+  return isRecord(last) && typeof last.text === "string" ? last.text : "";
 }

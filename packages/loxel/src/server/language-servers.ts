@@ -15,6 +15,7 @@ import { GolangciLintLspManager } from "./golangci-lint-lsp-manager";
 import { JavaLspManager } from "./java-lsp-manager";
 import { KotlinLintLspManager } from "./kotlin-lint-lsp-manager";
 import { MypyLspManager } from "./mypy-lsp-manager";
+import { OxlintLspManager } from "./oxlint-lsp-manager";
 import { PythonLspManager } from "./python-lsp-manager";
 import { RuffLspManager } from "./ruff-lsp-manager";
 import { RustLspManager } from "./rust-lsp-manager";
@@ -39,6 +40,7 @@ export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   new GolangciLintLspManager(),
   new JavaLspManager(),
   new KotlinLintLspManager(),
+  new OxlintLspManager(),
   new PythonLspManager(mypyLspManager),
   // After Python, which hears from it while it shuts down.
   mypyLspManager,
