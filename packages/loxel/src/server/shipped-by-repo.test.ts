@@ -63,11 +63,17 @@ describe("a repository git cannot read", () => {
     return root;
   }
 
-  test("counts everything as tracked, inside the worktree and outside it", async () => {
+  test("counts everything inside the worktree as tracked, and nothing outside it", async () => {
     const root = await makeUnreadableRepo();
     expect(await canGitReadRepo(root)).toBe(false);
     expect(await isShippedByRepo(root, join(root, "built", "tool"))).toBe(true);
-    expect(await isShippedByRepo(root, tmpdir())).toBe(true);
+    expect(await isShippedByRepo(root, tmpdir())).toBe(false);
+  });
+
+  test("still counts an untracked symlink in the worktree that leads out of it", async () => {
+    const root = await makeUnreadableRepo();
+    await symlink(tmpdir(), join(root, "built", "link"));
+    expect(await isShippedByRepo(root, join(root, "built", "link"))).toBe(true);
   });
 
   test("counts everything as tracked in a linked worktree whose git dir is gone", async () => {

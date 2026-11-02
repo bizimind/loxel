@@ -51,7 +51,7 @@ export async function resolveDefaultBranchRef(cwd: string): Promise<string | nul
       nothrow: true,
     })
   ).trim();
-  if (commonDir && (await isBareRepository(commonDir))) {
+  if (commonDir && (await isBareRepository(cwd, commonDir))) {
     const head = await gitText(["symbolic-ref", "--short", "HEAD"], {
       cwd: commonDir,
       env: readOnlyGitEnv(cwd),
@@ -101,13 +101,13 @@ async function resolveRemoteHead(cwd: string): Promise<string | null> {
   return chosen ? chosen[1].slice("refs/remotes/".length) : null;
 }
 
-async function isBareRepository(gitDir: string): Promise<boolean> {
+async function isBareRepository(cwd: string, gitDir: string): Promise<boolean> {
   // Read the config key rather than `rev-parse --is-bare-repository`: run inside
   // a git dir that command finds no work tree, so it reports `true` for any repo
   // whose config simply omits core.bare.
   const result = await gitText(["config", "--get", "--type=bool", "core.bare"], {
     cwd: gitDir,
-    env: readOnlyGitEnv(gitDir),
+    env: readOnlyGitEnv(cwd),
     nothrow: true,
   });
   return result.trim() === "true";

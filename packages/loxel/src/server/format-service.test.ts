@@ -818,6 +818,32 @@ describe("a manual override in an untrusted repository", () => {
     ]);
   });
 
+  test.each([
+    ["sh", "scripts/fmt {file}"],
+    ["sh", "./scripts/fmt"],
+    ["sh", "a.fake"],
+    ["some-tool", "--config=conf/fmt.toml {file}"],
+  ])("holds back %s %s, which names a path in the repository", async (command, args) => {
+    const wt = await worktreeWithScript();
+    const settings = overrideFor(command);
+    settings.overrides[0]!.args = args;
+    const result = await new FormatService([]).format("x", "a.fake", wt, settings);
+    expect(result).toEqual({ content: null });
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([
+      `Format on save doesn't run ${command} ${args} from this repository.`,
+    ]);
+  });
+
+  test("runs a command by name whose arguments name no path in the repository", async () => {
+    const wt = await worktreeWithScript();
+    const settings = overrideFor("sh");
+    settings.overrides[0]!.args = "-c true --stdin-filepath={file}";
+    const result = await new FormatService([]).format("x", "a.fake", wt, settings);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+    expect(result.content).toBeNull();
+    expect(result.notice).toBeUndefined();
+  });
+
   test("runs a relative path once the repository is trusted", async () => {
     const wt = await worktreeWithScript();
     setRepoTrusted(wt, true);

@@ -11,10 +11,7 @@ import { isRepoTrusted } from "../repo-trust";
 // it would leave a daemon behind for every worktree and submodule. Whether fsmonitor runs on a read
 // is the user's Git configuration in a trusted repository; everywhere else it is off.
 
-/**
- * The setting as an argument, placed before the subcommand, for the checks that decide what Loxel
- * runs, in any repository: `git -c` works in every git, while `GIT_CONFIG_COUNT` needs git 2.31.
- */
+/** The setting as an argument, for a caller that builds its own environment. */
 export const FSMONITOR_OFF = ["-c", "core.fsmonitor=false"];
 
 /**
@@ -44,10 +41,10 @@ export const SUBMODULE_GITLINK_ONLY = ["-c", "diff.ignoreSubmodules=dirty"];
  * all. Git ignores it wherever the lock is mandatory, so it is a no-op for mutating commands —
  * but it is only set here, on the read-only modules, to keep that guarantee explicit.
  *
- * `core.fsmonitor=false` is set here as well, through git's `GIT_CONFIG_*` variables, so every
- * read-only command has it in one place, unless `cwd` is in a trusted repository, whose fsmonitor
- * stays the user's choice. Without a `cwd` it is always set. Its precedence is that of `git -c`, and
- * any such variables already in the environment are kept.
+ * `core.fsmonitor=false` is set here as well, so every read-only command has it in one place,
+ * unless `cwd` is in a trusted repository, whose fsmonitor stays the user's choice. Without a `cwd`
+ * it is always set. `GIT_CONFIG_PARAMETERS` is what `git -c` itself sets, with the same precedence,
+ * and every git reads this form, while `GIT_CONFIG_COUNT` needs git 2.31. An inherited value is kept.
  *
  * Returned as a fresh object because a spawn's `env` REPLACES the child environment instead of
  * merging into it: without spreading `process.env` git would lose `PATH`/`HOME` and fail in ways
@@ -56,13 +53,12 @@ export const SUBMODULE_GITLINK_ONLY = ["-c", "diff.ignoreSubmodules=dirty"];
 export function readOnlyGitEnv(cwd?: string): Record<string, string> {
   const env = inheritedGitEnv();
   if (cwd !== undefined && isRepoTrusted(cwd)) return { ...env, GIT_OPTIONAL_LOCKS: "0" };
-  const index = Number.parseInt(env.GIT_CONFIG_COUNT ?? "", 10) || 0;
+  const inherited = env.GIT_CONFIG_PARAMETERS;
+  const fsmonitorOff = "'core.fsmonitor=false'";
   return {
     ...env,
     GIT_OPTIONAL_LOCKS: "0",
-    GIT_CONFIG_COUNT: String(index + 1),
-    [`GIT_CONFIG_KEY_${index}`]: "core.fsmonitor",
-    [`GIT_CONFIG_VALUE_${index}`]: "false",
+    GIT_CONFIG_PARAMETERS: inherited ? `${inherited} ${fsmonitorOff}` : fsmonitorOff,
   };
 }
 

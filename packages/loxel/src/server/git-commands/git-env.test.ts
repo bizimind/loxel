@@ -1,7 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-
 import "@/test/temp-state-dir";
-
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,54 +7,38 @@ import { join } from "node:path";
 import { setRepoTrusted } from "../repo-trust";
 import { readOnlyGitEnv } from "./git-env";
 
-const CONFIG_VARS = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"];
-
-const saved = new Map(CONFIG_VARS.map((name) => [name, process.env[name]]));
+const OFF = "'core.fsmonitor=false'";
+const saved = process.env.GIT_CONFIG_PARAMETERS;
 
 beforeEach(() => {
-  for (const name of CONFIG_VARS) delete process.env[name];
+  delete process.env.GIT_CONFIG_PARAMETERS;
 });
 
 afterEach(() => {
-  for (const [name, value] of saved) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  }
+  if (saved === undefined) delete process.env.GIT_CONFIG_PARAMETERS;
+  else process.env.GIT_CONFIG_PARAMETERS = saved;
 });
 
 describe("readOnlyGitEnv", () => {
   test("turns fsmonitor off", () => {
-    expect(readOnlyGitEnv()).toMatchObject({
-      GIT_OPTIONAL_LOCKS: "0",
-      GIT_CONFIG_COUNT: "1",
-      GIT_CONFIG_KEY_0: "core.fsmonitor",
-      GIT_CONFIG_VALUE_0: "false",
-    });
+    expect(readOnlyGitEnv()).toMatchObject({ GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_PARAMETERS: OFF });
   });
 
   test("leaves fsmonitor to the user's Git configuration only in a trusted repository", () => {
     const dir = mkdtempSync(join(tmpdir(), "git-env-"));
     try {
-      expect(readOnlyGitEnv(dir).GIT_CONFIG_KEY_0).toBe("core.fsmonitor");
+      expect(readOnlyGitEnv(dir).GIT_CONFIG_PARAMETERS).toBe(OFF);
       setRepoTrusted(dir, true);
       expect(readOnlyGitEnv(dir).GIT_OPTIONAL_LOCKS).toBe("0");
-      expect(readOnlyGitEnv(dir).GIT_CONFIG_COUNT).toBeUndefined();
-      expect(readOnlyGitEnv().GIT_CONFIG_KEY_0).toBe("core.fsmonitor");
+      expect(readOnlyGitEnv(dir).GIT_CONFIG_PARAMETERS).toBeUndefined();
+      expect(readOnlyGitEnv().GIT_CONFIG_PARAMETERS).toBe(OFF);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("keeps config variables already in the environment", () => {
-    process.env.GIT_CONFIG_COUNT = "1";
-    process.env.GIT_CONFIG_KEY_0 = "user.name";
-    process.env.GIT_CONFIG_VALUE_0 = "someone";
-    expect(readOnlyGitEnv()).toMatchObject({
-      GIT_CONFIG_COUNT: "2",
-      GIT_CONFIG_KEY_0: "user.name",
-      GIT_CONFIG_VALUE_0: "someone",
-      GIT_CONFIG_KEY_1: "core.fsmonitor",
-      GIT_CONFIG_VALUE_1: "false",
-    });
+  test("keeps config parameters already in the environment", () => {
+    process.env.GIT_CONFIG_PARAMETERS = "'user.name=someone'";
+    expect(readOnlyGitEnv().GIT_CONFIG_PARAMETERS).toBe(`'user.name=someone' ${OFF}`);
   });
 });

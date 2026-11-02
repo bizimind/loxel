@@ -215,11 +215,16 @@ export class FormatService {
     const override = findMatchingOverride(settings.overrides, ext);
     if (override) {
       // Overrides apply to every repository, and a relative path names a different file in each.
-      if (worktreePath && isRelativePath(override.command) && !isRepoTrusted(worktreePath)) {
+      if (
+        worktreePath &&
+        !isRepoTrusted(worktreePath) &&
+        overrideNamesRepoPath(override, worktreePath)
+      ) {
+        const named = `${override.command} ${override.args}`.trim();
         log.info("Holding back a relative override", { command: override.command, filePath });
         reportRepoRestriction(
           worktreePath,
-          `Format on save doesn't run ${override.command} from this repository.`,
+          `Format on save doesn't run ${named} from this repository.`,
         );
         return UNFORMATTED;
       }
@@ -575,6 +580,20 @@ function spawnFailureNotice(
 /** A command with a directory in it that isn't absolute, which resolves against the worktree. */
 function isRelativePath(command: string): boolean {
   return command.includes("/") && !isAbsolute(command);
+}
+
+/**
+ * Whether an override's command or an argument names a path in the worktree it runs in: `node
+ * tools/fmt.js {file}` runs the repository's script as surely as `tools/fmt.js` does. The saved
+ * file's own `{file}` doesn't count, and a value is read from `--flag=value`.
+ */
+function overrideNamesRepoPath(override: FormatterOverride, worktreePath: string): boolean {
+  if (isRelativePath(override.command)) return true;
+  return splitArgs(override.args).some((arg) => {
+    if (arg.includes("{file}")) return false;
+    const value = arg.startsWith("-") ? arg.split("=").slice(1).join("=") : arg;
+    return value !== "" && (isRelativePath(value) || existsSync(resolve(worktreePath, value)));
+  });
 }
 
 function extractExtension(filePath: string): string | null {

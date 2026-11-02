@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { findFileAbove, isDirectory } from "@/fs-utils";
 
-import { FSMONITOR_OFF, readOnlyGitEnv } from "./git-commands";
+import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
 import { measureSpawn } from "./spawn-metrics";
 
@@ -128,11 +128,14 @@ const trackedQuestions = new Map<string, Promise<boolean>>();
  */
 async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
   const worktreeRepo = await worktreeRepoOf(wtPath);
-  if (worktreeRepo === GIT_FAILED) return true;
   // Not a repository at all, so nothing in it can be committed.
   if (!worktreeRepo) return false;
 
   const physical = path.join(await realpath(path.dirname(filePath)), path.basename(filePath));
+  // A path outside the worktree needs no answer from git to say the worktree doesn't ship it.
+  if (worktreeRepo === GIT_FAILED) {
+    return isInside(physical, await realpath(wtPath).catch(() => wtPath));
+  }
   const key = `${wtPath}\0${physical}`;
   const known = trackedAnswers.get(key);
   if (known && (await stampsMatch(known.indexStamps))) return known.tracked;
@@ -256,7 +259,7 @@ export async function runGit(
 ): Promise<{ exitCode: number; stdout: string }> {
   try {
     const proc = measureSpawn("git", () =>
-      Bun.spawn(["git", "-C", cwd, ...FSMONITOR_OFF, ...args], {
+      Bun.spawn(["git", "-C", cwd, ...args], {
         env: readOnlyGitEnv(),
         stdin: "ignore",
         stdout: "pipe",
