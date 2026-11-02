@@ -367,10 +367,8 @@ export function CodeEditorPanel({
 
     editorRef.current = editor;
     if (waitedForContent.current) {
-      // `usePanelActivationFocus` found no editor when the panel opened. A modal opened while the
-      // file loaded keeps focus; all of the app's modals are native dialogs.
-      const modal = document.activeElement?.closest("dialog[open]");
-      if (!modal && isActivatedPanel(panelApi)) editor.focus();
+      // `usePanelActivationFocus` found no editor when the panel opened.
+      if (isActivatedPanel(panelApi)) editor.focus();
       // The content arrived with the model, so the disk-content effect below finds nothing to do.
       if (diskContent !== null) setDetectedIndentation(detectIndentation(diskContent));
     }
