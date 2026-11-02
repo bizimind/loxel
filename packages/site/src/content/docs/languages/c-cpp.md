@@ -65,9 +65,9 @@ While a C, C++ or Objective-C file is active, the status bar shows the compile d
 | `C++ (no compile database)`       | clangd guesses the flags, so includes may be missing. In yellow, the tooltip says what to run. Not in yellow, a `.clangd` file has `CompilationDatabase: None` |
 | `C++ (choose a compile database)` | Loxel found some but can't tell which applies, and clangd is guessing until you pick one                                                                       |
 
-Build folders with other names work too. clangd doesn't look in `cmake-build-debug/`, `build-debug/` or `out/build/x/`, so Loxel looks under the root of the worktree for `cmake-build-*`, `build-*`, `build/*`, `out/*` and `out/build/*`. If there's exactly one with a `compile_commands.json`, Loxel uses it. If there are several, which applies is up to you, so it uses none and asks.
+Build folders with other names work too. clangd doesn't look in `cmake-build-debug/`, `build-debug/` or `out/build/x/`, so Loxel looks under the root of the worktree for `cmake-build-*`, `build-*`, `build/*`, `out/*` and `out/build/*`, and for any folder CMake, Ninja or Meson has configured. If there's exactly one with a `compile_commands.json`, Loxel uses it. If there are several, which applies is up to you, so it uses none and asks.
 
-A compile database found this way applies to every file, so Loxel leaves it to you when clangd finds a database by itself anywhere in the worktree, such as a monorepo project's own `build/`. Those projects keep working as they are.
+A compile database found this way applies to every file, so Loxel leaves it to you when clangd finds a database by itself anywhere in the worktree, such as a monorepo project's own `build/`. Those projects keep working as they are. In a very large worktree, which Loxel can't search whole, it leaves the choice to you as well.
 
 Click the item, or run **C/C++: Select Compile Database** from the command palette (`Cmd+Shift+P`), to choose for this worktree:
 

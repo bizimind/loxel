@@ -150,6 +150,51 @@ describe(".clangd", () => {
     expect((await resolveCompileDatabases(root)).automatic).toBeNull();
   });
 
+  test("a later document that does not parse keeps the flag away, as clangd applies the first", async () => {
+    const root = await makeDir();
+    await write(root, "cmake-build-debug/compile_commands.json");
+    const config = await write(root, "sub/.clangd", `${database("sub")}---\nbad: [\n`);
+    const status = await resolveCompileDatabases(root);
+    expect(status.foundByClangd).toEqual([config]);
+    expect(status.automatic).toBeNull();
+    expect(status.namesOutsideDatabase).toBe(true);
+  });
+
+  test("one too large to read keeps the flag away", async () => {
+    const root = await makeDir();
+    await write(root, "cmake-build-debug/compile_commands.json");
+    await write(root, "sub/.clangd", "#".repeat(1024 * 1024 + 1));
+    const status = await resolveCompileDatabases(root);
+    expect(status.automatic).toBeNull();
+    expect(status.namesOutsideDatabase).toBe(true);
+  });
+
+  test("past the budget for reading them, the worktree counts as not searched", async () => {
+    const root = await makeDir();
+    await write(root, "cmake-build-debug/compile_commands.json");
+    const big = `# ${"x".repeat(1024 * 1024 - 8)}\n`;
+    await Promise.all(
+      Array.from({ length: 20 }, (_, index) => write(root, `d${index}/.clangd`, big)),
+    );
+    const status = await resolveCompileDatabases(root);
+    expect(status.searchCut).toBe(true);
+    expect(status.automatic).toBeNull();
+  });
+
+  test("says when one names a folder outside the worktree", async () => {
+    const root = await makeDir();
+    const outside = await makeDir();
+    await write(root, ".clangd", `If:\n  PathMatch: .*\n${database(outside)}`);
+    expect((await resolveCompileDatabases(root)).namesOutsideDatabase).toBe(true);
+    await write(root, ".clangd", database("inside"));
+    expect((await resolveCompileDatabases(root)).namesOutsideDatabase).toBe(false);
+    await write(root, ".clangd", database("None"));
+    expect((await resolveCompileDatabases(root)).namesOutsideDatabase).toBe(false);
+    await symlink(outside, join(root, "link"));
+    await write(root, ".clangd", database("link"));
+    expect((await resolveCompileDatabases(root)).namesOutsideDatabase).toBe(true);
+  });
+
   test("one that does not parse has no effect", async () => {
     const root = await makeDir();
     await write(root, ".clangd", "CompileFlags: [unclosed\n");
@@ -175,8 +220,47 @@ describe("non-standard candidates", () => {
   test("names that are not build folders aren't, nor is compile_flags.txt", async () => {
     const root = await makeDir();
     await write(root, "bin/compile_commands.json");
-    await write(root, "sub/cmake-build-debug/compile_commands.json");
     await write(root, "build-debug/compile_flags.txt", "-DX\n");
+    expect((await resolveCompileDatabases(root)).candidates).toEqual([]);
+  });
+
+  test.each(["CMakeCache.txt", "build.ninja", "meson-info/x"])(
+    "a folder of any name with %s is one, and is not a project of its own",
+    async (marker) => {
+      const root = await makeDir();
+      await write(root, "builddir/compile_commands.json");
+      await write(root, `builddir/${marker}`, "");
+      const status = await resolveCompileDatabases(root);
+      expect(status.candidates).toEqual([join(root, "builddir")]);
+      expect(status.foundByClangd).toEqual([]);
+      expect(status.automatic).toBe(join(root, "builddir"));
+    },
+  );
+
+  test("a subproject's build output doesn't count, and its own build/ does", async () => {
+    const root = await makeDir();
+    await write(root, "cmake-build-debug/compile_commands.json");
+    await write(root, "sub/cmake-build-debug/compile_commands.json");
+    await write(root, "sub/cmake-build-debug/CMakeCache.txt", "");
+    expect((await resolveCompileDatabases(root)).automatic).toBe(join(root, "cmake-build-debug"));
+    const own = await write(root, "sub/build/compile_commands.json");
+    expect((await resolveCompileDatabases(root)).foundByClangd).toEqual([own]);
+  });
+
+  test("build-named folders below the root can be a project's", async () => {
+    const root = await makeDir();
+    await write(root, "cmake-build-debug/compile_commands.json");
+    const own = await write(root, "libs/build-tools/compile_commands.json");
+    const status = await resolveCompileDatabases(root);
+    expect(status.foundByClangd).toEqual([own]);
+    expect(status.automatic).toBeNull();
+  });
+
+  test("a link partway to a folder is not followed", async () => {
+    const root = await makeDir();
+    const outside = await makeDir();
+    await write(outside, "build/x/compile_commands.json");
+    await symlink(outside, join(root, "out"));
     expect((await resolveCompileDatabases(root)).candidates).toEqual([]);
   });
 
@@ -312,6 +396,19 @@ describe("the hint for a file with no database", () => {
   });
 });
 
+describe("looks asked for together", () => {
+  test("share a later look, which sees what happened in the meantime", async () => {
+    const root = await makeDir();
+    const first = resolveCompileDatabases(root);
+    await write(root, "cmake-build-debug/compile_commands.json");
+    const second = resolveCompileDatabases(root);
+    const third = resolveCompileDatabases(root);
+    expect(second).toBe(third);
+    await first;
+    expect((await second).automatic).toBe(join(root, "cmake-build-debug"));
+  });
+});
+
 describe("following a worktree", () => {
   function nextUpdate(root: string): { update: Promise<CompileDatabaseUpdate>; stop: () => void } {
     const { promise, resolve } = Promise.withResolvers<CompileDatabaseUpdate>();
@@ -334,6 +431,10 @@ describe("following a worktree", () => {
     const third = nextUpdate(root);
     refreshCompileDatabases(root);
     expect((await third.update).changed).toBe(false);
-    for (const { stop } of [first, second, third]) stop();
+
+    const fourth = nextUpdate(root);
+    refreshCompileDatabases(root, true);
+    expect((await fourth.update).changed).toBe(true);
+    for (const { stop } of [first, second, third, fourth]) stop();
   });
 });

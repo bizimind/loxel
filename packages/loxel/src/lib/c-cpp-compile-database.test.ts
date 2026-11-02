@@ -15,6 +15,7 @@ const STATUS: CompileDatabaseStatus = {
   candidates: [],
   foundByClangd: [],
   searchCut: false,
+  namesOutsideDatabase: false,
 };
 const NONE: CompileDatabaseFileResponse = {
   database: null,

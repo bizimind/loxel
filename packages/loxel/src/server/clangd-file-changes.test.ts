@@ -127,6 +127,7 @@ describe("ClangdFileChanges", () => {
       indexDirectoryChanged: () => {},
       isOpen: () => true,
       refreshIndex: () => {},
+      databasesChanged: () => {},
     });
     throwing.pathsChanged(["a.h"]);
     expect(() => jest.advanceTimersByTime(SOURCE_DEBOUNCE_MS)).not.toThrow();

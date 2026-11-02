@@ -15,6 +15,7 @@ const STATUS: CompileDatabaseStatus = {
   candidates: ["/wt/cmake-build-debug"],
   foundByClangd: [],
   searchCut: false,
+  namesOutsideDatabase: false,
 };
 
 const originalClient = await import("@/api/c-cpp-compile-database-client");

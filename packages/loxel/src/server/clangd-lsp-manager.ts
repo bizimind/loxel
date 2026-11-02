@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 
 import type { ServerWebSocket, Subprocess } from "bun";
 
+import type { CompileDatabaseStatus } from "@/api/c-cpp-compile-database-model";
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
@@ -477,12 +478,19 @@ export class ClangdLspManager extends WorktreeLspManager {
           binary === userClangd ? USER_CLANGD_RESTRICTION : BUNDLED_CLANGD_RESTRICTION,
         );
       }
-      const databaseDir = compileCommandsDir(await resolveCompileDatabases(context.wtPath));
-      const withoutIndex = await indexDirectoryIsSymlink(
-        context.wtPath,
-        developerTools ? probe : probeWithoutAppleStubs,
-        databaseDir,
-      );
+      const databases = await resolveCompileDatabases(context.wtPath);
+      const databaseDir = compileCommandsDir(databases);
+      // clangd would put the index beside a database an untrusted `.clangd` names, wherever it is.
+      // The flag goes before `.clangd`.
+      const indexLeavesWorktree =
+        !context.repoTrusted && databaseDir === null && databases.namesOutsideDatabase;
+      const withoutIndex =
+        indexLeavesWorktree ||
+        (await indexDirectoryIsSymlink(
+          context.wtPath,
+          developerTools ? probe : probeWithoutAppleStubs,
+          databaseDir,
+        ));
       if (withoutIndex) {
         this.log.info("Background index off: its directory is or may be a symlink", {
           wtPath: context.wtPath,
@@ -568,7 +576,7 @@ export class ClangdLspManager extends WorktreeLspManager {
     const session = super.buildSession(ws, proc, context);
     const openDocuments = new Map<string, number>();
     const stopFollowingDatabases = subscribeCompileDatabases(session.wtPath, ({ status }) => {
-      this.restartIfDatabaseDirChanged(session, compileCommandsDir(status));
+      this.restartIfDatabaseDirChanged(session, status);
     });
     // Anything that changed between this start's own look and the subscription.
     refreshCompileDatabases(session.wtPath);
@@ -581,7 +589,10 @@ export class ClangdLspManager extends WorktreeLspManager {
         indexDirectoryChanged: () => void this.restartIfIndexDirectoryIsSymlink(session),
         isOpen: (relPath) => openDocuments.has(fileUri(join(session.wtPath, relPath))),
         refreshIndex: () => this.refreshIndex(session),
-        databasesChanged: () => refreshCompileDatabases(session.wtPath),
+        databasesChanged: () => {
+          refreshCompileDatabases(session.wtPath, true);
+          void this.restartIfIndexDirectoryIsSymlink(session);
+        },
       }),
     });
     return session;
@@ -665,11 +676,17 @@ export class ClangdLspManager extends WorktreeLspManager {
     this.restart(session, "Index directory changed; reconnect");
   }
 
-  /** The flag applies from a start, so a different folder takes a new session. */
-  private restartIfDatabaseDirChanged(session: WtLspSession, databaseDir: string | null): void {
+  /** The flag and the index apply from a start, so a different answer takes a new session. */
+  private restartIfDatabaseDirChanged(session: WtLspSession, status: CompileDatabaseStatus): void {
     const launch = this.launches.get(session.wtPath);
-    if (!launch || !this.isSessionLive(session) || launch.compileCommandsDir === databaseDir)
-      return;
+    if (!launch || !this.isSessionLive(session)) return;
+    const databaseDir = compileCommandsDir(status);
+    const indexLeavesWorktree =
+      !session.repoTrusted &&
+      databaseDir === null &&
+      status.namesOutsideDatabase &&
+      !launch.withoutIndex;
+    if (launch.compileCommandsDir === databaseDir && !indexLeavesWorktree) return;
     this.log.info("Restarting: the compile database changed", {
       wtPath: session.wtPath,
       databaseDir,
@@ -693,7 +710,12 @@ export class ClangdLspManager extends WorktreeLspManager {
       files.changes.refreshIndexAfter(waitMs);
       return;
     }
-    if (!launch?.compileCommandsDir && !hasCompileDatabase(files.openDocuments.keys())) return;
+    const passedDatabase =
+      launch?.compileCommandsDir && join(launch.compileCommandsDir, "compile_commands.json");
+    const hasIndex = passedDatabase
+      ? existsSync(passedDatabase)
+      : hasCompileDatabase(files.openDocuments.keys());
+    if (!hasIndex) return;
     this.indexRefreshedAt.set(session.wtPath, Date.now());
     this.log.info("Restarting: files changed on disk", { wtPath: session.wtPath });
     this.restart(session, "Files changed on disk; reconnect");

@@ -55,8 +55,8 @@ describe.skipIf(process.platform === "win32")("the start's arguments", () => {
       return this.bundled;
     }
 
-    async argsFor(wtPath: string): Promise<readonly string[]> {
-      const context = { wtPath, repoTrusted: false };
+    async argsFor(wtPath: string, repoTrusted = false): Promise<readonly string[]> {
+      const context = { wtPath, repoTrusted };
       await this.resolveBinary(context);
       return this.spawnArgs(context);
     }
@@ -98,6 +98,15 @@ describe.skipIf(process.platform === "win32")("the start's arguments", () => {
     await write(root, "cmake-build-debug/compile_commands.json", "[]");
     await symlink(await makeDir(), join(root, "cmake-build-debug", ".cache"));
     expect(await (await starting()).argsFor(root)).toContain("--background-index=false");
+  });
+
+  test("turn the index off when an untrusted .clangd names a database outside the worktree", async () => {
+    const root = await makeDir();
+    const outside = await makeDir();
+    await write(root, ".clangd", `CompileFlags:\n  CompilationDatabase: ${outside}\n`);
+    const manager = await starting();
+    expect(await manager.argsFor(root)).toContain("--background-index=false");
+    expect(await manager.argsFor(root, true)).not.toContain("--background-index=false");
   });
 });
 
