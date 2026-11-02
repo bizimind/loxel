@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, watch, type Dirent, type FSWatcher } from "node:fs";
+import { existsSync, readdirSync, realpathSync, watch, type Dirent, type FSWatcher } from "node:fs";
 import { access, constants, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -649,6 +649,15 @@ async function isJdkShippedByRepo(wtPath: string, home: string, dir = home): Pro
   if (isInside(realWtPath, realHome)) return true;
   if (dir !== home && (await isShippedByRepo(wtPath, dir))) return true;
   return isEnvShippedByRepo(wtPath, home, javaExecutable(home));
+}
+
+/** Whether a JDK's home is in the worktree, by real paths. A path that cannot be read counts. */
+export function isJdkInWorktree(home: string, wtPath: string): boolean {
+  try {
+    return isInside(realpathSync(home), realpathSync(wtPath));
+  } catch {
+    return true;
+  }
 }
 
 // ---------------------------------------------------------------------------

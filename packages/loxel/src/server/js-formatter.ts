@@ -71,11 +71,6 @@ interface JsTool {
   hasConfig(dir: string, packageJson: PackageJson): boolean;
   /** A config in `dir` turns the tool off, so depending on it says nothing about formatting. */
   isTurnedOff?(dir: string): boolean;
-  /**
-   * Whether the tool's config can run code or load plugins, even with the user's own install.
-   * A tool whose config is only data may run from the user's install in an untrusted repository.
-   */
-  configRunsCode: boolean;
 }
 
 const hasAnyFile = (dir: string, names: readonly string[]) =>
@@ -126,7 +121,6 @@ const BIOME: JsTool = {
   dependency: "@biomejs/biome",
   hasConfig: (dir) => biomeFormatterOn(dir) === true,
   isTurnedOff: (dir) => biomeFormatterOn(dir) === false,
-  configRunsCode: false,
 };
 
 /** Config files prettier discovers on its own (its config searcher in 3.9), but `package.yaml`. */
@@ -162,7 +156,6 @@ const PRETTIER: JsTool = {
   hasConfig: (dir, packageJson) =>
     hasAnyFile(dir, PRETTIER_CONFIG_FILES) ||
     (packageJson !== undefined && "prettier" in packageJson),
-  configRunsCode: true,
 };
 
 /** Config files oxfmt discovers on its own (see `oxfmt --help`, "Config Options"). */
@@ -187,7 +180,6 @@ const OXFMT: JsTool = {
   extensions: [...SHARED_FORMAT_EXTENSIONS, "toml"],
   dependency: "oxfmt",
   hasConfig: (dir) => hasAnyFile(dir, OXFMT_CONFIG_FILES),
-  configRunsCode: true,
 };
 
 /**
@@ -279,10 +271,10 @@ function detectFor(
   if (matchedDir?.tool !== tool) return null;
   const { dir } = matchedDir;
 
-  const formatter: FileFormatter = { command: tool.command, args: tool.args };
   if (isRepoTrusted(wtRoot)) {
     return {
-      ...formatter,
+      command: tool.command,
+      args: tool.args,
       backendMode: tool.backendMode,
       backendDir: dir,
       // A subproject can install the tool under a config further up.
@@ -290,7 +282,6 @@ function detectFor(
     };
   }
   const usersOwn = Bun.which(tool.command, { PATH: machinePath(tool.command, wtRoot) }) !== null;
-  if (usersOwn && !tool.configRunsCode) return formatter;
   if (!usersOwn && !nearestInstallDir(tool, startDir, wtRoot)) {
     return { notice: notInstalledNotice(tool.label) };
   }

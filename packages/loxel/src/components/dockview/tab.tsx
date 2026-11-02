@@ -73,6 +73,7 @@ interface TabProps {
    * name. Enter or Escape returns focus to the active panel.
    */
   onRename?: (newName: string) => void;
+  onClick?: () => void;
   /** When renaming, initially select only the part before the extension (file names). */
   selectBaseName?: boolean;
   /** Extra classes for the title text (e.g. a deleted-file strikethrough). */
@@ -93,6 +94,7 @@ export function Tab({
   trailing,
   contextMenuItems,
   onRename,
+  onClick,
   selectBaseName,
   titleClassName,
   titleTooltip,
@@ -164,7 +166,12 @@ export function Tab({
 
   return (
     <>
-      <div ref={tabRef} className="dv-default-tab" onContextMenu={handleContextMenu}>
+      <div
+        ref={tabRef}
+        className="dv-default-tab"
+        onClick={onClick}
+        onContextMenu={handleContextMenu}
+      >
         <div className="dv-default-tab-content flex items-center gap-1.5">
           {leading}
           {icon}

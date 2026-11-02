@@ -21,7 +21,7 @@ export function registerTabRename(panelId: string, startRename: () => void): () 
 /**
  * Whether the center's active tab can be renamed from where focus is. Focus in another center
  * group belongs to that group's panel even though it isn't the active one: a browser page takes
- * focus without activating its group, and the key must stay with the page.
+ * focus without activating its group, and the key is that page's hard refresh.
  */
 export function canRenameActiveTab(): boolean {
   const panel = getCenterApi()?.activePanel;

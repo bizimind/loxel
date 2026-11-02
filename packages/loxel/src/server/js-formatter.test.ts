@@ -325,28 +325,25 @@ describe("an untrusted repository", () => {
     expect(getRepoTrustStatus(wt).restrictions).toEqual(["Prettier doesn't format on save."]);
   });
 
-  test("a user's own prettier does not load the project's config either", async () => {
-    await write({ ".prettierrc.js": "" });
-    await tool(join(userBin, "prettier"), "user-prettier");
-    expect(await save("a.ts")).toEqual({ content: null, notice: heldBack("Prettier") });
-    expect(ran("user-prettier")).toBe(false);
-    expect(getRepoTrustStatus(wt).restrictions).toHaveLength(1);
+  test.each([
+    [".prettierrc.js", "prettier", "Prettier"],
+    [".oxfmtrc.json", "oxfmt", "oxfmt"],
+    ["biome.json", "biome", "Biome"],
+  ])("a user's own install does not load the project's %s either", async (config, name, label) => {
+    await write({ [config]: "{}" });
+    await tool(join(userBin, name), `user-${name}`);
+    expect(await save("a.ts")).toEqual({ content: null, notice: heldBack(label) });
+    expect(ran(`user-${name}`)).toBe(false);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([`${label} doesn't format on save.`]);
   });
 
-  test("a user's own Biome runs, as its config is only data, and nothing is held back", async () => {
+  test("a link on PATH leading into the worktree does not count as installed", async () => {
     await write({ "biome.json": "{}" });
-    await plantCanaries();
-    await tool(join(userBin, "biome"), "user-biome");
-    expect((await save("a.ts")).content).toStartWith("user-biome ");
-    expectNoProjectCode();
-    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
-  });
-
-  test("a link on PATH leading into the worktree is not the user's own", async () => {
-    await write({ "biome.json": "{}" });
-    await tool(bin(".", "biome"), "project-biome");
-    await symlink(bin(".", "biome"), join(userBin, "biome"));
-    expect((await save("a.ts")).notice).toBe(heldBack("Biome"));
+    await tool(inWt("scripts/biome"), "project-biome");
+    await symlink(inWt("scripts/biome"), join(userBin, "biome"));
+    expect((await save("a.ts")).notice).toBe(
+      "Format on save skipped: this project uses Biome, which is not installed. Install the project's dependencies in a terminal.",
+    );
     expect(ran("project-biome")).toBe(false);
   });
 
@@ -384,6 +381,13 @@ describe("an untrusted repository", () => {
     await tool(bin(".", "prettier"), "project-prettier");
     await tool(join(userBin, "prettier"), "user-prettier");
     expect((await save("a.ts", withOverride("prettier"))).content).toStartWith("user-prettier ");
+    expect(ran("project-prettier")).toBe(false);
+  });
+
+  test("an override through a link on PATH leading into the worktree does not run", async () => {
+    await tool(bin(".", "prettier"), "project-prettier");
+    await symlink(bin(".", "prettier"), join(userBin, "prettier"));
+    expect((await save("a.ts", withOverride("prettier"))).content).toBeNull();
     expect(ran("project-prettier")).toBe(false);
   });
 

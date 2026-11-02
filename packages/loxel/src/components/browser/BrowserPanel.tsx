@@ -25,6 +25,7 @@ import { FindBar } from "@/components/ui/find-bar";
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
+import { registerHardRefreshTarget } from "@/lib/hard-refresh-targets";
 import { openBrowserTab } from "@/lib/panel-creators";
 import { cn } from "@/lib/utils";
 import { reattachActiveContent } from "@/store/layout-actions";
@@ -322,6 +323,18 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     dismissDialogs();
     webviewRef.current?.reload();
   }, [dismissDialogs]);
+
+  const hardRefresh = useCallback(() => {
+    if (!readyRef.current) return;
+    dismissDialogs();
+    webviewRef.current?.reloadIgnoringCache();
+  }, [dismissDialogs]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    return registerHardRefreshTarget(root, hardRefresh);
+  }, [hardRefresh]);
 
   const stopLoading = useCallback(() => {
     if (readyRef.current) webviewRef.current?.stop();

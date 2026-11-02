@@ -50,6 +50,17 @@ describe("validateBindings", () => {
     ).toThrow();
   });
 
+  test("allows actions that may share a key to hold the same binding, but no other overlap", () => {
+    const shared = { "panel.rename": ["Cmd+Shift+R"], "browser.hardRefresh": ["Cmd+Shift+R"] };
+    expect(() => validateBindings(template(shared))).not.toThrow();
+    expect(() =>
+      validateBindings(template({ ...shared, "browser.hardRefresh": ["Cmd+Shift+R Z"] })),
+    ).toThrow();
+    expect(() =>
+      validateBindings(template({ ...shared, "panel.close": ["Cmd+Shift+R"] })),
+    ).toThrow();
+  });
+
   test("allows chords that share a prefix", () => {
     expect(() =>
       validateBindings(
@@ -212,9 +223,9 @@ describe("buildReverseLookup", () => {
     const template = TEMPLATES.loxel;
     const lookup = buildReverseLookup(template, {});
 
-    expect(lookup.get(normalizeKeyCombo("Cmd+N"))).toBe("panel.new.markdown");
-    expect(lookup.get(normalizeKeyCombo("Cmd+W"))).toBe("panel.close");
-    expect(lookup.get(normalizeKeyCombo("Cmd+Comma"))).toBe("app.settings");
+    expect(lookup.get(normalizeKeyCombo("Cmd+N"))).toEqual(["panel.new.markdown"]);
+    expect(lookup.get(normalizeKeyCombo("Cmd+W"))).toEqual(["panel.close"]);
+    expect(lookup.get(normalizeKeyCombo("Cmd+Comma"))).toEqual(["app.settings"]);
   });
 
   test("user overrides replace template bindings", () => {
@@ -226,7 +237,7 @@ describe("buildReverseLookup", () => {
     const lookup = buildReverseLookup(template, overrides);
 
     // New binding works
-    expect(lookup.get(normalizeKeyCombo("Cmd+Shift+N"))).toBe("panel.new.markdown");
+    expect(lookup.get(normalizeKeyCombo("Cmd+Shift+N"))).toEqual(["panel.new.markdown"]);
     // Old binding no longer maps to this action
     expect(lookup.get(normalizeKeyCombo("Cmd+N"))).toBeUndefined();
   });
@@ -236,8 +247,27 @@ describe("buildReverseLookup", () => {
     const lookup = buildReverseLookup(template, {});
 
     // panel.next has two bindings
-    expect(lookup.get(normalizeKeyCombo("Cmd+Shift+BracketRight"))).toBe("panel.next");
-    expect(lookup.get(normalizeKeyCombo("Ctrl+Tab"))).toBe("panel.next");
+    expect(lookup.get(normalizeKeyCombo("Cmd+Shift+BracketRight"))).toEqual(["panel.next"]);
+    expect(lookup.get(normalizeKeyCombo("Ctrl+Tab"))).toEqual(["panel.next"]);
+  });
+
+  test("actions that may share a key both hold it, the declaring one first", () => {
+    const lookup = buildReverseLookup(TEMPLATES.loxel, {});
+    const shared = ["browser.hardRefresh", "panel.rename"];
+    expect(lookup.get(normalizeKeyCombo("Cmd+Shift+R"))).toEqual(shared as ActionId[]);
+
+    // Overrides apply after the template; the order doesn't depend on which came first.
+    const overridden = buildReverseLookup(TEMPLATES.loxel, {
+      "panel.rename": [normalizeKeyBinding("Cmd+Shift+R")],
+    });
+    expect(overridden.get(normalizeKeyCombo("Cmd+Shift+R"))).toEqual(shared as ActionId[]);
+  });
+
+  test("a later action replaces an earlier one that can't share the key", () => {
+    const lookup = buildReverseLookup(TEMPLATES.loxel, {
+      "app.settings": [normalizeKeyBinding("Cmd+W")],
+    });
+    expect(lookup.get(normalizeKeyCombo("Cmd+W"))).toEqual(["app.settings"]);
   });
 });
 

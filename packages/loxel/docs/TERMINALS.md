@@ -63,6 +63,10 @@ Unless the spawn request carries `activatePythonEnv: false` (the `terminal.activ
 
 Login shells reorder an inherited `PATH`: on macOS, `/etc/zprofile` and `/etc/profile` run `path_helper`, which puts the system directories first. For zsh, the manager therefore points `ZDOTDIR` at a shim whose startup files source the user's own files unchanged and, after the last one (`.zlogin`), move the environment's directory back to the front of `PATH` unless the user's files activated a different `VIRTUAL_ENV`; how the shim stays invisible to the user's files is documented in [terminal-python-env.ts](../src/server/terminal-python-env.ts). A user file that `exec`s another program (`exec tmux`) ends startup before `.zlogin`, so that shell keeps the inherited order, and tools that activate on the prompt hook (direnv, mise) run after startup, so their environment wins. Other shells get only the `PATH` entry: where their login startup reorders `PATH` (bash's `/etc/profile`, fish's `/etc/paths` handling) the directory stays on `PATH` but not first, and a `VIRTUAL_ENV` naming the environment would then contradict the `python` and `pip` the shell runs.
 
+#### Java JDK
+
+A JDK the user chose for the worktree reaches new shells through [java-toolchain-env.ts](../src/server/java-toolchain-env.ts), as `JAVA_HOME` and its `bin` first on `PATH`; a detected JDK changes nothing. Its rules are in [languages/java.md](languages/java.md#terminals). There is no zsh shim here, so `bin` loses first place to login startup, and a startup file that exports `JAVA_HOME` replaces the value. macOS's `/usr/bin/java`, which startup then finds first, follows `JAVA_HOME`.
+
 ## WebSocket protocol
 
 Terminal messages are part of the main app socket (`/ws`). Types live in [ws-protocol.ts](../src/api/ws-protocol.ts); note that [ws-messages.ts](../src/server/ws-messages.ts) only builds the `worktrees_changed` message and has nothing terminal-specific.
