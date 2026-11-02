@@ -115,9 +115,10 @@ export function compileDatabaseTooltip(
   return lines.filter(Boolean).join("\n");
 }
 
-function automaticDescription(status: CompileDatabaseStatus, wtPath: string): string {
+export function automaticDescription(status: CompileDatabaseStatus, wtPath: string): string {
   if (status.automatic) return compileDatabaseFolderName(wtPath, status.automatic);
   if (status.foundByClangd.length > 0) return "clangd finds each file's own";
+  if (status.searchCut) return "Worktree too large to check; none picked";
   return status.candidates.length > 0 ? "Several found; none picked" : "None found";
 }
 

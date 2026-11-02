@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -495,7 +496,9 @@ describe("looks asked for together", () => {
   test("share a later look, which sees what happened in the meantime", async () => {
     const root = await makeDir();
     const first = resolveCompileDatabases(root);
-    await write(root, "cmake-build-debug/compile_commands.json");
+    // Synchronous, so that the first look is still running when the next two ask.
+    mkdirSync(join(root, "cmake-build-debug"));
+    writeFileSync(join(root, "cmake-build-debug/compile_commands.json"), COMMANDS);
     const second = resolveCompileDatabases(root);
     const third = resolveCompileDatabases(root);
     expect(second).toBe(third);

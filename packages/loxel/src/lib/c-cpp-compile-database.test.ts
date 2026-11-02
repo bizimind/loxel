@@ -5,7 +5,11 @@ import type {
   CompileDatabaseStatus,
 } from "@/api/c-cpp-compile-database-model";
 
-import { compileDatabaseSummary, compileDatabaseTooltip } from "./c-cpp-compile-database";
+import {
+  automaticDescription,
+  compileDatabaseSummary,
+  compileDatabaseTooltip,
+} from "./c-cpp-compile-database";
 
 const WT = "/wt";
 const STATUS: CompileDatabaseStatus = {
@@ -83,6 +87,18 @@ describe("compileDatabaseSummary", () => {
     const status = { ...STATUS, chosen: "/gone" };
     const file = found("/wt/build/compile_commands.json");
     expect(compileDatabaseSummary("cpp", WT, status, file).warning).toBe(true);
+  });
+});
+
+describe("automaticDescription", () => {
+  test("gives the reason a lone candidate wasn't picked, not that there are several", () => {
+    const status = { ...STATUS, candidates: ["/wt/cmake-build-debug"], searchCut: true };
+    expect(automaticDescription(status, WT)).toBe("Worktree too large to check; none picked");
+  });
+
+  test("says when there are several", () => {
+    const candidates = ["/wt/cmake-build-debug", "/wt/cmake-build-release"];
+    expect(automaticDescription({ ...STATUS, candidates }, WT)).toBe("Several found; none picked");
   });
 });
 
