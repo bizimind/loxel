@@ -453,7 +453,7 @@ describe("kotlinFormatter spawning", () => {
     process.env.PATH = `${wt}:${bin}:${originalPath}`;
     // The machine's own JDK comes first if it has one; either way, outside the worktree.
     const { content } = await save(wt, "A.kt");
-    expect(content).toEndWith("/bin/java\n");
+    expect(content).toEndWith("/java\n");
     expect(content).not.toContain(wt);
   });
 
