@@ -32,6 +32,7 @@ import { languageNeedsContent, resolveLanguage } from "@/lib/resolve-language";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
 import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
+import { registerClosedTabParams } from "@/store/closed-tabs";
 import { type EditorIndentation, useEditorIndentationStore } from "@/store/editor-indentation";
 import { useEditorStateStore } from "@/store/editor-state";
 import {
@@ -192,6 +193,9 @@ export function CodeEditorPanel({
       editor.setPosition({ lineNumber: ln, column: col });
       editor.focus();
       mountedRef.current = true;
+      // A one-time jump: left in the params it would repeat when the layout is next restored, and
+      // the same jump asked for again would change no prop and do nothing.
+      panelApi.updateParameters({ line: undefined, column: undefined });
     });
   }
 
@@ -622,7 +626,18 @@ export function CodeEditorPanel({
     editor.revealLineInCenter(line);
     editor.setPosition({ lineNumber: line, column: column ?? 1 });
     editor.focus();
-  }, [line, column]);
+    panelApi.updateParameters({ line: undefined, column: undefined });
+  }, [line, column, panelApi]);
+
+  // Reopening the closed tab puts the cursor back.
+  useEffect(
+    () =>
+      registerClosedTabParams(panelApi.id, () => {
+        const position = editorRef.current?.getPosition();
+        return position ? { line: position.lineNumber, column: position.column } : {};
+      }),
+    [panelApi.id],
+  );
 
   // Update language
   useEffect(() => {
