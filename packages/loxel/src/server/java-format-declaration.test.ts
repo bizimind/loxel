@@ -672,7 +672,6 @@ describe("which files a declaration formats", () => {
   });
 
   test("a skip set to false leaves the plugin on", async () => {
-    const PROPERTY_SKIP = ["$", "{fmt.skip}"].join("");
     const dependency =
       "<dependencies><dependency><artifactId>google-java-format</artifactId><version>1.30.0</version></dependency></dependencies>";
     const pom = (skip: string) =>
@@ -681,9 +680,7 @@ describe("which files a declaration formats", () => {
     await clean();
     expect(await inScope({ "pom.xml": pom("true") }, "src/main/java/A.java")).toBe(false);
     await clean();
-    expect(await inScope({ "pom.xml": pom("$" + "{fmt.skip}") }, "src/main/java/A.java")).toBe(
-      false,
-    );
+    expect(await inScope({ "pom.xml": pom("${fmt.skip}") }, "src/main/java/A.java")).toBe(false);
     await clean();
     const spotless = spotlessPom(GJF).replace("<java>", "<skip>false</skip><java>");
     expect(await inScope({ "pom.xml": spotless }, "src/main/java/A.java")).toBe(true);
