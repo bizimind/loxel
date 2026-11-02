@@ -46,6 +46,8 @@ The center area is the main content area. Every editor and interactive view open
 
 Double-click a terminal or file tab's title, right-click the tab and choose **Rename**, or press `Cmd+Shift+R` (**Rename Tab** in the command palette) to rename the active tab; renaming a file tab renames the file. Press `Enter` to apply the new name or `Esc` to cancel, and focus returns to the panel you were working in. The tab menu also copies a file's name or path, closes other tabs, and on macOS offers **Reveal in Finder** and **Open In**.
 
+Press `Cmd+Shift+T` (**Reopen Closed Tab** in the command palette) to bring back the tab you last closed in this worktree; keep pressing to go further back. It returns to its place among its group's tabs, or to the active group if its group is gone. Editors and browsers come back on the same file or page, a code editor with its cursor where you left it. A browser's back and forward history doesn't come back, and a terminal's session ended when you closed it, so you get a new terminal with the same title. Closed tabs are remembered until you close the window.
+
 ### Right sidebar
 
 The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads).

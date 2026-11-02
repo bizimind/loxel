@@ -1,12 +1,16 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
 
-import { FormatService } from "./format-service";
+const stateDir = mkdtempSync(join(tmpdir(), "csharp-formatter-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+
+const { FormatService } = await import("./format-service");
+const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 
 const REAL_ENV = { ...process.env };
 const ARCH_ROOT = `DOTNET_ROOT_${process.arch.toUpperCase()}`;
@@ -51,10 +55,13 @@ function save(name: string): Promise<{ content: string | null; notice?: string }
   );
 }
 
-/** The one way `dotnet` still runs, and what the repository trust gate restores for a manifest. */
-function saveWithDotnet(name: string): Promise<{ content: string | null; notice?: string }> {
-  const args = "tool run csharpier format --stdin-path {file}";
-  const overrides = [{ id: "o1", extensions: "cs", command: "dotnet", args }];
+/** A manual override, the one way `dotnet` runs in an untrusted repository, through its checks. */
+function saveWithDotnet(
+  name: string,
+  args = "format --stdin-path {file}",
+  command = "dotnet",
+): Promise<{ content: string | null; notice?: string }> {
+  const overrides = [{ id: "o1", extensions: "cs,fs", command, args }];
   const settings = { ...DEFAULT_FORMATTING_SETTINGS, overrides };
   return new FormatService().format("class A { }\n", join(wt, name), wt, settings);
 }
@@ -81,6 +88,7 @@ afterEach(async () => {
 });
 
 afterAll(() => {
+  rmSync(stateDir, { recursive: true, force: true });
   process.env.HOME = REAL_ENV.HOME;
   process.env.PATH = REAL_ENV.PATH;
   if (REAL_ENV.DOTNET_ROOT) process.env.DOTNET_ROOT = REAL_ENV.DOTNET_ROOT;
@@ -144,7 +152,7 @@ describe("csharpFormatter local tool", () => {
       const { content } = await saveWithDotnet("svc/src/deep/a.cs");
       const file = join(wt, "svc/src/deep/a.cs");
       expect(content).toContain(
-        `dotnet cwd=${join(wt, "svc")} args=tool run csharpier format --stdin-path ${file} telemetry=1 nologo=1`,
+        `dotnet cwd=${join(wt, "svc")} args=format --stdin-path ${file} telemetry=1 nologo=1`,
       );
     },
   );
@@ -170,7 +178,6 @@ describe("csharpFormatter local tool", () => {
     await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
     const { content, notice } = await save("a.cs");
     expect(content).toBeNull();
-    expect(notice).toContain("local CSharpier");
     expect(notice).toContain("`dotnet tool install -g csharpier`");
     expect(existsSync(ranMarker)).toBe(false);
   });
@@ -179,7 +186,7 @@ describe("csharpFormatter local tool", () => {
     await addFiles({
       "dotnet-tools.json": `{ // tools\n"tools": { "csharpier": { "commands": ["csharpier"], }, }, }`,
     });
-    expect((await save("a.cs")).notice).toContain("local CSharpier");
+    expect((await save("a.cs")).notice).toContain("trust the repository");
   });
 
   test("a nearer manifest without it passes the search up", async () => {
@@ -187,7 +194,7 @@ describe("csharpFormatter local tool", () => {
       "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }),
       "svc/dotnet-tools.json": manifest({ other: { commands: ["other"] } }),
     });
-    expect((await save("svc/a.cs")).notice).toContain("local CSharpier");
+    expect((await save("svc/a.cs")).notice).toContain("trust the repository");
   });
 
   test("a nearer root manifest without it stops the search, as it stops dotnet's", async () => {
@@ -215,18 +222,6 @@ describe("csharpFormatter local tool", () => {
     const padding = " ".repeat(1_024 * 1_024);
     await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) + padding });
     expect(await save("a.cs")).toEqual({ content: null });
-  });
-
-  test("a tool that is not restored says what to run", async () => {
-    await install(
-      tools,
-      "dotnet",
-      `#!/bin/sh\necho 'Run "dotnet tool restore" to make the "csharpier" command available.' >&2\nexit 1\n`,
-    );
-    await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
-    const { content, notice } = await saveWithDotnet("a.cs");
-    expect(content).toBeNull();
-    expect(notice).toContain("`dotnet tool restore`");
   });
 
   test("no dotnet says so, and nothing runs", async () => {
@@ -274,6 +269,7 @@ describe("csharpFormatter local tool", () => {
     const { content, notice } = await saveWithDotnet("a.cs");
     expect(content).toBeNull();
     expect(notice).toContain("shim");
+    expect(getRepoTrustStatus(wt).restrictions).toHaveLength(1);
     expect(existsSync(ranMarker)).toBe(false);
   });
 
@@ -285,6 +281,143 @@ describe("csharpFormatter local tool", () => {
     expect(content).toBeNull();
     expect(notice).toContain("Install the .NET SDK");
     expect(existsSync(ranMarker)).toBe(false);
+  });
+});
+
+describe("csharpFormatter repository trust", () => {
+  const LISTED = () =>
+    addFiles({ "svc/dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
+
+  test("trusted: runs the manifest's tool from its directory, over csharpier on PATH", async () => {
+    await install(tools, "dotnet");
+    await install(tools, "csharpier");
+    await LISTED();
+    setRepoTrusted(wt, true);
+    const { content } = await save("svc/src/a.cs");
+    const file = join(wt, "svc/src/a.cs");
+    expect(content).toContain(
+      `dotnet cwd=${join(wt, "svc")} args=tool run csharpier format --stdin-path ${file} telemetry=1 nologo=1`,
+    );
+  });
+
+  test("trusted: a tool that is not restored says what to run", async () => {
+    await install(
+      tools,
+      "dotnet",
+      `#!/bin/sh\necho 'Run "dotnet tool restore" to make the "csharpier" command available.' >&2\nexit 1\n`,
+    );
+    await LISTED();
+    setRepoTrusted(wt, true);
+    const { content, notice } = await save("svc/a.cs");
+    expect(content).toBeNull();
+    expect(notice).toContain("`dotnet tool restore`");
+  });
+
+  test("trusted: the project's global.json selects the SDK, as in the user's terminal", async () => {
+    await install(tools, "dotnet");
+    await addFiles({
+      "svc/dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }),
+      "svc/global.json": "{",
+    });
+    setRepoTrusted(wt, true);
+    expect((await save("svc/a.cs")).content).toContain("dotnet cwd=");
+  });
+
+  test("trusted: a version manager's shim runs in the project", async () => {
+    await install(join(temp, "shims"), "dotnet");
+    process.env.PATH = `${join(temp, "shims")}:${gitBin}`;
+    await LISTED();
+    setRepoTrusted(wt, true);
+    expect((await save("svc/a.cs")).content).toContain(`dotnet cwd=${join(wt, "svc")} `);
+  });
+
+  test("trusted: no dotnet says so", async () => {
+    await LISTED();
+    setRepoTrusted(wt, true);
+    const { content, notice } = await save("svc/a.cs");
+    expect(content).toBeNull();
+    expect(notice).toContain("Install the .NET SDK");
+  });
+
+  test("untrusted: a save uses csharpier on PATH and reports what is held back", async () => {
+    await install(tools, "dotnet");
+    await install(tools, "csharpier");
+    await LISTED();
+    expect((await save("svc/a.cs")).content).toContain(`csharpier cwd=${homedir()} `);
+    expect(getRepoTrustStatus(wt).restrictions).toHaveLength(1);
+  });
+
+  test("untrusted: nothing on PATH says what to do, and dotnet does not run", async () => {
+    await install(tools, "dotnet");
+    await LISTED();
+    const { content, notice } = await save("svc/a.cs");
+    expect(content).toBeNull();
+    expect(notice).toContain("trust the repository");
+    expect(notice).toContain("`dotnet tool install -g csharpier`");
+    expect(existsSync(ranMarker)).toBe(false);
+  });
+
+  test("untrusted: listing the formatters in Settings reports nothing", async () => {
+    await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
+    new FormatService().getDetectedFormatters(wt);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+  });
+
+  test("a project with only a config has nothing held back", async () => {
+    await install(tools, "csharpier");
+    await addFiles({ ".csharpierrc": "" });
+    expect((await save("a.cs")).content).toContain("csharpier cwd=");
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+  });
+
+  test("a change of trust applies from the next save", async () => {
+    await install(tools, "dotnet");
+    await install(tools, "csharpier");
+    await LISTED();
+    expect((await save("svc/a.cs")).content).toContain("csharpier cwd=");
+    setRepoTrusted(wt, true);
+    expect((await save("svc/a.cs")).content).toContain("dotnet cwd=");
+    setRepoTrusted(wt, false);
+    expect((await save("svc/a.cs")).content).toContain("csharpier cwd=");
+  });
+});
+
+describe("a manual dotnet override that runs a project's tool", () => {
+  const TOOL_RUN = "tool run csharpier format --stdin-path {file}";
+  const BY_NAME = "csharpier format --stdin-path {file}";
+
+  test.each([
+    ["tool run", "a.cs", TOOL_RUN],
+    ["its name alone, which dotnet looks up in the manifest", "a.cs", BY_NAME],
+    ["tool run for another language's files", "a.fs", TOOL_RUN],
+  ])("is held back in an untrusted repository: %s", async (_name, file, args) => {
+    await install(tools, "dotnet");
+    await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
+    expect(await saveWithDotnet(file, args)).toEqual({ content: null });
+    expect(existsSync(ranMarker)).toBe(false);
+    expect(getRepoTrustStatus(wt).restrictions).toHaveLength(1);
+  });
+
+  test("is held back when given as a path", async () => {
+    await install(tools, "dotnet");
+    expect(await saveWithDotnet("a.cs", TOOL_RUN, join(tools, "dotnet"))).toEqual({
+      content: null,
+    });
+    expect(existsSync(ranMarker)).toBe(false);
+  });
+
+  test.each([TOOL_RUN, BY_NAME])("runs in a trusted repository: %s", async (args) => {
+    await install(tools, "dotnet");
+    await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
+    setRepoTrusted(wt, true);
+    expect((await saveWithDotnet("a.cs", args)).content).toContain("dotnet cwd=");
+  });
+
+  test("a name no manifest claims runs as written", async () => {
+    await install(tools, "dotnet");
+    await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
+    expect((await saveWithDotnet("a.cs", "format {file}")).content).toContain("dotnet cwd=");
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 });
 
