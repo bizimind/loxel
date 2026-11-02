@@ -55,7 +55,7 @@ function save(name: string): Promise<{ content: string | null; notice?: string }
   );
 }
 
-/** A manual override, which goes through the same check as a manifest in a trusted repository. */
+/** A manual override, the one way `dotnet` runs in an untrusted repository, through its checks. */
 function saveWithDotnet(name: string): Promise<{ content: string | null; notice?: string }> {
   const args = "tool run csharpier format --stdin-path {file}";
   const overrides = [{ id: "o1", extensions: "cs", command: "dotnet", args }];
@@ -278,6 +278,7 @@ describe("csharpFormatter local tool", () => {
     const { content, notice } = await saveWithDotnet("a.cs");
     expect(content).toBeNull();
     expect(notice).toContain("shim");
+    expect(getRepoTrustStatus(wt).restrictions).toHaveLength(1);
     expect(existsSync(ranMarker)).toBe(false);
   });
 
@@ -306,7 +307,6 @@ describe("csharpFormatter repository trust", () => {
     expect(content).toContain(
       `dotnet cwd=${join(wt, "svc")} args=tool run csharpier format --stdin-path ${file} telemetry=1 nologo=1`,
     );
-    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 
   test("trusted: a tool that is not restored says what to run", async () => {

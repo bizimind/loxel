@@ -55,6 +55,7 @@ const MAX_PROJECT_FILE_BYTES = 1_024 * 1_024;
 /** In what `dotnet tool run` prints for a manifest's tool that is not in the local tool cache. */
 const NOT_RESTORED_HINT = "dotnet tool restore";
 const LOCAL_TOOL_RESTRICTION = "The project's own CSharpier doesn't format on save.";
+const SHIM_RESTRICTION = "A version manager's `dotnet` doesn't run for format on save.";
 const LOCAL_TOOL_DECLINE: FormatterDecline = {
   notice:
     "Format on save skipped: this project's CSharpier runs only once you trust the repository. Trust it, or install `csharpier` on your PATH with `dotnet tool install -g csharpier`.",
@@ -67,9 +68,10 @@ const LOCAL_TOOL_DECLINE: FormatterDecline = {
  * runs a `csharpier` from `PATH`. A bare project or `.editorconfig` formats nothing, like the other
  * formatters' opt-in signals. CSharpier resolves its own nested options from `--stdin-path`.
  *
- * Not cached, so a change of trust applies from the next save: a save costs a few `statSync` calls per directory level plus parsing the manifests
- * on the way, negligible next to spawning the formatter. So does the SDK check, which reads one
- * `global.json` and asks git only about its `sdk.paths` entries.
+ * Not cached, so a change of trust applies from the next save: a save costs a few `statSync` calls
+ * per directory level plus parsing the manifests on the way, negligible next to spawning the
+ * formatter. So does the SDK check in an untrusted repository, which reads one `global.json` and
+ * asks git only about its `sdk.paths` entries.
  */
 function detectCSharpFormatter(
   startDir: string,
@@ -172,6 +174,7 @@ async function dotnetSpawnOptions(dir: string, wtRoot: string): Promise<Formatte
       };
     }
     if (await isVersionManagerShim(dotnet)) {
+      reportRepoRestriction(wtRoot, SHIM_RESTRICTION);
       return {
         skip: {
           notice:
