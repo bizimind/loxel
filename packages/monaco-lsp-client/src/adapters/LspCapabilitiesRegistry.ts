@@ -45,8 +45,14 @@ export class LspCapabilitiesRegistry extends Disposable implements ILspCapabilit
       this._connection.registerRequestHandler(
         api.client.clientRegisterCapability,
         async (params) => {
-          for (const registration of params.registrations) {
-            const capability = getCapabilityByMethod(registration.method);
+          for (const registration of textSyncFirst(params.registrations)) {
+            const capability = capabilitiesByMethod.get(registration.method);
+            if (!capability) {
+              console.warn(
+                `[LspCapabilitiesRegistry] Ignoring registration: ${registration.method}`,
+              );
+              continue;
+            }
             const r = new CapabilityRegistration(
               registration.id,
               capability,
@@ -65,7 +71,9 @@ export class LspCapabilitiesRegistry extends Disposable implements ILspCapabilit
         api.client.clientUnregisterCapability,
         async (params) => {
           for (const unregistration of params.unregisterations) {
-            const capability = getCapabilityByMethod(unregistration.method);
+            const capability = capabilitiesByMethod.get(unregistration.method);
+            // Its registration was ignored, too.
+            if (!capability) continue;
             const info = this._registrations.get(capability);
             const handlerInfo = info?.registrations.get(unregistration.id);
             if (!handlerInfo) {
@@ -107,7 +115,7 @@ export class LspCapabilitiesRegistry extends Disposable implements ILspCapabilit
       throw new Error("Server capabilities already set");
     }
     this._serverCapabilities = serverCapabilities;
-    for (const cap of Object.values(capabilities)) {
+    for (const cap of textSyncFirst(Object.values(capabilities))) {
       const capKey = cap as Capability<unknown>;
       const options = this._dynamicFromStatic.getOptions(capKey, serverCapabilities);
       // LSP servers return `false` for capability fields (e.g. `hoverProvider: false`)
@@ -200,13 +208,20 @@ class CapabilityRegistration {
   ) {}
 }
 
-const capabilitiesByMethod = new Map(Object.values(capabilities).map((c) => [c.method, c]));
-function getCapabilityByMethod(method: string): Capability<unknown> {
-  const c = capabilitiesByMethod.get(method);
-  if (!c) {
-    throw new Error(`No capability found for method ${method}`);
-  }
-  return c;
+const capabilitiesByMethod = new Map<string, Capability<unknown>>([
+  ...Object.values(capabilities).map((c): [string, Capability<unknown>] => [c.method, c]),
+  // The spec registers semantic tokens under this method; the table has only the request methods.
+  ["textDocument/semanticTokens", capabilities.textDocumentSemanticTokensFull],
+]);
+
+/**
+ * Registering `textDocument/didChange` starts the synchronizer, which sends `didOpen` for existing
+ * models. Monaco asks a new code action provider for actions as it registers, so sync goes first:
+ * otherwise a request names a document the server has not been told about.
+ */
+function textSyncFirst<T extends { readonly method: string }>(items: readonly T[]): T[] {
+  const isTextSync = (item: T) => item.method === capabilities.textDocumentDidChange.method;
+  return [...items.filter(isTextSync), ...items.filter((item) => !isTextSync(item))];
 }
 
 class CapabilityInfo {
