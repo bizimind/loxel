@@ -15,6 +15,7 @@ import {
   toggleSidebarPanel,
   toggleWorktreeSidebar,
 } from "@/lib/focus-navigation";
+import { getFocusedHardRefreshTarget } from "@/lib/hard-refresh-targets";
 import { changeIndentation } from "@/lib/indentation-status";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { restartLanguageServers } from "@/lib/lsp-client";
@@ -165,6 +166,10 @@ export function useActionHandler(): (actionId: ActionId) => void {
 
       case "panel.rename":
         renameActiveTab();
+        break;
+
+      case "browser.hardRefresh":
+        getFocusedHardRefreshTarget()?.();
         break;
 
       // -- Panel navigation --
