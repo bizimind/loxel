@@ -342,7 +342,7 @@ function realpathOr(path: string): string {
  * directly leaves out Node, which from inside the project could be a version manager's shim.
  * `node_modules/@biomejs/biome` is a link under pnpm, with the binary's package beside the target.
  */
-function biomeNativeDir(dir: string): string | null {
+export function biomeNativeDir(dir: string): string | null {
   const packageDir = join(dir, "node_modules", "@biomejs", "biome");
   if (!isDirectory(packageDir)) return null;
   const native = join(realpathOr(packageDir), "..", `cli-${process.platform}-${process.arch}`);

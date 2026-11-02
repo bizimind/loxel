@@ -17,6 +17,7 @@ import {
   ProjectLinterLspManager,
   sendWarning,
 } from "./project-linter-lsp-manager";
+import { ReliedTrust } from "./project-scan";
 import { isRepoTrusted } from "./repo-trust";
 import type { WtLspContext, WtLspSession } from "./stdio-lsp-manager";
 import { documentPath, textDocumentUri } from "./ts-lsp-manager";
@@ -51,8 +52,7 @@ export class OxlintLspManager extends ProjectLinterLspManager<OxlintLaunch> {
   protected override readonly repoTrustRestriction =
     "oxlint doesn't run, since it would load this project's config and plugins.";
 
-  /** The answer of each repository a launch decision relied on; a context absent is still deciding. */
-  private readonly trustRelied = new WeakMap<WtLspContext, Map<string, boolean>>();
+  private readonly reliedTrust = new ReliedTrust();
   /** The contexts held because of what they need of Node. */
   private readonly heldOnNode = new WeakSet<WtLspContext>();
   private readonly eligible = new WeakMap<WtLspSession, Map<string, boolean>>();
@@ -69,8 +69,7 @@ export class OxlintLspManager extends ProjectLinterLspManager<OxlintLaunch> {
     try {
       const scan = await scanWorktree(wtPath, { signal });
       if (signal.aborted) return { notice: null };
-      const relied = [...scan.nestedConfigRepos, ...scan.ancestorRepos];
-      this.trustRelied.set(context, new Map(relied.map((dir) => [dir, isRepoTrusted(dir)])));
+      this.reliedTrust.record(context, [...scan.nestedConfigRepos, ...scan.ancestorRepos]);
       if (scan.incomplete) {
         return {
           notice:
@@ -132,10 +131,7 @@ export class OxlintLspManager extends ProjectLinterLspManager<OxlintLaunch> {
   }
 
   protected override isLaunchStale(context: WtLspContext): boolean {
-    if (!context.repoTrusted) return false;
-    const relied = this.trustRelied.get(context);
-    if (!relied) return true;
-    return [...relied].some(([dir, trusted]) => isRepoTrusted(dir) !== trusted);
+    return this.reliedTrust.isStale(context);
   }
 
   protected override isHeldOnNode(context: WtLspContext): boolean {
