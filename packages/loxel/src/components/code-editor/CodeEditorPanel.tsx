@@ -253,7 +253,6 @@ export function CodeEditorPanel({
   canCreateModelRef.current ||= diskContent !== null || isError || isPaused;
   const canCreateModel = canCreateModelRef.current;
   const waitedForContent = useRef(!canCreateModel);
-  const focusAtOpen = useRef(document.activeElement);
 
   // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
   const editorConfigQuery = useQuery({
@@ -368,11 +367,10 @@ export function CodeEditorPanel({
 
     editorRef.current = editor;
     if (waitedForContent.current) {
-      // `usePanelActivationFocus` found no editor when the panel opened. Unless the user has moved on
-      // while the file loaded (a palette, a dialog), focus goes where it would have then.
-      const focusUnmoved =
-        document.activeElement === focusAtOpen.current || document.activeElement === document.body;
-      if (focusUnmoved && isActivatedPanel(panelApi)) editor.focus();
+      // `usePanelActivationFocus` found no editor when the panel opened. A modal opened while the
+      // file loaded keeps focus; all of the app's modals are native dialogs.
+      const modal = document.activeElement?.closest("dialog[open]");
+      if (!modal && isActivatedPanel(panelApi)) editor.focus();
       // The content arrived with the model, so the disk-content effect below finds nothing to do.
       if (diskContent !== null) setDetectedIndentation(detectIndentation(diskContent));
     }
