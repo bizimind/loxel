@@ -700,13 +700,19 @@ describe("rust-analyzer", () => {
     await makeRustup(fixture, { active: STABLE });
     const brew = join(fixture.root, "brew");
     await writeExecutable(join(brew, "rustc"), `#!/bin/sh\necho "rustc 1.88.0"\n`);
+    for (const tool of ["cargo", "rustfmt", "cargo-clippy", "rust-analyzer"]) {
+      await symlink(join(fixture.bin, "rustup"), join(fixture.bin, tool)).catch(() => {});
+    }
 
     expect(
       await resolveRustToolchain(fixture.wt, {
         chosen: null,
         env: { ...fixture.env, PATH: `${brew}:${fixture.bin}` },
       }),
-    ).toMatchObject({ source: "no-rustup", tools: { rustAnalyzer: null } });
+    ).toMatchObject({
+      source: "no-rustup",
+      tools: { cargo: null, rustfmt: null, cargoClippy: null, rustAnalyzer: null },
+    });
   });
 
   test("without rustup it is the PATH binary, skipping a tracked one", async () => {

@@ -161,12 +161,6 @@ const DETECTION_RULES: {
     },
   },
   {
-    files: ["rustfmt.toml", ".rustfmt.toml"],
-    check: (wtRoot) =>
-      existsSync(join(wtRoot, "rustfmt.toml")) || existsSync(join(wtRoot, ".rustfmt.toml")),
-    formatter: { command: "rustfmt", args: "", extensions: ["rs"], backendMode: "command" },
-  },
-  {
     files: [".clang-format"],
     check: (wtRoot) => existsSync(join(wtRoot, ".clang-format")),
     formatter: {
