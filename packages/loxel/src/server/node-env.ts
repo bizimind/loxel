@@ -236,16 +236,16 @@ async function isExecutable(filePath: string): Promise<boolean> {
 
 /**
  * `node --version`, for a `node` no manager's directory explains. Asked from the filesystem root:
- * a version-manager shim answers for the directory it runs in, by acting on what that directory
- * and its parents' files say, which can include downloading a pinned version, and a pin can sit in
- * the home directory too. Pins were matched before this, so what is left to learn is the user's own
- * default. A real `node` answers the same anywhere.
+ * a version-manager shim answers for the directory it runs in and those above it, by acting on what
+ * their files say, which can include downloading a pinned version. Pins were matched before this,
+ * so what is left to learn is the user's own default, which shims keep elsewhere. A real `node`
+ * answers the same anywhere.
  */
 async function readNodeVersion(nodePath: string, env: SpawnEnv): Promise<string | null> {
   try {
     const proc = measureSpawn("node-version", () =>
       Bun.spawn([nodePath, "--version"], {
-        cwd: "/",
+        cwd: path.parse(env.HOME || homedir()).root,
         env: { ...env, MISE_NOT_FOUND_AUTO_INSTALL: "0" },
         stdin: "ignore",
         stdout: "pipe",
@@ -269,6 +269,7 @@ async function describeNode(
   nodePath: string,
   installs: readonly NodeInstall[],
   env: SpawnEnv,
+  { runNode = true } = {},
 ): Promise<NodeInstall> {
   const real = await realpath(nodePath).catch(() => nodePath);
   for (const install of installs) {
@@ -276,7 +277,11 @@ async function describeNode(
       return install;
     }
   }
-  return { nodePath, version: await readNodeVersion(nodePath, env), manager: null };
+  return {
+    nodePath,
+    version: runNode ? await readNodeVersion(nodePath, env) : null,
+    manager: null,
+  };
 }
 
 /** The first `node` on the login-shell `PATH` that git does not track, entry by entry. */
@@ -392,6 +397,11 @@ export interface ResolveNodeEnvOptions {
   overridePath?: string | null;
   /** Environment for `PATH` and the managers' variables. Defaults to the login-shell one. */
   env?: SpawnEnv;
+  /**
+   * Answer only for an override or a matched pin, running nothing: otherwise `env` is null, with no
+   * `pinProblem`, and an override no manager explains has no version.
+   */
+  selectedOnly?: boolean;
 }
 
 /**
@@ -425,7 +435,10 @@ export async function resolveNodeEnv(
     (await isExecutable(overridePath)) &&
     !(await isShippedByRepo(wtPath, overridePath))
   ) {
-    return answer({ ...(await describeNode(overridePath, installs, env)), source: "override" });
+    const chosen = await describeNode(overridePath, installs, env, {
+      runNode: !options.selectedOnly,
+    });
+    return answer({ ...chosen, source: "override" });
   }
 
   if (spec) {
@@ -435,6 +448,8 @@ export async function resolveNodeEnv(
       }
     }
   }
+
+  if (options.selectedOnly) return answer(null);
 
   const found = await pathNode(wtPath, env);
   const system = found ? await describeNode(found, installs, env) : null;

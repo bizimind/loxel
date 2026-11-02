@@ -122,6 +122,8 @@ Loxel never installs Node. If the pinned version is not installed, the status ba
 
 Click the item, or run **Node: Select Version** from the command palette (`Cmd+Shift+P`), to choose an installed version for this worktree, or to go back to automatic detection. The list shows what your version managers have installed and the `node` on `PATH`.
 
+New [terminals](/docs/terminals#node-version) use this version when it comes from a pin or an installed version you chose. When it is the `node` on your `PATH`, found or chosen, they are left as they are.
+
 ---
 
 ## Tool configuration files
@@ -150,5 +152,6 @@ Turn one off in **Settings > Schemas** to stop checking files against it. Other 
 ## See also
 
 - [TypeScript](/docs/languages/typescript) — the shared language server and how outside changes reach it
+- [Terminals](/docs/terminals#node-version) — new terminals start with the worktree's Node version first on `PATH`
 - [Language Intelligence](/docs/language-intelligence) — the features every language server provides, and how servers start and stop per worktree
 - [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code
