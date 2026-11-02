@@ -5,7 +5,7 @@ import path from "node:path";
 import { isRecord } from "@/lib/is-record";
 
 import { readConfigFile } from "./config-file-read";
-import { biomeNativeDir } from "./js-formatter";
+import { BIOME_CONFIG_FILES, biomeNativeDir } from "./js-formatter";
 import { isFile, namesDependency, notInstalledMessage, readPackageJson } from "./js-project";
 import {
   nearestAbove,
@@ -17,15 +17,12 @@ import {
 
 export const BIOME_PACKAGE = "@biomejs/biome";
 
-/** The names Biome loads a config from, in the order it prefers them. Checked against 2.6.4. */
-const CONFIG_FILES = ["biome.json", "biome.jsonc", ".biome.json", ".biome.jsonc"];
-
 export function isBiomeConfigFile(file: string): boolean {
-  return CONFIG_FILES.includes(path.basename(file));
+  return BIOME_CONFIG_FILES.includes(path.basename(file));
 }
 
 function configIn(dir: string): string | undefined {
-  return CONFIG_FILES.map((name) => path.join(dir, name)).find(isFile);
+  return BIOME_CONFIG_FILES.map((name) => path.join(dir, name)).find(isFile);
 }
 
 /**
@@ -84,7 +81,7 @@ export async function scanBiomeWorktree(
   const { usesTool: _, ...scan } = await scanProject(
     wtPath,
     {
-      configFiles: CONFIG_FILES,
+      configFiles: BIOME_CONFIG_FILES,
       packageName: BIOME_PACKAGE,
       skipsIgnored: false,
       followsLinks: false,

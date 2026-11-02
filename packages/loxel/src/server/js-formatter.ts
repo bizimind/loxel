@@ -76,13 +76,21 @@ interface JsTool {
 const hasAnyFile = (dir: string, names: readonly string[]) =>
   names.some((name) => readConfigFile(join(dir, name)) !== undefined);
 
+/** The names Biome loads a config from, in the order it prefers them. Checked against 2.6.4. */
+export const BIOME_CONFIG_FILES: readonly string[] = [
+  "biome.json",
+  "biome.jsonc",
+  ".biome.json",
+  ".biome.jsonc",
+];
+
 /**
  * Whether a Biome config in `dir` has the formatter on, undefined with no config. One that turns it
  * off is there for the linter alone. One that cannot be parsed still counts: Biome reports that
- * better than a silent other formatter. In the order Biome prefers them, checked against 2.5.11.
+ * better than a silent other formatter.
  */
 function biomeFormatterOn(dir: string): boolean | undefined {
-  for (const name of ["biome.json", "biome.jsonc", ".biome.json", ".biome.jsonc"]) {
+  for (const name of BIOME_CONFIG_FILES) {
     const text = readConfigFile(join(dir, name));
     if (text === undefined) continue;
     try {
