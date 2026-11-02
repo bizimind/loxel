@@ -19,6 +19,7 @@ import { $ } from "bun";
 
 import type { FileOperationResult } from "@/api/file-operations-model";
 
+import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
 
 const log = logger.child("files");
@@ -632,7 +633,9 @@ export class FileOperationsService {
   private async isGitTracked(relPath: string): Promise<boolean> {
     if (this.options.git === false) return false;
     try {
-      const out = await $`git -C ${this.worktreeCwd} ls-files -- ${relPath}`.text();
+      const out = await $`git -C ${this.worktreeCwd} ls-files -- ${relPath}`
+        .env(readOnlyGitEnv())
+        .text();
       return out.trim().length > 0;
     } catch {
       return false;

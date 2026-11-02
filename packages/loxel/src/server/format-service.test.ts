@@ -16,6 +16,7 @@ const stateDir = await mkdtemp(join(tmpdir(), "format-service-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { FormatService } = await import("./format-service");
 const { findVenvBin } = await import("./python-formatter");
+const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 
 afterAll(async () => {
   await rm(stateDir, { recursive: true, force: true });
@@ -376,6 +377,7 @@ describe("FormatService language modules", () => {
   test("detect receives the file's directory, and spawning defaults to the worktree", async () => {
     const wt = await realpath(await makeWorktree({ "sub/dir/a.fake": "" }));
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    setRepoTrusted(wt, true);
     const dirs: string[] = [];
     const language = fakeLanguage({
       detect: (dir) => {
@@ -398,6 +400,7 @@ describe("FormatService language modules", () => {
   test("applies the module's cwd, env and bin dirs, with {file} absolute", async () => {
     const wt = await realpath(await makeWorktree({ "mod/a.fake": "" }));
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    setRepoTrusted(wt, true);
     await installFormatter(join(wt, "tools"), "tools");
     const language = fakeLanguage({
       spawnOptions: (_command, dir) => ({
@@ -412,9 +415,32 @@ describe("FormatService language modules", () => {
     );
   });
 
+  test("an untrusted repository keeps node_modules/.bin off PATH and reports it", async () => {
+    const wt = await realpath(await makeWorktree({ "a.fake": "" }));
+    await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    const result = await new FormatService([fakeLanguage({})]).format(
+      "x",
+      "a.fake",
+      wt,
+      AUTO_DETECT,
+    );
+    expect(result.content).toBeNull();
+    expect(result.notice).toContain("is not installed");
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([
+      "Format on save doesn't run fake-fmt from node_modules.",
+    ]);
+  });
+
+  test("an untrusted repository reports nothing when node_modules/.bin lacks the formatter", async () => {
+    const wt = await realpath(await makeWorktree({ "a.fake": "" }));
+    await new FormatService([fakeLanguage({})]).format("x", "a.fake", wt, AUTO_DETECT);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+  });
+
   test("empty bin dirs keep node_modules/.bin off PATH", async () => {
     const wt = await makeWorktree({});
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    setRepoTrusted(wt, true);
     const language = fakeLanguage({ spawnOptions: () => ({ binDirs: [] }) });
     const result = await new FormatService([language]).format(
       "x",
@@ -431,6 +457,7 @@ describe("FormatService language modules", () => {
   test("skip does not spawn, and shows its notice if it has one", async () => {
     const wt = await makeWorktree({});
     const ran = join(wt, "ran");
+    setRepoTrusted(wt, true);
     await mkdir(join(wt, "node_modules/.bin"), { recursive: true });
     await writeFile(join(wt, "node_modules/.bin/fake-fmt"), `#!/bin/sh\n: > "${ran}"\n`, {
       mode: 0o755,
@@ -477,6 +504,7 @@ describe("FormatService language modules", () => {
       { command: "fake-fmt", extensions: ["rs"] },
     ]);
     await installFormatter(join(wt, "node_modules/.bin"), "next");
+    setRepoTrusted(wt, true);
     const path = join(wt, "a.rs");
     const result = await service.format("x", path, wt, AUTO_DETECT);
     expect(result.content).toStartWith("next ");
@@ -505,6 +533,7 @@ describe("FormatService language modules", () => {
   test("options a module leaves undefined keep their defaults", async () => {
     const wt = await realpath(await makeWorktree({}));
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    setRepoTrusted(wt, true);
     const language = fakeLanguage({ spawnOptions: () => ({ cwd: undefined, binDirs: undefined }) });
     const path = join(wt, "a.fake");
     const result = await new FormatService([language]).format("x", path, wt, AUTO_DETECT);
@@ -514,6 +543,7 @@ describe("FormatService language modules", () => {
   test("a module that throws does not fail the format", async () => {
     const wt = await makeWorktree({});
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    setRepoTrusted(wt, true);
     const throwing = () => {
       throw new Error("bad config");
     };
@@ -744,5 +774,16 @@ describe("FormatService failure notices", () => {
     await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\nexit 2\n");
     const result = await new FormatService().format("def (", join(wt, "a.py"), wt, AUTO_DETECT);
     expect(result).toEqual({ content: null });
+  });
+});
+
+describe("a persistent backend's failure in an untrusted repository", () => {
+  test("stays quiet when the project holds the formatter", async () => {
+    const wt = await realpath(await makeWorktree({ ".prettierrc": "{}", "a.ts": "" }));
+    await mkdir(join(wt, "node_modules/.bin"), { recursive: true });
+    await writeFile(join(wt, "node_modules/.bin/prettier"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const result = await new FormatService([]).format("x", "a.ts", wt, AUTO_DETECT);
+    expect(result).toEqual({ content: null });
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 });

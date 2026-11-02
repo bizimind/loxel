@@ -14,6 +14,8 @@ Loxel doesn't ask when you open a project. When a feature is restricted for lack
 
 Trust belongs to the repository, not to a worktree, so a new worktree of a trusted repository doesn't ask again. Moving or replacing the repository's folder means choosing again.
 
+In a repository you haven't trusted, format on save doesn't run a command-line formatter from the project's `node_modules`, and a Python installed through a version manager such as pyenv shows its global version in the status bar.
+
 Trust a repository only if you would be willing to run its code yourself. Language servers that depend on trust restart as soon as you choose.
 
 ## Stop trusting a repository

@@ -456,6 +456,8 @@ export function useWsBridge(): void {
 
         case "repo_trust_changed":
           void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
+          // What a toolchain reports can depend on trust, such as a shim's version.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.toolchainStatusAll() });
           break;
 
         case "store_updated":

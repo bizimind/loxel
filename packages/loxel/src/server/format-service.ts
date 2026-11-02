@@ -12,12 +12,14 @@ import {
   type FormatterFailure,
   type FormatterSpawnOptions,
   type LanguageFormatter,
-  nodeModulesBin,
+  projectHasCommand,
+  projectNodeBinDirs,
 } from "./language-formatter";
 import { languageFormatters } from "./language-formatters";
 import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
 import { PrettierLibBackend } from "./prettier-lib-backend";
+import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 
@@ -324,7 +326,7 @@ export class FormatService {
     return {
       ...options,
       cwd: options?.cwd ?? worktreePath,
-      binDirs: options?.binDirs ?? [nodeModulesBin(worktreePath)],
+      binDirs: options?.binDirs ?? projectNodeBinDirs(command, worktreePath),
     };
   }
 
@@ -367,6 +369,10 @@ export class FormatService {
     log.warn("Daemon formatter failed, falling back to command mode", { command: fmt.command });
     backend.destroy();
     this.backends.delete(key);
+    // The project's own copy just failed, usually on a syntax error, and its command is off PATH.
+    if (!isRepoTrusted(worktreePath) && projectHasCommand(fmt.command, worktreePath)) {
+      return UNFORMATTED;
+    }
     return this.runFormatter(fmt.command, fmt.args, content, filePath, worktreePath);
   }
 

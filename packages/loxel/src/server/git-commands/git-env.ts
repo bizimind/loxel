@@ -5,12 +5,15 @@
  * of truth for how Loxel shells out to git, independent of argument validation.
  */
 
-// Loxel deliberately does NOT pass `-c core.fsmonitor=true`. Forcing it bought nothing: read-only
-// commands run with GIT_OPTIONAL_LOCKS=0 (below), so git can never persist the fsmonitor token
-// in the index and every query gets a "trivial" response followed by a full lstat scan. It cost an
-// IPC round trip per command and left a persistent `fsmonitor--daemon` behind for every worktree
-// and — because `-c` travels to child git processes — every submodule a status touched. Whether
-// fsmonitor runs is the user's git configuration to decide.
+// Read-only commands set `core.fsmonitor=false` (see `readOnlyGitEnv`), so a read never starts a
+// file system monitor, whichever config names one. It also leaves no `fsmonitor--daemon` behind
+// for a worktree or submodule, and the setting reaches the child git processes a status starts.
+
+/**
+ * The same setting as an argument, placed before the subcommand, for the checks that decide what
+ * Loxel runs: `git -c` works in every git, while `GIT_CONFIG_COUNT` needs git 2.31.
+ */
+export const FSMONITOR_OFF = ["-c", "core.fsmonitor=false"];
 
 /**
  * Global options for every command that compares the working tree (status, working-tree diffs).
@@ -39,12 +42,24 @@ export const SUBMODULE_GITLINK_ONLY = ["-c", "diff.ignoreSubmodules=dirty"];
  * all. Git ignores it wherever the lock is mandatory, so it is a no-op for mutating commands —
  * but it is only set here, on the read-only modules, to keep that guarantee explicit.
  *
+ * `core.fsmonitor=false` is set here as well, through git's `GIT_CONFIG_*` variables, so every
+ * read-only command has it in one place. Its precedence is that of `git -c`, and any such
+ * variables already in the environment are kept.
+ *
  * Returned as a fresh object because a spawn's `env` REPLACES the child environment instead of
  * merging into it: without spreading `process.env` git would lose `PATH`/`HOME` and fail in ways
  * that no unit test observes.
  */
 export function readOnlyGitEnv(): Record<string, string> {
-  return { ...inheritedGitEnv(), GIT_OPTIONAL_LOCKS: "0" };
+  const env = inheritedGitEnv();
+  const index = Number.parseInt(env.GIT_CONFIG_COUNT ?? "", 10) || 0;
+  return {
+    ...env,
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_CONFIG_COUNT: String(index + 1),
+    [`GIT_CONFIG_KEY_${index}`]: "core.fsmonitor",
+    [`GIT_CONFIG_VALUE_${index}`]: "false",
+  };
 }
 
 /** The server's current environment, for commands with no special needs. */

@@ -12,7 +12,7 @@ export {
   getWorkingTreeFileContent,
   writeWorkingTreeFileContent,
 } from "./file-content";
-export { readOnlyGitEnv } from "./git-env";
+export { FSMONITOR_OFF, readOnlyGitEnv } from "./git-env";
 export { getBranchCommits, getLog } from "./log";
 export {
   checkout,

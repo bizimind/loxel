@@ -13,6 +13,7 @@ import { delimiter, dirname, join, normalize } from "node:path";
 import { isRecord } from "@/lib/is-record";
 
 import { config } from "./config";
+import { FSMONITOR_OFF } from "./git-commands";
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
 import {
@@ -278,7 +279,7 @@ export async function indexDirectoryIsSymlink(
   const pathspecs = INDEX_DIRECTORY_PARTS.map((part) => `:(glob)**/${part}`);
   const { code, stdout } = await run(
     // The repository's own config must not pick a program to run.
-    ["git", "-c", "core.fsmonitor=false", "-C", wtPath, "ls-files", "-s", "-z", "--", ...pathspecs],
+    ["git", ...FSMONITOR_OFF, "-C", wtPath, "ls-files", "-s", "-z", "--", ...pathspecs],
     INDEX_CHECK_TIMEOUT_MS,
   );
   // Git exits with an error outside a repository; a null code is a timeout or no git to run.

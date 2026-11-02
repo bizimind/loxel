@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { isRecord } from "@/lib/is-record";
 
-import { dirsUpToRoot, type LanguageFormatter, nodeModulesBin } from "./language-formatter";
+import { dirsUpToRoot, type LanguageFormatter, projectNodeBinDirs } from "./language-formatter";
 import { envBinDir, getPythonEnvNow, VENV_DIR_NAMES } from "./python-env";
 import { isEnvShippedByRepo } from "./shipped-by-repo";
 import { readToml, recordAt } from "./toml-file";
@@ -14,7 +14,7 @@ export const pythonFormatter: LanguageFormatter = {
   spawnOptions: async (command, dir, wtRoot) => {
     // A command given as a path does not go through PATH.
     const venvBin = command.includes("/") ? undefined : await findVenvBin(dir, wtRoot, command);
-    return { binDirs: venvBin ? [venvBin, nodeModulesBin(wtRoot)] : [nodeModulesBin(wtRoot)] };
+    return { binDirs: venvBin ? [venvBin] : projectNodeBinDirs(command, wtRoot) };
   },
 };
 
