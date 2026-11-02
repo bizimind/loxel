@@ -60,6 +60,11 @@ const PREFERENCES = {
   includeCompletionsForImportStatements: true,
   includeAutomaticOptionalChainCompletions: true,
   importModuleSpecifierPreference: "shortest",
+  // Whether they show is the editor's inlay hints setting. Names on literal arguments only, where
+  // the call doesn't say what the value means: `all` is about 3 to 4 times as many on real JavaScript.
+  includeInlayParameterNameHints: "literals",
+  includeInlayVariableTypeHints: true,
+  includeInlayFunctionLikeReturnTypeHints: true,
   // Loxel never fetches dependencies by itself: TypeScript would otherwise run `npm` for `@types`.
   automaticTypeAcquisitionEnabled: false,
 } as const;

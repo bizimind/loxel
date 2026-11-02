@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { PlacedThread } from "@/api/review-model";
+import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
 
 import { buildCommentDecorations } from "../comments/comment-decorations";
@@ -89,6 +90,7 @@ export function EditorPanel({
   const onContentChangeRef = useRef(onContentChange);
   onContentChangeRef.current = onContentChange;
   const isEditable = onContentChange !== undefined;
+  useInlayHintsOption(editorRef);
 
   // Mount editor once
   useEffect(() => {
@@ -109,6 +111,7 @@ export function EditorPanel({
       theme: getMonacoThemeName(darkMode),
       readOnly: !isEditable,
       domReadOnly: !isEditable,
+      inlayHints: inlayHintsOption(),
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       renderLineHighlight: "none",

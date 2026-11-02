@@ -18,6 +18,7 @@ import {
   useFormatOnSave,
 } from "@/hooks/use-disk-synced-content";
 import { useFirstLoadGate } from "@/hooks/useFirstLoadGate";
+import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { computeLineEdits } from "@/lib/compute-line-edits";
 import { detectIndentation } from "@/lib/detect-indentation";
@@ -343,6 +344,7 @@ export function CodeEditorPanel({
       // every open model's indentation. Indentation is set per model below; this constant flag only
       // keeps Monaco from overriding it.
       detectIndentation: false,
+      inlayHints: inlayHintsOption(),
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       lineHeight: 22,
@@ -628,6 +630,8 @@ export function CodeEditorPanel({
   useEffect(() => {
     monaco.editor.setTheme(getMonacoThemeName(darkMode));
   }, [darkMode]);
+
+  useInlayHintsOption(editorRef);
 
   // Apply indentation live, as its sources change.
   useEffect(() => {

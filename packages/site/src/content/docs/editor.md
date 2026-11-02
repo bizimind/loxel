@@ -1,6 +1,6 @@
 ---
 title: Editor
-description: Quick Open, Go to Symbol, Find in Files, autosave, formatter auto-detection, indentation, EditorConfig, Python and Go files, conflict handling, and deleted or moved files.
+description: Quick Open, Go to Symbol, Find in Files, autosave, formatter auto-detection, indentation, inlay hints, EditorConfig, Python and Go files, conflict handling, and deleted or moved files.
 order: 10
 ---
 
@@ -92,6 +92,21 @@ Each property is looked up on its own, so an `.editorconfig` that only sets `ind
 TypeScript and JavaScript quick fixes, such as **Implement interface**, indent the code they insert the same way as the file you apply them in.
 
 While a code file is the active editor, the status bar shows its indentation (`Spaces: 4` or `Tab Size: 4`), where that came from, and its line endings (`LF` or `CRLF`). Hover it for details, including when the project's `.editorconfig` outranks one of your overrides. Click it, or run **Editor: Change Indentation** from the command palette, to indent the file with spaces or tabs at another size, convert its existing indentation to spaces or tabs, or go back to the automatic choice.
+
+---
+
+## Inlay hints
+
+Inlay hints are the types and parameter names a language server shows inline in your code, such as `add(first: 1)`. They aren't part of the file, and they push the text after them to the right. Choose when they appear with **Inlay Hints** in **Settings > Editor**, which applies to every language and takes effect immediately:
+
+| Mode                              | Behavior                         |
+| --------------------------------- | -------------------------------- |
+| On (default)                      | Always shown                     |
+| Off                               | Never shown                      |
+| On, hidden while holding Ctrl+Alt | Shown until you hold `Ctrl+Alt`  |
+| Off, shown while holding Ctrl+Alt | Hidden until you hold `Ctrl+Alt` |
+
+Diff views show the code as it is, without hints.
 
 ---
 
