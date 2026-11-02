@@ -59,7 +59,7 @@ type BuildSignal =
       flags: string[];
       scope: FileScope;
     }
-  /** Its Java is formatted by something else, so what a parent directory declares does not apply. */
+  /** Its Java is formatted by something else or not at all, so a parent's declaration does not apply. */
   | { kind: "other" }
   /** A Maven plugin applied here with its configuration in a `pluginManagement`, here or above. */
   | { kind: "applied-elsewhere" }
@@ -277,6 +277,7 @@ function pluginsSignal(xml: string): BuildSignal | null {
 function spotlessMavenSignal(plugin: string): BuildSignal | null {
   const java = xmlElement(plugin, "java");
   if (java === null) {
+    if (isOn(xmlElement(plugin, "skip"))) return { kind: "other" };
     return xmlElement(plugin, "configuration") === null ? { kind: "applied-elsewhere" } : null;
   }
   const google = xmlElement(java, "googleJavaFormat");

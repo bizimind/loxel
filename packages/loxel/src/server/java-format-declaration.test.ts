@@ -712,6 +712,17 @@ describe("which files a declaration formats", () => {
     expect(await declared({ "build.gradle": script })).toMatchObject({ pin: "1.22.0" });
   });
 
+  test("a module switching off an inherited Spotless formats nothing", async () => {
+    const module = (skip: string) => `<project><build><plugins><plugin>
+      <artifactId>spotless-maven-plugin</artifactId>
+      <configuration><skip>${skip}</skip></configuration>
+    </plugin></plugins></build></project>`;
+    const files = (skip: string) => ({ "pom.xml": spotlessPom(GJF), "a/pom.xml": module(skip) });
+    expect(await inScope(files("true"), "a/src/main/java/A.java")).toBe(false);
+    await clean();
+    expect(await inScope(files("false"), "a/src/main/java/A.java")).toBe(true);
+  });
+
   test("a skip set to false leaves the plugin on", async () => {
     const dependency =
       "<dependencies><dependency><artifactId>google-java-format</artifactId><version>1.30.0</version></dependency></dependencies>";
