@@ -1,9 +1,10 @@
 import { wsClient } from "@/api/client";
+import { javaToolchain } from "@/api/java-env-model";
 import { useLspStatusStore } from "@/store/lsp-status";
 import { useWorktreeStore } from "@/store/worktrees";
 
-import { createJavaServerRecovery } from "./java-server-recovery";
 import { createLspClient } from "./lsp-client";
+import { createToolchainServerRecovery } from "./toolchain-server-recovery";
 
 // Eclipse JDT LS, on the user's JDK.
 const javaLspClient = createLspClient({
@@ -15,7 +16,8 @@ const javaLspClient = createLspClient({
 });
 
 wsClient.subscribe(
-  createJavaServerRecovery({
+  createToolchainServerRecovery({
+    changedMessage: javaToolchain.changedMessage,
     client: javaLspClient,
     stoppedServer: () => useLspStatusStore.getState().stopped.get("ws/java-lsp"),
     activeWorktree: () => useWorktreeStore.getState().activeWorktreePath,

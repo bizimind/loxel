@@ -72,6 +72,12 @@ export interface LspClientOptions {
   showMessages?: boolean;
   /** The server's read-only documents: tabs and peek widgets show them, read through this client. */
   virtualDocuments?: VirtualDocumentOptions;
+  /**
+   * Leave these languages' editor models on `loxel://HEAD/` URIs instead of `file://` (see
+   * `fileSchemeLanguages`), for a server sharing languages with one that needs them. Its manager
+   * translates the URIs.
+   */
+  keepsEditorUris?: boolean;
 }
 
 /**
@@ -99,6 +105,7 @@ export function createLspClient({
   onConnected,
   showMessages,
   virtualDocuments,
+  keepsEditorUris = false,
 }: LspClientOptions) {
   const markerOwner = route.replace(/^ws\//, "");
   const showMessage = showMessages ? createServerMessageToasts(name) : undefined;
@@ -184,6 +191,7 @@ export function createLspClient({
     disconnect: connection.disconnect,
     languageIds,
     syncsModel,
+    keepsEditorUris,
     logCategory: markerOwner,
   };
 }

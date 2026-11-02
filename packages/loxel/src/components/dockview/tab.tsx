@@ -9,6 +9,7 @@ import { focusActiveCenterPanel } from "@/lib/focus-navigation";
 import { relativeTo } from "@/lib/project-file-helpers";
 import { registerTabRename } from "@/lib/tab-rename";
 import { cn } from "@/lib/utils";
+import { closeCenterTab } from "@/store/closed-tabs";
 
 import { TabCloseButton } from "./tab-close-button";
 
@@ -147,17 +148,17 @@ export function Tab({
     setCtxOpen(true);
   }, []);
 
-  const handleClose = useCallback(() => api.close(), [api]);
+  const handleClose = useCallback(() => closeCenterTab(api), [api]);
 
   const handleCloseOthers = useCallback(() => {
     for (const panel of Array.from(api.group.panels)) {
-      if (panel.id !== api.id) panel.api.close();
+      if (panel.id !== api.id) closeCenterTab(panel.api);
     }
   }, [api]);
 
   const handleCloseAll = useCallback(() => {
     for (const panel of Array.from(api.group.panels)) {
-      panel.api.close();
+      closeCenterTab(panel.api);
     }
   }, [api]);
 

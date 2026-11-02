@@ -26,10 +26,17 @@ interface VirtualDocumentPanelProps {
   panelApi: DockviewPanelApi;
 }
 
-function reveal(editor: monacoEditor.IStandaloneCodeEditor, line: number, column = 1): void {
+function reveal(
+  editor: monacoEditor.IStandaloneCodeEditor,
+  panelApi: DockviewPanelApi,
+  line: number,
+  column = 1,
+): void {
   editor.revealLineInCenter(line);
   editor.setPosition({ lineNumber: line, column });
   editor.focus();
+  // A one-time jump: the same jump asked for again would change no prop and do nothing.
+  panelApi.updateParameters({ line: undefined, column: undefined });
 }
 
 /**
@@ -104,7 +111,7 @@ export function VirtualDocumentPanel({
         const { line: target, column: targetColumn } = locationRef.current;
         if (target) {
           revealFrame = requestAnimationFrame(() => {
-            if (editor) reveal(editor, target, targetColumn);
+            if (editor) reveal(editor, panelApi, target, targetColumn);
           });
         }
       },
@@ -121,12 +128,12 @@ export function VirtualDocumentPanel({
       editor?.dispose();
       model?.dispose();
     };
-  }, [uri, connectionId, attempt]);
+  }, [uri, connectionId, attempt, panelApi]);
 
   // Going to another place in a document whose tab is already open.
   useEffect(() => {
-    if (editorRef.current && line) reveal(editorRef.current, line, column);
-  }, [line, column]);
+    if (editorRef.current && line) reveal(editorRef.current, panelApi, line, column);
+  }, [line, column, panelApi]);
 
   useEffect(() => {
     monaco.editor.setTheme(getMonacoThemeName(darkMode));

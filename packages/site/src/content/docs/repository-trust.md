@@ -4,7 +4,7 @@ description: How Loxel decides whether it may run a repository's code, and how t
 order: 13.2
 ---
 
-Some language features can do more by running code from the repository you opened: build scripts, project plugins, a linter's config file. A repository you just cloned could put anything there, so a feature that depends on trust works in a restricted form until you say you trust the repository.
+Some language features can do more by running code from the repository you opened: build scripts, project plugins, a linter's or formatter's config file. A repository you just cloned could put anything there, so a feature that depends on trust works in a restricted form until you say you trust the repository.
 
 Every repository starts untrusted, including projects you already had. Editing, Git and everything else keep working.
 

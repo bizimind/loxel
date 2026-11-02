@@ -29,10 +29,11 @@ import { validateStrictJson } from "@/lib/json-strict-validator";
 import { fileSchemeLanguages } from "@/lib/lsp-clients";
 import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
-import { languageNeedsContent, resolveLanguage } from "@/lib/resolve-language";
+import { resolveLanguage } from "@/lib/resolve-language";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
 import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
+import { registerClosedTabParams } from "@/store/closed-tabs";
 import { type EditorIndentation, useEditorIndentationStore } from "@/store/editor-indentation";
 import { useEditorStateStore } from "@/store/editor-state";
 import {
@@ -193,6 +194,9 @@ export function CodeEditorPanel({
       editor.setPosition({ lineNumber: ln, column: col });
       editor.focus();
       mountedRef.current = true;
+      // A one-time jump: left in the params it would repeat when the layout is next restored, and
+      // the same jump asked for again would change no prop and do nothing.
+      panelApi.updateParameters({ line: undefined, column: undefined });
     });
   }
 
@@ -246,13 +250,13 @@ export function CodeEditorPanel({
   const resolvedLangRef = useRef(resolvedLang);
   resolvedLangRef.current = resolvedLang;
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
-  // A model's URI scheme and first language decide which language servers get it, so a file only
-  // its content can name a language for (a shebang script) waits for that content, unless it cannot
-  // come: an error.
+  // Creating a model sends it to language servers, so it waits for the file's content, unless that
+  // cannot come (an error): `didOpen` carries the real text, and the
+  // model's URI scheme and first language, which decide its servers, can come from that content (a
+  // shebang script).
   // Latched: losing that content to a refetch must not dispose the editor and its unsaved edits.
   const canCreateModelRef = useRef(false);
-  canCreateModelRef.current ||=
-    diskContent !== null || isError || !languageNeedsContent(filePath, fileAssociations);
+  canCreateModelRef.current ||= diskContent !== null || isError;
   const canCreateModel = canCreateModelRef.current;
   const waitedForContent = useRef(!canCreateModel);
   // An empty model says nothing about the file until a load has succeeded: until then neither an
@@ -522,9 +526,9 @@ export function CodeEditorPanel({
     addSaveAction(editor, () => void saveNow());
 
     // Navigate to initial line:column if provided (e.g. from search results).
-    // Only navigate now if diskContent was available at mount (React Query cache hit).
-    // If diskContent is null (still fetching), the editor has empty content and Monaco
-    // would clamp to line 1 — defer navigation to the effect below.
+    // Only navigate now if diskContent is available. It is null here only after a failed load: the
+    // editor is empty and Monaco would clamp to line 1, so the effect below navigates once a retry
+    // brings the content.
     let navRafId: number | undefined;
     if (initialLineRef.current && diskContent !== null) {
       navRafId = navigateToInitialPosition(editor);
@@ -573,8 +577,8 @@ export function CodeEditorPanel({
   }, [diskContent, filePath]);
 
   // Deferred initial navigation: when diskContent arrives after mount and initial refs are still pending.
-  // This handles the case where the editor was created with empty content (diskContent was null
-  // during mount) and the mount effect could not navigate. Declared after the content-update effect
+  // This handles the case where the editor was created with empty content (a failed load)
+  // and the mount effect could not navigate. Declared after the content-update effect
   // so React runs them in order — content is set in the model before navigation fires.
   useEffect(() => {
     if (diskContent === null || mountedRef.current) return;
@@ -597,7 +601,18 @@ export function CodeEditorPanel({
     editor.revealLineInCenter(line);
     editor.setPosition({ lineNumber: line, column: column ?? 1 });
     editor.focus();
-  }, [line, column]);
+    panelApi.updateParameters({ line: undefined, column: undefined });
+  }, [line, column, panelApi]);
+
+  // Reopening the closed tab puts the cursor back.
+  useEffect(
+    () =>
+      registerClosedTabParams(panelApi.id, () => {
+        const position = editorRef.current?.getPosition();
+        return position ? { line: position.lineNumber, column: position.column } : {};
+      }),
+    [panelApi.id],
+  );
 
   // Update language
   useEffect(() => {
@@ -682,7 +697,7 @@ export function CodeEditorPanel({
     }));
 
     monaco.editor.setModelMarkers(model, "typescript", markers);
-  }, [diagnostics]);
+  }, [diagnostics, canCreateModel]);
 
   // Real-time per-file diagnostics are delivered by TypeScript over LSP (via
   // LspDiagnosticsFeature in monaco-lsp-client) — no HTTP round-trip needed.
@@ -718,7 +733,7 @@ export function CodeEditorPanel({
       const m = editorRef.current?.getModel();
       if (m) monaco.editor.setModelMarkers(m, "json-strict", []);
     };
-  }, [resolvedLang]);
+  }, [resolvedLang, canCreateModel]);
 
   // Handlers for diverged state resolution
   const handleAcceptDisk = useCallback(() => {

@@ -39,17 +39,17 @@ Drop rules are enforced in `setupOuterDockview` (`onWillShowOverlay`): no edge d
 
 ## Panel identity and reuse
 
-| Type          | Dockview id             | Key params                                   | Open behavior                                                |
-| ------------- | ----------------------- | -------------------------------------------- | ------------------------------------------------------------ |
-| `terminal`    | `terminal-<terminalId>` | `terminalId`, `worktreePath`, `cwd?`         | Always new                                                   |
-| `browser`     | `browser-<uuid>`        | `url`, `faviconUrl`                          | Always new; `renderer: "always"`                             |
-| `editor` (md) | `editor-<filePath>`     | `filePath`, `worktreePath`, `line`, `column` | Reuse by path                                                |
-| `codeEditor`  | `codeeditor-<filePath>` | `filePath`, `worktreePath`, `line`, `column` | Reuse by path; `line`/`column` pushed via `updateParameters` |
-| `excalidraw`  | `drawing-<filePath>`    | `filePath`, `worktreePath`                   | Reuse by path                                                |
-| `media`       | `media-<filePath>`      | `filePath`, `worktreePath`                   | Reuse by path                                                |
-| `diff`        | `diff`                  | none                                         | Singleton                                                    |
-| `compare`     | `compare-<uuid>`        | `oldPath`, `newPath`, `worktreePath`         | Always new; a split duplicates the comparison                |
-| `localDb`     | `localdb-main`          | none                                         | Singleton                                                    |
+| Type          | Dockview id             | Key params                                   | Open behavior                                                                         |
+| ------------- | ----------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `terminal`    | `terminal-<terminalId>` | `terminalId`, `worktreePath`, `cwd?`         | Always new                                                                            |
+| `browser`     | `browser-<uuid>`        | `url`, `faviconUrl`                          | Always new; `renderer: "always"`                                                      |
+| `editor` (md) | `editor-<filePath>`     | `filePath`, `worktreePath`, `line`, `column` | Reuse by path                                                                         |
+| `codeEditor`  | `codeeditor-<filePath>` | `filePath`, `worktreePath`, `line`, `column` | Reuse by path; `line`/`column` pushed via `updateParameters` and cleared once applied |
+| `excalidraw`  | `drawing-<filePath>`    | `filePath`, `worktreePath`                   | Reuse by path                                                                         |
+| `media`       | `media-<filePath>`      | `filePath`, `worktreePath`                   | Reuse by path                                                                         |
+| `diff`        | `diff`                  | none                                         | Singleton                                                                             |
+| `compare`     | `compare-<uuid>`        | `oldPath`, `newPath`, `worktreePath`         | Always new; a split duplicates the comparison                                         |
+| `localDb`     | `localdb-main`          | none                                         | Singleton                                                                             |
 
 File-backed ids embed the absolute path, so a file has at most one editor tab per worktree layout; compare panels can show it again (see [EDITOR.md](EDITOR.md#several-editors-of-one-file)). Reuse always goes through `activatePanel()`, never `panel.api.setActive()` (see [KEYBINDINGS.md](KEYBINDINGS.md#focus-navigation) and the browser note in [ELECTRON.md](ELECTRON.md#browser-panels)).
 
@@ -74,6 +74,7 @@ Creation is decoupled through typed window events. [loxel-events.ts](../src/lib/
 - `handleFileMoved` (on `loxel-file-moved` after an in-app rename, or on the server's `file_moved` for a rename or move made anywhere) replaces the old tab with one for the new path at the same index, keeps it visible only if it was, never changes the active group, and migrates editor/drawing caches; a move whose unsaved edits cannot be carried over leaves the old tab in place, marked deleted (see [EDITOR.md](EDITOR.md#moved-files)). Covered by [panel-creators.test.ts](../src/lib/panel-creators.test.ts).
 - `handleFileDeleted` closes tabs for the path and anything under it. This is only for in-app deletes; a file deleted externally keeps its tab, marked as deleted (see [EDITOR.md](EDITOR.md#deleted-files)).
 - `CenterHost`'s `onDidRemovePanel` owns close-side effects: terminals send `terminal_destroy` and unregister notifications, and files outside the worktree send `close_external_file`. It is skipped while either layout is swapping, so a worktree switch does not kill PTYs.
+- [closed-tabs.ts](../src/store/closed-tabs.ts) keeps a per-worktree stack of closed tabs for `panel.reopenClosed`, in memory per window. Every user-facing close (tab button, tab menu, `panel.close`) goes through `closeCenterTab`, which records the tab's params, title, renderer, group and index before closing it. Removals the user didn't ask for (file moved or deleted, `replace` placements, layout swaps) call dockview directly and are not recorded, which is why this isn't in `onDidRemovePanel`, where the tab's index is also already gone. State a panel doesn't keep in its params is contributed through `registerClosedTabParams` (the code editor's cursor). `reopenClosedTab` in `panel-creators.ts` re-adds the panel under its old id, except a terminal, which gets a new `terminalId` and so a new PTY. A closed file that has since been deleted reopens marked as deleted, like any other missing file.
 
 ## Tabs and context menus
 
