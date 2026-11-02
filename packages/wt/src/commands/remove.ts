@@ -1,6 +1,5 @@
 import { createResult } from "@bizimind/cli-common";
 
-import { surviveHangup } from "../git/index.ts";
 import {
   executeRemove,
   forceReason,
@@ -52,9 +51,9 @@ export async function removeCommand(
     const force = await decideForce(plan, options);
     if (force === "cancel") return abortedResult("User declined force removal");
 
-    // Run from inside the worktree, its terminal may end as soon as the worktree is unregistered
-    // (Loxel ends a removed worktree's terminals), with the branch still to delete.
-    surviveHangup();
+    // Run from inside the worktree, its terminal may end soon after the worktree is unregistered
+    // (Loxel ends a removed worktree's terminals), with the rest of the removal still to do.
+    process.on("SIGHUP", () => {});
     const result = await executeRemove(
       { name: selected, repoPath, deleteBranch, force, forceBranch: options.forceBranch ?? false },
       { log: ctx.log, warn: ctx.warn },

@@ -6,25 +6,13 @@ export interface GitResult {
   stderr: string;
 }
 
-let keepRunningAfterHangup = false;
-
-/**
- * Keep this process, and the git commands it starts from now on, running when
- * its terminal closes. For a command that must not stop halfway.
- */
-export function surviveHangup(): void {
-  process.on("SIGHUP", () => {});
-  keepRunningAfterHangup = true;
-}
-
 /**
  * Run a git command without throwing, so callers can branch on the exit code
  * while keeping git's own stderr.
  */
 export async function runGit(args: string[], cwd?: string): Promise<GitResult> {
   try {
-    const command = keepRunningAfterHangup ? ["nohup", "git", ...args] : ["git", ...args];
-    const shell = cwd ? $`${command}`.cwd(cwd) : $`${command}`;
+    const shell = cwd ? $`git ${args}`.cwd(cwd) : $`git ${args}`;
     const result = await shell
       .env({ ...process.env, LANG: "C", LC_ALL: "C" })
       .quiet()

@@ -119,6 +119,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         LOXEL_DEV: "1",
         LOXEL_STATE_DIR: stateDir,
         LOXEL_SERVE_PORT: String(port),
+        LOXEL_REMOVED_WORKTREE_TERMINAL_DELAY_MS: "100",
       },
       stdin: "ignore",
       stdout: "ignore",
@@ -373,14 +374,15 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         await settle();
         const terminal = await openTerminal(wtPath);
 
-        // Holds the branch deletion until the terminal is gone, as a slow one would be.
+        // Holds the branch deletion until the terminal is gone. It ignores the hang-up itself: what
+        // this checks is that `wt` lives on to deal with the branch and start the file deletion.
         const release = path.join(stateDir, `${name}.release`);
         const shimDir = path.join(wtBinDir, name);
         mkdirSync(shimDir);
         const shim = path.join(shimDir, "git");
         writeFileSync(
           shim,
-          `#!/bin/sh\nif [ "$1" = branch ]; then while [ ! -e "${release}" ]; do sleep 0.05; done; fi\nexec "${Bun.which("git")}" "$@"\n`,
+          `#!/bin/sh\ntrap '' HUP\nif [ "$1" = branch ]; then while [ ! -e "${release}" ]; do sleep 0.05; done; fi\nexec "${Bun.which("git")}" "$@"\n`,
         );
         chmodSync(shim, 0o755);
 

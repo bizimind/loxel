@@ -276,17 +276,27 @@ export class TerminalManager {
   }
 
   /**
-   * End every session of a removed worktree, a shell still waiting for its environment included.
-   * Returns their IDs. The terminal may be the one running `wt rm`, which is built to finish with
-   * its terminal gone.
+   * End every session of a removed worktree, `delayMs` from now, calling `onEnded` with each one
+   * that was still running. Only the sessions there now: a worktree created at the same path
+   * meanwhile keeps its own. A shell still waiting for its environment never starts.
    */
-  destroyWorktree(worktreePath: string): string[] {
-    const ids = [
-      ...[...this.starting].filter(([, pending]) => pending.worktreePath === worktreePath),
-      ...[...this.sessions].filter(([, session]) => session.worktreePath === worktreePath),
-    ].map(([id]) => id);
-    for (const id of ids) this.destroy(id);
-    return ids;
+  endWorktreeSessions(worktreePath: string, delayMs: number, onEnded: (id: string) => void): void {
+    for (const [id, pending] of this.starting) {
+      if (pending.worktreePath !== worktreePath) continue;
+      this.destroy(id);
+      onEnded(id);
+    }
+    const sessions = [...this.sessions.values()].filter((s) => s.worktreePath === worktreePath);
+    const end = () => {
+      for (const session of sessions) {
+        // Exited or closed meanwhile, or already ended by the other removal path.
+        if (this.sessions.get(session.id) !== session) continue;
+        this.destroy(session.id);
+        onEnded(session.id);
+      }
+    };
+    if (delayMs === 0) end();
+    else if (sessions.length > 0) setTimeout(end, delayMs).unref();
   }
 
   /** A moved worktree keeps its sessions, so removing it later still ends them. */

@@ -297,6 +297,12 @@ describe("ending a removed worktree's sessions", () => {
 
   const inWorktree = (worktreePath: string) => ({ cols: 80, rows: 24, cwd: "/tmp", worktreePath });
 
+  const end = (manager: TerminalManager, worktreePath: string, delayMs = 0) => {
+    const ended: string[] = [];
+    manager.endWorktreeSessions(worktreePath, delayMs, (id) => ended.push(id));
+    return ended;
+  };
+
   test("ends the worktree's sessions and no other's", async () => {
     process.env.SHELL = "/bin/sh";
     const manager = createManager();
@@ -305,12 +311,35 @@ describe("ending a removed worktree's sessions", () => {
     await manager.ensureSpawned(b, inWorktree("/wt/a"));
     await manager.ensureSpawned(other, inWorktree("/wt/a-other"));
 
-    expect(manager.destroyWorktree("/wt/a").toSorted()).toEqual([a, b].toSorted());
+    expect(end(manager, "/wt/a").toSorted()).toEqual([a, b].toSorted());
 
     expect(manager.get(a)).toBeUndefined();
     expect(manager.get(b)).toBeUndefined();
     expect(manager.get(other)).toBeDefined();
-    expect(manager.destroyWorktree("/wt/a")).toEqual([]);
+    expect(end(manager, "/wt/a")).toEqual([]);
+  });
+
+  test("with a delay, ends them later, and leaves a new session at the same path", async () => {
+    process.env.SHELL = "/bin/sh";
+    const manager = createManager();
+    const [old, closed, recreated] = [
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+    ];
+    await manager.ensureSpawned(old, inWorktree("/wt/a"));
+    await manager.ensureSpawned(closed, inWorktree("/wt/a"));
+
+    const ended = end(manager, "/wt/a", 50);
+    expect(ended).toEqual([]);
+    expect(manager.get(old)).toBeDefined();
+
+    manager.destroy(closed);
+    await manager.ensureSpawned(recreated, inWorktree("/wt/a"));
+    await until(() => manager.get(old) === undefined);
+
+    expect(ended).toEqual([old]);
+    expect(manager.get(recreated)).toBeDefined();
   });
 
   test("a shell still waiting for its environment never starts", async () => {
@@ -323,7 +352,7 @@ describe("ending a removed worktree's sessions", () => {
     const id = crypto.randomUUID();
     const started = manager.ensureSpawned(id, inWorktree("/wt/a"));
 
-    expect(manager.destroyWorktree("/wt/a")).toEqual([id]);
+    expect(end(manager, "/wt/a", 60_000)).toEqual([id]);
     release();
     await started;
 
@@ -355,7 +384,7 @@ describe("ending a removed worktree's sessions", () => {
 
     manager.retargetWorktree("/wt/before", "/wt/after");
 
-    expect(manager.destroyWorktree("/wt/before")).toEqual([]);
-    expect(manager.destroyWorktree("/wt/after")).toEqual([id]);
+    expect(end(manager, "/wt/before")).toEqual([]);
+    expect(end(manager, "/wt/after")).toEqual([id]);
   });
 });

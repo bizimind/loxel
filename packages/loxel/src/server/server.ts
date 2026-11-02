@@ -599,7 +599,7 @@ async function reconcileWorktrees(project: ProjectState): Promise<void> {
 
   for (const wtPath of removed) {
     log.info(`Worktree removed, cleaning up: ${wtPath}`);
-    completeWorktreeRemoval(wtPath);
+    completeWorktreeRemoval(wtPath, config.removedWorktreeTerminalDelayMs);
   }
   for (const { from, to } of moved) {
     log.info(`Worktree moved: ${from} -> ${to}`);
@@ -630,15 +630,20 @@ function releaseWorktreeResources(wtPath: string): void {
  * Everything a removed worktree leaves behind, whichever way it was removed: in the app, after
  * `executeRemove` returned, or by `wt` or `git` anywhere else, on the event that follows. Runs only
  * once the worktree is unregistered, and running it twice is harmless, since an in-app removal also
- * causes that event.
+ * causes that event. `terminalDelayMs` is for a removal seen from outside the app, which may be
+ * running in one of these terminals with its branch still to delete, or a command chained after it.
  */
-function completeWorktreeRemoval(wtPath: string): void {
+function completeWorktreeRemoval(wtPath: string, terminalDelayMs = 0): void {
   releaseWorktreeResources(wtPath);
-  for (const id of terminalManager.destroyWorktree(wtPath)) {
+  terminalManager.endWorktreeSessions(wtPath, terminalDelayMs, (id) => {
     const owner = terminalOwners.get(id);
     if (owner) clients.get(owner)?.terminals.delete(id);
     terminalOwners.delete(id);
-  }
+    // Anything it raised during the delay; the rest went with the worktree.
+    if (notificationStore.dismissByPanel(id)) {
+      broadcastAll({ type: "notification_panel_dismissed", panelId: id });
+    }
+  });
   for (const panelId of notificationStore.dismissByWorktree(wtPath)) {
     broadcastAll({ type: "notification_panel_dismissed", panelId });
   }

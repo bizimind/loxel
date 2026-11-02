@@ -23,7 +23,7 @@ export {
   transformToBare,
   type RepoType,
 } from "./repo.ts";
-export { git, gitFailure, gitSucceeds, runGit, surviveHangup, type GitResult } from "./run.ts";
+export { git, gitFailure, gitSucceeds, runGit, type GitResult } from "./run.ts";
 export {
   addWorktree,
   canonicalWorktreesDir,

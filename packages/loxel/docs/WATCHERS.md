@@ -89,7 +89,7 @@ Ending terminals and deleting rows cannot be undone, while a missed removal only
 `completeWorktreeRemoval` in [server.ts](../src/server/server.ts) is the one routine both removal paths end in, covering every worktree the project had, subscribed or not:
 
 1. removes the path from each subscriber's subscription set and tears down its Git/file/detached/external watchers and related caches, and deletes its jdtls workspace;
-2. ends its terminal sessions (see [TERMINALS.md](TERMINALS.md#ownership-and-lifetime-in-serverts)) and dismisses their notifications;
+2. ends its terminal sessions, at once for an in-app removal and after a delay otherwise (see [TERMINALS.md](TERMINALS.md#ownership-and-lifetime-in-serverts)) and dismisses their notifications;
 3. deletes its rows from `stores.db` ([worktree-rows.ts](../src/server/worktree-rows.ts)).
 
 It may run twice for an in-app removal, from the route and from the event that follows, or the other way round, and the second run finds nothing to do. A worktree removed while no server was watching has no event: `initializeProject` deletes the rows of any path under the worktrees directory that is neither registered nor on disk, and its jdtls workspace. Removed and added again at one path between two reads goes unnoticed, leaving the old shell running: the path is listed both times, and the safe failure is preferred over guessing.
