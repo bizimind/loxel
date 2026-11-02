@@ -39,7 +39,7 @@ import {
 } from "./java-project-import";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
-import { isRepoTrusted } from "./repo-trust";
+import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 import { isInside } from "./shipped-by-repo";
 import {
@@ -64,6 +64,8 @@ const JAVA_SETTINGS = {
 /** What jdtls itself runs on. A project on an older Java also needs a JDK of its own level. */
 const JDTLS_MIN_JAVA = 25;
 const NO_JDK_REASON = `Java needs JDK ${JDTLS_MIN_JAVA} or newer for its language server. Install one alongside your project's JDK.`;
+const JDK_IN_REPO_REASON =
+  "Java's language server won't run a JDK inside the repository until you trust it.";
 /** Longest a new server waits for the previous one to let go of its workspace directory. */
 const PREVIOUS_SERVER_EXIT_TIMEOUT_MS = 10_000;
 
@@ -280,9 +282,25 @@ export function isJdkInWorktree(home: string, wtPath: string): boolean {
   }
 }
 
-/** Whether one of `runtimes` can run the server. */
-export function canRunJdtls(runtimes: readonly JavaRuntime[]): boolean {
-  return runtimes.some((runtime) => runtime.majorVersion >= JDTLS_MIN_JAVA);
+/** Whether one of `runtimes` can run the server for a worktree. */
+export function canRunJdtls(
+  runtimes: readonly JavaRuntime[],
+  { wtPath, repoTrusted }: Pick<WtLspContext, "wtPath" | "repoTrusted">,
+): boolean {
+  return runtimes.some(
+    (runtime) =>
+      runtime.majorVersion >= JDTLS_MIN_JAVA &&
+      (repoTrusted || !isJdkInWorktree(runtime.path, wtPath)),
+  );
+}
+
+/** What to tell the user when no JDK can run the server for a worktree. */
+export function noJdkReason(
+  runtimes: readonly Pick<JavaRuntime, "majorVersion">[],
+): string {
+  return runtimes.some((runtime) => runtime.majorVersion >= JDTLS_MIN_JAVA)
+    ? JDK_IN_REPO_REASON
+    : NO_JDK_REASON;
 }
 
 /** A JDK that can run the server appeared or went; the first look (`before` null) is neither. */
@@ -355,6 +373,7 @@ export function trustedJavaSettings(
 export class JavaLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
   protected override readonly repoTrustRestriction = "Maven and Gradle projects aren't loaded.";
+  protected override readonly reportsRestrictionAtStart = false;
   // Generated sources are read by jdtls but usually ignored by git.
   protected override readonly watchedIgnoredGlobs = [
     "**/target/generated-sources/**",
@@ -377,6 +396,8 @@ export class JavaLspManager extends WorktreeLspManager {
   /** Each trusted session's import, as the server has reported it so far. */
   private readonly importStates = new Map<WtLspSession, ImportState>();
   private readonly closedSessions = new WeakSet<WtLspSession>();
+  /** By worktree: what to say if no JDK ends up running its server. */
+  private readonly noJdkReasons = new Map<string, string>();
   /** Each trusted session's handling of changed project files, one at a time. */
   private readonly projectFollowers = new WeakMap<WtLspSession, Promise<void>>();
 
@@ -410,9 +431,11 @@ export class JavaLspManager extends WorktreeLspManager {
     this.triggerFiles.set(context.wtPath, await firstJavaFile(context.wtPath));
     const { java, runtimes } = await this.findJdks(context);
     this.runtimeSettings.set(context.wtPath, runtimes);
+    const projects = await findBuildProjects(context.wtPath);
     if (context.repoTrusted) {
-      const projects = await findBuildProjects(context.wtPath);
       this.importPlans.set(context.wtPath, planImport(context.wtPath, projects, buildSpawnEnv()));
+    } else if (projects.dirs.length > 0) {
+      reportRepoRestriction(context.wtPath, this.repoTrustRestriction);
     }
     return resolveBundledJdtls() && java;
   }
@@ -423,11 +446,8 @@ export class JavaLspManager extends WorktreeLspManager {
     repoTrusted,
   }: WtLspContext): Promise<{ java: string | null; runtimes: JavaRuntimeSetting[] }> {
     const [runtimes, chosen] = await Promise.all([listJavaRuntimes(wtPath), getJavaEnv(wtPath)]);
-    const host = runtimes.find(
-      (runtime) =>
-        runtime.majorVersion >= JDTLS_MIN_JAVA &&
-        (repoTrusted || !isJdkInWorktree(runtime.path, wtPath)),
-    );
+    const host = runtimes.find((runtime) => canRunJdtls([runtime], { wtPath, repoTrusted }));
+    this.noJdkReasons.set(wtPath, noJdkReason(runtimes));
     return {
       java: host ? javaExecutable(host.path) : null,
       runtimes: javaRuntimesSetting(runtimes, chosen),
@@ -451,7 +471,9 @@ export class JavaLspManager extends WorktreeLspManager {
     const home = resolveBundledJdtls();
     if (!home) return "The Java language server is missing from this build of Loxel";
     // No server was started, so there is no log of its own to read.
-    if (!this.startedAt.has(context.wtPath)) return NO_JDK_REASON;
+    if (!this.startedAt.has(context.wtPath)) {
+      return this.noJdkReasons.get(context.wtPath) ?? NO_JDK_REASON;
+    }
     const message = latestLogMessage(
       jdtlsConfigurationDir(home),
       this.startedAt.get(context.wtPath) ?? 0,
@@ -599,9 +621,16 @@ export class JavaLspManager extends WorktreeLspManager {
 
   override notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
     super.notifyWatchedFilesChanged(wtPath, paths);
-    if (!paths.some(isProjectFile)) return;
+    const projectFiles = paths.filter(isProjectFile);
+    if (projectFiles.length === 0) return;
     for (const session of this.sessions.values()) {
-      if (session.wtPath !== wtPath || !session.repoTrusted) continue;
+      if (session.wtPath !== wtPath) continue;
+      if (!session.repoTrusted) {
+        if (projectFiles.some((file) => existsSync(file))) {
+          reportRepoRestriction(wtPath, this.repoTrustRestriction);
+        }
+        continue;
+      }
       const previous = this.projectFollowers.get(session) ?? Promise.resolve();
       const next = previous.then(() => this.followProjects(session));
       this.projectFollowers.set(

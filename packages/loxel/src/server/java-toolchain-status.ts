@@ -26,6 +26,7 @@ import {
   onJavaProjectIssueChange,
   reloadJavaProjects,
 } from "./java-project-import";
+import { isRepoTrusted, onRepoTrustChange } from "./repo-trust";
 import { error, json } from "./response-helpers";
 import type { ToolchainStatusModule } from "./toolchain-status-module";
 
@@ -95,20 +96,31 @@ function subscribeJavaStatus(
   listener: (update: Pick<JavaEnvUpdate, "changed">) => void,
 ): () => void {
   let couldRun: boolean | null = null;
+  const check = async (): Promise<boolean> => {
+    const canRun = canRunJdtls(await listJavaRuntimes(wtPath), {
+      wtPath,
+      repoTrusted: isRepoTrusted(wtPath),
+    });
+    const crossed = jdtlsHostCrossed(couldRun, canRun);
+    couldRun = canRun;
+    return crossed;
+  };
   const stopIssues = onJavaProjectIssueChange((changedPath) => {
     if (changedPath === wtPath) listener({ changed: true });
   });
   const stopEnv = subscribeJavaEnv(wtPath, (update) => {
-    void listJavaRuntimes(wtPath).then((runtimes) => {
-      const canRun = canRunJdtls(runtimes);
-      const crossed = jdtlsHostCrossed(couldRun, canRun);
-      couldRun = canRun;
-      listener({ ...update, changed: update.changed || crossed });
+    void check().then((crossed) => listener({ ...update, changed: update.changed || crossed }));
+  });
+  // Trust can decide whether a JDK inside the repository may run the server.
+  const stopTrust = onRepoTrustChange(() => {
+    void check().then((crossed) => {
+      if (crossed) listener({ changed: true });
     });
   });
   return () => {
     stopIssues();
     stopEnv();
+    stopTrust();
   };
 }
 

@@ -361,6 +361,23 @@ describe("stopGradleDaemons", () => {
     await other.exited;
   });
 
+  test("without lsof it stops nothing, and leaves the daemon to its idle timeout", async () => {
+    const registry = dir({ "9.8.2/.keep": "" });
+    const placeholder = path.join(registry, "9.8.2", "held.log");
+    const daemon = holding(placeholder);
+    renameSync(placeholder, path.join(registry, "9.8.2", `daemon-${daemon.pid}.out.log`));
+    const { PATH } = process.env;
+    process.env.PATH = dir();
+    try {
+      await stopGradleDaemons(registry);
+    } finally {
+      process.env.PATH = PATH;
+    }
+    expect(daemon.exitCode).toBeNull();
+    daemon.kill();
+    await daemon.exited;
+  });
+
   test("carries on past a daemon that has already gone", async () => {
     const registry = dir({ "9.8.2/daemon-999999.out.log": "" });
     await stopGradleDaemons(registry);
