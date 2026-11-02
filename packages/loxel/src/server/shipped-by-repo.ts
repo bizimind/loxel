@@ -12,6 +12,7 @@ const log = logger.child("server");
 
 /** `runGit` exit code when git could not be started (missing binary, unusable directory). */
 const GIT_SPAWN_FAILED = -1;
+const GIT_TIMEOUT_MS = 10_000;
 
 // The trust rule for what Loxel runs out of a worktree: a project-provided binary or environment
 // must not be something the repository itself ships, or opening a file would run repository code.
@@ -251,6 +252,9 @@ export async function runGit(
         stdin: "ignore",
         stdout: "pipe",
         stderr: "ignore",
+        // A stalled git would otherwise hold up its caller, a save among them. A killed one exits
+        // non-zero, which callers take as no answer.
+        timeout: GIT_TIMEOUT_MS,
       }),
     );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
