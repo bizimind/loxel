@@ -41,11 +41,16 @@ class FakeEditor {
   onDidChangeCursorPosition = () => ({ dispose() {} });
   onDidDispose = () => {};
   addAction = () => ({ dispose() {} });
-  focus = () => {};
+  focus = () => {
+    focusCalls += 1;
+  };
   dispose = () => {};
 }
 
 let editor: FakeEditor | null = null;
+let focusCalls = 0;
+/** The content of each model at its creation, which is what `didOpen` sends. */
+let createdWith: string[] = [];
 mock.module("monaco-editor", () => ({
   Uri: { from: (parts: { path: string }) => parts },
   KeyMod: { CtrlCmd: 0, Shift: 0 },
@@ -54,7 +59,10 @@ mock.module("monaco-editor", () => ({
   editor: {
     EditorOption: {},
     getModel: () => null,
-    createModel: (content: string) => new FakeModel(content),
+    createModel: (content: string) => {
+      createdWith.push(content);
+      return new FakeModel(content);
+    },
     create: (_container: unknown, options: { model: FakeModel; readOnly: boolean }) => {
       editor = new FakeEditor(options);
       return editor;
@@ -96,7 +104,7 @@ const panelApi = {
   onDidGroupChange: () => ({ dispose() {} }),
 } as unknown as DockviewPanelApi;
 
-let fileResponse: () => Response;
+let fileResponse: () => Response | Promise<Response>;
 let writes: { path: string; content: string }[] = [];
 const realFetch = globalThis.fetch;
 
@@ -117,6 +125,8 @@ function mountedEditor(): FakeEditor {
 
 beforeEach(() => {
   editor = null;
+  focusCalls = 0;
+  createdWith = [];
   saveAction = null;
   writes = [];
   fileResponse = () => Response.json({ content: "REAL" });
@@ -139,6 +149,24 @@ afterEach(() => {
 });
 
 describe("CodeEditorPanel content load", () => {
+  test("the model waits for the file's content, then the editor takes focus", async () => {
+    const { promise: response, resolve: respond } = Promise.withResolvers<Response>();
+    let requested = false;
+    fileResponse = () => {
+      requested = true;
+      return response;
+    };
+    renderPanel();
+
+    await waitFor(() => expect(requested).toBe(true));
+    expect(createdWith).toEqual([]);
+    expect(editor).toBeNull();
+
+    respond(Response.json({ content: "REAL" }));
+    await waitFor(() => expect(createdWith).toEqual(["REAL"]));
+    expect(focusCalls).toBe(1);
+  });
+
   test("a failed load shows Retry and cannot be edited or saved over the file", async () => {
     fileResponse = () => new Response("boom", { status: 500 });
     const { unmount } = renderPanel();
