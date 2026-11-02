@@ -205,11 +205,6 @@ export class TerminalSession {
       });
   }
 
-  /** The shell's process ID. */
-  get pid(): number {
-    return this.proc.pid;
-  }
-
   /** Total output bytes produced so far. */
   get outputOffset(): number {
     return this.ring.end;
