@@ -455,7 +455,10 @@ export function readDotnetToolManifests(dir: string): Record<string, unknown>[] 
 
 /** Whether a manifest's tool entry gives `dotnet tool run` this command. */
 export function toolClaimsCommand(tool: unknown, command: string): boolean {
-  return isRecord(tool) && Array.isArray(tool.commands) && tool.commands.includes(command);
+  if (!isRecord(tool) || !Array.isArray(tool.commands)) return false;
+  // dotnet matches a manifest's command names without regard to case.
+  const wanted = command.toLowerCase();
+  return tool.commands.some((name) => typeof name === "string" && name.toLowerCase() === wanted);
 }
 
 /**
