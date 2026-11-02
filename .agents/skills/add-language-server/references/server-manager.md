@@ -37,7 +37,7 @@ Python runs basedpyright and ruff on the same `python` models. Each server is a 
 - Decide which server owns each overlapping feature and turn it off in the other: `suppressedFeatures` for capabilities (ruff's formatting), the server's own settings for diagnostics (ruff's `showSyntaxErrors: false`, since basedpyright reports syntax errors). Leave features that don't compete (ruff's organize imports, which basedpyright lacks).
 - A second server on JavaScript or TypeScript sets `keepsEditorUris` on its client and translates URIs in its manager, since those models belong to the TypeScript server's `loxel://HEAD/` scheme. A project's own linter extends `ProjectLinterLspManager`, which does this and holds the connection until the linter can run (ESLint, oxlint).
 
-A manager that alone can tell whether anything is held back until trust sets `reportsRestrictionAtStart` to false and calls `reportRepoRestriction` itself (`ProjectLinterLspManager`).
+A manager that alone can tell whether anything is held back until trust sets `reportsRestrictionAtStart` to false and calls `reportRepoRestriction` itself (`ProjectLinterLspManager`, clangd).
 
 ## Project-provided binaries
 

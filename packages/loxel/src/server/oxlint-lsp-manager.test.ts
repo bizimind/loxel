@@ -328,9 +328,9 @@ describe("in a trusted repository", () => {
     write(".oxlintrc.json");
     install();
     const socket = await start();
-    const { params } = received(socket).find((frame) => frame.method === "initialize") as Frame;
-    const capabilities = params?.capabilities as { workspace?: object };
-    expect(capabilities.workspace).toBeUndefined();
+    const [initialize] = received(socket);
+    expect(initialize?.method).toBe("initialize");
+    expect(initialize?.params?.capabilities).toEqual({});
   });
 
   test("revoking trust stops the server", async () => {
