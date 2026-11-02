@@ -1,7 +1,8 @@
 /**
  * Proves at the socket level that the bundled Eclipse JDT LS makes no network requests when it runs
  * behind the real `loxel-server`, through opening files, every command a user can start and reading
- * JDK and dependency sources, and that with project import off it runs nothing from the project and leaves the project's files alone.
+ * JDK and dependency sources, and that with project import off it runs nothing from the project and
+ * leaves the project's files alone.
  * macOS only. Run it after changing the server's pin, its runtime or its manager; it exits non-zero
  * on any outbound attempt.
  *
@@ -786,7 +787,7 @@ async function exerciseFeatures(): Promise<void> {
  * Library sources: go to definition on JDK and dependency classes, with and without attached source,
  * then read each document, open it and use it the way a read-only tab does.
  */
-async function exerciseLibrarySources(): Promise<void> {
+async function exerciseLibrarySources({ trusted }: { trusted: boolean }): Promise<void> {
   const root = path.join(work, "libraries");
   const app = `package app;
 
@@ -821,6 +822,10 @@ public class App {
     .cwd(jars)
     .quiet();
   await gitInit(root);
+  if (trusted) {
+    await post("/projects", { path: root });
+    await post("/repo-trust", { worktreePath: root, trusted: true });
+  }
 
   const client = await startClient(root);
   const textDocument = { uri: client.uri("src/app/App.java") };
@@ -1105,10 +1110,11 @@ try {
   await waitForServer(`http://127.0.0.1:${port}/`);
   if (values.trusted) {
     await exerciseTrusted();
+    await exerciseLibrarySources({ trusted: true });
   } else {
     const jar = await buildProcessorJar();
     await exerciseFeatures();
-    await exerciseLibrarySources();
+    await exerciseLibrarySources({ trusted: false });
     if (!values.control) await exerciseProjects(jar);
   }
 } finally {
