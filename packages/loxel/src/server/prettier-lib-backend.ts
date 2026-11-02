@@ -1,80 +1,175 @@
-import { join } from "node:path";
+import type { Subprocess } from "bun";
 
-import type { FormatterBackend } from "./formatter-backends";
+import { isRecord } from "@/lib/is-record";
+
+import {
+  FORMAT_REJECTED,
+  type FormatterBackend,
+  type FormatterResult,
+  killProcessGroup,
+} from "./formatter-backends";
+import { findProjectPackage, projectToolPath } from "./js-formatter";
 import { logger } from "./logger";
+import { getNodeEnv } from "./node-env";
+import { isRepoTrusted } from "./repo-trust";
+import { buildSpawnEnv } from "./shell-env";
+import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("format");
 
-interface PrettierModule {
-  format(source: string, options: Record<string, unknown>): Promise<string>;
-  resolveConfig(
-    filepath: string,
-    options?: { editorconfig?: boolean; useCache?: boolean },
-  ): Promise<Record<string, unknown> | null>;
+const FORMAT_TIMEOUT_MS = 5_000;
+/** A host holds a Node process per subproject, so one nobody saves in goes away. */
+const IDLE_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Runs in the worktree's Node, from `/` so that a version manager's shim for `node` reads no pin
+ * file of the project, then moves into the project, as prettier finds a config's plugins from the
+ * working directory. `.editorconfig` too, as the prettier CLI does (the library's default is to
+ * ignore it). Uncached: prettier never notices config edits, and the editor follows them right away.
+ */
+const HOST_SOURCE = `
+const prettier = require(process.argv[1]);
+process.chdir(process.argv[2]);
+process.on("disconnect", () => process.exit(0));
+process.on("message", async ({ id, content, filePath }) => {
+  try {
+    const config = (await prettier.resolveConfig(filePath, { editorconfig: true, useCache: false })) ?? {};
+    process.send({ id, formatted: await prettier.format(content, { ...config, filepath: filePath }) });
+  } catch (err) {
+    process.send({ id, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+`;
+
+interface PendingRequest {
+  resolve: (result: FormatterResult) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * Formats with a project's own prettier through its library API, in a Node process of its own: it
+ * loads the project's code and config, which a server could not unload when the repository stops
+ * being trusted. It stays running for speed, as starting prettier per save costs about 200 ms.
+ */
 export class PrettierLibBackend implements FormatterBackend {
-  private prettier: PrettierModule | null = null;
-  private loadPromise: Promise<PrettierModule | null> | null = null;
-  private loadFailed = false;
+  private proc: Subprocess | null = null;
+  private starting: Promise<Subprocess | null> | null = null;
+  private pending = new Map<number, PendingRequest>();
+  private requestId = 0;
+  private dead = false;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private worktreePath: string) {}
+  constructor(
+    private readonly dir: string,
+    private readonly wtPath: string,
+  ) {}
 
-  async format(content: string, filePath: string): Promise<string | null> {
-    const prettier = this.prettier ?? (await this.loadPrettier());
-    if (!prettier) return null;
-
-    try {
-      // `.editorconfig` too, as the prettier CLI does (the library's default is to ignore it).
-      // Uncached: prettier never notices config edits, and the editor follows them right away.
-      const config =
-        (await prettier.resolveConfig(filePath, { editorconfig: true, useCache: false })) ?? {};
-      return await prettier.format(content, { ...config, filepath: filePath });
-    } catch (err) {
-      log.warn("Prettier format failed", {
-        filePath,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
+  async format(content: string, filePath: string): Promise<FormatterResult> {
+    this.starting ??= this.start();
+    const proc = await this.starting;
+    if (!proc || this.dead) return null;
+    this.resetIdleTimer();
+    return new Promise((resolve) => {
+      const id = ++this.requestId;
+      const timer = setTimeout(() => {
+        log.warn("Prettier timed out", { filePath });
+        this.settle(id, null);
+      }, FORMAT_TIMEOUT_MS);
+      this.pending.set(id, { resolve, timer });
+      try {
+        proc.send({ id, content, filePath });
+      } catch (err) {
+        log.warn("Could not reach the prettier process", { filePath, error: err });
+        this.settle(id, null);
+      }
+    });
   }
 
   isAlive(): boolean {
-    return !this.loadFailed;
+    return !this.dead;
   }
 
   destroy(): void {
-    this.prettier = null;
-    this.loadPromise = null;
-    this.loadFailed = false;
+    this.dead = true;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.settleAll();
+    if (this.proc) killProcessGroup(this.proc.pid);
+    this.proc = null;
   }
 
-  private async loadPrettier(): Promise<PrettierModule | null> {
-    if (this.loadPromise) return this.loadPromise;
-    this.loadPromise = this.doLoad();
-    return this.loadPromise;
-  }
-
-  private async doLoad(): Promise<PrettierModule | null> {
-    const prettierPath = join(this.worktreePath, "node_modules", "prettier");
-    try {
-      const mod: unknown = await import(prettierPath);
-      if (typeof mod !== "object" || mod === null || !("format" in mod)) {
-        log.warn("Prettier module missing format function", { worktreePath: this.worktreePath });
-        this.loadFailed = true;
-        return null;
-      }
-      const prettier = mod as PrettierModule;
-      this.prettier = prettier;
-      log.info("Loaded prettier library backend", { worktreePath: this.worktreePath });
-      return prettier;
-    } catch (err) {
-      log.warn("Failed to load prettier from node_modules", {
-        worktreePath: this.worktreePath,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      this.loadFailed = true;
+  private async start(): Promise<Subprocess | null> {
+    const packageDir = findProjectPackage("prettier", this.dir, this.wtPath);
+    const nodePath = (await getNodeEnv(this.wtPath)).env?.nodePath;
+    const PATH = await projectToolPath(this.dir, this.wtPath);
+    // Asked again here: nothing else separates the save's detection from this spawn.
+    if (!packageDir || !nodePath || this.dead || !isRepoTrusted(this.wtPath)) {
+      this.dead = true;
       return null;
     }
+    try {
+      const proc = measureSpawn("prettier", () =>
+        Bun.spawn([nodePath, "-e", HOST_SOURCE, packageDir, this.dir], {
+          cwd: "/",
+          env: { ...buildSpawnEnv(), PATH, MISE_NOT_FOUND_AUTO_INSTALL: "0" },
+          stdin: "ignore",
+          // A project's config may print; replies have their own channel.
+          stdout: "ignore",
+          // Waiting on a pipe here would let a child of the project's code hold up exit detection.
+          stderr: "inherit",
+          detached: true,
+          serialization: "json",
+          ipc: (reply: unknown) => this.handleReply(reply),
+        }),
+      );
+      this.proc = proc;
+      void this.watchExit(proc);
+      log.info("Started prettier process", { dir: this.dir });
+      return proc;
+    } catch (err) {
+      log.warn("Could not start the prettier process", { dir: this.dir, error: err });
+      this.dead = true;
+      return null;
+    }
+  }
+
+  private async watchExit(proc: Subprocess): Promise<void> {
+    const code = await proc.exited;
+    if (this.proc !== proc) return;
+    log.warn("Prettier process exited", { dir: this.dir, code });
+    this.dead = true;
+    this.proc = null;
+    this.settleAll();
+  }
+
+  private handleReply(reply: unknown): void {
+    if (!isRecord(reply) || typeof reply.id !== "number") return;
+    if (typeof reply.formatted === "string") {
+      this.settle(reply.id, reply.formatted);
+      return;
+    }
+    // Typically a syntax error in the buffer; the process is fine and the CLI would fail the same.
+    log.warn("Prettier format failed", { dir: this.dir, error: reply.error });
+    this.settle(reply.id, FORMAT_REJECTED);
+  }
+
+  private settle(id: number, result: FormatterResult): void {
+    const request = this.pending.get(id);
+    if (!request) return;
+    clearTimeout(request.timer);
+    this.pending.delete(id);
+    request.resolve(result);
+  }
+
+  private settleAll(): void {
+    for (const id of [...this.pending.keys()]) this.settle(id, null);
+  }
+
+  private resetIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      if (this.pending.size > 0) this.resetIdleTimer();
+      else this.destroy();
+    }, IDLE_TIMEOUT_MS);
+    this.idleTimer.unref();
   }
 }

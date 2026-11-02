@@ -235,16 +235,17 @@ async function isExecutable(filePath: string): Promise<boolean> {
 }
 
 /**
- * `node --version`, for a `node` no manager's directory explains. Asked from the home directory:
- * a version-manager shim answers for the directory it runs in, by acting on what that directory's
- * files say, which can include downloading a pinned version. Pins were matched before this, so
- * what is left to learn is the user's own default. A real `node` answers the same anywhere.
+ * `node --version`, for a `node` no manager's directory explains. Asked from the filesystem root:
+ * a version-manager shim answers for the directory it runs in, by acting on what that directory
+ * and its parents' files say, which can include downloading a pinned version, and a pin can sit in
+ * the home directory too. Pins were matched before this, so what is left to learn is the user's own
+ * default. A real `node` answers the same anywhere.
  */
 async function readNodeVersion(nodePath: string, env: SpawnEnv): Promise<string | null> {
   try {
     const proc = measureSpawn("node-version", () =>
       Bun.spawn([nodePath, "--version"], {
-        cwd: env.HOME || homedir(),
+        cwd: "/",
         env: { ...env, MISE_NOT_FOUND_AUTO_INSTALL: "0" },
         stdin: "ignore",
         stdout: "pipe",

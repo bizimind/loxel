@@ -1,6 +1,6 @@
 ---
 title: JavaScript
-description: JavaScript projects, jsconfig.json, type checking plain JavaScript, the Node version, and tool configuration files.
+description: JavaScript projects, jsconfig.json, type checking plain JavaScript, format on save, the Node version, and tool configuration files.
 order: 13.5
 ---
 
@@ -73,6 +73,26 @@ In a JavaScript project:
 ## Scripts without an extension
 
 A file with no extension gets the same features when its first line names a JavaScript or TypeScript runner, as in `bin/www`: `#!/usr/bin/env node`, `#!/usr/bin/env -S node --no-warnings`, `nodejs` and `bun` open as JavaScript, and `tsx` and `ts-node`, including through `npx`, as TypeScript. A file association in [settings](/docs/reference-env-files-cli-settings) works for any other name.
+
+---
+
+## Format on save
+
+Loxel formats with the tool your project uses, found from the file's folder upward, so each project in a monorepo can use its own. The closest folder with a sign of a formatter decides:
+
+| Formatter | Detected from                                                                          | Formats                                                             |
+| --------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Biome     | `biome.json` or `biome.jsonc`, or an `@biomejs/biome` dependency                       | JS/TS, JSON, CSS, GraphQL                                           |
+| Prettier  | A Prettier config file, a `prettier` key in `package.json`, or a `prettier` dependency | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, Svelte, Astro, GraphQL |
+| oxfmt     | An `.oxfmtrc.*` file or an `oxfmt` dependency                                          | The same as Prettier without Svelte and Astro, plus TOML            |
+
+In one folder, a config file beats a dependency, and among them Biome comes before Prettier, then oxfmt. A tool only counts for the files it can format, so with Biome and Prettier side by side, Biome formats your code and Prettier your markdown and YAML. A `biome.json` with `"formatter": { "enabled": false }` is for linting only and doesn't select Biome. With only a `prettier` dependency and no config, files get Prettier's defaults.
+
+The project's own install runs, a subproject's before the root's, under the [Node version](#node-version) of the worktree. Without one, Loxel uses the tool on your `PATH`.
+
+These tools run code from the project, so they wait for you to [trust the repository](/docs/repository-trust): Prettier and oxfmt because their config files and plugins are code, and a project's own Biome because it is installed by the project. Until then the file saves unformatted and Loxel tells you, except that a Biome on your `PATH` still runs, since Biome's config is only data. If you stop trusting a repository, its formatters stop right away.
+
+If Biome or Deno would start through a version manager's shim, Loxel skips formatting and says so. Add the tool's own directory to your `PATH`.
 
 ---
 
