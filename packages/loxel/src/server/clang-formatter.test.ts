@@ -9,6 +9,7 @@ import "@/test/temp-state-dir";
 
 import { clangFormatter } from "./clang-formatter";
 import { FormatService } from "./format-service";
+import { setRepoTrusted } from "./repo-trust";
 
 /** Set to a real binary to compare the ignore rules against it; CI has none. */
 const REAL_CLANG_FORMAT = process.env.LOXEL_TEST_CLANG_FORMAT;
@@ -151,6 +152,8 @@ describe("clangFormatter spawning", () => {
 
   test("uses nothing from the worktree, on PATH or in node_modules/.bin", async () => {
     await addFiles({ ".clang-format": "" });
+    // Trusted, where the default would put `node_modules/.bin` first on `PATH`.
+    setRepoTrusted(wt, true);
     const repoBin = join(wt, "bin");
     await installFake(repoBin);
     await installFake(join(wt, "node_modules", ".bin"));
