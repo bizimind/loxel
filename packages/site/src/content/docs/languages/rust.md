@@ -42,7 +42,7 @@ Click the item, or run **Rust: Select Toolchain** from the command palette (`Cmd
 - **Use automatic detection** goes back to the order above.
 - The rest of the list is every toolchain you have installed with rustup. Without rustup there is nothing else to choose.
 
-The choice is saved for that worktree and survives restarts, and it takes precedence over a toolchain file. It doesn't change what `cargo` runs in your own terminals. If the chosen toolchain is later removed, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
+The choice is saved for that worktree and survives restarts, and it takes precedence over a toolchain file. New terminals in the worktree use it too, so `cargo` and `rustc` there run the chosen toolchain. A terminal that is already open keeps the toolchain it started with, so open a new one after changing the choice. A `RUSTUP_TOOLCHAIN` your shell's startup files export still wins in a terminal, since they run after Loxel starts the shell. If the chosen toolchain is later removed, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
 
 ---
 
