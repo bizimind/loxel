@@ -22,8 +22,11 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 | Close panel                        | `Cmd+W`                                                      |
 | Reopen closed tab                  | `Cmd+Shift+T`                                                |
 | Rename the active tab              | `Cmd+Shift+R`                                                |
+| Hard refresh a browser tab         | `Cmd+Shift+R` while the browser tab has focus                |
 | Next / previous tab                | `Cmd+Shift+]` / `Cmd+Shift+[`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Focus panel 1–9                    | `Cmd+1` – `Cmd+9`                                            |
+
+`Cmd+Shift+R` depends on focus: in a browser tab, its page or its toolbar, it reloads the page and bypasses the cache; anywhere else it renames the active tab. Settings > Keybindings lists them as **Hard Refresh Browser Tab** and **Rename Tab**, and remapping one leaves the other on `Cmd+Shift+R`.
 
 ---
 

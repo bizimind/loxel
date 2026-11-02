@@ -7,14 +7,14 @@
 
 import { useEffect } from "react";
 
-import { onFindTargetsChange } from "@/lib/find-targets";
+import { onFocusTargetsChange } from "@/lib/focus-target-registry";
 import type { KeyCombo } from "@/store/keybindings/key-combo";
 import { eventToKeyCombo, getBindingSteps, isModifierKey } from "@/store/keybindings/key-combo";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import {
   cancelPendingChord,
+  enabledActionOf,
   hasPendingChord,
-  isActionEnabledHere,
   resolveKeystroke,
   usePendingChordStore,
 } from "@/store/keybindings/pending-chord";
@@ -36,8 +36,8 @@ function isTextInput(target: EventTarget | null): boolean {
  */
 function firstKeystrokes(): string[] {
   const firstSteps = new Set<string>();
-  for (const [binding, actionId] of useKeybindingStore.getState().lookup) {
-    if (actionId.startsWith("tree.") || !isActionEnabledHere(actionId)) continue;
+  for (const [binding, actions] of useKeybindingStore.getState().lookup) {
+    if (!enabledActionOf(actions)) continue;
     firstSteps.add(getBindingSteps(binding)[0]!);
   }
   return [...firstSteps];
@@ -107,7 +107,7 @@ export function useKeybindings(): void {
     // blur, by when activeElement is the webview.
     const offWebviewFocused = window.electronAPI?.onWebviewFocused?.(syncWebviewInterception);
     const syncAfterFocusLeaves = () => setTimeout(syncWebviewInterception, 0);
-    const offFindTargets = onFindTargetsChange(syncWebviewInterception);
+    const offFocusTargets = onFocusTargetsChange(syncWebviewInterception);
     syncWebviewInterception();
 
     // Capture phase ensures this fires before component-level handlers
@@ -125,7 +125,7 @@ export function useKeybindings(): void {
       window.removeEventListener("blur", syncAfterFocusLeaves);
       offWebviewKeystroke?.();
       offWebviewFocused?.();
-      offFindTargets();
+      offFocusTargets();
       offLookup();
       offChord();
     };
