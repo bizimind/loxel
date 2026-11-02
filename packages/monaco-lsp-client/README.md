@@ -25,6 +25,8 @@ Forked from [`@vscode/monaco-lsp-client`](https://github.com/microsoft/monaco-ed
 - Document URIs are sent percent-encoded (`Uri.toString()`, as servers write them, where upstream skips encoding), and URIs from the server are matched to models after `Uri.parse(...).toString()`, since servers differ in what they escape
 - Markdown from the server (completion and signature-help documentation, hover contents, inlay-hint tooltips) is rendered untrusted, so command links and other trusted-only markdown are not executed
 - Document sync honors the negotiated `TextDocumentSyncKind`: `Full` sends the whole text, `None` sends no `didChange`, `Incremental` sends deltas
+- Text sync registers first, from the initialize response and within a `client/registerCapability` request, so existing models get `didOpen` before Monaco can ask a new provider about them
+- A dynamic registration under `textDocument/semanticTokens`, the spec's method, registers semantic tokens, and one the client does not recognize is skipped with a warning, so it does not cost the others in that request
 - Completion declares `snippetSupport` and `resolveSupport` for `additionalTextEdits`, so servers may send snippets and compute the edits an item adds (auto-imports) only on `completionItem/resolve`
 - Completion lists propagate the server's `isIncomplete` flag so Monaco re-requests as the user types, and completion and signature-help requests are skipped, or their results dropped, once Monaco cancels them
 
