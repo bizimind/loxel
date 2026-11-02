@@ -366,6 +366,28 @@ describe("the pinned jar from the build's cache", () => {
     expect(content).toBe(`${wt}\n`);
   });
 
+  test("the java that ran a cached jar stays an ordinary command for a manual override", async () => {
+    const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
+    process.env.PATH = "/usr/bin:/bin";
+    const home = await installJdk("jdk", true);
+    process.env.JAVA_HOME = home;
+    await cacheFormatterInMaven("1.22.0");
+    expect((await format(wt)).content).toContain("formatted on jdk");
+    await write(join(home, "bin", "java"), "#!/bin/sh\npwd\n", 0o755);
+    const { content } = await service.format("class A{}", join(wt, "src/main/java/A.java"), wt, {
+      ...DEFAULT_FORMATTING_SETTINGS,
+      overrides: [
+        {
+          id: "java",
+          extensions: "java",
+          command: join(home, "bin", "java"),
+          args: "-jar tool.jar",
+        },
+      ],
+    });
+    expect(content).toBe(`${wt}\n`);
+  });
+
   test("a cache inside the worktree is not used", async () => {
     const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
     process.env.PATH = "/usr/bin:/bin";

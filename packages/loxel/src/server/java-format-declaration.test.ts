@@ -559,10 +559,10 @@ describe("the nearest declaration decides", () => {
     const pom = join(wt ?? "", "pom.xml");
     await writeFile(
       pom,
-      spotlessPom("<googleJavaFormat><version>1.23.0.1</version></googleJavaFormat>"),
+      spotlessPom("<googleJavaFormat><version>1.23.0</version></googleJavaFormat>"),
     );
     expect(findJavaFormatDeclaration(join(wt ?? "", "src"), wt ?? "")).toMatchObject({
-      pin: "1.23.0.1",
+      pin: "1.23.0",
     });
   });
 });
@@ -669,6 +669,24 @@ describe("which files a declaration formats", () => {
   test("Settings, which names no file, still lists the formatter", async () => {
     const script = gradle("target javaGlobs");
     expect(await declared({ "build.gradle": script })).toMatchObject({ pin: "1.22.0" });
+  });
+
+  test("a skip set to false leaves the plugin on", async () => {
+    const PROPERTY_SKIP = ["$", "{fmt.skip}"].join("");
+    const dependency =
+      "<dependencies><dependency><artifactId>google-java-format</artifactId><version>1.30.0</version></dependency></dependencies>";
+    const pom = (skip: string) =>
+      fmtPom("com.spotify.fmt", `<configuration><skip>${skip}</skip></configuration>${dependency}`);
+    expect(await inScope({ "pom.xml": pom("false") }, "src/main/java/A.java")).toBe(true);
+    await clean();
+    expect(await inScope({ "pom.xml": pom("true") }, "src/main/java/A.java")).toBe(false);
+    await clean();
+    expect(await inScope({ "pom.xml": pom("$" + "{fmt.skip}") }, "src/main/java/A.java")).toBe(
+      false,
+    );
+    await clean();
+    const spotless = spotlessPom(GJF).replace("<java>", "<skip>false</skip><java>");
+    expect(await inScope({ "pom.xml": spotless }, "src/main/java/A.java")).toBe(true);
   });
 
   test("the fmt plugin's settings that move its files format nothing", async () => {

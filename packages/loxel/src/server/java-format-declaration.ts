@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative, sep } from "node:path";
 
@@ -163,18 +163,21 @@ function dirSignal(dir: string): BuildSignal | null {
   );
 }
 
-const signalCache = new Map<string, { fingerprint: string; signal: BuildSignal | null }>();
+const signalCache = new Map<string, { fingerprint: bigint | number; signal: BuildSignal | null }>();
 const MAX_CACHED_SIGNALS = 1_000;
 
-/** `parse(path)`, kept while the file's size and mtime stay: this runs on every save. */
+/**
+ * `parse(path)`, kept while the file's content stays. This runs on every save, when reading is cheap
+ * and parsing less so. A size and mtime would miss a same-size edit within one clock tick.
+ */
 function cachedByFile(
   path: string,
   parse: (path: string) => BuildSignal | null,
   variant = "",
 ): BuildSignal | null {
-  const info = statSync(path, { throwIfNoEntry: false });
-  if (!info) return null;
-  const fingerprint = `${info.size}:${info.mtimeMs}`;
+  const text = readText(path);
+  if (!text) return null;
+  const fingerprint = Bun.hash(text);
   const key = `${path}\0${variant}`;
   const cached = signalCache.get(key);
   if (cached?.fingerprint === fingerprint) return cached.signal;
@@ -265,7 +268,7 @@ function spotlessMavenSignal(plugin: string): BuildSignal | null {
   // A property here could turn out to be any value; only versions are worth following that far.
   if (MAVEN_OPTIONS.some((name) => setting(name)?.includes("$"))) return UNREADABLE_OPTION_NOTICE;
   const customImportOrder = xmlElement(java, "importOrder") !== null;
-  const scope = xmlElement(plugin, "skip") === "true" ? "unreadable" : mavenScope(java);
+  const scope = isOn(xmlElement(plugin, "skip")) ? "unreadable" : mavenScope(java);
   if (google !== null) {
     return {
       kind: "formatter",
@@ -310,7 +313,7 @@ function fmtMavenSignal(plugin: string): BuildSignal {
     kind: "formatter",
     tool: GOOGLE_JAVA_FORMAT,
     version,
-    scope: FMT_SCOPE_SETTINGS.some((name) => xmlElement(plugin, name) !== null)
+    scope: FMT_SCOPE_SETTINGS.some((name) => isOn(xmlElement(plugin, name)))
       ? "unreadable"
       : { includes: MAVEN_SOURCES, excludes: [], inherited: true, excludeBuildDir: false },
     flags: [
@@ -323,6 +326,11 @@ function fmtMavenSignal(plugin: string): BuildSignal {
         : [REFLOW]),
     ],
   };
+}
+
+/** Whether a setting is present as anything but `false`: on, a path, or a property it may turn on. */
+function isOn(value: string | null): boolean {
+  return value !== null && value.toLowerCase() !== "false";
 }
 
 /** The plugin's `<version>`, before its configuration and dependencies can hold another. */

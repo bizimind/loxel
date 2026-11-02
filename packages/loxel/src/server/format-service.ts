@@ -64,6 +64,8 @@ interface DetectedFormatter {
   backendToolDir?: string;
   /** See {@link FileFormatter.prepare}. */
   prepare?: FileFormatter["prepare"];
+  /** See {@link FileFormatter.spawn}. */
+  spawn?: FileFormatter["spawn"];
 }
 
 interface DetectionCache {
@@ -171,7 +173,7 @@ export class FormatService {
     if (fmt.backendMode !== "command") {
       return this.formatWithBackend(fmt, content, filePath, worktreePath);
     }
-    return this.runFormatter(fmt.command, fmt.args, content, filePath, worktreePath);
+    return this.runFormatter(fmt.command, fmt.args, content, filePath, worktreePath, fmt.spawn);
   }
 
   /**
@@ -377,11 +379,11 @@ export class FormatService {
     content: string,
     filePath: string,
     worktreePath: string | undefined,
+    spawn?: FormatterSpawnOptions,
   ): Promise<FormatResult> {
     const ext = extractExtension(filePath) ?? "";
-    const options = worktreePath
-      ? await this.spawnOptions(command, ext, filePath, worktreePath)
-      : {};
+    const options =
+      spawn ?? (worktreePath ? await this.spawnOptions(command, ext, filePath, worktreePath) : {});
     if (options.skip) {
       log.info("Language module skipped the formatter", { command, filePath });
       return { content: null, notice: options.skip.notice };

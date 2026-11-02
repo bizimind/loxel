@@ -18,6 +18,8 @@ export interface FileFormatter {
    * tool's version: runs once per save, before spawning, and its result is what runs or declines.
    */
   prepare?(): Promise<FileFormatter | FormatterDecline>;
+  /** How to spawn this formatter, in place of the module's `spawnOptions` for its command. */
+  spawn?: FormatterSpawnOptions;
 }
 
 /**

@@ -239,13 +239,16 @@ async function cachedJarFormatter(
   if (classpath.some((path) => isJdkInWorktree(path, root))) return null;
   const javaArgs = [...JVM_FLAGS, ...JAVAC_EXPORTS, "-cp", classpath.join(delimiter), GJF_MAIN];
   const java = await jdkRunning(jar, javaArgs, root);
-  if (java) jarRunners.add(java);
   if (!java) {
     return {
       notice: `Format on save skipped: ${GOOGLE_JAVA_FORMAT} ${version} from your build's cache doesn't run on any JDK Loxel found. Install a JDK it supports, or ${GOOGLE_JAVA_FORMAT} ${version} itself.`,
     };
   }
-  return { command: java, args: [...javaArgs, formatArgs(flags)].join(" ") };
+  return {
+    command: java,
+    args: [...javaArgs, formatArgs(flags)].join(" "),
+    spawn: { cwd: parse(root).root, env: { PATH: await trustedPath("java", root) }, binDirs: [] },
+  };
 }
 
 function mavenRepository(): string {
@@ -292,9 +295,6 @@ function listDir(dir: string): string[] {
     return [];
   }
 }
-
-/** Each `java` chosen to run a cached jar, which is how a spawn tells it from a manual override's. */
-const jarRunners = new Set<string>();
 
 interface JdkAnswer {
   java: string | null;
@@ -381,8 +381,7 @@ async function javaSpawnOptions(
   wtRoot: string,
 ): Promise<FormatterSpawnOptions> {
   const name = basename(command);
-  // Any other `java` is a manual override, whose relative arguments need the default directory.
-  if (!TOOLS.has(name) && !jarRunners.has(command)) return {};
+  if (!TOOLS.has(name)) return {};
   const root = resolve(wtRoot);
   return {
     cwd: parse(root).root,
