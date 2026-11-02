@@ -1,8 +1,10 @@
 import { readFileSync, statSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { homedir } from "node:os";
-import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { delimiter, isAbsolute, join, parse, resolve } from "node:path";
 
+import type { JavaRuntime } from "@/api/java-env-model";
+
+import { getJavaEnv } from "./java-env";
 import {
   dirsUpToRoot,
   type FileFormatter,
@@ -292,10 +294,11 @@ function kotlinFailureNotice(failure: FormatterFailure): string | undefined {
  * Kotlin formatters come from the machine, never the worktree. Putting a project directory on
  * `PATH` would also let the `ktlint` launcher, a shell script, pick up a committed `java` or `sed`.
  *
- * They run from the home directory. Any `cwd` other than the worktree makes `{file}` absolute,
+ * They run from the filesystem root. Any `cwd` other than the worktree makes `{file}` absolute,
  * which ktlint needs: with a relative `--stdin-path` it misses the `.editorconfig` in its working
- * directory. And outside the repository, a version manager's shim on `PATH` does not pick its
- * version from a `.tool-versions` the repository ships, which can name a path inside it.
+ * directory. And above every repository and the home directory, a version manager's shim on `PATH`
+ * finds no pin there to act on: not a `.tool-versions` the repository ships, which can name a path
+ * inside it, and not a `package.json` in the home directory, which can make it download.
  */
 async function kotlinSpawnOptions(
   command: string,
@@ -303,11 +306,34 @@ async function kotlinSpawnOptions(
   wtRoot: string,
 ): Promise<FormatterSpawnOptions> {
   const root = resolve(wtRoot);
+  const path = await trustedPath(command, root);
   return {
-    env: { PATH: await trustedPath(command, root) },
+    // ktfmt is a native binary or brings its own Java.
+    env: command === KTLINT.command ? await withWorktreeJdk(path, root) : { PATH: path },
     binDirs: [],
-    ...(command in INSTALL_HINTS ? { cwd: homedir() } : {}),
+    ...(command in INSTALL_HINTS ? { cwd: parse(root).root } : {}),
   };
+}
+
+/**
+ * The environment that runs a JVM tool on the JDK the status bar shows for the worktree, whose
+ * resolver holds it to the trust rule.
+ */
+export async function withWorktreeJdk(path: string, root: string): Promise<Record<string, string>> {
+  return jdkToolEnv(path, await getJavaEnv(root));
+}
+
+/**
+ * `path` with `jdk` first, and its `JAVA_HOME`. With no JDK, `path` alone: the tool then finds Java
+ * as it would in a terminal. So does a JDK whose path `PATH` cannot hold, since it would split into
+ * other directories.
+ */
+export function jdkToolEnv(
+  path: string,
+  jdk: Pick<JavaRuntime, "path"> | null,
+): Record<string, string> {
+  if (!jdk || jdk.path.includes(delimiter)) return { PATH: path };
+  return { JAVA_HOME: jdk.path, PATH: [join(jdk.path, "bin"), path].join(delimiter) };
 }
 
 /**

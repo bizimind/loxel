@@ -1,6 +1,6 @@
 ---
 title: Kotlin
-description: Editing Kotlin files in Loxel, with raw strings, backtick identifiers, and KDoc comments, plus format on save with ktfmt or ktlint and lint diagnostics from detekt and ktlint.
+description: Editing Kotlin files in Loxel, with raw strings, backtick identifiers, and KDoc comments, plus format on save with ktfmt or ktlint and lint diagnostics from detekt and ktlint, on the worktree's JDK.
 order: 13.5
 ---
 
@@ -26,7 +26,7 @@ The folder closest to the file decides, and ktfmt wins when one folder has both.
 
 Install the formatter yourself: Loxel runs it from your `PATH`, never from inside the worktree, and doesn't download anything. If it's missing, the save goes through unformatted and Loxel tells you what to run.
 
-Run `brew install ktfmt` or `brew install ktlint`, or use another install method from the tool's site. ktlint must be version 1.8 or newer, and needs Java on your `PATH`.
+Run `brew install ktfmt` or `brew install ktlint`, or use another install method from the tool's site. ktlint must be version 1.8 or newer, and runs on the [worktree's JDK](#jdk).
 
 **ktfmt** follows the `ktfmt {}` block of the closest build file that has one: `kotlinLangStyle()`, `googleStyle()` or the default style, and `removeUnusedImports` set to false. The `ktfmt` command can't apply `maxWidth`, `blockIndent`, `continuationIndent` or the trailing comma settings, so a project that sets any of them isn't formatted on save, since that would reflow its code against its own settings. Loxel tells you which setting it found, and Gradle's `ktfmtFormat` task still formats the project.
 
@@ -43,10 +43,16 @@ Loxel looks in the file's folder and up to the root of the worktree, and the clo
 
 A project with none of these runs nothing.
 
-Install the tools yourself: Loxel runs them from your `PATH`, never from inside the worktree, and doesn't download anything. If one is missing, Loxel tells you once what to run, such as `brew install detekt` or `brew install ktlint`. Both need Java on your `PATH`.
+Install the tools yourself: Loxel runs them from your `PATH`, never from inside the worktree, and doesn't download anything. If one is missing, Loxel tells you once what to run, such as `brew install detekt` or `brew install ktlint`. Both run on the [worktree's JDK](#jdk).
 
 Findings reflect saved files. A tool checks a file when you open it, and an open file again when it changes on disk or a config changes. Files you don't have open aren't checked, so a project-wide run in your terminal or CI can find more.
 
 Detekt rule sets from plugins don't run here, and baselines aren't applied, so a finding your build has baselined still shows in the editor.
+
+## JDK
+
+While a Kotlin file is the active editor, the status bar shows the worktree's JDK, for example `Java 21.0.5 (Temurin)`. ktlint and detekt run on that JDK, whether or not it's on your `PATH`, so a JDK Loxel found in a usual install location is enough. Click the item to choose another; the tools check your open files again with it. See [JDK detection](/docs/languages/java#jdk-detection) for how Loxel picks one.
+
+If there's no JDK, the status bar reads **No JDK found**, and ktlint and detekt look for Java the way they would in your terminal. If they don't find it either, Loxel tells you. ktfmt doesn't use this JDK.
 
 See [Repository Trust](/docs/repository-trust) for how a language feature asks before running a repository's code.

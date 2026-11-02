@@ -1,12 +1,18 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
-import { KotlinLintLspManager } from "./kotlin-lint-lsp-manager";
 import { fileUri } from "./lsp-file-uri";
+
+// The tools run on the worktree's JDK, whose override lives in the store database.
+const stateDir = await mkdtemp(join(tmpdir(), "kotlin-lint-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+const { refreshJavaEnv } = await import("./java-env");
+const { KotlinLintLspManager } = await import("./kotlin-lint-lsp-manager");
+type Manager = InstanceType<typeof KotlinLintLspManager>;
 
 // Drives the manager the way the Monaco client does, with stand-in tools on `PATH`. Each records its
 // arguments and working directory, and reports a violation for every file named in `<file>.bad`.
@@ -17,6 +23,7 @@ const originalPath = process.env.PATH;
 const FAKE_DETEKT = (version: string) => `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "Picked up JAVA_TOOL_OPTIONS: -Dx=y" >&2; echo "${version}"; exit 0; fi
 echo "$PWD|$*" >> "$RUNS_DIR/detekt"
+echo "$JAVA_HOME|$(command -v java)" >> "$RUNS_DIR/detekt-java"
 [ -f "$RUNS_DIR/fail" ] && { echo "bad config" >&2; exit 1; }
 [ -f "$RUNS_DIR/hang" ] && { sleep 300 & echo $! > "$RUNS_DIR/pid"; wait; }
 input="" report=""
@@ -40,6 +47,7 @@ exit 0
 
 const FAKE_KTLINT = `#!/bin/sh
 echo "$PWD|$*" >> "$RUNS_DIR/ktlint"
+echo "$JAVA_HOME|$(command -v java)" >> "$RUNS_DIR/ktlint-java"
 report=""
 entries=""
 for arg in "$@"; do
@@ -75,7 +83,7 @@ class FakeClient {
   readonly received: Received[] = [];
   private waiters: (() => void)[] = [];
 
-  constructor(private readonly target: KotlinLintLspManager) {
+  constructor(private readonly target: Manager) {
     const ws = {
       send: (data: string) => {
         this.received.push(JSON.parse(data) as Received);
@@ -147,14 +155,19 @@ class FakeClient {
 let wt: string;
 let bin: string;
 let runsDir: string;
-let manager: KotlinLintLspManager | undefined;
+let manager: Manager | undefined;
 
 afterEach(async () => {
   manager?.destroy();
   manager = undefined;
   process.env.PATH = originalPath;
   delete process.env.RUNS_DIR;
+  delete process.env.JAVA_HOME;
   await Promise.all([wt, bin, runsDir].map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+afterAll(async () => {
+  await rm(stateDir, { recursive: true, force: true });
 });
 
 async function setUp(
@@ -190,8 +203,22 @@ async function writeTool(name: string, script: string): Promise<void> {
   await chmod(join(bin, name), 0o755);
 }
 
-/** One `<cwd>|<arguments>` per run of `tool`. */
-async function runs(tool: "detekt" | "ktlint"): Promise<string[]> {
+/** A directory laid out like a JDK home, in the tools' directory, outside the worktree. */
+async function makeJdk(name: string): Promise<string> {
+  const home = join(bin, name);
+  await mkdir(join(home, "bin"), { recursive: true });
+  await mkdir(join(home, "lib"));
+  for (const launcher of ["java", "javac"]) {
+    await writeFile(join(home, "bin", launcher), "#!/bin/sh\n");
+    await chmod(join(home, "bin", launcher), 0o755);
+  }
+  await writeFile(join(home, "lib", "ct.sym"), "");
+  await writeFile(join(home, "release"), 'JAVA_VERSION="21.0.5"\n');
+  return home;
+}
+
+/** One `<cwd>|<arguments>` per run of `tool`; for `-java`, `<JAVA_HOME>|<java on PATH>`. */
+async function runs(tool: "detekt" | "ktlint" | "detekt-java" | "ktlint-java"): Promise<string[]> {
   const text = await readFile(join(runsDir, tool), "utf-8").catch(() => "");
   return text.split("\n").filter(Boolean);
 }
@@ -209,22 +236,42 @@ describe.skipIf(!canRun)("KotlinLintLspManager", () => {
     expect(result?.capabilities).toEqual({ textDocumentSync: { openClose: true, change: 0 } });
   });
 
-  test("both tools report on an opened file, each run from the home directory", async () => {
+  test("both tools report on an opened file, each run from the filesystem root", async () => {
     const client = await setUp({ ...BOTH, "src/A.kt": "", "src/A.kt.bad": "" });
     const file = join(wt, "src/A.kt");
     client.open(file);
     await client.diagnostics(file, ["detekt says", "ktlint says"]);
-    const home = await realpath(homedir());
     const [detekt] = await runs("detekt");
     const [ktlint] = await runs("ktlint");
-    expect(detekt).toStartWith(`${home}|`);
-    expect(ktlint).toStartWith(`${home}|`);
+    expect(detekt).toStartWith("/|");
+    expect(ktlint).toStartWith("/|");
     expect(detekt).toContain(`--input ${file}`);
     expect(detekt).toContain(`--config ${join(wt, "detekt.yml")},`);
     expect(detekt).toContain(`--base-path ${wt}`);
     expect(detekt).not.toMatch(/--(plugins|classpath|baseline)/);
     expect(ktlint).toEndWith(` ${file}`);
     expect(ktlint).not.toMatch(/--(ruleset|baseline)|-R /);
+  });
+
+  test("both tools run on the worktree's JDK, and again when it changes", async () => {
+    const client = await setUp({ ...BOTH, "A.kt": "", "A.kt.bad": "" });
+    const [first, second] = await Promise.all([makeJdk("first"), makeJdk("second")]);
+    process.env.JAVA_HOME = first;
+    const file = join(wt, "A.kt");
+    client.open(file);
+    await client.diagnostics(file, ["detekt says", "ktlint says"]);
+    expect(await runs("detekt-java")).toEqual([`${first}|${first}/bin/java`]);
+    expect(await runs("ktlint-java")).toEqual([`${first}|${first}/bin/java`]);
+
+    await rm(`${file}.bad`);
+    process.env.JAVA_HOME = second;
+    refreshJavaEnv(wt);
+    await client.diagnostics(file, []);
+    expect(await runs("detekt-java")).toEqual([
+      `${first}|${first}/bin/java`,
+      `${second}|${second}/bin/java`,
+    ]);
+    expect((await runs("ktlint-java")).at(-1)).toBe(`${second}|${second}/bin/java`);
   });
 
   test.each([

@@ -7,6 +7,7 @@ import type { ServerWebSocket } from "bun";
 import { LSP_REPLACED_CLOSE_CODE } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
+import { subscribeJavaEnv } from "./java-env";
 import { KTLINT_INSTALL_HINT } from "./kotlin-formatter";
 import {
   findKotlinLintProjects,
@@ -55,6 +56,8 @@ interface KotlinLintSession {
   notices: Set<string>;
   /** Stops the running tool when the session ends. */
   abort: AbortController;
+  /** Stops following the worktree's JDK when the session ends. */
+  unsubscribeJdk: () => void;
 }
 
 /**
@@ -70,7 +73,8 @@ interface KotlinLintSession {
  * changes during a run wait for the next one.
  *
  * Which tools apply is read for every run ({@link findKotlinLintProjects}), so a project with no
- * signal starts no process and a config change needs no restart.
+ * signal starts no process and a config change needs no restart. Tools run on the worktree's JDK,
+ * so all open files are checked again when it changes.
  */
 export class KotlinLintLspManager implements WorktreeLspServer {
   readonly name = "kotlin-lint-lsp";
@@ -100,6 +104,10 @@ export class KotlinLintLspManager implements WorktreeLspServer {
       configs: new Set(),
       notices: new Set(),
       abort: new AbortController(),
+      // The first resolution is the one a run is waiting for, not a change.
+      unsubscribeJdk: subscribeJavaEnv(wtPath, ({ first, changed }) => {
+        if (!first && changed) this.schedule(session, [...session.openFiles]);
+      }),
     };
     this.sessions.set(ws, session);
     this.sessionsByWorktree.set(wtPath, session);
@@ -323,6 +331,7 @@ export class KotlinLintLspManager implements WorktreeLspServer {
     if (session.timer) clearTimeout(session.timer);
     session.timer = null;
     session.abort.abort();
+    session.unsubscribeJdk();
   }
 
   private isLive(session: KotlinLintSession): boolean {
