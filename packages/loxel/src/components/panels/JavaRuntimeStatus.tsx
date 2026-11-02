@@ -1,6 +1,4 @@
-import { skipToken, useQuery } from "@tanstack/react-query";
-
-import { getJavaBuildFile, getJavaEnv } from "@/api/java-env-client";
+import { getJavaEnv, reloadJavaProjects } from "@/api/java-env-client";
 import { javaToolchain } from "@/api/java-env-model";
 import { useActiveEditorFile } from "@/hooks/useActiveEditorFilePath";
 import { javaEnvSourceDescription, javaRuntimeLabel, selectJavaRuntime } from "@/lib/java-runtime";
@@ -10,31 +8,22 @@ import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/setti
 
 import { ToolchainStatusButton } from "./ToolchainStatusButton";
 
-const PROJECT_NOT_LOADED_TOOLTIP =
-  "Maven and Gradle projects aren't loaded yet. Syntax errors, completion and outlines work; type errors, rename and go-to-definition don't.";
-
 /**
  * The JDK of the active editor's worktree, shown while that editor holds a Java or Kotlin file.
- * Clicking it opens the JDK picker for that worktree. Next to it, a note when a Java file belongs to
- * a Maven or Gradle project: Kotlin has no language server for that to matter to.
+ * Clicking it opens the JDK picker for that worktree. Next to it, while a Java file is active, a note
+ * when a trusted repository's Maven or Gradle projects did not fully load, which loads them again
+ * when clicked. Kotlin has no language server for that to matter to.
  */
 export function JavaRuntimeStatus() {
   const active = useActiveToolchainStatus(javaToolchain, getJavaEnv);
-  const activeFile = useActiveEditorFile()?.filePath ?? null;
+  const filePath = useActiveEditorFile()?.filePath;
   const associations = useSettingsStore(selectEffectiveFileAssociations);
-  const filePath =
-    activeFile && resolveLanguage(activeFile, associations) === "java" ? activeFile : null;
-  const worktreePath = active?.wtPath ?? null;
-  const { data: buildFile } = useQuery({
-    queryKey: ["java-build-file", worktreePath, filePath],
-    queryFn:
-      worktreePath && filePath ? () => getJavaBuildFile({ worktreePath, filePath }) : skipToken,
-  });
+  const inJavaFile = filePath !== undefined && resolveLanguage(filePath, associations) === "java";
 
   if (!active) return null;
 
   const { wtPath, status } = active;
-  const { env, overridePath, ignoredJavaHome } = status;
+  const { env, overridePath, ignoredJavaHome, projectIssue } = status;
   const overrideUnusable = overridePath !== null && env?.source !== "override";
   const tooltip = [
     env ? `${env.path}\n${javaEnvSourceDescription(env.source)}` : "No JDK found",
@@ -48,10 +37,15 @@ export function JavaRuntimeStatus() {
 
   return (
     <>
-      {filePath && buildFile?.buildTool && (
-        <span className="text-muted-foreground" title={PROJECT_NOT_LOADED_TOOLTIP}>
-          {buildFile.buildTool} project not loaded yet
-        </span>
+      {projectIssue && inJavaFile && (
+        <button
+          type="button"
+          className="text-warning hover:text-foreground cursor-pointer transition-colors"
+          title={projectIssue.detail}
+          onClick={() => void reloadJavaProjects({ worktreePath: wtPath })}
+        >
+          {projectIssue.label}
+        </button>
       )}
       <ToolchainStatusButton
         label={env ? javaRuntimeLabel(env) : "No JDK found"}

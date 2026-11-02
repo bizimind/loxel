@@ -19,6 +19,7 @@ import {
   useFormatOnSave,
 } from "@/hooks/use-disk-synced-content";
 import { useFirstLoadGate } from "@/hooks/useFirstLoadGate";
+import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { CODE_EDITOR_OPTIONS } from "@/lib/code-editor-options";
 import { computeLineEdits } from "@/lib/compute-line-edits";
@@ -352,6 +353,7 @@ export function CodeEditorPanel({
       theme: getMonacoThemeName(darkMode),
       readOnly: readOnlyRef.current,
       rulers: rulersFor(editorConfigRef.current),
+      inlayHints: inlayHintsOption(),
     });
 
     editorRef.current = editor;
@@ -628,6 +630,8 @@ export function CodeEditorPanel({
   useEffect(() => {
     monaco.editor.setTheme(getMonacoThemeName(darkMode));
   }, [darkMode]);
+
+  useInlayHintsOption(editorRef);
 
   // Apply indentation live, as its sources change.
   useEffect(() => {

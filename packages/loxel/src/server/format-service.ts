@@ -5,6 +5,7 @@ import type { FileSink } from "bun";
 
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 
+import { dotnetArgsRunProjectTool } from "./csharp-env";
 import {
   type BackendMode,
   FORMAT_REJECTED,
@@ -12,6 +13,7 @@ import {
   killProcessGroup,
 } from "./formatter-backends";
 import {
+  dirsUpToRoot,
   type FileFormatter,
   type FormatterDecline,
   type FormatterFailure,
@@ -23,7 +25,7 @@ import { languageFormatters } from "./language-formatters";
 import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
 import { PrettierLibBackend } from "./prettier-lib-backend";
-import { isRepoTrusted, onRepoTrustChange } from "./repo-trust";
+import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 
@@ -131,6 +133,24 @@ export class FormatService {
     // 1. Check manual overrides first
     const override = findMatchingOverride(settings.overrides, ext);
     if (override) {
+      // Overrides apply to every repository, and a manifest names a different tool in each.
+      if (
+        worktreePath &&
+        !isRepoTrusted(worktreePath) &&
+        dotnetArgsRunProjectTool(
+          override.command,
+          override.args,
+          dirsUpToRoot(fileDir(filePath, worktreePath), worktreePath),
+        )
+      ) {
+        const named = `${override.command} ${override.args}`.trim();
+        log.info("Holding back an override that runs a project's tool", { filePath });
+        reportRepoRestriction(
+          worktreePath,
+          `Format on save doesn't run ${named} from this repository.`,
+        );
+        return UNFORMATTED;
+      }
       log.info("Formatting with manual override", { command: override.command, filePath });
       return this.runFormatter(override.command, override.args, content, filePath, worktreePath);
     }

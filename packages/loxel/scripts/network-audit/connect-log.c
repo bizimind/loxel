@@ -56,6 +56,8 @@ static int describe(const struct sockaddr *a, char *what, size_t len) {
     const struct sockaddr_in6 *v6 = (const struct sockaddr_in6 *)a;
     inet_ntop(AF_INET6, &v6->sin6_addr, ip, sizeof ip);
     snprintf(what, len, "[%s]:%d", ip, ntohs(v6->sin6_port));
+    // Java's dual-stack sockets reach loopback as ::ffff:127.x.y.z, as Gradle's client does its daemon.
+    if (IN6_IS_ADDR_V4MAPPED(&v6->sin6_addr)) return v6->sin6_addr.s6_addr[12] != 127;
     return !IN6_IS_ADDR_LOOPBACK(&v6->sin6_addr);
   }
   if (a->sa_family == AF_UNIX) {

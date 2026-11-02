@@ -1,6 +1,6 @@
 ---
 title: Editor
-description: Quick Open, Go to Symbol, Find in Files, autosave, formatter auto-detection, indentation, EditorConfig, Python and Go files, conflict handling, and deleted or moved files.
+description: Quick Open, Go to Symbol, Find in Files, autosave, formatter auto-detection, indentation, inlay hints, EditorConfig, Python and Go files, conflict handling, and deleted or moved files.
 order: 10
 ---
 
@@ -75,7 +75,7 @@ Supported formatters:
 
 Biome, Prettier and oxfmt are detected from the folder closest to the file, and run only in a [repository you trust](/docs/repository-trust), except a Biome on your `PATH`. In one folder Biome comes first, then Prettier, then oxfmt, each for the languages it supports. See [JavaScript](/docs/languages/javascript#format-on-save).
 
-Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's Python environment when they're installed there (and the environment isn't committed to git), so the version pinned in your dev dependencies is the one used: a sub-project's own `.venv`, `venv` or `env` first, then the worktree's [Python environment](/docs/languages/python#python-environment), including an interpreter you chose, and files your ruff config excludes are left as they are. Go formatters are also detected from the config closest to the file: see [Go](/docs/languages/go#format-on-save). So is rustfmt, for Rust: see [Rust](/docs/languages/rust#format-on-save). CSharpier is detected from the config or tool manifest closest to the file too. A `.csproj` or `.editorconfig` alone doesn't turn it on, though CSharpier reads `.editorconfig` for its options when there is no `.csharpierrc`. Loxel runs a `csharpier` on your `PATH`, which you can install with `dotnet tool install -g csharpier`, and files in `.csharpierignore` are left as they are. It doesn't run a project's local CSharpier yet, so a project that lists one in its manifest also uses the one on your `PATH`, and a notice tells you when there is none. Loxel never restores or downloads the tool. The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
+Python formatters are detected from the config closest to the file, so each project in a monorepo can use its own. Because ruff is often configured just for linting, black wins when a project configures or depends on both, unless the ruff config has a `format` section. A `pyproject.toml` that neither configures nor depends on ruff or black isn't formatted; add a manual override if you want it formatted anyway. Loxel runs ruff and black from the project's Python environment when they're installed there (and the environment isn't committed to git), so the version pinned in your dev dependencies is the one used: a sub-project's own `.venv`, `venv` or `env` first, then the worktree's [Python environment](/docs/languages/python#python-environment), including an interpreter you chose, and files your ruff config excludes are left as they are. Go formatters are also detected from the config closest to the file: see [Go](/docs/languages/go#format-on-save). So is rustfmt, for Rust: see [Rust](/docs/languages/rust#format-on-save). CSharpier is detected from the config or tool manifest closest to the file too. A `.csproj` or `.editorconfig` alone doesn't turn it on, though CSharpier reads `.editorconfig` for its options when there is no `.csharpierrc`. In a repository you [trust](/docs/repository-trust), Loxel runs the version in your tool manifest with `dotnet tool run`. Otherwise it runs a `csharpier` on your `PATH`, which you can install with `dotnet tool install -g csharpier`, and a notice tells you when there is none. A manual override that runs a tool from a project's manifest, such as `dotnet tool run csharpier`, also waits until you trust the repository. Files in `.csharpierignore` are left as they are. Loxel never restores or downloads the tool: if a manifest's version isn't restored, a notice tells you to run `dotnet tool restore` in a terminal. The formatters found at the root of the current worktree are listed in **Settings > Editor**, where you can also add manual overrides that take precedence over detection.
 
 ---
 
@@ -95,6 +95,21 @@ Each property is looked up on its own, so an `.editorconfig` that only sets `ind
 TypeScript and JavaScript quick fixes, such as **Implement interface**, indent the code they insert the same way as the file you apply them in.
 
 While a code file is the active editor, the status bar shows its indentation (`Spaces: 4` or `Tab Size: 4`), where that came from, and its line endings (`LF` or `CRLF`). Hover it for details, including when the project's `.editorconfig` outranks one of your overrides. Click it, or run **Editor: Change Indentation** from the command palette, to indent the file with spaces or tabs at another size, convert its existing indentation to spaces or tabs, or go back to the automatic choice.
+
+---
+
+## Inlay hints
+
+Inlay hints are the types and parameter names a language server shows inline in your code, such as `add(first: 1)`. They aren't part of the file, and they push the text after them to the right. Choose when they appear with **Inlay Hints** in **Settings > Editor**, which applies to every language and takes effect immediately:
+
+| Mode                              | Behavior                         |
+| --------------------------------- | -------------------------------- |
+| On (default)                      | Always shown                     |
+| Off                               | Never shown                      |
+| On, hidden while holding Ctrl+Alt | Shown until you hold `Ctrl+Alt`  |
+| Off, shown while holding Ctrl+Alt | Hidden until you hold `Ctrl+Alt` |
+
+Diff views show the code as it is, without hints.
 
 ---
 

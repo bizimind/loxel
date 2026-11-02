@@ -11,17 +11,26 @@
  *
  * `--control` runs the server without the JVM flag that keeps host names from resolving. It is the
  * positive control and must fail, by attempting to reach the hosts jdtls contacts by default.
+ *
+ * `--trusted` audits the same server in a trusted repository, where projects load and their code
+ * runs, Gradle's daemons included. `--gradle-home <dir>` (a scratch copy: it gets written to) and
+ * `--gradle-url <url>` name a Gradle user home and a distribution URL its wrapper has installed;
+ * `--m2 <dir>` names a Maven repository with what a plain build needs. Without them only the projects
+ * that need nothing from those run. With `--trusted --control` it must fail on a host name looked
+ * up from a daemon, which proves the logger reaches daemons and that the options do the blocking.
  */
 
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -34,12 +43,16 @@ import { $ } from "bun";
 
 const LOXEL = path.resolve(import.meta.dir, "../..");
 const BUILD = path.join(LOXEL, "build");
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 180_000;
 
 const { values } = parseArgs({
   options: {
     control: { type: "boolean", default: false },
     keep: { type: "boolean", default: false },
+    trusted: { type: "boolean", default: false },
+    "gradle-home": { type: "string" },
+    "gradle-url": { type: "string" },
+    m2: { type: "string" },
   },
 });
 
@@ -206,6 +219,10 @@ class LspClient {
     });
   }
 
+  onClose(listener: (code: number) => void): void {
+    this.ws.addEventListener("close", ({ code }) => listener(code));
+  }
+
   uri(relative: string): string {
     return `file://${path.join(this.root, relative)}`;
   }
@@ -304,30 +321,43 @@ if (!process.env.JAVA_HOME) throw new Error("Set JAVA_HOME to a JDK 25 or newer"
 const realHome = process.env.JAVA_HOME;
 const realJava = path.join(realHome, "bin", "java");
 let auditedHome = realHome;
-if (values.control) {
-  // The same JDK, with a `java` that drops the flag on the way.
+const auditHome = path.join(work, "home");
+if (values.control || values.trusted) {
+  // The same JDK, with a `java` that drops the flag on the way when this is the control, and keeps
+  // `~/.m2` and the like out of the real home: Java does not read HOME for it.
   auditedHome = path.join(work, "control-jdk");
-  mkdirSync(path.join(auditedHome, "bin"), { recursive: true });
-  for (const entry of ["release", "lib", "conf", "legal"]) {
-    symlinkSync(path.join(realHome, entry), path.join(auditedHome, entry));
+  let target = realJava;
+  if (values.trusted) {
+    // A copy, since Gradle refuses a daemon whose `java.home` isn't the JDK it was told to use.
+    await $`cp -c -R ${realHome} ${auditedHome}`;
+    target = path.join(auditedHome, "bin", "java-audited");
+    renameSync(path.join(auditedHome, "bin", "java"), target);
+  } else {
+    mkdirSync(path.join(auditedHome, "bin"), { recursive: true });
+    for (const entry of ["release", "lib", "conf", "legal"]) {
+      symlinkSync(path.join(realHome, entry), path.join(auditedHome, entry));
+    }
+    symlinkSync(path.join(realHome, "bin", "javac"), path.join(auditedHome, "bin", "javac"));
   }
-  symlinkSync(path.join(realHome, "bin", "javac"), path.join(auditedHome, "bin", "javac"));
   const wrapper = path.join(auditedHome, "bin", "java");
   // bash is a system binary, so the dynamic linker drops the logger's variables going through it.
   writeFileSync(
     wrapper,
     `#!/bin/bash
-args=()
-for a in "$@"; do [[ "$a" == -Djdk.net.hosts.file=* ]] || args+=("$a"); done
+args=(-Duser.home='${auditHome}')
+${values.control ? 'for a in "$@"; do [[ "$a" == -Djdk.net.hosts.file=* ]] || args+=("$a"); done\nunset JAVA_TOOL_OPTIONS' : 'args+=("$@")'}
 export DYLD_INSERT_LIBRARIES='${dylib}' CONNECT_LOG='${logPath}'
-exec '${realJava}' "\${args[@]}"
+exec '${target}' "\${args[@]}"
 `,
   );
   chmodSync(wrapper, 0o755);
 }
 
-const auditHome = path.join(work, "home");
 mkdirSync(path.join(auditHome, ".jdks"), { recursive: true });
+if (values.m2) {
+  mkdirSync(path.join(auditHome, ".m2"));
+  symlinkSync(values.m2, path.join(auditHome, ".m2", "repository"));
+}
 symlinkSync(auditedHome, path.join(auditHome, ".jdks", "audited"));
 
 const markers = path.join(work, "markers");
@@ -504,6 +534,9 @@ const server = Bun.spawn([serverPath], {
     LOXEL_DEK_FILE: dekFile,
     LOXEL_SERVE_PORT: String(port),
     LOXEL_STATE_DIR: path.join(work, "state"),
+    ...(values.trusted
+      ? { GRADLE_USER_HOME: values["gradle-home"] ?? path.join(auditHome, ".gradle") }
+      : {}),
   },
 });
 
@@ -859,12 +892,225 @@ async function exerciseProjects(jar: string): Promise<void> {
   }
 }
 
+const api = `http://127.0.0.1:${port}/api`;
+
+async function post(route: string, body: unknown): Promise<void> {
+  const response = await fetch(`${api}${route}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`${route}: ${response.status} ${await response.text()}`);
+}
+
+async function projectIssueOf(root: string): Promise<{ detail: string } | null> {
+  const response = await fetch(`${api}/java-env?wt=${encodeURIComponent(root)}`);
+  const { projectIssue } = (await response.json()) as { projectIssue: { detail: string } | null };
+  return projectIssue;
+}
+
+/** The server's report comes in its own time; give it until `done`, then answer anyway. */
+async function waitForIssue(
+  root: string,
+  done: (issue: { detail: string } | null) => boolean,
+): Promise<{ detail: string } | null> {
+  const deadline = Date.now() + REQUEST_TIMEOUT_MS;
+  let issue = await projectIssueOf(root);
+  while (!done(issue) && Date.now() < deadline) {
+    await Bun.sleep(250);
+    issue = await projectIssueOf(root);
+  }
+  return issue;
+}
+
+const MAIN_FILE = "src/main/java/app/App.java";
+const TRUSTED_SOURCES = {
+  [MAIN_FILE]: `package app;
+public class App {
+  int size = Helper.size();
+  int wrong = "text";
+}
+`,
+  "src/main/java/app/Helper.java": `package app;
+class Helper {
+  static int size() { return 1; }
+}
+`,
+};
+
+/** A repository of `files` the user trusts. */
+async function trustedRepo(name: string, files: Record<string, string>): Promise<string> {
+  const root = path.join(work, name);
+  writeFiles(root, {
+    ...TRUSTED_SOURCES,
+    ".gitignore": "build/\ntarget/\nbin/\n.gradle/\n",
+    ...files,
+  });
+  await gitInit(root);
+  await post("/projects", { path: root });
+  await post("/repo-trust", { worktreePath: root, trusted: true });
+  return root;
+}
+
+const NO_ROOM_POM = `<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>c</groupId><artifactId>c</artifactId><version>1</version><properties><maven.compiler.release>21</maven.compiler.release></properties>`;
+
+/** The running daemons a server has registered, from the logs Gradle names by their ids. */
+async function registeredDaemonPids(): Promise<number[]> {
+  const logs = await $`find ${path.join(work, "state")} -name 'daemon-*.out.log'`.text();
+  return logs
+    .split("\n")
+    .filter(Boolean)
+    .map((log) => Number(/daemon-(\d+)/.exec(log)?.[1]));
+}
+
+async function waitForExit(pids: number[]): Promise<number[]> {
+  const running = (pid: number) =>
+    $`ps -p ${pid}`
+      .nothrow()
+      .quiet()
+      .then((r) => r.exitCode === 0);
+  let alive = pids;
+  const deadline = Date.now() + REQUEST_TIMEOUT_MS;
+  while (alive.length > 0 && Date.now() < deadline) {
+    await Bun.sleep(250);
+    const flags = await Promise.all(alive.map(running));
+    alive = alive.filter((_, i) => flags[i]);
+  }
+  return alive;
+}
+
+/** Features across files on a project that loaded, and the tree it leaves. */
+async function checkLoaded(name: string, root: string, expectDaemon = false): Promise<void> {
+  const client = await startClient(root);
+  const { text, diagnostics } = await client.open(MAIN_FILE);
+  const messages = diagnostics.map((d) => d.message);
+  check(
+    messages.some((m) => m.includes("cannot convert from String to int")),
+    `${name}: type errors are reported`,
+    messages,
+  );
+  const definition = (
+    await client.request("textDocument/definition", {
+      textDocument: { uri: client.uri(MAIN_FILE) },
+      position: positionOf(text, "Helper.size", 1),
+    })
+  ).result as { uri: string }[] | null;
+  check(
+    definition?.[0]?.uri.endsWith("Helper.java") === true,
+    `${name}: definition crosses files`,
+    definition,
+  );
+  check((await projectIssueOf(root)) === null, `${name}: nothing to tell the user`);
+  const daemons = await registeredDaemonPids();
+  if (expectDaemon) check(daemons.length > 0, `${name}: a daemon runs`, daemons);
+  await stopClient(client);
+  const alive = await waitForExit(daemons);
+  check(alive.length === 0, `${name}: no daemon outlives its server`, alive);
+  const status = await $`git -C ${root} status --porcelain --ignored`.text();
+  check(
+    !/\.(project|classpath|settings|factorypath)/.test(status),
+    `${name}: no IDE metadata in the tree`,
+    status.split("\n").filter(Boolean),
+  );
+}
+
+async function exerciseTrusted(): Promise<void> {
+  const name = "tr-maven-missing";
+  const root = await trustedRepo(name, {
+    "pom.xml": `${NO_ROOM_POM}<repositories><repository><id>byip</id><url>http://192.0.2.10/repo</url></repository><repository><id>byname</id><url>https://canary-repo.example/repo</url></repository></repositories><dependencies><dependency><groupId>canary</groupId><artifactId>dep</artifactId><version>1</version></dependency></dependencies></project>\n`,
+  });
+  const client = await startClient(root);
+  const issue = await waitForIssue(root, (i) => i?.detail.includes("mvn") === true);
+  check(issue?.detail.includes("mvn test-compile") === true, `${name}: says what to run`, issue);
+  await stopClient(client);
+
+  const nodist = "tr-gradle-no-distribution";
+  const nodistRoot = await trustedRepo(nodist, {
+    "build.gradle": `new File("${path.join(markers, "nodist-build")}").text = "ran"\napply plugin: 'java'\n`,
+    "settings.gradle": `rootProject.name = "c"\n`,
+    gradlew: `#!/bin/sh\necho ran > ${path.join(markers, "gradlew")}\n`,
+    "gradle/wrapper/gradle-wrapper.properties":
+      "distributionUrl=https\\://canary-dist.example/gradle-0.0.1-bin.zip\n",
+  });
+  const nodistClient = await startClient(nodistRoot);
+  const nodistIssue = await waitForIssue(nodistRoot, (i) => i !== null);
+  check(
+    nodistIssue?.detail.includes("./gradlew once") === true,
+    `${nodist}: says what to run`,
+    nodistIssue,
+  );
+  await stopClient(nodistClient);
+  check(readdirSync(markers).length === 0, `${nodist}: nothing ran`, readdirSync(markers));
+  const gradleHome = values["gradle-home"] ?? path.join(auditHome, ".gradle");
+  check(
+    !existsSync(path.join(gradleHome, "wrapper", "dists", "gradle-0.0.1-bin")),
+    `${nodist}: no download started`,
+  );
+
+  if (values.m2) {
+    const maven = "tr-maven";
+    await checkLoaded(maven, await trustedRepo(maven, { "pom.xml": `${NO_ROOM_POM}</project>\n` }));
+  }
+
+  if (!values["gradle-url"]) return;
+  const wrapper = `distributionUrl=${values["gradle-url"].replace(":", "\\:")}\n`;
+  const gradle = "tr-gradle";
+  const gradleRoot = await trustedRepo(gradle, {
+    "build.gradle": "plugins { id 'java' }\n",
+    "settings.gradle": `rootProject.name = "c"\n`,
+    "gradle/wrapper/gradle-wrapper.properties": wrapper,
+  });
+  await checkLoaded(gradle, gradleRoot, true);
+  const canary = "tr-gradle-canaries";
+  const canaryRoot = await trustedRepo(canary, {
+    "settings.gradle": `pluginManagement { repositories { maven { url 'http://192.0.2.1/plugins'; allowInsecureProtocol = true } } }
+try { java.net.InetAddress.getByName("canary-daemon.example") } catch (Exception e) {}
+new File("${path.join(work, "settings-ran")}").text = "ran"
+rootProject.name = "c"
+`,
+    "build.gradle": `buildscript { repositories { maven { url 'http://192.0.2.2/bs'; allowInsecureProtocol = true } }
+  dependencies { classpath 'canary:bscp:1.0' } }
+plugins { id 'java'; id 'canary.plugin' version '1.0' }
+repositories { maven { url 'http://192.0.2.3/deps'; allowInsecureProtocol = true } }
+dependencies { implementation 'canary:dep:1.0' }
+`,
+    "gradle/wrapper/gradle-wrapper.properties": wrapper,
+  });
+  const canaryClient = await startClient(canaryRoot);
+  const canaryIssue = await waitForIssue(canaryRoot, (i) => i !== null);
+  check(existsSync(path.join(work, "settings-ran")), `${canary}: its build ran`);
+  check(canaryIssue !== null, `${canary}: reports the failed import`, canaryIssue);
+  await stopClient(canaryClient);
+
+  // Taking trust back restarts the server restricted.
+  const revoked = await startClient(gradleRoot);
+  await revoked.open(MAIN_FILE);
+  const closed = new Promise((resolve) => {
+    revoked.onClose(resolve);
+  });
+  await post("/repo-trust", { worktreePath: gradleRoot, trusted: false });
+  console.log(`     revoking closed the connection: ${await closed}`);
+  const restricted = await startClient(gradleRoot);
+  const { diagnostics } = await restricted.open(MAIN_FILE);
+  const messages = diagnostics.map((d) => d.message);
+  check(
+    !messages.some((m) => m.includes("cannot convert from String to int")),
+    `${gradle}: revoked: back to the file on its own`,
+    messages,
+  );
+  await stopClient(restricted);
+}
+
 try {
   await waitForServer(`http://127.0.0.1:${port}/`);
-  const jar = await buildProcessorJar();
-  await exerciseFeatures();
-  await exerciseLibrarySources();
-  if (!values.control) await exerciseProjects(jar);
+  if (values.trusted) {
+    await exerciseTrusted();
+  } else {
+    const jar = await buildProcessorJar();
+    await exerciseFeatures();
+    await exerciseLibrarySources();
+    if (!values.control) await exerciseProjects(jar);
+  }
 } finally {
   server.kill();
   await server.exited;
@@ -873,7 +1119,7 @@ try {
 const all = readFileSync(logPath, { flag: "a+", encoding: "utf8" }).split("\n").filter(Boolean);
 const logged = all.filter((line) => line.split(" ")[1] !== "loxel-server");
 check(
-  logged.some((line) => line.split(" ")[1] === "java" && line.split(" ")[2] === "loaded"),
+  logged.some((line) => line.split(" ")[1]?.startsWith("java") && line.split(" ")[2] === "loaded"),
   "the logger loaded into java",
 );
 const lines = logged.filter((line) => line.split(" ")[2] !== "loaded");

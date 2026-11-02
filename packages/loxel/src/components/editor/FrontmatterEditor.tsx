@@ -4,6 +4,7 @@ import * as monaco from "monaco-editor";
 import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
 import { useUIStore } from "@/store/ui";
 
@@ -48,6 +49,7 @@ export function FrontmatterEditor({
   const darkMode = useUIStore((s) => s.darkMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<IStandaloneCodeEditor | null>(null);
+  useInlayHintsOption(editorRef);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -106,6 +108,7 @@ export function FrontmatterEditor({
     const editor = monaco.editor.create(container, {
       model,
       theme: getMonacoThemeName(darkMode),
+      inlayHints: inlayHintsOption(),
       minimap: { enabled: false },
       lineNumbers: "on",
       glyphMargin: false,

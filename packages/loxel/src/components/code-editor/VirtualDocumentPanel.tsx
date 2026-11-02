@@ -4,6 +4,7 @@ import * as monaco from "monaco-editor";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { EditorBanner } from "@/components/editor/EditorBanner";
+import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
 import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { CODE_EDITOR_OPTIONS } from "@/lib/code-editor-options";
 import { detectIndentation } from "@/lib/detect-indentation";
@@ -60,6 +61,7 @@ export function VirtualDocumentPanel({
   const [attempt, setAttempt] = useState(0);
   const darkMode = useUIStore((s) => s.darkMode);
 
+  useInlayHintsOption(editorRef);
   usePanelActivationFocus(
     panelApi,
     useCallback(() => editorRef.current?.focus(), []),
@@ -94,6 +96,7 @@ export function VirtualDocumentPanel({
           monaco.editor.createModel(text, connection.languageId, parsed);
         editor = monaco.editor.create(container, {
           ...CODE_EDITOR_OPTIONS,
+          inlayHints: inlayHintsOption(),
           model,
           theme: getMonacoThemeName(useUIStore.getState().darkMode),
           readOnly: true,
