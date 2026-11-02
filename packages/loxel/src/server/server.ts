@@ -277,23 +277,25 @@ function activeWindow(windowId: string | null): ActiveWindow | null {
 }
 
 /**
- * Send `message` to every window subscribed to `wtPath`, except the one the user is working in
- * among them, which gets `primary`: the window `windowId` names, else the most recently focused
- * one, else any of them.
+ * Send `message` to every window showing `wtPath`, except the one the user is working in among
+ * them, which gets `primary`: the window `windowId` names, else the most recently focused one, else
+ * any of them. A window that left the worktree can stay subscribed until its saves finish, and does
+ * not count. Returns false when no window shows it.
  */
 function sendToWorktreeWindows(
   wtPath: string,
   windowId: string | null,
   message: WsMessage,
   primary: WsMessage,
-): void {
-  const subscribers = [...(wtResources.get(wtPath)?.subscribers ?? [])];
-  const named = windowId
-    ? subscribers.find((ws) => clients.get(ws)?.windowId === windowId)
-    : undefined;
-  const focused = subscribers.find((ws) => ws === lastFocusedClient);
-  const inUse = named ?? focused ?? subscribers[0];
-  for (const ws of subscribers) sendTo(ws, ws === inUse ? primary : message);
+): boolean {
+  const showing = [...(wtResources.get(wtPath)?.subscribers ?? [])].filter(
+    (ws) => clients.get(ws)?.shownWorktree === wtPath,
+  );
+  const named = windowId ? showing.find((ws) => clients.get(ws)?.windowId === windowId) : undefined;
+  const focused = showing.find((ws) => ws === lastFocusedClient);
+  const inUse = named ?? focused ?? showing[0];
+  for (const ws of showing) sendTo(ws, ws === inUse ? primary : message);
+  return showing.length > 0;
 }
 
 /** Why a folder cannot be opened in an Others section, given the registered projects. */

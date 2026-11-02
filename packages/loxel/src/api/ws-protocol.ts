@@ -30,9 +30,10 @@ export type WsMessage =
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
   | ToolchainChangedMessage
+  // Worktree-scoped, or for the window in use when no window shows the worktree.
   | { type: "open_url"; wtPath: string; data: { url: string } & PanelOpenOptions }
   // Window-scoped (sent to the window the user is working in)
-  | { type: "open_file"; data: { filePath: string } & PanelOpenOptions }
+  | { type: "open_file"; data: OpenFilePanel }
   | { type: "open_folder"; data: { path: string } }
   | { type: "open_terminal"; data: OpenTerminalPanel }
   // Project-scoped (sent to all subscribers under project)
@@ -131,6 +132,12 @@ export interface TerminalState {
   cols: number;
   rows: number;
 }
+
+/**
+ * A file the server asks a window to open (`loxel <file>`, Finder). It opens in `worktreePath` if
+ * the command named one, else in the worktree holding it, else in the window's active worktree.
+ */
+export type OpenFilePanel = { filePath: string; worktreePath?: string } & PanelOpenOptions;
 
 /**
  * A terminal panel the server asks a window to create (`loxel terminal`). The server has already

@@ -54,8 +54,8 @@ Server-to-client delivery uses helpers in server.ts, chosen by scope:
 - `broadcastToSubscribers(wtPath)`: clients subscribed to a worktree (`status_changed`, `files_dir_changed`, `file_content_changed`, ...).
 - `broadcastToProject(projectPath)`: clients subscribed to any worktree of the project, deduplicated (`refs_changed`, `log_changed`, `worktree_status_changed`, `localdb_changed`).
 - `broadcastAll`: every app client (`store_updated`, notifications, `log_error_count`, `update_status_changed`).
-- `sendToActiveWindow(windowId)`: one window (`open_file`, `open_folder`, `open_terminal`), see [Per-window identity](#per-window-identity).
-- `sendToWorktreeWindows(wtPath, windowId)`: every subscriber of a worktree, with a different message for the window in use among them (`open_url` and its placement).
+- `sendToActiveWindow(windowId)`: one window (`open_file`, `open_folder`, `open_terminal`, and `open_url` when no window shows its worktree), see [Per-window identity](#per-window-identity).
+- `sendToWorktreeWindows(wtPath, windowId)`: every subscriber showing a worktree, with a different message for the window in use among them (`open_url` with its placement and focus); returns false when no window shows it, and `open_url` then goes through `sendToActiveWindow`.
 - `sendTo(owner)`: terminal events go only to the connection that owns the session.
 
 On the client, [client.ts](../src/api/client.ts) exports a singleton `wsClient` that reconnects every 2 s, queues JSON messages sent before the first connection (messages queued during a later disconnect are discarded on reconnect, since `onReconnect` listeners re-create server-side state), and on reconnect compares the server version from `/api/version` with the first one it saw: a change reloads the page, otherwise `onReconnect` listeners run so features re-create server-side state (worktree subscription, log subscription, terminal reattach).

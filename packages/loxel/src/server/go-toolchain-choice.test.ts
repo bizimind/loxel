@@ -9,7 +9,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import type { GoEnv } from "@/api/go-env-model";
@@ -426,11 +426,11 @@ describe("normalizeGoChoice", () => {
     expect(await normalizeGoChoice(wt, "  ~/sdk/go1.24.1/bin/go ", home)).toBe(go);
   });
 
-  test("runs the check from the home directory, with Loxel's Go environment", async () => {
+  test("runs the check from the filesystem root, with Loxel's Go environment", async () => {
     const { wt, home, installGo, calls } = await setup();
     const go = await installGo("1.24.1", join(home, "sdk", "go1.24.1"));
     await normalizeGoChoice(wt, go, home);
-    expect(await calls()).toEqual([`${go}|${homedir()}|version|GOROOT=|local`]);
+    expect(await calls()).toEqual([`${go}|/|version|GOROOT=|local`]);
   });
 
   test("refuses a relative or missing path", async () => {
@@ -497,10 +497,10 @@ describe("normalizeGoChoice", () => {
     setGoChoice(wt, link);
     await getGoEnv(wt);
     const shimCalls = (await calls()).filter((call) => call.startsWith(shim));
-    for (const call of shimCalls) expect(call.split("|")[1]).toBe(homedir());
+    for (const call of shimCalls) expect(call.split("|")[1]).toBe("/");
   });
 
-  test("stores the Go behind a shim, which runs only from the home directory", async () => {
+  test("stores the Go behind a shim, which runs only from the filesystem root", async () => {
     const { wt, home, installGo, modcache, log, calls } = await setup();
     const root = join(home, "installs", "go", "1.24.1");
     const go = await installGo("1.24.1", root);
@@ -509,7 +509,7 @@ describe("normalizeGoChoice", () => {
     expect(await normalizeGoChoice(wt, shim)).toBe(go);
     const shimCalls = (await calls()).filter((call) => call.startsWith(shim));
     expect(shimCalls.length).toBeGreaterThan(0);
-    for (const call of shimCalls) expect(call.split("|")[1]).toBe(homedir());
+    for (const call of shimCalls) expect(call.split("|")[1]).toBe("/");
   });
 });
 

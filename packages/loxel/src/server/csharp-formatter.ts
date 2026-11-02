@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
@@ -6,7 +6,13 @@ import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:pa
 import { isDirectory } from "@/fs-utils";
 import { isRecord } from "@/lib/is-record";
 
-import { prepareDotnet, resolveDotnet } from "./csharp-env";
+import {
+  isVersionManagerShim,
+  prepareDotnet,
+  readDotnetToolManifests,
+  resolveDotnet,
+  toolClaimsCommand,
+} from "./csharp-env";
 import {
   dirsUpToRoot,
   type FileFormatter,
@@ -42,7 +48,6 @@ const PATH_TOOL: FileFormatter = { command: CSHARPIER, args: STDIN_ARGS };
 
 /** CSharpier's own config names, checked against 1.3.0, which also reads `.yml`. */
 const CONFIG_FILES = [".csharpierrc", ".csharpierrc.json", ".csharpierrc.yaml", ".csharpierrc.yml"];
-const MANIFEST_FILES = ["dotnet-tools.json", join(".config", "dotnet-tools.json")];
 /** Far above any real manifest or config; a larger file does not count. */
 const MAX_PROJECT_FILE_BYTES = 1_024 * 1_024;
 /** In what `dotnet tool run` prints for a manifest's tool that is not in the local tool cache. */
@@ -87,7 +92,7 @@ function isOnPath(wtRoot: string): boolean {
  */
 function findLocalToolDir(dirs: readonly string[]): string | undefined {
   for (const dir of dirs) {
-    const manifests = MANIFEST_FILES.map((name) => readManifest(join(dir, name))).filter(isRecord);
+    const manifests = readDotnetToolManifests(dir);
     if (listsCSharpier(manifests)) return dir;
     if (manifests.some((manifest) => manifest.isRoot === true)) return undefined;
   }
@@ -102,26 +107,11 @@ function listsCSharpier(manifests: readonly Record<string, unknown>[]): boolean 
   const claiming = manifests.flatMap(({ tools }) =>
     isRecord(tools)
       ? Object.entries(tools)
-          .filter(([, tool]) => claimsCommand(tool))
+          .filter(([, tool]) => toolClaimsCommand(tool, CSHARPIER))
           .map(([id]) => id)
       : [],
   );
   return claiming.length > 0 && claiming.every((id) => id.toLowerCase() === CSHARPIER);
-}
-
-function claimsCommand(tool: unknown): boolean {
-  return isRecord(tool) && Array.isArray(tool.commands) && tool.commands.includes(CSHARPIER);
-}
-
-/** dotnet's reader allows comments and trailing commas in a manifest. */
-function readManifest(path: string): unknown {
-  if (!isSmallFile(path)) return undefined;
-  try {
-    return Bun.JSONC.parse(readFileSync(path, "utf-8"));
-  } catch (err) {
-    log.debug("Could not read a dotnet tool manifest", { path, error: err });
-    return undefined;
-  }
 }
 
 function isSmallFile(path: string): boolean {
@@ -163,38 +153,33 @@ async function dotnetSpawnOptions(dir: string, wtRoot: string): Promise<Formatte
   // On every save, and the run stays in `cwd`: other projects' global.json files do not apply.
   const prepared = await prepareDotnet(wtRoot, { cwd, applyingOnly: true });
   if (!prepared) {
-    if (await resolveDotnet(wtRoot)) {
-      log.info("dotnet may not run in this worktree; not formatting", { wtRoot });
-      return { skip: {} };
+    const dotnet = await resolveDotnet(wtRoot);
+    if (!dotnet) {
+      return {
+        skip: {
+          notice:
+            "Format on save skipped: this project uses CSharpier through dotnet, which is not on your PATH. Install the .NET SDK.",
+        },
+      };
     }
-    return {
-      skip: {
-        notice:
-          "Format on save skipped: this project uses CSharpier through dotnet, which is not on your PATH. Install the .NET SDK.",
-      },
-    };
+    if (await isVersionManagerShim(dotnet)) {
+      return {
+        skip: {
+          notice:
+            "Format on save skipped: \"dotnet\" on your PATH is a version manager's shim, which Loxel runs in a project only once you trust its repository. Trust it, or add the SDK's own directory to your PATH.",
+        },
+      };
+    }
+    log.info("dotnet may not run in this worktree; not formatting", { wtRoot });
+    return { skip: {} };
   }
   const { dotnetPath, env } = prepared;
-  if (await isVersionManagerShim(dotnetPath)) {
-    return {
-      skip: {
-        notice:
-          "Format on save skipped: \"dotnet\" on your PATH is a version manager's shim, which Loxel does not run in a project. Add the SDK's own directory to your PATH.",
-      },
-    };
-  }
   return {
     cwd: prepared.cwd,
     env: withAbsolutePath(env),
     // First, so `dotnet` by name is the one that the check above covered.
     binDirs: [dirname(dotnetPath)],
   };
-}
-
-/** asdf and mise name their directory of shims this. A shim reads its version from the cwd up. */
-async function isVersionManagerShim(dotnetPath: string): Promise<boolean> {
-  const real = await realpath(dotnetPath).catch(() => dotnetPath);
-  return [dotnetPath, real].some((path) => basename(dirname(path)) === "shims");
 }
 
 /** A relative entry would depend on the formatter's directory, here inside the project. */

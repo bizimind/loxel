@@ -71,6 +71,12 @@ function refusedPathEntries(env: SpawnEnv, changed: SpawnEnv): string[] {
   });
 }
 
+/** Put `bin` first on PATH, moved rather than duplicated. */
+export function putFirstOnPath(env: SpawnEnv, bin: string): void {
+  const rest = pathEntries(env).filter((dir) => dir && dir !== bin);
+  env.PATH = [bin, ...rest].join(path.delimiter);
+}
+
 /**
  * Apply one contribution, made on a copy of `env`: `env` becomes `changed`, or stays as it is, whole,
  * when the contribution puts a path on PATH that fails the check. Every caller that applies a

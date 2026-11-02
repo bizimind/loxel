@@ -52,6 +52,14 @@ To start terminals without it, turn off **Activate Python Environment** in **Set
 
 ---
 
+## Node version
+
+When a worktree pins a [Node version](/docs/languages/javascript#node-version), or you chose an installed one for it, new terminals in it start with that version's `node`, `npm` and `npx` first on `PATH`. If Loxel is using the `node` on your `PATH`, found or chosen, nothing changes. Loxel never adds `node_modules/.bin`, and never uses a version committed to the repository. Terminals already open keep what they started with; open a new terminal after changing the pin or your choice.
+
+Your shell's startup runs after that, so it can still change which `node` you get. A version manager's hook in your startup files (nvm, fnm) switches `node` as it normally would, and startup files that rebuild `PATH`, as macOS does for login shells, can put system directories ahead of the worktree's version, including Homebrew's. If `node --version` differs from the status bar, run `which node` to see which one won, and `nvm use` or your version manager's equivalent to switch.
+
+---
+
 ## Theme
 
 Terminal colors follow your dark/light mode setting automatically. No manual configuration needed.
@@ -101,7 +109,7 @@ loxel terminal --cwd ../other-worktree -- claude  # start an agent in another wo
 loxel terminal --split right -- pnpm dev          # in a new split beside the active tab
 ```
 
-The same `--split`, `--replace` and `--group` layout flags work for files and URLs too. When a coding agent runs `loxel`, it opens things in the background instead: no worktree switch and no stolen cursor, unless the agent passes `--focus` (see [Focus](/docs/reference-env-files-cli-settings#loxel-cli)).
+The same `--split`, `--replace`, `--group` and `--worktree` flags work for files and URLs too. When a coding agent runs `loxel`, it opens things in the background instead: no worktree switch and no stolen cursor, unless the agent passes `--focus` (see [Focus](/docs/reference-env-files-cli-settings#loxel-cli)).
 
 Because the terminal already has `LOXEL_PORT` set, the CLI connects to the running Loxel immediately.
 
