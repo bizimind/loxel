@@ -1,7 +1,6 @@
 import {
   existsSync,
   mkdirSync,
-  realpathSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -17,7 +16,13 @@ import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
 import { config, hash12 } from "./config";
-import { getJavaEnv, javaExecutable, listJavaRuntimes, subscribeJavaEnv } from "./java-env";
+import {
+  getJavaEnv,
+  isJdkInWorktree,
+  javaExecutable,
+  listJavaRuntimes,
+  subscribeJavaEnv,
+} from "./java-env";
 import {
   applyImportSignal,
   findBuildProjects,
@@ -41,7 +46,6 @@ import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
-import { isInside } from "./shipped-by-repo";
 import {
   type SpawnOptions,
   WorktreeLspManager,
@@ -271,15 +275,6 @@ export function dropUnusableActions(message: Record<string, unknown>): boolean {
   if (usable.length === message.result.length) return false;
   message.result = usable;
   return true;
-}
-
-/** Whether a JDK's home is in the worktree, by real paths. A path that cannot be read counts. */
-export function isJdkInWorktree(home: string, wtPath: string): boolean {
-  try {
-    return isInside(realpathSync(home), realpathSync(wtPath));
-  } catch {
-    return true;
-  }
 }
 
 /** Whether one of `runtimes` can run the server for a worktree. */

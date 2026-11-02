@@ -11,13 +11,13 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { isJdkInWorktree } from "./java-env";
 import {
   canRunJdtls,
   dropUnusableActions,
   dropWillRename,
   firstJavaFile,
   indentationOf,
-  isJdkInWorktree,
   javaRuntimesSetting,
   javaSettings,
   jdtlsHostCrossed,

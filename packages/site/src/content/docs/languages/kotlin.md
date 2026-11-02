@@ -51,7 +51,7 @@ Detekt rule sets from plugins don't run here, and baselines aren't applied, so a
 
 ## JDK
 
-While a Kotlin file is the active editor, the status bar shows the worktree's JDK, for example `Java 21.0.5 (Temurin)`. ktlint and detekt run on that JDK, whether or not it's on your `PATH`, so a JDK Loxel found in a usual install location is enough. Click the item to choose another; the tools check your open files again with it. They don't use a JDK inside the worktree. See [JDK detection](/docs/languages/java#jdk-detection) for how Loxel picks one.
+While a Kotlin file is the active editor, the status bar shows the worktree's JDK, for example `Java 21.0.5 (Temurin)`. ktlint and detekt run on that JDK, whether or not it's on your `PATH`, so a JDK Loxel found in a usual install location is enough. Click the item to choose another; the tools check your open files again with it. They don't use a JDK inside the worktree. See [JDK detection](/docs/languages/java#jdk-detection) for how Loxel picks one. A JDK you choose also reaches [new terminals](/docs/terminals#java-jdk) in that worktree.
 
 If there's no JDK, the status bar reads **No JDK found**, and ktlint and detekt look for Java the way they would in your terminal. If they don't find it either, Loxel tells you. ktfmt doesn't use this JDK.
 
