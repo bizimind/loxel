@@ -634,7 +634,7 @@ export class FileOperationsService {
     if (this.options.git === false) return false;
     try {
       const out = await $`git -C ${this.worktreeCwd} ls-files -- ${relPath}`
-        .env(readOnlyGitEnv())
+        .env(readOnlyGitEnv(this.worktreeCwd))
         .text();
       return out.trim().length > 0;
     } catch {

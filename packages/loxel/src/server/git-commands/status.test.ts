@@ -2,6 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { $ } from "bun";
 
+import "@/test/temp-state-dir";
+
+import { setRepoTrusted } from "../repo-trust";
 import { getStatus } from "./status";
 import type { TempRepo } from "./test-utils";
 import { branch, checkoutBranch, commit, createRepo, stageFile, writeFile } from "./test-utils";
@@ -162,7 +165,9 @@ describe("getStatus and fsmonitor", () => {
     },
   );
 
-  test("does not start a repository-configured fsmonitor", async () => {
+  async function withMonitor(
+    run: (repoPath: string, ran: () => Promise<boolean>) => Promise<void>,
+  ) {
     const repo = await createRepo();
     try {
       await commit(repo.path, "init", { "a.txt": "a\n" });
@@ -172,13 +177,25 @@ describe("getStatus and fsmonitor", () => {
       await Bun.write(hook, `#!/bin/sh\necho ran >> "${marker}"\nexit 1\n`);
       await $`chmod +x ${hook}`.quiet();
       await $`git -C ${repo.path} config core.fsmonitor ${hook}`.quiet();
-
-      await getStatus(repo.path);
-
-      expect(await Bun.file(marker).exists()).toBe(false);
+      await run(repo.path, () => Bun.file(marker).exists());
     } finally {
       await repo.cleanup();
     }
+  }
+
+  test("does not start a configured fsmonitor in an untrusted repository", async () => {
+    await withMonitor(async (repoPath, ran) => {
+      await getStatus(repoPath);
+      expect(await ran()).toBe(false);
+    });
+  });
+
+  test("leaves a configured fsmonitor in charge in a trusted repository", async () => {
+    await withMonitor(async (repoPath, ran) => {
+      setRepoTrusted(repoPath, true);
+      await getStatus(repoPath);
+      expect(await ran()).toBe(true);
+    });
   });
 });
 

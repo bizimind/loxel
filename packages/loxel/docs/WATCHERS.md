@@ -12,7 +12,7 @@ How the server keeps project files, Git status, refs, logs, worktrees, drafts an
 | `DetachedFilesService`     | worktree resources                                               | detached draft directory                                                                                              | detached-file panels                                                                                        |
 | `ExternalFilesService`     | worktree resources                                               | individually opened external files                                                                                    | external-file panels                                                                                        |
 | `ExternalFolderRegistry`   | server-wide                                                      | each Others folder, git status disabled                                                                               | Others section of every worktree listing the folder                                                         |
-| Git fsmonitor              | Git (user config)                                                | one daemon per Git directory                                                                                          | Commands that change the repository, only if the user enables it                                            |
+| Git fsmonitor              | Git (user config)                                                | one daemon per Git directory                                                                                          | Git status acceleration in trusted repositories and commands that change one, only if the user enables it   |
 | Language servers           | LSP managers                                                     | implementation-specific                                                                                               | diagnostics and language features                                                                           |
 | Python environment         | `python-env.ts` shared resolution (`subscribePythonEnv`)         | candidate and resolved envs, flat                                                                                     | the interpreter and installed packages for basedpyright, ruff, terminals, format on save and the status bar |
 | JDKs                       | `java-env.ts` one shared watch (`subscribeJavaEnv`)              | JDK install locations and homes, flat                                                                                 | the worktree's JDK and the machine's JDKs, once a worktree has asked for them                               |
@@ -95,7 +95,9 @@ Mass deletion is usually coalesced into relatively few FSEvents events. The expe
 
 ## External processes
 
-Read-only Git commands set `core.fsmonitor=false` through `readOnlyGitEnv()`, whatever Git's configuration says, so a read starts no fsmonitor hook or daemon. The setting travels to the child Git processes a status starts, so this covers submodules too. Commands that change the repository, such as commit and checkout, keep the user's Git configuration, and a fsmonitor daemon they start serves only them.
+Loxel never passes `core.fsmonitor=true`. Forcing it buys nothing: with `GIT_OPTIONAL_LOCKS=0` Git can never save the fsmonitor token in the index, while a persistent daemon is left behind for every Git directory a status touches. In a trusted repository, whether fsmonitor runs on a read is the user's Git configuration to decide. `readOnlyGitEnv(cwd)` sets `core.fsmonitor=false` for a repository that isn't trusted and for a call with no `cwd`, and the checks that decide what Loxel runs (`shipped-by-repo.ts`, clangd's `ls-files`) always pass it with `FSMONITOR_OFF`. The setting travels to the child Git processes a status starts, so this covers submodules too. Commands that change the repository, such as commit and checkout, keep the user's Git configuration.
+
+When the user does enable fsmonitor, daemon count scales with Git directories, not just top-level worktrees. Git reuses one daemon via `<gitdir>/fsmonitor--daemon.ipc`; a high count alone is not evidence of a leak.
 
 Status and working-tree diffs run with `-c diff.ignoreSubmodules=dirty` (`SUBMODULE_GITLINK_ONLY` in `git-env.ts`): a submodule is reported only when its checked-out commit differs from the recorded one, never for edits or untracked files inside it. Otherwise Git runs a status inside every submodule, recursively, on every refresh — 4s instead of 0.3s in a repository with 76 submodules. This is a deliberate design decision. It is a default, so a repository's own `submodule.<name>.ignore` still wins: an `ignore=all` submodule stays hidden, and one set to `none` is still inspected in full.
 
@@ -105,7 +107,7 @@ Language servers may run their own watchers; basedpyright, ruff, mypy, Kotlin li
 
 When changing watcher behavior, verify:
 
-- read-only Git calls use `readOnlyGitEnv()`, which keeps fsmonitor off;
+- read-only Git calls use `readOnlyGitEnv(cwd)`, which keeps fsmonitor off unless the repository is trusted, and never pass `core.fsmonitor=true`;
 - nothing a read path runs writes under the Git directory, `objects/` included;
 - watcher-driven status consumers use the files-service snapshot instead of running another `git status` (an explicit `/api/status` request still reads fresh, so it reflects a just-finished mutation);
 - a burst of events is coalesced, never dropped: the last event is always reflected;

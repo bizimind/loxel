@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
+import "@/test/temp-state-dir";
+
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { setRepoTrusted } from "../repo-trust";
 import { readOnlyGitEnv } from "./git-env";
 
 const CONFIG_VARS = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"];
@@ -25,6 +32,19 @@ describe("readOnlyGitEnv", () => {
       GIT_CONFIG_KEY_0: "core.fsmonitor",
       GIT_CONFIG_VALUE_0: "false",
     });
+  });
+
+  test("leaves fsmonitor to the user's Git configuration only in a trusted repository", () => {
+    const dir = mkdtempSync(join(tmpdir(), "git-env-"));
+    try {
+      expect(readOnlyGitEnv(dir).GIT_CONFIG_KEY_0).toBe("core.fsmonitor");
+      setRepoTrusted(dir, true);
+      expect(readOnlyGitEnv(dir).GIT_OPTIONAL_LOCKS).toBe("0");
+      expect(readOnlyGitEnv(dir).GIT_CONFIG_COUNT).toBeUndefined();
+      expect(readOnlyGitEnv().GIT_CONFIG_KEY_0).toBe("core.fsmonitor");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("keeps config variables already in the environment", () => {

@@ -7,7 +7,7 @@ import { gitText } from "./run-git";
 export async function isBareRepo(cwd: string): Promise<boolean> {
   const result = await gitText(["rev-parse", "--is-bare-repository"], {
     cwd,
-    env: readOnlyGitEnv(),
+    env: readOnlyGitEnv(cwd),
   });
   return result.trim() === "true";
 }
@@ -47,14 +47,14 @@ export async function resolveDefaultBranchRef(cwd: string): Promise<string | nul
   const commonDir = (
     await gitText(["rev-parse", "--path-format=absolute", "--git-common-dir"], {
       cwd,
-      env: readOnlyGitEnv(),
+      env: readOnlyGitEnv(cwd),
       nothrow: true,
     })
   ).trim();
   if (commonDir && (await isBareRepository(commonDir))) {
     const head = await gitText(["symbolic-ref", "--short", "HEAD"], {
       cwd: commonDir,
-      env: readOnlyGitEnv(),
+      env: readOnlyGitEnv(cwd),
       nothrow: true,
     });
     // HEAD is set once at creation and never rewritten, so it dangles after
@@ -68,7 +68,7 @@ export async function resolveDefaultBranchRef(cwd: string): Promise<string | nul
   // remote to learn the name from, but the config still records it.
   const configured = await gitText(["config", "--get", "init.defaultBranch"], {
     cwd,
-    env: readOnlyGitEnv(),
+    env: readOnlyGitEnv(cwd),
     nothrow: true,
   });
   const candidates = [configured.trim(), "main", "master"].filter((name) => name.length > 0);
@@ -84,7 +84,7 @@ async function resolveRemoteHead(cwd: string): Promise<string | null> {
   const format = "%(refname) %(symref)";
   const output = await gitText(["for-each-ref", `--format=${format}`, "refs/remotes"], {
     cwd,
-    env: readOnlyGitEnv(),
+    env: readOnlyGitEnv(cwd),
     nothrow: true,
   });
   const heads = output
@@ -107,7 +107,7 @@ async function isBareRepository(gitDir: string): Promise<boolean> {
   // whose config simply omits core.bare.
   const result = await gitText(["config", "--get", "--type=bool", "core.bare"], {
     cwd: gitDir,
-    env: readOnlyGitEnv(),
+    env: readOnlyGitEnv(gitDir),
     nothrow: true,
   });
   return result.trim() === "true";
@@ -119,11 +119,17 @@ async function refExists(cwd: string, ref: string): Promise<boolean> {
 
 export async function getGitRoot(cwd: string): Promise<string> {
   try {
-    const result = await gitText(["rev-parse", "--show-toplevel"], { cwd, env: readOnlyGitEnv() });
+    const result = await gitText(["rev-parse", "--show-toplevel"], {
+      cwd,
+      env: readOnlyGitEnv(cwd),
+    });
     return result.trim();
   } catch {
     // Bare repos don't have a working tree — use the git-common-dir as the root
-    const result = await gitText(["rev-parse", "--git-common-dir"], { cwd, env: readOnlyGitEnv() });
+    const result = await gitText(["rev-parse", "--git-common-dir"], {
+      cwd,
+      env: readOnlyGitEnv(cwd),
+    });
     const trimmed = result.trim();
     return trimmed.startsWith("/") ? trimmed : path.resolve(cwd, trimmed);
   }
