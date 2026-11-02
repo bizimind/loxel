@@ -1,10 +1,12 @@
-import { statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, relative, sep } from "node:path";
 
 import { isRecord } from "@/lib/is-record";
 
 import { blockBodies, declaresPlugin, readCode, readText } from "./kotlin-formatter";
 import { dirsUpToRoot, type FormatterDecline } from "./language-formatter";
+import { buildSpawnEnv } from "./shell-env";
 import { readToml, recordAt } from "./toml-file";
 
 export const GOOGLE_JAVA_FORMAT = "google-java-format";
@@ -14,15 +16,18 @@ export type JavaFormatTool = typeof GOOGLE_JAVA_FORMAT | typeof PALANTIR_JAVA_FO
 /** What a project's build files say about formatting its Java. */
 export interface JavaFormatDeclaration {
   tool: JavaFormatTool;
-  /** The version the build pins; null when it states none. */
-  pin: string | null;
+  /** The version the build uses. */
+  pin: string;
   /** The command-line flags matching the build's formatter settings. */
   flags: string[];
 }
 
 /** How a build names a version, before looking at the other files it may be in. */
 type VersionRef =
-  | { kind: "none" }
+  /** Spotless with no version picks one itself, by its own release and the JVM. */
+  | { kind: "spotless-default" }
+  /** The fmt plugin carries its own google-java-format, named by the plugin's published POM. */
+  | { kind: "fmt-plugin"; group: string; pluginVersion: VersionRef }
   | { kind: "literal"; version: string }
   | { kind: "maven-property"; name: string }
   | { kind: "gradle-variable"; name: string; script: string }
@@ -31,9 +36,29 @@ type VersionRef =
   | { kind: "plugin"; script: string }
   | { kind: "unreadable" };
 
+/** Which files a declaration formats, by glob relative to a project directory. */
+type FileScope =
+  /** It uses a form that cannot be read as text, so no file is known to be in it. */
+  | "unreadable"
+  | {
+      /** Null covers every Java file, for Gradle's source sets, which text cannot show. */
+      includes: string[] | null;
+      excludes: string[];
+      /** Whether it also applies from the directories of projects below the one declaring it. */
+      inherited: boolean;
+      /** Gradle leaves a project's own `build` directory out of everything. */
+      excludeBuildDir: boolean;
+    };
+
 /** What one build file declares. */
 type BuildSignal =
-  | { kind: "formatter"; tool: JavaFormatTool; version: VersionRef; flags: string[] }
+  | {
+      kind: "formatter";
+      tool: JavaFormatTool;
+      version: VersionRef;
+      flags: string[];
+      scope: FileScope;
+    }
   /** Its Java is formatted by something else, so what a parent directory declares does not apply. */
   | { kind: "other" }
   /** A Maven plugin applied here with its configuration in a `pluginManagement`, here or above. */
@@ -42,6 +67,7 @@ type BuildSignal =
   | { kind: "plugin-aliases"; aliases: string[] }
   | FormatterDecline;
 
+const BUILD_FILES = ["pom.xml", "build.gradle.kts", "build.gradle"];
 const VERSION = /^\d+(?:\.\d+)+(?:[-.][\w.-]+)?$/;
 const CATALOG = join("gradle", "libs.versions.toml");
 
@@ -76,11 +102,14 @@ const PALANTIR_JAVADOC_NOTICE: FormatterDecline = {
  * repository's code on save. A formatter configured where the text does not show it, in a convention
  * plugin or a parent POM that is not in a directory above, is not seen.
  *
- * A declaration whose version cannot be read declines, since no version could be shown to match.
+ * A declaration whose version cannot be read declines, since no version could be shown to match. A
+ * file the declaration leaves out, or may leave out, formats nothing: with `fileName` absent, as when
+ * Settings lists a worktree's formatters, that is not checked.
  */
 export function findJavaFormatDeclaration(
   startDir: string,
   wtRoot: string,
+  fileName?: string,
 ): JavaFormatDeclaration | FormatterDecline | null {
   const dirs = dirsUpToRoot(startDir, wtRoot);
   let awaitingManaged = false;
@@ -96,10 +125,18 @@ export function findJavaFormatDeclaration(
     }
     if ("notice" in signal) return signal;
     if (signal.kind === "other") return null;
+    if (fileName && !isInScope(signal.scope, join(startDir, fileName), dirs.slice(0, i + 1))) {
+      return null;
+    }
+    if (signal.version.kind === "spotless-default") {
+      return {
+        notice: `Format on save skipped: Spotless chooses this project's ${signal.tool} version itself, so Loxel can't tell which it is. Name the version in your Spotless config to format on save.`,
+      };
+    }
     const pin = resolveVersion(signal.version, dirs.slice(i));
     if (pin === undefined) {
       return {
-        notice: `Format on save skipped: Loxel can't read which ${signal.tool} version this project pins from its build files.`,
+        notice: `Format on save skipped: Loxel can't determine which ${signal.tool} version this project uses from its build files.`,
       };
     }
     return { tool: signal.tool, pin, flags: signal.flags };
@@ -151,6 +188,17 @@ function cachedByFile(
 // Maven
 
 const FMT_PLUGIN_GROUPS = new Set(["com.spotify.fmt", "com.spotify", "com.coveo"]);
+const MAVEN_SOURCES = ["src/main/java/**/*.java", "src/test/java/**/*.java"];
+/** Settings of the fmt plugin that change which files it covers. */
+const FMT_SCOPE_SETTINGS = [
+  "skip",
+  "sourceDirectory",
+  "testSourceDirectory",
+  "additionalSourceDirectories",
+  "filesNamePattern",
+  "skipSourceDirectory",
+  "skipTestSourceDirectory",
+];
 const MAVEN_OPTIONS = ["style", "reflowLongStrings", "reorderImports", "formatJavadoc"];
 const OTHER_SPOTLESS_JAVA_ELEMENT = /<(eclipse|prettier|clangFormat|greclipse)\b/;
 
@@ -210,16 +258,20 @@ function spotlessMavenSignal(plugin: string): BuildSignal | null {
   if (xmlElement(java, "toggleOffOn") !== null) return TOGGLE_NOTICE;
   const settings = google ?? palantir ?? "";
   if (xmlElement(settings, "groupArtifact") !== null) return FORK_NOTICE;
-  const version = mavenVersion(xmlElement(settings, "version"));
+  const declaredVersion = xmlElement(settings, "version");
+  const version: VersionRef =
+    declaredVersion === null ? { kind: "spotless-default" } : mavenVersion(declaredVersion);
   const setting = (name: string) => xmlElement(settings, name)?.toLowerCase();
   // A property here could turn out to be any value; only versions are worth following that far.
   if (MAVEN_OPTIONS.some((name) => setting(name)?.includes("$"))) return UNREADABLE_OPTION_NOTICE;
   const customImportOrder = xmlElement(java, "importOrder") !== null;
+  const scope = xmlElement(plugin, "skip") === "true" ? "unreadable" : mavenScope(java);
   if (google !== null) {
     return {
       kind: "formatter",
       tool: GOOGLE_JAVA_FORMAT,
       version,
+      scope,
       flags: googleFlags({
         style: setting("style"),
         reflow: setting("reflowLongStrings") === "true",
@@ -234,24 +286,33 @@ function spotlessMavenSignal(plugin: string): BuildSignal | null {
     kind: "formatter",
     tool: PALANTIR_JAVA_FORMAT,
     version,
+    scope,
     flags: palantirFlags(setting("style"), customImportOrder),
   };
 }
 
-/**
- * The fmt plugin carries its own google-java-format, which only a plugin dependency overrides. Its
- * own version says nothing about that one's, so with no override the project states no version.
- */
+/** The fmt plugin's version of the formatter is the override's, else what its own POM names. */
 function fmtMavenSignal(plugin: string): BuildSignal {
   const flag = (name: string, value: string, cliFlag: string) =>
     xmlElement(plugin, name)?.toLowerCase() === value ? [cliFlag] : [];
   const override = xmlBlocks(plugin, "dependency")
     .map(({ body }) => body)
     .find((dependency) => xmlElement(dependency, "artifactId") === GOOGLE_JAVA_FORMAT);
+  const overridden = override ? xmlElement(override, "version") : null;
+  const version: VersionRef = overridden
+    ? mavenVersion(overridden)
+    : {
+        kind: "fmt-plugin",
+        group: xmlElement(plugin, "groupId") ?? "",
+        pluginVersion: mavenVersion(pluginOwnVersion(plugin)),
+      };
   return {
     kind: "formatter",
     tool: GOOGLE_JAVA_FORMAT,
-    version: mavenVersion(override ? xmlElement(override, "version") : null),
+    version,
+    scope: FMT_SCOPE_SETTINGS.some((name) => xmlElement(plugin, name) !== null)
+      ? "unreadable"
+      : { includes: MAVEN_SOURCES, excludes: [], inherited: true, excludeBuildDir: false },
     flags: [
       ...flag("style", "aosp", "--aosp"),
       ...flag("skipSortingImports", "true", SKIP_SORTING),
@@ -264,8 +325,30 @@ function fmtMavenSignal(plugin: string): BuildSignal {
   };
 }
 
-function mavenVersion(text: string | null): VersionRef {
-  if (text === null) return { kind: "none" };
+/** The plugin's `<version>`, before its configuration and dependencies can hold another. */
+function pluginOwnVersion(plugin: string): string {
+  const nested = plugin.search(/<(configuration|dependencies|executions)\b/);
+  return xmlElement(nested === -1 ? plugin : plugin.slice(0, nested), "version") ?? "";
+}
+
+/** Spotless for Maven's own default, and where the fmt plugin looks unless told otherwise. */
+function mavenScope(java: string): FileScope {
+  const listed = (list: string, item: string) => {
+    const element = xmlElement(java, list);
+    return element === null ? [] : xmlBlocks(element, item).map(({ body }) => body.trim());
+  };
+  const includes = listed("includes", "include");
+  const excludes = listed("excludes", "exclude");
+  if (![...includes, ...excludes].every(isPlainGlob)) return "unreadable";
+  return {
+    includes: includes.length > 0 ? includes : MAVEN_SOURCES,
+    excludes,
+    inherited: true,
+    excludeBuildDir: false,
+  };
+}
+
+function mavenVersion(text: string): VersionRef {
   const property = /^\$\{([\w.-]+)\}$/.exec(text)?.[1];
   return property ? { kind: "maven-property", name: property } : literalVersion(text);
 }
@@ -335,6 +418,8 @@ function escapeRegExp(text: string): string {
 
 const OTHER_SPOTLESS_JAVA_STEP = /\b(eclipse|prettier|clangFormat|greclipse)\s*\(/;
 const JAVA_BLOCK = /\bjava\s*\{/g;
+/** Blocks that run a script's settings for other projects, whose directories its globs apply to. */
+const INHERITING_BLOCK = /\b(subprojects|allprojects|configure)\b/;
 /** Far above a real build; each block is scanned to its end, and the script is the repository's. */
 const MAX_JAVA_BLOCKS = 64;
 const TOGGLE_CALL = /\btoggleOffOn\s*\(/;
@@ -354,13 +439,20 @@ function gradleSignal(script: string): BuildSignal | null {
     if (call.chain.has("groupArtifact")) return FORK_NOTICE;
     const options = readGradleOptions(call.chain);
     if (!options) return UNREADABLE_OPTION_NOTICE;
-    const version = gradleVersion(call.argument, script);
+    const version: VersionRef = call.argument
+      ? gradleVersion(call.argument, script)
+      : { kind: "spotless-default" };
+    const scope = gradleScope(
+      javaBlocks.filter((java) => /\b(googleJavaFormat|palantirJavaFormat)\b/.test(java)),
+      script,
+    );
     const customImportOrder = javaBlocks.some((java) => IMPORT_ORDER_CALL.test(java));
     if (google) {
       return {
         kind: "formatter",
         tool: GOOGLE_JAVA_FORMAT,
         version,
+        scope,
         flags: googleFlags({
           style: call.chain.has("aosp") ? "aosp" : options.style,
           reflow: options.enabled("reflowLongStrings"),
@@ -377,6 +469,7 @@ function gradleSignal(script: string): BuildSignal | null {
       kind: "formatter",
       tool: PALANTIR_JAVA_FORMAT,
       version,
+      scope,
       flags: palantirFlags(options.style, customImportOrder),
     };
   }
@@ -390,12 +483,52 @@ function gradleSignal(script: string): BuildSignal | null {
   return aliases.length > 0 ? { kind: "plugin-aliases", aliases } : null;
 }
 
+/** `target` and `targetExclude` of the Java blocks holding the formatter, when plain globs. */
+function gradleScope(javaBlocks: readonly string[], script: string): FileScope {
+  const blocks = javaBlocks.join("\n");
+  if (/\btargetExcludeIfContent/.test(blocks)) return "unreadable";
+  const includes = gradleGlobs(blocks, "target");
+  const excludes = gradleGlobs(blocks, "targetExclude");
+  if (includes === undefined || excludes === undefined) return "unreadable";
+  return {
+    includes,
+    excludes: excludes ?? [],
+    inherited: INHERITING_BLOCK.test(script),
+    excludeBuildDir: true,
+  };
+}
+
+/** The call's glob arguments; null with no such call, undefined when they cannot be read. */
+function gradleGlobs(blocks: string, name: string): string[] | null | undefined {
+  const calls = [...blocks.matchAll(new RegExp(`(?<![.\\w"'/-])${name}\\b`, "g"))];
+  const [call] = calls;
+  if (!call) return null;
+  if (calls.length > 1) return undefined;
+  const after = call.index + name.length;
+  const rest = blocks.slice(after);
+  const paren = /^\s*\(/.exec(rest);
+  const groovy = /^[ \t]+([^\s}][^}\n;]*)/.exec(rest);
+  const argumentText = paren
+    ? blocks.slice(after + paren[0].length, closingParen(blocks, after + paren[0].length))
+    : groovy?.[1];
+  if (argumentText === undefined) return undefined;
+  const globs = argumentText
+    .split(",")
+    .map((argument) => argument.trim())
+    .filter(Boolean)
+    .map(stringLiteral);
+  return globs.length > 0 && globs.every((glob) => glob !== undefined && isPlainGlob(glob))
+    ? globs.filter((glob) => glob !== undefined)
+    : undefined;
+}
+
 function palantirPluginSignal(script: string): BuildSignal {
   return {
     kind: "formatter",
     tool: PALANTIR_JAVA_FORMAT,
     version: { kind: "plugin", script },
     flags: palantirFlags(undefined, false),
+    scope: { includes: null, excludes: [], inherited: true, excludeBuildDir: true },
   };
 }
 
@@ -466,7 +599,6 @@ function closingParen(script: string, start: number): number {
 }
 
 function gradleVersion(argument: string, script: string): VersionRef {
-  if (!argument) return { kind: "none" };
   const literal = stringLiteral(argument);
   if (literal !== undefined && !literal.includes("$")) return literalVersion(literal);
   const catalogVersion = /^libs\.versions\.([\w.]+)\.get\(\)$/.exec(argument)?.[1];
@@ -586,11 +718,13 @@ function pluginVersionInCatalog(catalog: Record<string, unknown>): string | unde
 // ---------------------------------------------------------------------------
 // Shared
 
-/** The pin a reference leads to: null for none, undefined when it cannot be read. */
-function resolveVersion(ref: VersionRef, dirs: readonly string[]): string | null | undefined {
+/** The version a reference leads to, undefined when it cannot be read. */
+function resolveVersion(ref: VersionRef, dirs: readonly string[]): string | undefined {
   switch (ref.kind) {
-    case "none":
-      return null;
+    case "fmt-plugin": {
+      const pluginVersion = resolveVersion(ref.pluginVersion, dirs);
+      return pluginVersion ? fmtPluginFormatterVersion(ref.group, pluginVersion) : undefined;
+    }
     case "literal":
       return ref.version;
     case "maven-property":
@@ -603,10 +737,56 @@ function resolveVersion(ref: VersionRef, dirs: readonly string[]): string | null
       return resolveCatalogLibrary(ref.alias, dirs);
     case "plugin":
       return resolvePluginVersion(ref.script, dirs);
+    case "spotless-default":
     case "unreadable":
     default:
       return undefined;
   }
+}
+
+/** What the plugin's published POM, in the user's Maven cache once a build has used it, depends on. */
+function fmtPluginFormatterVersion(group: string, pluginVersion: string): string | undefined {
+  const repository = join(buildSpawnEnv().HOME ?? homedir(), ".m2", "repository");
+  const name = `fmt-maven-plugin-${pluginVersion}.pom`;
+  const path = join(repository, ...group.split("."), "fmt-maven-plugin", pluginVersion, name);
+  const pom = withoutXmlComments(readText(path));
+  const dependency = xmlBlocks(pom, "dependency").find(
+    ({ body }) => xmlElement(body, "artifactId") === GOOGLE_JAVA_FORMAT,
+  );
+  const version = dependency && xmlElement(dependency.body, "version");
+  if (!version) return undefined;
+  const property = /^\$\{([\w.-]+)\}$/.exec(version)?.[1];
+  const properties = xmlElement(pom, "properties");
+  const value = property ? properties && xmlElement(properties, property) : version;
+  return value ? versionOrUndefined(value) : undefined;
+}
+
+/** Whether the file being saved is one the declaration formats. */
+function isInScope(scope: FileScope, file: string, dirsUpToDeclaring: readonly string[]): boolean {
+  if (scope === "unreadable") return false;
+  const declaring = dirsUpToDeclaring.at(-1) ?? "";
+  const bases = scope.inherited
+    ? dirsUpToDeclaring.filter((dir) => dir === declaring || hasBuildFile(dir))
+    : [declaring];
+  const fromBases = bases.map((base) => relative(base, file).split(sep).join("/"));
+  if (scope.excludeBuildDir && fromBases.some((path) => path.startsWith("build/"))) return false;
+  const matches = (globs: readonly string[]) =>
+    fromBases.some((path) => globs.some((glob) => new Bun.Glob(antGlob(glob)).match(path)));
+  return !matches(scope.excludes) && (scope.includes === null || matches(scope.includes));
+}
+
+function hasBuildFile(dir: string): boolean {
+  return BUILD_FILES.some((name) => existsSync(join(dir, name)));
+}
+
+/** A glob with nothing Ant and `Bun.Glob` read differently, and no variable or path out of a project. */
+function isPlainGlob(glob: string): boolean {
+  return glob !== "" && !/[$[\]{}!\\]/.test(glob) && !glob.startsWith("/") && !glob.includes("..");
+}
+
+/** Ant's trailing slash stands for everything under the directory. */
+function antGlob(glob: string): string {
+  return glob.endsWith("/") ? `${glob}**` : glob;
 }
 
 function literalVersion(text: string): VersionRef {

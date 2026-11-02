@@ -78,12 +78,14 @@ Loxel looks in the file's folder and up to the root of the worktree, so each mod
 
 Spotless configured only with other formatters, such as `eclipse()`, or only with steps such as `removeUnusedImports`, doesn't turn this on. Neither does configuration Loxel can't see without running the build: in a convention plugin, a separate Gradle script, or a parent POM that isn't in a folder above the file.
 
-Loxel uses a formatter you already have, and never downloads one. When your project pins a version, only that version runs, because another one could reformat code you didn't touch:
+Only files your configuration covers are formatted: Spotless's `target` and `targetExclude` in Gradle, its `<includes>` and `<excludes>` in Maven, whose default is `src/main/java` and `src/test/java`, and the same two folders for fmt-maven-plugin. Gradle's `build` folder is left alone. If these use something other than plain patterns, such as a variable, Java files under that configuration aren't formatted on save, and no notice appears.
 
-1. The tool on your `PATH`, if its version matches, or any version if the project pins none.
-2. For google-java-format, the pinned version from your Maven or Gradle cache, there once Spotless has run for the project, on a JDK that can run it.
+Loxel uses a formatter you already have, and never downloads one. Only the version your project uses runs, because another one could reformat code you didn't touch:
 
-Otherwise the file is saved unformatted, and a notice says which version the project wants. A project whose Spotless config uses `toggleOffOn`, or a version or option Loxel can't read from its build files, also gets a notice instead of being formatted. Version managers' shims aren't used, so add the tool's own directory to your `PATH`. Files with syntax errors are saved as they are.
+1. The tool on your `PATH`, if its version matches.
+2. For google-java-format, that version from your Maven or Gradle cache, there once Spotless has run for the project, on a JDK that can run it.
+
+Otherwise the file is saved unformatted, and a notice says which version the project wants. Spotless with no version picks one itself, which Loxel can't see, so name the version in your Spotless config to format on save, for example `googleJavaFormat('1.22.0')`. With fmt-maven-plugin, the version comes from the plugin in your Maven cache, there once the project has been built, or from a `google-java-format` dependency you add to the plugin. A project whose Spotless config uses `toggleOffOn`, or a version or option Loxel can't read from its build files, also gets a notice instead of being formatted. Version managers' shims aren't used, so add the tool's own directory to your `PATH`. Files with syntax errors are saved as they are.
 
 **Format Document** uses the language server's own formatter, which doesn't follow these settings.
 

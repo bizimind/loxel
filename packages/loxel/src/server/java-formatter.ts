@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, delimiter, join, parse, resolve } from "node:path";
 
 import { isVersionManagerShim as isInShimsDir } from "./csharp-env";
+import { killProcessGroup } from "./formatter-backends";
 import { getJavaEnv, isJdkInWorktree, javaExecutable, listJavaRuntimes } from "./java-env";
 import {
   findJavaFormatDeclaration,
@@ -33,8 +34,7 @@ export const javaFormatter: LanguageFormatter = {
   failureNotice: javaFailureNotice,
 };
 
-const VERSION_TIMEOUT_MS = 5_000;
-const PROBE_TIMEOUT_MS = 5_000;
+const CHECK_TIMEOUT_MS = 5_000;
 const VERSION_LINE = /^\S+:\s*Version\s+(\d\S*)/m;
 
 const GJF_MAIN = "com.google.googlejavaformat.java.Main";
@@ -65,8 +65,9 @@ const PROBE_SOURCE = "import java.util.List;\n\n/// A *doc*.\nclass A {\n  List<
 function detectJavaFormatter(
   startDir: string,
   wtRoot: string,
+  fileName?: string,
 ): FileFormatter | FormatterDecline | null {
-  const declared = findJavaFormatDeclaration(startDir, wtRoot);
+  const declared = findJavaFormatDeclaration(startDir, wtRoot, fileName);
   if (!declared || "notice" in declared) return declared;
   return {
     command: declared.tool,
@@ -90,15 +91,13 @@ async function prepareJavaFormat(
   root: string,
 ): Promise<FileFormatter | FormatterDecline> {
   const { tools, sawShim } = await toolsOnPath(tool, root);
-  const first = tools[0];
-  if (first && pin === null) return { command: first, args: formatArgs(flags) };
   const versions: string[] = [];
   for (const path of tools) {
     const version = await toolVersion(path, tool, root);
     if (version === pin) return { command: path, args: formatArgs(flags) };
     if (version) versions.push(version);
   }
-  if (pin && tool === GOOGLE_JAVA_FORMAT) {
+  if (tool === GOOGLE_JAVA_FORMAT) {
     const cached = await cachedJarFormatter(pin, flags, root);
     if (cached) return cached;
   }
@@ -107,30 +106,22 @@ async function prepareJavaFormat(
 
 function unavailableNotice(
   tool: string,
-  pin: string | null,
+  pin: string,
   found: string | undefined,
   sawShim: boolean,
 ): string {
   const skipped = "Format on save skipped:";
-  const install = installHint(tool, pin);
-  if (pin && found) {
+  const install =
+    tool === PALANTIR_JAVA_FORMAT
+      ? `Install version ${pin} from its Maven Central releases.`
+      : `Install ${pin} from its GitHub releases, or run Spotless once so the build caches it.`;
+  if (found) {
     return `${skipped} this project pins ${tool} ${pin}, and the one on your PATH is ${found}. ${install}`;
   }
   if (sawShim) {
     return `${skipped} "${tool}" on your PATH is a version manager's shim, which Loxel doesn't run. Add the tool's own directory to your PATH.`;
   }
-  const wanted = pin ? `${tool} ${pin}` : tool;
-  return `${skipped} this project uses ${wanted}, which is not on your PATH. ${install}`;
-}
-
-function installHint(tool: string, pin: string | null): string {
-  if (tool === PALANTIR_JAVA_FORMAT) {
-    return `Install ${pin ? `version ${pin}` : "it"} from its Maven Central releases.`;
-  }
-  if (pin) {
-    return `Install ${pin} from its GitHub releases, or run Spotless once so the build caches it.`;
-  }
-  return "Install it, for example with `brew install google-java-format`.";
+  return `${skipped} this project uses ${tool} ${pin}, which is not on your PATH. ${install}`;
 }
 
 /** Every copy of `tool` on the trusted part of `PATH`, without version managers' shims. */
@@ -173,24 +164,51 @@ function toolVersion(path: string, tool: string, root: string): Promise<string |
 
 async function askVersion(path: string, tool: string, root: string): Promise<string | null> {
   try {
-    const proc = Bun.spawn([path, "--version"], {
-      cwd: parse(root).root,
-      env: { ...buildSpawnEnv(), ...(await withWorktreeJdk(await trustedPath(tool, root), root)) },
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: VERSION_TIMEOUT_MS,
-    });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    const env = {
+      ...buildSpawnEnv(),
+      ...(await withWorktreeJdk(await trustedPath(tool, root), root)),
+    };
+    const { stdout, stderr, exitCode } = await runBriefly([path, "--version"], env, root);
     // `name: Version 1.2.3`, on either stream; a JVM's error can hold the word "version" too.
     return exitCode === 0 ? (VERSION_LINE.exec(`${stdout}\n${stderr}`)?.[1] ?? null) : null;
   } catch (err) {
     log.debug("Asking a formatter for its version failed", { path, error: err });
     return null;
+  }
+}
+
+/**
+ * Runs a check from the filesystem root, with the group killed at the timeout: a launcher's child
+ * that lives on would hold its output open, and the check would never end.
+ */
+async function runBriefly(
+  argv: string[],
+  env: Record<string, string | undefined>,
+  root: string,
+  stdin?: string,
+): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean }> {
+  const proc = Bun.spawn(argv, {
+    cwd: parse(root).root,
+    env,
+    stdin: stdin === undefined ? "ignore" : new TextEncoder().encode(stdin),
+    stdout: "pipe",
+    stderr: "pipe",
+    detached: true,
+  });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    killProcessGroup(proc.pid);
+  }, CHECK_TIMEOUT_MS);
+  try {
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { stdout, stderr, exitCode, timedOut };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -334,16 +352,14 @@ async function tryFormatter(
   root: string,
 ): Promise<"runs" | "fails" | "timed-out"> {
   try {
-    const proc = Bun.spawn([java, ...javaArgs, "-"], {
-      cwd: parse(root).root,
-      env: { ...buildSpawnEnv(), PATH: await trustedPath("java", root) },
-      stdin: new TextEncoder().encode(PROBE_SOURCE),
-      stdout: "pipe",
-      stderr: "ignore",
-      timeout: PROBE_TIMEOUT_MS,
-    });
-    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (proc.signalCode) return "timed-out";
+    const env = { ...buildSpawnEnv(), PATH: await trustedPath("java", root) };
+    const { stdout, exitCode, timedOut } = await runBriefly(
+      [java, ...javaArgs, "-"],
+      env,
+      root,
+      PROBE_SOURCE,
+    );
+    if (timedOut) return "timed-out";
     return exitCode === 0 && stdout.includes("class A") ? "runs" : "fails";
   } catch (err) {
     log.debug("A JDK could not run a formatter jar", { java, error: err });

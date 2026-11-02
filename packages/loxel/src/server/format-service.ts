@@ -33,6 +33,7 @@ const log = logger.child("format");
 
 const MAX_FORMAT_SIZE = 1_024 * 1_024; // 1 MB
 const FORMAT_TIMEOUT_MS = 5_000;
+const PREPARE_TIMEOUT_MS = 5_000;
 
 /**
  * Outcome of `FormatService.format()`. `content` is null when the file is saved unformatted;
@@ -104,7 +105,10 @@ export class FormatService {
   private running = new Set<{ worktreePath: string; pid: number; stopped: boolean }>();
   private readonly unsubscribeRepoTrust = onRepoTrustChange(() => this.stopUntrusted());
 
-  constructor(private readonly languages: readonly LanguageFormatter[] = languageFormatters) {}
+  constructor(
+    private readonly languages: readonly LanguageFormatter[] = languageFormatters,
+    private readonly prepareTimeoutMs = PREPARE_TIMEOUT_MS,
+  ) {}
 
   /**
    * Format file content using the resolved formatter.
@@ -154,7 +158,7 @@ export class FormatService {
       settings.autoDetect && worktreePath
         ? this.findDetectedFormatter(ext, filePath, worktreePath)
         : undefined;
-    const fmt = detected && (await prepareDetected(detected, filePath));
+    const fmt = detected && (await prepareDetected(detected, filePath, this.prepareTimeoutMs));
     if (!fmt || !worktreePath) {
       log.debug("No formatter found", { filePath, ext });
       return UNFORMATTED;
@@ -570,18 +574,34 @@ function detectFormatter(
   }
 }
 
-/** A detected formatter after its `prepare`; one that throws detects nothing, like `detect`. */
+/**
+ * A detected formatter after its `prepare`; one that throws detects nothing, like `detect`. The whole
+ * of it is capped, as a save is waiting. What it leaves running can still finish and be remembered.
+ */
 async function prepareDetected(
   detected: DetectedFormatter | FormatterDecline,
   filePath: string,
+  timeoutMs: number,
 ): Promise<DetectedFormatter | FormatterDecline | undefined> {
   if ("notice" in detected || !detected.prepare) return detected;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<FormatterDecline>((done) => {
+    timer = setTimeout(
+      () =>
+        done({
+          notice: `Format on save skipped: checking "${detected.command}" took too long. The next save tries again.`,
+        }),
+      timeoutMs,
+    );
+  });
   try {
-    const prepared = await detected.prepare();
+    const prepared = await Promise.race([detected.prepare(), timedOut]);
     return "notice" in prepared ? prepared : { ...detected, ...prepared, prepare: undefined };
   } catch (err) {
     log.warn("Preparing a formatter failed", { filePath, error: errorMessage(err) });
     return undefined;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

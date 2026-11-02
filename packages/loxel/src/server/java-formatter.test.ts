@@ -75,7 +75,7 @@ const gjfPom = (version?: string) => `<project><build><plugins><plugin>
   <configuration><java><googleJavaFormat>${version ? `<version>${version}</version>` : ""}</googleJavaFormat></java></configuration>
 </plugin></plugins></build></project>`;
 
-function format(wt: string, file = "src/A.java") {
+function format(wt: string, file = "src/main/java/A.java") {
   return service.format("class A{}", join(wt, file), wt, DEFAULT_FORMATTING_SETTINGS);
 }
 
@@ -94,7 +94,7 @@ describe("choosing what runs", () => {
     expect(await Bun.file(join(bin, "version-cwd")).text()).toBe("/\n");
     expect(await Bun.file(join(bin, "format-cwd")).text()).toBe("/\n");
     expect(await Bun.file(join(bin, "format-args")).text()).toBe(
-      `--skip-reflowing-long-strings --assume-filename=${join(wt, "src/A.java")} -\n`,
+      `--skip-reflowing-long-strings --assume-filename=${join(wt, "src/main/java/A.java")} -\n`,
     );
   });
 
@@ -116,19 +116,69 @@ describe("choosing what runs", () => {
     expect(await format(wt)).toEqual({ content: `formatted by ${GOOGLE} 1.22.0\n` });
   });
 
-  test("no pin runs what is there, without asking its version", async () => {
-    const wt = await makeWorktree({ "pom.xml": gjfPom() });
+  test("Spotless with no version declines before asking any tool", async () => {
+    const wt = await makeWorktree({
+      "pom.xml": gjfPom().replace("<googleJavaFormat></googleJavaFormat>", "<googleJavaFormat/>"),
+    });
     const bin = await installTool(GOOGLE, "1.37.0");
-    expect(await format(wt)).toEqual({ content: `formatted by ${GOOGLE} 1.37.0\n` });
-    expect(await Bun.file(join(bin, "version-cwd")).exists()).toBe(false);
+    expect((await format(wt)).notice).toContain("Spotless chooses");
+    expect(await readdir(bin)).toEqual([GOOGLE]);
+  });
+
+  test("the fmt plugin's version of the formatter comes from its POM in the cache", async () => {
+    const pom = `<project><build><plugins><plugin>
+      <groupId>com.spotify.fmt</groupId><artifactId>fmt-maven-plugin</artifactId><version>2.29</version>
+    </plugin></plugins></build></project>`;
+    const wt = await makeWorktree({ "pom.xml": pom });
+    await installTool(GOOGLE, "1.37.0");
+    expect((await format(wt)).notice).toContain("can't determine");
+    await write(
+      join(
+        process.env.HOME ?? "",
+        ".m2/repository/com/spotify/fmt/fmt-maven-plugin/2.29/fmt-maven-plugin-2.29.pom",
+      ),
+      `<project><dependency><artifactId>google-java-format</artifactId><version>1.28.0</version></dependency></project>`,
+    );
+    expect((await format(wt)).notice).toContain(
+      `pins ${GOOGLE} 1.28.0, and the one on your PATH is 1.37.0`,
+    );
+  });
+
+  test("a file the project's target leaves out is saved as it is, silently", async () => {
+    const wt = await makeWorktree({
+      "build.gradle":
+        "spotless { java { googleJavaFormat('1.22.0')\n targetExclude '**/generated/**' } }\n",
+    });
+    const bin = await installTool(GOOGLE, "1.22.0");
+    expect(await format(wt, "src/generated/A.java")).toEqual({ content: null });
+    expect(await readdir(bin)).toEqual([GOOGLE]);
+    expect((await format(wt, "src/main/java/A.java")).content).toContain("formatted by");
+  });
+
+  test("hanging launchers cost one deadline, whatever their number", async () => {
+    const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
+    const hanging = "#!/bin/sh\nsleep 30 &\nwait\n";
+    const first = await write(join(root ?? "", "a", GOOGLE), hanging, 0o755);
+    const second = await write(join(root ?? "", "b", GOOGLE), hanging, 0o755);
+    process.env.PATH = `${dirname(first)}:${dirname(second)}:/usr/bin:/bin`;
+    const short = new FormatService(undefined, 20);
+    const { content, notice } = await short.format(
+      "class A{}",
+      join(wt, "src/main/java/A.java"),
+      wt,
+      DEFAULT_FORMATTING_SETTINGS,
+    );
+    short.destroy();
+    expect(content).toBeNull();
+    expect(notice).toContain("took too long");
   });
 
   test("a missing tool says what to install", async () => {
-    const wt = await makeWorktree({ "pom.xml": gjfPom() });
+    const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
     process.env.PATH = "/usr/bin:/bin";
-    expect((await format(wt)).notice).toContain("brew install google-java-format");
-    const pinned = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
-    expect((await format(pinned)).notice).toContain(`${GOOGLE} 1.22.0, which is not on your PATH`);
+    const { notice } = await format(wt);
+    expect(notice).toContain(`${GOOGLE} 1.22.0, which is not on your PATH`);
+    expect(notice).toContain("GitHub releases");
   });
 
   test("a JVM's error is no version, and is asked again once fixed", async () => {
@@ -168,7 +218,7 @@ describe("choosing what runs", () => {
   test("a manual override runs whatever the version", async () => {
     const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
     await installTool(GOOGLE, "1.37.0");
-    const result = await service.format("class A{}", join(wt, "src/A.java"), wt, {
+    const result = await service.format("class A{}", join(wt, "src/main/java/A.java"), wt, {
       ...DEFAULT_FORMATTING_SETTINGS,
       overrides: [{ id: "java", extensions: "java", command: GOOGLE, args: "-" }],
     });
@@ -188,7 +238,7 @@ describe("choosing what runs", () => {
 
 describe("what the worktree cannot make run", () => {
   test("a fake tool in the worktree and a build file with side effects stay idle", async () => {
-    const wt = await makeWorktree({ "pom.xml": gjfPom() });
+    const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
     const canary = join(root ?? "", "canary");
     const fake = `#!/bin/sh\ntouch "${canary}"\necho fake\n`;
     await write(join(wt, "tools", GOOGLE), fake, 0o755);
@@ -202,7 +252,7 @@ describe("what the worktree cannot make run", () => {
   });
 
   test("a PATH entry leading into the worktree supplies nothing", async () => {
-    const wt = await makeWorktree({ "pom.xml": gjfPom() });
+    const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
     const canary = join(root ?? "", "canary");
     await write(join(wt, "tools", GOOGLE), `#!/bin/sh\ntouch "${canary}"\n`, 0o755);
     await symlink(join(wt, "tools"), join(root ?? "", "link"));
@@ -212,7 +262,7 @@ describe("what the worktree cannot make run", () => {
   });
 
   test("a version manager's shim is refused, by directory or by link", async () => {
-    const wt = await makeWorktree({ "pom.xml": gjfPom() });
+    const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
     const canary = join(root ?? "", "canary");
     const shims = join(root ?? "", "shims");
     await write(join(shims, GOOGLE), `#!/bin/sh\ntouch "${canary}"\n`, 0o755);
@@ -228,7 +278,7 @@ describe("what the worktree cannot make run", () => {
   });
 
   test("a launcher script that is no shim still runs", async () => {
-    const wt = await makeWorktree({ "pom.xml": gjfPom() });
+    const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
     await installTool(GOOGLE, "1.22.0");
     expect((await format(wt)).content).toBe(`formatted by ${GOOGLE} 1.22.0\n`);
   });
@@ -278,7 +328,7 @@ describe("the pinned jar from the build's cache", () => {
     expect(args).toContain(`-cp ${jar}:${guava}:${access} `);
     expect(args).toContain("--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED");
     expect(args).toContain("com.google.googlejavaformat.java.Main --skip-reflowing-long-strings");
-    expect(args).toContain(`--assume-filename=${join(wt, "src/A.java")} -`);
+    expect(args).toContain(`--assume-filename=${join(wt, "src/main/java/A.java")} -`);
   });
 
   test("from Gradle's cache, under GRADLE_USER_HOME", async () => {
@@ -309,7 +359,7 @@ describe("the pinned jar from the build's cache", () => {
   test("a manual override with an absolute java keeps the worktree as its directory", async () => {
     const wt = await makeWorktree({ "pom.xml": gjfPom("1.22.0") });
     const java = await write(join(root ?? "", "own", "java"), "#!/bin/sh\npwd\n", 0o755);
-    const { content } = await service.format("class A{}", join(wt, "src/A.java"), wt, {
+    const { content } = await service.format("class A{}", join(wt, "src/main/java/A.java"), wt, {
       ...DEFAULT_FORMATTING_SETTINGS,
       overrides: [{ id: "java", extensions: "java", command: java, args: "-jar tool.jar" }],
     });
@@ -340,7 +390,7 @@ describe("the pinned jar from the build's cache", () => {
 
   test("a project's pin selects only a cached version, not a path", async () => {
     const wt = await makeWorktree({ "pom.xml": gjfPom("../../../evil") });
-    expect((await format(wt)).notice).toContain("can't read");
+    expect((await format(wt)).notice).toContain("can't determine");
   });
 
   test("without the jar, the notice names the version", async () => {

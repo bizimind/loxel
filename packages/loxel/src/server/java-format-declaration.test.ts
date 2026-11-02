@@ -7,18 +7,21 @@ import { findJavaFormatDeclaration } from "./java-format-declaration";
 
 let wt: string | undefined;
 
+const originalHome = process.env.HOME;
+
 afterEach(async () => {
+  process.env.HOME = originalHome;
   if (wt) await rm(wt, { recursive: true, force: true });
   wt = undefined;
 });
 
-async function declared(files: Record<string, string>, dir = "src") {
+async function declared(files: Record<string, string>, dir = "src", fileName?: string) {
   wt = await realpath(await mkdtemp(join(tmpdir(), "java-format-declaration-")));
   for (const [name, content] of Object.entries(files)) {
     await mkdir(dirname(join(wt, name)), { recursive: true });
     await writeFile(join(wt, name), content);
   }
-  return findJavaFormatDeclaration(join(wt, dir), wt);
+  return findJavaFormatDeclaration(join(wt, dir), wt, fileName);
 }
 
 const spotlessPom = (java: string, extra = "") => `<project>${extra}<build><plugins><plugin>
@@ -36,6 +39,7 @@ const fmtPom = (group: string, body: string) => `<project><build><plugins><plugi
 </plugin></plugins></build></project>`;
 
 const REFLOW = "--skip-reflowing-long-strings";
+const GJF = "<googleJavaFormat><version>1.22.0</version></googleJavaFormat>";
 
 describe("no signal", () => {
   test.each([
@@ -56,7 +60,7 @@ describe("no signal", () => {
       },
     ],
     ["a commented-out step", { "build.gradle": "// googleJavaFormat('1.22.0')\n" }],
-    ["a commented-out POM", { "pom.xml": `<!-- ${spotlessPom("<googleJavaFormat/>")} -->` }],
+    ["a commented-out POM", { "pom.xml": `<!-- ${spotlessPom(GJF)} -->` }],
     ["a fmt plugin of another group", { "pom.xml": fmtPom("org.example", "") }],
   ])("%s formats nothing", async (_name, files: Record<string, string>) => {
     expect(await declared(files)).toBeNull();
@@ -64,12 +68,13 @@ describe("no signal", () => {
 });
 
 describe("Spotless for Maven", () => {
-  test("no version states no pin, with Spotless's defaults as flags", async () => {
-    expect(await declared({ "pom.xml": spotlessPom("<googleJavaFormat/>") })).toEqual({
-      tool: "google-java-format",
-      pin: null,
-      flags: [REFLOW],
-    });
+  test("no version declines: Spotless picks one by its own release", async () => {
+    const notice = expect.stringContaining("Spotless chooses this project's google-java-format");
+    expect(await declared({ "pom.xml": spotlessPom("<googleJavaFormat/>") })).toEqual({ notice });
+    await rm(wt ?? "", { recursive: true, force: true });
+    expect(
+      await declared({ "build.gradle": "spotless { java { googleJavaFormat() } }\n" }),
+    ).toEqual({ notice });
   });
 
   test("reads the version and options", async () => {
@@ -85,7 +90,8 @@ describe("Spotless for Maven", () => {
   });
 
   test("AOSP without reorderImports keeps the imports as they are", async () => {
-    const java = "<googleJavaFormat><style>AOSP</style></googleJavaFormat>";
+    const java =
+      "<googleJavaFormat><version>1.22.0</version><style>AOSP</style></googleJavaFormat>";
     expect(await declared({ "pom.xml": spotlessPom(java) })).toMatchObject({
       flags: ["--aosp", "--skip-sorting-imports", REFLOW],
     });
@@ -109,36 +115,39 @@ describe("Spotless for Maven", () => {
   test("a property it cannot find declines rather than guess", async () => {
     const java = "<googleJavaFormat><version>${gjf.version}</version></googleJavaFormat>";
     expect(await declared({ "pom.xml": spotlessPom(java) })).toEqual({
-      notice: expect.stringContaining("can't read which google-java-format version"),
+      notice: expect.stringContaining("can't determine which google-java-format version"),
     });
   });
 
   test("a value that is no version declines", async () => {
     const java = "<googleJavaFormat><version>../../evil</version></googleJavaFormat>";
     expect(await declared({ "pom.xml": spotlessPom(java) })).toEqual({
-      notice: expect.stringContaining("can't read"),
+      notice: expect.stringContaining("can't determine"),
     });
   });
 
   test("palantir styles and Javadoc", async () => {
-    const aosp = "<palantirJavaFormat><style>AOSP</style></palantirJavaFormat>";
+    const aosp =
+      "<palantirJavaFormat><version>2.1.0</version><style>AOSP</style></palantirJavaFormat>";
     expect(await declared({ "pom.xml": spotlessPom(aosp) })).toMatchObject({
       flags: ["--aosp", REFLOW],
     });
     await rm(wt ?? "", { recursive: true, force: true });
-    const google = "<palantirJavaFormat><style>GOOGLE</style></palantirJavaFormat>";
+    const google =
+      "<palantirJavaFormat><version>2.1.0</version><style>GOOGLE</style></palantirJavaFormat>";
     expect(await declared({ "pom.xml": spotlessPom(google) })).toMatchObject({ flags: [REFLOW] });
     await rm(wt ?? "", { recursive: true, force: true });
-    const javadoc = "<palantirJavaFormat><formatJavadoc>true</formatJavadoc></palantirJavaFormat>";
+    const javadoc =
+      "<palantirJavaFormat><version>2.1.0</version><formatJavadoc>true</formatJavadoc></palantirJavaFormat>";
     expect(await declared({ "pom.xml": spotlessPom(javadoc) })).toEqual({
       notice: expect.stringContaining("Javadoc"),
     });
   });
 
   test("toggleOffOn and a forked artifact decline", async () => {
-    expect(await declared({ "pom.xml": spotlessPom("<googleJavaFormat/><toggleOffOn/>") })).toEqual(
-      { notice: expect.stringContaining("toggleOffOn") },
-    );
+    expect(await declared({ "pom.xml": spotlessPom(`${GJF}<toggleOffOn/>`) })).toEqual({
+      notice: expect.stringContaining("toggleOffOn"),
+    });
     await rm(wt ?? "", { recursive: true, force: true });
     const fork = "<googleJavaFormat><groupArtifact>a:b</groupArtifact></googleJavaFormat>";
     expect(await declared({ "pom.xml": spotlessPom(fork) })).toEqual({
@@ -148,12 +157,57 @@ describe("Spotless for Maven", () => {
 });
 
 describe("fmt-maven-plugin", () => {
+  /** The plugin's published POM in the user's Maven cache, as a build leaves it. */
+  async function cachePluginPom(group: string, version: string, dependencyVersion: string) {
+    const home = join(wt ?? "", "..", `home-${crypto.randomUUID()}`);
+    process.env.HOME = home;
+    const name = `fmt-maven-plugin-${version}.pom`;
+    const path = join(
+      home,
+      ".m2/repository",
+      ...group.split("."),
+      "fmt-maven-plugin",
+      version,
+      name,
+    );
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(
+      path,
+      `<project><properties><gjf>1.28.0</gjf></properties><dependencies><dependency>
+        <groupId>com.google.googlejavaformat</groupId>
+        <artifactId>google-java-format</artifactId>
+        <version>${dependencyVersion}</version>
+      </dependency></dependencies></project>`,
+    );
+    return home;
+  }
+
   test.each(["com.spotify.fmt", "com.coveo"])("%s with options", async (group) => {
     const body = `<configuration><style>aosp</style><skipSortingImports>true</skipSortingImports></configuration>`;
-    expect(await declared({ "pom.xml": fmtPom(group, body) })).toEqual({
+    wt = await realpath(await mkdtemp(join(tmpdir(), "java-format-declaration-")));
+    const home = await cachePluginPom(group, "2.29.0", "1.13.0");
+    const pom = fmtPom(group, body);
+    await writeFile(join(wt, "pom.xml"), pom);
+    expect(findJavaFormatDeclaration(join(wt, "src"), wt)).toEqual({
       tool: "google-java-format",
-      pin: null,
+      pin: "1.13.0",
       flags: ["--aosp", "--skip-sorting-imports", REFLOW],
+    });
+    await rm(home, { recursive: true, force: true });
+  });
+
+  test("the formatter's version may be a property of the plugin's POM", async () => {
+    wt = await realpath(await mkdtemp(join(tmpdir(), "java-format-declaration-")));
+    const home = await cachePluginPom("com.spotify.fmt", "2.29.0", "${gjf}");
+    await writeFile(join(wt, "pom.xml"), fmtPom("com.spotify.fmt", ""));
+    expect(findJavaFormatDeclaration(join(wt, "src"), wt)).toMatchObject({ pin: "1.28.0" });
+    await rm(home, { recursive: true, force: true });
+  });
+
+  test("a plugin not in the cache leaves the version undetermined", async () => {
+    process.env.HOME = "/nonexistent-loxel-home";
+    expect(await declared({ "pom.xml": fmtPom("com.spotify.fmt", "") })).toEqual({
+      notice: expect.stringContaining("can't determine which google-java-format version"),
     });
   });
 
@@ -242,7 +296,7 @@ describe("Spotless for Gradle", () => {
   test("an expression it cannot follow declines", async () => {
     expect(
       await declared({ "build.gradle": "spotless { java { googleJavaFormat(pickVersion()) } }\n" }),
-    ).toEqual({ notice: expect.stringContaining("can't read") });
+    ).toEqual({ notice: expect.stringContaining("can't determine") });
   });
 
   test("palantir with a style and toggleOffOn", async () => {
@@ -309,7 +363,7 @@ describe("Palantir's Gradle plugin", () => {
   test("a plugin with no visible version declines", async () => {
     expect(
       await declared({ "build.gradle": "apply plugin: 'com.palantir.java-format'\n" }),
-    ).toEqual({ notice: expect.stringContaining("can't read") });
+    ).toEqual({ notice: expect.stringContaining("can't determine") });
   });
 });
 
@@ -326,10 +380,7 @@ describe("applied or only available", () => {
   test("pluginManagement alone formats no module", async () => {
     expect(
       await declared(
-        {
-          "pom.xml": managed("<googleJavaFormat/>"),
-          "a/pom.xml": "<project><artifactId>a</artifactId></project>",
-        },
+        { "pom.xml": managed(GJF), "a/pom.xml": "<project><artifactId>a</artifactId></project>" },
         "a/src",
       ),
     ).toBeNull();
@@ -399,12 +450,17 @@ describe("steps and options around the formatter", () => {
   test("an importOrder step keeps the imports for it to order", async () => {
     expect(
       await declared({
-        "build.gradle": "spotless { java { googleJavaFormat(); importOrder('java', '') } }\n",
+        "build.gradle":
+          "spotless { java { googleJavaFormat('1.22.0'); importOrder('java', '') } }\n",
       }),
     ).toMatchObject({ flags: ["--skip-sorting-imports", REFLOW] });
     await rm(wt ?? "", { recursive: true, force: true });
     expect(
-      await declared({ "pom.xml": spotlessPom("<palantirJavaFormat/><importOrder/>") }),
+      await declared({
+        "pom.xml": spotlessPom(
+          "<palantirJavaFormat><version>2.1.0</version></palantirJavaFormat><importOrder/>",
+        ),
+      }),
     ).toMatchObject({ flags: ["--palantir", "--skip-sorting-imports", REFLOW] });
   });
 
@@ -412,7 +468,7 @@ describe("steps and options around the formatter", () => {
     expect(
       await declared({
         "build.gradle":
-          "spotless { java { googleJavaFormat() }\n kotlin { ktfmt(); toggleOffOn() } }\n",
+          "spotless { java { googleJavaFormat('1.22.0') }\n kotlin { ktfmt(); toggleOffOn() } }\n",
       }),
     ).toMatchObject({ tool: "google-java-format" });
   });
@@ -446,7 +502,7 @@ describe("steps and options around the formatter", () => {
     expect(
       await declared(
         {
-          "pom.xml": spotlessPom("<googleJavaFormat/>"),
+          "pom.xml": spotlessPom(GJF),
           "a/build.gradle.kts": "configure<SpotlessExtension> { java { eclipse() } }\n",
         },
         "a/src",
@@ -468,7 +524,7 @@ describe("the nearest declaration decides", () => {
     expect(
       await declared(
         {
-          "pom.xml": spotlessPom("<googleJavaFormat/>"),
+          "pom.xml": spotlessPom(GJF),
           "a/build.gradle": "spotless { java { palantirJavaFormat('2.1.0') } }\n",
         },
         "a/src",
@@ -480,7 +536,7 @@ describe("the nearest declaration decides", () => {
     expect(
       await declared(
         {
-          "pom.xml": spotlessPom("<googleJavaFormat/>"),
+          "pom.xml": spotlessPom(GJF),
           "a/pom.xml": "<project><artifactId>a</artifactId></project>",
         },
         "a/src",
@@ -491,25 +547,136 @@ describe("the nearest declaration decides", () => {
   test("a module formatting with Eclipse does not inherit it", async () => {
     expect(
       await declared(
-        {
-          "pom.xml": spotlessPom("<googleJavaFormat/>"),
-          "a/build.gradle": "spotless { java { eclipse() } }\n",
-        },
+        { "pom.xml": spotlessPom(GJF), "a/build.gradle": "spotless { java { eclipse() } }\n" },
         "a/src",
       ),
     ).toBeNull();
   });
 
   test("an edited build file is read again", async () => {
-    const first = await declared({ "pom.xml": spotlessPom("<googleJavaFormat/>") });
-    expect(first).toMatchObject({ pin: null });
+    const first = await declared({ "pom.xml": spotlessPom(GJF) });
+    expect(first).toMatchObject({ pin: "1.22.0" });
     const pom = join(wt ?? "", "pom.xml");
     await writeFile(
       pom,
-      spotlessPom("<googleJavaFormat><version>1.22.0</version></googleJavaFormat>"),
+      spotlessPom("<googleJavaFormat><version>1.23.0</version></googleJavaFormat>"),
     );
     expect(findJavaFormatDeclaration(join(wt ?? "", "src"), wt ?? "")).toMatchObject({
-      pin: "1.22.0",
+      pin: "1.23.0",
     });
+  });
+});
+
+describe("which files a declaration formats", () => {
+  const gradle = (java: string) => `spotless { java { googleJavaFormat('1.22.0')\n${java} } }\n`;
+  const inScope = async (files: Record<string, string>, path: string) => {
+    const slash = path.lastIndexOf("/");
+    return (await declared(files, path.slice(0, slash), path.slice(slash + 1))) !== null;
+  };
+  const clean = () => rm(wt ?? "", { recursive: true, force: true });
+
+  test("Maven's default is the standard source folders", async () => {
+    const files = { "pom.xml": spotlessPom(GJF) };
+    expect(await inScope(files, "src/main/java/a/A.java")).toBe(true);
+    await clean();
+    expect(await inScope(files, "src/test/java/A.java")).toBe(true);
+    await clean();
+    expect(await inScope(files, "target/generated-sources/A.java")).toBe(false);
+    await clean();
+    expect(await inScope(files, "testdata/A.java")).toBe(false);
+  });
+
+  test("Maven's includes and excludes, in a module of the declaring POM", async () => {
+    const java = `${GJF}<includes><include>src/**/*.java</include></includes>
+      <excludes><exclude>**/generated/**</exclude></excludes>`;
+    const files = {
+      "pom.xml": spotlessPom(java),
+      "m/pom.xml": "<project><artifactId>m</artifactId></project>",
+    };
+    expect(await inScope(files, "m/src/custom/A.java")).toBe(true);
+    await clean();
+    expect(await inScope(files, "m/src/generated/A.java")).toBe(false);
+    await clean();
+    expect(await inScope(files, "m/other/A.java")).toBe(false);
+  });
+
+  test("Maven's globs with a variable format nothing, silently", async () => {
+    const java = `${GJF}<includes><include>\${dir}/**/*.java</include></includes>`;
+    expect(await inScope({ "pom.xml": spotlessPom(java) }, "src/main/java/A.java")).toBe(false);
+    await clean();
+    expect(
+      await inScope(
+        { "pom.xml": spotlessPom(GJF).replace("<java>", "<skip>true</skip><java>") },
+        "src/main/java/A.java",
+      ),
+    ).toBe(false);
+  });
+
+  test("Gradle with no target covers any file, but its build directory", async () => {
+    const files = { "build.gradle": gradle("") };
+    expect(await inScope(files, "anywhere/A.java")).toBe(true);
+    await clean();
+    expect(await inScope(files, "build/generated/A.java")).toBe(false);
+    await clean();
+    expect(await inScope(files, "src/main/java/com/build/A.java")).toBe(true);
+  });
+
+  test.each([
+    ["call", "target('src/**/*.java')\ntargetExclude('**/generated/**', 'src/skip/**')"],
+    ["Groovy command", "target 'src/**/*.java'\ntargetExclude '**/generated/**', 'src/skip/**'"],
+  ])("Gradle's target and targetExclude, as a %s", async (_form, java) => {
+    const files = { "build.gradle": gradle(java) };
+    expect(await inScope(files, "src/main/java/A.java")).toBe(true);
+    await clean();
+    expect(await inScope(files, "src/main/java/generated/A.java")).toBe(false);
+    await clean();
+    expect(await inScope(files, "src/skip/A.java")).toBe(false);
+    await clean();
+    expect(await inScope(files, "lib/A.java")).toBe(false);
+  });
+
+  test("a target from subprojects is relative to each subproject", async () => {
+    const script = `subprojects {\n${gradle("target 'src/**/*.java'")}}\n`;
+    const files = { "build.gradle": script, "lib/build.gradle": "" };
+    expect(await inScope(files, "lib/src/main/java/A.java")).toBe(true);
+    await clean();
+    expect(await inScope(files, "lib/testdata/A.java")).toBe(false);
+  });
+
+  test("a project's own target is not relative to a module below it", async () => {
+    const files = { "build.gradle": gradle("target 'src/**/*.java'"), "lib/build.gradle": "" };
+    expect(await inScope(files, "lib/src/main/java/A.java")).toBe(false);
+  });
+
+  test.each([
+    ["a variable", "target javaGlobs"],
+    ["a fileTree", "target fileTree('src')"],
+    ["an interpolated glob", 'target "$dir/**/*.java"'],
+    ["an assignment", "target = 'src/**/*.java'"],
+    ["a path out of the project", "target '../other/**/*.java'"],
+    ["two calls", "target 'a/**'\ntarget 'b/**'"],
+    ["a variable exclude", "targetExclude generated"],
+    ["a content rule", "targetExcludeIfContentContains('@Generated')"],
+  ])("%s formats nothing, silently", async (_form, java) => {
+    expect(await inScope({ "build.gradle": gradle(java) }, "src/main/java/A.java")).toBe(false);
+  });
+
+  test("another language's target says nothing about Java's", async () => {
+    const script = `spotless {\n java { googleJavaFormat('1.22.0') }\n kotlin { target 'x/**' }\n}\n`;
+    expect(await inScope({ "build.gradle": script }, "src/main/java/A.java")).toBe(true);
+  });
+
+  test("Settings, which names no file, still lists the formatter", async () => {
+    const script = gradle("target javaGlobs");
+    expect(await declared({ "build.gradle": script })).toMatchObject({ pin: "1.22.0" });
+  });
+
+  test("the fmt plugin's settings that move its files format nothing", async () => {
+    const pom = fmtPom(
+      "com.spotify.fmt",
+      `<configuration><sourceDirectory>gen</sourceDirectory></configuration>
+       <dependencies><dependency><artifactId>google-java-format</artifactId><version>1.30.0</version></dependency></dependencies>`,
+    );
+    expect(await inScope({ "pom.xml": pom }, "src/main/java/A.java")).toBe(false);
   });
 });
