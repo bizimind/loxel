@@ -1,29 +1,21 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { GoEnv } from "@/api/go-env-model";
 import { isDirectory } from "@/fs-utils";
-import { isRecord } from "@/lib/is-record";
 
 import { getGoEnv, goSpawnEnv } from "./go-env";
+import { golangciConfigIn, isFile, readGolangciConfig } from "./golangci-lint-config";
 import { dirsUpToRoot, type FileFormatter, type LanguageFormatter } from "./language-formatter";
 import { logger } from "./logger";
 import { isInside } from "./shipped-by-repo";
-import { parseToml, recordAt } from "./toml-file";
+import { recordAt } from "./toml-file";
 
 const log = logger.child("format");
 
 const GOFMT: FileFormatter = { command: "gofmt", args: "" };
 
 const GOLANGCI_LINT = "golangci-lint";
-
-/** golangci-lint's config names, in the order it prefers them within a directory. */
-const GOLANGCI_CONFIG_FILES = [
-  ".golangci.json",
-  ".golangci.toml",
-  ".golangci.yaml",
-  ".golangci.yml",
-];
 
 /** Often deliberately unformatted, or not the project's own code. */
 const SKIPPED_DIRS: ReadonlySet<string> = new Set(["vendor", "testdata"]);
@@ -60,6 +52,13 @@ export function goFormatterWith(gorootLookupTimeoutMs: number): LanguageFormatte
 
 export const goFormatter = goFormatterWith(GOROOT_LOOKUP_TIMEOUT_MS);
 
+/** Whether `dir` is in a directory of the worktree `root` that Go tools here leave alone. */
+export function isSkippedGoDir(dir: string, root: string): boolean {
+  return relative(root, dir)
+    .split(sep)
+    .some((segment) => SKIPPED_DIRS.has(segment));
+}
+
 /**
  * Pick the Go formatter for a file in `startDir`, walking up to `wtRoot`. The nearest `.golangci.*`
  * decides alone, as golangci-lint never merges configs: with `version: "2"` and enabled formatters
@@ -76,12 +75,11 @@ function detectGoFormatter(
 ): FileFormatter | null {
   const root = resolve(wtRoot);
   const dir = resolve(root, startDir);
-  const segments = relative(root, dir).split(sep);
-  if (segments.some((segment) => SKIPPED_DIRS.has(segment))) return null;
+  if (isSkippedGoDir(dir, root)) return null;
 
   const dirs = dirsUpToRoot(dir, root);
-  const configPath = dirs.map(configIn).find(Boolean);
-  const config = configPath ? readConfig(configPath) : undefined;
+  const configPath = dirs.map(golangciConfigIn).find(Boolean);
+  const config = configPath ? readGolangciConfig(configPath) : undefined;
   if (configPath && config && enablesFormatters(config)) {
     if (fileName && isExcluded(config, configPath, join(dir, fileName), dirs, root)) return null;
     const configArg = configArgFrom(existingDir(dir, root), configPath);
@@ -92,19 +90,6 @@ function detectGoFormatter(
   }
   const inModule = dirs.some((d) => isFile(join(d, "go.mod")) || isFile(join(d, "go.work")));
   return inModule ? GOFMT : null;
-}
-
-/** The config golangci-lint would take from `dir`. */
-function configIn(dir: string): string | undefined {
-  return GOLANGCI_CONFIG_FILES.map((name) => join(dir, name)).find(isFile);
-}
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path, { throwIfNoEntry: false })?.isFile() ?? false;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -118,19 +103,6 @@ function configArgFrom(cwd: string, configPath: string): string | undefined {
     const arg = relative(realpathSync(cwd), join(configDir, basename(configPath)));
     return /\s/.test(arg) ? undefined : arg;
   } catch {
-    return undefined;
-  }
-}
-
-/** The config's top-level table, or undefined when it is unreadable. */
-function readConfig(path: string): Record<string, unknown> | undefined {
-  try {
-    const text = readFileSync(path, "utf-8");
-    if (path.endsWith(".toml")) return parseToml(text);
-    const parsed: unknown = path.endsWith(".json") ? JSON.parse(text) : Bun.YAML.parse(text);
-    return isRecord(parsed) ? parsed : undefined;
-  } catch (err) {
-    log.debug("Could not read golangci-lint config", { path, error: err });
     return undefined;
   }
 }

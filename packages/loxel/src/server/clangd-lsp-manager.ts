@@ -17,8 +17,8 @@ import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
 import {
-  CLANGD_IGNORED_GLOBS,
   ClangdFileChanges,
+  classifyChange,
   INDEX_REFRESH_MIN_INTERVAL_MS,
   INDEX_REFRESH_QUIET_MS,
 } from "./clangd-file-changes";
@@ -398,10 +398,6 @@ export class ClangdLspManager extends WorktreeLspManager {
     "textDocument/formatting",
     "textDocument/rangeFormatting",
   ];
-  // clangd registers no watchers and ignores `workspace/didChangeWatchedFiles`. This brings the
-  // changes here, where `notifyWatchedFilesChanged` acts on them instead of telling the server.
-  protected override readonly forwardWatchedFiles = true;
-  protected override readonly watchedIgnoredGlobs = CLANGD_IGNORED_GLOBS;
 
   /** Why clangd won't start for a worktree, per worktree since each starts on its own. */
   private readonly failureReasons = new Map<string, string>();
@@ -428,6 +424,14 @@ export class ClangdLspManager extends WorktreeLspManager {
     for (const [session, files] of this.sessionFiles) {
       if (resolve(session.wtPath) !== root) continue;
       files.changes.pathsChanged(paths.map((changed) => relative(root, changed)));
+    }
+  }
+
+  override notifyIgnoredPathChanged(wtPath: string, relPath: string): void {
+    if (classifyChange(relPath) === null) return;
+    const root = resolve(wtPath);
+    for (const [session, files] of this.sessionFiles) {
+      if (resolve(session.wtPath) === root) files.changes.ignoredPathChanged(relPath);
     }
   }
 
@@ -572,6 +576,8 @@ export class ClangdLspManager extends WorktreeLspManager {
     const { textDocument } = message.params;
     if (!isRecord(textDocument) || typeof textDocument.uri !== "string") return;
     const { uri, version } = textDocument;
+    // A `loxel:` model reaches clangd too, but is no file: nothing here can name it to clangd.
+    if (!uri.startsWith("file:///")) return;
     const openDocuments = this.sessionFiles.get(session)?.openDocuments;
     if (message.method === "textDocument/didClose") {
       openDocuments?.delete(uri);

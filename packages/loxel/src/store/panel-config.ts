@@ -249,7 +249,7 @@ export const CENTER_PANELS = [
   },
   {
     type: "localDb",
-    idPrefix: "localdb-",
+    idPrefix: "localdb-main",
     component: "localDb",
     tabComponent: "localDbTab",
     icon: DatabaseIcon,

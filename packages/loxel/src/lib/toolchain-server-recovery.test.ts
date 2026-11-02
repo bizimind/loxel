@@ -3,13 +3,14 @@ import { describe, expect, test } from "bun:test";
 import type { WsMessage } from "@/api/ws-protocol";
 import type { LspStopReason } from "@/lib/lsp-connection";
 
-import { createJavaServerRecovery } from "./java-server-recovery";
+import { createToolchainServerRecovery } from "./toolchain-server-recovery";
 
 const CHANGED = { type: "java_env_changed", wtPath: "/wt" } as const satisfies WsMessage;
 
 function setup(reason: LspStopReason | null, activeWt: string | null = "/wt") {
   const calls: string[] = [];
-  const handle = createJavaServerRecovery({
+  const handle = createToolchainServerRecovery({
+    changedMessage: CHANGED.type,
     client: {
       connect: (wtPath) => calls.push(`connect ${wtPath}`),
       disconnect: () => calls.push("disconnect"),
@@ -20,7 +21,7 @@ function setup(reason: LspStopReason | null, activeWt: string | null = "/wt") {
   return { calls, handle };
 }
 
-describe("createJavaServerRecovery", () => {
+describe("createToolchainServerRecovery", () => {
   test("starts a server that could not start again from scratch", () => {
     const { calls, handle } = setup("start-failed");
     handle(CHANGED);

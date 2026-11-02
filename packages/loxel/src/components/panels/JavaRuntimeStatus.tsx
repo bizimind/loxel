@@ -4,7 +4,9 @@ import { getJavaBuildFile, getJavaEnv } from "@/api/java-env-client";
 import { javaToolchain } from "@/api/java-env-model";
 import { useActiveEditorFile } from "@/hooks/useActiveEditorFilePath";
 import { javaEnvSourceDescription, javaRuntimeLabel, selectJavaRuntime } from "@/lib/java-runtime";
+import { resolveLanguage } from "@/lib/resolve-language";
 import { useActiveToolchainStatus } from "@/queries/use-toolchain-status";
+import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/settings-store";
 
 import { ToolchainStatusButton } from "./ToolchainStatusButton";
 
@@ -12,13 +14,16 @@ const PROJECT_NOT_LOADED_TOOLTIP =
   "Maven and Gradle projects aren't loaded yet. Syntax errors, completion and outlines work; type errors, rename and go-to-definition don't.";
 
 /**
- * The JDK of the active editor's worktree, shown while that editor holds a Java file. Clicking it
- * opens the JDK picker for that worktree. Next to it, a note when the file belongs to a Maven or
- * Gradle project.
+ * The JDK of the active editor's worktree, shown while that editor holds a Java or Kotlin file.
+ * Clicking it opens the JDK picker for that worktree. Next to it, a note when a Java file belongs to
+ * a Maven or Gradle project: Kotlin has no language server for that to matter to.
  */
 export function JavaRuntimeStatus() {
   const active = useActiveToolchainStatus(javaToolchain, getJavaEnv);
-  const filePath = useActiveEditorFile()?.filePath ?? null;
+  const activeFile = useActiveEditorFile()?.filePath ?? null;
+  const associations = useSettingsStore(selectEffectiveFileAssociations);
+  const filePath =
+    activeFile && resolveLanguage(activeFile, associations) === "java" ? activeFile : null;
   const worktreePath = active?.wtPath ?? null;
   const { data: buildFile } = useQuery({
     queryKey: ["java-build-file", worktreePath, filePath],
@@ -43,7 +48,7 @@ export function JavaRuntimeStatus() {
 
   return (
     <>
-      {buildFile?.buildTool && (
+      {filePath && buildFile?.buildTool && (
         <span className="text-muted-foreground" title={PROJECT_NOT_LOADED_TOOLTIP}>
           {buildFile.buildTool} project not loaded yet
         </span>

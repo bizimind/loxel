@@ -514,6 +514,29 @@ exec /bin/cat > /dev/null
     expect((await client.closed).code).toBe(LSP_RESTART_CLOSE_CODE);
   });
 
+  test("a dependency install does not restart for the index", async () => {
+    const { recording, root } = await start(["a.cpp"]);
+    await writeFile(join(root, "compile_commands.json"), "[]");
+    jest.useFakeTimers();
+    recording.notifyIgnoredPathChanged(root, "node_modules/nan/nan.h");
+    jest.advanceTimersByTime(INDEX_REFRESH_QUIET_MS);
+    expect(recording.sent("textDocument/didSave")).toHaveLength(1);
+    expect(recording.liveSessions()).toBe(1);
+  });
+
+  test("a document that is not a file is left out of what the manager sends", async () => {
+    const { recording, client, root, uris } = await start();
+    const textDocument = { uri: "loxel://HEAD/a.cpp", languageId: "cpp", version: 1, text: "" };
+    client.send({ method: "textDocument/didOpen", params: { textDocument } });
+    jest.useFakeTimers();
+    recording.notifyWatchedFilesChanged(root, [join(root, "other.cpp"), join(root, ".clangd")]);
+    jest.advanceTimersByTime(INDEX_REFRESH_QUIET_MS);
+    expect(uris).toEqual([]);
+    expect(recording.sent("textDocument/didSave")).toEqual([]);
+    expect(recording.sent("textDocument/didChange")).toEqual([]);
+    expect(recording.liveSessions()).toBe(1);
+  });
+
   test("does not restart for the index without a compile database", async () => {
     const { recording, root } = await start(["a.cpp"]);
     jest.useFakeTimers();
