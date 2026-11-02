@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -9,12 +17,14 @@ import {
   dropWillRename,
   firstJavaFile,
   indentationOf,
+  isJdkInWorktree,
   javaRuntimesSetting,
   javaSettings,
   jdtlsHostCrossed,
   jdtlsArgs,
   jdtlsDataDir,
   latestLogMessage,
+  trustedJavaSettings,
 } from "./java-lsp-manager";
 import { fileUri } from "./lsp-file-uri";
 
@@ -53,6 +63,40 @@ describe("javaSettings", () => {
       import: { maven: { enabled: false }, gradle: { enabled: false }, exclusions: ["**"] },
       autobuild: { enabled: false },
     });
+  });
+});
+
+describe("trustedJavaSettings", () => {
+  const projects = { dirs: [], hasMaven: true, gradleRoots: [] };
+  const plan = { projects, blocked: [], gradleHome: null, gradleCommand: null };
+  const runtimes = [{ name: "JavaSE-21", path: "/jdk", default: true as const }];
+
+  test("loads projects, with the runtimes next to the build-file setting", () => {
+    expect(trustedJavaSettings("/wt", plan, runtimes)).toMatchObject({
+      import: { maven: { enabled: true }, gradle: { enabled: true } },
+      configuration: { updateBuildConfiguration: "automatic", runtimes },
+      telemetry: { enabled: false },
+      implementationCodeLens: "none",
+    });
+  });
+});
+
+describe("isJdkInWorktree", () => {
+  const wt = realpathSync(mkdtempSync(path.join(scratch, "wt-")));
+  const inside = path.join(wt, "jdk");
+  mkdirSync(inside);
+  const outside = realpathSync(mkdtempSync(path.join(scratch, "jdk-")));
+
+  test("compares real paths", () => {
+    expect(isJdkInWorktree(inside, wt)).toBe(true);
+    expect(isJdkInWorktree(outside, wt)).toBe(false);
+    const link = path.join(scratch, "link-to-inside");
+    symlinkSync(inside, link);
+    expect(isJdkInWorktree(link, wt)).toBe(true);
+  });
+
+  test("counts a path that cannot be read", () => {
+    expect(isJdkInWorktree(path.join(scratch, "missing"), wt)).toBe(true);
   });
 });
 
@@ -105,6 +149,16 @@ describe("jdtlsArgs", () => {
     ]);
   });
 
+  test("only a trusted server gets the daemon flags and the larger heap", () => {
+    const paths = { home, configuration: "/c", data: "/d", hosts: "/h" };
+    const restricted = jdtlsArgs(paths);
+    expect(restricted).toContain("-Xmx1G");
+    expect(restricted.join(" ")).not.toContain("org.gradle");
+    const trusted = jdtlsArgs(paths, true);
+    expect(trusted).toContain("-Xmx2G");
+    expect(trusted).toContain("-Dorg.gradle.daemon.registry.base=/d/gradle-daemons");
+  });
+
   test("fails on an incomplete install", () => {
     const empty = path.join(scratch, "empty");
     mkdirSync(path.join(empty, "plugins"), { recursive: true });
@@ -115,6 +169,10 @@ describe("jdtlsArgs", () => {
 test("jdtlsDataDir keeps same-named worktrees apart", () => {
   expect(jdtlsDataDir("/a/project")).not.toBe(jdtlsDataDir("/b/project"));
   expect(jdtlsDataDir("/a/project")).toBe(jdtlsDataDir("/a/project"));
+});
+
+test("jdtlsDataDir keeps a trusted server's imported projects from a restricted one", () => {
+  expect(jdtlsDataDir("/a/project", true)).not.toBe(jdtlsDataDir("/a/project"));
 });
 
 describe("dropWillRename", () => {

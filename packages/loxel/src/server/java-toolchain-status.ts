@@ -1,8 +1,4 @@
-import { existsSync } from "node:fs";
-import path from "node:path";
-
 import {
-  type JavaBuildFileResponse,
   type JavaEnvCandidatesResponse,
   type JavaEnvResponse,
   javaToolchain,
@@ -25,13 +21,22 @@ import {
   onJavaOverrideChange,
   setJavaOverride,
 } from "./java-override-store";
+import {
+  getJavaProjectIssue,
+  onJavaProjectIssueChange,
+  reloadJavaProjects,
+} from "./java-project-import";
 import { error, json } from "./response-helpers";
-import { isInside } from "./shipped-by-repo";
 import type { ToolchainStatusModule } from "./toolchain-status-module";
 
 async function javaEnvResponse(wtPath: string): Promise<JavaEnvResponse> {
   const { env, ignoredJavaHome } = await getJavaEnvResolution(wtPath);
-  return { env, overridePath: getJavaOverride(wtPath), ignoredJavaHome };
+  return {
+    env,
+    overridePath: getJavaOverride(wtPath),
+    ignoredJavaHome,
+    projectIssue: getJavaProjectIssue(wtPath),
+  };
 }
 
 // GET /api/java-env?wt= — The JDK Loxel uses for a worktree
@@ -74,52 +79,26 @@ async function handleJavaOverride(
   return json(await javaEnvResponse(wtPath));
 }
 
-const BUILD_FILES = [
-  ["pom.xml", "Maven"],
-  ["build.gradle", "Gradle"],
-  ["build.gradle.kts", "Gradle"],
-  ["settings.gradle", "Gradle"],
-  ["settings.gradle.kts", "Gradle"],
-] as const;
-
-/** The tool of the nearest build file from `filePath`'s folder up to the worktree; nothing is run. */
-export function nearestBuildTool(
-  wtPath: string,
-  filePath: string,
-): JavaBuildFileResponse["buildTool"] {
-  let dir = path.dirname(filePath);
-  while (isInside(dir, wtPath)) {
-    for (const [name, tool] of BUILD_FILES) {
-      if (existsSync(path.join(dir, name))) return tool;
-    }
-    if (dir === wtPath) break;
-    dir = path.dirname(dir);
-  }
-  return null;
-}
-
-// POST /api/java-env/build-file — The build tool of the project a Java file belongs to
-async function handleJavaBuildFile(
-  wtPath: string,
-  body: Record<string, unknown>,
-): Promise<Response> {
-  const { filePath } = body;
-  if (typeof filePath !== "string") return error("filePath must be a string", 400);
-  const response: JavaBuildFileResponse = { buildTool: nearestBuildTool(wtPath, filePath) };
-  return json(response);
+// POST /api/java-env/reload-projects — Load a worktree's projects again
+async function handleJavaReloadProjects(wtPath: string): Promise<Response> {
+  reloadJavaProjects(wtPath);
+  return json({ ok: true });
 }
 
 /**
  * Like {@link subscribeJavaEnv}, and also reports a change when a JDK that can run the language
  * server appears or goes, though the worktree's own JDK stays: a client whose server could not start
- * for lack of one tries again on that message.
+ * for lack of one tries again on that message. So does a change in what holds its projects back.
  */
 function subscribeJavaStatus(
   wtPath: string,
-  listener: (update: JavaEnvUpdate) => void,
+  listener: (update: Pick<JavaEnvUpdate, "changed">) => void,
 ): () => void {
   let couldRun: boolean | null = null;
-  return subscribeJavaEnv(wtPath, (update) => {
+  const stopIssues = onJavaProjectIssueChange((changedPath) => {
+    if (changedPath === wtPath) listener({ changed: true });
+  });
+  const stopEnv = subscribeJavaEnv(wtPath, (update) => {
     void listJavaRuntimes(wtPath).then((runtimes) => {
       const canRun = canRunJdtls(runtimes);
       const crossed = jdtlsHostCrossed(couldRun, canRun);
@@ -127,6 +106,10 @@ function subscribeJavaStatus(
       listener({ ...update, changed: update.changed || crossed });
     });
   });
+  return () => {
+    stopIssues();
+    stopEnv();
+  };
 }
 
 export const javaToolchainStatus: ToolchainStatusModule = {
@@ -139,8 +122,8 @@ export const javaToolchainStatus: ToolchainStatusModule = {
   routes: {
     GET: { "/api/java-env": handleJavaEnv, "/api/java-env/candidates": handleJavaEnvCandidates },
     POST: {
-      "/api/java-env/build-file": handleJavaBuildFile,
       "/api/java-env/override": handleJavaOverride,
+      "/api/java-env/reload-projects": handleJavaReloadProjects,
     },
   },
 };

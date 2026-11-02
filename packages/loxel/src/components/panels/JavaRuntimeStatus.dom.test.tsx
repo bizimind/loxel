@@ -3,7 +3,7 @@ import { afterEach, describe, expect, jest, mock, test } from "bun:test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-import type { JavaBuildFileResponse, JavaEnvResponse } from "@/api/java-env-model";
+import type { JavaEnvResponse } from "@/api/java-env-model";
 
 const JDK: NonNullable<JavaEnvResponse["env"]> = {
   source: "java-home",
@@ -18,9 +18,10 @@ const getJavaEnv = jest.fn(async (_wtPath: string): Promise<JavaEnvResponse> => 
   env: JDK,
   overridePath: null,
   ignoredJavaHome: null,
+  projectIssue: null,
 }));
-const getJavaBuildFile = jest.fn(async (): Promise<JavaBuildFileResponse> => ({ buildTool: null }));
-mock.module("@/api/java-env-client", () => ({ ...originalClient, getJavaBuildFile, getJavaEnv }));
+const reloadJavaProjects = jest.fn(async (_request: { worktreePath: string }) => {});
+mock.module("@/api/java-env-client", () => ({ ...originalClient, getJavaEnv, reloadJavaProjects }));
 
 const originalRuntime = await import("@/lib/java-runtime");
 const selectJavaRuntime = jest.fn(async (_wtPath: string) => {});
@@ -54,24 +55,29 @@ afterEach(() => {
   cleanup();
   getJavaEnv.mockClear();
   selectJavaRuntime.mockClear();
+  reloadJavaProjects.mockClear();
 });
 
 describe("JavaRuntimeStatus", () => {
-  test("says when the file belongs to a project that is not loaded", async () => {
-    getJavaBuildFile.mockImplementationOnce(async () => ({ buildTool: "Maven" }));
+  test("says what holds the projects back, and reloads them when clicked", async () => {
+    const detail = "gradle-9.8.2-bin isn't installed. Run ./gradlew once in a terminal.";
+    getJavaEnv.mockImplementationOnce(async () => ({
+      env: JDK,
+      overridePath: null,
+      ignoredJavaHome: null,
+      projectIssue: { label: "Project not fully loaded", detail },
+    }));
     renderStatus();
-    const note = await screen.findByText("Maven project not loaded yet");
-    expect(note.getAttribute("title")).toContain("rename and go-to-definition don't");
-    expect(getJavaBuildFile).toHaveBeenCalledWith({
-      worktreePath: "/wt-a",
-      filePath: "/wt-a/src/App.java",
-    });
+    const note = await screen.findByRole("button", { name: "Project not fully loaded" });
+    expect(note.title).toBe(detail);
+    fireEvent.click(note);
+    expect(reloadJavaProjects.mock.calls).toEqual([[{ worktreePath: "/wt-a" }]]);
   });
 
-  test("shows no note outside such a project", async () => {
+  test("shows no note when nothing holds the projects back", async () => {
     renderStatus();
     await screen.findByText(/Java 21/);
-    expect(screen.queryByText(/not loaded yet/)).toBeNull();
+    expect(screen.queryByText(/not fully loaded/)).toBeNull();
   });
 
   test("shows and selects the JDK of the active panel's worktree, not the active one", async () => {
@@ -92,6 +98,7 @@ describe("JavaRuntimeStatus", () => {
       env: { ...JDK, source: "install-location" },
       overridePath: null,
       ignoredJavaHome: "/opt/homebrew/opt/openjdk",
+      projectIssue: null,
     }));
     renderStatus();
 
@@ -105,6 +112,7 @@ describe("JavaRuntimeStatus", () => {
       env: JDK,
       overridePath: "/jdks/removed",
       ignoredJavaHome: null,
+      projectIssue: null,
     }));
     renderStatus();
 
@@ -118,6 +126,7 @@ describe("JavaRuntimeStatus", () => {
       env: null,
       overridePath: null,
       ignoredJavaHome: null,
+      projectIssue: null,
     }));
     renderStatus();
 
