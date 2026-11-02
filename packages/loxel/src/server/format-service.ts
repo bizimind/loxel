@@ -76,12 +76,6 @@ const DETECTION_RULES: {
   // Rules are evaluated in array order and `format()` picks the first detected formatter whose
   // extension set contains the file's extension.
   {
-    files: ["rustfmt.toml", ".rustfmt.toml"],
-    check: (wtRoot) =>
-      existsSync(join(wtRoot, "rustfmt.toml")) || existsSync(join(wtRoot, ".rustfmt.toml")),
-    formatter: { command: "rustfmt", args: "", extensions: ["rs"], backendMode: "command" },
-  },
-  {
     files: [".clang-format"],
     check: (wtRoot) => existsSync(join(wtRoot, ".clang-format")),
     formatter: {

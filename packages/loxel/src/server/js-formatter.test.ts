@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  setDefaultTimeout,
+  test,
+} from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,6 +19,9 @@ const stateDir = await mkdtemp(join(tmpdir(), "js-formatter-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { FormatService } = await import("./format-service");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+
+// Saves spawn real processes and resolve Node, which takes a while on a busy machine.
+setDefaultTimeout(60_000);
 
 const realNode = Bun.which("node");
 const originalPath = process.env.PATH;

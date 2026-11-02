@@ -415,21 +415,21 @@ describe("FormatService language modules", () => {
   });
 
   test("a module that detects nothing leaves the file to the next one, then the root rules", async () => {
-    const wt = await makeWorktree({ "rustfmt.toml": "" });
-    const none = fakeLanguage({ extensions: ["rs"], detect: () => null });
-    const next = fakeLanguage({ extensions: ["rs"], detect: () => FAKE_FORMATTER });
+    const wt = await makeWorktree({ "deno.json": "{}" });
+    const none = fakeLanguage({ extensions: ["ts"], detect: () => null });
+    const next = fakeLanguage({ extensions: ["ts"], detect: () => FAKE_FORMATTER });
     const service = new FormatService([none, next]);
     expect(service.getDetectedFormatters(wt)).toEqual([
-      { command: "rustfmt", extensions: ["rs"] },
-      { command: "fake-fmt", extensions: ["rs"] },
+      { command: "deno", extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"] },
+      { command: "fake-fmt", extensions: ["ts"] },
     ]);
     await installFormatter(join(wt, "node_modules/.bin"), "next");
-    const path = join(wt, "a.rs");
+    const path = join(wt, "a.ts");
     const result = await service.format("x", path, wt, AUTO_DETECT);
     expect(result.content).toStartWith("next ");
 
-    // The root rule's rustfmt, here from node_modules/.bin so the test needs no real one.
-    await writeFile(join(wt, "node_modules/.bin/rustfmt"), REPORT_SCRIPT("root-rule"), {
+    // The root rule's deno, here from node_modules/.bin so the test needs no real one.
+    await writeFile(join(wt, "node_modules/.bin/deno"), REPORT_SCRIPT("root-rule"), {
       mode: 0o755,
     });
     const rootRule = await new FormatService([none]).format("x", path, wt, AUTO_DETECT);
@@ -578,14 +578,14 @@ describe("FormatService language failure notices", () => {
   });
 
   test("a decline shows its notice and asks no later module or rule", async () => {
-    const wt = await makeWorktree({ "rustfmt.toml": "" });
+    const wt = await makeWorktree({ "deno.json": "{}" });
     const later = mock(() => MISSING);
     const decline: LanguageFormatter = {
-      extensions: ["rs"],
+      extensions: ["ts"],
       detect: () => ({ notice: "declined, because" }),
     };
-    const service = new FormatService([decline, { extensions: ["rs"], detect: later }]);
-    const result = await service.format("x", join(wt, "a.rs"), wt, AUTO_DETECT);
+    const service = new FormatService([decline, { extensions: ["ts"], detect: later }]);
+    const result = await service.format("x", join(wt, "a.ts"), wt, AUTO_DETECT);
     expect(result).toEqual({ content: null, notice: "declined, because" });
     expect(later).not.toHaveBeenCalled();
   });

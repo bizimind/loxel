@@ -10,6 +10,7 @@ import { jsFormatters } from "./js-formatter";
 import { kotlinFormatter } from "./kotlin-formatter";
 import type { LanguageFormatter } from "./language-formatter";
 import { pythonFormatter } from "./python-formatter";
+import { rustFormatter } from "./rust-formatter";
 
 export const languageFormatters: readonly LanguageFormatter[] = [
   // This comment keeps the formatter from joining the entries onto one line.
@@ -18,4 +19,5 @@ export const languageFormatters: readonly LanguageFormatter[] = [
   ...jsFormatters,
   kotlinFormatter,
   pythonFormatter,
+  rustFormatter,
 ];
