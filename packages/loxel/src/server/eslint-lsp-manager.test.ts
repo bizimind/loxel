@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { ServerWebSocket } from "bun";
 
@@ -232,14 +233,15 @@ describe("in a trusted repository", () => {
     const { result } = await socket.next(isInitializeResponse);
     expect(result).toEqual({ capabilities: { hoverProvider: true } });
     const file = write("src/a b.tsx");
-    const uri = `loxel://head${file.replace(" ", "%20")}`;
+    const fileUrl = pathToFileURL(file).href;
+    const uri = fileUrl.replace("file:///", "loxel://head/");
     send(socket, {
       method: "textDocument/didOpen",
       params: { textDocument: { uri, languageId: "tsx", version: 1, text: "loxel://head/text" } },
     });
     const { params } = await socket.received("textDocument/didOpen");
     expect(params?.textDocument).toEqual({
-      uri: `file://${file.replace(" ", "%20")}`,
+      uri: fileUrl,
       languageId: "typescriptreact",
       version: 1,
       text: "loxel://head/text",

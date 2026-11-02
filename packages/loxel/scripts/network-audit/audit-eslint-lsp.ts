@@ -56,7 +56,8 @@ class LspClient {
         ws.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { applied: true } }));
         return;
       }
-      this.waiting.get(message.id)?.(message);
+      const resolve = this.waiting.get(message.id);
+      if (typeof resolve === "function") resolve(message);
     });
   }
 
