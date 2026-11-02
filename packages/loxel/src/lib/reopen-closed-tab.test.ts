@@ -12,7 +12,8 @@ mock.module("@/components/excalidraw-editor/ExcalidrawEditor", () => ({
   renameDrawingCacheKey: () => {},
 }));
 
-const { handleFileDeleted, handleFileMoved, reopenClosedTab } = await import("./panel-creators");
+const { handleFileDeleted, handleFileMoved, openLocalDb, reopenClosedTab } =
+  await import("./panel-creators");
 const { closeCenterTab, forgetClosedTabGroup, registerClosedTabParams } =
   await import("@/store/closed-tabs");
 const { setCenterApi } = await import("@/store/tools-bar");
@@ -160,6 +161,42 @@ describe("reopenClosedTab", () => {
     reopenClosedTab();
 
     expect(api.getPanel(b.id)?.group.id).toBe(a.group.id);
+  });
+
+  test("a removed group's tabs still reopen when the first lands below their old index", () => {
+    const api = createCenter();
+    const p = addFile(api, "p.ts");
+    const q = addFile(api, "q.ts", { referencePanel: p.id, direction: "within" });
+    const r = addFile(api, "r.ts", { referencePanel: p.id, direction: "within" });
+    const s = addFile(api, "s.ts", { referencePanel: p.id, direction: "within" });
+    addFile(api, "x.ts", { referencePanel: p.id, direction: "right" });
+    const { id: removedId } = p.group;
+
+    closeCenterTab(p.api);
+    closeCenterTab(s.api);
+    // Removed without being recorded (their files were deleted), which empties the group.
+    q.api.close();
+    r.api.close();
+    forgetClosedTabGroup(WT, removedId);
+
+    reopenClosedTab();
+    reopenClosedTab();
+
+    expect(ids(api)).toEqual(["p.ts", "x.ts", "s.ts"]);
+  });
+
+  test("brings back the Database tab", () => {
+    const api = createCenter();
+    const a = addFile(api, "a.ts");
+    openLocalDb();
+    const db = api.getPanel("localdb-main")!;
+
+    closeCenterTab(a.api);
+    closeCenterTab(db.api);
+    reopenClosedTab();
+
+    expect(api.getPanel("localdb-main")).toBeDefined();
+    expect(api.getPanel(a.id)).toBeUndefined();
   });
 
   test("skips a tab that is open again", () => {

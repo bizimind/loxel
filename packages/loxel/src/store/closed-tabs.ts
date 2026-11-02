@@ -106,7 +106,9 @@ export function retargetClosedTabs(
     tabs: store
       .getState()
       .tabs.map((t) =>
-        t.groupId === fromId ? { ...t, groupId: toId, index: t.index + indexOffset } : t,
+        t.groupId === fromId
+          ? { ...t, groupId: toId, index: Math.max(0, t.index + indexOffset) }
+          : t,
       ),
   });
 }
