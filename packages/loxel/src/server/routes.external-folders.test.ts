@@ -81,7 +81,7 @@ describe("Others folders routes", () => {
         sent.push({ windowId, msg });
         return windowConnected;
       },
-      sendToWorktreeWindows: () => {},
+      sendToWorktreeWindows: () => false,
       externalFolderConflict: (path) => externalFolderConflict([project], path, "/home/me"),
       getProject: () => undefined,
       findProjectForPath: (path) =>

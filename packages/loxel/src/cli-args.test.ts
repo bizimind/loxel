@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseOpenArgs, parseTerminalArgs } from "./cli-args";
+import { parseOpenArgs, parseTerminalArgs, planOpens } from "./cli-args";
 
 const BASE = "/home/me/repo";
 
@@ -76,23 +76,23 @@ describe("parseTerminalArgs", () => {
 
 describe("parseOpenArgs", () => {
   test("a target alone has no placement", () => {
-    expect(parseOpenArgs(["src/app.ts"], BASE)).toEqual({ target: "src/app.ts" });
+    expect(parseOpenArgs(["src/app.ts"], BASE)).toEqual({ targets: ["src/app.ts"] });
   });
 
   test("layout flags go before or after the target", () => {
     expect(parseOpenArgs(["--split", "right", "src/app.ts"], BASE)).toEqual({
-      target: "src/app.ts",
+      targets: ["src/app.ts"],
       placement: { split: "right" },
     });
     expect(parseOpenArgs(["https://example.com", "--split=up"], BASE)).toEqual({
-      target: "https://example.com",
+      targets: ["https://example.com"],
       placement: { split: "up" },
     });
   });
 
   test("--group keeps the tab name and resolves it as a path against the base directory", () => {
     expect(parseOpenArgs(["a.ts", "--group", "src/b.ts", "--split", "left"], BASE)).toEqual({
-      target: "a.ts",
+      targets: ["a.ts"],
       placement: { group: { name: "src/b.ts", path: "/home/me/repo/src/b.ts" }, split: "left" },
     });
     expect(parseOpenArgs(["--group=Terminal 2", "a.ts"], BASE).placement).toEqual({
@@ -101,12 +101,12 @@ describe("parseOpenArgs", () => {
   });
 
   test("a bare - is a target", () => {
-    expect(parseOpenArgs(["-"], BASE)).toEqual({ target: "-" });
+    expect(parseOpenArgs(["-"], BASE)).toEqual({ targets: ["-"] });
   });
 
   test("a target starting with a dash goes after --", () => {
     expect(parseOpenArgs(["--replace", "--", "-notes.md"], BASE)).toEqual({
-      target: "-notes.md",
+      targets: ["-notes.md"],
       placement: { replace: true },
     });
   });
@@ -127,9 +127,9 @@ describe("parseOpenArgs", () => {
 
   test("focus is unset unless a flag names it", () => {
     expect(parseOpenArgs(["a.ts"], BASE).focus).toBeUndefined();
-    expect(parseOpenArgs(["a.ts", "--focus"], BASE)).toEqual({ target: "a.ts", focus: true });
+    expect(parseOpenArgs(["a.ts", "--focus"], BASE)).toEqual({ targets: ["a.ts"], focus: true });
     expect(parseOpenArgs(["--no-focus", "--split=up", "a.ts"], BASE)).toEqual({
-      target: "a.ts",
+      targets: ["a.ts"],
       placement: { split: "up" },
       focus: false,
     });
@@ -149,10 +149,109 @@ describe("parseOpenArgs", () => {
     expect(() => parseOpenArgs(["--focus=yes", "a.ts"], BASE)).toThrow("--focus takes no value");
   });
 
-  test("needs exactly one target", () => {
+  test("needs a target", () => {
     expect(() => parseOpenArgs(["--replace"], BASE)).toThrow("missing file, folder or URL");
-    expect(() => parseOpenArgs(["a.ts", "b.ts"], BASE)).toThrow(
-      "expected one file, folder or URL, got 2",
+  });
+
+  test("takes several targets in order, with flags anywhere among them", () => {
+    expect(parseOpenArgs(["a.md", "b.md", "https://example.com"], BASE)).toEqual({
+      targets: ["a.md", "b.md", "https://example.com"],
+    });
+    expect(parseOpenArgs(["a.md", "--split", "right", "b.md", "--no-focus", "c.md"], BASE)).toEqual(
+      { targets: ["a.md", "b.md", "c.md"], placement: { split: "right" }, focus: false },
     );
+    expect(parseOpenArgs(["a.md", "--", "-b.md", "--split"], BASE).targets).toEqual([
+      "a.md",
+      "-b.md",
+      "--split",
+    ]);
+  });
+
+  test("--replace takes one target, since each would close the tab of the one before", () => {
+    expect(() => parseOpenArgs(["--replace", "a.md", "b.md"], BASE)).toThrow(
+      "--replace takes one target, got 2",
+    );
+    expect(parseOpenArgs(["--replace", "a.md"], BASE).targets).toEqual(["a.md"]);
+  });
+
+  test("--worktree resolves against the base directory", () => {
+    expect(parseOpenArgs(["a.md", "--worktree", ".worktrees/x"], BASE)).toEqual({
+      targets: ["a.md"],
+      worktree: "/home/me/repo/.worktrees/x",
+    });
+    expect(parseOpenArgs(["--worktree=/wt", "a.md"], BASE).worktree).toBe("/wt");
+    expect(() => parseOpenArgs(["--worktree=", "a.md"], BASE)).toThrow("--worktree needs a path");
+    expect(() => parseOpenArgs(["a.md", "--worktree"], BASE)).toThrow("--worktree needs a value");
+  });
+
+  test("a terminal starts in --cwd, else in the --worktree directory", () => {
+    expect(parseTerminalArgs(["--worktree", "/wt", "--", "ls"], BASE)).toEqual({
+      terminal: { cwd: "/wt", command: "ls" },
+      worktree: "/wt",
+    });
+    expect(terminal(["--worktree", "/wt", "--cwd", "/elsewhere"], BASE).cwd).toBe("/elsewhere");
+  });
+});
+
+describe("planOpens", () => {
+  const plan = (
+    targets: string[],
+    worktrees: { pinnedWorktree?: string; commandWorktree?: string } = {},
+    placement?: { split?: "right"; group?: { name: string } },
+  ) =>
+    planOpens(
+      { targets, ...(placement ? { placement } : {}) },
+      {
+        baseDir: BASE,
+        pinnedWorktree: worktrees.pinnedWorktree ?? null,
+        commandWorktree: worktrees.pinnedWorktree ?? worktrees.commandWorktree ?? null,
+        options: { focus: true },
+      },
+    );
+
+  test("a single target has no label, and a file alone names no worktree", () => {
+    expect(plan(["a.md"])).toEqual([
+      { label: "", request: { filePath: "/home/me/repo/a.md", focus: true } },
+    ]);
+  });
+
+  test("a command's URLs and files share its worktree, leniently for the files", () => {
+    expect(plan(["a.md", "https://x.dev"], { commandWorktree: "/wt" })).toEqual([
+      {
+        label: "a.md: ",
+        request: { filePath: "/home/me/repo/a.md", commandWtPath: "/wt", focus: true },
+      },
+      { label: "https://x.dev: ", request: { url: "https://x.dev", wtPath: "/wt", focus: true } },
+    ]);
+  });
+
+  test("--worktree pins every target", () => {
+    expect(
+      plan(["a.md", "https://x.dev"], { pinnedWorktree: "/wt" }).map((o) => o.request),
+    ).toEqual([
+      { filePath: "/home/me/repo/a.md", pinWtPath: "/wt", focus: true },
+      { url: "https://x.dev", wtPath: "/wt", focus: true },
+    ]);
+  });
+
+  test("a URL with no worktree has no request, and the files still go", () => {
+    const [file, url] = plan(["a.md", "https://x.dev"]);
+    expect(file!.request).toEqual({ filePath: "/home/me/repo/a.md", focus: true });
+    expect(url).toEqual({ label: "https://x.dev: " });
+  });
+
+  test("several targets with --split share one batch; other placements need none", () => {
+    const placements = plan(["a.md", "b.md"], {}, { split: "right" }).map(
+      (open) => open.request?.placement,
+    );
+    expect(placements[0]?.batch).toBeString();
+    expect(placements[1]).toEqual(placements[0]);
+
+    expect(plan(["a.md"], {}, { split: "right" })[0]!.request?.placement).toEqual({
+      split: "right",
+    });
+    expect(plan(["a.md", "b.md"], {}, { group: { name: "x" } })[0]!.request?.placement).toEqual({
+      group: { name: "x" },
+    });
   });
 });

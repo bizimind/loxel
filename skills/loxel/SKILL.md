@@ -28,11 +28,11 @@ This skill covers what an agent can do from a Loxel terminal. It does not cover 
 ## The `loxel` CLI
 
 ```
-loxel [open flags] <file | folder | url>
+loxel [open flags] <file | folder | url>...
 loxel terminal [--cwd <dir>] [--title <name>] [open flags] [--] [command...]
 loxel                      # launch or focus Loxel
 
-open flags: [--split left|right|up|down | --replace] [--group <tab>] [--focus | --no-focus]
+open flags: [--split left|right|up|down | --replace] [--group <tab>] [--worktree <path>] [--focus | --no-focus]
 ```
 
 ```sh
@@ -45,11 +45,17 @@ loxel terminal                      # new terminal tab in the current directory
 loxel terminal --title tests -- bun test --watch
 loxel terminal 'cd web && pnpm dev' # one argument = a shell command line, used as is
 loxel --split right src/app.ts      # open beside the active tab instead of as a tab in its group
+loxel docs/*.md                     # open several targets, in order
+loxel --worktree ../other https://github.com/org/repo/pull/42  # open in another worktree
 ```
 
 There is no `--help`: `loxel --help` fails with `unknown option --help` and prints the usage. On success the CLI prints nothing (at most `loxel: waiting for a Loxel window...` while Loxel starts, or a `loxel: warning: ...` line about a flag it ignored) and exits 0. Errors it can detect print `loxel: <message>` to stderr and exit 1. Some requests are accepted and then refused inside Loxel, which shows the user a message while the CLI still exits 0. That happens, for example, with a folder that belongs to a project but to none of its worktrees, such as a bare repo's root.
 
 If `command -v loxel` finds nothing, the CLI isn't installed for this shell. Tell the user, and fall back to the clickable paths and URLs described in [Keep the user oriented](#keep-the-user-oriented).
+
+### Several targets
+
+Files, folders and URLs can be mixed in one command, and shell patterns work. They open in order. A target that can't be opened prints `loxel: <target>: <message>` and the others still open; the CLI then exits 1. With `--split` they share one new split, as tabs. `--replace` takes a single target.
 
 ### Files and folders
 
@@ -60,7 +66,9 @@ If `command -v loxel` finds nothing, the CLI isn't installed for this shell. Tel
 ### URLs
 
 - Only `http://` and `https://` URLs count as URLs. Anything else is treated as a path.
-- The URL opens in a browser panel in the windows currently showing the worktree that contains your current directory. If you aren't in a git repository, Loxel uses `LOXEL_WORKTREE`. It never switches worktrees: if no window is showing that worktree, nothing opens and the CLI still exits 0.
+- The URL opens in a browser panel in the worktree that contains your current directory. If you aren't in a git repository, Loxel uses `LOXEL_WORKTREE`. If no window is showing that worktree, it opens there in your terminal's window, and without focus it is waiting when the user switches there.
+- If another window is showing that worktree, the page opens there and not in your terminal's window.
+- Files in the same command as a URL open in the URL's worktree too. A command of only files opens each in its own worktree.
 - Inside a git repository that isn't one of the user's projects (a cloned dependency, a temp repo), it fails with `No project found for worktree`. Run it from your worktree instead: `(cd "$LOXEL_WORKTREE" && loxel http://localhost:5173)`.
 - Good uses: the dev server you just started, a PR you just opened, a deploy preview, the docs page you're citing.
 
@@ -83,6 +91,10 @@ loxel terminal --cwd ~/code/app/.worktrees/fix/flaky-test --title claude -- clau
 ```
 
 Create worktrees the way the project already does. If it uses `wt`, `wt add <name>` creates `.worktrees/<name>` and runs the repo's setup hook, which a bare `git worktree add` skips. To show the new worktree nested under yours in Loxel's sidebar, add `--meta loxel-parent-wt=<id>` with your worktree's id from `wt meta get wt-id`. This needs worktree metadata on (`wt init --worktree-metadata on`, which also gives every existing worktree an id). If `wt meta get wt-id` prints nothing, your worktree was created outside `wt`: run `wt init --worktree-metadata on` to give it one.
+
+### Choosing the worktree
+
+`--worktree <path>` opens every target of the command in the worktree containing `<path>`, even a file that belongs to another worktree. It fails if `<path>` isn't in a git repository, and with `No project found for worktree` if that worktree isn't in one of the user's projects. `loxel terminal --worktree <path>` also starts the shell there unless `--cwd` is given. A folder ignores it, with a warning.
 
 ### Layout flags
 

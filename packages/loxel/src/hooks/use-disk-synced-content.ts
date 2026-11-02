@@ -64,8 +64,8 @@ export interface DiskSyncedContent<T> {
   cacheKey: string;
   /** Whether the active query errored. */
   isError: boolean;
-  /** Whether the active query is waiting for the network (offline). */
-  isPaused: boolean;
+  /** Run the file's content query again, after a failed load. */
+  retryLoad: () => void;
   /**
    * Ref the editor must populate with a fn returning its current serialized content. Called only
    * to write it, so an editor may first adjust the content for `reason` (the code editor applies
@@ -233,7 +233,7 @@ export function useDiskSyncedContent<T>(
   }, [editorKey, mergeCallbacks]);
 
   // --- Query ---
-  const { data, dataUpdatedAt, isError, isPaused, error } = useQuery({
+  const { data, dataUpdatedAt, isError, error, refetch } = useQuery({
     queryKey: queryKeys.fileContent(
       activeProjectPath,
       filePath,
@@ -248,7 +248,11 @@ export function useDiskSyncedContent<T>(
     // A confirmed-missing file will not appear by retrying; anything else (including a 404 for a
     // worktree the server has not finished subscribing) keeps the default single retry.
     retry: (failureCount, err) => !api.isFileMissingError(err) && failureCount < 1,
+    // The server is local, so the browser's online state says nothing about reaching it. A query
+    // paused on it would leave the editor waiting with no failure to show or retry.
+    networkMode: "always",
   });
+  const retryLoad = useCallback(() => void refetch(), [refetch]);
 
   // --- Existence tracking ---
   // Clean editors usually learn about a deletion through this query: the change event
@@ -432,7 +436,7 @@ export function useDiskSyncedContent<T>(
     isDeleted,
     cacheKey,
     isError,
-    isPaused,
+    retryLoad,
     getSerializedContentRef,
     save,
     saveNow,
