@@ -9,6 +9,7 @@ import { AstroLspManager } from "./astro-lsp-manager";
 import { ClangdLspManager } from "./clangd-lsp-manager";
 import { DockerLspManager } from "./docker-lsp-manager";
 import { GoLspManager } from "./go-lsp-manager";
+import { GolangciLintLspManager } from "./golangci-lint-lsp-manager";
 import { JavaLspManager } from "./java-lsp-manager";
 import { KotlinLintLspManager } from "./kotlin-lint-lsp-manager";
 import { MypyLspManager } from "./mypy-lsp-manager";
@@ -30,6 +31,7 @@ export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   new ClangdLspManager(),
   new DockerLspManager(),
   new GoLspManager(),
+  new GolangciLintLspManager(),
   new JavaLspManager(),
   new KotlinLintLspManager(),
   new PythonLspManager(mypyLspManager),

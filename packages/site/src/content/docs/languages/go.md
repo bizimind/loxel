@@ -1,6 +1,6 @@
 ---
 title: Go
-description: Go language features from gopls, with navigation, rename, quick fixes, inlay hints, go.mod support and format on save.
+description: Go language features from gopls, with navigation, rename, quick fixes, inlay hints, go.mod support, format on save and golangci-lint diagnostics.
 order: 13.5
 ---
 
@@ -63,6 +63,19 @@ Files in a Go module or workspace (a `go.mod` or `go.work` in the file's folder 
 Loxel leaves some files alone: those in `vendor/` and `testdata/`, those your config's `formatters.exclusions.paths` excludes, and `.go` files with no module or selecting config above them. If a pattern in `formatters.exclusions.paths` is too complex for Loxel to evaluate, files under that config are left alone too. To format those, or to use `goimports` or `gofumpt` on their own, add a manual override in **Settings > Editor**.
 
 If `golangci-lint` can't load the config, or your installed version is older than v2, the file is saved unformatted. Run `golangci-lint version` and `golangci-lint config verify` in a terminal to see why. A file with a syntax error is also saved as it is. Formatting never downloads anything.
+
+## golangci-lint diagnostics
+
+If your project has a `.golangci.yml`, `.golangci.yaml`, `.golangci.toml` or `.golangci.json`, and you [trust the repository](/docs/repository-trust), Loxel shows what `golangci-lint` v2.1 or newer finds in the editor, next to gopls's own diagnostics. It checks a file's package when you open or save the file, and again when the config changes, using the config closest to the file. Each diagnostic names the linter and links to its documentation. Without a `severity` section in your config, findings are warnings.
+
+Files in `vendor/` and `testdata/` are not checked. Findings gopls already reports appear once, from gopls. While your code doesn't compile, gopls shows the error and golangci-lint's earlier findings stay until a run gets through.
+
+Loxel runs the `golangci-lint` on your `PATH`, and never downloads it or anything it needs. It won't use one inside the project or behind a version manager's shim, and doesn't run `go tool golangci-lint` or a custom build. A message tells you what to do in these cases:
+
+- **Not installed.** [Install golangci-lint v2.1 or newer](https://golangci-lint.run/docs/welcome/install/).
+- **Older than v2.1.** Install a newer v2. If the config is the old one, run `golangci-lint migrate` in a terminal.
+- **Custom linters or a custom output.** Loxel does not run a config that sets `linters.settings.custom`, or an output `path` other than `stdout` or `stderr`. Run `golangci-lint` in a terminal instead.
+- **A config it can't read or load.** Run `golangci-lint config verify` in a terminal to see why.
 
 ## Monorepos and build tags
 
