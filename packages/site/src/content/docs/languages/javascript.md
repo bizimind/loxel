@@ -1,6 +1,6 @@
 ---
 title: JavaScript
-description: JavaScript projects, jsconfig.json, type checking plain JavaScript, format on save, ESLint, the Node version, and tool configuration files.
+description: JavaScript projects, jsconfig.json, type checking plain JavaScript, inlay hints, format on save, ESLint, the Node version, and tool configuration files.
 order: 13.5
 ---
 
@@ -73,6 +73,12 @@ In a JavaScript project:
 ## Scripts without an extension
 
 A file with no extension gets the same features when its first line names a JavaScript or TypeScript runner, as in `bin/www`: `#!/usr/bin/env node`, `#!/usr/bin/env -S node --no-warnings`, `nodejs` and `bun` open as JavaScript, and `tsx` and `ts-node`, including through `npx`, as TypeScript. A file association in [settings](/docs/reference-env-files-cli-settings) works for any other name.
+
+---
+
+## Inlay hints
+
+[Inlay hints](/docs/editor#inlay-hints) work as in [TypeScript](/docs/languages/typescript): inferred variable and return types, and the parameter names of literal arguments. A value TypeScript knows nothing about shows `: any`, which is common for packages without types and goes away once their types are installed. To turn hints off or show them only on demand, use **Settings > Editor**.
 
 ---
 

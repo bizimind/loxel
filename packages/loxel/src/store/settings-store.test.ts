@@ -259,6 +259,17 @@ describe("BUILTIN_SCHEMA_DEFAULTS", () => {
 describe("settings migration", () => {
   const migrate = useSettingsStore.persist.getOptions().migrate;
 
+  test("v13 editor settings get inlay hints on, and keep the rest", async () => {
+    const editor = { indentation: { tabSize: 8, insertSpaces: false } };
+    const migrated = (await migrate?.({ editor }, 13)) as SettingsState;
+    expect(migrated.editor).toEqual({ ...editor, inlayHints: "on" } as EditorSettings);
+  });
+
+  test("a chosen inlay hints mode survives migration", async () => {
+    const migrated = (await migrate?.({ editor: { inlayHints: "off" } }, 13)) as SettingsState;
+    expect(migrated.editor.inlayHints).toBe("off");
+  });
+
   test("v11 settings get the automatic update check turned on", async () => {
     const migrated = (await migrate?.({ terminal: {} }, 11)) as SettingsState;
     expect(migrated.autoCheckForUpdates).toBe(true);
