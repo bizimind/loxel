@@ -118,6 +118,19 @@ describe.skipIf(process.platform === "win32")("the start's arguments", () => {
     expect(await manager.argsFor(root)).toContain("--background-index=false");
     expect(await manager.argsFor(root, true)).not.toContain("--background-index=false");
   });
+
+  test("a chosen database goes before a .clangd naming one outside, untrusted too", async () => {
+    const root = await makeDir();
+    const outside = await makeDir();
+    const chosen = await makeDir();
+    await write(chosen, "compile_commands.json", "[]");
+    await write(root, ".clangd", `CompileFlags:\n  CompilationDatabase: ${outside}\n`);
+    setCompileDatabaseChoice(root, chosen);
+    const args = await (await starting()).argsFor(root);
+    setCompileDatabaseChoice(root, null);
+    expect(flagOf(args)).toBe(`--compile-commands-dir=${chosen}`);
+    expect(args).not.toContain("--background-index=false");
+  });
 });
 
 describe.skipIf(process.platform === "win32")("indexDirectoryIsSymlink with a database", () => {

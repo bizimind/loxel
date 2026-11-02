@@ -323,6 +323,101 @@ describe("non-standard candidates", () => {
   });
 });
 
+describe("what keeps the flag or the index in check", () => {
+  const database = (value: string) => `CompileFlags:\n  CompilationDatabase: ${value}\n`;
+
+  test("a marker at the root doesn't hide the root's .clangd or its projects", async () => {
+    const root = await makeDir();
+    const outside = await makeDir();
+    await write(root, "build.ninja", "");
+    await write(root, ".clangd", database(outside));
+    expect((await resolveCompileDatabases(root)).namesOutsideDatabase).toBe(true);
+    await write(root, ".clangd", "");
+    const own = await write(root, "sub/build/compile_commands.json");
+    await write(root, "cmake-build-debug/compile_commands.json");
+    const status = await resolveCompileDatabases(root);
+    expect(status.foundByClangd).toEqual([own]);
+    expect(status.automatic).toBeNull();
+  });
+
+  test.each(["sub", "out/src", "build", "cmake-build-debug/x"])(
+    "a .clangd in build output %s still counts for the index, and not as a project",
+    async (relDir) => {
+      const root = await makeDir();
+      const outside = await makeDir();
+      await write(root, "sub/build.ninja", "");
+      await write(root, `${relDir}/.clangd`, database(outside));
+      const status = await resolveCompileDatabases(root);
+      expect(status.namesOutsideDatabase).toBe(true);
+      expect(status.foundByClangd).toEqual([]);
+    },
+  );
+
+  test("an in-source build below the root is a project", async () => {
+    const root = await makeDir();
+    await write(root, "cmake-build-debug/compile_commands.json");
+    await write(root, "libs/foo/CMakeLists.txt", "");
+    await write(root, "libs/foo/CMakeCache.txt", "");
+    const own = await write(root, "libs/foo/compile_commands.json");
+    const status = await resolveCompileDatabases(root);
+    expect(status.foundByClangd).toEqual([own]);
+    expect(status.automatic).toBeNull();
+  });
+
+  test.each([
+    ["an escaped key", (dir: string) => `CompileFlags:\n  "Compilation\\x44atabase": ${dir}\n`],
+    [
+      "a quoted key before a bad document",
+      (dir: string) => `CompileFlags:\n  "CompilationDatabase": ${dir}\n---\nbad: [\n`,
+    ],
+    [
+      "a duplicate key",
+      (dir: string) =>
+        `CompileFlags:\n  CompilationDatabase: ${dir}\n  CompilationDatabase: None\n`,
+    ],
+  ])("%s fails closed", async (_name, text) => {
+    const root = await makeDir();
+    await write(root, ".clangd", text(await makeDir()));
+    expect((await resolveCompileDatabases(root)).namesOutsideDatabase).toBe(true);
+  });
+
+  test("cmake -B out is a candidate", async () => {
+    const root = await makeDir();
+    await write(root, "out/CMakeCache.txt", "");
+    await write(root, "out/compile_commands.json");
+    expect((await resolveCompileDatabases(root)).automatic).toBe(join(root, "out"));
+  });
+
+  test("too many folders to look at means none is picked", async () => {
+    const root = await makeDir();
+    await write(root, "cmake-build-a/compile_commands.json");
+    await Promise.all(
+      Array.from({ length: 300 }, (_, index) =>
+        mkdir(join(root, "out", `d${index}`), { recursive: true }),
+      ),
+    );
+    const status = await resolveCompileDatabases(root);
+    expect(status.searchCut).toBe(true);
+    expect(status.automatic).toBeNull();
+  });
+
+  test("a worktree nested in this one isn't one of its projects", async () => {
+    const root = await makeDir();
+    await write(root, "cmake-build-debug/compile_commands.json");
+    await write(root, ".worktrees/feat/.git", "gitdir: /repo/.git/worktrees/feat\n");
+    await write(root, ".worktrees/feat/build/compile_commands.json");
+    expect((await resolveCompileDatabases(root)).automatic).toBe(join(root, "cmake-build-debug"));
+  });
+
+  test("a submodule is", async () => {
+    const root = await makeDir();
+    await write(root, "cmake-build-debug/compile_commands.json");
+    await write(root, "dep/.git", "gitdir: ../.git/modules/dep\n");
+    const own = await write(root, "dep/build/compile_commands.json");
+    expect((await resolveCompileDatabases(root)).foundByClangd).toEqual([own]);
+  });
+});
+
 describe("a choice", () => {
   test("is a folder or a database file in one, anywhere", async () => {
     const root = await makeDir();
@@ -434,6 +529,7 @@ describe("following a worktree", () => {
 
     const fourth = nextUpdate(root);
     refreshCompileDatabases(root, true);
+    refreshCompileDatabases(root);
     expect((await fourth.update).changed).toBe(true);
     for (const { stop } of [first, second, third, fourth]) stop();
   });

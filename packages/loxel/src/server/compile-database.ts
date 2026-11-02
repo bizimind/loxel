@@ -39,6 +39,10 @@ const CANDIDATE_PARENTS = ["build", "out", "out/build"];
 const MAX_CANDIDATE_FOLDERS = 256;
 /** What a build system's configure step leaves in its output folder, whatever it is called. */
 const GENERATED_FOLDER_MARKERS = ["CMakeCache.txt", "build.ninja", "meson-info"];
+/** Beside one of those markers these mean an in-source build, whose folder holds a project. */
+const PROJECT_FILES = ["CMakeLists.txt", "meson.build"];
+/** Most folders of build output looked through for a `.clangd`: they are many, and rarely hold one. */
+const MAX_CONFIG_ONLY_DIRS = 2000;
 
 /** Whether a compile database is well-formed at both ends. clangd passes over one that is not. */
 async function looksLikeCompileCommands(file: string, size: number): Promise<boolean> {
@@ -85,6 +89,8 @@ interface ClangdConfigFile {
    * be read whole if it may: clangd applies the documents before one that does not parse.
    */
   anyDatabase: boolean;
+  /** What it names can't be told from the parsed values, so it may be any folder. */
+  mayNameAny: boolean;
   addsFlags: boolean;
 }
 
@@ -102,20 +108,26 @@ function parseClangdConfig(text: string): ClangdConfigFile {
     database: null,
     namedFolders: [],
     anyDatabase: false,
+    mayNameAny: false,
     addsFlags: false,
   };
-  // Most have neither, and parsing is the costly part.
-  if (!text.includes(DATABASE_KEY) && !text.includes("Add")) return result;
+  const mentions = text.split(DATABASE_KEY).length - 1;
+  // A backslash may spell a key some other way in a quoted string.
+  const mayMatter = mentions > 0 || text.includes("\\");
+  // Most have none of these, and parsing is the costly part.
+  if (!mayMatter && !text.includes("Add")) return result;
   let parsed: unknown;
   try {
     parsed = Bun.YAML.parse(text);
   } catch (err) {
     log.debug("Could not parse a .clangd file", { error: err });
-    result.anyDatabase = text.includes(DATABASE_KEY);
+    result.anyDatabase = mayMatter;
+    result.mayNameAny = mayMatter;
     return result;
   }
   // A file of several documents comes as an array of them.
   const documents = Array.isArray(parsed) ? (parsed as unknown[]) : [parsed];
+  let values = 0;
   for (const document of documents) {
     const fragment = asRecord(document);
     const flags = asRecord(fragment?.CompileFlags);
@@ -123,6 +135,7 @@ function parseClangdConfig(text: string): ClangdConfigFile {
     const unconditional = fragment.If === undefined;
     const database = flags[DATABASE_KEY];
     if (typeof database === "string") {
+      values += 1;
       // `Ancestors` asks for what clangd does anyway.
       if (database !== "Ancestors") result.anyDatabase = true;
       if (!SPECIAL_DATABASE_VALUES.has(database)) result.namedFolders.push(database);
@@ -130,6 +143,12 @@ function parseClangdConfig(text: string): ClangdConfigFile {
       if (unconditional) result.database = database;
     }
     if (unconditional && flags.Add !== undefined) result.addsFlags = true;
+  }
+  // A duplicate key keeps a different value here than in clangd, and a spelling or place not read
+  // above may still count there.
+  if (mentions !== values) {
+    result.anyDatabase = true;
+    result.mayNameAny = true;
   }
   return result;
 }
@@ -139,7 +158,13 @@ async function readClangdConfig(file: string): Promise<ClangdConfigFile | null> 
   const info = await stat(file).catch(() => null);
   if (!info?.isFile()) return null;
   if (info.size > MAX_CONFIG_BYTES) {
-    return { database: null, namedFolders: [], anyDatabase: true, addsFlags: false };
+    return {
+      database: null,
+      namedFolders: [],
+      anyDatabase: true,
+      mayNameAny: true,
+      addsFlags: false,
+    };
   }
   try {
     return parseClangdConfig(await Bun.file(file).text());
@@ -210,7 +235,10 @@ async function readDirents(dir: string): Promise<Dirent[]> {
 
 /** Whether a folder is build output by what is in it, under whatever name. */
 function isGeneratedFolder(names: ReadonlySet<string>): boolean {
-  return GENERATED_FOLDER_MARKERS.some((marker) => names.has(marker));
+  return (
+    GENERATED_FOLDER_MARKERS.some((marker) => names.has(marker)) &&
+    !PROJECT_FILES.some((file) => names.has(file))
+  );
 }
 
 /** Whether each part of a path below `root` is a real directory, and none of them a link. */
@@ -229,7 +257,7 @@ async function isRealPathBelow(root: string, relative: string): Promise<boolean>
  * them, or by what a configure step leaves in them. With `fs`, since they are git-ignored. Links
  * aren't followed, neither the folder nor the file, so nothing here leads out of the worktree.
  */
-async function findCandidates(wtPath: string): Promise<string[]> {
+async function findCandidates(wtPath: string): Promise<{ candidates: string[]; cut: boolean }> {
   const rootEntries = await readDirents(wtPath);
   const folders = rootEntries
     .filter((entry) => entry.isDirectory() && CANDIDATE_AT_ROOT.test(entry.name))
@@ -245,7 +273,10 @@ async function findCandidates(wtPath: string): Promise<string[]> {
   }
   const others = rootEntries.filter(
     (entry) =>
-      entry.isDirectory() && !UNWALKED_DIR.test(entry.name) && !BUILD_DIR_AT_ROOT.test(entry.name),
+      entry.isDirectory() &&
+      !UNWALKED_DIR.test(entry.name) &&
+      !CANDIDATE_AT_ROOT.test(entry.name) &&
+      entry.name !== "build",
   );
   const generated = await Promise.all(
     others.slice(0, MAX_CANDIDATE_FOLDERS).map(async (entry) => {
@@ -255,14 +286,17 @@ async function findCandidates(wtPath: string): Promise<string[]> {
     }),
   );
   folders.push(...generated.filter((folder) => folder !== null));
+  const unique = [...new Set(folders)];
+  // "Exactly one" means nothing unless every folder was looked at.
+  const cut = others.length > MAX_CANDIDATE_FOLDERS || unique.length > MAX_CANDIDATE_FOLDERS;
   const held = await Promise.all(
-    [...new Set(folders)].slice(0, MAX_CANDIDATE_FOLDERS).map(async (folder) => {
+    unique.slice(0, MAX_CANDIDATE_FOLDERS).map(async (folder) => {
       const file = path.join(folder, COMPILE_COMMANDS);
       const info = await lstat(file).catch(() => null);
       return info?.isFile() && (await looksLikeCompileCommands(file, info.size)) ? folder : null;
     }),
   );
-  return held.filter((folder) => folder !== null).toSorted();
+  return { candidates: held.filter((folder) => folder !== null).toSorted(), cut };
 }
 
 interface ClangdsOwn {
@@ -276,43 +310,78 @@ async function realPathOf(file: string): Promise<string> {
   return realpath(file).catch(() => file);
 }
 
-/** Note what one `.clangd` says. Returns false when the walk's budget for reading them has gone. */
-async function addConfigFindings(
+/** Note whether one `.clangd` may send clangd's index outside the worktree. */
+async function noteNamedFolders(
   file: string,
+  config: ClangdConfigFile | null,
   own: ClangdsOwn,
-  budget: { bytes: number },
   realRoot: string,
-): Promise<boolean> {
-  const size = (await stat(file).catch(() => null))?.size ?? 0;
-  budget.bytes -= Math.min(size, MAX_CONFIG_BYTES);
-  if (budget.bytes < 0) return false;
-  const config = await readClangdConfig(file);
-  if (config?.anyDatabase) own.found.add(file);
+): Promise<void> {
   // Fails closed: one that could not be read whole may name anything.
-  if (config?.anyDatabase && config.namedFolders.length === 0 && !config.database) {
-    own.namesOutside ||= size > MAX_CONFIG_BYTES || (await unparsedNamesDatabase(file));
-  }
+  if (config?.mayNameAny) own.namesOutside = true;
   for (const named of config?.namedFolders ?? []) {
     // oxlint-disable-next-line no-await-in-loop -- few, and most files have none
     const real = await realPathOf(path.resolve(path.dirname(file), named));
     if (!isInside(real, realRoot)) own.namesOutside = true;
   }
-  return true;
 }
 
-/** Whether a `.clangd` that does not parse as a whole names a database, as `None` does not. */
-async function unparsedNamesDatabase(file: string): Promise<boolean> {
-  const text = await Bun.file(file)
+/** Read a `.clangd` within the walk's budget of bytes; undefined once the budget has gone. */
+async function readWithinBudget(
+  file: string,
+  budget: { bytes: number },
+): Promise<ClangdConfigFile | null | undefined> {
+  const size = (await stat(file).catch(() => null))?.size ?? 0;
+  budget.bytes -= Math.min(size, MAX_CONFIG_BYTES);
+  return budget.bytes < 0 ? undefined : readClangdConfig(file);
+}
+
+/** Whether a folder is another worktree of the repository, checked out inside this one. */
+async function isLinkedWorktree(dir: string, entries: readonly Dirent[]): Promise<boolean> {
+  if (!entries.some((entry) => entry.name === ".git" && entry.isFile())) return false;
+  const gitFile = await Bun.file(path.join(dir, ".git"))
+    .slice(0, 4096)
     .text()
     .catch(() => "");
-  return new RegExp(`${DATABASE_KEY}\\s*:\\s*(?!None\\b|Ancestors\\b)\\S`).test(text);
+  return /^gitdir: .*\/worktrees\//m.test(gitFile);
+}
+
+/**
+ * Only for `.clangd` files, in build output: clangd reads one there for a file there, but what it
+ * says about a database doesn't concern the project. Its limit leaves the answer as it is, or a
+ * large build tree would take away the choice it is a candidate for.
+ */
+async function walkForConfigOnly(
+  folders: string[],
+  own: ClangdsOwn,
+  budget: { bytes: number },
+  realRoot: string,
+): Promise<void> {
+  let walked = 0;
+  for (let dir = folders.pop(); dir !== undefined; dir = folders.pop()) {
+    if (walked >= MAX_CONFIG_ONLY_DIRS) return;
+    walked += 1;
+    // oxlint-disable-next-line no-await-in-loop -- one folder at a time, to stay light on the disk
+    for (const entry of await readDirents(dir)) {
+      if (entry.isDirectory() && !UNWALKED_DIR.test(entry.name)) {
+        folders.push(path.join(dir, entry.name));
+      } else if (entry.name === CLANGD_CONFIG) {
+        const file = path.join(dir, CLANGD_CONFIG);
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        const config = await readWithinBudget(file, budget);
+        if (config === undefined) return;
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await noteNamedFolders(file, config, own, realRoot);
+      }
+    }
+  }
 }
 
 /**
  * Where clangd finds a database by itself for some of the worktree's files: from the root, and in
  * each project below it. The whole tree, within limits, rather than to a depth: a project missed
  * here would have its own database overridden. Build output is left out, under whatever name, as
- * clangd finds a database in it only for files inside it.
+ * clangd finds a database in it only for files inside it, and so are worktrees nested in this one.
  */
 async function findClangdsOwn(wtPath: string): Promise<ClangdsOwn> {
   const own: ClangdsOwn = { found: new Set(), cut: false, namesOutside: false };
@@ -325,6 +394,7 @@ async function findClangdsOwn(wtPath: string): Promise<ClangdsOwn> {
 
   const realRoot = await realPathOf(wtPath);
   const budget = { bytes: MAX_CONFIG_BYTES_PER_WALK };
+  const buildOutput: string[] = [];
   const pending = [wtPath];
   let walked = 0;
   for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
@@ -332,46 +402,57 @@ async function findClangdsOwn(wtPath: string): Promise<ClangdsOwn> {
     walked += 1;
     // oxlint-disable-next-line no-await-in-loop -- one folder at a time, to stay light on the disk
     const entries = await readDirents(dir);
+    const atRoot = dir === wtPath;
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    if (!atRoot && (await isLinkedWorktree(dir, entries))) continue;
     const names = new Set(entries.map((entry) => entry.name));
-    if (isGeneratedFolder(names)) continue;
+    // The root is the project whatever else is in it.
+    if (!atRoot && isGeneratedFolder(names)) {
+      buildOutput.push(dir);
+      continue;
+    }
     for (const entry of entries) {
-      const skipped =
-        UNWALKED_DIR.test(entry.name) || (dir === wtPath && BUILD_DIR_AT_ROOT.test(entry.name));
-      if (entry.isDirectory() && !skipped) pending.push(path.join(dir, entry.name));
+      if (!entry.isDirectory() || UNWALKED_DIR.test(entry.name)) continue;
+      const child = path.join(dir, entry.name);
+      if (atRoot && BUILD_DIR_AT_ROOT.test(entry.name)) buildOutput.push(child);
+      else pending.push(child);
     }
     if (names.has(COMPILE_COMMANDS) || names.has(COMPILE_FLAGS) || names.has("build")) {
       // oxlint-disable-next-line no-await-in-loop -- as above
       const database = await databaseIn(dir);
       if (database) own.found.add(database);
     }
-    if (
-      names.has(CLANGD_CONFIG) &&
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      !(await addConfigFindings(path.join(dir, CLANGD_CONFIG), own, budget, realRoot))
-    ) {
-      return { ...own, cut: true };
-    }
+    if (!names.has(CLANGD_CONFIG)) continue;
+    const file = path.join(dir, CLANGD_CONFIG);
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    const config = await readWithinBudget(file, budget);
+    if (config === undefined) return { ...own, cut: true };
+    if (config?.anyDatabase) own.found.add(file);
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await noteNamedFolders(file, config, own, realRoot);
   }
+  await walkForConfigOnly(buildOutput, own, budget, realRoot);
   return own;
 }
 
 async function lookAtWorktree(wtPath: string): Promise<CompileDatabaseStatus> {
   const chosen = getCompileDatabaseChoice(wtPath);
-  const [chosenDatabase, candidates, own] = await Promise.all([
+  const [chosenDatabase, { candidates, cut }, own] = await Promise.all([
     chosen ? databaseIn(chosen) : null,
     findCandidates(wtPath),
     findClangdsOwn(wtPath),
   ]);
   // A flag applies to every file, so it goes only where clangd's own search has nothing to lose.
+  const searchCut = own.cut || cut;
   const automatic =
-    candidates.length === 1 && own.found.size === 0 && !own.cut ? (candidates[0] ?? null) : null;
+    candidates.length === 1 && own.found.size === 0 && !searchCut ? (candidates[0] ?? null) : null;
   return {
     chosen,
     chosenUsable: chosenDatabase !== null,
     automatic,
     candidates,
     foundByClangd: [...own.found].toSorted(),
-    searchCut: own.cut,
+    searchCut,
     namesOutsideDatabase: own.namesOutside,
   };
 }
@@ -500,6 +581,8 @@ interface WatchedWorktree {
   settled: string | null;
   /** The latest resolution's number: an older one finishing later has nothing to say. */
   generation: number;
+  /** A resolution since the last one told was asked for by a change on disk. */
+  filesChanged: boolean;
 }
 
 const watched = new Map<string, WatchedWorktree>();
@@ -510,7 +593,12 @@ export function subscribeCompileDatabases(
   listener: (update: CompileDatabaseUpdate) => void,
 ): () => void {
   const wtPath = path.resolve(worktreePath);
-  const entry = watched.get(wtPath) ?? { listeners: new Set(), settled: null, generation: 0 };
+  const entry = watched.get(wtPath) ?? {
+    listeners: new Set(),
+    settled: null,
+    generation: 0,
+    filesChanged: false,
+  };
   watched.set(wtPath, entry);
   entry.listeners.add(listener);
   return () => {
@@ -529,13 +617,15 @@ export function refreshCompileDatabases(worktreePath: string, filesChanged = fal
   const entry = watched.get(wtPath);
   if (!entry) return;
   entry.generation += 1;
+  entry.filesChanged ||= filesChanged;
   const { generation } = entry;
   void resolveCompileDatabases(wtPath)
     .then((status) => {
       if (entry.generation !== generation) return;
       const serialized = JSON.stringify(status);
-      const changed = filesChanged || serialized !== entry.settled;
+      const changed = entry.filesChanged || serialized !== entry.settled;
       entry.settled = serialized;
+      entry.filesChanged = false;
       for (const listener of [...entry.listeners]) listener({ status, changed });
     })
     .catch((err: unknown) => {

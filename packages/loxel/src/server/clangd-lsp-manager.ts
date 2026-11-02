@@ -394,6 +394,8 @@ interface ClangdLaunch {
   developerTools: boolean;
   /** Passed as `--compile-commands-dir`; null leaves finding each file's database to clangd. */
   compileCommandsDir: string | null;
+  /** The index is off for a `.clangd` naming a database outside the worktree. */
+  indexLeavesWorktree: boolean;
 }
 
 /** A live session's view of the files changing under it. */
@@ -485,17 +487,19 @@ export class ClangdLspManager extends WorktreeLspManager {
       // The index goes beside the database, and stays in the project tree. The flag beats `.clangd`.
       const indexLeavesWorktree =
         !context.repoTrusted && databaseDir === null && databases.namesOutsideDatabase;
-      const withoutIndex =
-        indexLeavesWorktree ||
-        (await indexDirectoryIsSymlink(
-          context.wtPath,
-          developerTools ? probe : probeWithoutAppleStubs,
-          databaseDir,
-        ));
+      const indexIsSymlink = await indexDirectoryIsSymlink(
+        context.wtPath,
+        developerTools ? probe : probeWithoutAppleStubs,
+        databaseDir,
+      );
+      const withoutIndex = indexLeavesWorktree || indexIsSymlink;
       if (withoutIndex) {
-        this.log.info("Background index off: its directory is or may be a symlink", {
-          wtPath: context.wtPath,
-        });
+        this.log.info(
+          indexIsSymlink
+            ? "Background index off: its directory is or may be a symlink"
+            : "Background index off: a .clangd names a database outside the worktree",
+          { wtPath: context.wtPath },
+        );
       }
       const resourceDir = join(dirname(binary), BUNDLED_RESOURCE_DIR);
       this.launches.set(context.wtPath, {
@@ -503,6 +507,7 @@ export class ClangdLspManager extends WorktreeLspManager {
         resourceDir: !usesUserClangd && existsSync(resourceDir) ? resourceDir : null,
         developerTools,
         compileCommandsDir: databaseDir,
+        indexLeavesWorktree,
       });
       return binary;
     }
@@ -683,11 +688,13 @@ export class ClangdLspManager extends WorktreeLspManager {
     if (!launch || !this.isSessionLive(session)) return;
     const databaseDir = compileCommandsDir(status);
     const indexLeavesWorktree =
-      !session.repoTrusted &&
-      databaseDir === null &&
-      status.namesOutsideDatabase &&
-      !launch.withoutIndex;
-    if (launch.compileCommandsDir === databaseDir && !indexLeavesWorktree) return;
+      !session.repoTrusted && databaseDir === null && status.namesOutsideDatabase;
+    if (
+      launch.compileCommandsDir === databaseDir &&
+      launch.indexLeavesWorktree === indexLeavesWorktree
+    ) {
+      return;
+    }
     this.log.info("Restarting: the compile database changed", {
       wtPath: session.wtPath,
       databaseDir,
