@@ -47,6 +47,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 echo "stats: stdout is not the report"
+[ -f "${runs}/during" ] && sh "${runs}/during"
 if [ -f "${runs}/hang" ]; then sleep 300 & echo $! > "${runs}/pid"; wait; fi
 [ -f "${runs}/report.json" ] && cp "${runs}/report.json" "$report"
 [ -f "${runs}/stderr" ] && cat "${runs}/stderr" >&2
@@ -247,6 +248,82 @@ async function settle(client: FakeClient, sentinel: string): Promise<void> {
 
 const GO_FILE = "package a\n";
 
+const SOURCE = "package a\n\nvar x = 1\n";
+const FIXABLE = {
+  FromLinter: "lint",
+  Text: "found",
+  Severity: "",
+  Pos: { Line: 3, Column: 5 },
+  SuggestedFixes: [
+    {
+      Message: "rename it",
+      // `x` on line 3.
+      TextEdits: [{ Pos: 15, End: 16, NewText: Buffer.from("y").toString("base64") }],
+    },
+  ],
+};
+const ALL_ACTIONS = ["lint: rename it", "lint: Disable for this line"];
+
+let nextRequest = 1000;
+
+/** The code actions at `line`, with what the request asks for in `context`. */
+async function requestActions(
+  client: FakeClient,
+  file: string,
+  line: number,
+  context: Record<string, unknown>,
+): Promise<{ title: string }[]> {
+  const id = nextRequest++;
+  const position = { line, character: 4 };
+  client.send({
+    id,
+    method: "textDocument/codeAction",
+    params: {
+      textDocument: { uri: fileUri(file) },
+      range: { start: position, end: position },
+      context: { diagnostics: [], ...context },
+    },
+  });
+  const answer = await client.next((message) => message.id === id);
+  return answer.result as unknown as { title: string }[];
+}
+
+async function actionTitles(
+  client: FakeClient,
+  file: string,
+  context: Record<string, unknown> = {},
+): Promise<string[]> {
+  return (await requestActions(client, file, 2, context)).map((action) => action.title);
+}
+
+function fixableIssue(file: string) {
+  return { ...FIXABLE, Pos: { ...FIXABLE.Pos, Filename: file } };
+}
+
+function openWith(client: FakeClient, file: string, text: string): void {
+  client.send({
+    method: "textDocument/didOpen",
+    params: { textDocument: { uri: fileUri(file), languageId: "go", version: 1, text } },
+  });
+}
+
+function change(client: FakeClient, file: string, text: string, version = 2): void {
+  client.send({
+    method: "textDocument/didChange",
+    params: { textDocument: { uri: fileUri(file), version }, contentChanges: [{ text }] },
+  });
+}
+
+/** A file with a fixable issue, open with its text in the buffer and reported on. */
+async function fixableFile(): Promise<{ client: FakeClient; file: string }> {
+  const client = await setUp({ "go.mod": "module a\n", ".golangci.yml": CONFIG, "a.go": SOURCE });
+  const file = join(wt, "a.go");
+  await report(fixableIssue(file));
+  openWith(client, file, SOURCE);
+  await client.diagnostics(file, ["found"]);
+  return { client, file };
+}
+
 /** Runs a trusted worktree's check to its end: runs go in order, so earlier ones are done. */
 async function trustedSiblingRun(): Promise<void> {
   const sibling = await makeRepo({
@@ -275,7 +352,8 @@ describe.skipIf(!canRun)("GolangciLintLspManager", () => {
     client.send({ id: 1, method: "initialize", params: {} });
     const answer = await client.next((message) => message.id === 1);
     expect(answer.result?.capabilities).toEqual({
-      textDocumentSync: { openClose: true, change: 0 },
+      textDocumentSync: { openClose: true, change: 1 },
+      codeActionProvider: { codeActionKinds: ["quickfix"] },
     });
   });
 
@@ -684,6 +762,127 @@ describe.skipIf(!canRun)("GolangciLintLspManager", () => {
       "start",
       "end",
     ]);
+  });
+
+  describe("code actions", () => {
+    test("offers the fixes and nolint for what is under the range", async () => {
+      const { client, file } = await fixableFile();
+      expect(await actionTitles(client, file)).toEqual(ALL_ACTIONS);
+      expect(await requestActions(client, file, 0, {})).toEqual([]);
+    });
+
+    test("an edit takes them away, and undoing it brings them back", async () => {
+      const { client, file } = await fixableFile();
+      change(client, file, `// edited\n${SOURCE}`);
+      expect(await actionTitles(client, file)).toEqual([]);
+      change(client, file, SOURCE);
+      expect(await actionTitles(client, file)).toEqual(ALL_ACTIONS);
+    });
+
+    test("a file changed on disk takes them away, before any new run", async () => {
+      const { client, file } = await fixableFile();
+      await writeFile(file, `// changed\n${SOURCE}`);
+      expect(await actionTitles(client, file)).toEqual([]);
+    });
+
+    test("a file that changes during the run gets none", async () => {
+      const client = await setUp({
+        "go.mod": "module a\n",
+        ".golangci.yml": CONFIG,
+        "a.go": SOURCE,
+      });
+      const file = join(wt, "a.go");
+      await report(fixableIssue(file));
+      const moved = `// moved\n${SOURCE}`;
+      await writeFile(join(runs, "during"), `printf '%s' '${moved}' > '${file}'\n`);
+      openWith(client, file, moved);
+      await client.diagnostics(file, ["found"]);
+      expect(await actionTitles(client, file)).toEqual([]);
+    });
+
+    test("a change undone during the run gets none", async () => {
+      const client = await setUp({
+        "go.mod": "module a\n",
+        ".golangci.yml": CONFIG,
+        "a.go": SOURCE,
+      });
+      const file = join(wt, "a.go");
+      await report(fixableIssue(file));
+      // The same bytes back, as if the run had read something else in between.
+      await writeFile(
+        join(runs, "during"),
+        `printf '%s' '${SOURCE}' > '${file}'\ntouch -t 200001010000 '${file}'\n`,
+      );
+      openWith(client, file, SOURCE);
+      await client.diagnostics(file, ["found"]);
+      expect(await actionTitles(client, file)).toEqual([]);
+    });
+
+    test("edits name the buffer's version", async () => {
+      const { client, file } = await fixableFile();
+      change(client, file, SOURCE, 9);
+      const [action] = await requestActions(client, file, 2, {});
+      expect(action).toMatchObject({
+        edit: { documentChanges: [{ textDocument: { uri: fileUri(file), version: 9 } }] },
+      });
+    });
+
+    test("a buffer that was never the file gets none", async () => {
+      const client = await setUp({
+        "go.mod": "module a\n",
+        ".golangci.yml": CONFIG,
+        "a.go": SOURCE,
+      });
+      const file = join(wt, "a.go");
+      await report(fixableIssue(file));
+      openWith(client, file, `// unsaved\n${SOURCE}`);
+      await client.diagnostics(file, ["found"]);
+      expect(await actionTitles(client, file)).toEqual([]);
+    });
+
+    test("a closed file gets none", async () => {
+      const { client, file } = await fixableFile();
+      client.send({
+        method: "textDocument/didClose",
+        params: { textDocument: { uri: fileUri(file) } },
+      });
+      expect(await actionTitles(client, file)).toEqual([]);
+    });
+
+    test("only quick fixes: a request for another kind gets nothing", async () => {
+      const { client, file } = await fixableFile();
+      expect(await actionTitles(client, file, { only: ["source.fixAll"] })).toEqual([]);
+      expect(await actionTitles(client, file, { only: ["quickfix"] })).toEqual(ALL_ACTIONS);
+    });
+
+    test("none in an untrusted repository", async () => {
+      const client = await setUp(
+        { "go.mod": "module a\n", ".golangci.yml": CONFIG, "a.go": SOURCE },
+        { trusted: false },
+      );
+      const file = join(wt, "a.go");
+      await report(fixableIssue(file));
+      openWith(client, file, SOURCE);
+      expect(await actionTitles(client, file)).toEqual([]);
+      expect(await runLog()).toEqual([]);
+    });
+
+    test("none once trust goes", async () => {
+      const { client, file } = await fixableFile();
+      const from = client.received.length;
+      setRepoTrusted(wt, false);
+      await client.diagnostics(file, [], from);
+      expect(await actionTitles(client, file)).toEqual([]);
+    });
+
+    test("a later run replaces what is offered", async () => {
+      const { client, file } = await fixableFile();
+      const from = client.received.length;
+      await report({ ...fixableIssue(file), Text: "found again", SuggestedFixes: [] });
+      manager?.notifyWatchedFilesChanged(wt, [file]);
+      await client.diagnostics(file, ["found again"], from);
+      expect(await actionTitles(client, file)).toEqual(["lint: Disable for this line"]);
+    });
   });
 });
 

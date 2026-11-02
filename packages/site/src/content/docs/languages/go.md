@@ -1,6 +1,6 @@
 ---
 title: Go
-description: Go language features from gopls, with navigation, rename, quick fixes, inlay hints, go.mod support, format on save and golangci-lint diagnostics.
+description: Go language features from gopls, with navigation, rename, quick fixes, inlay hints, go.mod support, format on save and golangci-lint diagnostics with quick fixes.
 order: 13.5
 ---
 
@@ -76,6 +76,14 @@ Loxel runs the `golangci-lint` on your `PATH`, and never downloads it or anythin
 - **Older than v2.1.** Install a newer v2. If the config is the old one, run `golangci-lint migrate` in a terminal.
 - **Custom linters or a custom output.** Loxel does not run a config that sets `linters.settings.custom`, or an output `path` other than `stdout` or `stderr`. Run `golangci-lint` in a terminal instead.
 - **A config it can't read or load.** Run `golangci-lint config verify` in a terminal to see why.
+
+### Quick fixes for golangci-lint findings
+
+`Cmd+.` on a finding offers the linter's own suggested fix where it has one, named after the linter, such as **canonicalheader: should be replaced "Etag" with "ETag"**. A linter's suggestion can be wrong, so Loxel never applies one by itself and **Fix All** leaves them out. A fix changes the editor's text like any other edit, and undo takes it back.
+
+**\<linter\>: Disable for this line** adds `//nolint:<linter>` to the line. If the line already has a `//nolint:` list, the linter joins it, as in `//nolint:errcheck,gosec`. If it has another comment, the directive goes first, because golangci-lint only reads a comment that starts with it. This isn't offered on a line holding only a comment, or one that ends inside a raw string or block comment.
+
+These appear only while the file is exactly what golangci-lint last checked. After an edit they go away until the change is saved and the next check finishes.
 
 ## Monorepos and build tags
 
