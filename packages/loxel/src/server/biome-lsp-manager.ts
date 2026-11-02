@@ -201,7 +201,7 @@ export class BiomeLspManager extends ProjectLinterLspManager<BiomeLaunch> {
   /**
    * The TypeScript server owns Organize Imports: it answers wherever the cursor is, and it removes
    * unused imports. Biome answers only with the cursor on its diagnostic, which would make the same
-   * command sometimes ask which server to use. Its order stays one Quick Fix or Fix All away.
+   * command sometimes ask which server to use. Its order stays in Source Action and Fix All.
    */
   protected override handleClientData(session: WtLspSession, data: string): void {
     const id = organizeImportsRequestId(data);

@@ -144,7 +144,7 @@ In a [trusted repository](/docs/repository-trust), JavaScript and TypeScript fil
 
 The config at the root is `biome.json`, `biome.jsonc`, `.biome.json` or `.biome.jsonc`. Packages of a monorepo can add their own with `"root": false`, as in a terminal. A package's config with none at the root isn't picked up.
 
-**Fix All** applies the safe fixes in the file and sorts its imports. If your config leaves Biome's formatter on, it formats the file too, like `biome check --write`. **Organize Imports** stays with the TypeScript server, so its order can differ from Biome's: use **Fix All**, or the quick fix on Biome's import problem, for Biome's order. Formatting stays with [format on save](#format-on-save).
+**Fix All** applies the safe fixes in the file and sorts its imports. If your config leaves Biome's formatter on, it formats the file too, like `biome check --write`. **Organize Imports** stays with the TypeScript server, so its order can differ from Biome's: use **Fix All** or **Source Action** for Biome's order. Formatting stays with [format on save](#format-on-save).
 
 Loxel never installs Biome. If a project has a config and no Biome installed, a notification says what to run. Until you trust a repository, Biome's linter doesn't run in it, and the status bar shows **Restricted** once you open a file in a project with a config.
 
