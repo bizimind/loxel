@@ -58,6 +58,7 @@ class LspClient {
   private nextId = 1;
   private readonly waiting = new Map<number, (message: RpcMessage) => void>();
   private diagnosed: (diagnostics: { range: unknown }[]) => void = () => {};
+  private warned: () => void = () => {};
 
   constructor(private readonly ws: WebSocket) {
     ws.addEventListener("message", (event) => {
@@ -66,6 +67,7 @@ class LspClient {
         const diagnostics = message.params?.diagnostics ?? [];
         if (diagnostics.length > 0) this.diagnosed(diagnostics);
       }
+      if (message.method === "window/showMessage") this.warned();
       if (message.id === undefined) return;
       if (message.method) {
         const result =
@@ -93,6 +95,17 @@ class LspClient {
 
   notify(method: string, params: unknown): void {
     this.ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+  }
+
+  /** Biome's word on a config it could not load, which comes after trying to. */
+  warning(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("no warning")), REQUEST_TIMEOUT_MS);
+      this.warned = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
   }
 
   diagnostics(): Promise<{ range: unknown }[]> {
@@ -196,6 +209,7 @@ async function session(config: unknown, label: string, expectLint: boolean): Pro
     rootUri: null,
     capabilities: CAPABILITIES,
   });
+  const warned = client.warning();
   client.notify("initialized", {});
   const uri = `loxel://head${path.join(project, "src/a.js")}`;
   const textDocument = { uri };
@@ -223,10 +237,8 @@ async function session(config: unknown, label: string, expectLint: boolean): Pro
     ).result as { kind?: string }[];
     check(fixAll[0]?.kind === "source.fixAll.biome", `Biome offers Fix All (${label})`);
   } else {
-    await client.request("textDocument/hover", {
-      textDocument,
-      position: { line: 0, character: 0 },
-    });
+    await warned;
+    check(true, `Biome tried the config and declined it (${label})`);
   }
   ws.close();
 }

@@ -148,9 +148,11 @@ The config at the root is `biome.json`, `biome.jsonc`, `.biome.json` or `.biome.
 
 Loxel never installs Biome. If a project has a config and no Biome installed, a notification says what to run. Until you trust a repository, Biome's linter doesn't run in it, and the status bar shows **Restricted** once you open a file in a project with a config.
 
-A separate repository inside your worktree, such as a submodule or a clone, even one git ignores, has its own trust. If it has a Biome config, Biome waits until you trust that repository too, and a notification says so. The same goes for the folder above the worktree holding the config Biome would use, when your root config has `"root": false`.
+A separate repository inside your worktree, such as a submodule or a clone, even one git ignores, has its own trust. If it has a Biome config, Biome waits until you trust that repository too, and a notification says so. The same goes for a folder above the worktree holding a config Biome would use, when your root config has `"root": false` or `"extends": "//"`.
 
-Changes to a config file apply right away, and so does installing or upgrading packages. If a project also uses ESLint or oxlint, each runs, and **Fix All** lets you choose between them.
+Biome also reads folders git ignores, so Loxel checks those too. If a folder in the worktree can't be read, or it has more than 100,000 folders, Biome doesn't run and a notification says so.
+
+Changes to a Biome config in your project apply right away, and so does installing or upgrading packages. Changes to a file your config extends under another name, or to a plugin, apply the next time Biome restarts, such as when you reopen the worktree. If a project also uses ESLint or oxlint, each runs, and **Fix All** lets you choose between them.
 
 ---
 

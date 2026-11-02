@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import type { ServerWebSocket, Subprocess } from "bun";
@@ -8,8 +8,9 @@ import { isRecord } from "@/lib/is-record";
 import {
   BIOME_PACKAGE,
   biomeBinary,
-  biomeDaemonHome,
   biomeNotInstalledMessage,
+  createBiomeDaemonHome,
+  findBiomeInstall,
   hasBiomeConfig,
   isBiomeConfigFile,
   scanBiomeWorktree,
@@ -38,23 +39,23 @@ const RESTARTING_FILES = new Set([
   "tsconfig.json",
 ]);
 
+/** Longest `pkill` may take, as a process table can hang on a stuck file system. */
+const PKILL_TIMEOUT_MS = 2000;
+
 export interface BiomeLaunch extends LinterLaunch {
   node: null;
   bin: string;
-  /** The home the daemon runs with, so that it serves this worktree alone. */
-  home: string;
 }
 
 /**
  * The project's own Biome through `lsp-proxy`, one per worktree. Nothing of Biome's is bundled, so a
  * worktree without an install holds its connection.
  *
- * A server reads the configs it can see when it starts, wherever they lie, so what it would load is
- * looked for first, and a config it should not load holds the connection. Config changes restart
- * the server rather than reach it, so that this holds for every load: it is told of no watched file.
+ * What a server would read when it starts is looked at first, and a repository whose trust is still
+ * open holds the connection. Config changes restart the server rather than reach it, so that this
+ * holds for every load: it is told of no watched file.
  *
- * The proxy starts a daemon that does the work and outlives it while busy, so the daemon is stopped
- * along with the session.
+ * The proxy starts a daemon that does the work. Each session has its own, stopped with the session.
  */
 export class BiomeLspManager extends ProjectLinterLspManager<BiomeLaunch> {
   protected override readonly repoTrustRestriction =
@@ -67,8 +68,9 @@ export class BiomeLspManager extends ProjectLinterLspManager<BiomeLaunch> {
   ];
 
   private readonly reliedTrust = new ReliedTrust();
-  private readonly daemons = new WeakMap<WtLspSession, number | null>();
+  private readonly startingHomes = new WeakMap<WtLspContext, string>();
   private readonly homes = new WeakMap<WtLspSession, string>();
+  private readonly daemonStops = new Set<Promise<void>>();
 
   constructor() {
     super("biome-lsp");
@@ -86,11 +88,11 @@ export class BiomeLspManager extends ProjectLinterLspManager<BiomeLaunch> {
       }
       const scan = await scanBiomeWorktree(wtPath, { signal });
       if (signal.aborted) return { notice: null };
-      const relied = [...scan.nestedConfigRepos, ...(scan.ancestorRepo ? [scan.ancestorRepo] : [])];
-      this.reliedTrust.record(context, relied);
+      this.reliedTrust.record(context, [...scan.nestedConfigRepos, ...scan.ancestorRepos]);
       if (scan.incomplete) {
         return {
-          notice: "Doesn't run here, as not every folder in this worktree could be checked.",
+          notice:
+            "Doesn't run here, as not every folder in this worktree could be checked, including those git ignores. Make them readable, or move the largest out of the worktree.",
         };
       }
       const nested = scan.nestedConfigRepos.find((dir) => !isRepoTrusted(dir));
@@ -99,22 +101,21 @@ export class BiomeLspManager extends ProjectLinterLspManager<BiomeLaunch> {
           notice: `Doesn't run here while ${path.relative(wtPath, nested)}, a separate repository with its own Biome config, isn't trusted. Open it in Loxel and trust it.`,
         };
       }
-      if (scan.ancestorRepo && !isRepoTrusted(scan.ancestorRepo)) {
+      const ancestor = scan.ancestorRepos.find((dir) => !isRepoTrusted(dir));
+      if (ancestor) {
         return {
-          notice: `Doesn't run here while ${scan.ancestorRepo}, above this worktree, isn't trusted, since Biome would use its config. Open it in Loxel and trust it.`,
+          notice: `Doesn't run here while ${ancestor}, above this worktree, isn't trusted, since Biome would use its config. Open it in Loxel and trust it.`,
         };
       }
-      const [installDir] = scan.installDirs;
+      const installDir = findBiomeInstall(scan.installDirs, wtPath);
       if (!installDir) return { notice: biomeNotInstalledMessage(wtPath) };
       const bin = biomeBinary(installDir);
       if (!bin) {
         return {
-          notice: `Biome is installed without its binary for this platform. Reinstall ${BIOME_PACKAGE} in a terminal.`,
+          notice: `Biome's binary for this platform wasn't found in this install. Reinstall ${BIOME_PACKAGE} in a terminal.`,
         };
       }
-      const home = biomeDaemonHome(`${wtPath}\0${bin}`);
-      if (!home) return { notice: "Doesn't run here, as its daemon has no private folder to use." };
-      return { node: null, bin, home };
+      return { node: null, bin };
     } catch (err) {
       this.log.warn("Could not decide how to run Biome", { error: err });
       return { notice: null };
@@ -155,10 +156,11 @@ export class BiomeLspManager extends ProjectLinterLspManager<BiomeLaunch> {
     return ["lsp-proxy"];
   }
 
+  /** Each session gets its own daemon. A failure here is a start failure. */
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
     const options = super.spawnOptions(context);
-    const home = this.launchOf(context)?.home;
-    if (!home) return options;
+    const home = createBiomeDaemonHome();
+    this.startingHomes.set(context, home);
     // macOS finds its cache through `HOME`, Linux through this first.
     const env = { ...options.env, HOME: home, XDG_CACHE_HOME: path.join(home, ".cache") };
     return { ...options, env };
@@ -177,25 +179,43 @@ export class BiomeLspManager extends ProjectLinterLspManager<BiomeLaunch> {
     context: WtLspContext,
   ): WtLspSession {
     const session = super.buildSession(ws, proc, context);
-    const home = this.launchOf(context)?.home;
+    const home = this.startingHomes.get(context);
     if (home) this.homes.set(session, home);
     return session;
   }
 
-  protected override handleServerFrame(session: WtLspSession, body: string): void {
-    // Its first answer means the daemon is up.
-    if (!this.daemons.has(session)) this.daemons.set(session, findDaemon(session.proc.pid));
-    super.handleServerFrame(session, body);
-  }
-
   protected override onSessionClosed(session: WtLspSession): void {
     super.onSessionClosed(session);
-    const daemon = this.daemons.get(session);
-    this.daemons.set(session, null);
-    if (daemon) stopDaemon(daemon);
     const home = this.homes.get(session);
+    if (!home) return;
     this.homes.delete(session);
-    if (home) rmSync(home, { recursive: true, force: true });
+    const stop = this.stopDaemon(home).finally(() => this.daemonStops.delete(stop));
+    this.daemonStops.add(stop);
+  }
+
+  /**
+   * Its command line names its home, which is this session's alone, so this finds it whatever became
+   * of the proxy. Never rejects, as closing a session must go on regardless.
+   */
+  private async stopDaemon(home: string): Promise<void> {
+    try {
+      const pkill = Bun.spawn(["pkill", "-KILL", "-f", `__run_server.*${home}`], {
+        stdout: "ignore",
+        stderr: "ignore",
+        timeout: PKILL_TIMEOUT_MS,
+      });
+      await pkill.exited;
+    } catch (err) {
+      this.log.warn("Could not stop Biome's daemon", { error: err });
+    }
+    await rm(home, { recursive: true, force: true, maxRetries: 3 }).catch((err: unknown) => {
+      this.log.debug("Could not remove Biome's daemon folder", { error: err });
+    });
+  }
+
+  override async destroy(): Promise<void> {
+    await super.destroy();
+    await Promise.all(this.daemonStops);
   }
 
   /**
@@ -230,26 +250,4 @@ function organizeImportsRequestId(data: string): number | string | undefined {
     only.length > 0 &&
     only.every((kind) => typeof kind === "string" && kind.startsWith("source.organizeImports"));
   return asksOrganize ? message.id : undefined;
-}
-
-/** The daemon `proxy` started; none when it connected to one already running. */
-function findDaemon(proxy: number): number | null {
-  const { stdout } = Bun.spawnSync(["pgrep", "-P", String(proxy)]);
-  const pid = Number(stdout.toString().trim().split("\n")[0]);
-  return Number.isInteger(pid) && pid > 0 ? pid : null;
-}
-
-/**
- * Its home makes it this session's alone. It exits by itself once its last client goes, unless a
- * plugin keeps it busy, so nothing is lost by not waiting. The check is for a daemon long gone,
- * whose number may be another process's by now.
- */
-function stopDaemon(pid: number): void {
-  const { stdout } = Bun.spawnSync(["ps", "-o", "command=", "-p", String(pid)]);
-  if (!stdout.toString().includes("__run_server")) return;
-  try {
-    process.kill(pid, "SIGKILL");
-  } catch {
-    // It went between the check and now, which is what was wanted.
-  }
 }

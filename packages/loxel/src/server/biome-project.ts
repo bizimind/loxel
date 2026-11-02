@@ -1,12 +1,12 @@
 /** What a worktree says about Biome's linter, read from disk without running anything. */
-import { lstatSync, mkdirSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import path from "node:path";
 
 import { isRecord } from "@/lib/is-record";
 
 import { readConfigFile } from "./config-file-read";
 import { biomeNativeDir } from "./js-formatter";
-import { isFile, notInstalledMessage } from "./js-project";
+import { isFile, namesDependency, notInstalledMessage, readPackageJson } from "./js-project";
 import {
   nearestAbove,
   owningRepo,
@@ -37,32 +37,45 @@ export function hasBiomeConfig(wtPath: string): boolean {
 }
 
 /**
- * Whether the root's config leaves the search going upward. One that cannot be read or parsed
- * counts, so that a decision never rests on a config Biome may read differently.
+ * Whether the config in `dir` leaves the search going upward: `root: false`, or `extends: "//"`,
+ * which implies it. One that cannot be read or parsed counts, so that a decision never rests on a
+ * config Biome may read differently.
  */
-function looksAboveWorktree(wtPath: string): boolean {
-  const config = configIn(wtPath);
+function looksAbove(dir: string): boolean {
+  const config = configIn(dir);
   const text = config && readConfigFile(config);
   if (text === undefined) return true;
   try {
     const parsed: unknown = Bun.JSONC.parse(text);
-    return !isRecord(parsed) || parsed.root === false;
+    if (!isRecord(parsed) || parsed.root === false) return true;
+    const { extends: extended } = parsed;
+    return extended === "//" || (Array.isArray(extended) && extended.includes("//"));
   } catch {
     return true;
   }
 }
 
+/** The repositories of the configs Biome would go through above the worktree, to the first root. */
+function findAncestorRepos(wtPath: string): string[] {
+  const repos = new Set<string>();
+  let dir: string | null = wtPath;
+  while (dir && looksAbove(dir)) {
+    dir = nearestAbove(dir, (candidate) => configIn(candidate) !== undefined);
+    if (dir) repos.add(owningRepo(dir));
+  }
+  return [...repos];
+}
+
 /** What a server for this worktree would run and load. */
 export interface BiomeWorktreeScan extends Omit<ProjectScan, "usesTool"> {
-  /** The directory whose trust covers the config Biome would use from above the worktree. */
-  ancestorRepo: string | null;
+  /** The directories whose trust covers the configs Biome would use from above the worktree. */
+  ancestorRepos: string[];
 }
 
 /**
- * Biome's start reads every config below its root, nested repositories included, and with
- * `root: false` at the worktree's root the nearest above it. It reads only the root's `.gitignore`
- * and only with `vcs.useIgnoreFile`, so what git ignores is walked too. It does not enter symbolic
- * links.
+ * Biome's start reads every config below its root, nested repositories included, and with a root
+ * config that defers upward, those above it too. It reads only the root's `.gitignore` and only with
+ * `vcs.useIgnoreFile`, so what git ignores is walked too. It does not enter symbolic links.
  */
 export async function scanBiomeWorktree(
   wtPath: string,
@@ -78,10 +91,18 @@ export async function scanBiomeWorktree(
     },
     options,
   );
-  const above = looksAboveWorktree(wtPath)
-    ? nearestAbove(wtPath, (dir) => configIn(dir) !== undefined)
-    : null;
-  return { ...scan, ancestorRepo: above && owningRepo(above) };
+  return { ...scan, ancestorRepos: findAncestorRepos(wtPath) };
+}
+
+/**
+ * The install to run: the nearest to the root, at the root or where a manifest asks for it. Since
+ * the walk covers what git ignores, any other is a fixture or a leftover, not the project's Biome.
+ */
+export function findBiomeInstall(installDirs: readonly string[], wtPath: string): string | null {
+  const found = installDirs.find(
+    (dir) => dir === wtPath || namesDependency(readPackageJson(dir), BIOME_PACKAGE),
+  );
+  return found ?? null;
 }
 
 /** The platform binary an install at `dir` runs; its `.bin` entry is a Node script around this. */
@@ -100,22 +121,10 @@ export function biomeNotInstalledMessage(wtPath: string): string {
 }
 
 /**
- * A home of `key`'s own, so that its daemon is its own. Biome keeps one daemon per version per home,
- * whichever binary asks, so a daemon started from one repository's install would serve another's.
- *
- * Under `/tmp` because the daemon's socket lies about 65 characters below this, and a socket's path
- * must fit in about 104: the state and temporary directories are too long on macOS. Since others
- * can write to `/tmp`, a directory that is not this user's own counts as none.
+ * A new home for one session's daemon, as Biome keeps one daemon per version per home. Under `/tmp`
+ * because the daemon's socket lies about 65 characters below it and a socket's path must fit in
+ * about 104, which the state and temporary directories leave no room for on macOS.
  */
-export function biomeDaemonHome(key: string): string | null {
-  const uid = process.getuid?.();
-  if (uid === undefined) return null;
-  const home = `/tmp/lxb-${uid}-${Bun.hash(key).toString(36).slice(0, 8)}`;
-  try {
-    mkdirSync(home, { mode: 0o700 });
-  } catch (err) {
-    if (!isRecord(err) || err.code !== "EEXIST") return null;
-  }
-  const stat = lstatSync(home);
-  return stat.isDirectory() && stat.uid === uid && (stat.mode & 0o077) === 0 ? home : null;
+export function createBiomeDaemonHome(): string {
+  return mkdtempSync("/tmp/lxb-");
 }

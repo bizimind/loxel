@@ -1,5 +1,15 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -11,11 +21,12 @@ const stateDir = mkdtempSync(path.join(tmpdir(), "biome-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 
 const { BiomeLspManager } = await import("./biome-lsp-manager");
+const { scanBiomeWorktree } = await import("./biome-project");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 
 // A stand-in for Biome: reports its arguments, home and each message, with a daemon as its child.
 const FAKE_BIOME = `#!${process.execPath}
-const daemon = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 1000)", "__run_server"], { stdio: ["ignore", "ignore", "ignore"] });
+const daemon = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 1000)", "__run_server", process.env.HOME], { stdio: ["ignore", "ignore", "ignore"] });
 let buf = Buffer.alloc(0);
 const write = (msg) => {
   const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", ...msg }));
@@ -33,7 +44,15 @@ for await (const chunk of process.stdin) {
     buf = buf.subarray(end + 4 + length);
     write({ method: "test/received", params: { json: JSON.stringify(msg) } });
     if (msg.method === "initialize") {
-      const capabilities = { args: process.argv.slice(2), home: process.env.HOME, daemon: daemon.pid };
+      const capabilities = {
+        args: process.argv.slice(2),
+        home: process.env.HOME,
+        cache: process.env.XDG_CACHE_HOME,
+        daemon: daemon.pid,
+        hoverProvider: true,
+        documentFormattingProvider: true,
+        documentRangeFormattingProvider: true,
+      };
       write({ id: msg.id, result: { capabilities } });
     } else if (msg.id !== undefined) {
       write({ id: msg.id, result: { fromServer: true } });
@@ -124,7 +143,7 @@ async function start(): Promise<FakeSocket> {
 }
 
 interface Running {
-  capabilities: { args: string[]; home: string; daemon: number };
+  capabilities: { args: string[]; home: string; cache: string; daemon: number };
 }
 
 const running = (socket: FakeSocket) => socket.frames.find(isInitializeResponse)?.result as Running;
@@ -149,6 +168,11 @@ function isAlive(pid: number): boolean {
   const { stdout } = Bun.spawnSync(["ps", "-o", "stat=", "-p", String(pid)]);
   const state = stdout.toString().trim();
   return state !== "" && !state.startsWith("Z");
+}
+
+/** A signal or a removal takes effect after the call returns, with nothing to wait on. */
+async function until(condition: () => boolean): Promise<void> {
+  while (!condition()) await Bun.sleep(10);
 }
 
 beforeEach(() => {
@@ -205,11 +229,21 @@ describe("in a trusted repository", () => {
     });
   }
 
-  test("an install in a package serves a root config", async () => {
+  test("an install in a package asking for Biome serves a root config", async () => {
     write("biome.json");
+    write("packages/a/package.json", '{ "devDependencies": { "@biomejs/biome": "2" } }');
     install("packages/a");
     const socket = await start();
     expect(running(socket).capabilities.args).toEqual(["lsp-proxy"]);
+  });
+
+  test("an install nothing asks for is not the project's Biome", async () => {
+    write("biome.json");
+    install("test/fixtures/old");
+    const socket = await start();
+    open(socket, write("a.js"));
+    expect(socket.frames.find(isInitializeResponse)?.result).toEqual(NO_FEATURES);
+    expect(warnings(socket)[0]).toContain("isn't installed");
   });
 
   test("a config only in a package starts nothing, as Biome would lint nothing", async () => {
@@ -232,26 +266,44 @@ describe("in a trusted repository", () => {
     write("node_modules/@biomejs/biome/package.json");
     const socket = await start();
     open(socket, write("a.js"));
-    expect(warnings(socket)[0]).toContain("without its binary");
+    expect(warnings(socket)[0]).toContain("wasn't found in this install");
   });
 
-  test("the daemon gets a short private home per worktree", async () => {
+  test("the daemon gets a short private home for both of the platforms' cache lookups", async () => {
     write("biome.json");
     install();
     const socket = await start();
-    const { home } = running(socket).capabilities;
-    expect(home).toMatch(/^\/tmp\/lxb-\d+-[a-z0-9]+$/);
+    const { home, cache } = running(socket).capabilities;
+    expect(home).toMatch(/^\/tmp\/lxb-\w+$/);
     expect(home.length).toBeLessThan(30);
+    expect(cache).toBe(path.join(home, ".cache"));
+    expect(statSync(home).mode & 0o077).toBe(0);
   });
 
-  test("the daemon stops with the session", async () => {
+  test("the daemon and its home go with the session", async () => {
     write("biome.json");
     install();
     const socket = await start();
-    const { daemon } = running(socket).capabilities;
+    const { daemon, home } = running(socket).capabilities;
     expect(isAlive(daemon)).toBe(true);
     await manager.destroy();
-    expect(isAlive(daemon)).toBe(false);
+    await until(() => !isAlive(daemon));
+    expect(existsSync(home)).toBe(false);
+  });
+
+  test("a second connection keeps its own home when it replaces the first", async () => {
+    write("biome.json");
+    install();
+    const first = await start();
+    const second = fakeSocket();
+    manager.createSession(second.ws, wt);
+    send(second, { id: 1, method: "initialize", params: { capabilities: {} } });
+    await second.next(isInitializeResponse);
+    const { home } = running(second).capabilities;
+    const firstHome = running(first).capabilities.home;
+    expect(home).not.toBe(firstHome);
+    await until(() => !existsSync(firstHome));
+    expect(existsSync(home)).toBe(true);
   });
 
   test("a nested repository with a config holds it until that repository is trusted", async () => {
@@ -268,18 +320,34 @@ describe("in a trusted repository", () => {
     setRepoTrusted(path.join(wt, "vendor/lib"), false);
   });
 
+  test("trust withdrawn from a nested repository restarts a running server", async () => {
+    write("biome.json");
+    install();
+    const nested = path.join(wt, "vendor/lib");
+    write("vendor/lib/.git/config", "");
+    write("vendor/lib/biome.json");
+    setRepoTrusted(nested, true);
+    const socket = await start();
+    expect(running(socket).capabilities.args).toEqual(["lsp-proxy"]);
+    setRepoTrusted(nested, false);
+    expect(await socket.closed).toBe(LSP_RESTART_CLOSE_CODE);
+  });
+
   test("a nested repository git ignores counts, as Biome walks it", async () => {
+    Bun.spawnSync(["git", "init", "-q"], { cwd: wt });
+    setRepoTrusted(wt, true);
     write("biome.json");
     write(".gitignore", "vendor/\n");
-    write(".git/config", "");
     install();
     write("vendor/lib/.git/config", "");
     write("vendor/lib/biome.json");
     const socket = await start();
+    open(socket, write("a.js"));
     expect(socket.frames.find(isInitializeResponse)?.result).toEqual(NO_FEATURES);
+    expect(warnings(socket)[0]).toContain(path.join("vendor", "lib"));
   });
 
-  test("a config in node_modules or behind a link does not count", async () => {
+  test("a config in node_modules does not count", async () => {
     write("biome.json");
     install();
     write("node_modules/dep/.git/config", "");
@@ -288,14 +356,45 @@ describe("in a trusted repository", () => {
     expect(running(socket).capabilities.args).toEqual(["lsp-proxy"]);
   });
 
-  test("root: false holds it until the repository of the config above is trusted", async () => {
+  test("a config behind a symbolic link does not count", async () => {
+    write("biome.json");
+    install();
+    const other = path.join(scratch, "other");
+    write(".git/config", "", other);
+    write("biome.json", "{}", other);
+    symlinkSync(other, path.join(wt, "linked"));
+    const socket = await start();
+    expect(running(socket).capabilities.args).toEqual(["lsp-proxy"]);
+  });
+
+  for (const [name, config] of [
+    ["root: false", '{ "root": false }'],
+    ['extends: "//"', '{ "extends": "//" }'],
+    ['extends: ["//"]', '{ "extends": ["//"] }'],
+  ] as const) {
+    test(`${name} holds it until the repository of the config above is trusted`, async () => {
+      write("biome.json", config);
+      install();
+      write("biome.json", "{}", path.dirname(wt));
+      const socket = await start();
+      open(socket, write("a.js"));
+      expect(socket.frames.find(isInitializeResponse)?.result).toEqual(NO_FEATURES);
+      expect(warnings(socket)[0]).toContain("above this worktree");
+    });
+  }
+
+  test("every config on the way up counts, to the first that is a root", async () => {
     write("biome.json", '{ "root": false }');
     install();
-    write("biome.json", "{}", path.dirname(wt));
+    const parent = path.dirname(wt);
+    write("biome.json", '{ "root": false }', parent);
+    setRepoTrusted(parent, true);
+    write("biome.json", "{}", scratch);
     const socket = await start();
     open(socket, write("a.js"));
     expect(socket.frames.find(isInitializeResponse)?.result).toEqual(NO_FEATURES);
-    expect(warnings(socket)[0]).toContain("above this worktree");
+    expect(warnings(socket)[0]).toContain(`${scratch}, above this worktree`);
+    setRepoTrusted(parent, false);
   });
 
   test("a root config ignores what lies above the worktree", async () => {
@@ -314,10 +413,8 @@ describe("in a trusted repository", () => {
     expect(socket.frames.find(isInitializeResponse)?.result).toEqual(NO_FEATURES);
   });
 
-  test("a walk over the limit holds it", async () => {
+  test("a walk that cannot finish reports it", async () => {
     write("biome.json");
-    install();
-    const { scanBiomeWorktree } = await import("./biome-project");
     write("a/b.js");
     const scan = await scanBiomeWorktree(wt, { maxDirs: 1 });
     expect(scan.incomplete).toBe(true);
@@ -327,10 +424,10 @@ describe("in a trusted repository", () => {
     write("biome.json");
     install();
     const socket = await start();
-    await settle(socket);
-    const hook = (manager as unknown as { suppressedFeatures: readonly string[] })
-      .suppressedFeatures;
-    expect(hook).toEqual(["textDocument/formatting", "textDocument/rangeFormatting"]);
+    const capabilities = running(socket).capabilities as unknown as Record<string, unknown>;
+    expect(capabilities.documentFormattingProvider).toBeUndefined();
+    expect(capabilities.documentRangeFormattingProvider).toBeUndefined();
+    expect(capabilities.hoverProvider).toBe(true);
   });
 
   test("Organize Imports stays with the TypeScript server, other source actions reach Biome", async () => {
@@ -348,10 +445,12 @@ describe("in a trusted repository", () => {
       params: params(["source.organizeImports"]),
     });
     send(socket, { id: 3, method: "textDocument/codeAction", params: params(["source.fixAll"]) });
+    send(socket, { id: 4, method: "textDocument/codeAction", params: params(["source"]) });
     expect((await socket.next((frame) => frame.id === 2)).result).toEqual([]);
     expect((await socket.next((frame) => frame.id === 3)).result).toEqual({ fromServer: true });
+    expect((await socket.next((frame) => frame.id === 4)).result).toEqual({ fromServer: true });
     const asked = received(socket).filter((frame) => frame.method === "textDocument/codeAction");
-    expect(asked.map((frame) => frame.id)).toEqual([3]);
+    expect(asked.map((frame) => frame.id)).toEqual([3, 4]);
   });
 
   test("a config change restarts it and is not forwarded", async () => {
@@ -365,13 +464,45 @@ describe("in a trusted repository", () => {
     );
   });
 
+  for (const file of [
+    ".editorconfig",
+    ".gitignore",
+    "tsconfig.json",
+    "package.json",
+    "node_modules/dep/biome.json",
+    "node_modules/@biomejs/biome/package.json",
+  ]) {
+    test(`a change to ${file} restarts a running server`, async () => {
+      write("biome.json");
+      install();
+      const socket = await start();
+      manager.notifyWatchedFilesChanged(wt, [path.join(wt, file)]);
+      expect(await socket.closed).toBe(LSP_RESTART_CLOSE_CODE);
+    });
+  }
+
   test("a change to an ordinary file changes nothing", async () => {
     write("biome.json");
     install();
     const socket = await start();
+    let closed = false;
+    void socket.closed.then(() => {
+      closed = true;
+    });
     manager.notifyWatchedFilesChanged(wt, [path.join(wt, "src/a.js")]);
     await settle(socket);
-    expect(running(socket).capabilities.args).toEqual(["lsp-proxy"]);
+    expect(closed).toBe(false);
+  });
+
+  test("a held connection stays for what cannot change its answer", async () => {
+    const socket = await start();
+    let closed = false;
+    void socket.closed.then(() => {
+      closed = true;
+    });
+    manager.notifyWatchedFilesChanged(wt, [path.join(wt, ".gitignore")]);
+    await settle(socket);
+    expect(closed).toBe(false);
   });
 
   test("a held connection restarts when a config appears", async () => {
