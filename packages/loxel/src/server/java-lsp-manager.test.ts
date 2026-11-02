@@ -28,11 +28,7 @@ import {
   noJdkReason,
   trustedJavaSettings,
 } from "./java-lsp-manager";
-import {
-  getJavaProjectIssue,
-  type ImportPlan,
-  setJavaProjectIssue,
-} from "./java-project-import";
+import { getJavaProjectIssue, type ImportPlan, setJavaProjectIssue } from "./java-project-import";
 import { fileUri } from "./lsp-file-uri";
 import type { WtLspSession } from "./stdio-lsp-manager";
 
@@ -417,9 +413,9 @@ describe("JavaLspManager, trusted", () => {
     manager.initialize(session);
     manager.notifyWatchedFilesChanged(wtPath, [path.join(root, "pom.xml")]);
     await manager.settled(session);
-    expect(written.map((frame) => (frame.includes("java.project.import") ? "import" : "settings"))).toEqual(
-      ["settings", "import"],
-    );
+    expect(
+      written.map((frame) => (frame.includes("java.project.import") ? "import" : "settings")),
+    ).toEqual(["settings", "import"]);
     setJavaProjectIssue(wtPath, null);
   });
 

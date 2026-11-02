@@ -295,9 +295,7 @@ export function canRunJdtls(
 }
 
 /** What to tell the user when no JDK can run the server for a worktree. */
-export function noJdkReason(
-  runtimes: readonly Pick<JavaRuntime, "majorVersion">[],
-): string {
+export function noJdkReason(runtimes: readonly Pick<JavaRuntime, "majorVersion">[]): string {
   return runtimes.some((runtime) => runtime.majorVersion >= JDTLS_MIN_JAVA)
     ? JDK_IN_REPO_REASON
     : NO_JDK_REASON;
