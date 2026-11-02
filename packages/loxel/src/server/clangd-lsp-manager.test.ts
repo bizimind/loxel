@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 import { $ } from "bun";
 
 import { LSP_RESTART_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
+import "@/test/temp-state-dir";
 
 import {
   CACHED_FILE_DELAY_MS,

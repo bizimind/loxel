@@ -1,15 +1,18 @@
 import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { RustToolchain, RustToolchainSource } from "@/api/rust-toolchain-model";
 import { isRecord } from "@/lib/is-record";
 
 import { pathOutsideWorktree } from "./python-env";
+import { isReadableRustManifest, RUST_MANIFEST } from "./rust-project-lookup";
 import { rustToolEnv } from "./rust-toolchain";
 import { buildSpawnEnv } from "./shell-env";
 
 const COMMAND_TIMEOUT_MS = 10_000;
-const MANIFEST = "Cargo.toml";
+/** A manifest's check reads one file, but on a loaded machine a refusal is worse than a wait. */
+const MANIFEST_CHECK_TIMEOUT_MS = 30_000;
 
 /**
  * The oldest rust-analyzer Loxel starts, by the date in its version. Older ones are not known to
@@ -19,6 +22,12 @@ export const MIN_RUST_ANALYZER_DATE = "2025-01-07";
 
 /** The inline project for a worktree without a manifest: nothing is looked for on disk instead. */
 const NO_PROJECT = { sysroot: null, crates: [] };
+
+/** The edition of a file outside any package: the newest the oldest supported server accepts. */
+const LOOSE_FILE_EDITION = "2024";
+
+/** What a server whose toolchain has them finds the standard library's sources under. */
+const SYSROOT_LIBRARY = "lib/rustlib/src/rust/library";
 
 /** Where a toolchain named by path is the user's own doing, and not a file in the repository. */
 const USER_SELECTED_SOURCES: ReadonlySet<RustToolchainSource> = new Set([
@@ -36,6 +45,7 @@ export type RustAnalyzerPlan =
   | {
       kind: "run";
       binary: string;
+      cargo: string;
       env: Record<string, string>;
       sysroot: string;
       /** The compiler's own target, the one analyzed. */
@@ -46,6 +56,8 @@ export type RustAnalyzerPlan =
       key: string;
     }
   | { kind: "refuse"; reason: string };
+
+type RunPlan = Extract<RustAnalyzerPlan, { kind: "run" }>;
 
 function refuse(reason: string): RustAnalyzerPlan {
   return { kind: "refuse", reason };
@@ -177,6 +189,7 @@ export async function planRustAnalyzer(
   return {
     kind: "run",
     binary: rustAnalyzer,
+    cargo,
     env: rustAnalyzerEnv(toolchain, cargo, spawnEnv.PATH ?? "", wtPath),
     sysroot: toolchain.sysroot,
     host,
@@ -195,23 +208,15 @@ export async function planRustAnalyzer(
   };
 }
 
-function isFile(file: string): boolean {
-  try {
-    return statSync(file).isFile();
-  } catch {
-    return false;
-  }
-}
-
-/** The manifests rust-analyzer loads: the worktree's own, or else those one directory down. */
+/** What rust-analyzer loads from the start: the worktree's manifest, or else those one level down. */
 export function findRustManifests(wtPath: string): string[] {
-  const own = path.join(wtPath, MANIFEST);
-  if (isFile(own)) return [own];
+  const own = path.join(wtPath, RUST_MANIFEST);
+  if (isReadableRustManifest(own, wtPath)) return [own];
   try {
     return readdirSync(wtPath, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(wtPath, entry.name, MANIFEST))
-      .filter(isFile)
+      .map((entry) => path.join(wtPath, entry.name, RUST_MANIFEST))
+      .filter((manifest) => isReadableRustManifest(manifest, wtPath))
       .toSorted();
   } catch {
     return [];
@@ -221,7 +226,51 @@ export function findRustManifests(wtPath: string): string[] {
 /** Whether a changed file can change {@link findRustManifests}'s answer. */
 export function isRustManifestPath(wtPath: string, changed: string): boolean {
   const parts = path.relative(wtPath, changed).split(path.sep);
-  return parts.length <= 2 && parts.at(-1) === MANIFEST;
+  return parts.length <= 2 && parts.at(-1) === RUST_MANIFEST;
+}
+
+/**
+ * Why rust-analyzer could not load this manifest, or null when it can. A server that fails on one
+ * linked project stops taking in new ones, and its status does not say which one failed, so a
+ * project is checked before it is added, with the command the server itself runs for a project, in
+ * the server's environment, from the manifest's folder as the server does.
+ */
+export async function rustManifestProblem(
+  { cargo, env }: Pick<RunPlan, "cargo" | "env">,
+  manifest: string,
+): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(
+      [
+        cargo,
+        "metadata",
+        "--no-deps",
+        "--offline",
+        "--format-version",
+        "1",
+        "--color",
+        "never",
+        "--manifest-path",
+        manifest,
+      ],
+      {
+        cwd: path.dirname(manifest),
+        env: { ...buildSpawnEnv(), ...env },
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "pipe",
+        timeout: MANIFEST_CHECK_TIMEOUT_MS,
+      },
+    );
+    const [stderr, exitCode] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    if (exitCode === 0) return null;
+    if (proc.signalCode !== null) return "cargo did not finish in time.";
+    return (
+      stderr.split("\n").find((line) => line.startsWith("error:")) ?? "cargo could not read it."
+    );
+  } catch {
+    return "cargo could not be started.";
+  }
 }
 
 /**
@@ -230,13 +279,23 @@ export function isRustManifestPath(wtPath: string, changed: string): boolean {
  * a project file can name a toolchain, and opening a file would start a search from that file.
  */
 export function rustAnalyzerSettings(
-  {
-    sysroot,
-    host,
-    rustSrc,
-  }: Pick<Extract<RustAnalyzerPlan, { kind: "run" }>, "sysroot" | "host" | "rustSrc">,
+  { sysroot, host, rustSrc }: Pick<RunPlan, "sysroot" | "host" | "rustSrc">,
   manifests: readonly string[],
+  looseFiles: readonly string[] = [],
 ): Record<string, unknown> {
+  const linkedProjects: unknown[] = [...manifests];
+  if (looseFiles.length > 0) {
+    // One project for all of them, listed here rather than through a `rust-project.json`.
+    linkedProjects.push({
+      sysroot: rustSrc ? sysroot : null,
+      ...(rustSrc && { sysroot_src: path.join(sysroot, SYSROOT_LIBRARY) }),
+      crates: looseFiles.map((file) => ({
+        root_module: file,
+        edition: LOOSE_FILE_EDITION,
+        deps: [],
+      })),
+    });
+  }
   return {
     checkOnSave: false,
     cargo: {
@@ -248,7 +307,7 @@ export function rustAnalyzerSettings(
       target: host,
     },
     procMacro: { enable: false },
-    linkedProjects: manifests.length > 0 ? manifests : [NO_PROJECT],
+    linkedProjects: linkedProjects.length > 0 ? linkedProjects : [NO_PROJECT],
   };
 }
 
@@ -315,16 +374,57 @@ export function blockedClientMethod(data: string): { id?: unknown; method: strin
   }
 }
 
+/** A client frame about a document's life, with the document's path. */
+export function readDocumentLifecycle(data: string): { opened: boolean; file: string } | null {
+  if (!data.includes('"textDocument/didOpen"') && !data.includes('"textDocument/didClose"')) {
+    return null;
+  }
+  try {
+    const frame: unknown = JSON.parse(data);
+    if (!isRecord(frame) || !isRecord(frame.params) || !isRecord(frame.params.textDocument)) {
+      return null;
+    }
+    const { uri } = frame.params.textDocument;
+    if (typeof uri !== "string" || !uri.startsWith("file:") || !uri.endsWith(".rs")) return null;
+    if (frame.method === "textDocument/didOpen") return { opened: true, file: fileURLToPath(uri) };
+    if (frame.method === "textDocument/didClose") {
+      return { opened: false, file: fileURLToPath(uri) };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export interface RustServerStatus {
-  /** What to tell the user, by kind so each is told once; null when there is nothing to tell. */
-  notice: { kind: "dependencies" | "project"; message: string } | null;
+  /** What to tell the user, by kind so each is told once. */
+  notices: { kind: string; message: string }[];
+}
+
+/** The project a status names as missing dependencies, by its manifest in backquotes. */
+const MISSING_DEPENDENCIES_OF = new RegExp(`${MISSING_DEPENDENCIES} for \`([^\`]+)\``, "g");
+
+/** The notice for a project whose dependencies could not be read; no directory for the root's. */
+function missingDependenciesNotice(wtPath: string, manifest?: string) {
+  const directory = manifest ? path.relative(wtPath, path.dirname(manifest)) : "";
+  if (directory === "" || directory.startsWith("..") || path.isAbsolute(directory)) {
+    return {
+      kind: "dependencies",
+      message:
+        "Some dependencies are not available locally, so their items are unknown. Loxel does not download them: run `cargo fetch` in a terminal, then Restart Language Servers.",
+    };
+  }
+  return {
+    kind: `dependencies:${directory}`,
+    message: `Some dependencies of ${directory} are not available locally, so their items are unknown. Loxel does not download them: run \`cargo fetch\` in that folder in a terminal, then Restart Language Servers.`,
+  };
 }
 
 /**
  * Read a server frame as the project status, or null for any other frame. rust-analyzer's own words
  * name internal commands and suggest running without `--offline`; this says what the user can do.
  */
-export function readServerStatus(body: string): RustServerStatus | null {
+export function readServerStatus(body: string, wtPath: string): RustServerStatus | null {
   if (!body.includes(SERVER_STATUS)) return null;
   try {
     const frame: unknown = JSON.parse(body);
@@ -332,21 +432,23 @@ export function readServerStatus(body: string): RustServerStatus | null {
     const { health, message } = frame.params;
     const text = typeof message === "string" ? message : "";
     if (text.includes(MISSING_DEPENDENCIES)) {
+      const manifests = [...text.matchAll(MISSING_DEPENDENCIES_OF)].map((match) => match[1]);
       return {
-        notice: {
-          kind: "dependencies",
-          message:
-            "Some dependencies are not available locally, so their items are unknown. Loxel does not download them: run `cargo fetch` in a terminal, then Restart Language Servers.",
-        },
+        notices:
+          manifests.length > 0
+            ? manifests.map((manifest) => missingDependenciesNotice(wtPath, manifest))
+            : [missingDependenciesNotice(wtPath)],
       };
     }
-    if (health !== "error") return { notice: null };
+    if (health !== "error") return { notices: [] };
     const firstError = text.split("\n").find((line) => line.startsWith("error:"));
     return {
-      notice: {
-        kind: "project",
-        message: `Could not load this Rust project. ${firstError ?? "Check that Cargo.toml is valid."}`,
-      },
+      notices: [
+        {
+          kind: "project",
+          message: `Could not load this Rust project. ${firstError ?? "Check that Cargo.toml is valid."}`,
+        },
+      ],
     };
   } catch {
     return null;

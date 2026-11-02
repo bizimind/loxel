@@ -22,13 +22,15 @@ const {
   isRustManifestPath,
   MIN_RUST_ANALYZER_DATE,
   planRustAnalyzer,
+  readDocumentLifecycle,
   readServerStatus,
   rustAnalyzerDate,
   rustAnalyzerEnv,
   rustAnalyzerSettings,
+  rustManifestProblem,
   withRustClientCapabilities,
 } = await import("./rust-analyzer-run");
-const { RustLspManager } = await import("./rust-lsp-manager");
+const { MAX_OPENED_RUST_PROJECTS, RustLspManager } = await import("./rust-lsp-manager");
 const { refreshRustToolchain } = await import("./rust-toolchain");
 
 const roots: string[] = [];
@@ -79,6 +81,15 @@ process.stdin.on("data", (chunk) => {
     if (buffer.length < end + 4 + length) return;
     const msg = JSON.parse(buffer.slice(end + 4, end + 4 + length));
     buffer = buffer.slice(end + 4 + length);
+    if (msg.method === "workspace/didChangeConfiguration") {
+      const items = [{ section: "rust-analyzer" }];
+      send({ jsonrpc: "2.0", id: "pull", method: "workspace/configuration", params: { items } });
+      continue;
+    }
+    if (msg.id === "pull") {
+      send({ jsonrpc: "2.0", method: "test/pulled", params: { settings: msg.result[0] } });
+      continue;
+    }
     if (msg.method !== "initialize") continue;
     send({
       jsonrpc: "2.0",
@@ -139,7 +150,7 @@ async function installFakeRust(
 interface TestFrame {
   id?: number;
   method?: string;
-  params: { message: string };
+  params: { message: string; settings: Record<string, unknown> & { linkedProjects: unknown[] } };
   error?: { code: number };
   result: {
     args: string[];
@@ -184,6 +195,9 @@ function fakeSocket() {
     closedWith: () => close,
     untilClosed: () => until(() => close),
     untilFrame: (match: (frame: TestFrame) => boolean) => until(() => frames.find(match)),
+    /** The server's pulled settings, once `count` pulls have come back. */
+    untilPull: (count: number) =>
+      until(() => frames.filter((frame) => frame.method === "test/pulled")[count - 1]?.params),
   };
 }
 
@@ -360,6 +374,36 @@ describe("rustAnalyzerSettings", () => {
     );
     expect(linkedProjects).toEqual([{ sysroot: null, crates: [] }]);
   });
+
+  test("gives files outside any package one inline project next to the manifests", () => {
+    const { linkedProjects } = rustAnalyzerSettings(
+      { sysroot: "/sys", host: "h", rustSrc: true },
+      ["/wt/Cargo.toml"],
+      ["/wt/a.rs", "/wt/b.rs"],
+    );
+    expect(linkedProjects).toEqual([
+      "/wt/Cargo.toml",
+      {
+        sysroot: "/sys",
+        sysroot_src: "/sys/lib/rustlib/src/rust/library",
+        crates: [
+          { root_module: "/wt/a.rs", edition: "2024", deps: [] },
+          { root_module: "/wt/b.rs", edition: "2024", deps: [] },
+        ],
+      },
+    ]);
+  });
+
+  test("names no sysroot for those files when the toolchain has no sources", () => {
+    const { linkedProjects } = rustAnalyzerSettings(
+      { sysroot: "/sys", host: "h", rustSrc: false },
+      [],
+      ["/wt/a.rs"],
+    );
+    expect(linkedProjects).toEqual([
+      { sysroot: null, crates: [{ root_module: "/wt/a.rs", edition: "2024", deps: [] }] },
+    ]);
+  });
 });
 
 describe("findRustManifests", () => {
@@ -474,15 +518,36 @@ describe("blockedClientMethod", () => {
 
 describe("readServerStatus", () => {
   const status = (params: Record<string, unknown>) =>
-    readServerStatus(frameOf({ method: "experimental/serverStatus", params }));
+    readServerStatus(frameOf({ method: "experimental/serverStatus", params }), "/wt");
 
   test("says what to run for dependencies that could not be read", () => {
     const read = status({
       health: "warning",
       message: "Failed to read Cargo metadata with dependencies for `Cargo.toml`: offline",
     });
-    expect(read?.notice?.kind).toBe("dependencies");
-    expect(read?.notice?.message).toContain("cargo fetch");
+    expect(read?.notices).toHaveLength(1);
+    expect(read?.notices[0]?.kind).toBe("dependencies");
+    expect(read?.notices[0]?.message).toContain("cargo fetch");
+  });
+
+  test("names the folder of each project with missing dependencies", () => {
+    const line = (manifest: string) =>
+      `Failed to read Cargo metadata with dependencies for \`${manifest}\`: offline`;
+    const read = status({
+      health: "warning",
+      message: [
+        line("/wt/Cargo.toml"),
+        line("/wt/services/alpha/Cargo.toml"),
+        line("/elsewhere/Cargo.toml"),
+      ].join("\n\n"),
+    });
+    expect(read?.notices.map((notice) => notice.kind)).toEqual([
+      "dependencies",
+      "dependencies:services/alpha",
+      "dependencies",
+    ]);
+    expect(read?.notices[0]?.message).not.toContain("folder");
+    expect(read?.notices[1]?.message).toContain("Some dependencies of services/alpha");
   });
 
   test("reports a project that does not load by its first error", () => {
@@ -490,14 +555,71 @@ describe("readServerStatus", () => {
       health: "error",
       message: "cargo metadata failed\nerror: failed to parse manifest\nmore",
     });
-    expect(read?.notice?.kind).toBe("project");
-    expect(read?.notice?.message).toContain("error: failed to parse manifest");
+    expect(read?.notices[0]?.kind).toBe("project");
+    expect(read?.notices[0]?.message).toContain("error: failed to parse manifest");
   });
 
   test("tells nothing for other statuses, and leaves other frames alone", () => {
-    expect(status({ health: "ok" })).toEqual({ notice: null });
-    expect(status({ health: "warning", message: "something else" })).toEqual({ notice: null });
-    expect(readServerStatus(frameOf({ id: 1, result: null }))).toBeNull();
+    expect(status({ health: "ok" })).toEqual({ notices: [] });
+    expect(status({ health: "warning", message: "something else" })).toEqual({ notices: [] });
+    expect(readServerStatus(frameOf({ id: 1, result: null }), "/wt")).toBeNull();
+  });
+});
+
+describe("rustManifestProblem", () => {
+  test("asks offline for the package alone, in the given environment, from its folder", async () => {
+    const dir = await makeDir("rust-cargo-");
+    const cargo = join(dir, "cargo");
+    const seen = join(dir, "seen");
+    await writeExecutable(
+      cargo,
+      `#!/bin/sh\necho "$PWD|$*|$RUSTC_WRAPPER|$CARGO_NET_OFFLINE" > "${seen}"\n`,
+    );
+    const crate = join(dir, "crate");
+    await mkdir(crate);
+    const env = { RUSTC_WRAPPER: "", CARGO_NET_OFFLINE: "true" };
+    expect(await rustManifestProblem({ cargo, env }, join(crate, "Cargo.toml"))).toBeNull();
+    expect((await Bun.file(seen).text()).trim()).toBe(
+      `${crate}|metadata --no-deps --offline --format-version 1 --color never --manifest-path ${join(crate, "Cargo.toml")}||true`,
+    );
+  });
+
+  test("gives cargo's first error, and says when cargo cannot start", async () => {
+    const dir = await makeDir("rust-cargo-");
+    const cargo = join(dir, "cargo");
+    await writeExecutable(
+      cargo,
+      `#!/bin/sh\necho "warning: a" >&2\necho "error: b" >&2\nexit 101\n`,
+    );
+    expect(await rustManifestProblem({ cargo, env: {} }, join(dir, "Cargo.toml"))).toBe("error: b");
+    expect(
+      await rustManifestProblem({ cargo: join(dir, "gone"), env: {} }, join(dir, "Cargo.toml")),
+    ).toBe("cargo could not be started.");
+  });
+});
+
+describe("readDocumentLifecycle", () => {
+  const frame = (method: string, uri: string) =>
+    frameOf({ method, params: { textDocument: { uri } } });
+
+  test("reads a Rust file opening and closing", () => {
+    expect(readDocumentLifecycle(frame("textDocument/didOpen", "file:///wt/a%20b.rs"))).toEqual({
+      opened: true,
+      file: "/wt/a b.rs",
+    });
+    expect(readDocumentLifecycle(frame("textDocument/didClose", "file:///wt/a.rs"))).toEqual({
+      opened: false,
+      file: "/wt/a.rs",
+    });
+  });
+
+  test("ignores everything else", () => {
+    expect(
+      readDocumentLifecycle(frame("textDocument/didOpen", "file:///wt/Cargo.toml")),
+    ).toBeNull();
+    expect(readDocumentLifecycle(frame("textDocument/didOpen", "untitled:/a.rs"))).toBeNull();
+    expect(readDocumentLifecycle(frame("textDocument/hover", "file:///wt/a.rs"))).toBeNull();
+    expect(readDocumentLifecycle("not json")).toBeNull();
   });
 });
 
@@ -509,6 +631,397 @@ describe("RustLspManager", () => {
     manager.handleMessage(socket.ws, INITIALIZE);
     return socket;
   }
+
+  const open = (socket: ReturnType<typeof fakeSocket>, file: string) =>
+    manager?.handleMessage(
+      socket.ws,
+      frameOf({
+        method: "textDocument/didOpen",
+        params: {
+          textDocument: { uri: `file://${file}`, languageId: "rust", version: 1, text: "" },
+        },
+      }),
+    );
+
+  /** A crate of its own at `dir` under the worktree, with one source file, whose path is returned. */
+  async function makeCrate(wt: string, dir: string, manifest = "[package]\nname = 'x'\n") {
+    await mkdir(join(wt, dir, "src"), { recursive: true });
+    await writeFile(join(wt, dir, "Cargo.toml"), manifest);
+    const file = join(wt, dir, "src", "lib.rs");
+    await writeFile(file, "");
+    return file;
+  }
+
+  describe("projects of opened files", () => {
+    async function started(wt: string) {
+      const socket = await start(wt);
+      await socket.untilFrame((message) => message.id === 1);
+      manager?.handleMessage(socket.ws, INITIALIZED);
+      return socket;
+    }
+
+    test("adds a nested crate through the server's pull, with the restricted settings", async () => {
+      const { root } = await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const socket = await started(wt);
+      open(socket, await makeCrate(wt, "services/alpha/rust"));
+
+      const { settings } = await socket.untilPull(1);
+      expect(settings).toEqual({
+        checkOnSave: false,
+        cargo: { buildScripts: { enable: false }, sysroot: root, target: "fake-host-triple" },
+        procMacro: { enable: false },
+        linkedProjects: [join(wt, "services/alpha/rust/Cargo.toml")],
+      });
+      expect(socket.closedWith()).toBeUndefined();
+    });
+
+    test("adds to what the start found, and asks once for a known project", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await writeFile(join(wt, "Cargo.toml"), "[workspace]\nmembers = ['crates/*']\n");
+      const member = await makeCrate(wt, "crates/one");
+      const fuzz = await makeCrate(wt, "fuzz");
+      const socket = await started(wt);
+      open(socket, member);
+      open(socket, fuzz);
+      open(socket, fuzz);
+      const { settings } = await socket.untilPull(1);
+      expect(settings.linkedProjects).toEqual([
+        join(wt, "Cargo.toml"),
+        join(wt, "fuzz/Cargo.toml"),
+      ]);
+
+      // The sentinel is the second pull, so a stray one for the member or the repeat would show.
+      open(socket, await makeCrate(wt, "other"));
+      expect((await socket.untilPull(2)).settings.linkedProjects).toEqual([
+        join(wt, "Cargo.toml"),
+        join(wt, "fuzz/Cargo.toml"),
+        join(wt, "other/Cargo.toml"),
+      ]);
+    });
+
+    test("adds nothing for a file outside the worktree", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const outside = await makeDir("rust-outside-");
+      const socket = await started(wt);
+      open(socket, await makeCrate(outside, "std"));
+      open(socket, await makeCrate(wt, "mine"));
+      expect((await socket.untilPull(1)).settings.linkedProjects).toEqual([
+        join(wt, "mine/Cargo.toml"),
+      ]);
+    });
+
+    test("gives a file outside any package the inline project", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const loose = join(wt, "scratch.rs");
+      await writeFile(loose, "");
+      const socket = await started(wt);
+      open(socket, loose);
+      const [project] = (await socket.untilPull(1)).settings.linkedProjects;
+      expect(project).toMatchObject({ crates: [{ root_module: loose, edition: "2024" }] });
+    });
+
+    test("leaves out a project cargo cannot read, says why, and tries again after a change", async () => {
+      const { bin } = await installFakeRust();
+      await writeExecutable(
+        join(bin, "cargo"),
+        `#!/bin/sh
+read -r first < "$PWD/Cargo.toml"
+if [ "$first" = "[package" ]; then
+  echo "warning: x" >&2
+  echo "error: failed to parse manifest" >&2
+  exit 101
+fi
+`,
+      );
+      const wt = await makeDir("rust-wt-");
+      const file = await makeCrate(wt, "deep/broken", "[package\n");
+      const socket = await started(wt);
+      open(socket, file);
+      const { params } = await socket.untilFrame(
+        (message) =>
+          message.method === "window/showMessage" && message.params.message.includes("broken"),
+      );
+      expect(params.message).toBe(
+        "Could not load the Rust project in deep/broken. error: failed to parse manifest",
+      );
+
+      open(socket, await makeCrate(wt, "deep/fine"));
+      expect((await socket.untilPull(1)).settings.linkedProjects).toEqual([
+        join(wt, "deep/fine/Cargo.toml"),
+      ]);
+
+      await writeFile(join(wt, "deep/broken/Cargo.toml"), "[package]\nname = 'broken'\n");
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "deep/broken/Cargo.toml")]);
+      expect((await socket.untilPull(2)).settings.linkedProjects).toEqual([
+        join(wt, "deep/fine/Cargo.toml"),
+        join(wt, "deep/broken/Cargo.toml"),
+      ]);
+    });
+
+    /** Fails while a manifest's first line is `[package`, as for broken TOML. */
+    const CARGO_FAILS_ON_BROKEN = `#!/bin/sh
+read -r first < "$PWD/Cargo.toml"
+if [ "$first" = "[package" ]; then
+  echo "error: failed to parse manifest" >&2
+  exit 101
+fi
+`;
+
+    test("keeps a broken manifest from the start out, so others can load", async () => {
+      const { bin } = await installFakeRust();
+      await writeExecutable(join(bin, "cargo"), CARGO_FAILS_ON_BROKEN);
+      const wt = await makeDir("rust-wt-");
+      await makeCrate(wt, "bad", "[package\n");
+      const socket = await started(wt);
+      open(socket, await makeCrate(wt, "deep/fine"));
+      expect((await socket.untilPull(1)).settings.linkedProjects).toEqual([
+        join(wt, "deep/fine/Cargo.toml"),
+      ]);
+      await socket.untilFrame(
+        (message) =>
+          message.method === "window/showMessage" &&
+          message.params.message.startsWith("Could not load the Rust project in bad."),
+      );
+
+      await writeFile(join(wt, "bad/Cargo.toml"), "[package]\nname = 'bad'\n");
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "bad/Cargo.toml")]);
+      expect((await socket.untilPull(2)).settings.linkedProjects).toEqual([
+        join(wt, "bad/Cargo.toml"),
+        join(wt, "deep/fine/Cargo.toml"),
+      ]);
+    });
+
+    test("forgets a refused manifest once it is gone", async () => {
+      const { bin } = await installFakeRust();
+      await writeExecutable(join(bin, "cargo"), CARGO_FAILS_ON_BROKEN);
+      const wt = await makeDir("rust-wt-");
+      const file = await makeCrate(wt, "deep/broken", "[package\n");
+      const socket = await started(wt);
+      open(socket, file);
+      const isNotice = (message: { method?: string; params: { message: string } }) =>
+        message.method === "window/showMessage" && message.params.message.includes("deep/broken");
+      await socket.untilFrame(isNotice);
+
+      await rm(join(wt, "deep/broken"), { recursive: true });
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "deep/broken/Cargo.toml")]);
+      // Adding this project is the sentinel: the change before it has been dealt with by then.
+      open(socket, await makeCrate(wt, "deep/other"));
+      await socket.untilPull(1);
+      await writeFile(join(wt, "deep/other/Cargo.toml"), "[package]\nname = 'other'\n");
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "deep/other/Cargo.toml")]);
+      open(socket, await makeCrate(wt, "deep/third"));
+      await socket.untilPull(2);
+      expect(socket.frames.filter(isNotice)).toHaveLength(1);
+    });
+
+    test("says which loaded manifest broke, and keeps it linked", async () => {
+      const { bin } = await installFakeRust();
+      await writeExecutable(join(bin, "cargo"), CARGO_FAILS_ON_BROKEN);
+      const wt = await makeDir("rust-wt-");
+      const socket = await started(wt);
+      open(socket, await makeCrate(wt, "deep/one"));
+      await socket.untilPull(1);
+
+      await writeFile(join(wt, "deep/one/Cargo.toml"), "[package\n");
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "deep/one/Cargo.toml")]);
+      await socket.untilFrame(
+        (message) =>
+          message.method === "window/showMessage" &&
+          message.params.message.startsWith("Could not load the Rust project in deep/one."),
+      );
+      open(socket, await makeCrate(wt, "deep/two"));
+      expect((await socket.untilPull(2)).settings.linkedProjects).toEqual([
+        join(wt, "deep/one/Cargo.toml"),
+        join(wt, "deep/two/Cargo.toml"),
+      ]);
+    });
+
+    test("takes a fix made while the check of the broken text is running", async () => {
+      const { bin } = await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const release = join(wt, "release");
+      const running = join(wt, "running");
+      // The first check reports the text it read before the fix; later ones read the file anew.
+      await writeExecutable(
+        join(bin, "cargo"),
+        `#!/bin/sh
+case "$PWD" in *broken*) ;; *) exit 0 ;; esac
+if [ ! -e "${release}" ]; then
+  : > "${running}"
+  until [ -e "${release}" ]; do :; done
+  echo "error: failed to parse manifest" >&2
+  exit 101
+fi
+`,
+      );
+      const file = await makeCrate(wt, "deep/broken", "[package\n");
+      const socket = await started(wt);
+      open(socket, file);
+      while (!(await Bun.file(running).exists())) await Bun.sleep(1);
+
+      await writeFile(join(wt, "deep/broken/Cargo.toml"), "[package]\nname = 'x'\n");
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "deep/broken/Cargo.toml")]);
+      await writeFile(release, "");
+      expect((await socket.untilPull(1)).settings.linkedProjects).toEqual([
+        join(wt, "deep/broken/Cargo.toml"),
+      ]);
+    });
+
+    test("notices a manifest in an ignored folder, and not one in a build", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await mkdir(join(wt, "a/b/src"), { recursive: true });
+      const file = join(wt, "a/b/src/lib.rs");
+      await writeFile(file, "");
+      const socket = await started(wt);
+      open(socket, file);
+      await socket.untilPull(1);
+
+      manager?.notifyIgnoredPathChanged(wt, "target/package/x/Cargo.toml");
+      await writeFile(join(wt, "a/b/Cargo.toml"), "[package]\nname = 'b'\n");
+      manager?.notifyIgnoredPathChanged(wt, "a/b/Cargo.toml");
+      expect((await socket.untilPull(2)).settings.linkedProjects).toEqual([
+        join(wt, "a/b/Cargo.toml"),
+      ]);
+    });
+
+    test("brings back a loose file deleted and written again while open", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const file = join(wt, "scratch.rs");
+      await writeFile(file, "");
+      const socket = await started(wt);
+      open(socket, file);
+      await socket.untilPull(1);
+
+      await rm(file);
+      manager?.notifyWatchedFilesChanged(wt, [file]);
+      expect((await socket.untilPull(2)).settings.linkedProjects).toEqual([
+        { sysroot: null, crates: [] },
+      ]);
+      await writeFile(file, "");
+      manager?.notifyWatchedFilesChanged(wt, [file]);
+      const [project] = (await socket.untilPull(3)).settings.linkedProjects;
+      expect(project).toMatchObject({ crates: [{ root_module: file }] });
+    });
+
+    test("counts loose files as one project, and drops closed ones", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const socket = await started(wt);
+      const files = [join(wt, "one.rs"), join(wt, "two.rs")];
+      await Promise.all(files.map((file) => writeFile(file, "")));
+      open(socket, files[0] ?? "");
+      await socket.untilPull(1);
+      manager?.handleMessage(
+        socket.ws,
+        frameOf({
+          method: "textDocument/didClose",
+          params: { textDocument: { uri: `file://${files[0]}` } },
+        }),
+      );
+      open(socket, files[1] ?? "");
+      const [project] = (await socket.untilPull(2)).settings.linkedProjects;
+      expect(project).toMatchObject({ crates: [{ root_module: files[1] }] });
+      for (let i = 0; i < MAX_OPENED_RUST_PROJECTS - 1; i++) {
+        open(socket, await makeCrate(wt, `deep/crate${i}`));
+      }
+      const full = MAX_OPENED_RUST_PROJECTS;
+      await socket.untilFrame(
+        (message) =>
+          message.method === "test/pulled" &&
+          message.params.settings.linkedProjects.length === full,
+      );
+      expect(socket.frames.some((frame) => frame.params?.message?.includes("at most"))).toBe(false);
+    });
+
+    test("drops a deleted manifest without a restart, and the file falls to what remains", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const file = await makeCrate(wt, "a/b/c");
+      const socket = await started(wt);
+      open(socket, file);
+      expect((await socket.untilPull(1)).settings.linkedProjects).toEqual([
+        join(wt, "a/b/c/Cargo.toml"),
+      ]);
+
+      await rm(join(wt, "a/b/c/Cargo.toml"));
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "a/b/c/Cargo.toml")]);
+      const [project] = (await socket.untilPull(2)).settings.linkedProjects;
+      expect(project).toMatchObject({ crates: [{ root_module: file }] });
+      expect(socket.closedWith()).toBeUndefined();
+    });
+
+    test("moves a loose file to the project that appears around it", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      await mkdir(join(wt, "a/b/src"), { recursive: true });
+      const file = join(wt, "a/b/src/lib.rs");
+      await writeFile(file, "");
+      const socket = await started(wt);
+      open(socket, file);
+      await socket.untilPull(1);
+
+      await writeFile(join(wt, "a/b/Cargo.toml"), "[package]\nname = 'b'\n");
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "a/b/Cargo.toml")]);
+      expect((await socket.untilPull(2)).settings.linkedProjects).toEqual([
+        join(wt, "a/b/Cargo.toml"),
+      ]);
+    });
+
+    test("says so at the limit, and keeps what is loaded", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const socket = await started(wt);
+      for (let i = 0; i <= MAX_OPENED_RUST_PROJECTS; i++) {
+        open(socket, await makeCrate(wt, `deep/crate${i}`));
+      }
+      const { params } = await socket.untilFrame(
+        (message) =>
+          message.method === "window/showMessage" && message.params.message.includes("at most"),
+      );
+      expect(params.message).toContain(`at most ${MAX_OPENED_RUST_PROJECTS}`);
+      expect(params.message).toContain(`deep/crate${MAX_OPENED_RUST_PROJECTS}/src/lib.rs`);
+      await socket.untilFrame(
+        (message) =>
+          message.method === "test/pulled" &&
+          message.params.settings.linkedProjects.length === MAX_OPENED_RUST_PROJECTS,
+      );
+      const pulled = socket.frames.filter((frame) => frame.method === "test/pulled");
+      for (const { params: pull } of pulled) {
+        expect(pull.settings.linkedProjects.length).toBeLessThanOrEqual(MAX_OPENED_RUST_PROJECTS);
+      }
+    });
+
+    test("starts over after a restart, from what the client opens again", async () => {
+      await installFakeRust();
+      const wt = await makeDir("rust-wt-");
+      const file = await makeCrate(wt, "a/b");
+      const first = await started(wt);
+      open(first, file);
+      await first.untilPull(1);
+
+      await writeFile(join(wt, "Cargo.toml"), "");
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "Cargo.toml")]);
+      expect(first.closedWith()?.code).toBe(LSP_RESTART_CLOSE_CODE);
+      const second = fakeSocket();
+      manager?.createSession(second.ws, wt);
+      manager?.handleMessage(second.ws, INITIALIZE);
+      const { result } = await second.untilFrame((message) => message.id === 1);
+      expect(result.settings).toMatchObject({ linkedProjects: [join(wt, "Cargo.toml")] });
+      manager?.handleMessage(second.ws, INITIALIZED);
+      open(second, file);
+      expect((await second.untilPull(1)).settings.linkedProjects).toEqual([
+        join(wt, "Cargo.toml"),
+        join(wt, "a/b/Cargo.toml"),
+      ]);
+      expect(second.closedWith()).toBeUndefined();
+    });
+  });
 
   test("runs the toolchain's rust-analyzer restricted, with no formatting", async () => {
     const { bin, root } = await installFakeRust();
