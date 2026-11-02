@@ -559,10 +559,10 @@ describe("the nearest declaration decides", () => {
     const pom = join(wt ?? "", "pom.xml");
     await writeFile(
       pom,
-      spotlessPom("<googleJavaFormat><version>1.23.0</version></googleJavaFormat>"),
+      spotlessPom("<googleJavaFormat><version>1.23.0.1</version></googleJavaFormat>"),
     );
     expect(findJavaFormatDeclaration(join(wt ?? "", "src"), wt ?? "")).toMatchObject({
-      pin: "1.23.0",
+      pin: "1.23.0.1",
     });
   });
 });
