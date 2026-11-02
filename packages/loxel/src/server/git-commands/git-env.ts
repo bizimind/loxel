@@ -1,3 +1,5 @@
+import { isRepoTrusted } from "../repo-trust";
+
 /**
  * Environment and shared arguments for git invocations.
  *
@@ -5,12 +7,12 @@
  * of truth for how Loxel shells out to git, independent of argument validation.
  */
 
-// Loxel deliberately does NOT pass `-c core.fsmonitor=true`. Forcing it bought nothing: read-only
-// commands run with GIT_OPTIONAL_LOCKS=0 (below), so git can never persist the fsmonitor token
-// in the index and every query gets a "trivial" response followed by a full lstat scan. It cost an
-// IPC round trip per command and left a persistent `fsmonitor--daemon` behind for every worktree
-// and — because `-c` travels to child git processes — every submodule a status touched. Whether
-// fsmonitor runs is the user's git configuration to decide.
+// Loxel never passes `core.fsmonitor=true`: under GIT_OPTIONAL_LOCKS=0 it can't save its token, and
+// it would leave a daemon behind for every worktree and submodule. Whether fsmonitor runs on a read
+// is the user's Git configuration in a trusted repository; everywhere else it is off.
+
+/** The setting as an argument, for a caller that builds its own environment. */
+export const FSMONITOR_OFF = ["-c", "core.fsmonitor=false"];
 
 /**
  * Global options for every command that compares the working tree (status, working-tree diffs).
@@ -39,12 +41,25 @@ export const SUBMODULE_GITLINK_ONLY = ["-c", "diff.ignoreSubmodules=dirty"];
  * all. Git ignores it wherever the lock is mandatory, so it is a no-op for mutating commands —
  * but it is only set here, on the read-only modules, to keep that guarantee explicit.
  *
+ * `core.fsmonitor=false` is set here as well, so every read-only command has it in one place,
+ * unless `cwd` is in a trusted repository, whose fsmonitor stays the user's choice. Without a `cwd`
+ * it is always set. `GIT_CONFIG_PARAMETERS` is what `git -c` itself sets, with the same precedence,
+ * and every git reads this form, while `GIT_CONFIG_COUNT` needs git 2.31. An inherited value is kept.
+ *
  * Returned as a fresh object because a spawn's `env` REPLACES the child environment instead of
  * merging into it: without spreading `process.env` git would lose `PATH`/`HOME` and fail in ways
  * that no unit test observes.
  */
-export function readOnlyGitEnv(): Record<string, string> {
-  return { ...inheritedGitEnv(), GIT_OPTIONAL_LOCKS: "0" };
+export function readOnlyGitEnv(cwd?: string): Record<string, string> {
+  const env = inheritedGitEnv();
+  if (cwd !== undefined && isRepoTrusted(cwd)) return { ...env, GIT_OPTIONAL_LOCKS: "0" };
+  const inherited = env.GIT_CONFIG_PARAMETERS;
+  const fsmonitorOff = "'core.fsmonitor=false'";
+  return {
+    ...env,
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_CONFIG_PARAMETERS: inherited ? `${inherited} ${fsmonitorOff}` : fsmonitorOff,
+  };
 }
 
 /** The server's current environment, for commands with no special needs. */

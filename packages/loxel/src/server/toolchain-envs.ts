@@ -8,6 +8,7 @@
 import { goToolchainEnv } from "./go-toolchain-env";
 import { nodeToolchainEnv } from "./node-toolchain-env";
 import { pythonToolchainEnv } from "./python-toolchain-env";
+import { rustToolchainEnv } from "./rust-toolchain-env";
 import type { ToolchainEnvContributor } from "./toolchain-env-contributor";
 
 export const toolchainEnvs: readonly ToolchainEnvContributor[] = [
@@ -15,4 +16,5 @@ export const toolchainEnvs: readonly ToolchainEnvContributor[] = [
   goToolchainEnv,
   nodeToolchainEnv,
   pythonToolchainEnv,
+  rustToolchainEnv,
 ];

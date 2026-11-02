@@ -27,7 +27,7 @@ export async function resolveCommit(cwd: string, rev: string): Promise<string | 
   const spec = `${rev}^{commit}`;
   const result = await gitText(["rev-parse", "--verify", "--quiet", spec], {
     cwd,
-    env: readOnlyGitEnv(),
+    env: readOnlyGitEnv(cwd),
     nothrow: true,
   });
   return result.trim() || null;
@@ -40,7 +40,7 @@ export async function resolveMergeBase(
 ): Promise<string | null> {
   const result = await gitText(["merge-base", left, right], {
     cwd,
-    env: readOnlyGitEnv(),
+    env: readOnlyGitEnv(cwd),
     nothrow: true,
   });
   return result.trim() || null;
@@ -49,13 +49,16 @@ export async function resolveMergeBase(
 export async function getStagedDiff(cwd: string): Promise<DiffInfo> {
   const baseRef = await resolveCommit(cwd, "HEAD");
   const result = baseRef
-    ? await gitText(["diff", "--cached", baseRef], { cwd, env: readOnlyGitEnv() })
-    : await gitText(["diff", "--cached"], { cwd, env: readOnlyGitEnv() });
+    ? await gitText(["diff", "--cached", baseRef], { cwd, env: readOnlyGitEnv(cwd) })
+    : await gitText(["diff", "--cached"], { cwd, env: readOnlyGitEnv(cwd) });
   return { files: parseDiffOutput(result), baseRef };
 }
 
 export async function getUnstagedDiff(cwd: string): Promise<DiffInfo> {
-  const result = await gitText([...SUBMODULE_GITLINK_ONLY, "diff"], { cwd, env: readOnlyGitEnv() });
+  const result = await gitText([...SUBMODULE_GITLINK_ONLY, "diff"], {
+    cwd,
+    env: readOnlyGitEnv(cwd),
+  });
   // The old side here is the index, which is not a commit and has no SHA to name.
   return { files: parseDiffOutput(result), baseRef: null };
 }
@@ -64,7 +67,7 @@ export async function getCommitDiff(cwd: string, commit: string): Promise<DiffIn
   validateCommitHash(commit);
   const result = await gitText(["diff-tree", "-p", "--root", commit], {
     cwd,
-    env: readOnlyGitEnv(),
+    env: readOnlyGitEnv(cwd),
     nothrow: true,
   });
   // A root commit has no parent, so the old side is the empty tree: null.
@@ -99,7 +102,7 @@ export async function getRangeDiff(cwd: string, range: string): Promise<DiffInfo
     baseRef = await resolveCommit(cwd, ref1);
     rangeSpec = `${baseRef ?? ref1}..${rightRef}`;
   }
-  const result = await gitText(["diff", rangeSpec], { cwd, env: readOnlyGitEnv() });
+  const result = await gitText(["diff", rangeSpec], { cwd, env: readOnlyGitEnv(cwd) });
   return { files: parseDiffOutput(result), baseRef };
 }
 
@@ -121,7 +124,7 @@ export async function getWorkingTreeDiff(
       const baseRef = await resolveCommit(worktreePath, ref);
       const result = await gitText([...SUBMODULE_GITLINK_ONLY, "diff", baseRef ?? ref], {
         cwd: worktreePath,
-        env: readOnlyGitEnv(),
+        env: readOnlyGitEnv(cwd),
       });
       return { baseRef, files: parseDiffOutput(result) };
     })(),
@@ -141,7 +144,7 @@ export async function getWorkingTreeDiff(
 async function listUntrackedFiles(worktreePath: string): Promise<string[]> {
   const result = await gitText(["ls-files", "--others", "--exclude-standard", "-z"], {
     cwd: worktreePath,
-    env: readOnlyGitEnv(),
+    env: readOnlyGitEnv(worktreePath),
     nothrow: true,
   });
   return result.split("\0").filter((file) => file && !file.endsWith("/"));
@@ -172,7 +175,7 @@ async function getUntrackedDiff(worktreePath: string): Promise<FileDiff[]> {
     const objects = path.join(scratch, "objects");
     await mkdir(objects);
     const env = {
-      ...readOnlyGitEnv(),
+      ...readOnlyGitEnv(worktreePath),
       GIT_INDEX_FILE: path.join(scratch, "index"),
       GIT_OBJECT_DIRECTORY: objects,
       // Names are data, not pathspecs: `a*.txt` or `:x` must not glob or trigger magic.
@@ -238,7 +241,7 @@ async function getUntrackedDiff(worktreePath: string): Promise<FileDiff[]> {
   const perFile = await mapWithConcurrency(files, FALLBACK_DIFF_CONCURRENCY, async (file) => {
     const diff = await gitText(["diff", "--no-index", "--", "/dev/null", file], {
       cwd: worktreePath,
-      env: readOnlyGitEnv(),
+      env: readOnlyGitEnv(worktreePath),
       nothrow: true,
     });
     return parseDiffOutput(diff);

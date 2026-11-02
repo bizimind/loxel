@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { BackendMode } from "./formatter-backends";
+import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
 
 /** The command a language module picked for a file. `{file}` / `{ext}` in `args` are substituted. */
 export interface FileFormatter {
@@ -37,7 +38,7 @@ export interface FormatterSpawnOptions {
   cwd?: string;
   /** Added to the login-shell environment. */
   env?: Record<string, string>;
-  /** Prepended to `PATH`, first wins. Default: the worktree's `node_modules/.bin`. */
+  /** Prepended to `PATH`, first wins. Default: {@link projectNodeBinDirs}. */
   binDirs?: readonly string[];
   /** Do not spawn at all: the save goes out unformatted, and the user sees `notice` if there is one. */
   skip?: { notice?: string };
@@ -77,9 +78,27 @@ export interface LanguageFormatter {
   failureNotice?(failure: FormatterFailure): string | undefined;
 }
 
-/** The default of {@link FormatterSpawnOptions.binDirs}, for a module that adds to it. */
+/**
+ * The default of {@link FormatterSpawnOptions.binDirs}, for a module that adds to it: the worktree's
+ * `node_modules/.bin` when the repository is trusted, else nothing, reporting the restriction when
+ * that directory holds `command`.
+ */
+export function projectNodeBinDirs(command: string, wtRoot: string): string[] {
+  const binDir = nodeModulesBin(wtRoot);
+  if (isRepoTrusted(wtRoot)) return [binDir];
+  if (projectHasCommand(command, wtRoot)) {
+    reportRepoRestriction(wtRoot, `Format on save doesn't run ${command} from node_modules.`);
+  }
+  return [];
+}
+
 export function nodeModulesBin(wtRoot: string): string {
   return join(wtRoot, "node_modules", ".bin");
+}
+
+/** Whether the worktree's `node_modules/.bin` holds `command`, which a path does not look up. */
+function projectHasCommand(command: string, wtRoot: string): boolean {
+  return !command.includes("/") && Bun.which(command, { PATH: nodeModulesBin(wtRoot) }) !== null;
 }
 
 /** `startDir` and its ancestors up to `wtRoot` (inclusive); just `wtRoot` when outside it. */
