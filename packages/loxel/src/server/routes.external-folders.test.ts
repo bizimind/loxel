@@ -234,6 +234,18 @@ describe("Others folders routes", () => {
       expect(await missing.json()).toMatchObject({ code: "ENOENT" });
     });
 
+    test("opening a file outside every tree reports it missing only for a known worktree", async () => {
+      const path = encodeURIComponent(join(root, "gone.py"));
+
+      const known = await get(contentUrl(join(root, "gone.py"), ""));
+      expect(known.status).toBe(404);
+      expect(await known.json()).toMatchObject({ code: "ENOENT" });
+
+      const unknown = await get(`/api/file-content?path=${path}&wt=%2Fnot-subscribed`);
+      expect(unknown.status).toBe(404);
+      expect(await unknown.json()).not.toHaveProperty("code");
+    });
+
     test("needs a known worktree for a file outside every tree", async () => {
       const file = join(root, "lib.py");
       await writeFile(file, "x");

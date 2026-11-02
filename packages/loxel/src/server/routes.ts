@@ -503,8 +503,15 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
     const resolved = preview
       ? resolvePreviewPath(ctx, path, url.searchParams.get("wt"))
       : resolveFilePathWithHint(ctx, path, url.searchParams.get("wt"));
-    // No `code`: the path is not in a subscribed worktree (yet), which says nothing about the file.
-    if (!resolved) return error("File not found in any active worktree", 404);
+    if (!resolved) {
+      // A subscribed worktree would have taken the file as an external one, had it been on disk.
+      const hint = url.searchParams.get("wt");
+      if (hint && ctx.getWorktreeResources(hint) && !existsSync(path)) {
+        return error("File not found", 404, "ENOENT");
+      }
+      // No `code`: the path is not in a subscribed worktree (yet), which says nothing about the file.
+      return error("File not found in any active worktree", 404);
+    }
     if (resolved.type === "detached") {
       return readFileContentResponse(() =>
         resolved.resources.detachedFilesService.readFileContent(resolved.name),
