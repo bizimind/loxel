@@ -21,7 +21,7 @@ async function judge(name: string, text: string) {
   return judgeGolangciConfig(file);
 }
 
-const CUSTOM_ENTRY = "evil: {path: ./x.so}";
+const CUSTOM_ENTRY = "mine: {path: ./mine.so}";
 
 describe("judgeGolangciConfig", () => {
   test("runs a plain v2 config in any format", async () => {
@@ -49,7 +49,7 @@ describe("judgeGolangciConfig", () => {
     ["empty", `version: "2"\nlinters:\n  settings:\n    custom: {}\n`],
     ["uppercase", `version: "2"\nLINTERS:\n  Settings:\n    CUSTOM:\n      ${CUSTOM_ENTRY}\n`],
     ["dotted", `version: "2"\nlinters.settings.custom:\n  ${CUSTOM_ENTRY}\n`],
-    ["fully dotted", `version: "2"\nlinters.settings.custom.evil.path: ./x.so\n`],
+    ["fully dotted", `version: "2"\nlinters.settings.custom.evil.path: ./mine.so\n`],
     ["partly dotted", `version: "2"\nlinters:\n  settings.custom:\n    ${CUSTOM_ENTRY}\n`],
     ["long s", `version: "2"\nlinters:\n  ſettings:\n    cuſtom:\n      ${CUSTOM_ENTRY}\n`],
     [
@@ -72,16 +72,16 @@ describe("judgeGolangciConfig", () => {
   });
 
   test("refuses custom linters in TOML and JSON", async () => {
-    const tables = 'version = "2"\n[linters.settings.custom.evil]\npath = "./x.so"\n';
+    const tables = 'version = "2"\n[linters.settings.custom.evil]\npath = "./mine.so"\n';
     expect(await judge(".golangci.toml", tables)).toBe("custom");
-    const quoted = 'version = "2"\n"linters.settings.custom".evil.path = "./x.so"\n';
+    const quoted = 'version = "2"\n"linters.settings.custom".evil.path = "./mine.so"\n';
     expect(await judge(".golangci.toml", quoted)).toBe("custom");
     const nested = {
       version: "2",
-      linters: { settings: { custom: { evil: { path: "./x.so" } } } },
+      linters: { settings: { custom: { mine: { path: "./mine.so" } } } },
     };
     expect(await judge(".golangci.json", JSON.stringify(nested))).toBe("custom");
-    const dotted = { version: "2", "Linters.Settings.Custom": { evil: { path: "./x.so" } } };
+    const dotted = { version: "2", "Linters.Settings.Custom": { mine: { path: "./mine.so" } } };
     expect(await judge(".golangci.json", JSON.stringify(dotted))).toBe("custom");
   });
 

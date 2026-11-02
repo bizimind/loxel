@@ -611,7 +611,7 @@ describe.skipIf(!canRun)("GolangciLintLspManager", () => {
       await client.diagnostics(file, ["reported"]);
       const before = (await runLog()).length;
 
-      const custom = 'version: "2"\nlinters.settings.custom:\n  x: {path: ./x.so}\n';
+      const custom = 'version: "2"\nlinters.settings.custom:\n  x: {path: ./mine.so}\n';
       await writeFile(join(wt, ".golangci.yml"), custom);
       manager?.notifyWatchedFilesChanged(wt, [join(wt, ".golangci.yml")]);
       await client.notice("custom linters or a custom output");
