@@ -7,7 +7,6 @@ import type { ServerWebSocket } from "bun";
 
 import { LSP_RESTART_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
 import { repeatUntil } from "@/test/repeat-until";
-import "@/test/temp-state-dir";
 
 import { GO_ENV, refreshGoEnv, subscribeGoEnv } from "./go-env";
 import {

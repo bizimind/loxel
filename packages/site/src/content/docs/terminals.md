@@ -60,6 +60,14 @@ Your shell's startup runs after that, so it can still change which `node` you ge
 
 ---
 
+## Java JDK
+
+When you [choose a JDK](/docs/languages/java#seeing-and-changing-the-jdk) for a worktree, new terminals in it start with `JAVA_HOME` set to that JDK and its `bin` first on `PATH`. Without a choice nothing changes, even when Loxel's Java features detected a JDK: your terminal keeps your own `JAVA_HOME` and `java`. A JDK inside the worktree reaches terminals only once you [trust the repository](/docs/repository-trust), and one committed to it never does. Terminals already open keep what they started with; open a new terminal after changing your choice.
+
+Your shell's startup runs after that, so it can still change what you get. A `JAVA_HOME` exported in your startup files, for example `~/.zshenv`, or set by a version manager, replaces the chosen one. If `echo $JAVA_HOME` differs from the status bar, look there first. On macOS, a login shell's startup also moves system directories ahead of the JDK's `bin`, so `which java` prints `/usr/bin/java`. That launcher follows `JAVA_HOME`, so `java` still runs the chosen JDK, as long as `JAVA_HOME` holds.
+
+---
+
 ## Theme
 
 Terminal colors follow your dark/light mode setting automatically. No manual configuration needed.

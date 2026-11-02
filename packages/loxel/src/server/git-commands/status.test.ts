@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { $ } from "bun";
 
+import { setRepoTrusted } from "../repo-trust";
 import { getStatus } from "./status";
 import type { TempRepo } from "./test-utils";
 import { branch, checkoutBranch, commit, createRepo, stageFile, writeFile } from "./test-utils";
@@ -132,10 +133,8 @@ const hasBuiltinFsmonitor = (await $`git version --build-options`.text()).includ
 );
 
 describe("getStatus and fsmonitor", () => {
-  // Forcing `-c core.fsmonitor=true` left a persistent daemon behind for every git dir a status
-  // touched, submodules included, and bought nothing under GIT_OPTIONAL_LOCKS=0.
   test.skipIf(!hasBuiltinFsmonitor)(
-    "starts no fsmonitor daemon, in the repo or its submodules, unless git config asks",
+    "starts no fsmonitor daemon, in the repo or its submodules",
     async () => {
       const sub = await createRepo();
       const repo = await createRepo();
@@ -146,11 +145,9 @@ describe("getStatus and fsmonitor", () => {
         await commit(repo.path, "add submodule");
         // A moved submodule commit is what status reports for a submodule (see below).
         await commit(`${repo.path}/sub`, "move", { "s.txt": "moved\n" });
-        // A developer's global config may legitimately enable fsmonitor; nothing to assert then.
-        const configured = await $`git -C ${repo.path} config --get core.fsmonitor`
-          .nothrow()
-          .text();
-        if (configured.trim()) return;
+        // Git's own config asking for the daemon does not start one for a read.
+        await $`git -C ${repo.path} config core.fsmonitor true`.quiet();
+        await $`git -C ${repo.path}/sub config core.fsmonitor true`.quiet();
 
         const status = await getStatus(repo.path);
 
@@ -166,24 +163,37 @@ describe("getStatus and fsmonitor", () => {
     },
   );
 
-  test("leaves a repository-configured fsmonitor in charge", async () => {
+  async function withMonitor(
+    run: (repoPath: string, ran: () => Promise<boolean>) => Promise<void>,
+  ) {
     const repo = await createRepo();
     try {
       await commit(repo.path, "init", { "a.txt": "a\n" });
-      // A hook-based fsmonitor works on every platform. A command-line `-c core.fsmonitor=...`
-      // would override it and the hook would never run.
+      // A hook-based fsmonitor works on every platform.
       const marker = `${repo.path}/.git/hook-ran`;
       const hook = `${repo.path}/.git/fsmonitor-hook.sh`;
       await Bun.write(hook, `#!/bin/sh\necho ran >> "${marker}"\nexit 1\n`);
       await $`chmod +x ${hook}`.quiet();
       await $`git -C ${repo.path} config core.fsmonitor ${hook}`.quiet();
-
-      await getStatus(repo.path);
-
-      expect(await Bun.file(marker).exists()).toBe(true);
+      await run(repo.path, () => Bun.file(marker).exists());
     } finally {
       await repo.cleanup();
     }
+  }
+
+  test("does not start a configured fsmonitor in an untrusted repository", async () => {
+    await withMonitor(async (repoPath, ran) => {
+      await getStatus(repoPath);
+      expect(await ran()).toBe(false);
+    });
+  });
+
+  test("leaves a configured fsmonitor in charge in a trusted repository", async () => {
+    await withMonitor(async (repoPath, ran) => {
+      setRepoTrusted(repoPath, true);
+      await getStatus(repoPath);
+      expect(await ran()).toBe(true);
+    });
   });
 });
 

@@ -14,7 +14,6 @@ import { delimiter, join } from "node:path";
 
 import type { GoEnv } from "@/api/go-env-model";
 import { repeatUntil } from "@/test/repeat-until";
-import "@/test/temp-state-dir";
 
 import {
   canChangeGoEnv,

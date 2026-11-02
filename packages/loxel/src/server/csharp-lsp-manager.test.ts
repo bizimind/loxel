@@ -13,7 +13,10 @@ process.env.LOXEL_STATE_DIR = stateDir;
 const { CSharpLspManager, CSHARP_LS_SETTINGS, MIN_CSHARP_LS_VERSION, withClientRegistrations } =
   await import("./csharp-lsp-manager");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+const { getCSharpLspState, subscribeCSharpStatus } = await import("./csharp-lsp-state");
+const { setCSharpSolution } = await import("./csharp-solution-store");
 type WtLspContext = import("./stdio-lsp-manager").WtLspContext;
+type WtLspSession = import("./stdio-lsp-manager").WtLspSession;
 
 // Each test spawns git and scripts many times; how fast is not what these test.
 setDefaultTimeout(60_000);
@@ -630,6 +633,236 @@ describe.skipIf(process.platform === "win32")("CSharpLspManager", () => {
       manager?.destroySession(socket.ws);
       expect(isHold(await connect(wt).untilInitialized())).toBe(true);
     });
+  });
+});
+
+/** Waits for what the manager publishes for a worktree to satisfy `done`. */
+async function untilState(
+  wt: string,
+  done: (state: ReturnType<typeof getCSharpLspState>) => boolean,
+): Promise<ReturnType<typeof getCSharpLspState>> {
+  while (!done(getCSharpLspState(wt))) {
+    await new Promise<void>((resolve) => {
+      const stop = subscribeCSharpStatus(wt, () => {
+        stop();
+        resolve();
+      });
+    });
+  }
+  return getCSharpLspState(wt);
+}
+
+const blockedBy = (block: string) => (state: ReturnType<typeof getCSharpLspState>) =>
+  state?.kind === "blocked" && state.block === block;
+
+describe.skipIf(process.platform === "win32")("what the status shows", () => {
+  test("not trusted, then running once trusted, with no reload", async () => {
+    await installToolchain();
+    const wt = await makeRepo({ "App.csproj": PROJECT, "obj/project.assets.json": "{}" });
+    const held = connect(wt);
+    await held.untilInitialized();
+    await untilState(wt, blockedBy("untrusted"));
+    setRepoTrusted(wt, true);
+    expect((await held.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    manager?.destroySession(held.ws);
+    connect(wt);
+    expect(await untilState(wt, (state) => state?.kind === "running")).toEqual({
+      kind: "running",
+      target: null,
+      projects: [join(wt, "App.csproj")],
+      sdkVersion: "10.0.100",
+    });
+  });
+
+  test("a repository with no project", async () => {
+    await installToolchain();
+    const wt = await makeRepo({ "Loose.cs": "" });
+    setRepoTrusted(wt, true);
+    connect(wt);
+    await untilState(wt, (state) => state?.kind === "no-project");
+  });
+
+  test("each missing step, in the words of the notice", async () => {
+    const cases = [
+      { options: { dotnet: false }, block: "no-dotnet" },
+      { options: { csharpLs: null }, block: "no-csharp-ls" },
+      { options: { csharpLs: "0.20.0" }, block: "old-csharp-ls" },
+    ];
+    for (const { options, block } of cases) {
+      await installToolchain(options);
+      const wt = await makeRestoredRepo();
+      const socket = connect(wt);
+      const state = await untilState(wt, blockedBy(block));
+      const message = state?.kind === "blocked" ? state.message : "";
+      expect(await socket.untilMessage(message)).toBe(message);
+      manager?.destroySession(socket.ws);
+    }
+  });
+
+  /** Holds on to each session, and lets a test replay what the base does late. */
+  class LateFramesManager extends TestManager {
+    readonly built: WtLspSession[] = [];
+    protected override buildSession(...args: Parameters<TestManager["buildSession"]>) {
+      const session = super.buildSession(...args);
+      this.built.push(session);
+      return session;
+    }
+    closeAgain(session: WtLspSession): void {
+      this.onSessionClosed(session);
+    }
+    frame(session: WtLspSession, body: string): void {
+      this.handleServerFrame(session, body);
+    }
+  }
+
+  test("an old server that exits, or speaks, late does not replace a newer decision", async () => {
+    await installToolchain();
+    const wt = await makeRestoredRepo();
+    const late = new LateFramesManager();
+    manager = late;
+    const first = connect(wt);
+    await first.untilInitialized();
+    manager.destroySession(first.ws);
+    expect(getCSharpLspState(wt)).toEqual({ kind: "stopped" });
+    const second = connect(wt);
+    await second.untilInitialized();
+    const running = await untilState(wt, (state) => state?.kind === "running");
+
+    const old = late.built[0]!;
+    late.closeAgain(old);
+    late.frame(
+      old,
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "window/showMessage",
+        params: { type: 1, message: "Solution could not be loaded" },
+      }),
+    );
+    expect(getCSharpLspState(wt)).toEqual(running);
+  });
+
+  test("a live server's failed solution is shown, on its first line", async () => {
+    await installToolchain();
+    const wt = await makeRestoredRepo();
+    const late = new LateFramesManager();
+    manager = late;
+    await connect(wt).untilInitialized();
+    late.frame(
+      late.built[0]!,
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "window/showMessage",
+        params: { type: 1, message: "Solution could not be loaded: x\n  at stack" },
+      }),
+    );
+    expect(getCSharpLspState(wt)).toEqual({
+      kind: "blocked",
+      block: "load-failed",
+      message: "Solution could not be loaded: x",
+    });
+  });
+
+  test("not restored, in the words of the notice", async () => {
+    await installToolchain();
+    const wt = await makeRepo({ "App.csproj": PROJECT });
+    setRepoTrusted(wt, true);
+    const socket = connect(wt);
+    const state = await untilState(wt, blockedBy("not-restored"));
+    expect(state?.kind === "blocked" && state.message).toContain("dotnet restore");
+    await socket.untilMessage("dotnet restore");
+  });
+});
+
+describe.skipIf(process.platform === "win32")("a chosen solution", () => {
+  const argsOf = async (socket: ReturnType<typeof connect>) =>
+    (await socket.untilInitialized()).args;
+  const loading = (file: string) => ["--loglevel", "information", "--solution", file];
+
+  test("loads instead of the first, with no word about the others", async () => {
+    await installToolchain();
+    const wt = await makeRestoredRepo({ "a/A.sln": "", "b/B.sln": "" });
+    setCSharpSolution(wt, join(wt, "b/B.sln"));
+    const socket = connect(wt);
+    expect(await argsOf(socket)).toEqual(loading(join(wt, "b/B.sln")));
+    await socket.untilFrame((frame) => frame.method === "test/configuration");
+    expect(socket.messages().filter((message) => message.includes("solutions"))).toEqual([]);
+  });
+
+  test("the multi-solution notice points at the picker", async () => {
+    await installToolchain();
+    const wt = await makeRestoredRepo({ "a/A.sln": "", "b/B.sln": "" });
+    expect(await connect(wt).untilMessage("2 solutions")).toContain("C#: Select Solution");
+  });
+
+  test("choosing restarts a server loading something else, and not one already loading it", async () => {
+    await installToolchain();
+    const wt = await makeRestoredRepo({ "a/A.sln": "", "b/B.sln": "" });
+    const first = connect(wt);
+    await first.untilInitialized();
+    setCSharpSolution(wt, join(wt, "a/A.sln"));
+    setCSharpSolution(wt, join(wt, "b/B.sln"));
+    expect((await first.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    manager?.destroySession(first.ws);
+    const second = connect(wt);
+    expect(await argsOf(second)).toEqual(loading(join(wt, "b/B.sln")));
+  });
+
+  test("a filter's own projects decide the gate, relative to the solution it filters", async () => {
+    await installToolchain();
+    const filter = JSON.stringify({
+      solution: { path: "sub/All.sln", projects: ["..\\Lib\\Lib.csproj"] },
+    });
+    const wt = await makeRestoredRepo({
+      "sub/All.sln": "",
+      "Only.slnf": `\uFEFF${filter}`,
+      "Lib/Lib.csproj": PROJECT,
+    });
+    setCSharpSolution(wt, join(wt, "Only.slnf"));
+    const socket = connect(wt);
+    await socket.untilInitialized();
+    await untilState(wt, blockedBy("not-restored"));
+    await write(join(wt, "Lib/obj/project.assets.json"), "{}");
+    manager?.notifyWatchedFilesChanged(wt, [join(wt, "Lib/Lib.csproj")]);
+    expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    manager?.destroySession(socket.ws);
+    expect(await argsOf(connect(wt))).toEqual(loading(join(wt, "Only.slnf")));
+  });
+
+  test("a chosen file that goes away falls back to detection, and comes back with it", async () => {
+    await installToolchain();
+    const wt = await makeRestoredRepo({ "a/A.sln": "", "b/B.sln": "" });
+    const chosen = join(wt, "b/B.sln");
+    setCSharpSolution(wt, chosen);
+    const first = connect(wt);
+    await first.untilInitialized();
+
+    await rm(chosen);
+    manager?.notifyWatchedFilesChanged(wt, [chosen]);
+    expect((await first.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    manager?.destroySession(first.ws);
+    const second = connect(wt);
+    // With one solution left at no root, detection picks it, and nothing needs saying.
+    expect(await argsOf(second)).toEqual(loading(join(wt, "a/A.sln")));
+
+    await write(chosen);
+    manager?.notifyWatchedFilesChanged(wt, [chosen]);
+    expect((await second.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    manager?.destroySession(second.ws);
+    expect(await argsOf(connect(wt))).toEqual(loading(chosen));
+  });
+
+  test("choosing does not open the gate of an untrusted repository", async () => {
+    const { dotnetRuns } = await installToolchain();
+    const wt = await makeRepo({
+      "App.csproj": PROJECT,
+      "obj/project.assets.json": "{}",
+      "A.sln": "",
+    });
+    setCSharpSolution(wt, join(wt, "A.sln"));
+    const socket = connect(wt);
+    expect(isHold(await socket.untilInitialized())).toBe(true);
+    await untilState(wt, blockedBy("untrusted"));
+    expect(await Bun.file(dotnetRuns).exists()).toBe(false);
   });
 });
 

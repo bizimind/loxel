@@ -1,8 +1,17 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { isJdkInWorktree } from "./java-env";
 import {
   canRunJdtls,
   dropUnusableActions,
@@ -14,9 +23,14 @@ import {
   jdtlsHostCrossed,
   jdtlsArgs,
   jdtlsDataDir,
+  JavaLspManager,
   latestLogMessage,
+  noJdkReason,
+  trustedJavaSettings,
 } from "./java-lsp-manager";
+import { getJavaProjectIssue, type ImportPlan, setJavaProjectIssue } from "./java-project-import";
 import { fileUri } from "./lsp-file-uri";
+import type { WtLspSession } from "./stdio-lsp-manager";
 
 const scratch = mkdtempSync(path.join(tmpdir(), "java-lsp-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -32,18 +46,33 @@ describe("jdtlsHostCrossed", () => {
 });
 
 describe("canRunJdtls", () => {
-  const runtime = (majorVersion: number) => ({
-    path: "/jdk",
+  const wt = realpathSync(mkdtempSync(path.join(scratch, "wt-host-")));
+  const runtime = (majorVersion: number, home = scratch) => ({
+    path: home,
     majorVersion,
     version: String(majorVersion),
     implementor: null,
   });
+  const untrusted = { wtPath: wt, repoTrusted: false };
 
   test("takes Java 25 or newer", () => {
-    expect(canRunJdtls([])).toBe(false);
-    expect(canRunJdtls([runtime(21), runtime(17)])).toBe(false);
-    expect(canRunJdtls([runtime(25)])).toBe(true);
-    expect(canRunJdtls([runtime(26), runtime(8)])).toBe(true);
+    expect(canRunJdtls([], untrusted)).toBe(false);
+    expect(canRunJdtls([runtime(21), runtime(17)], untrusted)).toBe(false);
+    expect(canRunJdtls([runtime(25)], untrusted)).toBe(true);
+    expect(canRunJdtls([runtime(26), runtime(8)], untrusted)).toBe(true);
+  });
+
+  test("takes a JDK inside the worktree only once the repository is trusted", () => {
+    const inside = path.join(wt, "jdk");
+    mkdirSync(inside);
+    expect(canRunJdtls([runtime(25, inside)], untrusted)).toBe(false);
+    expect(canRunJdtls([runtime(25, inside)], { wtPath: wt, repoTrusted: true })).toBe(true);
+  });
+
+  test("the reason says which it is", () => {
+    expect(noJdkReason([])).toContain("Install one");
+    expect(noJdkReason([{ majorVersion: 21 }])).toContain("Install one");
+    expect(noJdkReason([{ majorVersion: 25 }])).toContain("inside the repository");
   });
 });
 
@@ -53,6 +82,40 @@ describe("javaSettings", () => {
       import: { maven: { enabled: false }, gradle: { enabled: false }, exclusions: ["**"] },
       autobuild: { enabled: false },
     });
+  });
+});
+
+describe("trustedJavaSettings", () => {
+  const projects = { dirs: [], hasMaven: true, gradleRoots: [] };
+  const plan = { projects, blocked: [], gradleHome: null, gradleCommand: null };
+  const runtimes = [{ name: "JavaSE-21", path: "/jdk", default: true as const }];
+
+  test("loads projects, with the runtimes next to the build-file setting", () => {
+    expect(trustedJavaSettings("/wt", plan, runtimes)).toMatchObject({
+      import: { maven: { enabled: true }, gradle: { enabled: true } },
+      configuration: { updateBuildConfiguration: "automatic", runtimes },
+      telemetry: { enabled: false },
+      implementationCodeLens: "none",
+    });
+  });
+});
+
+describe("isJdkInWorktree", () => {
+  const wt = realpathSync(mkdtempSync(path.join(scratch, "wt-")));
+  const inside = path.join(wt, "jdk");
+  mkdirSync(inside);
+  const outside = realpathSync(mkdtempSync(path.join(scratch, "jdk-")));
+
+  test("compares real paths", () => {
+    expect(isJdkInWorktree(inside, wt)).toBe(true);
+    expect(isJdkInWorktree(outside, wt)).toBe(false);
+    const link = path.join(scratch, "link-to-inside");
+    symlinkSync(inside, link);
+    expect(isJdkInWorktree(link, wt)).toBe(true);
+  });
+
+  test("counts a path that cannot be read", () => {
+    expect(isJdkInWorktree(path.join(scratch, "missing"), wt)).toBe(true);
   });
 });
 
@@ -105,6 +168,16 @@ describe("jdtlsArgs", () => {
     ]);
   });
 
+  test("only a trusted server gets the daemon flags and the larger heap", () => {
+    const paths = { home, configuration: "/c", data: "/d", hosts: "/h" };
+    const restricted = jdtlsArgs(paths);
+    expect(restricted).toContain("-Xmx1G");
+    expect(restricted.join(" ")).not.toContain("org.gradle");
+    const trusted = jdtlsArgs(paths, true);
+    expect(trusted).toContain("-Xmx2G");
+    expect(trusted).toContain("-Dorg.gradle.daemon.registry.base=/d/gradle-daemons");
+  });
+
   test("fails on an incomplete install", () => {
     const empty = path.join(scratch, "empty");
     mkdirSync(path.join(empty, "plugins"), { recursive: true });
@@ -115,6 +188,10 @@ describe("jdtlsArgs", () => {
 test("jdtlsDataDir keeps same-named worktrees apart", () => {
   expect(jdtlsDataDir("/a/project")).not.toBe(jdtlsDataDir("/b/project"));
   expect(jdtlsDataDir("/a/project")).toBe(jdtlsDataDir("/a/project"));
+});
+
+test("jdtlsDataDir keeps a trusted server's imported projects from a restricted one", () => {
+  expect(jdtlsDataDir("/a/project", true)).not.toBe(jdtlsDataDir("/a/project"));
 });
 
 describe("dropWillRename", () => {
@@ -209,5 +286,155 @@ describe("latestLogMessage", () => {
     writeFileSync(path.join(dir, "1.log"), "!MESSAGE old\n");
     utimesSync(path.join(dir, "1.log"), 1, 1);
     expect(latestLogMessage(dir, 5000)).toBeNull();
+  });
+});
+
+describe("JavaLspManager, trusted", () => {
+  /** A manager with its sessions' lifecycle in reach, and no process or client behind them. */
+  class TestManager extends JavaLspManager {
+    addLive(session: WtLspSession): void {
+      this.sessions.set(session.ws, session);
+    }
+
+    close(session: WtLspSession): void {
+      this.onSessionClosed(session);
+    }
+
+    frame(session: WtLspSession, body: string): void {
+      this.handleServerFrame(session, body);
+    }
+
+    plan(wtPath: string, plan: ImportPlan): void {
+      this["importPlans"].set(wtPath, plan);
+    }
+
+    initialize(session: WtLspSession): void {
+      this["jdkSubscriptions"].set(session, () => {});
+    }
+
+    settled(session: WtLspSession): Promise<void> | undefined {
+      return this["projectFollowers"].get(session);
+    }
+  }
+
+  function fixture(repoTrusted = true) {
+    const wtPath = realpathSync(mkdtempSync(path.join(scratch, "wt-session-")));
+    const written: string[] = [];
+    const session = {
+      ws: { send: () => 0, close: () => {} },
+      proc: {
+        exited: Promise.resolve(0),
+        stdin: {
+          write: (data: string | Uint8Array) => {
+            if (typeof data !== "string") written.push(Buffer.from(data).toString());
+          },
+          flush: () => {},
+        },
+      },
+      wtPath,
+      repoTrusted,
+      stdoutBuf: Buffer.alloc(0),
+      documentContents: new Map(),
+    } as unknown as WtLspSession;
+    const manager = new TestManager();
+    const plan: ImportPlan = {
+      projects: { dirs: [], hasMaven: true, gradleRoots: [] },
+      blocked: [],
+      gradleHome: null,
+      gradleCommand: null,
+    };
+    manager.plan(wtPath, plan);
+    return { manager, plan, session, wtPath, written };
+  }
+
+  const WARNING = JSON.stringify({
+    jsonrpc: "2.0",
+    method: "language/status",
+    params: { type: "ProjectStatus", message: "WARNING" },
+  });
+
+  test("a live session's failed import reaches the user", () => {
+    const { manager, session, wtPath } = fixture();
+    manager.addLive(session);
+    manager.frame(session, WARNING);
+    expect(getJavaProjectIssue(wtPath)?.detail).toContain("mvn test-compile");
+    setJavaProjectIssue(wtPath, null);
+  });
+
+  test("the last frames of a closed session don't", () => {
+    const { manager, session, wtPath } = fixture();
+    manager.frame(session, WARNING);
+    expect(getJavaProjectIssue(wtPath)).toBeNull();
+  });
+
+  test("a repeated close leaves what a newer server reported alone", () => {
+    const { manager, session, wtPath } = fixture();
+    const issue = { label: "l", detail: "from the newer server" };
+    setJavaProjectIssue(wtPath, { label: "l", detail: "from this server" });
+    manager.close(session);
+    expect(getJavaProjectIssue(wtPath)).toBeNull();
+    setJavaProjectIssue(wtPath, issue);
+    manager.close(session);
+    expect(getJavaProjectIssue(wtPath)).toEqual(issue);
+    setJavaProjectIssue(wtPath, null);
+  });
+
+  test("asks the server to import a build file in a new folder", async () => {
+    const { manager, session, wtPath, written } = fixture();
+    manager.addLive(session);
+    manager.initialize(session);
+    mkdirSync(path.join(wtPath, "mod"));
+    writeFileSync(path.join(wtPath, "mod", "pom.xml"), "");
+    manager.notifyWatchedFilesChanged(wtPath, [path.join(wtPath, "mod", "pom.xml")]);
+    await manager.settled(session);
+    expect(written.filter((frame) => frame.includes("java.project.import"))).toHaveLength(1);
+  });
+
+  test("doesn't ask again for a folder it knows", async () => {
+    const { manager, session, wtPath, written } = fixture();
+    manager.addLive(session);
+    manager.initialize(session);
+    writeFileSync(path.join(wtPath, "pom.xml"), "");
+    const file = path.join(wtPath, "pom.xml");
+    manager.notifyWatchedFilesChanged(wtPath, [file]);
+    manager.notifyWatchedFilesChanged(wtPath, [file]);
+    await manager.settled(session);
+    expect(written.filter((frame) => frame.includes("java.project.import"))).toHaveLength(1);
+  });
+
+  test("imports a project no longer held back, with the new settings first", async () => {
+    const { manager, plan, session, wtPath, written } = fixture();
+    const root = path.join(wtPath, "svc");
+    mkdirSync(root);
+    writeFileSync(path.join(root, "pom.xml"), "");
+    const projects = { dirs: [root], hasMaven: true, gradleRoots: [] };
+    manager.plan(wtPath, { ...plan, projects, blocked: [{ root, message: "m" }] });
+    manager.addLive(session);
+    manager.initialize(session);
+    manager.notifyWatchedFilesChanged(wtPath, [path.join(root, "pom.xml")]);
+    await manager.settled(session);
+    expect(
+      written.map((frame) => (frame.includes("java.project.import") ? "import" : "settings")),
+    ).toEqual(["settings", "import"]);
+    setJavaProjectIssue(wtPath, null);
+  });
+
+  test("sends nothing before the client initialized", async () => {
+    const { manager, session, wtPath, written } = fixture();
+    manager.addLive(session);
+    writeFileSync(path.join(wtPath, "pom.xml"), "");
+    manager.notifyWatchedFilesChanged(wtPath, [path.join(wtPath, "pom.xml")]);
+    await manager.settled(session);
+    expect(written).toEqual([]);
+  });
+
+  test("a change in an untrusted repository sends no import", async () => {
+    const { manager, session, wtPath, written } = fixture(false);
+    manager.addLive(session);
+    manager.initialize(session);
+    writeFileSync(path.join(wtPath, "pom.xml"), "");
+    manager.notifyWatchedFilesChanged(wtPath, [path.join(wtPath, "pom.xml")]);
+    expect(manager.settled(session)).toBeUndefined();
+    expect(written).toEqual([]);
   });
 });

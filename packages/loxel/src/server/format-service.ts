@@ -1,10 +1,11 @@
 import { existsSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import type { FileSink } from "bun";
 
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 
+import { dotnetArgsRunProjectTool } from "./csharp-env";
 import {
   type BackendMode,
   FORMAT_REJECTED,
@@ -12,18 +13,19 @@ import {
   killProcessGroup,
 } from "./formatter-backends";
 import {
+  dirsUpToRoot,
   type FileFormatter,
   type FormatterDecline,
   type FormatterFailure,
   type FormatterSpawnOptions,
   type LanguageFormatter,
-  nodeModulesBin,
+  projectNodeBinDirs,
 } from "./language-formatter";
 import { languageFormatters } from "./language-formatters";
 import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
 import { PrettierLibBackend } from "./prettier-lib-backend";
-import { isRepoTrusted, onRepoTrustChange } from "./repo-trust";
+import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 
@@ -78,16 +80,6 @@ const DETECTION_RULES: {
   // Rules are evaluated in array order and `format()` picks the first detected formatter whose
   // extension set contains the file's extension.
   {
-    files: [".clang-format"],
-    check: (wtRoot) => existsSync(join(wtRoot, ".clang-format")),
-    formatter: {
-      command: "clang-format",
-      args: "--assume-filename={file}",
-      extensions: ["c", "cpp", "h", "hpp", "cc", "cxx"],
-      backendMode: "command",
-    },
-  },
-  {
     files: ["deno.json", "deno.jsonc"],
     check: (wtRoot) =>
       existsSync(join(wtRoot, "deno.json")) || existsSync(join(wtRoot, "deno.jsonc")),
@@ -131,6 +123,26 @@ export class FormatService {
     // 1. Check manual overrides first
     const override = findMatchingOverride(settings.overrides, ext);
     if (override) {
+      // Overrides apply to every repository, and a relative path or a manifest names a different
+      // file or tool in each.
+      if (
+        worktreePath &&
+        !isRepoTrusted(worktreePath) &&
+        (overrideNamesRepoPath(override, worktreePath) ||
+          dotnetArgsRunProjectTool(
+            override.command,
+            override.args,
+            dirsUpToRoot(fileDir(filePath, worktreePath), worktreePath),
+          ))
+      ) {
+        const named = `${override.command} ${override.args}`.trim();
+        log.info("Holding back an override that runs a project's file or tool", { filePath });
+        reportRepoRestriction(
+          worktreePath,
+          `Format on save doesn't run ${named} from this repository.`,
+        );
+        return UNFORMATTED;
+      }
       log.info("Formatting with manual override", { command: override.command, filePath });
       return this.runFormatter(override.command, override.args, content, filePath, worktreePath);
     }
@@ -256,7 +268,7 @@ export class FormatService {
     return {
       ...options,
       cwd: options?.cwd ?? worktreePath,
-      binDirs: options?.binDirs ?? [nodeModulesBin(worktreePath)],
+      binDirs: options?.binDirs ?? projectNodeBinDirs(command, worktreePath),
     };
   }
 
@@ -506,6 +518,26 @@ function spawnFailureNotice(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** A command with a directory in it that isn't absolute, which resolves against the worktree. */
+function isRelativePath(command: string): boolean {
+  return command.includes("/") && !isAbsolute(command);
+}
+
+/**
+ * Whether an override's command or an argument names a path in the worktree it runs in: `node
+ * tools/fmt.js {file}` runs the repository's script as surely as `tools/fmt.js` does. The saved
+ * file's own `{file}` doesn't count, and a value is read from `--flag=value`.
+ */
+function overrideNamesRepoPath(override: FormatterOverride, worktreePath: string): boolean {
+  if (isRelativePath(override.command)) return true;
+  return splitArgs(override.args).some((arg) => {
+    if (arg.includes("{file}")) return false;
+    const value = arg.startsWith("-") ? arg.split("=").slice(1).join("=") : arg;
+    if (value === "" || isAbsolute(value)) return false;
+    return isRelativePath(value) || existsSync(resolve(worktreePath, value));
+  });
+}
 
 function extractExtension(filePath: string): string | null {
   const lastSlash = filePath.lastIndexOf("/");

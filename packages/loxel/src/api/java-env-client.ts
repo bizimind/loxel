@@ -1,10 +1,9 @@
 import { fetchJson, withScope } from "./client";
 import type {
-  JavaBuildFileRequest,
-  JavaBuildFileResponse,
   JavaEnvCandidatesResponse,
   JavaEnvResponse,
   JavaOverrideRequest,
+  JavaReloadProjectsRequest,
 } from "./java-env-model";
 
 export async function getJavaEnv(worktreePath: string): Promise<JavaEnvResponse> {
@@ -27,12 +26,7 @@ export async function setJavaOverride(request: JavaOverrideRequest): Promise<Jav
   });
 }
 
-/** The build tool of the project a file belongs to, read from the file's nearest build file. */
-export async function getJavaBuildFile(
-  request: JavaBuildFileRequest,
-): Promise<JavaBuildFileResponse> {
-  return fetchJson<JavaBuildFileResponse>("/java-env/build-file", {
-    method: "POST",
-    body: JSON.stringify(request),
-  });
+/** Load the worktree's Maven and Gradle projects again. */
+export async function reloadJavaProjects(request: JavaReloadProjectsRequest): Promise<void> {
+  await fetchJson("/java-env/reload-projects", { method: "POST", body: JSON.stringify(request) });
 }

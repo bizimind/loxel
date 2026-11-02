@@ -25,6 +25,13 @@ export interface JavaEnv extends JavaRuntime {
   source: JavaEnvSource;
 }
 
+/** What holds a worktree's Maven or Gradle projects back, as the status bar says it. */
+export interface JavaProjectIssue {
+  label: string;
+  /** What is wrong and what to run about it, one point per line. */
+  detail: string;
+}
+
 /** `GET /api/java-env?wt=` response; `env` is null when no JDK was found. */
 export interface JavaEnvResponse {
   env: JavaEnv | null;
@@ -32,6 +39,8 @@ export interface JavaEnvResponse {
   overridePath: string | null;
   /** The value of `JAVA_HOME` when it is set but is not a usable JDK. */
   ignoredJavaHome: string | null;
+  /** Null while the worktree's projects loaded, or none are loaded because it isn't trusted. */
+  projectIssue: JavaProjectIssue | null;
 }
 
 /** `GET /api/java-env/candidates?wt=` response: JDKs the user can pick for a worktree. */
@@ -50,16 +59,9 @@ export interface JavaOverrideRequest {
   javaHome: string | null;
 }
 
-/** `POST /api/java-env/build-file` body: a file of the worktree. */
-export interface JavaBuildFileRequest {
+/** `POST /api/java-env/reload-projects` body: the worktree whose projects to load again. */
+export interface JavaReloadProjectsRequest {
   worktreePath: string;
-  filePath: string;
-}
-
-/** `POST /api/java-env/build-file` response: the build tool of the file's nearest build file. */
-export interface JavaBuildFileResponse {
-  /** Null when no folder from the file up to the worktree holds a build file. */
-  buildTool: "Maven" | "Gradle" | null;
 }
 
 export const javaToolchain = {

@@ -8,7 +8,10 @@ import { registerPanelFocus } from "@/lib/panel-focus";
 import { canRenameActiveTab, renameActiveTab } from "@/lib/tab-rename";
 import { setCenterApi } from "@/store/tools-bar";
 
+import { BrowserTab } from "./browser-tab";
 import { Tab, usePanelTitle } from "./tab";
+
+type BrowserTabProps = React.ComponentProps<typeof BrowserTab>;
 
 /** The parts of a dockview panel API the tab uses, with a working title. */
 function fakePanelApi(initialTitle: string) {
@@ -57,6 +60,20 @@ afterEach(() => {
   } else {
     Reflect.deleteProperty(Element.prototype, "getAnimations");
   }
+});
+
+describe("BrowserTab", () => {
+  test("clicking it returns focus to the panel's page", () => {
+    const focusPage = jest.fn(() => true);
+    const unregister = registerPanelFocus("panel-1", focusPage);
+    const api = Object.assign(fakePanelApi("Example"), {
+      onDidParametersChange: () => ({ dispose: () => {} }),
+    });
+    render(<BrowserTab {...({ api, params: {} } as unknown as BrowserTabProps)} />);
+    fireEvent.click(screen.getByText("Example"));
+    expect(focusPage).toHaveBeenCalledTimes(1);
+    unregister();
+  });
 });
 
 describe("Tab rename", () => {

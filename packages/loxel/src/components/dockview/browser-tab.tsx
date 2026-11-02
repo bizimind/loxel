@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { ContextMenuItem } from "@/components/ui/context-menu";
 import { createBrowser } from "@/lib/panel-creators";
+import { focusRegisteredPanel } from "@/lib/panel-focus";
 
 import { Tab, usePanelTitle } from "./tab";
 
@@ -44,6 +45,9 @@ export function BrowserTab(props: IDockviewPanelHeaderProps<BrowserPanelParams>)
       icon={icon}
       title={title || "Browser"}
       contextMenuItems={contextMenuItems}
+      // Clicking the already-active tab fires no activation, and leaves focus on the tab header,
+      // outside the panel: the page's shortcuts would stop applying.
+      onClick={() => focusRegisteredPanel(props.api.id)}
     />
   );
 }

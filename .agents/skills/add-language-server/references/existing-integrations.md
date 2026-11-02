@@ -20,7 +20,7 @@ Quick reference for the quirks of the servers that existed before `docs/language
 | Go (gopls)              | built from Go | worktree | lazy       | enabled         | no             | `serve`         | settings (pulled)             |
 | Go (golangci-lint)      | machine PATH  | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
 | Rust (rust-analyzer)    | user's binary | worktree | lazy       | enabled         | no             | none            | restricted mode, project list |
-| Java (jdtls)            | bundled jar   | worktree | lazy       | enabled         | no             | JVM flags       | import off (init and pushed)  |
+| Java (jdtls)            | bundled jar   | worktree | lazy       | enabled         | no             | JVM flags       | import once trusted (pushed)  |
 | ESLint                  | bundled JS    | worktree | lazy       | n/a             | no             | `--stdio`       | settings per file (pulled)    |
 
 ## TypeScript — Do Not Use as Template

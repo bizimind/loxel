@@ -1,16 +1,16 @@
 ---
 title: Java
-description: Java language features from Eclipse JDT LS, running on your JDK 25 or newer, and the JDK Loxel uses for each worktree.
+description: Java language features from Eclipse JDT LS, running on your JDK 25 or newer, Maven and Gradle projects in trusted repositories, and the JDK Loxel uses for each worktree.
 order: 13.5
 ---
 
-The Java server starts the first time you open a `.java` file, and stops when none remain open. Loxel bundles [Eclipse JDT LS](https://github.com/eclipse-jdtls/eclipse.jdt.ls), and the server makes no network requests.
+The Java server starts the first time you open a `.java` file, and stops when none remain open. Loxel bundles [Eclipse JDT LS](https://github.com/eclipse-jdtls/eclipse.jdt.ls), and it works from what is already on your machine: neither it nor Gradle downloads anything to load a project, even in a trusted repository.
 
 ## Java 25 or newer
 
 The server needs a JDK 25 or newer on your machine to run. If your project is on an older Java, install JDK 25 or newer alongside your project's JDK: the server runs on the newest one, and your code is still checked against the JDK of the worktree (see [JDK detection](#jdk-detection)). Without one, the Java server stops and the status bar says what to install. Installing a JDK while Loxel is open brings it back.
 
-Maven and Gradle projects aren't loaded. The server starts with project import off, and what you get depends on the folder a file is in.
+What you get depends on the folder a file is in, and on whether you [trust the repository](/docs/repository-trust).
 
 ## Folders without a build file
 
@@ -28,13 +28,43 @@ The source folder comes from the first Java file found in the folder, so a proje
 
 ## Maven and Gradle projects
 
-A Java file with a `pom.xml` or Gradle build in its folder or a folder above it is treated as a separate file outside any project. The status bar says so while it is the active editor, and the file gets:
+Maven and Gradle projects load once you trust the repository, which runs their build logic: Gradle build scripts, annotation processors and Maven plugins. A file in a loaded project gets everything above, across all the modules of the project and with its dependencies on the classpath. Projects in subfolders of a repository load too, and changes to build files are picked up as you save them or switch branches.
+
+Until you trust the repository, a Java file with a `pom.xml` or Gradle build in its folder or a folder above it is treated as a separate file outside any project, and nothing from the build runs. It gets:
 
 - Syntax errors, but no type errors
 - Completion, code actions, document symbols, references within the file, folding and semantic highlighting
 - **Format Document**
 
-Go-to-definition, rename, workspace symbols and hover on your own types need the project to be loaded, so they do not work there yet. Nothing from the build runs: not the build scripts, wrappers, plugins or annotation processors.
+### What needs to be on your machine
+
+Trusting a repository doesn't let Loxel download anything. Dependencies and Gradle itself need to be there already, which they are once you have built the project in a terminal. When something is missing, the status bar shows **Project not fully loaded** while a Java file is active. Hover it to see what is missing and what to run, and click it to load the projects again once you have.
+
+| What you see                           | What to do                                                          |
+| -------------------------------------- | ------------------------------------------------------------------- |
+| A Gradle version isn't installed       | Run `./gradlew` once in a terminal                                  |
+| A Gradle project with no wrapper       | Install Gradle, or add a wrapper                                    |
+| Missing Maven or Gradle dependencies   | Run `mvn test-compile` or `./gradlew testClasses`                   |
+| A Gradle version can't run on your JDK | Choose a JDK it supports, see [below](#seeing-and-changing-the-jdk) |
+
+Projects with a Gradle toolchain find the JDKs Loxel knows about, and Gradle never downloads one.
+
+### While a project loads
+
+The first load of a large Gradle project can take a minute or two. Until it finishes, files show few or no errors, and go-to-definition and rename may find nothing.
+
+### What it leaves behind
+
+Loading a project writes what a build would: `target/` for Maven, and `bin/` and `.gradle/` for Gradle. Gradle's `bin/` isn't in every project's `.gitignore`, so you may want to add it. IDE files such as `.project` and `.classpath` are kept out of your project.
+
+Each worktree runs its own Gradle process while its Java server does, about 500 MB or more on top of the server's 1 GB or so, and it stops with the server. Gradle processes you started yourself are not touched.
+
+### Limits
+
+- In a repository with Maven or Gradle projects, Java files outside any of them get syntax errors only.
+- Projects whose tests use a different Java level from their main code may show false errors in tests.
+- Kotlin sources and classes generated by other tools aren't visible to Java files in mixed projects.
+- Of several Maven modules with the same `artifactId`, only the first loads.
 
 ## JDK classes
 
@@ -65,6 +95,8 @@ Click it, or run **Java: Select JDK** from the command palette (`Cmd+Shift+P`), 
 - The rest of the list is every JDK Loxel found.
 
 The choice is saved for that worktree and survives restarts. If the chosen JDK is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
+
+New terminals in that worktree start with the chosen JDK, see [Java JDK in terminals](/docs/terminals#java-jdk). Automatic detection leaves terminals as they are.
 
 ---
 

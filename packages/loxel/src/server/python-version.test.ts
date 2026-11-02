@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { pythonVersion } from "./python-version";
+const stateDir = await mkdtemp(join(tmpdir(), "python-version-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+const { pythonVersion } = await import("./python-version");
+const { setRepoTrusted } = await import("./repo-trust");
+
+afterAll(async () => {
+  await rm(stateDir, { recursive: true, force: true });
+});
 
 let root: string | undefined;
 
@@ -49,12 +56,27 @@ describe("pythonVersion", () => {
     expect(await runs()).toBe(2);
   });
 
-  test("asks from the worktree, so a version-manager shim reads its .python-version", async () => {
-    // Like a pyenv shim: the version comes from `.python-version` in the working directory.
-    const { python } = await fakePython(`echo "Python $(cat .python-version)"`);
+  /** Like a pyenv shim: the version comes from `.python-version` in the working directory. */
+  async function shimAndWorktree(): Promise<{ python: string; wt: string }> {
+    const { python } = await fakePython(
+      `if [ -f .python-version ]; then echo "Python $(cat .python-version)"; else echo "Python 3.9.0"; fi`,
+    );
     const wt = join(root!, "wt");
     await mkdir(wt);
     await writeFile(join(wt, ".python-version"), "3.11.9\n");
+    return { python, wt };
+  }
+
+  test("asks from the worktree of a trusted repository, so a shim reads its .python-version", async () => {
+    const { python, wt } = await shimAndWorktree();
+    setRepoTrusted(wt, true);
+    expect(await pythonVersion(python, wt)).toBe("3.11.9");
+  });
+
+  test("asks from the filesystem root otherwise, and again from the worktree once trusted", async () => {
+    const { python, wt } = await shimAndWorktree();
+    expect(await pythonVersion(python, wt)).toBe("3.9.0");
+    setRepoTrusted(wt, true);
     expect(await pythonVersion(python, wt)).toBe("3.11.9");
   });
 

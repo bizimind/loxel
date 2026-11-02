@@ -7,6 +7,7 @@ import type {
   JavaScriptDialogClosed,
   JavaScriptDialogRequest,
 } from "@/electron/javascript-dialog-protocol";
+import { getFocusedHardRefreshTarget } from "@/lib/hard-refresh-targets";
 import { focusRegisteredPanel } from "@/lib/panel-focus";
 
 // BrowserPanel renders its webview only in Electron (read once, at import).
@@ -80,10 +81,12 @@ function renderPanel({ ready = true, url = "about:blank" } = {}) {
   const guest = { id: WEB_CONTENTS_ID };
   // How many dialog answers had been sent when the page was reloaded.
   const reload = mock(() => respondToJavaScriptDialog.mock.calls.length);
+  const reloadIgnoringCache = mock(() => respondToJavaScriptDialog.mock.calls.length);
   Object.assign(webview, {
     getWebContentsId: () => guest.id,
     loadURL: async () => {},
     reload,
+    reloadIgnoringCache,
     canGoBack: () => false,
     canGoForward: () => false,
   });
@@ -91,7 +94,7 @@ function renderPanel({ ready = true, url = "about:blank" } = {}) {
   webview.focus();
   const fireReady = () => act(() => void webview.dispatchEvent(new Event("dom-ready")));
   if (ready) fireReady();
-  return { webview, guest, reload, fireReady };
+  return { webview, guest, reload, reloadIgnoringCache, fireReady };
 }
 
 const lastResponse = () => respondToJavaScriptDialog.mock.calls.at(-1)?.[0];
@@ -231,6 +234,42 @@ describe("page dialogs in a browser panel", () => {
     renderPanel();
     show({ webContentsId: WEB_CONTENTS_ID + 1, message: "not mine" });
     expect(screen.queryByText("not mine")).toBeNull();
+  });
+});
+
+describe("hard refresh", () => {
+  test("bypasses the cache for the panel that holds focus, in its page or its toolbar", () => {
+    const { webview, reload, reloadIgnoringCache } = renderPanel();
+    getFocusedHardRefreshTarget()?.();
+    expect(reloadIgnoringCache).toHaveBeenCalledTimes(1);
+
+    screen.getByRole("textbox").focus();
+    getFocusedHardRefreshTarget()?.();
+    expect(reloadIgnoringCache).toHaveBeenCalledTimes(2);
+    expect(reload).not.toHaveBeenCalled();
+
+    screen.getByText("Elsewhere").focus();
+    expect(document.activeElement).not.toBe(webview);
+    expect(getFocusedHardRefreshTarget()).toBeUndefined();
+  });
+
+  test("first dismisses the page's dialogs, which would block the navigation", () => {
+    const { reloadIgnoringCache } = renderPanel();
+    show({ type: "confirm" });
+    act(() => getFocusedHardRefreshTarget()?.());
+    expect(reloadIgnoringCache.mock.results).toEqual([{ type: "return", value: 1 }]);
+  });
+
+  test("does nothing until the webview is ready, and stops applying once unmounted", () => {
+    const { reloadIgnoringCache, fireReady } = renderPanel({ ready: false });
+    getFocusedHardRefreshTarget()?.();
+    expect(reloadIgnoringCache).not.toHaveBeenCalled();
+    fireReady();
+    getFocusedHardRefreshTarget()?.();
+    expect(reloadIgnoringCache).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    expect(getFocusedHardRefreshTarget()).toBeUndefined();
   });
 });
 

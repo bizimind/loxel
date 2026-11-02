@@ -232,6 +232,18 @@ class FakeClient {
     return (await this.diagnostics(uri)).map((d) => d.message);
   }
 
+  /** Each inlay hint in the document, in order, with its parts joined. */
+  async inlayHintLabels(uri: string): Promise<Array<{ line: number; label: string }>> {
+    const hints = (await this.request("textDocument/inlayHint", {
+      textDocument: { uri },
+      range: { start: { line: 0, character: 0 }, end: { line: 1000, character: 0 } },
+    })) as Array<{ position: { line: number }; label: string | Array<{ value: string }> }>;
+    return hints.map(({ position, label }) => ({
+      line: position.line,
+      label: typeof label === "string" ? label : label.map((part) => part.value).join(""),
+    }));
+  }
+
   async codeActions(uri: string): Promise<unknown> {
     const start = { line: 0, character: 0 };
     return this.request("textDocument/codeAction", {
@@ -391,6 +403,35 @@ describe.skipIf(resolveTypeScriptBinary() === null)("TsLspManager with tsc --lsp
       client.change(uri, 2, "{ }");
       expect(recording.forwarded("textDocument/didOpen")).toEqual([]);
       expect(recording.forwarded("textDocument/didChange")).toEqual([]);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "returns inlay hints on a real file, with parameter names on literal arguments only",
+    async () => {
+      root = await realpath(await mkdtemp(join(tmpdir(), "TsLspInlay-")));
+      manager = new TsLspManager();
+      const client = new FakeClient(manager);
+      await client.start(root);
+      const text = [
+        "function add(first, second) {",
+        "  return 1;",
+        "}",
+        "const literal = add(1, 2);",
+        "const other = add(literal, literal);",
+        "",
+      ].join("\n");
+      const labels = await client.inlayHintLabels(
+        client.open(join(root, "a.js"), text, "javascript"),
+      );
+      expect(labels).toEqual([
+        { line: 0, label: ": number" },
+        { line: 3, label: ": number" },
+        { line: 3, label: "first:" },
+        { line: 3, label: "second:" },
+        { line: 4, label: ": number" },
+      ]);
     },
     TEST_TIMEOUT_MS,
   );
