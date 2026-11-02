@@ -63,6 +63,8 @@ type BuildSignal =
   | { kind: "other" }
   /** A Maven plugin applied here with its configuration in a `pluginManagement`, here or above. */
   | { kind: "applied-elsewhere" }
+  /** The fmt plugin's entry, which what `pluginManagement` entries above it say still adds to. */
+  | { kind: "fmt-plugin"; plugin: string }
   /** Plugins applied through catalog aliases, which only the catalog can name. */
   | { kind: "plugin-aliases"; aliases: string[] }
   | FormatterDecline;
@@ -119,8 +121,15 @@ export function findJavaFormatDeclaration(
     const found = awaitingManaged ? (managedSignal(dir) ?? own) : own;
     const signal = hasKind(found, "plugin-aliases")
       ? palantirByAlias(found.aliases, dirs.slice(i))
-      : found;
-    if (!signal || hasKind(signal, "applied-elsewhere") || hasKind(signal, "plugin-aliases")) {
+      : hasKind(found, "fmt-plugin")
+        ? fmtMavenSignal([found.plugin, ...managedFmtPlugins(dirs.slice(i))])
+        : found;
+    if (
+      !signal ||
+      hasKind(signal, "applied-elsewhere") ||
+      hasKind(signal, "plugin-aliases") ||
+      hasKind(signal, "fmt-plugin")
+    ) {
       continue;
     }
     if ("notice" in signal) return signal;
@@ -231,6 +240,24 @@ function readPom(path: string): string {
     : "";
 }
 
+function isFmtPlugin(plugin: string): boolean {
+  return (
+    xmlElement(plugin, "artifactId") === "fmt-maven-plugin" &&
+    FMT_PLUGIN_GROUPS.has(xmlElement(plugin, "groupId") ?? "")
+  );
+}
+
+/** The fmt plugin's `pluginManagement` entries from these directories, nearest first. */
+function managedFmtPlugins(dirs: readonly string[]): string[] {
+  return dirs.flatMap((dir) =>
+    xmlBlocks(readPom(join(dir, "pom.xml")), "pluginManagement").flatMap(({ body }) =>
+      xmlBlocks(body, "plugin")
+        .map((plugin) => plugin.body)
+        .filter(isFmtPlugin),
+    ),
+  );
+}
+
 function pluginsSignal(xml: string): BuildSignal | null {
   let applied: BuildSignal | null = null;
   for (const { body: plugin } of xmlBlocks(xml, "plugin")) {
@@ -238,9 +265,8 @@ function pluginsSignal(xml: string): BuildSignal | null {
     const signal =
       artifact === "spotless-maven-plugin"
         ? spotlessMavenSignal(plugin)
-        : artifact === "fmt-maven-plugin" &&
-            FMT_PLUGIN_GROUPS.has(xmlElement(plugin, "groupId") ?? "")
-          ? fmtMavenSignal(plugin)
+        : isFmtPlugin(plugin)
+          ? ({ kind: "fmt-plugin", plugin } as const)
           : null;
     if (hasKind(signal, "applied-elsewhere")) applied = signal;
     else if (signal) return signal;
@@ -294,11 +320,23 @@ function spotlessMavenSignal(plugin: string): BuildSignal | null {
   };
 }
 
-/** The fmt plugin's version of the formatter is the override's, else what its own POM names. */
-function fmtMavenSignal(plugin: string): BuildSignal {
+/**
+ * The fmt plugin's settings from its applied entry, then the `pluginManagement` entries it inherits,
+ * nearest first, as Maven merges them. Its version of the formatter is the override's, else what
+ * its own POM names.
+ */
+function fmtMavenSignal(plugins: readonly string[]): BuildSignal {
+  const setting = (name: string): string | null => {
+    for (const plugin of plugins) {
+      const value = xmlElement(plugin, name);
+      if (value !== null) return value;
+    }
+    return null;
+  };
   const flag = (name: string, value: string, cliFlag: string) =>
-    xmlElement(plugin, name)?.toLowerCase() === value ? [cliFlag] : [];
-  const override = xmlBlocks(plugin, "dependency")
+    setting(name)?.toLowerCase() === value ? [cliFlag] : [];
+  const override = plugins
+    .flatMap((plugin) => xmlBlocks(plugin, "dependency"))
     .map(({ body }) => body)
     .find((dependency) => xmlElement(dependency, "artifactId") === GOOGLE_JAVA_FORMAT);
   const overridden = override ? xmlElement(override, "version") : null;
@@ -306,14 +344,14 @@ function fmtMavenSignal(plugin: string): BuildSignal {
     ? mavenVersion(overridden)
     : {
         kind: "fmt-plugin",
-        group: xmlElement(plugin, "groupId") ?? "",
-        pluginVersion: mavenVersion(pluginOwnVersion(plugin)),
+        group: setting("groupId") ?? "",
+        pluginVersion: mavenVersion(plugins.map(pluginOwnVersion).find(Boolean) ?? ""),
       };
   return {
     kind: "formatter",
     tool: GOOGLE_JAVA_FORMAT,
     version,
-    scope: FMT_SCOPE_SETTINGS.some((name) => isOn(xmlElement(plugin, name)))
+    scope: FMT_SCOPE_SETTINGS.some((name) => isOn(setting(name)))
       ? "unreadable"
       : { includes: MAVEN_SOURCES, excludes: [], inherited: true, excludeBuildDir: false },
     flags: [
@@ -321,9 +359,7 @@ function fmtMavenSignal(plugin: string): BuildSignal {
       ...flag("skipSortingImports", "true", SKIP_SORTING),
       ...flag("skipRemovingUnusedImports", "true", SKIP_UNUSED),
       // Unlike the command's, the plugin's default is to leave long strings alone.
-      ...(xmlElement(plugin, "skipReflowingLongStrings")?.toLowerCase() === "false"
-        ? []
-        : [REFLOW]),
+      ...(setting("skipReflowingLongStrings")?.toLowerCase() === "false" ? [] : [REFLOW]),
     ],
   };
 }

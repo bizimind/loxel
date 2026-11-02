@@ -211,6 +211,47 @@ describe("fmt-maven-plugin", () => {
     });
   });
 
+  describe("with a parent's pluginManagement", () => {
+    const parent = `<project><build><pluginManagement><plugins><plugin>
+      <groupId>com.spotify.fmt</groupId>
+      <artifactId>fmt-maven-plugin</artifactId>
+      <version>2.29.0</version>
+      <configuration><style>aosp</style></configuration>
+      <dependencies><dependency>
+        <artifactId>google-java-format</artifactId><version>1.30.0</version>
+      </dependency></dependencies>
+    </plugin></plugins></pluginManagement></build></project>`;
+    const module = (body: string) => `<project><build><plugins><plugin>
+      <groupId>com.spotify.fmt</groupId>
+      <artifactId>fmt-maven-plugin</artifactId>
+      ${body}
+    </plugin></plugins></build></project>`;
+    const AOSP_130 = { pin: "1.30.0", flags: ["--aosp", REFLOW] };
+
+    test.each([
+      ["a bare entry", ""],
+      ["its own version", "<version>2.28.0</version>"],
+      ["its own version and executions", "<version>2.28.0</version><executions/>"],
+    ])("%s inherits the settings", async (_name, body) => {
+      expect(
+        await declared({ "pom.xml": parent, "a/pom.xml": module(body) }, "a/src/main/java"),
+      ).toMatchObject(AOSP_130);
+    });
+
+    test("what the module sets wins", async () => {
+      const body = "<configuration><style>google</style></configuration>";
+      expect(
+        await declared({ "pom.xml": parent, "a/pom.xml": module(body) }, "a/src/main/java"),
+      ).toMatchObject({ pin: "1.30.0", flags: [REFLOW] });
+    });
+
+    test("a module not applying it formats nothing", async () => {
+      expect(
+        await declared({ "pom.xml": parent, "a/pom.xml": "<project/>" }, "a/src/main/java"),
+      ).toBeNull();
+    });
+  });
+
   test("a dependency override pins the version, and strings can be set to reflow", async () => {
     const body = `<configuration><skipReflowingLongStrings>false</skipReflowingLongStrings></configuration>
       <dependencies><dependency>

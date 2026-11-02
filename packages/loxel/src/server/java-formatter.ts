@@ -20,8 +20,8 @@ import type {
   LanguageFormatter,
 } from "./language-formatter";
 import { logger } from "./logger";
-import { linksToVersionManager } from "./rust-tool-shim";
 import { buildSpawnEnv } from "./shell-env";
+import { linksToVersionManager } from "./version-manager-link";
 
 const log = logger.child("format");
 
