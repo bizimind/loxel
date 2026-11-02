@@ -495,6 +495,58 @@ describe("placement", () => {
     expect(api.activePanel?.id).toBe(a.id);
   });
 
+  test("a batch's first panel is placed as asked and the rest join its group", () => {
+    const { api } = setup();
+    const placement = { split: "right" as const, batch: "b1" };
+
+    createBrowser("https://example.com/1", { placement });
+    openFileBacked("codeEditor", "/repo/new.ts", { placement });
+    createBrowser("https://example.com/2", { placement });
+
+    expect(api.groups).toHaveLength(3);
+    const last = api.groups[2]!.panels;
+    expect(last).toHaveLength(3);
+    expect(last[1]!.id).toBe("codeeditor-/repo/new.ts");
+  });
+
+  test("without focus a batch keeps the active tab and still shares one group", () => {
+    const { api, a } = setup();
+    a.api.setActive();
+    const placement = { split: "right" as const, batch: "b2" };
+
+    createBrowser("https://example.com/1", { placement, focus: false });
+    createBrowser("https://example.com/2", { placement, focus: false });
+
+    expect(api.activePanel?.id).toBe(a.id);
+    expect(api.groups).toHaveLength(3);
+    expect(api.groups.map((g) => g.panels.length).toSorted((x, y) => x - y)).toEqual([1, 2, 2]);
+  });
+
+  test("an open file in a batch moves to the batch's group", () => {
+    const { api, c } = setup();
+    const placement = { split: "down" as const, batch: "b3" };
+
+    createBrowser("https://example.com", { placement });
+    openFileBacked("codeEditor", "/repo/a.ts", { placement });
+
+    const moved = api.getPanel("codeeditor-/repo/a.ts")!;
+    const browser = api.panels.find((p) => p.id.startsWith("browser-"))!;
+    expect(moved.group).toBe(browser.group);
+    expect(moved.group).not.toBe(c.group);
+  });
+
+  test("another batch, or another layout, starts its own group", () => {
+    const { api } = setup();
+
+    createBrowser("https://example.com/1", { placement: { split: "right", batch: "b4" } });
+    createBrowser("https://example.com/2", { placement: { split: "right", batch: "b5" } });
+    expect(api.groups).toHaveLength(4);
+
+    const other = setup();
+    createBrowser("https://example.com/3", { placement: { split: "right", batch: "b5" } });
+    expect(other.api.groups).toHaveLength(3);
+  });
+
   test("without focus a browser tab added behind the active tab leaves its content shown", () => {
     const { api, a } = setup();
     a.api.setActive();
