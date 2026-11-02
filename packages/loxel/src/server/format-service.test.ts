@@ -519,6 +519,7 @@ describe("FormatService language modules", () => {
 
   test("a relative override command survives the module's cwd", async () => {
     const wt = await makeWorktree({ "mod/a.fake": "" });
+    setRepoTrusted(wt, true);
     await installFormatter(join(wt, "tools"), "tools");
     const language = fakeLanguage({ spawnOptions: (_command, dir) => ({ cwd: dir }) });
     const settings: FormattingSettings = {
@@ -685,6 +686,7 @@ describe("FormatService language failure notices", () => {
   test("a manual override still runs where the module declines", async () => {
     const wt = await makeWorktree({});
     await writeFile(join(wt, "fmt"), "#!/bin/sh\necho overridden\n", { mode: 0o755 });
+    setRepoTrusted(wt, true);
     const decline: LanguageFormatter = {
       extensions: ["fake"],
       detect: () => ({ notice: "declined" }),
@@ -784,6 +786,59 @@ describe("a persistent backend's failure in an untrusted repository", () => {
     await writeFile(join(wt, "node_modules/.bin/prettier"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     const result = await new FormatService([]).format("x", "a.ts", wt, AUTO_DETECT);
     expect(result).toEqual({ content: null });
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+  });
+});
+
+describe("a manual override in an untrusted repository", () => {
+  const overrideFor = (command: string): FormattingSettings => ({
+    ...DEFAULT_FORMATTING_SETTINGS,
+    enabled: true,
+    overrides: [{ id: "1", extensions: "fake", command, args: "" }],
+  });
+
+  async function worktreeWithScript(): Promise<string> {
+    const wt = await realpath(await makeWorktree({ "a.fake": "" }));
+    await mkdir(join(wt, "scripts"));
+    await writeFile(join(wt, "scripts/fmt"), "#!/bin/sh\necho ran\n", { mode: 0o755 });
+    return wt;
+  }
+
+  test("holds back a relative path and reports it", async () => {
+    const wt = await worktreeWithScript();
+    const result = await new FormatService([]).format(
+      "x",
+      "a.fake",
+      wt,
+      overrideFor("scripts/fmt"),
+    );
+    expect(result).toEqual({ content: null });
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([
+      "Format on save doesn't run scripts/fmt from this repository.",
+    ]);
+  });
+
+  test("runs a relative path once the repository is trusted", async () => {
+    const wt = await worktreeWithScript();
+    setRepoTrusted(wt, true);
+    const result = await new FormatService([]).format(
+      "x",
+      "a.fake",
+      wt,
+      overrideFor("scripts/fmt"),
+    );
+    expect(result.content).toBe("ran\n");
+  });
+
+  test("runs an absolute path", async () => {
+    const wt = await worktreeWithScript();
+    const result = await new FormatService([]).format(
+      "x",
+      "a.fake",
+      wt,
+      overrideFor(join(wt, "scripts/fmt")),
+    );
+    expect(result.content).toBe("ran\n");
     expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import type { FileSink } from "bun";
 
@@ -19,7 +19,7 @@ import { languageFormatters } from "./language-formatters";
 import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
 import { PrettierLibBackend } from "./prettier-lib-backend";
-import { isRepoTrusted } from "./repo-trust";
+import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 
@@ -220,6 +220,15 @@ export class FormatService {
     // 1. Check manual overrides first
     const override = findMatchingOverride(settings.overrides, ext);
     if (override) {
+      // Overrides apply to every repository, and a relative path names a different file in each.
+      if (worktreePath && isRelativePath(override.command) && !isRepoTrusted(worktreePath)) {
+        log.info("Holding back a relative override", { command: override.command, filePath });
+        reportRepoRestriction(
+          worktreePath,
+          `Format on save doesn't run ${override.command} from this repository.`,
+        );
+        return UNFORMATTED;
+      }
       log.info("Formatting with manual override", { command: override.command, filePath });
       return this.runFormatter(override.command, override.args, content, filePath, worktreePath);
     }
@@ -568,6 +577,11 @@ function spawnFailureNotice(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** A command with a directory in it that isn't absolute, which resolves against the worktree. */
+function isRelativePath(command: string): boolean {
+  return command.includes("/") && !isAbsolute(command);
+}
 
 function extractExtension(filePath: string): string | null {
   const lastSlash = filePath.lastIndexOf("/");
