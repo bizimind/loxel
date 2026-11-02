@@ -96,6 +96,8 @@ Click it, or run **Java: Select JDK** from the command palette (`Cmd+Shift+P`), 
 
 The choice is saved for that worktree and survives restarts. If the chosen JDK is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
 
+New terminals in that worktree start with the chosen JDK, see [Java JDK in terminals](/docs/terminals#java-jdk). Automatic detection leaves terminals as they are.
+
 ---
 
 ## See also
