@@ -793,7 +793,8 @@ describe.skipIf(!canRun)("GolangciLintLspManager", () => {
       });
       const file = join(wt, "a.go");
       await report(fixableIssue(file));
-      const moved = `// moved\n${SOURCE}`;
+      // Appended, so the diagnostic stays under the request and only the guard can refuse it.
+      const moved = `${SOURCE}// moved\n`;
       await writeFile(join(runs, "during"), `printf '%s' '${moved}' > '${file}'\n`);
       openWith(client, file, moved);
       await client.diagnostics(file, ["found"]);
