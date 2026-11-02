@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
+import "@/test/temp-state-dir";
 
 import { FakeClient } from "./clangd-test-client";
 

@@ -4,6 +4,7 @@ import {
   CACHED_FILE_DELAY_MS,
   ClangdFileChanges,
   classifyChange,
+  DATABASES_DEBOUNCE_MS,
   INDEX_DIRECTORY_DEBOUNCE_MS,
   INDEX_DIRECTORY_RECHECK_MS,
   INDEX_REFRESH_QUIET_MS,
@@ -45,23 +46,38 @@ describe("classifyChange", () => {
 
 describe("ClangdFileChanges", () => {
   let fired: string[];
+  let databaseLooks: number;
   let changes: ClangdFileChanges;
 
   beforeEach(() => {
     jest.useFakeTimers();
     fired = [];
+    databaseLooks = 0;
     changes = new ClangdFileChanges({
       recheck: () => fired.push("recheck"),
       rebuild: () => fired.push("rebuild"),
       indexDirectoryChanged: () => fired.push("index-directory"),
       isOpen: (relPath) => relPath === "open.cpp",
       refreshIndex: () => fired.push("refresh-index"),
+      databasesChanged: () => {
+        databaseLooks += 1;
+      },
     });
   });
 
   afterEach(() => {
     changes.dispose();
     jest.useRealTimers();
+  });
+
+  test("a database or .clangd changing means looking again once, not a source", () => {
+    changes.pathsChanged(["cmake-build-debug/compile_commands.json"]);
+    changes.pathsChanged(["sub/.clangd"]);
+    jest.advanceTimersByTime(DATABASES_DEBOUNCE_MS);
+    expect(databaseLooks).toBe(1);
+    changes.pathsChanged(["src/a.cpp"]);
+    jest.advanceTimersByTime(DATABASES_DEBOUNCE_MS);
+    expect(databaseLooks).toBe(1);
   });
 
   test("a checkout arriving in many batches gives one re-check", () => {
@@ -111,6 +127,7 @@ describe("ClangdFileChanges", () => {
       indexDirectoryChanged: () => {},
       isOpen: () => true,
       refreshIndex: () => {},
+      databasesChanged: () => {},
     });
     throwing.pathsChanged(["a.h"]);
     expect(() => jest.advanceTimersByTime(SOURCE_DEBOUNCE_MS)).not.toThrow();

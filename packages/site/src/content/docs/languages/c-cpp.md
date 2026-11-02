@@ -1,6 +1,6 @@
 ---
 title: C and C++
-description: C, C++ and Objective-C language features from clangd, with compile_commands.json, .clangd and .clang-tidy.
+description: C, C++ and Objective-C language features from clangd, with compile_commands.json in any build folder, .clangd and .clang-tidy.
 order: 13.5
 ---
 
@@ -11,7 +11,7 @@ These files are served by [clangd](https://clangd.llvm.org). Besides diagnostics
 - **Semantic highlighting**: macros, namespaces, types and parameters are colored by what they are, and code disabled by `#if 0` is dimmed.
 - **Inlay hints**: parameter names at call sites and deduced types, shown inline.
 - **Quick fixes and refactorings** (`Cmd+.`): fix a typo clang recognizes, remove an unused include, replace `auto` with the deduced type, and more.
-- **Project-wide search**: references, rename and Go to Symbol cover the whole project once clangd has indexed it in the background.
+- **Project-wide search**: references, rename and Go to Symbol cover the whole project once clangd has indexed it in the background. That means the files in the compile database, so test files left out of the build keep the old name after a rename.
 
 ## What you need to install
 
@@ -39,7 +39,7 @@ The usual source is a `compile_commands.json` file. With CMake, turn it on when 
 cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 ```
 
-clangd looks for the file from each source file's folder upward, in each folder and its `build/` subfolder, so the `build` folder above is found without further setup, and each project in a monorepo can have its own. Other build systems have their own generators, such as `bear -- make` for Make.
+clangd looks for the file from each source file's folder upward, in each folder and its `build/` subfolder, so the `build` folder above is found without further setup, and each project in a monorepo can have its own. Other build systems have their own generators, such as `meson setup build` for Meson and `bear -- make` for Make. Loxel never runs these for you.
 
 A project with its own compiler gets its include paths from that compiler once you [trust the repository](/docs/repository-trust), so cross-compilers work whatever they are called and wherever they are. Until then, clangd asks only compilers in system folders. Loxel doesn't always prompt for this, so run **Manage Repository Trust** from the command palette if your project needs it.
 
@@ -50,7 +50,32 @@ For a small project, a `compile_flags.txt` file with one flag per line, at the p
 -Iinclude
 ```
 
-The index clangd builds is saved in `.cache/clangd/index/` beside `compile_commands.json`, and it ignores itself in git. If that folder is a symlink, clangd skips the background index, and references and rename cover only the open files.
+The index clangd builds is saved in `.cache/clangd/index/` beside `compile_commands.json`, and it ignores itself in git. If that folder is a symlink, clangd skips the background index, and references and rename cover only the open files. The same goes, until you [trust the repository](/docs/repository-trust), for a repository whose `.clangd` names a compile database outside its worktree.
+
+## Which compile database a file uses
+
+While a C, C++ or Objective-C file is active, the status bar shows the compile database it uses, such as `C++ (cmake-build-debug)`. Hover it to see the path and how it was found.
+
+| The status bar shows              | What it means                                                                                                                                                  |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `C++ (build)`                     | The folder holding the file's `compile_commands.json`                                                                                                          |
+| `C++ (compile_commands.json)`     | The file itself, at the root of the worktree                                                                                                                   |
+| `C++ (compile_flags.txt)`         | A flags file that applies to the files below it                                                                                                                |
+| `C++ (.clangd flags)`             | No database, and a `.clangd` file adds compile flags                                                                                                           |
+| `C++ (no compile database)`       | clangd guesses the flags, so includes may be missing. In yellow, the tooltip says what to run. Not in yellow, a `.clangd` file has `CompilationDatabase: None` |
+| `C++ (choose a compile database)` | Loxel found some but can't tell which applies, and clangd is guessing until you pick one                                                                       |
+
+Build folders with other names work too. clangd doesn't look in `cmake-build-debug/`, `build-debug/` or `out/build/x/`, so Loxel looks under the root of the worktree for `cmake-build-*`, `build-*`, `build/*`, `out/*` and `out/build/*`, and for any folder CMake, Ninja or Meson has configured. If there's exactly one with a `compile_commands.json`, Loxel uses it. If there are several, which applies is up to you, so it uses none and asks.
+
+A compile database found this way applies to every file, so Loxel leaves it to you when clangd finds a database by itself anywhere in the worktree, such as a monorepo project's own `build/`. Those projects keep working as they are. In a very large worktree, which Loxel can't search whole, it leaves the choice to you as well.
+
+Click the item, or run **C/C++: Select Compile Database** from the command palette (`Cmd+Shift+P`), to choose for this worktree:
+
+- **Use automatic detection**: the rules above.
+- **A folder Loxel found**: applies to every file of the worktree.
+- **Enter a folder or compile database path**: any folder holding a `compile_commands.json` or `compile_flags.txt`, also outside the worktree. It applies to every file too, over a project's own database and a `.clangd` file's.
+
+The language server restarts when the database in use changes, whether you chose it or a new build folder appeared, and your open files and unsaved edits stay as they are. The index goes beside the database, in its folder's `.cache/clangd/index/`.
 
 ## When files change on disk
 
@@ -62,7 +87,7 @@ Open files follow what happens on disk, whoever makes the change: a saved header
 
 ## Configure clangd
 
-A `.clangd` file in your project adds to or changes the compile flags and turns features on or off for the files under its folder:
+A `.clangd` file in your project adds to or changes the compile flags and turns features on or off for the files under its folder. It can also name a compile database with `CompilationDatabase`, a folder relative to the `.clangd` file, or turn it off with `None`:
 
 ```yaml
 CompileFlags:
