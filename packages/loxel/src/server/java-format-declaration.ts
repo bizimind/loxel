@@ -461,14 +461,16 @@ function escapeRegExp(text: string): string {
 // ---------------------------------------------------------------------------
 // Gradle
 
-const OTHER_SPOTLESS_JAVA_STEP = /\b(eclipse|prettier|clangFormat|greclipse)\s*\(/;
+/** These take a parenthesis or, in Groovy, a space and an argument. */
+const OTHER_SPOTLESS_JAVA_STEP =
+  /\b(eclipse|prettier|clangFormat|greclipse)(?:\s*\(|[ \t]+[\w'"$])/;
 const JAVA_BLOCK = /\bjava\s*\{/g;
 /** Blocks that run a script's settings for other projects, whose directories its globs apply to. */
-const INHERITING_BLOCK = /\b(subprojects|allprojects|configure)\b/;
+const INHERITING_BLOCK = /\b(?:subprojects|allprojects)\b[^{(;\n]*\{|\bconfigure\s*\([^)]*\)\s*\{/g;
 /** Far above a real build; each block is scanned to its end, and the script is the repository's. */
 const MAX_JAVA_BLOCKS = 64;
-const TOGGLE_CALL = /\btoggleOffOn\s*\(/;
-const IMPORT_ORDER_CALL = /\bimportOrder(?:File)?\s*\(/;
+const TOGGLE_CALL = /\btoggleOffOn(?:\s*\(|[ \t]+[\w'"$])/;
+const IMPORT_ORDER_CALL = /\bimportOrder(?:File)?(?:\s*\(|[ \t]+[\w'"$])/;
 const APPLY_FALSE_LINE = /^.*\bapply\s*\(?\s*false.*$/gm;
 const PLUGIN_ALIAS = /\balias\(\s*libs\.plugins\.([\w.]+)\s*\)/g;
 const BOOLEAN_ARGUMENT = /^(true|false)?$/;
@@ -538,7 +540,9 @@ function gradleScope(javaBlocks: readonly string[], script: string): FileScope {
   return {
     includes,
     excludes: excludes ?? [],
-    inherited: INHERITING_BLOCK.test(script),
+    inherited: blockBodies(script, INHERITING_BLOCK, MAX_JAVA_BLOCKS).some((body) =>
+      javaBlocks.some((java) => body.includes(java)),
+    ),
     excludeBuildDir: true,
   };
 }
@@ -552,11 +556,13 @@ function gradleGlobs(blocks: string, name: string): string[] | null | undefined 
   const after = call.index + name.length;
   const rest = blocks.slice(after);
   const paren = /^\s*\(/.exec(rest);
-  const groovy = /^[ \t]+([^\s}][^}\n;]*)/.exec(rest);
+  // Groovy's list goes on past a line that ends in a comma.
+  const groovy = /^[ \t]+((?:[^\s}][^}\n;]*,[ \t]*\r?\n[ \t]*)*[^\s}][^}\n;]*)/.exec(rest);
   const argumentText = paren
     ? blocks.slice(after + paren[0].length, closingParen(blocks, after + paren[0].length))
     : groovy?.[1];
-  if (argumentText === undefined) return undefined;
+  // Ending in a comma, the list was cut short, and a lost exclude would be formatted.
+  if (argumentText === undefined || argumentText.trimEnd().endsWith(",")) return undefined;
   const globs = argumentText
     .split(",")
     .map((argument) => argument.trim())

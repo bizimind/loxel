@@ -505,6 +505,35 @@ describe("steps and options around the formatter", () => {
     ).toMatchObject({ flags: ["--palantir", "--skip-sorting-imports", REFLOW] });
   });
 
+  test.each([
+    ["importOrder", "importOrder 'java', 'javax', ''"],
+    ["importOrderFile", 'importOrderFile "$rootDir/etc/x.importorder"'],
+  ])("Groovy's %s without parentheses keeps the imports too", async (_name, step) => {
+    expect(
+      await declared({
+        "build.gradle": `spotless { java { googleJavaFormat('1.22.0')\n${step}\n } }\n`,
+      }),
+    ).toMatchObject({ flags: ["--skip-sorting-imports", REFLOW] });
+  });
+
+  test("Groovy's toggleOffOn without parentheses declines", async () => {
+    expect(
+      await declared({
+        "build.gradle":
+          "spotless { java { googleJavaFormat('1.22.0')\ntoggleOffOn 'a', 'b'\n } }\n",
+      }),
+    ).toEqual({ notice: expect.stringContaining("toggleOffOn") });
+  });
+
+  test("Groovy's eclipse without parentheses ends the walk", async () => {
+    expect(
+      await declared(
+        { "pom.xml": spotlessPom(GJF), "a/build.gradle": "spotless { java { eclipse '4.26' } }\n" },
+        "a/src",
+      ),
+    ).toBeNull();
+  });
+
   test("toggleOffOn only for another language leaves Java formatted", async () => {
     expect(
       await declared({
@@ -682,6 +711,56 @@ describe("which files a declaration formats", () => {
     expect(await inScope(files, "lib/src/main/java/A.java")).toBe(true);
     await clean();
     expect(await inScope(files, "lib/testdata/A.java")).toBe(false);
+  });
+
+  test.each([
+    ["repositories for all projects", "allprojects { repositories { mavenCentral() } }"],
+    ["the word in a string", "println 'please configure the build'"],
+    ["the word in a coordinate", "dependencies { implementation 'x:subprojects:1.0' }"],
+    ["a block for this project", "configure<JavaPluginExtension> { }"],
+  ])("%s does not make a target relative to modules", async (_name, line) => {
+    const files = {
+      "build.gradle": `${line}\n${gradle("target 'src/**/*.java'")}`,
+      "lib/build.gradle": "",
+    };
+    expect(await inScope(files, "lib/src/main/java/A.java")).toBe(false);
+  });
+
+  test.each([
+    ["subprojects with a parameter", "subprojects { p ->\n", "}\n"],
+    ["allprojects", "allprojects {\n", "}\n"],
+    ["configure(subprojects)", "configure(subprojects) {\n", "}\n"],
+    ["subprojects.each", "subprojects.each {\n", "}\n"],
+  ])("a target inside %s is relative to modules", async (_name, open, close) => {
+    const files = {
+      "build.gradle": `${open}${gradle("target 'src/**/*.java'")}${close}`,
+      "lib/build.gradle": "",
+    };
+    expect(await inScope(files, "lib/src/main/java/A.java")).toBe(true);
+  });
+
+  test("Groovy's list wrapped onto further lines", async () => {
+    const java = `target 'src/**/*.java',
+        'lib/**/*.java'
+      targetExclude 'src/main/java/generated/**',
+                    'src/main/java/legacy/**'
+      `;
+    const files = { "build.gradle": gradle(java) };
+    expect(await inScope(files, "src/main/java/generated/A.java")).toBe(false);
+    await clean();
+    expect(await inScope(files, "src/main/java/legacy/A.java")).toBe(false);
+    await clean();
+    expect(await inScope(files, "src/main/java/A.java")).toBe(true);
+    await clean();
+    expect(await inScope(files, "lib/A.java")).toBe(true);
+  });
+
+  test("a list that ends in a comma was not read whole", async () => {
+    const java = "targetExclude 'a/**',\n  someVariable\n";
+    expect(await inScope({ "build.gradle": gradle(java) }, "src/main/java/A.java")).toBe(false);
+    await clean();
+    const cut = "targetExclude 'a/**',\n }";
+    expect(await inScope({ "build.gradle": gradle(cut) }, "src/main/java/A.java")).toBe(false);
   });
 
   test("a project's own target is not relative to a module below it", async () => {
