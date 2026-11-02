@@ -444,31 +444,28 @@ describe("kotlinFormatter spawning", () => {
     expect(result.notice).toBe(NOT_INSTALLED("ktlint"));
   });
 
-  test("the java a ktlint launcher finds cannot come from the worktree", async () => {
+  // `sed`, which the launcher also runs, since a JDK that resolves puts its own `java` first.
+  test("what a ktlint launcher runs cannot come from the worktree", async () => {
     const wt = await makeWorktree(KTLINT_PROJECT);
-    await install(wt, "java", "#!/bin/sh\n");
+    await install(wt, "sed", '#!/bin/sh\necho "worktree sed"\n');
     const bin = join(dirname(wt), "machine-bin");
-    await install(bin, "java", "#!/bin/sh\n");
-    await install(bin, "ktlint", "#!/bin/sh\ncommand -v java\n");
+    await install(bin, "sed", '#!/bin/sh\necho "machine sed"\n');
+    await install(bin, "ktlint", "#!/bin/sh\nexec sed\n");
     process.env.PATH = `${wt}:${bin}:${originalPath}`;
-    // The machine's own JDK comes first if it has one; either way, outside the worktree.
-    const { content } = await save(wt, "A.kt");
-    expect(content).toEndWith("/java\n");
-    expect(content).not.toContain(wt);
+    const result = await save(wt, "A.kt");
+    expect(result.content).toBe("machine sed\n");
   });
 
-  test("a PATH entry that is a symlink into the worktree supplies no java either", async () => {
+  test("a PATH entry that is a symlink into the worktree supplies nothing to it either", async () => {
     const wt = await makeWorktree(KTLINT_PROJECT);
-    await install(join(wt, "tools"), "java", "#!/bin/sh\n");
+    await install(join(wt, "tools"), "sed", '#!/bin/sh\necho "worktree sed"\n');
     const outside = dirname(wt);
     await symlink(join(wt, "tools"), join(outside, "link"));
     const bin = join(outside, "machine-bin");
-    await install(bin, "java", "#!/bin/sh\n");
-    await install(bin, "ktlint", "#!/bin/sh\ncommand -v java\n");
+    await install(bin, "sed", '#!/bin/sh\necho "machine sed"\n');
+    await install(bin, "ktlint", "#!/bin/sh\nexec sed\n");
     process.env.PATH = `${join(outside, "link")}:${bin}:${originalPath}`;
-    const { content } = await save(wt, "A.kt");
-    expect(content).toEndWith("/java\n");
-    expect(content).not.toContain("/link/");
+    expect((await save(wt, "A.kt")).content).toBe("machine sed\n");
   });
 
   test("a PATH entry that does not exist is dropped without losing the others", async () => {
