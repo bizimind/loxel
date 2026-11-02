@@ -446,25 +446,29 @@ describe("kotlinFormatter spawning", () => {
 
   test("the java a ktlint launcher finds cannot come from the worktree", async () => {
     const wt = await makeWorktree(KTLINT_PROJECT);
-    await install(wt, "java", '#!/bin/sh\necho "worktree java"\n');
+    await install(wt, "java", "#!/bin/sh\n");
     const bin = join(dirname(wt), "machine-bin");
-    await install(bin, "java", '#!/bin/sh\necho "machine java"\n');
-    await install(bin, "ktlint", "#!/bin/sh\nexec java\n");
+    await install(bin, "java", "#!/bin/sh\n");
+    await install(bin, "ktlint", "#!/bin/sh\ncommand -v java\n");
     process.env.PATH = `${wt}:${bin}:${originalPath}`;
-    const result = await save(wt, "A.kt");
-    expect(result.content).toBe("machine java\n");
+    // The machine's own JDK comes first if it has one; either way, outside the worktree.
+    const { content } = await save(wt, "A.kt");
+    expect(content).toEndWith("/bin/java\n");
+    expect(content).not.toContain(wt);
   });
 
   test("a PATH entry that is a symlink into the worktree supplies no java either", async () => {
     const wt = await makeWorktree(KTLINT_PROJECT);
-    await install(join(wt, "tools"), "java", '#!/bin/sh\necho "worktree java"\n');
+    await install(join(wt, "tools"), "java", "#!/bin/sh\n");
     const outside = dirname(wt);
     await symlink(join(wt, "tools"), join(outside, "link"));
     const bin = join(outside, "machine-bin");
-    await install(bin, "java", '#!/bin/sh\necho "machine java"\n');
-    await install(bin, "ktlint", "#!/bin/sh\nexec java\n");
+    await install(bin, "java", "#!/bin/sh\n");
+    await install(bin, "ktlint", "#!/bin/sh\ncommand -v java\n");
     process.env.PATH = `${join(outside, "link")}:${bin}:${originalPath}`;
-    expect((await save(wt, "A.kt")).content).toBe("machine java\n");
+    const { content } = await save(wt, "A.kt");
+    expect(content).toEndWith("/java\n");
+    expect(content).not.toContain("/link/");
   });
 
   test("a PATH entry that does not exist is dropped without losing the others", async () => {

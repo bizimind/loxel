@@ -411,9 +411,7 @@ describe.skipIf(!canRun)("KotlinLintLspManager", () => {
     await writeTool("detekt", "#!/bin/sh\necho 'Unable to locate a Java Runtime.' >&2\nexit 1\n");
     client.open(join(wt, "A.kt"));
     const notice = await client.next((m) => m.method === "window/showMessage");
-    expect(notice.params?.message).toBe(
-      "detekt needs Java, which is not on your PATH. Install a JDK and add it to your PATH to see its diagnostics.",
-    );
+    expect(notice.params?.message).toBe("detekt needs Java. Install a JDK to see its diagnostics.");
   });
 
   test("a binary in the worktree does not run, even on PATH", async () => {

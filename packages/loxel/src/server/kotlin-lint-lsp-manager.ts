@@ -304,7 +304,7 @@ export class KotlinLintLspManager implements WorktreeLspServer {
       this.notify(
         session,
         MESSAGE_TYPE.warning,
-        `${tool} needs Java, which is not on your PATH. Install a JDK and add it to your PATH to see its diagnostics.`,
+        `${tool} needs Java. Install a JDK to see its diagnostics.`,
       );
     } else if (outcome.kind === "failed") {
       const where = path.relative(session.wtPath, root) || "the worktree";

@@ -282,7 +282,7 @@ function kotlinFailureNotice(failure: FormatterFailure): string | undefined {
     return `Format on save skipped: this project uses ${command}, which is not on your PATH. Install it, for example with \`${install}\`.`;
   }
   if (NO_JAVA.test(failure.stderr)) {
-    return `Format on save skipped: ${command} needs Java, which is not on your PATH. Install a JDK and add it to your PATH.`;
+    return `Format on save skipped: ${command} needs Java. Install a JDK.`;
   }
   if (command === KTLINT.command && UNKNOWN_FLAG.test(failure.stderr)) {
     return "Format on save skipped: Loxel needs ktlint 1.8 or newer. Upgrade it, for example with `brew upgrade ktlint`.";
