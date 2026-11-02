@@ -10,6 +10,7 @@ import { ClangdLspManager } from "./clangd-lsp-manager";
 import { DockerLspManager } from "./docker-lsp-manager";
 import { EslintLspManager } from "./eslint-lsp-manager";
 import { GoLspManager } from "./go-lsp-manager";
+import { GolangciLintLspManager } from "./golangci-lint-lsp-manager";
 import { JavaLspManager } from "./java-lsp-manager";
 import { KotlinLintLspManager } from "./kotlin-lint-lsp-manager";
 import { MypyLspManager } from "./mypy-lsp-manager";
@@ -32,6 +33,7 @@ export const worktreeLspManagers: readonly WorktreeLspServer[] = [
   new DockerLspManager(),
   new EslintLspManager(),
   new GoLspManager(),
+  new GolangciLintLspManager(),
   new JavaLspManager(),
   new KotlinLintLspManager(),
   new PythonLspManager(mypyLspManager),
