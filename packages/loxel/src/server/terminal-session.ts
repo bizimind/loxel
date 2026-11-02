@@ -135,7 +135,8 @@ export class TerminalSession {
   /** Identifies this spawn; a client may only resume with offsets it got under this epoch. */
   readonly epoch = crypto.randomUUID();
   readonly cwd: string;
-  readonly worktreePath: string;
+  /** The worktree this session belongs to; follows the worktree when it is moved. */
+  worktreePath: string;
   cols: number;
   rows: number;
   /** Resolves with the shell's exit code once the process is gone. */
@@ -202,6 +203,11 @@ export class TerminalSession {
       .catch((err: unknown) => {
         log.error(`Terminal ${this.shortId} exit handling failed`, { error: err });
       });
+  }
+
+  /** The shell's process ID. */
+  get pid(): number {
+    return this.proc.pid;
   }
 
   /** Total output bytes produced so far. */

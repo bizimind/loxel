@@ -23,6 +23,10 @@ const textEncoder = new TextEncoder();
 
 /** How long a new shell waits for its toolchains' environments before starting without them. */
 const TOOLCHAIN_ENV_TIMEOUT_MS = 3000;
+/** How often a session of a removed worktree checks whether the removal it runs has finished. */
+const REMOVAL_POLL_MS = 200;
+/** A removal has only quick steps left once Loxel sees it; a `wt` still running after this is hung. */
+const REMOVAL_WAIT_MS = 60_000;
 
 export interface TerminalSpawnOptions extends TerminalToolchainSettings {
   cols: number;
@@ -53,6 +57,10 @@ export interface TerminalManagerHooks {
   onNotification: (session: TerminalSession, payload: OscPayload) => void;
   /** Called after the session has been removed. */
   onExit: (session: TerminalSession, exitCode: number) => void;
+  /** Called after a session has been ended because its worktree was removed. */
+  onRetired: (id: string) => void;
+  /** Whether a `wt` process runs below the shell `pid`; see {@link TerminalManager.retireWorktree}. */
+  isRunningWt: (pid: number) => Promise<boolean>;
   /** What contributes to a new shell's environment, applied in this order. */
   toolchainEnvs: readonly ToolchainEnvContributor[];
 }
@@ -90,6 +98,7 @@ async function resolveToolchainEnv(
 
 /** A shell waiting for its environment, and what reached it meanwhile. */
 interface PendingStart {
+  worktreePath: string;
   /** Resolves to null when the terminal was destroyed meanwhile. */
   session: Promise<TerminalSession | null>;
   /** The client to bind once spawned; cleared by a detach. */
@@ -150,11 +159,12 @@ export class TerminalManager {
       session: this.buildEnv(options).then((env) => {
         if (this.starting.get(id) !== pending) return null;
         this.starting.delete(id);
-        const session = this.spawn(id, options, env);
+        const session = this.spawn(id, { ...options, worktreePath: pending.worktreePath }, env);
         if (pending.size) session.resize(pending.size.cols, pending.size.rows);
         for (const data of pending.input) session.write(data);
         return session;
       }),
+      worktreePath: options.worktreePath ?? options.cwd,
       sink: null,
       size: null,
       input: [],
@@ -271,6 +281,52 @@ export class TerminalManager {
     if (!session) return;
     this.sessions.delete(id);
     session.destroy();
+  }
+
+  /**
+   * End every session of a removed worktree, on both removal paths. A session running `wt` keeps
+   * running until `wt` exits: the terminal may be the one running `wt rm`, which at this point has
+   * unregistered the worktree but may not have started deleting its files or its branch, and
+   * closing the PTY would hang it up. `graceMs` also lets a command chained after it finish.
+   */
+  retireWorktree(worktreePath: string, graceMs = 0): void {
+    for (const [id, pending] of this.starting) {
+      if (pending.worktreePath !== worktreePath) continue;
+      this.destroy(id);
+      this.hooks.onRetired(id);
+    }
+    for (const session of this.sessions.values()) {
+      if (session.worktreePath !== worktreePath) continue;
+      this.retire(session, graceMs).catch((err: unknown) => {
+        log.error("Failed to end a removed worktree's terminal", { id: session.id, error: err });
+      });
+    }
+  }
+
+  private async retire(session: TerminalSession, graceMs: number): Promise<void> {
+    if (graceMs > 0) await Bun.sleep(graceMs);
+    const deadline = Date.now() + REMOVAL_WAIT_MS;
+    while (
+      this.sessions.get(session.id) === session &&
+      Date.now() < deadline &&
+      (await this.hooks.isRunningWt(session.pid))
+    ) {
+      await Bun.sleep(REMOVAL_POLL_MS);
+    }
+    // Exited by itself or closed meanwhile, or already ended by the other removal path.
+    if (this.sessions.get(session.id) !== session) return;
+    this.destroy(session.id);
+    this.hooks.onRetired(session.id);
+  }
+
+  /** A moved worktree keeps its sessions, so removing it later still ends them. */
+  retargetWorktree(from: string, to: string): void {
+    for (const pending of this.starting.values()) {
+      if (pending.worktreePath === from) pending.worktreePath = to;
+    }
+    for (const session of this.sessions.values()) {
+      if (session.worktreePath === from) session.worktreePath = to;
+    }
   }
 
   /** True if any session has no attached client. */

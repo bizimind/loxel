@@ -12,6 +12,7 @@ import type { FileOperationsHistory, FileOperationsService } from "./file-operat
 import type { FileWatcher } from "./file-watcher";
 import type { NodeModulesChanges } from "./node-modules-changes";
 import type { ProjectFilesService } from "./project-files-service";
+import type { RegisteredWorktrees } from "./registered-worktrees";
 import type { ReviewDb } from "./review-db";
 import type { WorktreeStatusTracker } from "./worktree-status-tracker";
 
@@ -27,6 +28,8 @@ export interface ProjectState {
   worktreesDir: string;
   /** Cached dirty status of every worktree, pushed as `worktree_status_changed`. */
   worktreeStatuses: WorktreeStatusTracker;
+  /** The worktrees seen registered, to tell a removal from a move on a `worktrees` event. */
+  registeredWorktrees: RegisteredWorktrees;
 }
 
 /**

@@ -62,7 +62,6 @@ import { getDiagnostics } from "./diagnostics";
 import { resolveEditorConfig } from "./editorconfig";
 import { describeError } from "./error-message";
 import type { FileTree } from "./external-folders-service";
-import { externalFoldersStoreKey } from "./external-folders-service";
 import type { HistoryStep } from "./file-operations-service";
 import { listFolderApps } from "./folder-apps";
 import type { FormatResult } from "./format-service";
@@ -96,6 +95,7 @@ import { stress } from "./stress-detector";
 import { toolchainStatusModules } from "./toolchain-statuses";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
 import { getCurrentVersion } from "./version";
+import { isLayoutRowOfMissingWorktree } from "./worktree-rows";
 import { findWorkspacePackages } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
 
@@ -2472,13 +2472,8 @@ async function removeOneWorktree(
       wtProgress,
     );
     wtLog.info(`Worktree '${name}' removed`, { branchDeleted: result.branchDeleted });
+    // Only now: a removal that fails, or a clean hook still running, leaves the terminals alone.
     ctx.completeWorktreeRemoval(wtPath);
-    // A worktree later created at the same path starts with an empty Others section and its own
-    // toolchain detection.
-    storeDb.deleteStore(externalFoldersStoreKey(wtPath));
-    for (const { overrideStoreKey } of toolchainStatusModules) {
-      storeDb.deleteStore(overrideStoreKey(wtPath));
-    }
     return result;
   } catch (err) {
     try {
@@ -3510,6 +3505,7 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
         if (isRepoTrustStoreKey(storeKey)) return error("Not writable through this route", 403);
         const body = await parseBody(req);
         if (typeof body.value !== "string") return error("Missing 'value' string in body", 400);
+        if (isLayoutRowOfMissingWorktree(storeKey)) return json({ success: true });
         const stored = isSettings ? stripLegacyAgentSettings(body.value) : body.value;
         storeDb.putStore(storeKey, stored);
         // Broadcast to all clients for cross-tab sync

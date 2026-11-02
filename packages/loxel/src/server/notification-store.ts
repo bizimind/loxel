@@ -42,6 +42,17 @@ export class NotificationStore {
     return this.notifications.length !== before;
   }
 
+  /** Dismiss what a worktree's terminals raised. Returns the panels that had notifications. */
+  dismissByWorktree(worktreePath: string): string[] {
+    const panelIds = new Set<string>();
+    this.notifications = this.notifications.filter((n) => {
+      if (n.source.worktreePath !== worktreePath) return true;
+      panelIds.add(n.source.panelId);
+      return false;
+    });
+    return [...panelIds];
+  }
+
   dismissAll(): void {
     this.notifications = [];
   }

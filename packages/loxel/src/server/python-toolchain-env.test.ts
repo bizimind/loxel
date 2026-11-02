@@ -37,6 +37,8 @@ describe("pythonToolchainEnv", () => {
       isSequenceEnabled: () => false,
       onNotification: () => {},
       onExit: () => {},
+      onRetired: () => {},
+      isRunningWt: async () => false,
       toolchainEnvs: [pythonToolchainEnv],
     });
     let output = "";

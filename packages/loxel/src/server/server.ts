@@ -39,9 +39,11 @@ import { tomlLspManager, worktreeLspManagers } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
 import { NotificationStore } from "./notification-store";
+import { isWtRunningBelow } from "./process-tree";
 import { ProjectFilesService } from "./project-files-service";
 import { addProject, loadProjects } from "./project-store";
 import { isListedWorktree, toWorktreeEntry } from "./project-worktrees";
+import { RegisteredWorktrees } from "./registered-worktrees";
 import { onRepoTrustStatusChange } from "./repo-trust";
 import { type RequestOriginPolicy, checkRequest } from "./request-origin";
 import { error } from "./response-helpers";
@@ -76,6 +78,7 @@ import type { TerminalSink } from "./terminal-session";
 import { isNotificationSequenceEnabled, terminalSpawnSettings } from "./terminal-settings";
 import { toolchainEnvs } from "./toolchain-envs";
 import { toolchainStatusModules } from "./toolchain-statuses";
+import { deleteRowsOfMissingWorktrees, deleteWorktreeRows } from "./worktree-rows";
 import { WorktreeStatusTracker } from "./worktree-status-tracker";
 import { INTERNAL_WORKTREE_PREFIX } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
@@ -590,17 +593,38 @@ function teardownWorktreeResources(wtPath: string, resources: WorktreeResources)
   log.info(`Worktree resources torn down: ${wtPath}`);
 }
 
-function reconcileRemovedWorktrees(projectPath: string): void {
-  for (const [wtPath, resources] of [...wtResources]) {
-    if (resources.projectPath !== projectPath || existsSync(wtPath)) continue;
+/** Follow a `worktrees` event: what was removed or moved, by whatever did it. */
+async function reconcileWorktrees(project: ProjectState): Promise<void> {
+  const subscribed = [...wtResources]
+    .filter(([, resources]) => resources.projectPath === project.cwd)
+    .map(([wtPath]) => wtPath);
+  const { removed, moved, replaced } = await project.registeredWorktrees.refresh(subscribed);
+  if (projects.get(project.cwd) !== project) return;
 
-    log.info(`Worktree removed outside the app, releasing resources: ${wtPath}`);
-    completeWorktreeRemoval(wtPath);
+  for (const wtPath of removed) {
+    log.info(`Worktree removed, cleaning up: ${wtPath}`);
+    completeWorktreeRemoval(wtPath, EXTERNAL_REMOVAL_TERMINAL_GRACE_MS);
+  }
+  // The path is valid again and clients go on showing it, so only what the old worktree left goes.
+  for (const wtPath of replaced) {
+    log.info(`Worktree removed and added again, cleaning up: ${wtPath}`);
+    endRemovedWorktree(wtPath, EXTERNAL_REMOVAL_TERMINAL_GRACE_MS);
+  }
+  for (const { from, to } of moved) {
+    log.info(`Worktree moved: ${from} -> ${to}`);
+    terminalManager.retargetWorktree(from, to);
+    releaseWorktreeResources(from);
+  }
+  // Registered, but its directory is gone (deleted by hand; `git worktree prune` removes it later).
+  // Nothing is lost by this: it comes back with the directory. A removal in progress resumes the
+  // same services if git refuses, so those are left alone.
+  for (const wtPath of subscribed) {
+    if (!existsSync(wtPath) && !suspendedWorktrees.has(wtPath)) releaseWorktreeResources(wtPath);
   }
 }
 
-/** Permanently release a removed worktree after its final project broadcast. */
-function completeWorktreeRemoval(wtPath: string): void {
+/** Stop serving a worktree path that no longer exists. */
+function releaseWorktreeResources(wtPath: string): void {
   deleteJdtlsData(wtPath);
   const resources = wtResources.get(wtPath);
   if (!resources) return;
@@ -608,6 +632,26 @@ function completeWorktreeRemoval(wtPath: string): void {
     clients.get(ws)?.subscribedWorktrees.delete(wtPath);
   }
   teardownWorktreeResources(wtPath, resources);
+}
+
+/**
+ * Everything a removed worktree leaves behind, whichever way it was removed: in the app, after
+ * `executeRemove` returned, or by `wt` or `git` anywhere else, on the event that follows. Runs only
+ * once the worktree is unregistered, and running it twice is harmless, since an in-app removal also
+ * causes that event. `terminalGraceMs` is for a shell that may be the one removing the worktree.
+ */
+function completeWorktreeRemoval(wtPath: string, terminalGraceMs = 0): void {
+  releaseWorktreeResources(wtPath);
+  endRemovedWorktree(wtPath, terminalGraceMs);
+}
+
+/** End a removed worktree's terminals and forget what is stored for it. */
+function endRemovedWorktree(wtPath: string, terminalGraceMs: number): void {
+  terminalManager.retireWorktree(wtPath, terminalGraceMs);
+  for (const panelId of notificationStore.dismissByWorktree(wtPath)) {
+    broadcastAll({ type: "notification_panel_dismissed", panelId });
+  }
+  deleteWorktreeRows(wtPath);
 }
 
 /** Pause only filesystem delivery; service caches and tracked external files remain intact. */
@@ -691,7 +735,9 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
 
       if (event === "worktrees") {
         broadcastToProject(cwd, worktreesChangedMessage(cwd));
-        reconcileRemovedWorktrees(cwd);
+        await reconcileWorktrees(project).catch((err: unknown) => {
+          log.warn("Could not read the worktree list", { projectPath: cwd, error: err });
+        });
         project.worktreeStatuses.invalidate();
         return;
       }
@@ -725,6 +771,15 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
 
   const localDb = openDatabase(join(config.stateDir, "localdb", hash12(cwd), "localdb.db"));
 
+  const registeredWorktrees = new RegisteredWorktrees(cwd);
+  await registeredWorktrees.refresh();
+  const registeredPaths = new Set(managed.map((wt) => wt.path));
+  for (const wtPath of deleteRowsOfMissingWorktrees(worktreesDir, registeredPaths)) {
+    // Not necessarily a new server: terminals outlive a project removed from the sidebar.
+    log.info(`Worktree removed while its project was not watched, cleaning up: ${wtPath}`);
+    completeWorktreeRemoval(wtPath, EXTERNAL_REMOVAL_TERMINAL_GRACE_MS);
+  }
+
   const filteredWorktrees: WorktreeEntry[] = managed
     .filter(isListedWorktree)
     .map((wt) => toWorktreeEntry(wt, null));
@@ -737,6 +792,7 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
     localDb,
     authorName,
     worktreesDir,
+    registeredWorktrees,
     worktreeStatuses: new WorktreeStatusTracker({
       projectPath: cwd,
       liveStatus: (wtPath) => liveWorktreeStatus(cwd, wtPath),
@@ -778,6 +834,11 @@ function teardownProject(cwd: string): void {
 
 // --- Idle auto-shutdown ---
 
+/**
+ * How long a terminal outlives a removal seen from outside the app. It may be the shell running
+ * `wt rm x && git push origin --delete x`, whose next command should get to finish.
+ */
+const EXTERNAL_REMOVAL_TERMINAL_GRACE_MS = 2000;
 const IDLE_SHUTDOWN_MS = 30_000;
 /** Grace period for orphaned terminals to be reattached before cleanup + shutdown. */
 const ORPHAN_CLEANUP_MS = 5 * 60_000;
@@ -792,6 +853,7 @@ const logSubscribers = new Set<ServerWebSocket<WsData>>();
 const terminalManager = new TerminalManager({
   isSequenceEnabled: isNotificationSequenceEnabled,
   toolchainEnvs,
+  isRunningWt: isWtRunningBelow,
   onNotification: (session, payload) => {
     const notification = notificationStore.add({
       source: { kind: "terminal", panelId: session.id, worktreePath: session.worktreePath },
@@ -806,6 +868,15 @@ const terminalManager = new TerminalManager({
     const owner = terminalOwners.get(session.id);
     if (owner) clients.get(owner)?.terminals.delete(session.id);
     terminalOwners.delete(session.id);
+  },
+  onRetired: (id) => {
+    const owner = terminalOwners.get(id);
+    if (owner) clients.get(owner)?.terminals.delete(id);
+    terminalOwners.delete(id);
+    // Anything it raised while its removal finished; the rest went with the worktree.
+    if (notificationStore.dismissByPanel(id)) {
+      broadcastAll({ type: "notification_panel_dismissed", panelId: id });
+    }
   },
 });
 const notificationStore = new NotificationStore();

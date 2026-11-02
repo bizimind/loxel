@@ -174,6 +174,8 @@ describe("nodeToolchainEnv", () => {
       isSequenceEnabled: () => false,
       onNotification: () => {},
       onExit: () => {},
+      onRetired: () => {},
+      isRunningWt: async () => false,
       toolchainEnvs: [nodeToolchainEnv],
     });
     let output = "";
