@@ -66,7 +66,7 @@ export interface JavaReloadProjectsRequest {
 
 export const javaToolchain = {
   id: "java",
-  languageIds: ["java"],
+  languageIds: ["java", "kotlin"],
   changedMessage: "java_env_changed",
   selectAction: { id: "java.selectRuntime", label: "Java: Select JDK" },
 } as const satisfies ToolchainStatusDescriptor;

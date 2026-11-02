@@ -9,9 +9,10 @@ import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/setti
 import { ToolchainStatusButton } from "./ToolchainStatusButton";
 
 /**
- * The JDK of the active editor's worktree, shown while that editor holds a Java file. Clicking it
- * opens the JDK picker for that worktree. Next to it, a note when a trusted repository's Maven or
- * Gradle projects did not fully load, which loads them again when clicked.
+ * The JDK of the active editor's worktree, shown while that editor holds a Java or Kotlin file.
+ * Clicking it opens the JDK picker for that worktree. Next to it, while a Java file is active, a note
+ * when a trusted repository's Maven or Gradle projects did not fully load, which loads them again
+ * when clicked. Kotlin has no language server for that to matter to.
  */
 export function JavaRuntimeStatus() {
   const active = useActiveToolchainStatus(javaToolchain, getJavaEnv);

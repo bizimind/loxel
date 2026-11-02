@@ -72,7 +72,7 @@ Hover on a JDK class shows its documentation when the JDK includes its sources (
 
 ## JDK detection
 
-Each worktree has one JDK that Java features in Loxel use. Loxel uses the first of:
+Each worktree has one JDK that Java features in Loxel use, and so do [Kotlin's ktlint and detekt](/docs/languages/kotlin#jdk). Loxel uses the first of:
 
 1. The JDK you chose for the worktree (see below).
 2. `JAVA_HOME`, if it points to a JDK. If it does not, for example after the JDK it named was removed, Loxel ignores it and says so when you hover the status bar item.
@@ -86,7 +86,7 @@ A JRE does not count, since it cannot compile, and neither does a JDK committed 
 
 ## Seeing and changing the JDK
 
-While a Java file is the active editor, the status bar shows the worktree's JDK, for example `Java 21.0.5 (Temurin)`. Hover it to see the JDK's full path and how it was found. If there is none, it reads **No JDK found**.
+While a Java or Kotlin file is the active editor, the status bar shows the worktree's JDK, for example `Java 21.0.5 (Temurin)`. Hover it to see the JDK's full path and how it was found. If there is none, it reads **No JDK found**.
 
 Click it, or run **Java: Select JDK** from the command palette (`Cmd+Shift+P`), to choose another one:
 

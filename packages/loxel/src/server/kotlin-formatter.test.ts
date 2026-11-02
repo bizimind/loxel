@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 
 import { $ } from "bun";
 
@@ -9,17 +9,18 @@ import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
 
 import type { FileFormatter, FormatterDecline } from "./language-formatter";
 
-// Reaches the Python module's state through `pathOutsideWorktree`; keep it out of the real store.
+// Reaches the Python module's state and the JDK override; keep them out of the real store.
 const stateDir = await mkdtemp(join(tmpdir(), "kotlin-formatter-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { FormatService } = await import("./format-service");
-const { kotlinFormatter } = await import("./kotlin-formatter");
+const { jdkToolEnv, kotlinFormatter } = await import("./kotlin-formatter");
 
 const originalPath = process.env.PATH;
 let root: string | undefined;
 
 afterEach(async () => {
   process.env.PATH = originalPath;
+  delete process.env.JAVA_HOME;
   if (root) await rm(root, { recursive: true, force: true });
   root = undefined;
 });
@@ -329,7 +330,7 @@ describe("kotlinFormatter spawning", () => {
     const bin = await machineBin(wt, "ktlint");
     const result = await save(wt, "src/A.kt");
     expect(result.content).toBe(
-      `ktlint from ${bin}/ktlint cwd=${await realpath(homedir())} args=--stdin -F --ignore-autocorrect-failures --stdin-path=${join(wt, "src/A.kt")} --log-level=none\n`,
+      `ktlint from ${bin}/ktlint cwd=/ args=--stdin -F --ignore-autocorrect-failures --stdin-path=${join(wt, "src/A.kt")} --log-level=none\n`,
     );
   });
 
@@ -338,8 +339,81 @@ describe("kotlinFormatter spawning", () => {
     const bin = await machineBin(wt, "ktfmt");
     const result = await save(wt, "src/A.kts");
     expect(result.content).toBe(
-      `ktfmt from ${bin}/ktfmt cwd=${await realpath(homedir())} args=--kotlinlang-style --stdin-name=${join(wt, "src/A.kts")} -\n`,
+      `ktfmt from ${bin}/ktfmt cwd=/ args=--kotlinlang-style --stdin-name=${join(wt, "src/A.kts")} -\n`,
     );
+  });
+
+  /** A directory laid out like a JDK home, in the test's directory outside the worktree. */
+  async function makeJdk(wt: string): Promise<string> {
+    const home = join(dirname(wt), "jdk");
+    await writeJdkFiles(home);
+    return home;
+  }
+
+  async function writeJdkFiles(home: string): Promise<void> {
+    await install(join(home, "bin"), "java", "#!/bin/sh\n");
+    await install(join(home, "bin"), "javac", "#!/bin/sh\n");
+    await mkdir(join(home, "lib"));
+    await writeFile(join(home, "lib", "ct.sym"), "");
+    await writeFile(join(home, "release"), 'JAVA_VERSION="21.0.5"\n');
+  }
+
+  const REPORT_JAVA = '#!/bin/sh\necho "JAVA_HOME=$JAVA_HOME java=$(command -v java)"\n';
+
+  test("ktlint runs on the worktree's JDK, ahead of any java on PATH", async () => {
+    const wt = await makeWorktree(KTLINT_PROJECT);
+    const bin = await machineBin(wt, "java");
+    await install(bin, "ktlint", REPORT_JAVA);
+    const jdk = await makeJdk(wt);
+    process.env.JAVA_HOME = jdk;
+    const result = await save(wt, "A.kt");
+    expect(result.content).toBe(`JAVA_HOME=${jdk} java=${jdk}/bin/java\n`);
+  });
+
+  test("ktfmt does not get the JDK", async () => {
+    const wt = await makeWorktree({ "build.gradle.kts": ktfmtScript() });
+    const bin = await machineBin(wt, "java");
+    await install(bin, "ktfmt", REPORT_JAVA);
+    const jdk = await makeJdk(wt);
+    process.env.JAVA_HOME = jdk;
+    const result = await save(wt, "A.kt");
+    expect(result.content).toBe(`JAVA_HOME=${jdk} java=${bin}/java\n`);
+  });
+
+  for (const [name, tracked] of [
+    ["the repository tracks", true],
+    ["only sits in the worktree", false],
+  ] as const) {
+    test(`a JDK that ${name} reaches no spawn`, async () => {
+      const wt = await makeWorktree(KTLINT_PROJECT);
+      const bin = await machineBin(wt, "ktlint");
+      await install(bin, "ktlint", REPORT_JAVA);
+      const inWorktree = join(wt, "jdk");
+      await writeJdkFiles(inWorktree);
+      await $`git init -q`.cwd(wt).quiet();
+      if (tracked) await $`git add -A`.cwd(wt).quiet();
+      process.env.JAVA_HOME = inWorktree;
+      const result = await save(wt, "A.kt");
+      expect(result.content).not.toContain(inWorktree);
+    });
+  }
+
+  test("an inherited JAVA_HOME that is no JDK stays: it may be a JRE that runs the tool", async () => {
+    const wt = await makeWorktree({ "build.gradle.kts": ktfmtScript() });
+    const bin = await machineBin(wt, "java");
+    await install(bin, "ktfmt", REPORT_JAVA);
+    process.env.JAVA_HOME = "/opt/some-jre";
+    const result = await save(wt, "A.kt");
+    expect(result.content).toBe(`JAVA_HOME=/opt/some-jre java=${bin}/java\n`);
+  });
+
+  test("with no JDK, or one PATH cannot hold, the environment is PATH alone", () => {
+    expect(jdkToolEnv("/usr/bin", null)).toEqual({ PATH: "/usr/bin" });
+    expect(jdkToolEnv("/usr/bin", { path: `/a${delimiter}b/jdk` })).toEqual({ PATH: "/usr/bin" });
+    expect(jdkToolEnv("/usr/bin", { path: "/jdk" })).toEqual({
+      JAVA_HOME: "/jdk",
+      PATH: `/jdk/bin${delimiter}/usr/bin`,
+    });
   });
 
   for (const [name, placement] of [
@@ -370,27 +444,28 @@ describe("kotlinFormatter spawning", () => {
     expect(result.notice).toBe(NOT_INSTALLED("ktlint"));
   });
 
-  test("the java a ktlint launcher finds cannot come from the worktree", async () => {
+  // `sed`, which the launcher also runs, since a JDK that resolves puts its own `java` first.
+  test("what a ktlint launcher runs cannot come from the worktree", async () => {
     const wt = await makeWorktree(KTLINT_PROJECT);
-    await install(wt, "java", '#!/bin/sh\necho "worktree java"\n');
+    await install(wt, "sed", '#!/bin/sh\necho "worktree sed"\n');
     const bin = join(dirname(wt), "machine-bin");
-    await install(bin, "java", '#!/bin/sh\necho "machine java"\n');
-    await install(bin, "ktlint", "#!/bin/sh\nexec java\n");
+    await install(bin, "sed", '#!/bin/sh\necho "machine sed"\n');
+    await install(bin, "ktlint", "#!/bin/sh\nexec sed\n");
     process.env.PATH = `${wt}:${bin}:${originalPath}`;
     const result = await save(wt, "A.kt");
-    expect(result.content).toBe("machine java\n");
+    expect(result.content).toBe("machine sed\n");
   });
 
-  test("a PATH entry that is a symlink into the worktree supplies no java either", async () => {
+  test("a PATH entry that is a symlink into the worktree supplies nothing to it either", async () => {
     const wt = await makeWorktree(KTLINT_PROJECT);
-    await install(join(wt, "tools"), "java", '#!/bin/sh\necho "worktree java"\n');
+    await install(join(wt, "tools"), "sed", '#!/bin/sh\necho "worktree sed"\n');
     const outside = dirname(wt);
     await symlink(join(wt, "tools"), join(outside, "link"));
     const bin = join(outside, "machine-bin");
-    await install(bin, "java", '#!/bin/sh\necho "machine java"\n');
-    await install(bin, "ktlint", "#!/bin/sh\nexec java\n");
+    await install(bin, "sed", '#!/bin/sh\necho "machine sed"\n');
+    await install(bin, "ktlint", "#!/bin/sh\nexec sed\n");
     process.env.PATH = `${join(outside, "link")}:${bin}:${originalPath}`;
-    expect((await save(wt, "A.kt")).content).toBe("machine java\n");
+    expect((await save(wt, "A.kt")).content).toBe("machine sed\n");
   });
 
   test("a PATH entry that does not exist is dropped without losing the others", async () => {

@@ -80,6 +80,33 @@ describe("JavaRuntimeStatus", () => {
     expect(screen.queryByText(/not fully loaded/)).toBeNull();
   });
 
+  test("shows the JDK for a Kotlin file, with no note about Java's project loading", async () => {
+    const { id, params } = activePanel;
+    activePanel.id = "codeeditor-/wt-a/src/App.kt";
+    activePanel.params = { ...params, filePath: "/wt-a/src/App.kt" };
+    getJavaEnv.mockImplementationOnce(async () => ({
+      env: JDK,
+      overridePath: null,
+      ignoredJavaHome: null,
+      projectIssue: { label: "Project not fully loaded", detail: "d" },
+    }));
+    try {
+      renderStatus();
+      await screen.findByRole("button", { name: "Java 21.0.5 (Temurin)" });
+      expect(screen.queryByText(/not fully loaded/)).toBeNull();
+    } finally {
+      activePanel.id = id;
+      activePanel.params = params;
+    }
+  });
+
+  test("the toolchain covers Kotlin while the client that starts jdtls stays Java-only", async () => {
+    const { javaToolchain } = await import("@/api/java-env-model");
+    const { default: javaLspClient } = await import("@/lib/java-lsp-client");
+    expect(javaToolchain.languageIds).toContain("kotlin");
+    expect(javaLspClient.languageIds).toEqual(["java"]);
+  });
+
   test("shows and selects the JDK of the active panel's worktree, not the active one", async () => {
     useWorktreeStore.setState({ activeWorktreePath: "/wt-b" });
     renderStatus();
