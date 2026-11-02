@@ -5,8 +5,11 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import type { RustToolchain } from "@/api/rust-toolchain-model";
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
+import { fileUri } from "./lsp-file-uri";
+import { onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import {
   blockedClientMethod,
+  endServerChildren,
   findRustManifests,
   isRustManifestPath,
   planRustAnalyzer,
@@ -15,10 +18,18 @@ import {
   type RustAnalyzerPlan,
   rustAnalyzerSettings,
   rustManifestProblem,
+  withoutPullDiagnostics,
   withRustClientCapabilities,
 } from "./rust-analyzer-run";
-import { findRustProject, isReadableRustManifest, RUST_MANIFEST } from "./rust-project-lookup";
+import { RustCheckOnChange } from "./rust-check-on-change";
+import {
+  findRustProject,
+  isReadableRustManifest,
+  RUST_MANIFEST,
+  untrustedNestedRepo,
+} from "./rust-project-lookup";
 import { getRustToolchain, getRustToolchainNow, subscribeRustToolchain } from "./rust-toolchain";
+import { isInside } from "./shipped-by-repo";
 import {
   type SpawnOptions,
   type SuppressibleFeature,
@@ -48,6 +59,11 @@ interface SessionState {
   refreshing: Promise<void>;
   refreshQueued: boolean;
   unsubscribe: () => void;
+  /** A trusted server's checks, which it starts on a save only. */
+  checks: RustCheckOnChange | null;
+  stopFollowingTrust: () => void;
+  /** The client's `initialized` went through: the server takes nothing else before that. */
+  initialized: boolean;
   /** One check at a time, so the last resolution decides. */
   checking: Promise<void>;
 }
@@ -66,13 +82,20 @@ export const MAX_OPENED_RUST_PROJECTS = 10;
 
 const SETTINGS_SECTION = "rust-analyzer";
 
+const TRUST_RESTRICTION =
+  "Rust build scripts, proc macros and cargo check don't run, so generated code is unknown and many errors show no marker.";
+
 /**
  * Manages rust-analyzer child processes, one per worktree, running the user's own rust-analyzer from
- * the worktree's toolchain in a restricted mode (`docs/languages/rust.md`). A session starts only
- * when that holds, and restarts when the toolchain or the worktree's manifests change. Projects
- * elsewhere in the worktree are added as their files open, without a restart.
+ * the worktree's toolchain: in full in a trusted repository, and otherwise in a restricted mode
+ * (`docs/languages/rust.md`). A session starts only when that holds, and restarts when trust, the
+ * toolchain or the worktree's manifests change. Projects elsewhere in the worktree are added as their
+ * files open, without a restart.
  */
 export class RustLspManager extends WorktreeLspManager {
+  protected override readonly repoTrustRestriction = TRUST_RESTRICTION;
+  // Reported once a Cargo project is linked: trust adds little to a loose file.
+  protected override readonly reportsRestrictionAtStart = false;
   protected override readonly forwardWatchedFiles = true;
   /** Format on save owns Rust, and the server's formatting can run a repository's command. */
   protected override readonly suppressedFeatures: readonly SuppressibleFeature[] = [
@@ -90,7 +113,11 @@ export class RustLspManager extends WorktreeLspManager {
   }
 
   protected async resolveBinary(context: WtLspContext): Promise<string | null> {
-    const plan = await planRustAnalyzer(context.wtPath, await getRustToolchain(context.wtPath));
+    const plan = await planRustAnalyzer(
+      context.wtPath,
+      await getRustToolchain(context.wtPath),
+      context.repoTrusted,
+    );
     this.plans.set(context, plan);
     if (plan.kind === "refuse") {
       this.log.info("Not starting rust-analyzer", { wtPath: context.wtPath, reason: plan.reason });
@@ -125,7 +152,7 @@ export class RustLspManager extends WorktreeLspManager {
     const plan = this.plans.get(context);
     const state: SessionState = {
       plan: plan?.kind === "run" ? plan : null,
-      manifests: findRustManifests(wtPath),
+      manifests: findRustManifests(wtPath, context.repoTrusted),
       openedManifests: new Set(),
       looseFiles: new Set(),
       openFiles: new Set(),
@@ -137,6 +164,16 @@ export class RustLspManager extends WorktreeLspManager {
       unsubscribe: subscribeRustToolchain(wtPath, ({ toolchain }) => {
         this.queueCheck(session, state, () => Promise.resolve(toolchain));
       }),
+      checks: context.repoTrusted
+        ? new RustCheckOnChange(wtPath, {
+            linkedProjectOf: (file) => this.linkedProjectOf(state, file, wtPath),
+            save: (file) => this.saveFile(session, state, file),
+          })
+        : null,
+      initialized: false,
+      stopFollowingTrust: context.repoTrusted
+        ? onRepoTrustChange(() => this.followNestedTrust(session, state))
+        : () => {},
       checking: Promise.resolve(),
     };
     this.states.set(session, state);
@@ -146,8 +183,18 @@ export class RustLspManager extends WorktreeLspManager {
   }
 
   protected override onSessionClosed(session: WtLspSession): void {
-    this.states.get(session)?.unsubscribe();
+    const state = this.states.get(session);
+    if (!state) return;
     this.states.delete(session);
+    state.unsubscribe();
+    state.stopFollowingTrust();
+    state.checks?.dispose();
+    // Only a trusted server has builds running, and a revoked repository must keep none. Once the
+    // server is gone so is its place in the process tree, and its number may be someone else's.
+    const { proc } = session;
+    if (session.repoTrusted && proc.exitCode === null && proc.signalCode === null) {
+      endServerChildren(proc.pid);
+    }
   }
 
   // A throw ends the session as a start failure: the server must not run without these settings.
@@ -159,7 +206,7 @@ export class RustLspManager extends WorktreeLspManager {
 
   /**
    * The server asks after {@link notifyConfigurationChanged}, and what it gets replaces what it was
-   * started with, so this is the whole of the restricted settings.
+   * started with, so this is the whole of the settings.
    */
   protected override workspaceConfiguration(
     session: WtLspSession,
@@ -171,18 +218,71 @@ export class RustLspManager extends WorktreeLspManager {
   }
 
   private settingsOf(plan: RunPlan, state: SessionState): Record<string, unknown> {
-    const manifests = new Set(
-      [...state.manifests, ...state.openedManifests].filter(
-        (manifest) => !state.refusedManifests.has(manifest),
-      ),
-    );
-    return rustAnalyzerSettings(plan, [...manifests], [...state.looseFiles]);
+    return rustAnalyzerSettings(plan, this.linkedManifests(state), [...state.looseFiles]);
+  }
+
+  private linkedManifests(state: SessionState): string[] {
+    const manifests = new Set([...state.manifests, ...state.openedManifests]);
+    return [...manifests].filter((manifest) => !state.refusedManifests.has(manifest));
+  }
+
+  /**
+   * The project that checks `file`. A loose file has none. A crate that is not linked itself can
+   * still belong to a linked project above it, as a path dependency in its folder does, which only
+   * Cargo can tell, and a save there at worst checks that project once more.
+   */
+  private linkedProjectOf(state: SessionState, file: string, wtPath: string): string | null {
+    const project = findRustProject(file, wtPath);
+    if (project?.kind !== "manifest") return null;
+    const linked = this.linkedManifests(state);
+    if (linked.includes(project.manifest)) return project.manifest;
+    const above = linked.filter((manifest) => isInside(file, path.dirname(manifest)));
+    return above.toSorted((a, b) => b.length - a.length)[0] ?? null;
+  }
+
+  /** The one source of `didSave`; the client's stays blocked. */
+  private saveFile(session: WtLspSession, state: SessionState, file: string): void {
+    // Before that the server would fail the handshake, and the check after its load covers this.
+    if (!state.initialized || !this.isSessionLive(session)) return;
+    const params = { textDocument: { uri: fileUri(file) } };
+    try {
+      this.writeToStdin(
+        session,
+        JSON.stringify({ jsonrpc: "2.0", method: "textDocument/didSave", params }),
+      );
+    } catch (err) {
+      // A server that has closed its stdin, not yet reaped: this runs in a timer.
+      this.log.debug("Could not send didSave", { error: err });
+    }
+  }
+
+  /**
+   * A nested repository has an answer of its own, which the base does not follow. One no longer
+   * trusted takes a restart, since a project going away leaves its builds and macros behind.
+   */
+  private followNestedTrust(session: WtLspSession, state: SessionState): void {
+    if (!this.isSessionLive(session)) return;
+    if (
+      this.holdsUntrustedRepo(session, state) ||
+      findRustManifests(session.wtPath, true).join("\0") !== state.manifests.join("\0")
+    ) {
+      this.restart(session, "a nested repository's trust changed");
+      return;
+    }
+    this.queueRefresh(session, state);
+  }
+
+  /** Whether a trusted server has come to hold a project of a repository not trusted itself. */
+  private holdsUntrustedRepo({ repoTrusted, wtPath }: WtLspSession, state: SessionState): boolean {
+    if (!repoTrusted) return false;
+    const held = [...state.manifests, ...state.openedManifests, ...state.refusedManifests];
+    return held.some((manifest) => untrustedNestedRepo(manifest, wtPath) !== null);
   }
 
   protected override handleClientData(session: WtLspSession, data: string): void {
     const blocked = blockedClientMethod(data);
     if (!blocked) {
-      super.handleClientData(session, withRustClientCapabilities(data));
+      super.handleClientData(session, withRustClientCapabilities(data, session.repoTrusted));
       this.trackDocument(session, data);
       return;
     }
@@ -196,14 +296,16 @@ export class RustLspManager extends WorktreeLspManager {
   protected override handleServerFrame(session: WtLspSession, body: string): void {
     const status = readServerStatus(body, session.wtPath);
     if (!status) {
-      super.handleServerFrame(session, body);
+      super.handleServerFrame(session, session.repoTrusted ? withoutPullDiagnostics(body) : body);
       return;
     }
     for (const { kind, message } of status.notices) this.report(session, kind, message);
   }
 
   protected override onClientInitialized(session: WtLspSession): void {
-    if (this.states.get(session)?.plan?.rustSrc !== false) return;
+    const state = this.states.get(session);
+    if (state) state.initialized = true;
+    if (state?.plan?.rustSrc !== false) return;
     this.report(
       session,
       "rust-src",
@@ -230,7 +332,7 @@ export class RustLspManager extends WorktreeLspManager {
       const state = this.states.get(session);
       if (!state) continue;
       if (paths.some((changed) => isRustManifestPath(wtPath, changed))) {
-        const manifests = findRustManifests(session.wtPath);
+        const manifests = findRustManifests(session.wtPath, session.repoTrusted);
         if (manifests.join("\0") !== state.manifests.join("\0")) {
           this.restart(session, "manifests changed");
           continue;
@@ -241,6 +343,7 @@ export class RustLspManager extends WorktreeLspManager {
       if (manifestChanged || paths.some((changed) => state.openFiles.has(changed))) {
         this.queueRefresh(session, state);
       }
+      state.checks?.pathsChanged(paths);
     }
   }
 
@@ -248,8 +351,19 @@ export class RustLspManager extends WorktreeLspManager {
   override notifyIgnoredPathChanged(wtPath: string, relPath: string): void {
     super.notifyIgnoredPathChanged(wtPath, relPath);
     const parts = relPath.split("/");
-    if (parts.at(-1) !== RUST_MANIFEST || parts.includes("target")) return;
-    this.notifyWatchedFilesChanged(wtPath, [path.join(wtPath, relPath)]);
+    if (parts.includes("target")) return;
+    const absolute = path.join(wtPath, relPath);
+    if (parts.at(-1) === RUST_MANIFEST) {
+      this.notifyWatchedFilesChanged(wtPath, [absolute]);
+      return;
+    }
+    if (!relPath.endsWith(".rs")) return;
+    const root = path.resolve(wtPath);
+    for (const session of this.sessions.values()) {
+      if (path.resolve(session.wtPath) === root) {
+        this.states.get(session)?.checks?.pathsChanged([absolute]);
+      }
+    }
   }
 
   /** Follow the client's open documents; a newly open one can need a project loaded. */
@@ -287,6 +401,11 @@ export class RustLspManager extends WorktreeLspManager {
     const { plan } = state;
     if (!plan || !this.isSessionLive(session)) return;
     const { wtPath } = session;
+    // A folder can have become a repository of its own since it was linked.
+    if (this.holdsUntrustedRepo(session, state)) {
+      this.restart(session, "a project is now in an untrusted repository");
+      return;
+    }
     const before = JSON.stringify(this.settingsOf(plan, state));
     for (const manifest of state.openedManifests) {
       if (!isReadableRustManifest(manifest, wtPath)) state.openedManifests.delete(manifest);
@@ -304,6 +423,19 @@ export class RustLspManager extends WorktreeLspManager {
     for (const file of state.openFiles) {
       const project = findRustProject(file, wtPath);
       if (!project) continue;
+      const nested =
+        project.kind === "manifest" && session.repoTrusted
+          ? untrustedNestedRepo(project.manifest, wtPath)
+          : null;
+      if (nested !== null) {
+        const folder = path.relative(wtPath, nested);
+        this.report(
+          session,
+          `nested:${nested}`,
+          `${folder} is a repository of its own that you haven't trusted, so its Rust project isn't loaded here. Open it as a project to trust it.`,
+        );
+        continue;
+      }
       const known =
         project.kind === "loose"
           ? state.looseFiles.has(project.file)
@@ -334,6 +466,14 @@ export class RustLspManager extends WorktreeLspManager {
       }
       state.refusedManifests.add(project.manifest);
       this.reportManifestProblem(session, project.manifest, problem);
+    }
+    if (!session.repoTrusted && this.linkedManifests(state).length > 0) {
+      reportRepoRestriction(wtPath, TRUST_RESTRICTION);
+    }
+    // The answer can have changed during the checks above, which only this catches.
+    if (this.holdsUntrustedRepo(session, state)) {
+      this.restart(session, "a project is now in an untrusted repository");
+      return;
     }
     if (JSON.stringify(this.settingsOf(plan, state)) === before) return;
     this.log.info("Updating rust-analyzer's projects", {
@@ -414,7 +554,7 @@ export class RustLspManager extends WorktreeLspManager {
     if (!this.isSessionLive(session)) return;
     // Gone may be an install in progress; the running server stays on the toolchain it was given.
     if (toolchain.status === "none") return;
-    const next = await planRustAnalyzer(session.wtPath, toolchain);
+    const next = await planRustAnalyzer(session.wtPath, toolchain, session.repoTrusted);
     if (!this.isSessionLive(session)) return;
     if (next.kind === "run" && next.key === state.plan?.key) return;
     this.restart(session, "rust toolchain changed");

@@ -313,9 +313,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected readonly watchedIgnoredGlobs: readonly string[] = [];
 
   /**
-   * Set to true for servers that only react to `textDocument/didSave` (clangd reparses, and
-   * rust-analyzer runs its check): a change the file watcher reports to a document the session has
-   * open is sent as one, without text. monaco-lsp-client saves nothing itself, since saving goes
+   * Set to true for servers that only react to `textDocument/didSave` (clangd reparses): a change
+   * the file watcher reports to a document the session has open is sent as one, without text. monaco-lsp-client saves nothing itself, since saving goes
    * through the file routes. The client keeps advertising `didSave: false`: these servers take the
    * notification regardless, and advertising it would have rust-analyzer register it dynamically
    * with a client that cannot send it. A subclass overriding {@link handleClientData} must pass
