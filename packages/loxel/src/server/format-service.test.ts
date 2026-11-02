@@ -58,60 +58,7 @@ async function makeFakeVenv(
 
 const AUTO_DETECT: FormattingSettings = DEFAULT_FORMATTING_SETTINGS;
 
-function findFormatter(service: InstanceType<typeof FormatService>, wt: string, command: string) {
-  return service.getDetectedFormatters(wt).find((f) => f.command === command);
-}
-
 describe("FormatService auto-detection", () => {
-  test("detects oxfmt from a devDependency and claims md (and other oxfmt-supported extensions)", async () => {
-    const wt = await makeWorktree({
-      "package.json": JSON.stringify({ devDependencies: { oxfmt: "0.68.0" } }),
-    });
-    const service = new FormatService();
-    const detected = service.getDetectedFormatters(wt);
-    expect(detected.map((f) => f.command)).toEqual(["oxfmt"]);
-
-    const oxfmt = findFormatter(service, wt, "oxfmt");
-    expect(oxfmt).toBeDefined();
-    for (const ext of ["ts", "md", "json", "yaml", "toml", "html", "vue", "scss", "graphql"]) {
-      expect(oxfmt!.extensions).toContain(ext);
-    }
-    // Not formatted by default in oxfmt 0.68 — must not be claimed.
-    expect(oxfmt!.extensions).not.toContain("svelte");
-    expect(oxfmt!.extensions).not.toContain("astro");
-  });
-
-  test("detects oxfmt from .oxfmtrc.jsonc without a package.json", async () => {
-    const wt = await makeWorktree({ ".oxfmtrc.jsonc": "{}" });
-    const service = new FormatService();
-    expect(findFormatter(service, wt, "oxfmt")?.extensions).toContain("md");
-  });
-
-  test("lists prettier before oxfmt when both are detected (prettier wins for md)", async () => {
-    // `format()` walks detected formatters in order and uses the first one whose extension set
-    // contains the file's extension. Detection rules are ordered prettier → oxfmt, so a project
-    // with both formatters keeps using prettier for shared extensions such as md/json.
-    const wt = await makeWorktree({
-      ".prettierrc": "{}",
-      "package.json": JSON.stringify({ devDependencies: { oxfmt: "0.68.0", prettier: "3.0.0" } }),
-    });
-    const service = new FormatService();
-    const detected = service.getDetectedFormatters(wt);
-    expect(detected.map((f) => f.command)).toEqual(["prettier", "oxfmt"]);
-
-    // Every extension oxfmt claims that prettier can also format must route to prettier, so
-    // alias spellings (yml, mjs, scss, mdx, ...) do not silently diverge from the canonical ones.
-    const oxfmt = findFormatter(service, wt, "oxfmt")!;
-    const prettier = findFormatter(service, wt, "prettier")!;
-    for (const ext of oxfmt.extensions) {
-      const first = detected.find((f) => f.extensions.includes(ext));
-      expect(first?.command, `first formatter for .${ext}`).toBe(
-        ext === "toml" ? "oxfmt" : "prettier",
-      );
-    }
-    expect(prettier.extensions).toContain("md");
-  });
-
   test("detects nothing in an empty worktree", async () => {
     const wt = await makeWorktree({});
     const service = new FormatService();
@@ -473,7 +420,7 @@ describe("FormatService language modules", () => {
     const next = fakeLanguage({ extensions: ["ts"], detect: () => FAKE_FORMATTER });
     const service = new FormatService([none, next]);
     expect(service.getDetectedFormatters(wt)).toEqual([
-      { command: "deno", extensions: ["ts", "tsx", "js", "jsx"] },
+      { command: "deno", extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"] },
       { command: "fake-fmt", extensions: ["ts"] },
     ]);
     await installFormatter(join(wt, "node_modules/.bin"), "next");

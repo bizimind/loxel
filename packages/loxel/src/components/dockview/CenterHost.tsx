@@ -13,6 +13,7 @@ import { withDrawingCachePreserved } from "@/components/excalidraw-editor/Excali
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchPendingOpen } from "@/lib/open-path";
+import { forgetClosedTabGroup } from "@/store/closed-tabs";
 import { reattachActiveContent } from "@/store/layout-actions";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
@@ -53,6 +54,14 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
     api.onDidMovePanel(({ from, to }) => {
       reattachActiveContent(from);
       reattachActiveContent(to);
+    });
+
+    // A swap's groups come back with their ids when the layout is restored; these are gone for good.
+    api.onDidRemoveGroup((group) => {
+      const worktreePath = worktreePathRef.current;
+      if (worktreePath && !swappingRef.current && !isOuterSwapping()) {
+        forgetClosedTabGroup(worktreePath, group.id);
+      }
     });
 
     api.onDidRemovePanel((event) => {

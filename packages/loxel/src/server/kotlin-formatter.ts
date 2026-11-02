@@ -1,8 +1,10 @@
 import { readFileSync, statSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { homedir } from "node:os";
-import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { delimiter, isAbsolute, join, parse, resolve } from "node:path";
 
+import type { JavaRuntime } from "@/api/java-env-model";
+
+import { getJavaEnv } from "./java-env";
 import {
   dirsUpToRoot,
   type FileFormatter,
@@ -280,7 +282,7 @@ function kotlinFailureNotice(failure: FormatterFailure): string | undefined {
     return `Format on save skipped: this project uses ${command}, which is not on your PATH. Install it, for example with \`${install}\`.`;
   }
   if (NO_JAVA.test(failure.stderr)) {
-    return `Format on save skipped: ${command} needs Java, which is not on your PATH. Install a JDK and add it to your PATH.`;
+    return `Format on save skipped: ${command} needs Java. Install a JDK.`;
   }
   if (command === KTLINT.command && UNKNOWN_FLAG.test(failure.stderr)) {
     return "Format on save skipped: Loxel needs ktlint 1.8 or newer. Upgrade it, for example with `brew upgrade ktlint`.";
@@ -292,10 +294,9 @@ function kotlinFailureNotice(failure: FormatterFailure): string | undefined {
  * Kotlin formatters come from the machine, never the worktree. Putting a project directory on
  * `PATH` would also let the `ktlint` launcher, a shell script, pick up a committed `java` or `sed`.
  *
- * They run from the home directory. Any `cwd` other than the worktree makes `{file}` absolute,
+ * They run from the filesystem root. Any `cwd` other than the worktree makes `{file}` absolute,
  * which ktlint needs: with a relative `--stdin-path` it misses the `.editorconfig` in its working
- * directory. And outside the repository, a version manager's shim on `PATH` does not pick its
- * version from a `.tool-versions` the repository ships, which can name a path inside it.
+ * directory. And a version manager's shim on `PATH` finds no project or user pin there.
  */
 async function kotlinSpawnOptions(
   command: string,
@@ -303,11 +304,60 @@ async function kotlinSpawnOptions(
   wtRoot: string,
 ): Promise<FormatterSpawnOptions> {
   const root = resolve(wtRoot);
+  const path = await trustedPath(command, root);
   return {
-    env: { PATH: await trustedPath(command, root) },
+    // ktfmt is a native binary or brings its own Java.
+    env:
+      command === KTLINT.command
+        ? await withWorktreeJdk(path, root)
+        : { PATH: path, ...(await withoutWorktreeJavaHome(root)) },
     binDirs: [],
-    ...(command in INSTALL_HINTS ? { cwd: homedir() } : {}),
+    ...(command in INSTALL_HINTS ? { cwd: parse(root).root } : {}),
   };
+}
+
+/**
+ * The environment that runs a JVM tool on the JDK the status bar shows for the worktree. The resolver
+ * holds it to the trust rule, which refuses what the repository tracks. Kotlin's tools are stricter
+ * about `PATH`, which never holds a worktree directory, so a JDK in the worktree is not used here.
+ * With no JDK, `path` alone: the tool then finds Java as it would in a terminal.
+ */
+export async function withWorktreeJdk(path: string, root: string): Promise<Record<string, string>> {
+  const jdk = await getJavaEnv(root);
+  const usable = jdk && !(await isInWorktree(jdk.path, root)) ? jdk : null;
+  return usable
+    ? jdkToolEnv(path, usable)
+    : { ...jdkToolEnv(path, null), ...(await withoutWorktreeJavaHome(root)) };
+}
+
+/**
+ * `path` with `jdk` first, and its `JAVA_HOME`. A JDK whose path `PATH` cannot hold, since it would
+ * split into other directories, counts as none.
+ */
+export function jdkToolEnv(
+  path: string,
+  jdk: Pick<JavaRuntime, "path"> | null,
+): Record<string, string> {
+  if (!jdk || jdk.path.includes(delimiter)) return { PATH: path };
+  return { JAVA_HOME: jdk.path, PATH: [join(jdk.path, "bin"), path].join(delimiter) };
+}
+
+/**
+ * Blanks an inherited `JAVA_HOME` in the worktree, which launchers would prefer over `PATH`; empty
+ * reads as unset to them, and the formatter seam can only add variables. Any other value stays,
+ * usable or not: a JRE is no JDK to the resolver, and still runs these tools.
+ */
+async function withoutWorktreeJavaHome(root: string): Promise<Record<string, string>> {
+  const javaHome = buildSpawnEnv().JAVA_HOME?.trim();
+  return javaHome && (await isInWorktree(javaHome, root)) ? { JAVA_HOME: "" } : {};
+}
+
+/** Under either spelling, so a symlink in the worktree or one leading into it counts. */
+async function isInWorktree(dir: string, root: string): Promise<boolean> {
+  const real = (target: string) => realpath(target).catch(() => target);
+  if (isInside(resolve(dir), root)) return true;
+  const [realDir, realRoot] = await Promise.all([real(dir), real(root)]);
+  return isInside(realDir, realRoot);
 }
 
 /**

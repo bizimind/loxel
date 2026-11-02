@@ -18,6 +18,8 @@ Quick reference for the quirks of the servers that existed before `docs/language
 | XML (LemMinX)           | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | none                          |
 | TOML (Tombi)            | downloaded    | worktree | lazy       | disabled        | no             | `lsp`           | schema map (post-init)        |
 | Go (gopls)              | built from Go | worktree | lazy       | enabled         | no             | `serve`         | settings (pulled)             |
+| Go (golangci-lint)      | machine PATH  | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
+| Rust (rust-analyzer)    | user's binary | worktree | lazy       | enabled         | no             | none            | restricted mode, project list |
 | Java (jdtls)            | bundled jar   | worktree | lazy       | enabled         | no             | JVM flags       | import off (init and pushed)  |
 
 ## TypeScript — Do Not Use as Template
