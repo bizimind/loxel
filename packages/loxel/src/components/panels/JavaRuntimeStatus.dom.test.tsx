@@ -92,7 +92,7 @@ describe("JavaRuntimeStatus", () => {
     }
   });
 
-  test("a Kotlin file shows the JDK but connects no Java server", async () => {
+  test("the toolchain covers Kotlin while the client that starts jdtls stays Java-only", async () => {
     const { javaToolchain } = await import("@/api/java-env-model");
     const { default: javaLspClient } = await import("@/lib/java-lsp-client");
     expect(javaToolchain.languageIds).toContain("kotlin");

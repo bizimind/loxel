@@ -346,12 +346,16 @@ describe("kotlinFormatter spawning", () => {
   /** A directory laid out like a JDK home, in the test's directory outside the worktree. */
   async function makeJdk(wt: string): Promise<string> {
     const home = join(dirname(wt), "jdk");
+    await writeJdkFiles(home);
+    return home;
+  }
+
+  async function writeJdkFiles(home: string): Promise<void> {
     await install(join(home, "bin"), "java", "#!/bin/sh\n");
     await install(join(home, "bin"), "javac", "#!/bin/sh\n");
     await mkdir(join(home, "lib"));
     await writeFile(join(home, "lib", "ct.sym"), "");
     await writeFile(join(home, "release"), 'JAVA_VERSION="21.0.5"\n');
-    return home;
   }
 
   const REPORT_JAVA = '#!/bin/sh\necho "JAVA_HOME=$JAVA_HOME java=$(command -v java)"\n';
@@ -376,22 +380,31 @@ describe("kotlinFormatter spawning", () => {
     expect(result.content).toBe(`JAVA_HOME=${jdk} java=${bin}/java\n`);
   });
 
-  test("a JDK the repository tracks is not put on PATH", async () => {
-    const wt = await makeWorktree(KTLINT_PROJECT);
-    const bin = await machineBin(wt, "ktlint");
-    await install(bin, "ktlint", REPORT_JAVA);
-    const shipped = join(wt, "jdk");
-    await install(join(shipped, "bin"), "java", "#!/bin/sh\n");
-    await install(join(shipped, "bin"), "javac", "#!/bin/sh\n");
-    await mkdir(join(shipped, "lib"));
-    await writeFile(join(shipped, "lib", "ct.sym"), "");
-    await writeFile(join(shipped, "release"), 'JAVA_VERSION="21.0.5"\n');
-    await $`git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init`
-      .cwd(wt)
-      .quiet();
-    process.env.JAVA_HOME = shipped;
+  for (const [name, tracked] of [
+    ["the repository tracks", true],
+    ["only sits in the worktree", false],
+  ] as const) {
+    test(`a JDK that ${name} reaches no spawn`, async () => {
+      const wt = await makeWorktree(KTLINT_PROJECT);
+      const bin = await machineBin(wt, "ktlint");
+      await install(bin, "ktlint", REPORT_JAVA);
+      const inWorktree = join(wt, "jdk");
+      await writeJdkFiles(inWorktree);
+      await $`git init -q`.cwd(wt).quiet();
+      if (tracked) await $`git add -A`.cwd(wt).quiet();
+      process.env.JAVA_HOME = inWorktree;
+      const result = await save(wt, "A.kt");
+      expect(result.content).not.toContain(inWorktree);
+    });
+  }
+
+  test("an inherited JAVA_HOME that is no JDK stays: it may be a JRE that runs the tool", async () => {
+    const wt = await makeWorktree({ "build.gradle.kts": ktfmtScript() });
+    const bin = await machineBin(wt, "java");
+    await install(bin, "ktfmt", REPORT_JAVA);
+    process.env.JAVA_HOME = "/opt/some-jre";
     const result = await save(wt, "A.kt");
-    expect(result.content).not.toContain(`java=${shipped}`);
+    expect(result.content).toBe(`JAVA_HOME=/opt/some-jre java=${bin}/java\n`);
   });
 
   test("with no JDK, or one PATH cannot hold, the environment is PATH alone", () => {
