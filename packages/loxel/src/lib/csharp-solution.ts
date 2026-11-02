@@ -14,6 +14,7 @@ import { manageRepoTrust } from "./repo-trust-dialog";
 // Picker ids that cannot collide with a solution path, which is always absolute.
 const AUTOMATIC_ID = "#automatic";
 const TRUST_ID = "#trust";
+const MAX_TOOLTIP_PROJECTS = 3;
 
 const BLOCK_LABELS: Record<CSharpBlock, string> = {
   untrusted: "C#: Not trusted",
@@ -32,6 +33,13 @@ function baseName(file: string): string {
 function displayPath(file: string, wtPath: string): string {
   const root = wtPath.endsWith("/") ? wtPath : `${wtPath}/`;
   return file.startsWith(root) ? file.slice(root.length) : file;
+}
+
+/** A few projects and how many more: the browser cuts a long tooltip off at its end. */
+function loadedProjects(projects: readonly string[], wtPath: string): string {
+  const shown = projects.slice(0, MAX_TOOLTIP_PROJECTS).map((file) => displayPath(file, wtPath));
+  const more = projects.length - shown.length;
+  return more > 0 ? `${shown.join(", ")} and ${more} more` : shown.join(", ");
 }
 
 /** The status bar's words; null when there is nothing to show. */
@@ -61,7 +69,7 @@ export function csharpStatusTooltip(status: CSharpStatusResponse, wtPath: string
     lines.push(
       server.target
         ? `Loaded: ${displayPath(server.target, wtPath)}`
-        : `Loaded: ${server.projects.map((project) => displayPath(project, wtPath)).join(", ")}`,
+        : `Loaded: ${loadedProjects(server.projects, wtPath)}`,
       `.NET SDK ${server.sdkVersion}`,
       chosen && !chosenMissing ? "Chosen for this worktree" : "Detected automatically",
     );

@@ -65,6 +65,14 @@ describe("csharpStatusTooltip", () => {
     expect(csharpStatusTooltip(status(RUNNING), WT)).toContain("Detected automatically");
   });
 
+  test("names a few projects, so the lines after them survive", () => {
+    const projects = ["a", "b", "c", "d", "e"].map((name) => `${WT}/${name}.csproj`);
+    const tooltip = csharpStatusTooltip(status({ ...RUNNING, target: null, projects }), WT);
+    expect(tooltip).toContain("Loaded: a.csproj, b.csproj, c.csproj and 2 more");
+    expect(tooltip).not.toContain("d.csproj");
+    expect(tooltip).toContain("Click to select a solution");
+  });
+
   test("gives the manager's words for a missing step", () => {
     const message = "Run `dotnet tool update --global csharp-ls` in a terminal.";
     expect(
