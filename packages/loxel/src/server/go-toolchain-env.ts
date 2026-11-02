@@ -10,20 +10,15 @@ import type { GoEnv } from "@/api/go-env-model";
 
 import { getGoEnv } from "./go-env";
 import { getGoChoice } from "./go-toolchain-store";
-import type {
-  SpawnEnv,
-  TerminalEnvChange,
-  ToolchainEnvContributor,
+import {
+  putFirstOnPath,
+  type TerminalEnvChange,
+  type ToolchainEnvContributor,
 } from "./toolchain-env-contributor";
 
 /** The chosen Go's `bin`. `go-env.ts` refuses a chosen Go in the worktree or tracked by git. */
 function chosenBin(env: GoEnv | null): string | null {
   return env?.source === "chosen" && env.goroot ? path.join(env.goroot, "bin") : null;
-}
-
-function putFirstOnPath(env: SpawnEnv, bin: string): void {
-  const rest = (env.PATH ?? "").split(path.delimiter).filter((dir) => dir && dir !== bin);
-  env.PATH = [bin, ...rest].join(path.delimiter);
 }
 
 function changeFor(env: GoEnv | null): TerminalEnvChange | null {

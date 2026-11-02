@@ -52,6 +52,14 @@ To start terminals without it, turn off **Activate Python Environment** in **Set
 
 ---
 
+## Node version
+
+When a worktree pins a [Node version](/docs/languages/javascript#node-version), or you chose an installed one for it, new terminals in it start with that version's `node`, `npm` and `npx` first on `PATH`. If Loxel is using the `node` on your `PATH`, found or chosen, nothing changes. Loxel never adds `node_modules/.bin`, and never uses a version committed to the repository. Terminals already open keep what they started with; open a new terminal after changing the pin or your choice.
+
+Your shell's startup runs after that, so it can still change which `node` you get. A version manager's hook in your startup files (nvm, fnm) switches `node` as it normally would, and startup files that rebuild `PATH`, as macOS does for login shells, can put system directories ahead of the worktree's version, including Homebrew's. If `node --version` differs from the status bar, run `which node` to see which one won, and `nvm use` or your version manager's equivalent to switch.
+
+---
+
 ## Theme
 
 Terminal colors follow your dark/light mode setting automatically. No manual configuration needed.
