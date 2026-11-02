@@ -55,14 +55,20 @@ export interface IndentationOverride {
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 import { DEFAULT_FORMATTING_SETTINGS } from "@/lib/formatting-model";
 
+/** When an editor shows inlay hints; the values of Monaco's `inlayHints.enabled`. */
+export type InlayHintsMode = "on" | "off" | "onUnlessPressed" | "offUnlessPressed";
+
 export interface EditorSettings {
   indentation: IndentationDefaults;
+  inlayHints: InlayHintsMode;
   overrides: IndentationOverride[];
   formatting: FormattingSettings;
 }
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   indentation: { tabSize: 2, insertSpaces: true },
+  // On, as in VS Code, and what every language server that emits hints has shown until now.
+  inlayHints: "on",
   overrides: [],
   formatting: structuredClone(DEFAULT_FORMATTING_SETTINGS),
 };
@@ -520,6 +526,7 @@ export interface SettingsState {
 
   // Editor actions
   updateEditorIndentation: (partial: Partial<IndentationDefaults>) => void;
+  setEditorInlayHints: (mode: InlayHintsMode) => void;
   addEditorOverride: (extension: string, tabSize: number, insertSpaces: boolean) => void;
   updateEditorOverride: (id: string, updates: Partial<Omit<IndentationOverride, "id">>) => void;
   removeEditorOverride: (id: string) => void;
@@ -683,6 +690,8 @@ export const useSettingsStore = create<SettingsState>()(
         set((s) => ({
           editor: { ...s.editor, indentation: { ...s.editor.indentation, ...partial } },
         })),
+
+      setEditorInlayHints: (mode) => set((s) => ({ editor: { ...s.editor, inlayHints: mode } })),
 
       addEditorOverride: (extension, tabSize, insertSpaces) =>
         set((s) => {
@@ -852,7 +861,7 @@ export const useSettingsStore = create<SettingsState>()(
         autoRevealInExplorer: state.autoRevealInExplorer,
         autoCheckForUpdates: state.autoCheckForUpdates,
       }),
-      version: 13,
+      version: 14,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
         const state = persisted as Record<string, unknown>;
@@ -976,6 +985,17 @@ export const useSettingsStore = create<SettingsState>()(
           delete state.models;
           delete state.codingAgent;
           stripPanelFromLayout(state.layout, "forkTree");
+        }
+
+        if (version <= 13) {
+          // v13 → v14: add the inlay hints setting to editor
+          const editor =
+            typeof state.editor === "object" && state.editor !== null
+              ? (state.editor as Record<string, unknown>)
+              : undefined;
+          if (editor && !editor.inlayHints) {
+            editor.inlayHints = DEFAULT_EDITOR_SETTINGS.inlayHints;
+          }
         }
 
         // zustand migrations receive unknown and must return the store type.
