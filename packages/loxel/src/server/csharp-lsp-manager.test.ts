@@ -15,6 +15,7 @@ const { CSharpLspManager, CSHARP_LS_SETTINGS, MIN_CSHARP_LS_VERSION, withClientR
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 const { getCSharpLspState, subscribeCSharpStatus } = await import("./csharp-lsp-state");
 const { setCSharpSolution } = await import("./csharp-solution-store");
+const { projectsSolutionPath } = await import("./csharp-projects-solution");
 type WtLspContext = import("./stdio-lsp-manager").WtLspContext;
 type WtLspSession = import("./stdio-lsp-manager").WtLspSession;
 
@@ -498,7 +499,12 @@ describe.skipIf(process.platform === "win32")("CSharpLspManager", () => {
       const wt = await makeRestoredRepo();
       const socket = connect(wt);
       const result = await socket.untilInitialized();
-      expect(result.args).toEqual(["--loglevel", "information"]);
+      expect(result.args).toEqual([
+        "--loglevel",
+        "information",
+        "--solution",
+        projectsSolutionPath(wt),
+      ]);
       expect(result.cwd).toBe(wt);
       expect(result.dotnetRoot).toBe(bin);
       expect(result.nodeReuse).toBe("1");
@@ -553,6 +559,68 @@ describe.skipIf(process.platform === "win32")("CSharpLspManager", () => {
       await held.untilMessage("dotnet tool restore");
       await write(join(process.env.HOME ?? "", ".dotnet", "toolResolverCache", "1", "csharp-ls"));
       expect((await held.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    });
+
+    test("with no solution it loads the discovered projects, not what is on disk", async () => {
+      await installToolchain();
+      const wt = await makeRestoredRepo({
+        ".gitignore": "obj/\nbin/\nskipped/\n",
+        "lib/Lib.csproj": PROJECT,
+        "skipped/Skipped.csproj": PROJECT,
+      });
+      const nested = join(wt, "nested");
+      await write(join(nested, "Nested.csproj"), PROJECT);
+      await write(join(nested, "Nested.slnx"), "");
+      await git(nested, "init", "-q");
+      const result = await connect(wt).untilInitialized();
+      expect(result.args).toEqual([
+        "--loglevel",
+        "information",
+        "--solution",
+        projectsSolutionPath(wt),
+      ]);
+      const listed = await Bun.file(projectsSolutionPath(wt)).text();
+      expect(listed).toContain(join(wt, "App.csproj"));
+      expect(listed).toContain(join(wt, "lib", "Lib.csproj"));
+      expect(listed).not.toContain("Nested.csproj");
+      expect(listed).not.toContain("Skipped.csproj");
+    });
+
+    test("a project added beside a listed one restarts the server, restored or not", async () => {
+      await installToolchain();
+      const wt = await makeRestoredRepo();
+      const socket = connect(wt);
+      await socket.untilInitialized();
+      const added = join(wt, "lib", "Lib.csproj");
+      await write(added, PROJECT);
+      manager?.notifyWatchedFilesChanged(wt, [added]);
+      expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+      expect(await Bun.file(projectsSolutionPath(wt)).text()).not.toContain("Lib.csproj");
+      manager?.destroySession(socket.ws);
+      await connect(wt).untilInitialized();
+      expect(await Bun.file(projectsSolutionPath(wt)).text()).toContain("Lib.csproj");
+    });
+
+    test("a directory newly ignored restarts a server listing its project", async () => {
+      await installToolchain();
+      const wt = await makeRestoredRepo({ "lib/Lib.csproj": PROJECT });
+      const socket = connect(wt);
+      await socket.untilInitialized();
+      expect(await Bun.file(projectsSolutionPath(wt)).text()).toContain("Lib.csproj");
+      const ignore = await write(join(wt, ".gitignore"), "obj/\nbin/\nlib/\n");
+      manager?.notifyWatchedFilesChanged(wt, [ignore]);
+      expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    });
+
+    test("no list of projects means no server, until it can be written", async () => {
+      await installToolchain();
+      const wt = await makeRestoredRepo();
+      const blocker = dirname(projectsSolutionPath(wt));
+      await write(blocker);
+      const socket = connect(wt);
+      expect(isHold(await socket.untilInitialized())).toBe(true);
+      await rm(blocker);
+      expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
     });
 
     test("one solution at the root is what loads, with no word about others", async () => {
