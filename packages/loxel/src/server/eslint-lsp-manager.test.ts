@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,6 +12,20 @@ import type { EslintLaunch, EslintNoLaunch } from "./eslint-lsp-manager";
 
 const stateDir = mkdtempSync(path.join(tmpdir(), "eslint-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
+// The worktree's Node as the test says, not as this machine resolves it: a running server restarts
+// when the two differ.
+const nodeListeners = new Set<(update: { env: { nodePath: string } | null }) => void>();
+void mock.module("./node-env", () => ({
+  getNodeEnv: () => Promise.resolve({ env: { nodePath: process.execPath } }),
+  subscribeNodeEnv: (
+    _wtPath: string,
+    listener: (update: { env: { nodePath: string } | null }) => void,
+  ) => {
+    nodeListeners.add(listener);
+    return () => nodeListeners.delete(listener);
+  },
+}));
+
 const { EslintLspManager } = await import("./eslint-lsp-manager");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 type Context = import("./stdio-lsp-manager").WtLspContext;
@@ -327,6 +341,23 @@ describe("in a trusted repository", () => {
     await socket.next(isInitializeResponse);
     manager.notifyWatchedFilesChanged(wt, [path.join(wt, "src/a.js")]);
     manager.notifyWatchedFilesChanged(wt, [path.join(wt, "node_modules/eslint/package.json")]);
+    expect(await socket.closed).toBe(LSP_RESTART_CLOSE_CODE);
+  });
+
+  test("a change of Node restarts the server, and no change leaves it", async () => {
+    const socket = start(LAUNCH);
+    await socket.next(isInitializeResponse);
+    for (const listener of nodeListeners) listener({ env: { nodePath: process.execPath } });
+    send(socket, { method: "test/send", params: { method: "test/alive" } });
+    await socket.next((frame) => frame.method === "test/alive");
+    for (const listener of nodeListeners) listener({ env: { nodePath: "/other/node" } });
+    expect(await socket.closed).toBe(LSP_RESTART_CLOSE_CODE);
+  });
+
+  test("a Node appearing restarts a held connection", async () => {
+    const socket = start({ notice: "needs Node" });
+    await socket.next(isInitializeResponse);
+    for (const listener of nodeListeners) listener({ env: { nodePath: process.execPath } });
     expect(await socket.closed).toBe(LSP_RESTART_CLOSE_CODE);
   });
 
