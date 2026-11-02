@@ -1,6 +1,6 @@
 import type { FileSink, Subprocess } from "bun";
 
-import { type FormatterBackend, killProcessGroup } from "./formatter-backends";
+import { type FormatterBackend, idleTimer, killProcessGroup } from "./formatter-backends";
 import { projectToolPath } from "./js-formatter";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
@@ -30,15 +30,25 @@ export class OxfmtLspBackend implements FormatterBackend {
   private initPromise: Promise<boolean> | null = null;
   private dead = false;
 
-  /** `dir` is the workspace root oxfmt takes its config from, in the worktree `worktreePath`. */
+  private readonly idle = idleTimer(
+    () => this.pendingRequests.size > 0,
+    () => this.destroy(),
+  );
+
+  /**
+   * `dir` is the workspace root oxfmt takes its config from, and the search for its install starts
+   * at `toolDir`, both in the worktree `worktreePath`.
+   */
   constructor(
     private readonly dir: string,
+    private readonly toolDir: string,
     private readonly worktreePath: string,
   ) {}
 
   async format(content: string, filePath: string): Promise<string | null> {
     const ready = await this.ensureInitialized();
     if (!ready) return null;
+    this.idle.touch();
 
     const uri = fileUri(filePath);
     const languageId = this.inferLanguageId(filePath);
@@ -78,6 +88,7 @@ export class OxfmtLspBackend implements FormatterBackend {
 
   destroy(): void {
     this.dead = true;
+    this.idle.clear();
     for (const pending of this.pendingRequests.values()) {
       clearTimeout(pending.timer);
       pending.resolve(null);
@@ -101,7 +112,7 @@ export class OxfmtLspBackend implements FormatterBackend {
   }
 
   private async startAndInitialize(): Promise<boolean> {
-    const PATH = await projectToolPath(this.dir, this.worktreePath);
+    const PATH = await projectToolPath(this.toolDir, this.worktreePath);
     const binary = Bun.which("oxfmt", { PATH });
     // Asked again here: nothing else separates the save's detection from this spawn.
     if (!binary || this.dead || !isRepoTrusted(this.worktreePath)) {

@@ -10,6 +10,8 @@ export interface FileFormatter {
   backendMode?: BackendMode;
   /** The directory a persistent backend serves, one per directory. Default: the worktree. */
   backendDir?: string;
+  /** Where a persistent backend starts looking for the tool's install. Default: `backendDir`. */
+  backendToolDir?: string;
 }
 
 /**

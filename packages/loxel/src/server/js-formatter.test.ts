@@ -19,6 +19,7 @@ const stateDir = await mkdtemp(join(tmpdir(), "js-formatter-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { FormatService } = await import("./format-service");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+const { idleTimer } = await import("./formatter-backends");
 
 // Saves spawn real processes and resolve Node, which takes a while on a busy machine.
 setDefaultTimeout(60_000);
@@ -258,6 +259,17 @@ describe("the prettier process", () => {
     expect((await save("x.ts")).content).toStartWith(`root-prettier cwd=${wt} `);
   });
 
+  test.skipIf(!realNode)("a subproject's install under a config further up is used", async () => {
+    await write({ ".prettierrc": "{}", "apps/a/src/.keep": "" });
+    await fakePrettier("apps/a", "a-prettier");
+    expect((await save("apps/a/src/x.ts")).content).toStartWith(
+      `a-prettier cwd=${inWt("apps/a")} `,
+    );
+    const pid = await readFile(join(root, "a-prettier.pid"), "utf-8");
+    expect((await save("apps/a/src/y.ts")).content).toStartWith("a-prettier ");
+    expect(await readFile(join(root, "a-prettier.pid"), "utf-8")).toBe(pid);
+  });
+
   test.skipIf(!realNode)("a syntax error keeps it running, with no command fallback", async () => {
     await write({ ".prettierrc": "{}" });
     await fakePrettier(".", "prettier", 'if (source === "bad") throw new Error("syntax");');
@@ -303,6 +315,14 @@ describe("an untrusted repository", () => {
     expect(await save("a.ts")).toEqual({ content: null, notice: heldBack(label) });
     expectNoProjectCode();
     expect(getRepoTrustStatus(wt).restrictions).toEqual([`${label} doesn't format on save.`]);
+  });
+
+  test("a subproject's install under a config further up is held back, not missing", async () => {
+    await write({ ".prettierrc": "{}", "apps/a/src/.keep": "" });
+    await tool(bin("apps/a", "prettier"), "project-prettier");
+    expect(await save("apps/a/src/x.ts")).toEqual({ content: null, notice: heldBack("Prettier") });
+    expect(ran("project-prettier")).toBe(false);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual(["Prettier doesn't format on save."]);
   });
 
   test("a user's own prettier does not load the project's config either", async () => {
@@ -555,11 +575,11 @@ describe("the oxfmt process", () => {
   const pidsFile = () => join(root, "lsp-pids");
 
   /** Answers like `oxfmt --lsp`, and records each start. */
-  async function fakeOxfmtLsp(): Promise<void> {
+  async function fakeOxfmtLsp(dir = "."): Promise<void> {
     process.env.PATH = `${dirname(process.execPath)}:${process.env.PATH}`;
-    await mkdir(dirname(bin(".", "oxfmt")), { recursive: true });
+    await mkdir(dirname(bin(dir, "oxfmt")), { recursive: true });
     await writeFile(
-      bin(".", "oxfmt"),
+      bin(dir, "oxfmt"),
       `#!/usr/bin/env bun
 require("node:fs").appendFileSync(${JSON.stringify(pidsFile())}, process.pid + "\\n");
 let buf = Buffer.alloc(0);
@@ -603,6 +623,14 @@ for await (const chunk of Bun.stdin.stream()) {
     while (isRunning(pids[0]!)) await Bun.sleep(5);
   });
 
+  test("a subproject's install under a config further up beats a machine-wide one", async () => {
+    await write({ ".oxfmtrc.json": "{}", "apps/a/src/.keep": "" });
+    await fakeOxfmtLsp("apps/a");
+    await tool(join(userBin, "oxfmt"), "user-oxfmt");
+    expect((await save("apps/a/src/x.ts")).content).toBe("lsp");
+    expect(ran("user-oxfmt")).toBe(false);
+  });
+
   test("it stops when trust ends", async () => {
     await write({ ".oxfmtrc.json": "{}" });
     await fakeOxfmtLsp();
@@ -611,5 +639,24 @@ for await (const chunk of Bun.stdin.stream()) {
     setRepoTrusted(wt, false);
     while (isRunning(pid!)) await Bun.sleep(5);
     expect((await save("a.ts")).content).toBeNull();
+  });
+});
+
+describe("idleTimer", () => {
+  test("stops once nothing is in flight", async () => {
+    let busy = true;
+    const stopped = Promise.withResolvers<void>();
+    const checks = Promise.withResolvers<void>();
+    idleTimer(
+      () => {
+        checks.resolve();
+        return busy;
+      },
+      stopped.resolve,
+      1,
+    ).touch();
+    await checks.promise;
+    busy = false;
+    await stopped.promise;
   });
 });

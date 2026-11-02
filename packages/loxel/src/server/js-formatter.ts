@@ -281,11 +281,17 @@ function detectFor(
 
   const formatter: FileFormatter = { command: tool.command, args: tool.args };
   if (isRepoTrusted(wtRoot)) {
-    return { ...formatter, backendMode: tool.backendMode, backendDir: dir };
+    return {
+      ...formatter,
+      backendMode: tool.backendMode,
+      backendDir: dir,
+      // A subproject can install the tool under a config further up.
+      backendToolDir: nearestInstallDir(tool, startDir, wtRoot) ?? dir,
+    };
   }
   const usersOwn = Bun.which(tool.command, { PATH: machinePath(tool.command, wtRoot) }) !== null;
   if (usersOwn && !tool.configRunsCode) return formatter;
-  if (!usersOwn && !isInstalledInProject(tool, dir, wtRoot)) {
+  if (!usersOwn && !nearestInstallDir(tool, startDir, wtRoot)) {
     return { notice: notInstalledNotice(tool.label) };
   }
   // A listing in Settings holds back nothing, so it must not make the UI ask.
@@ -293,9 +299,13 @@ function detectFor(
   return { notice: heldBackNotice(tool.label) };
 }
 
-function isInstalledInProject(tool: JsTool, dir: string, wtRoot: string): boolean {
-  return dirsUpToRoot(dir, wtRoot).some(
-    (candidate) => Bun.which(tool.command, { PATH: nodeModulesBin(candidate) }) !== null,
+/** The nearest directory from `dir` up to the worktree root that installs `tool`. */
+function nearestInstallDir(tool: JsTool, dir: string, wtRoot: string): string | undefined {
+  return dirsUpToRoot(dir, wtRoot).find(
+    (candidate) =>
+      Bun.which(tool.command, { PATH: nodeModulesBin(candidate) }) !== null ||
+      readConfigFile(join(candidate, "node_modules", tool.dependency, "package.json")) !==
+        undefined,
   );
 }
 

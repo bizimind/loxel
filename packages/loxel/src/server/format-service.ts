@@ -57,6 +57,8 @@ interface DetectedFormatter {
   backendMode: BackendMode;
   /** See {@link FileFormatter.backendDir}. */
   backendDir?: string;
+  /** See {@link FileFormatter.backendToolDir}. */
+  backendToolDir?: string;
 }
 
 interface DetectionCache {
@@ -274,7 +276,7 @@ export class FormatService {
     filePath: string,
     worktreePath: string,
   ): Promise<FormatResult> {
-    const key = `${worktreePath}\0${fmt.command}\0${fmt.backendDir ?? worktreePath}`;
+    const key = [worktreePath, fmt.command, fmt.backendDir, fmt.backendToolDir].join("\0");
     let backend = this.backends.get(key);
 
     // Lazy start or restart on crash
@@ -309,11 +311,12 @@ export class FormatService {
     worktreePath: string,
   ): FormatterBackend | undefined {
     const dir = fmt.backendDir ?? worktreePath;
+    const toolDir = fmt.backendToolDir ?? dir;
     switch (fmt.command) {
       case "oxfmt":
-        return new OxfmtLspBackend(dir, worktreePath);
+        return new OxfmtLspBackend(dir, toolDir, worktreePath);
       case "prettier":
-        return new PrettierLibBackend(dir, worktreePath);
+        return new PrettierLibBackend(dir, toolDir, worktreePath);
       default:
         return undefined;
     }

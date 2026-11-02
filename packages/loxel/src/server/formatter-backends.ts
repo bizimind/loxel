@@ -19,6 +19,28 @@ export function killProcessGroup(pid: number): void {
   }
 }
 
+/** A backend holds a process per directory, so one nobody saves in goes away. */
+const IDLE_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Calls `stop` once `touch` has not been called for `timeoutMs`, unless `isBusy` says a request is
+ * still in flight. `clear` cancels it.
+ */
+export function idleTimer(
+  isBusy: () => boolean,
+  stop: () => void,
+  timeoutMs = IDLE_TIMEOUT_MS,
+): { touch: () => void; clear: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const clear = () => clearTimeout(timer);
+  const touch = () => {
+    clear();
+    timer = setTimeout(() => (isBusy() ? touch() : stop()), timeoutMs);
+    timer.unref();
+  };
+  return { touch, clear };
+}
+
 export interface FormatterBackend {
   /** Format content. `filePath` is absolute. */
   format(content: string, filePath: string): Promise<FormatterResult>;

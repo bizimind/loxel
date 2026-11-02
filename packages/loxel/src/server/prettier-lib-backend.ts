@@ -6,6 +6,7 @@ import {
   FORMAT_REJECTED,
   type FormatterBackend,
   type FormatterResult,
+  idleTimer,
   killProcessGroup,
 } from "./formatter-backends";
 import { findProjectPackage, projectToolPath } from "./js-formatter";
@@ -18,8 +19,6 @@ import { measureSpawn } from "./spawn-metrics";
 const log = logger.child("format");
 
 const FORMAT_TIMEOUT_MS = 5_000;
-/** A host holds a Node process per subproject, so one nobody saves in goes away. */
-const IDLE_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * Runs in the worktree's Node, from `/` so that a version manager's shim for `node` reads no pin
@@ -57,10 +56,18 @@ export class PrettierLibBackend implements FormatterBackend {
   private pending = new Map<number, PendingRequest>();
   private requestId = 0;
   private dead = false;
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly idle = idleTimer(
+    () => this.pending.size > 0,
+    () => this.destroy(),
+  );
 
+  /**
+   * `dir` is the directory that selected prettier, and the search for its install starts at
+   * `toolDir`, both in the worktree `wtPath`.
+   */
   constructor(
     private readonly dir: string,
+    private readonly toolDir: string,
     private readonly wtPath: string,
   ) {}
 
@@ -68,7 +75,7 @@ export class PrettierLibBackend implements FormatterBackend {
     this.starting ??= this.start();
     const proc = await this.starting;
     if (!proc || this.dead) return null;
-    this.resetIdleTimer();
+    this.idle.touch();
     return new Promise((resolve) => {
       const id = ++this.requestId;
       const timer = setTimeout(() => {
@@ -91,16 +98,16 @@ export class PrettierLibBackend implements FormatterBackend {
 
   destroy(): void {
     this.dead = true;
-    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idle.clear();
     this.settleAll();
     if (this.proc) killProcessGroup(this.proc.pid);
     this.proc = null;
   }
 
   private async start(): Promise<Subprocess | null> {
-    const packageDir = findProjectPackage("prettier", this.dir, this.wtPath);
+    const packageDir = findProjectPackage("prettier", this.toolDir, this.wtPath);
     const nodePath = (await getNodeEnv(this.wtPath)).env?.nodePath;
-    const PATH = await projectToolPath(this.dir, this.wtPath);
+    const PATH = await projectToolPath(this.toolDir, this.wtPath);
     // Asked again here: nothing else separates the save's detection from this spawn.
     if (!packageDir || !nodePath || this.dead || !isRepoTrusted(this.wtPath)) {
       this.dead = true;
@@ -108,7 +115,7 @@ export class PrettierLibBackend implements FormatterBackend {
     }
     try {
       const proc = measureSpawn("prettier", () =>
-        Bun.spawn([nodePath, "-e", HOST_SOURCE, packageDir, this.dir], {
+        Bun.spawn([nodePath, "-e", HOST_SOURCE, packageDir, this.workingDir()], {
           cwd: "/",
           env: { ...buildSpawnEnv(), PATH, MISE_NOT_FOUND_AUTO_INSTALL: "0" },
           stdin: "ignore",
@@ -130,6 +137,11 @@ export class PrettierLibBackend implements FormatterBackend {
       this.dead = true;
       return null;
     }
+  }
+
+  /** Both are ancestors of the saved file, and a config's plugins resolve from the nearer one. */
+  private workingDir(): string {
+    return this.toolDir.length > this.dir.length ? this.toolDir : this.dir;
   }
 
   private async watchExit(proc: Subprocess): Promise<void> {
@@ -162,14 +174,5 @@ export class PrettierLibBackend implements FormatterBackend {
 
   private settleAll(): void {
     for (const id of [...this.pending.keys()]) this.settle(id, null);
-  }
-
-  private resetIdleTimer(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => {
-      if (this.pending.size > 0) this.resetIdleTimer();
-      else this.destroy();
-    }, IDLE_TIMEOUT_MS);
-    this.idleTimer.unref();
   }
 }
