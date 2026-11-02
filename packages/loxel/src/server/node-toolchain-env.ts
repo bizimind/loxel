@@ -8,7 +8,11 @@ import type { NodeEnv } from "@/api/node-env-model";
 import { logger } from "./logger";
 import { resolveNodeEnv } from "./node-env";
 import { isShippedByRepo } from "./shipped-by-repo";
-import type { TerminalEnvChange, ToolchainEnvContributor } from "./toolchain-env-contributor";
+import {
+  putFirstOnPath,
+  type TerminalEnvChange,
+  type ToolchainEnvContributor,
+} from "./toolchain-env-contributor";
 
 const log = logger.child("server");
 
@@ -31,8 +35,7 @@ async function nodeEnvChange(
     return null;
   }
   return (env) => {
-    const rest = (env.PATH ?? "").split(path.delimiter).filter((dir) => dir && dir !== binDir);
-    env.PATH = [binDir, ...rest].join(path.delimiter);
+    putFirstOnPath(env, binDir);
   };
 }
 
