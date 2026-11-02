@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 
-import { requestOpen } from "./open-request";
+import { requestOpen, requestOpenAll } from "./open-request";
 
 const SERVER = "http://127.0.0.1:7434";
 const NO_WINDOW = { status: 503, body: { error: "No Loxel window is open" } };
@@ -75,5 +75,52 @@ describe("requestOpen", () => {
       "File not found",
     );
     expect(bodies).toHaveLength(1);
+  });
+
+  test("sends every request in order, reporting failures and going on after them", async () => {
+    const { bodies } = serve([
+      { status: 200, body: { ok: true } },
+      { status: 404, body: { error: "File not found" } },
+      { status: 200, body: { ok: true } },
+    ]);
+
+    const result = await requestOpenAll(SERVER, [
+      { filePath: "/a" },
+      { filePath: "/missing" },
+      { url: "https://example.com", wtPath: "/wt" },
+    ]);
+
+    expect(bodies).toEqual([
+      { filePath: "/a" },
+      { filePath: "/missing" },
+      { url: "https://example.com", wtPath: "/wt" },
+    ]);
+    expect(result).toEqual({ warnings: [], failures: [{ index: 1, message: "File not found" }] });
+  });
+
+  test("reports each distinct warning once", async () => {
+    serve([{ status: 200, body: { ok: true, warning: "ignored" } }]);
+
+    const { warnings } = await requestOpenAll(SERVER, [{ filePath: "/a" }, { filePath: "/b" }]);
+
+    expect(warnings).toEqual(["ignored"]);
+  });
+
+  test("shares one wait for a window across the requests", async () => {
+    const { bodies } = serve([NO_WINDOW]);
+    // Every look at the clock is 20s later, so the 30s budget is gone after the first request.
+    let now = 0;
+    const clock = spyOn(Date, "now").mockImplementation(() => (now += 20_000));
+    let waits = 0;
+
+    const { failures } = await requestOpenAll(SERVER, [{ filePath: "/a" }, { filePath: "/b" }], {
+      windowWaitMs: 30_000,
+      onWaiting: () => waits++,
+    });
+    clock.mockRestore();
+
+    expect(bodies).toHaveLength(2);
+    expect(waits).toBe(1);
+    expect(failures.map((f) => f.index)).toEqual([0, 1]);
   });
 });

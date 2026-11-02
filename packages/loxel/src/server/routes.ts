@@ -129,14 +129,15 @@ export interface RouteContext {
   sendToActiveWindow: (windowId: string | null, msg: WsMessage) => boolean;
   /**
    * Send to every window subscribed to `wtPath`; the one the user is working in among them
-   * (`windowId`'s, else the most recently focused) gets `primary` instead.
+   * (`windowId`'s, else the most recently focused) gets `primary` instead. Returns false when no
+   * window shows the worktree.
    */
   sendToWorktreeWindows: (
     wtPath: string,
     windowId: string | null,
     msg: WsMessage,
     primary: WsMessage,
-  ) => void;
+  ) => boolean;
   /** Why a folder cannot be opened in an Others section, or null when it can. */
   externalFolderConflict: (folder: string) => string | null;
   getProject: (cwd: string) => ProjectState | undefined;
@@ -2799,13 +2800,17 @@ async function owningWorktree(ctx: RouteContext, dir: string): Promise<string | 
   try {
     worktrees = (await listProjectWorktrees(project.cwd)).map((wt) => wt.path);
   } catch (err) {
-    terminalLog.warn("Could not list worktrees for a terminal", {
-      project: project.cwd,
-      error: err,
-    });
+    terminalLog.warn("Could not list a project's worktrees", { project: project.cwd, error: err });
     return null;
   }
   return findTreeRoot(dir, project.isBare ? worktrees : [...worktrees, project.cwd]);
+}
+
+/** The worktree a request names (any path in it), or null when it names none that exists. */
+async function namedWorktree(ctx: RouteContext, path: unknown): Promise<string | null> {
+  if (typeof path !== "string") return null;
+  const canonical = await canonicalPath(path);
+  return canonical ? owningWorktree(ctx, canonical) : null;
 }
 
 // POST /api/open — open a file, folder, URL or terminal in the appropriate panel (triggered by the
@@ -2825,6 +2830,10 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   // Opening without focus leaves the window's worktree and active tab alone.
   const unfocused = body.focus === false ? { focus: false } : {};
   const placed = { ...(placement ? { placement } : {}), ...unfocused };
+  const pinned = await namedWorktree(ctx, body.pinWtPath);
+  if (body.pinWtPath !== undefined && !pinned) {
+    return error("No project found for worktree", 404);
+  }
 
   // Terminal mode: a new terminal panel in the window in use, its shell started in `cwd` by the
   // server right away, with an optional command typed into it. The command goes to that one spawn
@@ -2847,8 +2856,9 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
     if (!cwd || !cwdStats) return error("Directory not found", 404);
     if (!cwdStats.isDirectory()) return error("Not a directory", 400);
 
-    // The panel belongs to the worktree holding `cwd`, else to the one the window shows.
-    const owner = await owningWorktree(ctx, cwd);
+    // The panel belongs to the worktree named, else to the one holding `cwd`, else to the one the
+    // window shows.
+    const owner = pinned ?? (await owningWorktree(ctx, cwd));
     const window = ctx.activeWindow(windowId);
     if (!window) return error("No Loxel window is open", 503);
     const worktreePath = owner ?? window.worktreePath;
@@ -2886,20 +2896,24 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
       return error("Invalid URL — only http and https URLs are supported", 400);
     }
 
-    const wtPath = typeof body.wtPath === "string" ? body.wtPath : null;
-    if (!wtPath || !ctx.findProjectForPath(wtPath)) {
-      return error("No project found for worktree", 404);
-    }
+    const wtPath = await namedWorktree(ctx, body.wtPath);
+    if (!wtPath) return error("No project found for worktree", 404);
 
     // Every window showing the worktree gets the page, but only the one in use applies the
-    // placement: a `--replace` must not close tabs in windows the user did not target.
-    const data = { url: body.url, ...unfocused };
-    ctx.sendToWorktreeWindows(
+    // placement and takes focus: a `--replace` must not close tabs, nor a page take over, in
+    // windows the user did not target.
+    const primary: WsMessage = { type: "open_url", wtPath, data: { url: body.url, ...placed } };
+    const shown = ctx.sendToWorktreeWindows(
       wtPath,
       windowId,
-      { type: "open_url", wtPath, data },
-      { type: "open_url", wtPath, data: { ...data, ...placed } },
+      { type: "open_url", wtPath, data: { url: body.url, focus: false } },
+      primary,
     );
+    // No window shows the worktree: the window in use opens it there, like a file. 503 like a file
+    // when no window is connected, which the CLI retries while Loxel launches.
+    if (!shown && !ctx.sendToActiveWindow(windowId, primary)) {
+      return error("No Loxel window is open", 503);
+    }
     return json({ ok: true });
   }
 
@@ -2914,9 +2928,11 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   // otherwise the focused one — which opens them in their worktree or its Others section.
   const path = (await canonicalPath(absolutePath)) ?? absolutePath;
   if (!stats.isDirectory()) {
+    // The worktree of the command's URLs, if it is a project's: the file can open without it.
+    const worktreePath = pinned ?? (await namedWorktree(ctx, body.commandWtPath));
     const sent = ctx.sendToActiveWindow(windowId, {
       type: "open_file",
-      data: { filePath: path, ...placed },
+      data: { filePath: path, ...(worktreePath ? { worktreePath } : {}), ...placed },
     });
     return sent ? json({ ok: true }) : error("No Loxel window is open", 503);
   }
@@ -2927,9 +2943,10 @@ async function handleOpen(req: Request, ctx: RouteContext): Promise<Response> {
   }
   const sent = ctx.sendToActiveWindow(windowId, { type: "open_folder", data: { path } });
   if (!sent) return error("No Loxel window is open", 503);
+  const ignored = placement ? "Layout flags do not" : pinned ? "--worktree does not" : null;
   return json(
-    placement
-      ? { ok: true, warning: "Layout flags do not apply to a folder; it opens in the file tree" }
+    ignored
+      ? { ok: true, warning: `${ignored} apply to a folder; it opens in the file tree` }
       : { ok: true },
   );
 }
