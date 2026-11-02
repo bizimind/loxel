@@ -11,7 +11,7 @@ These files are served by [clangd](https://clangd.llvm.org). Besides diagnostics
 - **Semantic highlighting**: macros, namespaces, types and parameters are colored by what they are, and code disabled by `#if 0` is dimmed.
 - **Inlay hints**: parameter names at call sites and deduced types, shown inline.
 - **Quick fixes and refactorings** (`Cmd+.`): fix a typo clang recognizes, remove an unused include, replace `auto` with the deduced type, and more.
-- **Project-wide search**: references, rename and Go to Symbol cover the whole project once clangd has indexed it in the background.
+- **Project-wide search**: references, rename and Go to Symbol cover the whole project once clangd has indexed it in the background. That means the files in the compile database, so test files left out of the build keep the old name after a rename.
 
 ## What you need to install
 
