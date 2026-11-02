@@ -27,7 +27,7 @@ import { validateStrictJson } from "@/lib/json-strict-validator";
 import { fileSchemeLanguages } from "@/lib/lsp-clients";
 import { addSaveAction } from "@/lib/monaco-save-action";
 import { getMonacoThemeName, toMonacoLanguage } from "@/lib/monaco-theme";
-import { languageNeedsContent, resolveLanguage } from "@/lib/resolve-language";
+import { resolveLanguage } from "@/lib/resolve-language";
 import { inspectTokenAtPosition } from "@/lib/textmate-inspector";
 import { hasTypeScriptDiagnostics } from "@/lib/typescript-files";
 import { queryKeys } from "@/queries/query-keys";
@@ -244,18 +244,16 @@ export function CodeEditorPanel({
   const resolvedLangRef = useRef(resolvedLang);
   resolvedLangRef.current = resolvedLang;
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
-  // A model's URI scheme and first language decide which language servers get it, so a file only
-  // its content can name a language for (a shebang script) waits for that content, unless it cannot
-  // come: an error, or a query paused offline.
+  // Creating a model sends it to language servers, so it waits for the file's content, unless that
+  // cannot come (an error, or a query paused offline): `didOpen` carries the real text, and the
+  // model's URI scheme and first language, which decide its servers, can come from that content (a
+  // shebang script).
   // Latched: losing that content to a refetch must not dispose the editor and its unsaved edits.
   const canCreateModelRef = useRef(false);
-  canCreateModelRef.current ||=
-    diskContent !== null ||
-    isError ||
-    isPaused ||
-    !languageNeedsContent(filePath, fileAssociations);
+  canCreateModelRef.current ||= diskContent !== null || isError || isPaused;
   const canCreateModel = canCreateModelRef.current;
   const waitedForContent = useRef(!canCreateModel);
+  const focusAtOpen = useRef(document.activeElement);
 
   // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
   const editorConfigQuery = useQuery({
@@ -370,8 +368,11 @@ export function CodeEditorPanel({
 
     editorRef.current = editor;
     if (waitedForContent.current) {
-      // `usePanelActivationFocus` found no editor when the panel opened.
-      if (isActivatedPanel(panelApi)) editor.focus();
+      // `usePanelActivationFocus` found no editor when the panel opened. Unless the user has moved on
+      // while the file loaded (a palette, a dialog), focus goes where it would have then.
+      const focusUnmoved =
+        document.activeElement === focusAtOpen.current || document.activeElement === document.body;
+      if (focusUnmoved && isActivatedPanel(panelApi)) editor.focus();
       // The content arrived with the model, so the disk-content effect below finds nothing to do.
       if (diskContent !== null) setDetectedIndentation(detectIndentation(diskContent));
     }
@@ -537,9 +538,9 @@ export function CodeEditorPanel({
     addSaveAction(editor, () => void saveNow());
 
     // Navigate to initial line:column if provided (e.g. from search results).
-    // Only navigate now if diskContent was available at mount (React Query cache hit).
-    // If diskContent is null (still fetching), the editor has empty content and Monaco
-    // would clamp to line 1 — defer navigation to the effect below.
+    // Only navigate now if diskContent is available. It is null here only after a failed or paused
+    // load: the editor is empty and Monaco would clamp to line 1, so the effect below navigates
+    // once a retry brings the content.
     let navRafId: number | undefined;
     if (initialLineRef.current && diskContent !== null) {
       navRafId = navigateToInitialPosition(editor);
@@ -588,8 +589,8 @@ export function CodeEditorPanel({
   }, [diskContent, filePath]);
 
   // Deferred initial navigation: when diskContent arrives after mount and initial refs are still pending.
-  // This handles the case where the editor was created with empty content (diskContent was null
-  // during mount) and the mount effect could not navigate. Declared after the content-update effect
+  // This handles the case where the editor was created with empty content (a failed or paused load)
+  // and the mount effect could not navigate. Declared after the content-update effect
   // so React runs them in order — content is set in the model before navigation fires.
   useEffect(() => {
     if (diskContent === null || mountedRef.current) return;
@@ -700,7 +701,7 @@ export function CodeEditorPanel({
     }));
 
     monaco.editor.setModelMarkers(model, "typescript", markers);
-  }, [diagnostics]);
+  }, [diagnostics, canCreateModel]);
 
   // Real-time per-file diagnostics are delivered by TypeScript over LSP (via
   // LspDiagnosticsFeature in monaco-lsp-client) — no HTTP round-trip needed.
@@ -736,7 +737,7 @@ export function CodeEditorPanel({
       const m = editorRef.current?.getModel();
       if (m) monaco.editor.setModelMarkers(m, "json-strict", []);
     };
-  }, [resolvedLang]);
+  }, [resolvedLang, canCreateModel]);
 
   // Handlers for diverged state resolution
   const handleAcceptDisk = useCallback(() => {
