@@ -1,5 +1,9 @@
 import { basename, extname } from "node:path";
 
+import { logger } from "./logger";
+
+const log = logger.child("clangd-lsp");
+
 const C_FAMILY_EXTENSIONS = [
   "c",
   "c++",
@@ -33,18 +37,6 @@ const CONFIG_FILES = [".clangd", ".clang-tidy"];
 const INDEX_DIRECTORY = /(^|\/)\.cache(\/clangd(\/index)?)?$/;
 /** What clangd writes itself. */
 const INDEX_CONTENTS = /(^|\/)\.cache\/clangd\//;
-
-/**
- * Also matched inside git-ignored directories, where compile databases and generated headers
- * nearly always are. `.cache` is usually ignored as well.
- */
-export const CLANGD_IGNORED_GLOBS: readonly string[] = [
-  ...[...DATABASE_FILES, ...CONFIG_FILES].map((name) => `**/${name}`),
-  "**/.cache",
-  "**/.cache/clangd",
-  "**/.cache/clangd/index",
-  `**/*.{${C_FAMILY_EXTENSIONS.join(",")}}`,
-];
 
 export type ClangdFileChange = "source" | "database" | "config" | "index-directory";
 
@@ -115,14 +107,26 @@ export class ClangdFileChanges {
   constructor(private readonly actions: ClangdFileChangeActions) {}
 
   pathsChanged(relPaths: readonly string[]): void {
+    this.apply(relPaths);
+    const closedSource = (relPath: string) =>
+      classifyChange(relPath) === "source" && !this.actions.isOpen(relPath);
+    if (!this.disposed && relPaths.some(closedSource)) {
+      this.refreshIndexAfter(INDEX_REFRESH_QUIET_MS);
+    }
+  }
+
+  /**
+   * A path in a git-ignored directory: build output, where compile databases and generated headers
+   * are, but also dependency trees, whose installs must not restart clangd for the index.
+   */
+  ignoredPathChanged(relPath: string): void {
+    this.apply([relPath]);
+  }
+
+  private apply(relPaths: readonly string[]): void {
     if (this.disposed) return;
     const changes = new Set(relPaths.map(classifyChange));
     if (changes.has("source")) this.sourcesChanged();
-    const closedSource = (relPath: string) =>
-      classifyChange(relPath) === "source" && !this.actions.isOpen(relPath);
-    if (changes.has("source") && relPaths.some(closedSource)) {
-      this.refreshIndexAfter(INDEX_REFRESH_QUIET_MS);
-    }
     if (changes.has("database") || changes.has("config")) {
       const changed = () => this.actions.databasesChanged();
       this.schedule("databases", DATABASES_DEBOUNCE_MS, changed);
@@ -169,7 +173,12 @@ export class ClangdFileChanges {
       key,
       setTimeout(() => {
         this.timers.delete(key);
-        fire();
+        // Nothing above this timer would catch it, and an uncaught error stops the whole server.
+        try {
+          fire();
+        } catch (err) {
+          log.warn("Could not act on changed files", { trigger: key, error: err });
+        }
       }, delayMs),
     );
   }

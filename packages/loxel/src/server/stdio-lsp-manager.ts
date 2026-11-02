@@ -304,10 +304,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   /**
    * Like {@link watchedFileGlobs}, and also matched against events inside git-ignored directories,
-   * which reach servers only through this: `build/compile_commands.json` (clangd),
-   * `obj/project.assets.json` (C#). Keep them narrow, since build output is the busiest part of
-   * a worktree. A manager that must act on such a file itself, rather than tell its server, can
-   * override {@link notifyWatchedFilesChanged}. Needs {@link forwardWatchedFiles}.
+   * which reach servers only through this: `obj/project.assets.json` (C#). Keep them narrow, since
+   * build output is the busiest part of a worktree. A manager that must act on such a file itself,
+   * rather than tell its server, can override {@link notifyWatchedFilesChanged}, or
+   * {@link notifyIgnoredPathChanged} to tell these paths from the rest (clangd). Needs
+   * {@link forwardWatchedFiles}.
    */
   protected readonly watchedIgnoredGlobs: readonly string[] = [];
 

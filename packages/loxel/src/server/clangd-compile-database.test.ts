@@ -151,9 +151,7 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")("with clan
       expect(await client.openAndWaitForDiagnostics(file)).toEqual([]);
 
       await write(root, "cmake-build-release/compile_commands.json", commands(root, file, 8));
-      server.notifyWatchedFilesChanged(root, [
-        join(root, "cmake-build-release/compile_commands.json"),
-      ]);
+      server.notifyIgnoredPathChanged(root, "cmake-build-release/compile_commands.json");
       expect((await client.closed).code).toBe(LSP_RESTART_CLOSE_CODE);
 
       const next = new FakeClient(server);

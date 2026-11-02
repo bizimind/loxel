@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 
 import {
   CACHED_FILE_DELAY_MS,
-  CLANGD_IGNORED_GLOBS,
   ClangdFileChanges,
   classifyChange,
   DATABASES_DEBOUNCE_MS,
@@ -42,20 +41,6 @@ describe("classifyChange", () => {
     "Makefile",
   ])("%s means nothing to clangd", (relPath) => {
     expect(classifyChange(relPath)).toBeNull();
-  });
-});
-
-describe("CLANGD_IGNORED_GLOBS", () => {
-  const globs = CLANGD_IGNORED_GLOBS.map((glob) => new Bun.Glob(glob));
-  const matched = (relPath: string) => globs.some((glob) => glob.match(relPath));
-
-  test("take what build directories hold for clangd, and leave build output", () => {
-    expect(matched("build/compile_commands.json")).toBe(true);
-    expect(matched("build/generated/version.h")).toBe(true);
-    expect(matched("build/x.c++")).toBe(true);
-    expect(matched(".cache/clangd/index")).toBe(true);
-    expect(matched("build/CMakeFiles/a.dir/a.cpp.o")).toBe(false);
-    expect(matched(".cache/clangd/index/a.cpp.0123.idx")).toBe(false);
   });
 });
 
@@ -125,6 +110,27 @@ describe("ClangdFileChanges", () => {
     changes.dispose();
     jest.advanceTimersByTime(10);
     expect(fired).toEqual(["refresh-index"]);
+  });
+
+  test("a path in a git-ignored directory re-checks, without refreshing the index", () => {
+    changes.ignoredPathChanged("node_modules/nan/nan.h");
+    jest.advanceTimersByTime(INDEX_REFRESH_QUIET_MS);
+    expect(fired).toEqual(["recheck"]);
+  });
+
+  test("an action that throws stops at its timer", () => {
+    const throwing = new ClangdFileChanges({
+      recheck: () => {
+        throw new Error("from the action");
+      },
+      rebuild: () => {},
+      indexDirectoryChanged: () => {},
+      isOpen: () => true,
+      refreshIndex: () => {},
+    });
+    throwing.pathsChanged(["a.h"]);
+    expect(() => jest.advanceTimersByTime(SOURCE_DEBOUNCE_MS)).not.toThrow();
+    throwing.dispose();
   });
 
   test("saving an open file leaves the index to clangd", () => {
