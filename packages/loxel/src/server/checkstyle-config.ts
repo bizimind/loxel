@@ -5,7 +5,7 @@
  * repository's code. A config file no build names does not count, so a project that doesn't run
  * Checkstyle doesn't get it.
  */
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { isRecord } from "@/lib/is-record";
@@ -13,6 +13,7 @@ import { isRecord } from "@/lib/is-record";
 import { readConfigFile } from "./config-file-read";
 import { blockBodies, buildScripts, declaresPlugin, readCode } from "./kotlin-formatter";
 import { dirsUpToRoot } from "./language-formatter";
+import { isInside } from "./shipped-by-repo";
 import { readToml, recordAt } from "./toml-file";
 
 const PLUGIN_ID = "checkstyle";
@@ -162,7 +163,7 @@ function mavenProject(dirs: readonly string[]): CheckstyleProject | null {
   const usual = chain.flatMap(mainPluginBlocks);
   const skip = usual.map((block) => xmlText(block, "skip")).find((value) => value !== undefined);
   if (expand(skip ?? properties["checkstyle.skip"] ?? "") === "true") return null;
-  const locate = (location: string) => locateInBuild(location, chain);
+  const locate = (location: string) => locateInBuild(location, chain, dirs.at(-1) ?? dir);
   const locations = blocks.flatMap((block) =>
     xmlTexts(block, "configLocation").map((location) => expand(location)),
   );
@@ -185,7 +186,8 @@ function pomChain(dirs: readonly string[]): PomFile[] {
   const chain: PomFile[] = [];
   const [start] = dirs;
   let current = start ? readPom(start) : null;
-  while (current) {
+  // A pom can name itself or a child as its parent.
+  while (current && !chain.some((pom) => pom.dir === current?.dir)) {
     chain.push(current);
     current = parentPom(current, dirs);
   }
@@ -324,28 +326,28 @@ function pickConfig(
  * The file a Maven location names, without fetching a URL. It may be relative to any pom of the
  * chain, or a resource of a sibling module its plugin depends on.
  */
-function locateInBuild(location: string, chain: readonly PomFile[]): string | null {
+function locateInBuild(location: string, chain: readonly PomFile[], wtPath: string): string | null {
   if (!location || location.includes("://") || location.includes("${")) return null;
   const inside = location.replace(/^(classpath:)?\/+/, "");
   const roots = chain.map((pom) => pom.dir);
-  if (path.isAbsolute(location) && isFileAt(location) && insideAny(location, roots)) {
-    return location;
-  }
-  for (const root of roots) {
-    const file = path.join(root, inside);
-    if (isFileAt(file)) return file;
-  }
   const topDir = roots.at(-1);
-  if (!topDir) return null;
-  for (const entry of listDir(topDir)) {
-    const file = path.join(topDir, entry, "src", "main", "resources", inside);
-    if (isFileAt(file)) return file;
-  }
-  return null;
+  const candidates = [
+    ...(path.isAbsolute(location) ? [location] : []),
+    ...roots.map((root) => path.join(root, inside)),
+    ...(topDir ? listDir(topDir) : []).map((entry) =>
+      path.join(topDir ?? "", entry, "src", "main", "resources", inside),
+    ),
+  ];
+  return candidates.find((file) => isFileInWorktree(file, wtPath)) ?? null;
 }
 
-function insideAny(file: string, roots: readonly string[]): boolean {
-  return roots.some((root) => file.startsWith(root + path.sep));
+/** By real paths, so a link in the repository doesn't reach what's outside it. */
+function isFileInWorktree(file: string, wtPath: string): boolean {
+  try {
+    return isFileAt(file) && isInside(realpathSync(file), realpathSync(wtPath));
+  } catch {
+    return false;
+  }
 }
 
 function mavenScope(
@@ -459,21 +461,22 @@ function gradleProject(dirs: readonly string[], wtPath: string): CheckstyleProje
   if (!texts.some(appliesPlugin)) return null;
   const buildFile = gradleBuildFile(dir, between);
   const paths = { projectDir: dir, rootDir };
+  const settings = texts.flatMap(checkstyleSettings);
   const directory =
-    firstPath(texts, CONFIG_DIRECTORY, paths) ?? path.join(rootDir, "config", PLUGIN_ID);
-  const named = namedConfigs(texts);
+    firstPath(settings, CONFIG_DIRECTORY, paths) ?? path.join(rootDir, "config", PLUGIN_ID);
+  const named = namedConfigs(settings);
   const file =
-    firstPath(texts, CONFIG_FILE, paths) ??
+    firstPath(settings, CONFIG_FILE, paths) ??
     (named ? path.resolve(directory, named) : path.join(directory, "checkstyle.xml"));
   return {
     dir,
     rootDir,
     buildFile,
-    config: isFileAt(file)
+    config: isFileInWorktree(file, wtPath)
       ? { kind: "file", path: file }
       : { kind: "not-found", location: path.relative(wtPath, file) },
-    properties: gradleProperties(texts, paths, directory),
-    pinnedVersion: gradleToolVersion(firstMatch(texts, TOOL_VERSION), rootDir),
+    properties: gradleProperties(settings, paths, directory),
+    pinnedVersion: gradleToolVersion(firstMatch(settings, TOOL_VERSION), rootDir),
     scope: gradleScope(texts, dir),
   };
 }
@@ -489,6 +492,19 @@ const TOOL_VERSION = /\b(?:[sS]et)?[tT]oolVersion\b\s*(?:=|\.set\(|\(|\s)\s*(.+)
 const CONFIG_PROPERTIES = /\bconfigProperties\b\s*(?:=|\.putAll\(|\.set\()\s*/;
 const CHECKSTYLE_TASK_BLOCK =
   /(?:\bwithType\s*\(?\s*(?:<\s*)?Checkstyle\b[^{]*|\bcheckstyle(?:Main|Test)\b[^{\n]*|\bnamed\s*\(?\s*["']checkstyle\w*["'][^{\n]*)\{/g;
+
+/**
+ * What a script says to Checkstyle: other tools have a `toolVersion` or `configFile` too. Its
+ * extension's block, its tasks', and statements on the extension, as a plugin in Java writes them.
+ */
+function checkstyleSettings(text: string): string[] {
+  return [
+    ...blockBodies(text, /(?:^|[\s(.])checkstyle\s*\{/gm),
+    ...blockBodies(text, /\bconfigure<CheckstyleExtension>\s*\{/g),
+    ...blockBodies(text, CHECKSTYLE_TASK_BLOCK),
+    ...(text.match(/\bcheckstyle\.\w[^\n]*/g) ?? []),
+  ];
+}
 
 function appliesPlugin(text: string): boolean {
   return (

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import {
   CheckstyleDiscovery,
@@ -137,6 +137,33 @@ other=1</propertyExpansion><includeTestSourceDirectory>true</includeTestSourceDi
       "tools/c.xml": "<module/>",
     });
     expect(findCheckstyleProject(wt, wt)?.config.kind).toBe("file");
+  });
+
+  test("a pom that names itself or a child as its parent ends the chain", async () => {
+    await setUp({
+      "pom.xml": pom(`<parent><relativePath>.</relativePath></parent>${build(plugin(""))}`),
+      "a/pom.xml": `<project><artifactId>a</artifactId><parent><artifactId>b</artifactId><relativePath>../b</relativePath></parent></project>`,
+      "b/pom.xml": `<project><artifactId>b</artifactId><parent><artifactId>a</artifactId><relativePath>../a</relativePath></parent></project>`,
+    });
+    expect(findCheckstyleProject(wt, wt)?.dir).toBe(wt);
+    expect(findCheckstyleProject(join(wt, "a"), wt)).toBeNull();
+  });
+
+  test("a location outside the worktree isn't read", async () => {
+    await setUp({
+      "pom.xml": pom(build(plugin("<configLocation>../outside.xml</configLocation>"))),
+      "b/pom.xml": pom(build(plugin("<configLocation>link.xml</configLocation>"))),
+    });
+    const outside = join(dirname(wt), `${basename(wt)}-outside.xml`);
+    await writeFile(outside, "<module/>");
+    await symlink(outside, join(wt, "b/link.xml"));
+    await writeFile(
+      join(wt, "pom.xml"),
+      pom(build(plugin(`<configLocation>../${basename(outside)}</configLocation>`))),
+    );
+    expect(findCheckstyleProject(wt, wt)?.config.kind).toBe("not-found");
+    expect(findCheckstyleProject(join(wt, "b"), wt)?.config.kind).toBe("not-found");
+    await rm(outside);
   });
 
   test("skip turns it off, unless only a profile says so", async () => {
@@ -298,6 +325,23 @@ tasks.withType(Checkstyle) { exclude '**/generated/**' }
     expect(discovery.projectFor(join(wt, "c/src/main/java/G.java"))).not.toBeNull();
     expect(discovery.projectFor(join(wt, "d/src/test/java/T.java"))).not.toBeNull();
     expect(discovery.projectFor(join(wt, "d/build/generated/G.java"))).toBeNull();
+  });
+
+  test("other tools' settings aren't taken for Checkstyle's", async () => {
+    await setUp({
+      ...defaults,
+      "codenarc.xml": "<module/>",
+      "build.gradle": `plugins { id 'checkstyle'; id 'jacoco'; id 'codenarc' }
+jacoco { toolVersion = "0.8.11" }
+codenarc { configFile = file("codenarc.xml"); toolVersion = "3.0" }
+`,
+    });
+    const project = findCheckstyleProject(wt, wt);
+    expect(project?.pinnedVersion).toBeNull();
+    expect(project?.config).toEqual({
+      kind: "file",
+      path: join(wt, "config/checkstyle/checkstyle.xml"),
+    });
   });
 
   test("a build that doesn't use it, whatever files sit around", async () => {

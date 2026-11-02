@@ -153,6 +153,10 @@ const FETCHING_CONFIGS: Record<string, string> = {
   "suppressions-ftp-ip": config(filter("ftp://192.0.2.12/s.xml")),
   "suppressions-ftp-spelled": config(filter("&#102;tp://192.0.2.17/s.xml")),
   "suppressions-jar-ftp": config(filter("jar:ftp://192.0.2.18/s.jar!/s.xml")),
+  "suppressions-url-ftp": config(filter("url:ftp://192.0.2.19/s.xml")),
+  "suppressions-default-ftp": config(
+    `<module name="SuppressionFilter"><property name="file" value="\${unset}" default="ftp://192.0.2.20/s.xml"/></module>`,
+  ),
   "suppressions-jar-ip": config(filter("jar:http://192.0.2.13/s.jar!/s.xml")),
   header: config(
     '<module name="Header"><property name="headerFile" value="http://192.0.2.14/h.txt"/></module>',
@@ -160,6 +164,10 @@ const FETCHING_CONFIGS: Record<string, string> = {
   "import-control": config("").replace(
     '<module name="ConstantName"/>',
     '<module name="ImportControl"><property name="file" value="http://192.0.2.15/i.xml"/></module>',
+  ),
+  "dtd-ftp": config(
+    "",
+    '<!DOCTYPE module PUBLIC "-//Canary//DTD Nothing//EN" "ftp://192.0.2.21/canary.dtd">',
   ),
   dtd: config(
     "",
@@ -295,6 +303,41 @@ try {
   check(!existsSync(path.join(inTree, "build/cs.cache")), "no cacheFile in the repository");
   check(await isClean(inTree), "cache: the tree stays clean");
   cached.client.close();
+
+  // Other spellings of the same property: taken out, or the config isn't run at all.
+  for (const [name, property] of [
+    ["cache-spaces", `<property name=" cacheFile " value="${outside}"/>`],
+    ["cache-char-ref", `<property value="${outside}" name="cache&#70;ile"/>`],
+  ] as const) {
+    const root = await fixture(name, config(property));
+    const run = await open(root);
+    await run.client.waitFor((m) => m.method === "textDocument/publishDiagnostics");
+    check(!existsSync(outside), `${name}: no cacheFile`);
+    run.client.close();
+  }
+  const attlist = await fixture(
+    "cache-attlist",
+    config(
+      `<property value="${outside}"/>`,
+      `<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN" "https://checkstyle.org/dtds/configuration_1_3.dtd" [<!ATTLIST property name NMTOKEN "cacheFile">]>`,
+    ),
+  );
+  const attlistRun = await open(attlist);
+  await attlistRun.client.waitFor((m) => m.method === "window/showMessage");
+  check(!existsSync(outside), "cache-attlist: no cacheFile");
+  attlistRun.client.close();
+
+  const suppressionDtd = await fixture(
+    "suppressions-doctype-ftp",
+    config(filter("config/checkstyle/s.xml")),
+    {
+      "config/checkstyle/s.xml":
+        '<?xml version="1.0"?><!DOCTYPE suppressions PUBLIC "-//Canary//Nothing//EN" "ftp://192.0.2.22/s.dtd"><suppressions/>\n',
+    },
+  );
+  const suppressionRun = await open(suppressionDtd);
+  await suppressionRun.client.waitFor((m) => m.method === "window/showMessage");
+  suppressionRun.client.close();
 
   const custom = await fixture("custom-class", config('<module name="canary.NotOnTheClasspath"/>'));
   const customRun = await open(custom);

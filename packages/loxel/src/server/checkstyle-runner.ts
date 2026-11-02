@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { CheckstyleProject } from "./checkstyle-config";
+import { readConfigFile } from "./config-file-read";
 import { isVersionManagerShim as isInShimsDir } from "./csharp-env";
 import { killProcessGroup } from "./formatter-backends";
 import { isJdkInWorktree, listJavaRuntimes } from "./java-env";
@@ -120,7 +121,11 @@ export async function runCheckstyle(
       if (NO_JAVA.test(exit.stderr)) return { kind: "no-java" };
       if (exit.stderr.includes("UnsupportedClassVersionError")) return { kind: "needs-newer-java" };
       const report = parseCheckstyleXml(exit.stdout, remaining);
-      if (!report) return { kind: "config-failed", message: failureMessage(exit) };
+      if (!report) {
+        // A JVM that was killed or died silently says nothing about the config.
+        const silent = exit.exitCode === null || !`${exit.stderr}${exit.stdout}`.trim();
+        return { kind: silent ? "failed" : "config-failed", message: failureMessage(exit) };
+      }
       for (const [file, errors] of report.errors) {
         const list = await toDiagnostics(file, errors, prepared.tabWidth);
         if (list.length > 0) diagnostics.set(file, list);
@@ -137,16 +142,17 @@ export async function runCheckstyle(
 }
 
 /** The version of the tool, for a message: a JVM start, so only when there is one to give. */
-export async function checkstyleVersion(wtPath: string): Promise<string | null> {
+export async function checkstyleVersion(
+  wtPath: string,
+  signal: AbortSignal,
+): Promise<string | null> {
   const tool = await findCheckstyle(wtPath);
   if (!("executable" in tool)) return null;
   const scratch = await mkdtemp(path.join(tmpdir(), "loxel-checkstyle-"));
   try {
     const { env } = await toolEnv(tool, wtPath, scratch);
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), VERSION_TIMEOUT_MS);
-    const exit = await spawnCheckstyle(tool.executable, ["--version"], env, scratch, abort.signal);
-    clearTimeout(timer);
+    const limited = AbortSignal.any([signal, AbortSignal.timeout(VERSION_TIMEOUT_MS)]);
+    const exit = await spawnCheckstyle(tool.executable, ["--version"], env, scratch, limited);
     return /version:?\s*(\d[\w.-]*)/i.exec(exit.stdout)?.[1] ?? null;
   } catch (err) {
     log.debug("Asking Checkstyle for its version failed", { error: err });
@@ -176,7 +182,8 @@ async function prepareRun(
   await Bun.write(
     properties,
     propertiesFileText({
-      ...project.properties,
+      // A bundled config is read by Checkstyle alone, so nothing here checks what it would be given.
+      ...(config.kind === "file" ? project.properties : {}),
       "checkstyle.cache.file": path.join(scratch, "cache"),
     }),
   );
@@ -191,17 +198,13 @@ async function prepareRun(
   }
   const text = await readFile(config.path, "utf8").catch(() => null);
   if (text === null) return { message: `its config ${config.path} can't be read.` };
-  if (ENTITY_CONFIG.test(text)) {
-    return { message: "it builds property names from XML entities, which Loxel doesn't read." };
-  }
-  if (namesUnproxiedUrl(text, project.properties)) {
-    return { message: "it names an FTP or mail URL, which Loxel doesn't fetch." };
-  }
-  const local = localConfig(text, [project.dir, project.rootDir, path.dirname(config.path)]);
+  const baseDirs = [project.dir, project.rootDir, path.dirname(config.path)];
+  const local = prepareConfig(text, project.properties, baseDirs);
+  if ("refused" in local) return { message: local.refused };
   let configFile = config.path;
-  if (local !== text) {
+  if (!local.same) {
     configFile = path.join(scratch, "checkstyle.xml");
-    await Bun.write(configFile, local);
+    await Bun.write(configFile, local.text);
   }
   return {
     args: [...common, "-c", configFile],
@@ -288,50 +291,88 @@ async function spawnCheckstyle(
 // ---------------------------------------------------------------------------
 // Preparing a config
 
-/** A Checker's `cacheFile`, which would have it write there. */
-const CACHE_FILE_PROPERTY =
-  /<property\b(?:"[^"]*"|'[^']*'|[^>"'])*?\bname\s*=\s*["']cacheFile["'](?:"[^"]*"|'[^']*'|[^>"'])*?(?:\/>|>\s*<\/property\s*>)/g;
-/** A way to spell a property's name so the text above doesn't show it. */
-const ENTITY_CONFIG = /<!ENTITY|<property\b[^>]*\bname\s*=\s*["'][^"']*&/;
+/** A `<property>`, whichever way round its attributes come and whatever they hold. */
+const PROPERTY_ELEMENT =
+  /<property\b((?:\s+[^\s=<>/]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(?:\/>|>\s*<\/property\s*>)/g;
 /** Properties naming a file to read, whose relative paths a run from elsewhere would miss. */
-const FILE_PROPERTY =
-  /(<property\b[^>]*?\bname\s*=\s*["'](?:file|headerFile)["'][^>]*?\bvalue\s*=\s*)(["'])([^"']*)\2/g;
+const FILE_PROPERTIES = new Set(["file", "headerFile"]);
+/**
+ * A URL the JVM would reach without its proxy options: its FTP client goes straight to a literal
+ * address. Only as a value's start or a list's entry, since patterns such as `ignorePattern`'s often
+ * mention `ftp://`. What it allows before the scheme is what `java.net.URL` does.
+ */
+const UNPROXIED_URL = /(?:^|[,\s])(?:url:)?(?:jar:)?(?:ftp|mailto):/i;
+const UNFETCHED_NOTICE = "it names an FTP or mail URL, which Loxel doesn't fetch.";
 
 /**
- * The config as a run should read it: `cacheFile` out, and a relative file it names, which the
- * project's build resolves against its directory, made absolute. `baseDirs` are where to look, in
- * order; a file in none of them stays as written, and Checkstyle reports it.
+ * What a run should read for a config: its text, with `cacheFile` out and a relative file made
+ * absolute, since the project's build resolves those against its directory, or `same` when that
+ * changes nothing. `baseDirs` are where to look for one, in order. Refused with a message for
+ * something that can't be read reliably as text, such as a DOCTYPE's own declarations, which can
+ * supply a property's name.
  */
-export function localConfig(text: string, baseDirs: readonly string[]): string {
-  return text
-    .replace(CACHE_FILE_PROPERTY, "")
-    .replace(FILE_PROPERTY, (whole, start: string, quote: string, value: string) => {
-      if (!value || path.isAbsolute(value) || value.includes("${") || value.includes(":")) {
-        return whole;
-      }
-      const found = baseDirs
-        .map((dir) => path.join(dir, value))
-        .find((file) => Bun.file(file).size);
-      return found ? `${start}${quote}${xmlEscape(found)}${quote}` : whole;
-    });
+export function prepareConfig(
+  text: string,
+  properties: Record<string, string>,
+  baseDirs: readonly string[],
+): { refused: string } | { text: string; same: boolean } {
+  const bare = text.replace(/<!--[\s\S]*?-->/g, "");
+  const doctype = refusedDoctype(bare);
+  if (doctype) return { refused: doctype };
+  let same = true;
+  let refused: string | null = null;
+  let found = 0;
+  const local = bare.replace(PROPERTY_ELEMENT, (whole: string, attributes: string) => {
+    found += 1;
+    const attrs = xmlAttributes(attributes);
+    const name = attrs.get("name")?.trim();
+    if (name === "cacheFile") {
+      same = false;
+      return "";
+    }
+    const expand = (value: string) =>
+      value.replace(/\$\{([^}]+)\}/g, (ref, key: string) => properties[key] ?? ref);
+    const values = [attrs.get("value"), attrs.get("default")].flatMap((v) =>
+      v ? [expand(v)] : [],
+    );
+    if (values.some(namesUnproxiedUrl)) refused = UNFETCHED_NOTICE;
+    if (!name || !FILE_PROPERTIES.has(name)) return whole;
+    const value = attrs.get("value") ?? "";
+    const file = localFile(expand(value), baseDirs);
+    if (file) refused ??= refusedDoctype(readConfigFile(file) ?? "");
+    if (!file || file === value) return whole;
+    same = false;
+    attrs.set("value", file);
+    return `<property${[...attrs].map(([key, v]) => ` ${key}="${xmlEscape(v)}"`).join("")}/>`;
+  });
+  if (refused) return { refused };
+  // One this reader passed over would keep whatever it says.
+  if (found !== [...bare.matchAll(/<property\b/g)].length) {
+    return { refused: "it has a property Loxel can't read." };
+  }
+  return { text: local, same };
 }
 
-/**
- * Whether a property's value is a URL the JVM would reach without its proxy options: its FTP client
- * goes straight to a literal address. Only as a value's start or a list's entry, since patterns
- * such as `ignorePattern`'s often mention `ftp://`.
- */
-export function namesUnproxiedUrl(text: string, properties: Record<string, string>): boolean {
-  for (const [, double, single] of text.matchAll(
-    /<property\b[^>]*?\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)')/g,
-  )) {
-    const decoded = xmlDecode(double ?? single ?? "").replace(
-      /\$\{([^}]+)\}/g,
-      (whole, name: string) => properties[name] ?? whole,
-    );
-    if (/(?:^|[,\s])(?:jar:)?(?:ftp|mailto):/i.test(decoded)) return true;
-  }
-  return false;
+/** The file a property names, when it is a path on this machine that exists. */
+function localFile(value: string, baseDirs: readonly string[]): string | null {
+  if (!value || value.includes("${") || /^[a-z][a-z0-9+.-]+:/i.test(value)) return null;
+  if (path.isAbsolute(value)) return Bun.file(value).size ? value : null;
+  return baseDirs.map((dir) => path.join(dir, value)).find((file) => Bun.file(file).size) ?? null;
+}
+
+/** Why an XML file's DOCTYPE won't do: its own declarations, or a URL that isn't proxied. */
+function refusedDoctype(xml: string): string | null {
+  const doctype = /<!DOCTYPE\b(?:"[^"]*"|'[^']*'|[^>"'[])*(\[)?/.exec(xml);
+  if (!doctype) return null;
+  if (doctype[1]) return "it declares things in its DOCTYPE, which Loxel doesn't read.";
+  const literals = [...doctype[0].matchAll(/"([^"]*)"|'([^']*)'/g)];
+  return literals.some(([, a, b]) => namesUnproxiedUrl(a ?? b ?? "")) ? UNFETCHED_NOTICE : null;
+}
+
+function namesUnproxiedUrl(value: string): boolean {
+  // `java.net.URL` skips control characters before the scheme, as it does spaces.
+  const spaced = Array.from(value, (char) => ((char.codePointAt(0) ?? 0) < 32 ? " " : char));
+  return UNPROXIED_URL.test(spaced.join(""));
 }
 
 function xmlEscape(text: string): string {
@@ -436,8 +477,10 @@ function isSeverity(value: string | undefined): value is keyof typeof SEVERITY {
 
 function xmlAttributes(text: string): Map<string, string> {
   const attrs = new Map<string, string>();
-  for (const [, name, value] of text.matchAll(/([\w-]+)="([^"]*)"/g)) {
-    if (name) attrs.set(name, xmlDecode(value ?? ""));
+  for (const [, name, double, single] of text.matchAll(
+    /([\w.:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g,
+  )) {
+    if (name) attrs.set(name, xmlDecode(double ?? single ?? ""));
   }
   return attrs;
 }

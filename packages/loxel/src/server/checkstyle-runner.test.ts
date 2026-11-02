@@ -7,9 +7,8 @@ import {
   type CheckstyleError,
   configTabWidth,
   failureMessage,
-  localConfig,
-  namesUnproxiedUrl,
   parseCheckstyleXml,
+  prepareConfig,
   propertiesFileText,
   stoppedAtFile,
   toDiagnostic,
@@ -208,16 +207,23 @@ describe("toDiagnostic", () => {
   });
 });
 
-describe("localConfig", () => {
+describe("prepareConfig", () => {
   let dir: string;
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  async function inDir(): Promise<void> {
+  async function inDir(files: Record<string, string> = {}): Promise<void> {
     dir = await realpath(await mkdtemp(join(tmpdir(), "checkstyle-local-")));
     await writeFile(join(dir, "s.xml"), "<suppressions/>");
+    for (const [name, text] of Object.entries(files)) await writeFile(join(dir, name), text);
   }
+  const textOf = (result: ReturnType<typeof prepareConfig>): string => {
+    if ("refused" in result) throw new Error(result.refused);
+    return result.text;
+  };
+  const filter = (attributes: string) =>
+    `<module name="SuppressionFilter"><property ${attributes}/></module>`;
 
   test("takes cacheFile out however it's written", async () => {
     await inDir();
@@ -226,54 +232,112 @@ describe("localConfig", () => {
       `<property value="x>y" name='cacheFile' />`,
       `<property\n  name = "cacheFile"\n  value="\${c}"></property>`,
       `<property name="cacheFile" value="x"> </property>`,
+      `<property name=" cacheFile " value="x"/>`,
+      `<property value="a>b" name="cache&#70;ile"/>`,
     ]) {
       const text = `<module name="Checker">${property}<property name="cacheFileX" value="kept"/></module>`;
-      const local = localConfig(text, [dir]);
-      expect(local).not.toContain('"x"');
-      expect(local).not.toMatch(/name\s*=\s*["']cacheFile["']/);
-      expect(local).toContain("cacheFileX");
+      const result = prepareConfig(text, {}, [dir]);
+      expect(result).toMatchObject({ same: false });
+      expect(textOf(result)).toBe(
+        '<module name="Checker"><property name="cacheFileX" value="kept"/></module>',
+      );
     }
+  });
+
+  test("a mention in a comment changes nothing", async () => {
+    await inDir();
+    const text = `<module><!-- <property name="cacheFile" value="x"/> --></module>`;
+    expect(prepareConfig(text, {}, [dir])).toMatchObject({ same: true });
   });
 
   test("makes a relative file absolute, where it exists", async () => {
     await inDir();
-    const text = (value: string) =>
-      `<module name="SuppressionFilter"><property name="file" value="${value}"/></module>`;
-    expect(localConfig(text("s.xml"), ["/nowhere", dir])).toBe(text(join(dir, "s.xml")));
+    const result = prepareConfig(filter('name="file" value="s.xml"'), {}, ["/nowhere", dir]);
+    expect(result).toMatchObject({ same: false });
+    expect(textOf(result)).toBe(filter(`name="file" value="${join(dir, "s.xml")}"`));
+    expect(
+      prepareConfig(`<property value="s.xml" name='headerFile' default="d"/>`, {}, [dir]),
+    ).toMatchObject({ same: false });
     for (const value of ["gone.xml", "/abs/s.xml", "${config_loc}/s.xml", "http://x/s.xml"]) {
-      expect(localConfig(text(value), [dir])).toBe(text(value));
+      expect(prepareConfig(filter(`name="file" value="${value}"`), {}, [dir])).toMatchObject({
+        same: true,
+      });
     }
   });
 
   test("leaves a config with nothing to change as it is", async () => {
     await inDir();
     const text = `<module name="Checker"><property name="severity" value="warning"/></module>`;
-    expect(localConfig(text, [dir])).toBe(text);
+    expect(prepareConfig(text, {}, [dir])).toEqual({ text, same: true });
   });
-});
 
-describe("namesUnproxiedUrl", () => {
-  const property = (value: string) => `<property name="file" value="${value}"/>`;
-
-  test("a value that is one, however spelled", () => {
-    for (const value of [
-      "ftp://192.0.2.1/s.xml",
-      "FTP://192.0.2.1/s.xml",
-      "jar:ftp://192.0.2.1/s.jar!/s.xml",
-      "&#102;tp://192.0.2.1/s.xml",
-      "mailto:a@example.com",
-      "a.xml, ftp://192.0.2.1/b.xml",
-      "${u}/s.xml",
+  test("refuses a URL the proxies don't reach, however spelled", async () => {
+    await inDir();
+    for (const attributes of [
+      'name="file" value="ftp://192.0.2.1/s.xml"',
+      'name="file" value="FTP://192.0.2.1/s.xml"',
+      'name="file" value="jar:ftp://192.0.2.1/s.jar!/s.xml"',
+      'name="file" value="url:ftp://192.0.2.1/s.xml"',
+      'name="file" value="&#102;tp://192.0.2.1/s.xml"',
+      'name="file" value="&#1;ftp://192.0.2.1/s.xml"',
+      'name="file" value="mailto:a@example.com"',
+      'name="headerFiles" value="a.xml, ftp://192.0.2.1/b.xml"',
+      'name="file" value="${u}/s.xml"',
+      'name="file" value="${nope}" default="ftp://192.0.2.1/s.xml"',
+      'default="a>b" value=\'ftp://192.0.2.1/s.xml\' name="file"',
     ]) {
-      expect(namesUnproxiedUrl(property(value), { u: "ftp://192.0.2.1" })).toBe(true);
+      expect(prepareConfig(filter(attributes), { u: "ftp://192.0.2.1" }, [dir])).toEqual({
+        refused: "it names an FTP or mail URL, which Loxel doesn't fetch.",
+      });
     }
-    expect(namesUnproxiedUrl(`<property value='ftp://x' name='file'/>`, {})).toBe(true);
   });
 
-  test("not a pattern that mentions one, or anything else", () => {
+  test("not a pattern that mentions one, or anything else", async () => {
+    await inDir();
     for (const value of ["^.*(http|ftp)://.*$", "a|ftp://", "http://x/s.xml", "${u}", "file.xml"]) {
-      expect(namesUnproxiedUrl(property(value), {})).toBe(false);
+      expect(
+        prepareConfig(filter(`name="ignorePattern" value="${value}"`), {}, [dir]),
+      ).toMatchObject({ same: true });
     }
+  });
+
+  test("refuses a DOCTYPE with declarations of its own, or an FTP one", async () => {
+    await inDir();
+    const body = "<module/>";
+    for (const doctype of [
+      `<!DOCTYPE module [<!ENTITY a "cacheFile">]>`,
+      `<!DOCTYPE module PUBLIC "-//X//" "x.dtd" [<!ATTLIST property name NMTOKEN "cacheFile">]>`,
+      `<!DOCTYPE module PUBLIC "-//X//" "ftp://192.0.2.1/x.dtd">`,
+      `<!DOCTYPE module SYSTEM 'jar:ftp://192.0.2.1/x.jar!/x.dtd'>`,
+    ]) {
+      expect("refused" in prepareConfig(doctype + body, {}, [dir])).toBe(true);
+    }
+    expect(
+      prepareConfig(
+        `<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN" "https://checkstyle.org/dtds/configuration_1_3.dtd">${body}`,
+        {},
+        [dir],
+      ),
+    ).toMatchObject({ same: true });
+  });
+
+  test("the same for a suppressions file it names", async () => {
+    await inDir({
+      "bad.xml": `<!DOCTYPE suppressions SYSTEM "ftp://192.0.2.1/x.dtd"><suppressions/>`,
+    });
+    expect(prepareConfig(filter('name="file" value="bad.xml"'), {}, [dir])).toEqual({
+      refused: "it names an FTP or mail URL, which Loxel doesn't fetch.",
+    });
+    expect(
+      prepareConfig(filter(`name="file" value="\${s}"`), { s: join(dir, "bad.xml") }, [dir]),
+    ).toEqual({ refused: "it names an FTP or mail URL, which Loxel doesn't fetch." });
+  });
+
+  test("refuses a property it can't read", async () => {
+    await inDir();
+    expect(prepareConfig(`<property name="cacheFile" value=unquoted/>`, {}, [dir])).toEqual({
+      refused: "it has a property Loxel can't read.",
+    });
   });
 });
 

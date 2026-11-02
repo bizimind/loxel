@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -50,6 +51,8 @@ interface CheckstyleSession {
   discovery: CheckstyleDiscovery;
   /** Configs that failed to load, as their projects: not run again until something changes. */
   failedConfigs: Set<string>;
+  /** Bumped when that set is cleared, so a run that started before doesn't add to it after. */
+  configEpoch: number;
   notices: Set<string>;
   /** Stops the running tool when the session ends or trust goes away. */
   abort: AbortController;
@@ -100,12 +103,13 @@ export class CheckstyleLspManager implements WorktreeLspServer {
       published: new Set(),
       discovery: new CheckstyleDiscovery(wtPath),
       failedConfigs: new Set(),
+      configEpoch: 0,
       notices: new Set(),
       abort: new AbortController(),
       // A new JDK can run what an older one could not. Asked for by the first run, not a change.
       unsubscribeJdk: subscribeJavaEnv(wtPath, ({ first, changed }) => {
         if (first || !changed) return;
-        session.failedConfigs.clear();
+        forgetFailures(session);
         this.schedule(session, [...session.openFiles]);
       }),
     };
@@ -152,7 +156,7 @@ export class CheckstyleLspManager implements WorktreeLspServer {
     if (!session) return;
     if (paths.some(mayAffectCheckstyle)) {
       session.discovery.clear();
-      session.failedConfigs.clear();
+      forgetFailures(session);
       this.schedule(session, [...session.openFiles]);
       return;
     }
@@ -200,7 +204,7 @@ export class CheckstyleLspManager implements WorktreeLspServer {
         for (const file of [...session.published]) this.publish(session, file, []);
       }
       session.discovery.clear();
-      session.failedConfigs.clear();
+      forgetFailures(session);
       this.schedule(session, [...session.openFiles]);
     }
   }
@@ -249,14 +253,21 @@ export class CheckstyleLspManager implements WorktreeLspServer {
   }
 
   private async check(session: CheckstyleSession, files: readonly string[]): Promise<void> {
+    // Trust going away replaces this, and ends the batch whichever project it has reached.
+    const { signal } = session.abort;
     for (const { project, key, files: group } of this.groupByProject(session, files)) {
+      if (signal.aborted) return;
       if (session.failedConfigs.has(key)) continue;
-      const { abort } = session;
       const open = group.filter((file) => session.openFiles.has(file));
       if (open.length === 0) continue;
-      const outcome = await this.run(session, project, open, abort.signal);
-      if (!this.isLive(session) || abort.signal.aborted) return;
-      await this.apply(session, project, key, open, outcome);
+      const epoch = session.configEpoch;
+      const outcome = await this.run(session, project, open, signal);
+      if (!this.isLive(session) || signal.aborted) return;
+      this.apply(session, open, outcome);
+      if (outcome.kind === "config-failed" && epoch === session.configEpoch) {
+        session.failedConfigs.add(key);
+      }
+      await this.tell(session, project, outcome, signal);
     }
   }
 
@@ -282,7 +293,8 @@ export class CheckstyleLspManager implements WorktreeLspServer {
   ): { project: CheckstyleProject; key: string; files: string[] }[] {
     const groups = new Map<string, { project: CheckstyleProject; key: string; files: string[] }>();
     for (const file of files) {
-      const project = session.discovery.projectFor(file);
+      // A file gone from disk, by a branch switch, would leave Checkstyle nothing to report on.
+      const project = isFile(file) ? session.discovery.projectFor(file) : null;
       if (!project) {
         this.publish(session, file, []);
         continue;
@@ -295,13 +307,11 @@ export class CheckstyleLspManager implements WorktreeLspServer {
     return [...groups.values()];
   }
 
-  private async apply(
+  private apply(
     session: CheckstyleSession,
-    project: CheckstyleProject,
-    key: string,
     files: readonly string[],
     outcome: CheckstyleOutcome,
-  ): Promise<void> {
+  ): void {
     if (outcome.kind === "reported") {
       for (const file of files) {
         if (session.openFiles.has(file)) {
@@ -313,15 +323,15 @@ export class CheckstyleLspManager implements WorktreeLspServer {
     if (outcome.kind === "stopped") return;
     // Nothing was checked, so what is showing can't be vouched for.
     for (const file of files) this.publish(session, file, []);
-    await this.tell(session, project, key, outcome);
   }
 
   private async tell(
     session: CheckstyleSession,
     project: CheckstyleProject,
-    key: string,
-    outcome: Exclude<CheckstyleOutcome, { kind: "reported" | "stopped" }>,
+    outcome: CheckstyleOutcome,
+    signal: AbortSignal,
   ): Promise<void> {
+    if (outcome.kind === "reported" || outcome.kind === "stopped") return;
     const build = path.relative(session.wtPath, project.buildFile);
     // The same words for every project of a worktree and every worktree, so it is said once.
     if (outcome.kind === "not-installed") {
@@ -342,9 +352,9 @@ export class CheckstyleLspManager implements WorktreeLspServer {
         "Checkstyle needs a newer JDK than any Loxel found. Install one to see its diagnostics.",
       );
     } else if (outcome.kind === "config-failed") {
-      session.failedConfigs.add(key);
       log.warn("Checkstyle could not load a config", { build, message: outcome.message });
-      this.notify(session, await this.configFailureNotice(session, project, outcome.message));
+      const notice = await this.configFailureNotice(session, project, outcome.message, signal);
+      if (!signal.aborted) this.notify(session, notice);
     } else {
       log.warn("Checkstyle failed", { build, message: outcome.message });
       this.notify(session, `Checkstyle could not check ${build}'s files: ${outcome.message}`);
@@ -355,13 +365,14 @@ export class CheckstyleLspManager implements WorktreeLspServer {
     session: CheckstyleSession,
     project: CheckstyleProject,
     message: string,
+    signal: AbortSignal,
   ): Promise<string> {
     const { config } = project;
     const where =
       config.kind === "file"
         ? path.relative(session.wtPath, config.path)
         : path.relative(session.wtPath, project.buildFile);
-    const version = await checkstyleVersion(session.wtPath);
+    const version = await checkstyleVersion(session.wtPath, signal);
     const pin = project.pinnedVersion;
     const named = version ? `Checkstyle ${version}` : "Checkstyle";
     const pinned = pin && pin !== version ? ` This project pins Checkstyle ${pin}.` : "";
@@ -414,6 +425,19 @@ export class CheckstyleLspManager implements WorktreeLspServer {
     } catch (err) {
       log.debug("send() on a closed Checkstyle WebSocket threw", { error: err });
     }
+  }
+}
+
+function forgetFailures(session: CheckstyleSession): void {
+  session.failedConfigs.clear();
+  session.configEpoch += 1;
+}
+
+function isFile(file: string): boolean {
+  try {
+    return statSync(file).isFile();
+  } catch {
+    return false;
   }
 }
 

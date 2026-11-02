@@ -27,6 +27,10 @@ const FAKE_CHECKSTYLE = `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "Checkstyle version: 14.3.0"; exit 0; fi
 echo "$PWD|$JAVA_HOME|$JAVA_TOOL_OPTIONS|$*" >> "$RUNS_DIR/runs"
 if [ -f "$RUNS_DIR/config-fails" ] && ! echo "$*" | grep -q fine.xml; then
+  if [ -f "$RUNS_DIR/hold-failure" ]; then
+    touch "$RUNS_DIR/holding"
+    while [ -f "$RUNS_DIR/hold-failure" ]; do sleep 0.01; done
+  fi
   echo "com.puppycrawl.tools.checkstyle.api.CheckstyleException: Property \\\${m} has not been set" >&2
   exit 254
 fi
@@ -369,6 +373,17 @@ describe.skipIf(!canRun)("in a trusted repository", () => {
     await client.diagnostics(file, []);
   });
 
+  test("a file deleted from disk is cleared, and doesn't fail the project", async () => {
+    const client = await setUp(GRADLE_PROJECT);
+    const file = await badFile();
+    client.open(file);
+    await client.diagnostics(file, ["checkstyle says"]);
+    await rm(file);
+    manager?.notifyWatchedFilesChanged(wt, [file]);
+    await client.diagnostics(file, []);
+    expect(client.notices()).toEqual([]);
+  });
+
   test("ending the session stops a run, whole", async () => {
     const client = await setUp(GRADLE_PROJECT);
     await writeFile(join(runsDir, "hang"), "");
@@ -424,6 +439,20 @@ describe.skipIf(!canRun)("a config that doesn't load", () => {
     await client.notice(/could not load/);
     await rm(join(runsDir, "config-fails"));
     manager?.notifyWatchedFilesChanged(wt, [join(wt, "config/checkstyle/checkstyle.xml")]);
+    await client.diagnostics(file, ["checkstyle says"]);
+  });
+
+  test("a config fixed during the run that failed gets tried again", async () => {
+    const client = await setUp(GRADLE_PROJECT);
+    await writeFile(join(runsDir, "config-fails"), "");
+    const file = await badFile();
+    await writeFile(join(runsDir, "hold-failure"), "");
+    client.open(file);
+    const held = join(runsDir, "holding");
+    while (!(await Bun.file(held).exists())) await Bun.sleep(5);
+    await rm(join(runsDir, "config-fails"));
+    manager?.notifyWatchedFilesChanged(wt, [join(wt, "config/checkstyle/checkstyle.xml")]);
+    await rm(join(runsDir, "hold-failure"));
     await client.diagnostics(file, ["checkstyle says"]);
   });
 
@@ -542,6 +571,29 @@ describe.skipIf(!canRun)("in an untrusted repository", () => {
     expect(client.notices()).toEqual([]);
     setRepoTrusted(wt, true);
     await client.notice(/not on your PATH/);
+  });
+
+  test("taking trust back during a batch starts none of its later projects", async () => {
+    const client = await setUp({
+      ...GRADLE_PROJECT,
+      "other/build.gradle":
+        "apply plugin: 'checkstyle'\ncheckstyle { configFile = file('fine.xml') }\n",
+      "other/fine.xml": "<module/>",
+      "other/src/main/java/B.java": "class B {}\n",
+      "other/src/main/java/B.java.bad": "",
+    });
+    await writeFile(join(runsDir, "config-fails"), "");
+    await writeFile(join(runsDir, "hold-failure"), "");
+    const file = await badFile();
+    const other = join(wt, "other/src/main/java/B.java");
+    client.open(file);
+    client.open(other);
+    const held = join(runsDir, "holding");
+    while (!(await Bun.file(held).exists())) await Bun.sleep(5);
+    setRepoTrusted(wt, false);
+    await rm(join(runsDir, "hold-failure"));
+    await restricted();
+    expect((await runs()).filter((run) => run.includes("fine.xml"))).toEqual([]);
   });
 
   test("taking trust back stops a run and clears its findings", async () => {
