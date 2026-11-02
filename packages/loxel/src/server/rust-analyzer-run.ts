@@ -269,7 +269,7 @@ export function withRustClientCapabilities(data: string): string {
     // Nothing may override the restricted settings, which the manager adds next.
     delete frame.params.initializationOptions;
     const { capabilities } = frame.params;
-    if (!isRecord(capabilities)) return data;
+    if (!isRecord(capabilities)) return JSON.stringify(frame);
     const experimental = isRecord(capabilities.experimental) ? capabilities.experimental : {};
     capabilities.experimental = { ...experimental, serverStatusNotification: true };
     const { textDocument } = capabilities;

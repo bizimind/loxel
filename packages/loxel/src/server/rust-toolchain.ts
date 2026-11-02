@@ -304,10 +304,10 @@ async function resolvePlain(
   const sysroot = await readSysroot(rustcPath, env);
   const [version, cargo, rustfmt, cargoClippy, rustAnalyzer] = await Promise.all([
     rustVersion(rustcPath, env),
-    // A rustup proxy would pick its toolchain by the directory it runs in, unchecked.
+    // A proxy behind a Rust without rustup would pick its own toolchain, not this one.
     findTool(wtPath, "cargo", dirs, { skipProxies: true }),
-    findTool(wtPath, "rustfmt", dirs),
-    findTool(wtPath, "cargo-clippy", dirs),
+    findTool(wtPath, "rustfmt", dirs, { skipProxies: true }),
+    findTool(wtPath, "cargo-clippy", dirs, { skipProxies: true }),
     findTool(wtPath, "rust-analyzer", dirs, { skipProxies: true }),
   ]);
   return {
@@ -414,7 +414,9 @@ async function rustupTool(
   dirs: string[],
 ): Promise<string | null> {
   if (!real || (await isRepoLocal(wtPath, real)) || (await isVersionManagerShim(real))) return null;
-  return (await findTool(wtPath, name, dirs)) ?? real;
+  const found = await findTool(wtPath, name, dirs);
+  // A standalone one earlier on the path is not this toolchain's.
+  return found && (await rustupBehindProxy(found)) ? found : real;
 }
 
 /** The tool's path in the worktree's toolchain, or null when the toolchain does not have it. */

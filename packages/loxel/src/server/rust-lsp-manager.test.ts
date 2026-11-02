@@ -433,6 +433,13 @@ describe("withRustClientCapabilities", () => {
     expect(JSON.parse(frame).params.initializationOptions).toBeUndefined();
   });
 
+  test("drops the client's own settings also without capabilities", () => {
+    const frame = withRustClientCapabilities(
+      frameOf({ id: 1, method: "initialize", params: { initializationOptions: { a: 1 } } }),
+    );
+    expect(JSON.parse(frame).params.initializationOptions).toBeUndefined();
+  });
+
   test("leaves other frames as they are", () => {
     const other = frameOf({ method: "initialized", params: {} });
     expect(withRustClientCapabilities(other)).toBe(other);

@@ -4,6 +4,7 @@ import { useLspStatusStore } from "@/store/lsp-status";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { createLspClient } from "./lsp-client";
+import { createToolchainServerRecovery } from "./toolchain-server-recovery";
 
 // rust-analyzer: only worktrees with Rust files pay the cost.
 const rustLspClient = createLspClient({
@@ -14,14 +15,13 @@ const rustLspClient = createLspClient({
   showMessages: true,
 });
 
-// A server that could not start comes back with the toolchain it was waiting for.
-wsClient.subscribe((message) => {
-  if (message.type !== rustToolchain.changedMessage) return;
-  if (useLspStatusStore.getState().stopped.get("ws/rust-lsp")?.reason !== "start-failed") return;
-  const wtPath = useWorktreeStore.getState().activeWorktreePath;
-  if (wtPath === null || wtPath !== message.wtPath) return;
-  rustLspClient.disconnect();
-  rustLspClient.connect(wtPath);
-});
+wsClient.subscribe(
+  createToolchainServerRecovery({
+    changedMessage: rustToolchain.changedMessage,
+    client: rustLspClient,
+    stoppedServer: () => useLspStatusStore.getState().stopped.get("ws/rust-lsp"),
+    activeWorktree: () => useWorktreeStore.getState().activeWorktreePath,
+  }),
+);
 
 export default rustLspClient;
