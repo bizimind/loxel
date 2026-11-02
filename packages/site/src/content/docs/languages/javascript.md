@@ -132,7 +132,7 @@ Other files stay clean, so a package without oxlint in a monorepo isn't linted w
 
 Loxel never installs oxlint. If a project uses it with none installed, or with an older version, a notification says what to do. oxlint runs on the [Node version](#node-version) the worktree uses, which has to be one the installed oxlint supports. Until you trust a repository, oxlint doesn't run in it, and the status bar shows **Restricted** once you open a file in a project that uses it.
 
-A separate repository inside your worktree, such as a submodule or a clone that git doesn't ignore, has its own trust. If it has an oxlint config, oxlint waits until you trust that repository too or add it to `.gitignore`, and a notification says so. The same goes for a config above the worktree when the worktree's root has none.
+A separate repository inside your worktree, such as a submodule or a clone that git doesn't ignore, has its own trust. If it has an oxlint config, oxlint waits until you trust that repository too or add it to `.gitignore`, and a notification says so. The same goes for a folder above the worktree that holds an oxlint config, or `oxlint-tsgolint` for type-aware rules, when the worktree has none of its own.
 
 Changes to a config file apply right away, and so does installing or upgrading packages.
 

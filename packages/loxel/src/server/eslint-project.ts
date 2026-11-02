@@ -50,5 +50,9 @@ export function hasInstalledEslint(file: string, wtPath: string): boolean {
 
 /** What to tell the user about a project with an ESLint config and no ESLint installed. */
 export function eslintNotInstalledMessage(configDir: string, wtPath: string): string {
-  return notInstalledMessage({ name: "ESLint", packageName: "eslint" }, configDir, wtPath);
+  return notInstalledMessage(
+    { name: "ESLint", packageName: "eslint", sign: "has a config" },
+    configDir,
+    wtPath,
+  );
 }

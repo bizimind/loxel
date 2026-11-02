@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { isRecord } from "@/lib/is-record";
 
-import { readPackageJson } from "./js-project";
+import { hasInstalledPackage, namesDependency, readPackageJson } from "./js-project";
 import {
   findOxlintProjectDir,
   isOxlintConfigFile,
@@ -12,7 +12,6 @@ import {
   scanWorktree,
 } from "./oxlint-project";
 import {
-  isInNodeModules,
   type LinterLaunch,
   type LinterNoLaunch,
   ProjectLinterLspManager,
@@ -28,8 +27,8 @@ const MIN_OXLINT_VERSION = "1.29.0";
 /** LSP's largest line number, for a range to the end of any file. */
 const LAST_LINE = 2_147_483_647;
 
-/** Files whose change can change what starts, and what a running server has read. */
-const RESTARTING_FILES = new Set(["package.json", ".gitignore"]);
+/** The packages whose change matters to a connection with no server running. */
+const OXLINT_PACKAGES = new Set([OXLINT_PACKAGE, "oxlint-tsgolint"]);
 
 export interface OxlintLaunch extends LinterLaunch {
   bin: string;
@@ -54,25 +53,28 @@ export class OxlintLspManager extends ProjectLinterLspManager<OxlintLaunch> {
 
   /** The answer of each repository a launch decision relied on; a context absent is still deciding. */
   private readonly trustRelied = new WeakMap<WtLspContext, Map<string, boolean>>();
+  /** The contexts held because of what they need of Node. */
+  private readonly heldOnNode = new WeakSet<WtLspContext>();
   private readonly eligible = new WeakMap<WtLspSession, Map<string, boolean>>();
 
   constructor() {
     super("oxlint-lsp");
   }
 
-  protected async findLaunch(context: WtLspContext): Promise<OxlintLaunch | OxlintNoLaunch> {
+  protected async findLaunch(
+    context: WtLspContext,
+    signal: AbortSignal,
+  ): Promise<OxlintLaunch | OxlintNoLaunch> {
     const { wtPath } = context;
     try {
-      const scan = await scanWorktree(wtPath);
-      const relied = [
-        ...scan.nestedConfigRepos,
-        ...(scan.ancestorConfigRepo ? [scan.ancestorConfigRepo] : []),
-      ];
+      const scan = await scanWorktree(wtPath, { signal });
+      if (signal.aborted) return { notice: null };
+      const relied = [...scan.nestedConfigRepos, ...scan.ancestorRepos];
       this.trustRelied.set(context, new Map(relied.map((dir) => [dir, isRepoTrusted(dir)])));
-      if (scan.truncated) {
+      if (scan.incomplete) {
         return {
           notice:
-            "Doesn't run here, as this worktree has too many folders to check. Add the largest to .gitignore.",
+            "Doesn't run here, as not every folder in this worktree could be checked. Add the largest or unreadable ones to .gitignore.",
         };
       }
       const nested = scan.nestedConfigRepos.find((dir) => !isRepoTrusted(dir));
@@ -81,15 +83,16 @@ export class OxlintLspManager extends ProjectLinterLspManager<OxlintLaunch> {
           notice: `Doesn't run here while ${path.relative(wtPath, nested)}, a separate repository with its own oxlint config, isn't trusted. Open it in Loxel and trust it, or add it to .gitignore.`,
         };
       }
-      const { ancestorConfigRepo: ancestor } = scan;
-      if (ancestor && !isRepoTrusted(ancestor)) {
+      const ancestor = scan.ancestorRepos.find((dir) => !isRepoTrusted(dir));
+      if (ancestor) {
         return {
-          notice: `Doesn't run here while ${ancestor} has an oxlint config and isn't trusted. Open it in Loxel and trust it, or add an oxlint config to this project.`,
+          notice: `Doesn't run here while ${ancestor}, above this worktree, isn't trusted, since oxlint would use files from it. Open it in Loxel and trust it.`,
         };
       }
       const [installDir] = scan.installDirs;
       if (!installDir || !scan.usesOxlint) return { notice: null };
-      return await this.launchFrom(path.join(installDir, "node_modules", OXLINT_PACKAGE), wtPath);
+      const packageDir = path.join(installDir, "node_modules", OXLINT_PACKAGE);
+      return await this.launchFrom(packageDir, context);
     } catch (err) {
       this.log.warn("Could not decide how to run oxlint", { error: err });
       return { notice: null };
@@ -98,7 +101,7 @@ export class OxlintLspManager extends ProjectLinterLspManager<OxlintLaunch> {
 
   private async launchFrom(
     packageDir: string,
-    wtPath: string,
+    context: WtLspContext,
   ): Promise<OxlintLaunch | OxlintNoLaunch> {
     const manifest = readPackageJson(packageDir);
     const version = typeof manifest?.version === "string" ? manifest.version : null;
@@ -108,8 +111,9 @@ export class OxlintLspManager extends ProjectLinterLspManager<OxlintLaunch> {
       };
     }
     const range = isRecord(manifest?.engines) ? manifest.engines.node : undefined;
+    this.heldOnNode.add(context);
     const node = await this.resolveNode(
-      wtPath,
+      context.wtPath,
       typeof range === "string" ? { range, label: range } : null,
     );
     if (typeof node !== "string") return node;
@@ -123,7 +127,8 @@ export class OxlintLspManager extends ProjectLinterLspManager<OxlintLaunch> {
   protected override heldNotice(file: string, wtPath: string, notice: string | null) {
     if (notice) return notice;
     const projectDir = findOxlintProjectDir(file, wtPath);
-    return projectDir ? oxlintNotInstalledMessage(projectDir, wtPath) : null;
+    if (!projectDir || hasInstalledPackage(OXLINT_PACKAGE, file, wtPath)) return null;
+    return oxlintNotInstalledMessage(projectDir, wtPath);
   }
 
   protected override isLaunchStale(context: WtLspContext): boolean {
@@ -133,9 +138,21 @@ export class OxlintLspManager extends ProjectLinterLspManager<OxlintLaunch> {
     return [...relied].some(([dir, trusted]) => isRepoTrusted(dir) !== trusted);
   }
 
+  protected override isHeldOnNode(context: WtLspContext): boolean {
+    return this.heldOnNode.has(context);
+  }
+
+  /** A worktree not using oxlint holds its connection, and most changes mean nothing to it. */
   protected override changeRestarts(file: string) {
-    if (isInNodeModules(file) || isOxlintConfigFile(file)) return "all" as const;
-    return RESTARTING_FILES.has(path.basename(file)) ? ("all" as const) : null;
+    const segments = file.split(path.sep);
+    const packageIndex = segments.lastIndexOf("node_modules") + 1;
+    if (packageIndex > 0) {
+      return OXLINT_PACKAGES.has(segments[packageIndex] ?? "") ? "all" : "running";
+    }
+    if (isOxlintConfigFile(file) || path.basename(file) === ".gitignore") return "all";
+    if (path.basename(file) !== "package.json") return null;
+    const manifest = readPackageJson(path.dirname(file));
+    return namesDependency(manifest, OXLINT_PACKAGE) ? "all" : "running";
   }
 
   protected override spawnArgs(context: WtLspContext): readonly string[] {

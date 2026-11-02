@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -76,7 +84,7 @@ describe("which files are oxlint's", () => {
     write("pnpm-lock.yaml");
     write("a/.oxlintrc.json");
     expect(oxlintNotInstalledMessage(path.join(wt, "a"), wt)).toBe(
-      "a has a config, but oxlint isn't installed. Run `pnpm add -D oxlint` in that folder.",
+      "a uses oxlint, but oxlint isn't installed. Run `pnpm add -D oxlint` in that folder.",
     );
   });
 });
@@ -117,39 +125,113 @@ describe("scanWorktree", () => {
     expect((await scanWorktree(wt)).nestedConfigRepos).toEqual([path.join(wt, "sub")]);
   });
 
-  test("skips what git ignores, node_modules and symbolic links", async () => {
+  test("skips what a .gitignore covers and node_modules", async () => {
     git("init", "-q");
     write(".gitignore", "ignored/\n");
     write("ignored/clone/.git/HEAD");
     write("ignored/clone/.oxlintrc.json");
     write("node_modules/dep/.git/HEAD");
     write("node_modules/dep/.oxlintrc.json");
-    mkdirSync(path.join(top, "elsewhere/.git"), { recursive: true });
-    writeFileSync(path.join(top, "elsewhere/.oxlintrc.json"), "");
-    symlinkSync(path.join(top, "elsewhere"), path.join(wt, "link"));
     write(".oxlintrc.json");
     expect((await scanWorktree(wt)).nestedConfigRepos).toEqual([]);
   });
 
+  test.each([
+    ["a .gitignore in another case", () => write(".gitignore", "Vendor/\n")],
+    ["only the repository's own excludes", () => write(".git/info/exclude", "vendor/\n")],
+  ])("does not skip for %s, which the server does not follow", async (_what, ignore) => {
+    git("init", "-q");
+    ignore();
+    write("vendor/clone/.git/HEAD");
+    write("vendor/clone/.oxlintrc.json");
+    expect((await scanWorktree(wt)).nestedConfigRepos).toEqual([path.join(wt, "vendor/clone")]);
+  });
+
+  test("does not skip for a .gitignore above a worktree that is a repository's subfolder", async () => {
+    const { exitCode } = Bun.spawnSync(["git", "-C", top, "init", "-q"]);
+    expect(exitCode).toBe(0);
+    writeFileSync(path.join(top, ".gitignore"), "vendor/\n");
+    write("vendor/clone/.git/HEAD");
+    write("vendor/clone/.oxlintrc.json");
+    expect((await scanWorktree(wt)).nestedConfigRepos).toEqual([path.join(wt, "vendor/clone")]);
+  });
+
+  test("follows a link out of the worktree, whose target stands for itself", async () => {
+    mkdirSync(path.join(top, "elsewhere"));
+    writeFileSync(path.join(top, "elsewhere/.oxlintrc.json"), "");
+    write("x.js");
+    symlinkSync(path.join(top, "elsewhere"), path.join(wt, "link"));
+    expect((await scanWorktree(wt)).nestedConfigRepos).toEqual([path.join(top, "elsewhere")]);
+  });
+
+  test("a link into a nested repository counts, and a link inside the project does not", async () => {
+    git("init", "-q");
+    write(".gitignore", "hidden/\n");
+    write("hidden/clone/.git/HEAD");
+    write("hidden/clone/.oxlintrc.json");
+    write("packages/a/.oxlintrc.json");
+    symlinkSync(path.join(wt, "packages/a"), path.join(wt, "alias"));
+    expect((await scanWorktree(wt)).nestedConfigRepos).toEqual([]);
+    symlinkSync(path.join(wt, "hidden/clone"), path.join(wt, "link"));
+    expect((await scanWorktree(wt)).nestedConfigRepos).toEqual([path.join(wt, "link")]);
+  });
+
+  test("a link to a parent ends", async () => {
+    write("a/x.js");
+    symlinkSync(wt, path.join(wt, "a/up"));
+    expect((await scanWorktree(wt)).incomplete).toBe(false);
+  });
+
+  test("an aborted walk stops", async () => {
+    write("a/.git/HEAD");
+    write("a/.oxlintrc.json");
+    const { nestedConfigRepos } = await scanWorktree(wt, { signal: AbortSignal.abort() });
+    expect(nestedConfigRepos).toEqual([]);
+  });
+
+  test("a folder it cannot read leaves the answer incomplete", async () => {
+    write("locked/x.js");
+    chmodSync(path.join(wt, "locked"), 0o000);
+    try {
+      expect((await scanWorktree(wt)).incomplete).toBe(true);
+    } finally {
+      chmodSync(path.join(wt, "locked"), 0o755);
+    }
+  });
+
   test("a walk over its limit says so", async () => {
     write("a/b/c/d/x.js");
-    expect((await scanWorktree(wt, 2)).truncated).toBe(true);
-    expect((await scanWorktree(wt)).truncated).toBe(false);
+    expect((await scanWorktree(wt, { maxDirs: 2 })).incomplete).toBe(true);
+    expect((await scanWorktree(wt)).incomplete).toBe(false);
   });
 
   test("with no config at the root, a config above it counts, under the repository holding it", async () => {
     mkdirSync(path.join(top, ".git"));
-    mkdirSync(path.join(top, "conf"));
     writeFileSync(path.join(top, ".oxlintrc.json"), "");
-    expect((await scanWorktree(wt)).ancestorConfigRepo).toBe(top);
+    expect((await scanWorktree(wt)).ancestorRepos).toEqual([top]);
     write(".oxlintrc.json");
-    expect((await scanWorktree(wt)).ancestorConfigRepo).toBeNull();
+    expect((await scanWorktree(wt)).ancestorRepos).toEqual([]);
   });
 
-  test("a config above with no repository around it stands for itself", async () => {
+  test("a directory named like a config at the root does not stop the look upward", async () => {
+    writeFileSync(path.join(top, ".oxlintrc.json"), "");
+    mkdirSync(path.join(wt, ".oxlintrc.json"));
+    expect((await scanWorktree(wt)).ancestorRepos).toEqual([top]);
+  });
+
+  test("with no type checker at the root, one above it counts", async () => {
+    write(".oxlintrc.json");
+    mkdirSync(path.join(top, "node_modules/.bin"), { recursive: true });
+    writeFileSync(path.join(top, "node_modules/.bin/tsgolint"), "");
+    expect((await scanWorktree(wt)).ancestorRepos).toEqual([top]);
+    write("node_modules/.bin/tsgolint");
+    expect((await scanWorktree(wt)).ancestorRepos).toEqual([]);
+  });
+
+  test("what lies above with no repository around it stands for itself", async () => {
     const nested = path.join(wt, "deep");
     mkdirSync(nested);
     write(".oxlintrc.json");
-    expect((await scanWorktree(nested)).ancestorConfigRepo).toBe(wt);
+    expect((await scanWorktree(nested)).ancestorRepos).toEqual([wt]);
   });
 });

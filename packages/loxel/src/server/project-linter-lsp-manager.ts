@@ -51,6 +51,8 @@ interface HeldConnection {
   /** What to tell the user of a project using the linter, in a trusted repository. */
   notice: string | null;
   stopWatchingNode: (() => void) | null;
+  /** Ends a `findLaunch` no one is waiting for any more. */
+  deciding: AbortController;
 }
 
 /**
@@ -74,7 +76,10 @@ export abstract class ProjectLinterLspManager<
   private unsubscribeTrust: (() => void) | null = null;
 
   /** How to run the linter for this context, or why it cannot run. Runs only once trusted. */
-  protected abstract findLaunch(context: WtLspContext): Promise<TLaunch | LinterNoLaunch>;
+  protected abstract findLaunch(
+    context: WtLspContext,
+    signal: AbortSignal,
+  ): Promise<TLaunch | LinterNoLaunch>;
 
   /** Whether `file` belongs to a project using the linter, which is who hears about a hold. */
   protected abstract usesLinter(file: string, wtPath: string): boolean;
@@ -82,6 +87,11 @@ export abstract class ProjectLinterLspManager<
   /** What to tell the user when `file`, of a project using the linter, opens on a held connection. */
   protected heldNotice(_file: string, _wtPath: string, notice: string | null): string | null {
     return notice;
+  }
+
+  /** Whether a resolution of Node can change the answer for a connection held in this context. */
+  protected isHeldOnNode(_context: WtLspContext): boolean {
+    return true;
   }
 
   /** Whether what `findLaunch` decided depended on a trust answer that has since changed. */
@@ -109,7 +119,9 @@ export abstract class ProjectLinterLspManager<
         notice: "Needs Node to run. Install Node from nodejs.org or with a version manager.",
       };
     }
-    if (required && env.version && !Bun.semver.satisfies(env.version, required.range)) {
+    // Without its pre-release part: a range admits those only of the version it names.
+    const release = env.version?.split("-")[0];
+    if (required && release && !Bun.semver.satisfies(release, required.range)) {
       return {
         notice: `Needs Node ${required.label} to run, and this worktree uses Node ${env.version}.`,
       };
@@ -123,7 +135,14 @@ export abstract class ProjectLinterLspManager<
   protected override startSession(ws: ServerWebSocket<unknown>, context: WtLspContext): void {
     this.detach(ws);
     this.unsubscribeTrust ??= onRepoTrustChange(() => this.restartOnTrustChange());
-    const held: HeldConnection = { ws, context, frames: [], notice: null, stopWatchingNode: null };
+    const held: HeldConnection = {
+      ws,
+      context,
+      frames: [],
+      notice: null,
+      stopWatchingNode: null,
+      deciding: new AbortController(),
+    };
     this.held.set(ws, held);
     void this.decide(held);
   }
@@ -151,9 +170,11 @@ export abstract class ProjectLinterLspManager<
     if (context.repoTrusted) {
       // Before resolving, so that no change is missed.
       held.stopWatchingNode = subscribeNodeEnv(context.wtPath, ({ env }) => {
-        if (env && held.frames === null) this.restart(ws, "Node changed; reconnect");
+        if (env && held.frames === null && this.isHeldOnNode(context)) {
+          this.restart(ws, "Node changed; reconnect");
+        }
       });
-      launch = await this.findLaunch(context);
+      launch = await this.findLaunch(context, held.deciding.signal);
     }
     if (this.held.get(ws) !== held) return;
     const frames = held.frames ?? [];
@@ -204,7 +225,9 @@ export abstract class ProjectLinterLspManager<
   }
 
   private releaseHeld(ws: ServerWebSocket<unknown>): void {
-    this.held.get(ws)?.stopWatchingNode?.();
+    const held = this.held.get(ws);
+    held?.stopWatchingNode?.();
+    held?.deciding.abort();
     this.held.delete(ws);
   }
 

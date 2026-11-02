@@ -68,7 +68,7 @@ export function namesDependency(
 
 /** What to tell the user about a project that uses a tool it has not installed. */
 export function notInstalledMessage(
-  { name, packageName }: { name: string; packageName: string },
+  { name, packageName, sign }: { name: string; packageName: string; sign: string },
   dir: string,
   wtPath: string,
 ): string {
@@ -83,5 +83,5 @@ export function notInstalledMessage(
       .at(0) ?? DEFAULT_PACKAGE_MANAGER;
   const named = dirs.some((candidate) => namesDependency(readPackageJson(candidate), packageName));
   const command = named ? manager.install : `${manager.addDev} ${packageName}`;
-  return `${path.basename(dir)} has a config, but ${name} isn't installed. Run \`${command}\` in that folder.`;
+  return `${path.basename(dir)} ${sign}, but ${name} isn't installed. Run \`${command}\` in that folder.`;
 }

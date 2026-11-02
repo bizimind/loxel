@@ -82,7 +82,7 @@ function fakeSocket() {
 type FakeSocket = ReturnType<typeof fakeSocket>;
 
 let wt: string;
-let manager: InstanceType<typeof OxlintLspManager>;
+let manager = new OxlintLspManager();
 
 function write(rel: string, text = ""): string {
   const file = path.join(wt, rel);
@@ -114,9 +114,11 @@ function open(socket: FakeSocket, file: string): string {
 }
 
 const isInitializeResponse = (frame: Frame) => frame.id === 1;
+const RUNNING = { capabilities: { args: ["--lsp"] } };
 const NO_FEATURES = { capabilities: { textDocumentSync: { openClose: true, change: 0 } } };
 
 async function start(): Promise<FakeSocket> {
+  await manager.destroy();
   manager = new OxlintLspManager();
   const socket = fakeSocket();
   manager.createSession(socket.ws, wt);
@@ -228,6 +230,27 @@ describe("in a trusted repository", () => {
     expect(warnings(socket)[0]).toContain("Needs Node ^20.19.0 || >=22.12.0");
   });
 
+  test("a pre-release Node inside the package's engines runs", async () => {
+    write(".oxlintrc.json");
+    install(".", "1.86.0", ">=22.12.0");
+    nodeEnv = { nodePath: process.execPath, version: "25.0.0-nightly20250101abc" };
+    const socket = await start();
+    expect(socket.frames.find(isInitializeResponse)?.result).toEqual(RUNNING);
+  });
+
+  test("a worktree with no sign of oxlint restarts only for what could change that", async () => {
+    const socket = await start();
+    manager.notifyWatchedFilesChanged(wt, [
+      write("package.json", "{}"),
+      path.join(wt, "node_modules/left-pad/package.json"),
+    ]);
+    send(socket, { id: 2, method: "shutdown" });
+    await socket.next((frame) => frame.id === 2);
+    write("package.json", JSON.stringify({ devDependencies: { oxlint: "1" } }));
+    manager.notifyWatchedFilesChanged(wt, [path.join(wt, "package.json")]);
+    expect(await socket.closed).toBe(LSP_RESTART_CLOSE_CODE);
+  });
+
   test("files of no project using oxlint never reach it, and get a clean answer", async () => {
     write("packages/a/.oxlintrc.json");
     install();
@@ -297,7 +320,7 @@ describe("in a trusted repository", () => {
     open(socket, write("packages/b/z.js"));
     await settle(socket);
     expect(warnings(socket)).toEqual([
-      "b has a config, but oxlint isn't installed. Run `npm install --save-dev oxlint` in that folder.",
+      "b uses oxlint, but oxlint isn't installed. Run `npm install --save-dev oxlint` in that folder.",
     ]);
   });
 
@@ -339,6 +362,34 @@ describe("in a trusted repository", () => {
     const socket = await start();
     setRepoTrusted(wt, false);
     expect(await socket.closed).toBe(LSP_RESTART_CLOSE_CODE);
+  });
+
+  test("an untrusted repository above the worktree holding its type checker holds it back", async () => {
+    const outer = realpathSync(mkdtempSync(path.join(tmpdir(), "oxlint-lsp-outer-")));
+    const previous = wt;
+    wt = path.join(outer, "wt");
+    try {
+      mkdirSync(path.join(outer, "node_modules/.bin"), { recursive: true });
+      writeFileSync(path.join(outer, "node_modules/.bin/tsgolint"), "");
+      write(".oxlintrc.json");
+      install();
+      setRepoTrusted(wt, true);
+      const socket = await start();
+      expect(socket.frames.find(isInitializeResponse)?.result).toEqual(NO_FEATURES);
+      open(socket, write("a.js"));
+      expect(warnings(socket)[0]).toContain(outer);
+      setRepoTrusted(outer, true);
+      expect(await socket.closed).toBe(LSP_RESTART_CLOSE_CODE);
+      const running = await start();
+      expect(running.frames.find(isInitializeResponse)?.result).toEqual(RUNNING);
+      setRepoTrusted(outer, false);
+      expect(await running.closed).toBe(LSP_RESTART_CLOSE_CODE);
+      await manager.destroy();
+      setRepoTrusted(wt, false);
+    } finally {
+      wt = previous;
+      rmSync(outer, { recursive: true, force: true });
+    }
   });
 
   describe("with a nested repository holding an oxlint config", () => {
