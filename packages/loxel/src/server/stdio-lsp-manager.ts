@@ -1122,6 +1122,11 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
    * trust the repository, and the server restarts when the answer changes.
    */
   protected readonly repoTrustRestriction: string | null = null;
+  /**
+   * False for a server that only knows once it has looked at the machine whether anything is held
+   * back: it calls `reportRepoRestriction` itself, as a repository nothing is held back in stays quiet.
+   */
+  protected readonly reportsRestrictionAtStart: boolean = true;
   private unsubscribeRepoTrust: (() => void) | null = null;
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
@@ -1130,7 +1135,9 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
       this.unsubscribeRepoTrust ??= onRepoTrustChange(() => {
         for (const session of [...this.sessions.values()]) this.restartIfTrustChanged(session);
       });
-      if (!repoTrusted) reportRepoRestriction(wtPath, this.repoTrustRestriction);
+      if (!repoTrusted && this.reportsRestrictionAtStart) {
+        reportRepoRestriction(wtPath, this.repoTrustRestriction);
+      }
     }
     this.startSession(ws, { wtPath, repoTrusted });
   }

@@ -69,6 +69,12 @@ export interface LspClientOptions {
    * (mypy's setup problems, a Kotlin lint tool that is missing or failed).
    */
   showMessages?: boolean;
+  /**
+   * Leave these languages' editor models on `loxel://HEAD/` URIs instead of `file://` (see
+   * `fileSchemeLanguages`), for a server sharing languages with one that needs them. Its manager
+   * translates the URIs.
+   */
+  keepsEditorUris?: boolean;
 }
 
 /**
@@ -94,6 +100,7 @@ export function createLspClient({
   languageId,
   onConnected,
   showMessages,
+  keepsEditorUris = false,
 }: LspClientOptions) {
   const markerOwner = route.replace(/^ws\//, "");
   const showMessage = showMessages ? createServerMessageToasts(name) : undefined;
@@ -165,6 +172,7 @@ export function createLspClient({
     connect: connection.connect,
     disconnect: connection.disconnect,
     languageIds: typeof languageId === "string" ? [languageId] : languageId,
+    keepsEditorUris,
     logCategory: markerOwner,
   };
 }

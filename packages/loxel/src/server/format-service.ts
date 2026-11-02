@@ -5,6 +5,7 @@ import type { FileSink } from "bun";
 
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 
+import { dotnetArgsRunProjectTool } from "./csharp-env";
 import {
   type BackendMode,
   FORMAT_REJECTED,
@@ -12,6 +13,7 @@ import {
   killProcessGroup,
 } from "./formatter-backends";
 import {
+  dirsUpToRoot,
   type FileFormatter,
   type FormatterDecline,
   type FormatterFailure,
@@ -131,14 +133,20 @@ export class FormatService {
     // 1. Check manual overrides first
     const override = findMatchingOverride(settings.overrides, ext);
     if (override) {
-      // Overrides apply to every repository, and a relative path names a different file in each.
+      // Overrides apply to every repository, and a relative path or a manifest names a different
+      // file or tool in each.
       if (
         worktreePath &&
         !isRepoTrusted(worktreePath) &&
-        overrideNamesRepoPath(override, worktreePath)
+        (overrideNamesRepoPath(override, worktreePath) ||
+          dotnetArgsRunProjectTool(
+            override.command,
+            override.args,
+            dirsUpToRoot(fileDir(filePath, worktreePath), worktreePath),
+          ))
       ) {
         const named = `${override.command} ${override.args}`.trim();
-        log.info("Holding back a relative override", { command: override.command, filePath });
+        log.info("Holding back an override that runs a project's file or tool", { filePath });
         reportRepoRestriction(
           worktreePath,
           `Format on save doesn't run ${named} from this repository.`,
