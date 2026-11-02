@@ -15,7 +15,9 @@ These files are served by [clangd](https://clangd.llvm.org). Besides diagnostics
 
 ## What you need to install
 
-On macOS, clangd ships with Loxel, so these features work with nothing installed. Xcode's clangd isn't supported, and Loxel uses its own. Standard headers such as `<stdio.h>` and `<vector>` come from Apple's developer tools. If you don't have them, Loxel tells you, and `#include`s of those headers show as not found until you install them in a terminal:
+In a [trusted repository](/docs/repository-trust), Loxel uses the `clangd` on your shell's `PATH`, including Xcode's, so language features match the compiler you build with. It needs version 16 or newer; otherwise, Loxel uses its own where it has one.
+
+On macOS, clangd also ships with Loxel, so these features work with nothing installed, and it is what runs until you trust the repository. In a repository you haven't trusted, Xcode's clangd isn't supported. Standard headers such as `<stdio.h>` and `<vector>` come from Apple's developer tools. If you don't have them, Loxel tells you, and `#include`s of those headers show as not found until you install them in a terminal:
 
 ```bash
 xcode-select --install
@@ -23,7 +25,7 @@ xcode-select --install
 
 Then run **Restart Language Servers** from the command palette. Loxel never installs them for you.
 
-On Linux, Loxel uses the `clangd` on your shell's `PATH`, version 16 or newer. Install your distribution's package, for example `sudo apt install clangd`, or `clangd-16` or newer where the default package is older. If it was missing when you opened a file, the status bar says so; install it, then click that message to restart the server.
+On Linux, Loxel uses the `clangd` on your shell's `PATH` in every repository, version 16 or newer. Install your distribution's package, for example `sudo apt install clangd`, or `clangd-16` or newer where the default package is older. If it was missing when you opened a file, the status bar says so; install it, then click that message to restart the server.
 
 C and C++ language features are not available on Windows yet.
 
@@ -38,6 +40,8 @@ cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 ```
 
 clangd looks for the file from each source file's folder upward, in each folder and its `build/` subfolder, so the `build` folder above is found without further setup, and each project in a monorepo can have its own. Other build systems have their own generators, such as `bear -- make` for Make.
+
+In a trusted repository, clangd asks the compiler a `compile_commands.json` names for its include paths, so cross-compilers work whatever they are called and wherever they are. Otherwise it asks only compilers in system folders.
 
 For a small project, a `compile_flags.txt` file with one flag per line, at the project root, applies to every file:
 
@@ -70,7 +74,7 @@ Diagnostics:
 
 See clangd's [configuration reference](https://clangd.llvm.org/config) for every option. Your own config at `~/Library/Preferences/clangd/config.yaml` on macOS, or `~/.config/clangd/config.yaml` on Linux, applies to every project.
 
-Loxel leaves out compile flags that make the compiler write output files, and flags that pass options through to it or load them from elsewhere: `-Xpreprocessor`, `-Wp,` and `--config`. This does not affect how your project builds, only what clangd sees.
+In a repository you haven't trusted, Loxel leaves out compile flags that make the compiler write output files, and flags that pass options through to it or load them from elsewhere: `-Xpreprocessor`, `-Wp,` and `--config`. This does not affect how your project builds, only what clangd sees.
 
 ## clang-tidy
 

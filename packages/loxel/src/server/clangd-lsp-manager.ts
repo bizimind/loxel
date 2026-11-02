@@ -25,7 +25,8 @@ import {
 import { config } from "./config";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
-import { buildSpawnEnv } from "./shell-env";
+import { reportRepoRestriction } from "./repo-trust";
+import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import {
   WorktreeLspManager,
   type SpawnOptions,
@@ -50,6 +51,26 @@ const QUERY_DRIVER_COMPILERS = ["*gcc*", "*g++*", "*clang*"];
 export function queryDriverGlobs(dirs: readonly string[] = QUERY_DRIVER_DIRS): string {
   return dirs.flatMap((dir) => QUERY_DRIVER_COMPILERS.map((name) => `${dir}/${name}`)).join(",");
 }
+
+/**
+ * `--query-driver` in a trusted repository: whatever compiler its compile database names, since
+ * cross-compilers and wrappers go by many names and live anywhere, the project included.
+ */
+const TRUSTED_QUERY_DRIVER = "**";
+/** Where compilers live on a Mac without developer tools, whose `/usr/bin` stubs offer an install. */
+const TRUSTED_QUERY_DRIVER_WITHOUT_STUBS = [
+  "/Applications",
+  "/Library",
+  "/nix",
+  "/Users",
+  "/Volumes",
+  "/opt",
+  "/private",
+  "/tmp",
+  "/usr/local",
+]
+  .map((root) => `${root}/**`)
+  .join(",");
 
 /**
  * Compile flags that make the compiler write output files have no place in an editor session.
@@ -182,6 +203,10 @@ const MIN_CLANGD_MAJOR = 16;
 const APPLE_CLANGD_STUB = `${APPLE_STUB_DIR}/clangd`;
 /** Beside the bundled binary, holding the compiler headers its release keeps in `lib/clang/<major>`. */
 const BUNDLED_RESOURCE_DIR = "clangd-resource";
+/** What an untrusted repository leaves out, where a bundled clangd runs and the user has their own. */
+const BUNDLED_CLANGD_RESTRICTION = "Uses Loxel's own clangd instead of yours.";
+/** The same where the user's own clangd runs anyway, as nothing is bundled for the platform. */
+const USER_CLANGD_RESTRICTION = "Asks only compilers in system folders for include paths.";
 /** `window/showMessage`'s warning type. */
 const MESSAGE_TYPE_WARNING = 2;
 const NO_DEVELOPER_TOOLS_MESSAGE =
@@ -243,18 +268,21 @@ const FAILURE_REASONS = {
 export type ClangdCheck = "ok" | keyof typeof FAILURE_REASONS;
 
 /**
- * Whether a clangd found on `PATH` can serve. Xcode's isn't supported, under any path; Apple's stub
- * isn't even run, since that can raise macOS's install dialog. Too old a clangd exits at once on
- * the flags below, and only a version it can read is known to be neither.
+ * Whether a clangd found on `PATH` can serve. Unless `appleAllowed`, Xcode's isn't taken, under any
+ * path, and Apple's stub isn't even run, since that can raise macOS's install dialog. Too old a
+ * clangd exits at once on the flags below, and only a version it can read is known to be neither.
  */
 export async function checkClangd(
   binary: string,
   platform: NodeJS.Platform,
   run: typeof probe = probe,
+  appleAllowed = false,
 ): Promise<ClangdCheck> {
-  if (platform === "darwin" && realPath(binary) === APPLE_CLANGD_STUB) return "apple";
+  if (!appleAllowed && platform === "darwin" && realPath(binary) === APPLE_CLANGD_STUB) {
+    return "apple";
+  }
   const { stdout } = await run([binary, "--version"]);
-  if (/\bApple\b/.test(stdout)) return "apple";
+  if (!appleAllowed && /\bApple\b/.test(stdout)) return "apple";
   const major = clangdMajorVersion(stdout);
   if (major === null) return "unknown";
   return major < MIN_CLANGD_MAJOR ? "too-old" : "ok";
@@ -358,9 +386,13 @@ interface ClangdSessionFiles {
 /**
  * Manages clangd child processes, one per worktree, for C, C++ and Objective-C. clangd finds each
  * file's compile command itself, per file, so monorepos with several compile databases work without
- * `--compile-commands-dir`. The binary is the bundled one, else the login-shell PATH's.
+ * `--compile-commands-dir`. In a trusted repository the binary is the login-shell PATH's, else the
+ * bundled one; otherwise the bundled one, else the PATH's.
  */
 export class ClangdLspManager extends WorktreeLspManager {
+  protected override readonly repoTrustRestriction = BUNDLED_CLANGD_RESTRICTION;
+  // Reported from `resolveBinary`, which knows whether the user has a clangd to be held back from.
+  protected override readonly reportsRestrictionAtStart = false;
   // Format on save owns formatting.
   protected override readonly suppressedFeatures: readonly SuppressibleFeature[] = [
     "textDocument/formatting",
@@ -405,14 +437,23 @@ export class ClangdLspManager extends WorktreeLspManager {
       this.failureReasons.set(context.wtPath, "clangd is not available on Windows yet");
       return null;
     }
-    const binary = this.resolveBundledBinary("clangd");
+    const developerTools = this.platform !== "darwin" || (await this.findDeveloperTools());
+    const userClangd = await this.findUserClangd(developerTools, context.repoTrusted);
+    const usesUserClangd = context.repoTrusted && userClangd !== null;
+    const binary = usesUserClangd ? userClangd : this.resolveBundledBinary("clangd");
     if (!binary) {
       this.failureReasons.set(context.wtPath, installHint(this.platform));
       return null;
     }
-    const check = await checkClangd(binary, this.platform);
+    const check = usesUserClangd ? "ok" : await checkClangd(binary, this.platform);
     if (check === "ok") {
-      const developerTools = this.platform !== "darwin" || (await this.findDeveloperTools());
+      // The sentence is about the user's own clangd: without one, the UI doesn't ask.
+      if (!context.repoTrusted && userClangd !== null) {
+        reportRepoRestriction(
+          context.wtPath,
+          binary === userClangd ? USER_CLANGD_RESTRICTION : BUNDLED_CLANGD_RESTRICTION,
+        );
+      }
       const withoutIndex = await indexDirectoryIsSymlink(
         context.wtPath,
         developerTools ? probe : probeWithoutAppleStubs,
@@ -425,13 +466,39 @@ export class ClangdLspManager extends WorktreeLspManager {
       const resourceDir = join(dirname(binary), BUNDLED_RESOURCE_DIR);
       this.launches.set(context.wtPath, {
         withoutIndex,
-        resourceDir: existsSync(resourceDir) ? resourceDir : null,
+        resourceDir: !usesUserClangd && existsSync(resourceDir) ? resourceDir : null,
         developerTools,
       });
       return binary;
     }
     this.log.warn(`Not starting ${binary}`, { check });
     this.failureReasons.set(context.wtPath, FAILURE_REASONS[check]);
+    return null;
+  }
+
+  /**
+   * The login-shell `PATH`'s clangd, Xcode's included, if it can serve. Null otherwise, whatever the
+   * reason, so that a bundled one takes over. Without the developer tools, Apple's stub isn't run.
+   */
+  private async findUserClangd(
+    developerTools: boolean,
+    repoTrusted: boolean,
+  ): Promise<string | null> {
+    const found = Bun.which("clangd", { PATH: buildSpawnEnv().PATH ?? "" });
+    if (!found) {
+      // It may have been installed since the login-shell PATH was captured; the next start retries.
+      // Only where it would be used: `resolveBundledBinary` does this when it comes to the PATH.
+      if (repoTrusted) void refreshLoginShellEnv();
+      return null;
+    }
+    const check = await checkClangd(
+      found,
+      this.platform,
+      developerTools ? probe : probeWithoutAppleStubs,
+      developerTools,
+    );
+    if (check === "ok") return found;
+    this.log.info(`Not using ${found}`, { check });
     return null;
   }
 
@@ -449,12 +516,19 @@ export class ClangdLspManager extends WorktreeLspManager {
       "--limit-references=0",
       "--rename-file-limit=0",
       "--header-insertion-decorators=0",
-      `--query-driver=${queryDriverGlobs(
-        launch?.developerTools === false
-          ? QUERY_DRIVER_DIRS.filter((dir) => dir !== APPLE_STUB_DIR)
-          : QUERY_DRIVER_DIRS,
-      )}`,
+      `--query-driver=${this.queryDriver(context.repoTrusted, launch?.developerTools !== false)}`,
     ];
+  }
+
+  private queryDriver(repoTrusted: boolean, developerTools: boolean): string {
+    if (repoTrusted) {
+      return developerTools ? TRUSTED_QUERY_DRIVER : TRUSTED_QUERY_DRIVER_WITHOUT_STUBS;
+    }
+    return queryDriverGlobs(
+      developerTools
+        ? QUERY_DRIVER_DIRS
+        : QUERY_DRIVER_DIRS.filter((dir) => dir !== APPLE_STUB_DIR),
+    );
   }
 
   protected override buildSession(
@@ -598,7 +672,8 @@ export class ClangdLspManager extends WorktreeLspManager {
     return {
       ...super.spawnOptions(context),
       env: {
-        ...prepareClangdUserConfig(this.stateDir, this.platform, env),
+        // In a trusted repository clangd reads the user's config itself, as it would for them.
+        ...(context.repoTrusted ? {} : prepareClangdUserConfig(this.stateDir, this.platform, env)),
         // clangd runs `xcrun` at startup to find the SDK, and carries on without it if not on PATH.
         ...(this.launches.get(context.wtPath)?.developerTools === false
           ? { PATH: withoutAppleStubs(env.PATH) }
