@@ -77,13 +77,14 @@ On a `worktrees` event the server broadcasts `worktrees_changed` before reconcil
 
 That event also fires for config and metadata changes and for worktrees added or moved, so `reconcileWorktrees` asks [`RegisteredWorktrees`](../src/server/registered-worktrees.ts) what happened. It keeps each worktree's admin directory (`<common dir>/worktrees/<id>`, read from the checkout's `.git` file), and compares with the current list. The admin directory is what tells a removal from a move: a move leaves the old path empty too, but only a removal unregisters the worktree.
 
-| Seen                                                           | Counts as | What the server does                                                      |
-| -------------------------------------------------------------- | --------- | ------------------------------------------------------------------------- |
-| Unlisted, admin directory gone, directory gone                 | removed   | `completeWorktreeRemoval`                                                 |
-| Unlisted, admin directory now points elsewhere                 | moved     | sessions follow to the new path, resources of the old path are released   |
-| Still listed, directory gone (deleted by hand, or mid-`wt rm`) | neither   | resources are released unless a removal has them suspended; nothing else  |
-| Listed, but with a new admin directory (`wt rm x && wt add x`) | replaced  | as removed, except that resources stay, since clients still show the path |
-| Anything else, or a list that cannot be read                   | neither   | nothing                                                                   |
+Ending terminals and deleting rows cannot be undone, while a missed removal only leaves a shell running until the server stops, so a worktree counts as removed only on positive evidence:
+
+| Seen                                                         | Counts as | What the server does                                                     |
+| ------------------------------------------------------------ | --------- | ------------------------------------------------------------------------ |
+| Unlisted, admin directory reported not found, directory gone | removed   | `completeWorktreeRemoval`                                                |
+| Unlisted, admin directory points elsewhere                   | moved     | sessions follow to the new path, resources of the old path are released  |
+| Directory gone, anything else (deleted by hand, mid-`wt rm`) | neither   | resources are released unless a removal has them suspended; nothing else |
+| Anything else: a read that fails, an unknown admin directory | neither   | nothing                                                                  |
 
 `completeWorktreeRemoval` in [server.ts](../src/server/server.ts) is the one routine both removal paths end in, covering every worktree the project had, subscribed or not:
 
@@ -91,9 +92,9 @@ That event also fires for config and metadata changes and for worktrees added or
 2. ends its terminal sessions (see [TERMINALS.md](TERMINALS.md#ownership-and-lifetime-in-serverts)) and dismisses their notifications;
 3. deletes its rows from `stores.db` ([worktree-rows.ts](../src/server/worktree-rows.ts)).
 
-It may run twice for an in-app removal, from the route and from the event that follows, or the other way round, and the second run finds nothing to do. A worktree removed while no server was running has no event: `initializeProject` runs the routine for any path with rows under the worktrees directory that is neither registered nor on disk.
+It may run twice for an in-app removal, from the route and from the event that follows, or the other way round, and the second run finds nothing to do. A worktree removed while no server was watching has no event: `initializeProject` deletes the rows of any path under the worktrees directory that is neither registered nor on disk, and its jdtls workspace. Removed and added again at one path between two reads goes unnoticed, leaving the old shell running: the path is listed both times, and the safe failure is preferred over guessing.
 
-Before an in-app removal, filesystem delivery for that worktree is paused. `wt` renames the checkout into `<worktreesDir>/.wt-trash/` and returns once Git has unregistered it; the files are deleted afterwards by a detached `rm -rf`, so the route answers in well under a second rather than after the many seconds the deletion takes. Those deletions happen outside any subscribed working tree: in a bare repo the project watcher sees them under `.worktrees/` and classifies them as nothing, and a regular repository's root checkout ignores `.worktrees/` through `info/exclude`.
+Before an in-app removal, filesystem delivery for that worktree is paused. `wt` renames the checkout into `<worktreesDir>/.wt-trash/`, has Git unregister it, handles the branch and returns; the files are deleted afterwards by a detached `rm -rf`, so the route answers in well under a second rather than after the many seconds the deletion takes. Those deletions happen outside any subscribed working tree: in a bare repo the project watcher sees them under `.worktrees/` and classifies them as nothing, and a regular repository's root checkout ignores `.worktrees/` through `info/exclude`.
 
 If Git refuses removal, every service is given a chance to resume without losing state, and a failure in one does not prevent the others; the server then sends `worktree_files_resynced` so the client refetches worktree-scoped file queries, and dirty editors use the normal conflict-aware disk-change path rather than silently accepting new content. If removal succeeds, the route performs permanent teardown and sends the final project broadcast; a later lifecycle event is harmless and keeps external removals covered. Nothing permanent happens before `executeRemove` returns: a clean hook still running, or a removal that fails, leaves the terminals and rows alone.
 

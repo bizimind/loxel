@@ -23,10 +23,6 @@ const textEncoder = new TextEncoder();
 
 /** How long a new shell waits for its toolchains' environments before starting without them. */
 const TOOLCHAIN_ENV_TIMEOUT_MS = 3000;
-/** How often a session of a removed worktree checks whether the removal it runs has finished. */
-const REMOVAL_POLL_MS = 200;
-/** A removal has only quick steps left once Loxel sees it; a `wt` still running after this is hung. */
-const REMOVAL_WAIT_MS = 60_000;
 
 export interface TerminalSpawnOptions extends TerminalToolchainSettings {
   cols: number;
@@ -57,10 +53,6 @@ export interface TerminalManagerHooks {
   onNotification: (session: TerminalSession, payload: OscPayload) => void;
   /** Called after the session has been removed. */
   onExit: (session: TerminalSession, exitCode: number) => void;
-  /** Called after a session has been ended because its worktree was removed. */
-  onRetired: (id: string) => void;
-  /** Whether a `wt` process runs below the shell `pid`; see {@link TerminalManager.retireWorktree}. */
-  isRunningWt: (pid: number) => Promise<boolean>;
   /** What contributes to a new shell's environment, applied in this order. */
   toolchainEnvs: readonly ToolchainEnvContributor[];
 }
@@ -284,39 +276,17 @@ export class TerminalManager {
   }
 
   /**
-   * End every session of a removed worktree, on both removal paths. A session running `wt` keeps
-   * running until `wt` exits: the terminal may be the one running `wt rm`, which at this point has
-   * unregistered the worktree but may not have started deleting its files or its branch, and
-   * closing the PTY would hang it up. `graceMs` also lets a command chained after it finish.
+   * End every session of a removed worktree, a shell still waiting for its environment included.
+   * Returns their IDs. The terminal may be the one running `wt rm`, which is built to finish with
+   * its terminal gone.
    */
-  retireWorktree(worktreePath: string, graceMs = 0): void {
-    for (const [id, pending] of this.starting) {
-      if (pending.worktreePath !== worktreePath) continue;
-      this.destroy(id);
-      this.hooks.onRetired(id);
-    }
-    for (const session of this.sessions.values()) {
-      if (session.worktreePath !== worktreePath) continue;
-      this.retire(session, graceMs).catch((err: unknown) => {
-        log.error("Failed to end a removed worktree's terminal", { id: session.id, error: err });
-      });
-    }
-  }
-
-  private async retire(session: TerminalSession, graceMs: number): Promise<void> {
-    if (graceMs > 0) await Bun.sleep(graceMs);
-    const deadline = Date.now() + REMOVAL_WAIT_MS;
-    while (
-      this.sessions.get(session.id) === session &&
-      Date.now() < deadline &&
-      (await this.hooks.isRunningWt(session.pid))
-    ) {
-      await Bun.sleep(REMOVAL_POLL_MS);
-    }
-    // Exited by itself or closed meanwhile, or already ended by the other removal path.
-    if (this.sessions.get(session.id) !== session) return;
-    this.destroy(session.id);
-    this.hooks.onRetired(session.id);
+  destroyWorktree(worktreePath: string): string[] {
+    const ids = [
+      ...[...this.starting].filter(([, pending]) => pending.worktreePath === worktreePath),
+      ...[...this.sessions].filter(([, session]) => session.worktreePath === worktreePath),
+    ].map(([id]) => id);
+    for (const id of ids) this.destroy(id);
+    return ids;
   }
 
   /** A moved worktree keeps its sessions, so removing it later still ends them. */

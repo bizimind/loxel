@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { executeAdd, executeMove, executeRemove } from "@bizimind/wt/lib";
@@ -8,7 +8,7 @@ import { createSyncRepo, git, type SyncRepo } from "@/test/git-sync-harness";
 
 import { RegisteredWorktrees } from "./registered-worktrees";
 
-const NO_CHANGES = { removed: [], moved: [], replaced: [] };
+const NO_CHANGES = { removed: [], moved: [] };
 
 describe.each(["bare", "regular"] as const)("RegisteredWorktrees, %s repo", (layout) => {
   let repo: SyncRepo;
@@ -40,7 +40,7 @@ describe.each(["bare", "regular"] as const)("RegisteredWorktrees, %s repo", (lay
       deleteBranch: true,
       force: true,
     });
-    expect(await worktrees.refresh()).toEqual({ removed: [wtPath], moved: [], replaced: [] });
+    expect(await worktrees.refresh()).toEqual({ removed: [wtPath], moved: [] });
     expect(await worktrees.refresh()).toEqual(NO_CHANGES);
   });
 
@@ -48,7 +48,7 @@ describe.each(["bare", "regular"] as const)("RegisteredWorktrees, %s repo", (lay
     const wtPath = await add("plain-remove");
     await worktrees.refresh();
     await git(repo.root, "worktree", "remove", "--force", wtPath);
-    expect(await worktrees.refresh()).toEqual({ removed: [wtPath], moved: [], replaced: [] });
+    expect(await worktrees.refresh()).toEqual({ removed: [wtPath], moved: [] });
   });
 
   test("wt mv counts as moved, and a later removal is seen at the new path", async () => {
@@ -59,18 +59,17 @@ describe.each(["bare", "regular"] as const)("RegisteredWorktrees, %s repo", (lay
       name: "after-mv",
       repoPath: repo.root,
     });
-    expect(await worktrees.refresh()).toEqual({ removed: [], moved: [{ from, to }], replaced: [] });
+    expect(await worktrees.refresh()).toEqual({ removed: [], moved: [{ from, to }] });
 
     await executeRemove({ name: "after-mv", repoPath: repo.root, deleteBranch: true, force: true });
-    expect(await worktrees.refresh()).toEqual({ removed: [to], moved: [], replaced: [] });
+    expect(await worktrees.refresh()).toEqual({ removed: [to], moved: [] });
   });
 
-  test("removed and added again between two reads counts as replaced, once", async () => {
-    const wtPath = await add("again");
+  test("removed and added again between two reads goes unnoticed", async () => {
+    await add("again");
     await worktrees.refresh();
     await executeRemove({ name: "again", repoPath: repo.root, deleteBranch: true, force: true });
     await add("again");
-    expect(await worktrees.refresh()).toEqual({ removed: [], moved: [], replaced: [wtPath] });
     expect(await worktrees.refresh()).toEqual(NO_CHANGES);
   });
 
@@ -80,7 +79,7 @@ describe.each(["bare", "regular"] as const)("RegisteredWorktrees, %s repo", (lay
     rmSync(wtPath, { recursive: true, force: true });
     expect(await worktrees.refresh()).toEqual(NO_CHANGES);
     await git(repo.root, "worktree", "prune", "--expire", "now");
-    expect(await worktrees.refresh()).toEqual({ removed: [wtPath], moved: [], replaced: [] });
+    expect(await worktrees.refresh()).toEqual({ removed: [wtPath], moved: [] });
   });
 
   test("a worktree moved out of the managed directory is moved, not removed", async () => {
@@ -88,16 +87,28 @@ describe.each(["bare", "regular"] as const)("RegisteredWorktrees, %s repo", (lay
     await worktrees.refresh();
     const to = path.join(path.dirname(repo.primary), `outside-${layout}`);
     await git(repo.root, "worktree", "move", from, to);
-    expect(await worktrees.refresh()).toEqual({ removed: [], moved: [{ from, to }], replaced: [] });
+    expect(await worktrees.refresh()).toEqual({ removed: [], moved: [{ from, to }] });
     expect(await worktrees.refresh()).toEqual(NO_CHANGES);
     await git(repo.root, "worktree", "remove", "--force", to);
-    expect(await worktrees.refresh()).toEqual({ removed: [to], moved: [], replaced: [] });
+    expect(await worktrees.refresh()).toEqual({ removed: [to], moved: [] });
   });
 
-  test("a subscribed worktree never seen listed is checked too", async () => {
-    const gone = path.join(repo.root, "never-listed");
-    expect(await worktrees.refresh([gone])).toEqual({ removed: [gone], moved: [], replaced: [] });
-    expect(await worktrees.refresh([repo.primary])).toEqual(NO_CHANGES);
+  test("an admin directory it cannot read counts as nothing having happened", async () => {
+    const wtPath = await add("unreadable");
+    await worktrees.refresh();
+    const adminDir = path.resolve(wtPath, await git(wtPath, "rev-parse", "--git-dir"));
+    const gitdirFile = path.join(adminDir, "gitdir");
+    const content = readFileSync(gitdirFile, "utf8");
+    // Reading a directory where git keeps a file fails with something other than "not found".
+    rmSync(gitdirFile);
+    mkdirSync(gitdirFile);
+    rmSync(wtPath, { recursive: true, force: true });
+    expect((await worktrees.refresh()).removed).toEqual([]);
+
+    rmSync(gitdirFile, { recursive: true, force: true });
+    writeFileSync(gitdirFile, content);
+    await git(repo.root, "worktree", "prune", "--expire", "now");
+    expect((await worktrees.refresh()).removed).toEqual([wtPath]);
   });
 
   test("a list that cannot be read reports nothing and forgets nothing", async () => {
@@ -106,6 +117,6 @@ describe.each(["bare", "regular"] as const)("RegisteredWorktrees, %s repo", (lay
     const broken = new RegisteredWorktrees(path.join(repo.root, "not-a-repo"));
     expect(broken.refresh()).rejects.toThrow();
     await executeRemove({ name: "survives", repoPath: repo.root, deleteBranch: true, force: true });
-    expect(await worktrees.refresh()).toEqual({ removed: [wtPath], moved: [], replaced: [] });
+    expect(await worktrees.refresh()).toEqual({ removed: [wtPath], moved: [] });
   });
 });

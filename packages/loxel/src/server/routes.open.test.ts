@@ -174,8 +174,6 @@ describe("POST /api/open terminals and placement", () => {
       isSequenceEnabled: () => false,
       onNotification: () => {},
       onExit: () => {},
-      onRetired: () => {},
-      isRunningWt: async () => false,
       toolchainEnvs: [],
     });
     try {

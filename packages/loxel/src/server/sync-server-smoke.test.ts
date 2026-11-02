@@ -5,7 +5,9 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -303,6 +305,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
       };
     }
 
+    const worktreesDir = () => path.join(repo.root, ".worktrees");
     const isAlive = (pid: number) => {
       try {
         process.kill(pid, 0);
@@ -363,36 +366,36 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
     );
 
     test(
-      "wt rm from inside the worktree's own terminal finishes before that terminal ends",
+      "wt rm from inside the worktree's own terminal finishes after that terminal ended",
       async () => {
         const name = "rm-from-inside";
         const { path: wtPath } = await executeAdd({ name, repoPath: repo.root });
         await settle();
         const terminal = await openTerminal(wtPath);
-        const done = path.join(stateDir, `${name}.done`);
 
-        terminal.type(
-          `"${wtBinDir}/wt" rm --force --delete-branch ${name} --json > "${done}.log" 2>&1; echo $? > "${done}"`,
+        // Holds the branch deletion until the terminal is gone, as a slow one would be.
+        const release = path.join(stateDir, `${name}.release`);
+        const shimDir = path.join(wtBinDir, name);
+        mkdirSync(shimDir);
+        const shim = path.join(shimDir, "git");
+        writeFileSync(
+          shim,
+          `#!/bin/sh\nif [ "$1" = branch ]; then while [ ! -e "${release}" ]; do sleep 0.05; done; fi\nexec "${Bun.which("git")}" "$@"\n`,
         );
-        await untilDead(terminal.pid);
+        chmodSync(shim, 0o755);
 
-        expect(readFileSync(done, "utf8").trim()).toBe("0");
-        // `wt` only warns when it could not delete the branch: its output says why.
-        expect({
-          branch: await git(repo.root, "branch", "--list", name),
-          output: readFileSync(`${done}.log`, "utf8"),
-        }).toMatchObject({ branch: "" });
-        expect(existsSync(wtPath)).toBe(false);
-        const worktreesDir = (
-          await readJson<{ projects: Array<{ path: string; worktreesDir: string }> }>(
-            "/api/projects",
-          )
-        ).projects.find((p) => p.path === repo.root)!.worktreesDir;
+        terminal.type(`PATH="${shimDir}:$PATH" "${wtBinDir}/wt" rm --force -D ${name}`);
+        await untilDead(terminal.pid);
         const parked = () =>
-          readdirSync(path.join(worktreesDir, ".wt-trash")).filter((entry) =>
+          readdirSync(path.join(worktreesDir(), ".wt-trash")).filter((entry) =>
             entry.startsWith(name),
           );
+        expect(parked()).toHaveLength(1);
+
+        writeFileSync(release, "");
         await until(() => parked().length === 0, TEST_TIMEOUT_MS);
+        expect(await git(repo.root, "branch", "--list", name)).toBe("");
+        expect(existsSync(wtPath)).toBe(false);
         terminal.close();
       },
       TEST_TIMEOUT_MS,

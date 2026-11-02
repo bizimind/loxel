@@ -4,106 +4,87 @@
  * path empty just as a removal does, so neither a missing directory nor a shorter list is enough.
  * What tells them apart is the worktree's admin directory under `<common dir>/worktrees/`: it
  * stays through `git worktree move` and goes away when the worktree is unregistered.
+ *
+ * Ending terminals and deleting what is stored for a worktree cannot be undone, while a missed
+ * removal only leaves a shell running until the server stops. So a worktree counts as removed only
+ * on positive evidence, and anything this cannot tell counts as nothing having happened.
  */
 import { existsSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import { listManagedWorktrees } from "@bizimind/wt/lib";
 
 export interface WorktreeListChanges {
-  /** Worktrees no longer registered and no longer on disk. */
+  /** Worktrees git has unregistered and whose directory is gone. */
   removed: string[];
   moved: Array<{ from: string; to: string }>;
-  /** Removed and added again at the same path between two reads, as `wt rm x && wt add x` can be. */
-  replaced: string[];
 }
 
-/** A worktree's admin directory, and which one of that name it is. */
-interface AdminDir {
-  path: string;
-  identity: string | null;
-}
-
-async function readAdminDirIdentity(adminDir: string): Promise<string | null> {
+/** A worktree's admin directory, from the `.git` file in its checkout; null when unreadable. */
+async function readAdminDir(wtPath: string): Promise<string | null> {
   try {
-    const { dev, ino, birthtimeMs } = await stat(adminDir);
-    return `${dev}:${ino}:${birthtimeMs}`;
-  } catch {
-    return null;
-  }
-}
-
-/** A worktree's admin directory, from the `.git` file in its checkout. */
-async function readAdminDir(wtPath: string): Promise<AdminDir | null> {
-  try {
-    const gitFile = await Bun.file(join(wtPath, ".git")).text();
+    const gitFile = await readFile(join(wtPath, ".git"), "utf8");
     const gitDir = /^gitdir:\s*(.+?)\s*$/m.exec(gitFile)?.[1];
-    if (!gitDir) return null;
-    const adminDir = resolve(wtPath, gitDir);
-    return { path: adminDir, identity: await readAdminDirIdentity(adminDir) };
+    return gitDir ? resolve(wtPath, gitDir) : null;
   } catch {
     return null;
   }
 }
 
-/** Where git has the worktree of `adminDir` now, or null once it is unregistered. */
-async function readRegisteredPath(adminDir: string): Promise<string | null> {
+/** What git has on record for the worktree of `adminDir`; null when that cannot be read. */
+async function readRegistration(
+  adminDir: string,
+): Promise<{ registered: true; path: string } | { registered: false } | null> {
   try {
-    const gitFilePath = await Bun.file(join(adminDir, "gitdir")).text();
-    return dirname(resolve(adminDir, gitFilePath.trim()));
-  } catch {
-    return null;
+    const gitFilePath = await readFile(join(adminDir, "gitdir"), "utf8");
+    return { registered: true, path: dirname(resolve(adminDir, gitFilePath.trim())) };
+  } catch (err) {
+    return err instanceof Error && "code" in err && err.code === "ENOENT"
+      ? { registered: false }
+      : null;
   }
 }
 
 export class RegisteredWorktrees {
-  /** Each registered worktree's admin directory, when known. */
-  private known = new Map<string, AdminDir | null>();
+  /** Each worktree seen, with its admin directory if it could be read. */
+  private known = new Map<string, string | null>();
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly projectPath: string) {}
 
   /**
    * Read the list again and report what changed since the last call; the first call only records.
-   * `alsoCheck` adds worktrees the caller knows of that may not have been seen listed. Calls run
-   * in order, so an older read cannot overwrite a newer one. Throws, keeping what it knew, when
-   * the list cannot be read.
+   * Calls run in order, so an older read cannot overwrite a newer one. Throws, keeping what it
+   * knew, when the list cannot be read.
    */
-  refresh(alsoCheck: Iterable<string> = []): Promise<WorktreeListChanges> {
-    const result = this.queue.then(() => this.readChanges(alsoCheck));
+  refresh(): Promise<WorktreeListChanges> {
+    const result = this.queue.then(() => this.readChanges());
     this.queue = result.catch(() => {});
     return result;
   }
 
-  private async readChanges(alsoCheck: Iterable<string>): Promise<WorktreeListChanges> {
+  private async readChanges(): Promise<WorktreeListChanges> {
     const listed = await listManagedWorktrees(this.projectPath);
-    const next = new Map<string, AdminDir | null>();
+    const next = new Map<string, string | null>();
     await Promise.all(
       listed.map(async ({ path }) => {
         next.set(path, (await readAdminDir(path)) ?? this.known.get(path) ?? null);
       }),
     );
 
-    const changes: WorktreeListChanges = { removed: [], moved: [], replaced: [] };
-    const previous = new Map(this.known);
-    for (const path of alsoCheck) if (!previous.has(path)) previous.set(path, null);
-    for (const [path, adminDir] of previous) {
-      const listedAdminDir = next.get(path);
-      if (listedAdminDir) {
-        const before = adminDir?.identity;
-        if (before && listedAdminDir.identity && before !== listedAdminDir.identity) {
-          changes.replaced.push(path);
-        }
-      }
-      if (next.has(path)) continue;
-      const registeredAt = adminDir ? await readRegisteredPath(adminDir.path) : null;
-      if (registeredAt) {
-        // Still registered, even if somewhere the managed list leaves out.
-        next.set(registeredAt, adminDir);
-        if (registeredAt !== path) changes.moved.push({ from: path, to: registeredAt });
-      } else if (!existsSync(path)) {
-        changes.removed.push(path);
+    const changes: WorktreeListChanges = { removed: [], moved: [] };
+    for (const [path, adminDir] of this.known) {
+      if (next.has(path) || !adminDir) continue;
+      const registration = await readRegistration(adminDir);
+      if (registration?.registered === false) {
+        if (!existsSync(path)) changes.removed.push(path);
+      } else if (registration && registration.path !== path) {
+        next.set(registration.path, adminDir);
+        changes.moved.push({ from: path, to: registration.path });
+      } else {
+        // Still registered there, or unreadable for now: look again on the next event.
+        next.set(path, adminDir);
       }
     }
     this.known = next;
