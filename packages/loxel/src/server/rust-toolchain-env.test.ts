@@ -12,6 +12,7 @@ mock.module("./rust-tool-shim", () => ({ isVersionManagerShim: async () => false
 // Choices live in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "rust-toolchain-env-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
+const { resolveRustToolchain } = await import("./rust-toolchain");
 const { rustToolchainEnv } = await import("./rust-toolchain-env");
 const { setRustChoice } = await import("./rust-toolchain-store");
 const { toolchainEnvs } = await import("./toolchain-envs");
@@ -138,11 +139,14 @@ describe("rustToolchainEnv", () => {
 case "$1 $2" in
   "--version "*) echo "rustup 1.29.0 (fake)" ;;
   "toolchain list") echo "linked ${linked}" ;;
+  "show active-toolchain") echo "linked (default)" ;;
+  "which rustc") echo "${linked}/bin/rustc" ;;
   *) exit 1 ;;
 esac
 `,
     );
     setRustChoice(fixture.wt, "linked");
+    expect((await resolveRustToolchain(fixture.wt)).status).toBe("refused");
     expect(await rustToolchainEnv.resolveForTerminal(fixture.wt)).toBeNull();
   });
 
