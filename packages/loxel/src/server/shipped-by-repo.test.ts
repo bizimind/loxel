@@ -106,6 +106,21 @@ describe("a repository git cannot read", () => {
     expect(await isShippedByRepo(root, join(root, "built", "tool"))).toBe(false);
   });
 
+  test("counts a path in the worktree as tracked when git is killed, as a timeout does", async () => {
+    wt = await realpath(await mkdtemp(join(tmpdir(), "shipped-by-repo-")));
+    await mkdir(join(wt, "bin"));
+    await writeFile(join(wt, "bin", "git"), "#!/bin/sh\nkill -TERM $$\n", { mode: 0o755 });
+    await writeFile(join(wt, "tool"), "");
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${join(wt, "bin")}:${originalPath}`;
+    try {
+      expect(await canGitReadRepo(wt)).toBe(false);
+      expect(await isShippedByRepo(wt, join(wt, "tool"))).toBe(true);
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   test("a folder in no repository has nothing tracked", async () => {
     wt = await realpath(await mkdtemp(join(tmpdir(), "shipped-by-repo-")));
     await writeFile(join(wt, "tool"), "");

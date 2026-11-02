@@ -16,6 +16,8 @@ const log = logger.child("server");
  */
 const GIT_FAILED = -1;
 const GIT_TIMEOUT_MS = 10_000;
+/** Git's exit code for a fatal error, such as no repository. Any other failure is no answer. */
+const GIT_FATAL_EXIT = 128;
 
 // The trust rule for what Loxel runs out of a worktree: a project-provided binary or environment
 // must not be something the repository itself ships, or opening a file would run repository code.
@@ -212,7 +214,8 @@ export async function canGitReadRepo(dir: string): Promise<boolean> {
 /**
  * The repository containing `dir`, null when it is in none, or {@link GIT_FAILED}. Git exits 128
  * both outside any repository and for one it cannot answer for (another owner, a missing `HEAD`, a
- * pruned linked worktree, no work tree), so a `.git` on the way up tells them apart.
+ * pruned linked worktree, no work tree), so a `.git` on the way up tells them apart. Git killed by
+ * the timeout, or exiting any other way, has not said there is no repository.
  */
 async function repoAt(dir: string): Promise<RepoInfo | null | typeof GIT_FAILED> {
   const result = await runGit(dir, ["rev-parse", "--show-toplevel", "--absolute-git-dir"]);
@@ -221,7 +224,7 @@ async function repoAt(dir: string): Promise<RepoInfo | null | typeof GIT_FAILED>
   if (result.exitCode === 0 && toplevel && gitDir) {
     return { toplevel, indexFile: path.join(gitDir, "index") };
   }
-  if (!findFileAbove(".git", dir)) return null;
+  if (result.exitCode === GIT_FATAL_EXIT && !findFileAbove(".git", dir)) return null;
   log.debug("Git could not read the repository here", { dir });
   return GIT_FAILED;
 }

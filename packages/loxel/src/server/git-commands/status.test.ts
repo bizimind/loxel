@@ -2,8 +2,6 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { $ } from "bun";
 
-import "@/test/temp-state-dir";
-
 import { setRepoTrusted } from "../repo-trust";
 import { getStatus } from "./status";
 import type { TempRepo } from "./test-utils";
