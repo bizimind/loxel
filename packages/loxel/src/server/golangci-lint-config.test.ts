@@ -49,7 +49,7 @@ describe("judgeGolangciConfig", () => {
     ["empty", `version: "2"\nlinters:\n  settings:\n    custom: {}\n`],
     ["uppercase", `version: "2"\nLINTERS:\n  Settings:\n    CUSTOM:\n      ${CUSTOM_ENTRY}\n`],
     ["dotted", `version: "2"\nlinters.settings.custom:\n  ${CUSTOM_ENTRY}\n`],
-    ["fully dotted", `version: "2"\nlinters.settings.custom.evil.path: ./mine.so\n`],
+    ["fully dotted", `version: "2"\nlinters.settings.custom.mine.path: ./mine.so\n`],
     ["partly dotted", `version: "2"\nlinters:\n  settings.custom:\n    ${CUSTOM_ENTRY}\n`],
     ["long s", `version: "2"\nlinters:\n  ſettings:\n    cuſtom:\n      ${CUSTOM_ENTRY}\n`],
     [
@@ -72,9 +72,9 @@ describe("judgeGolangciConfig", () => {
   });
 
   test("refuses custom linters in TOML and JSON", async () => {
-    const tables = 'version = "2"\n[linters.settings.custom.evil]\npath = "./mine.so"\n';
+    const tables = 'version = "2"\n[linters.settings.custom.mine]\npath = "./mine.so"\n';
     expect(await judge(".golangci.toml", tables)).toBe("custom");
-    const quoted = 'version = "2"\n"linters.settings.custom".evil.path = "./mine.so"\n';
+    const quoted = 'version = "2"\n"linters.settings.custom".mine.path = "./mine.so"\n';
     expect(await judge(".golangci.toml", quoted)).toBe("custom");
     const nested = {
       version: "2",
