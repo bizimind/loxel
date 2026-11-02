@@ -69,7 +69,10 @@ export function parseWorktreeListOutput(output: string): WorktreeEntry[] {
 
 /** `git worktree list`, parsed. Unlike {@link getWorktrees} it does not stat each directory. */
 export async function listWorktrees(cwd: string): Promise<WorktreeEntry[]> {
-  const result = await gitText(["worktree", "list", "--porcelain"], { cwd, env: readOnlyGitEnv() });
+  const result = await gitText(["worktree", "list", "--porcelain"], {
+    cwd,
+    env: readOnlyGitEnv(cwd),
+  });
   return parseWorktreeListOutput(result);
 }
 
