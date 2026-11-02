@@ -1,10 +1,10 @@
 ---
 title: JavaScript
-description: JavaScript projects, jsconfig.json, type checking plain JavaScript, format on save, ESLint, the Node version, and tool configuration files.
+description: JavaScript projects, jsconfig.json, type checking plain JavaScript, format on save, ESLint, oxlint, the Node version, and tool configuration files.
 order: 13.5
 ---
 
-<!-- Later subsections go in "Linters", after ESLint: oxlint, Biome. "Tool configuration files" stays last. -->
+<!-- Later subsections go in "Linters", after oxlint: Biome. "Tool configuration files" stays last. -->
 
 JavaScript files use the same language server as [TypeScript](/docs/languages/typescript), so `.js`, `.mjs`, `.cjs` and `.jsx` files get the same hover, navigation, completions and refactors. Types for your packages come from what is installed: install your dependencies, and the `@types` packages of those that ship no types.
 
@@ -112,6 +112,25 @@ Each package of a monorepo uses its own config, and a package without one uses t
 Loxel never installs ESLint. If a project has a config and no ESLint, a notification says what to run, for example `npm install`. ESLint runs on the [Node version](#node-version) the worktree uses; without any Node, a notification says to install one. Until you trust a repository, ESLint doesn't run in it, and the status bar shows **Restricted** once you open a file in a project that uses it.
 
 Changes to a config file apply right away, and so does installing or upgrading packages. Formatting stays with [format on save](#format-on-save), even when ESLint has fixable formatting rules.
+
+### oxlint
+
+In a [trusted repository](/docs/repository-trust), JavaScript and TypeScript files in a project that uses oxlint show its problems in the editor as you type, with quick fixes for fixing a problem or disabling a rule for a line or a file. **Fix All** applies the safe fixes in the file. Loxel runs the oxlint your project has installed, version 1.29 or newer, with your config and plugins, and type-aware rules work if you have set them up.
+
+A file is linted when both of these hold:
+
+- Its folder or one above it, up to the worktree root, has an oxlint config (`.oxlintrc.json`, `.oxlintrc.jsonc`, `oxlint.config.ts` or `oxlint.config.mts`) or lists `oxlint` as a dependency in `package.json`. With only the dependency, oxlint's default rules apply, the same as running it there.
+- oxlint is installed in `node_modules` there or above it.
+
+Other files stay clean, so a package without oxlint in a monorepo isn't linted with its defaults. Packages can have their own configs, as with oxlint in a terminal. One oxlint runs per worktree, the install closest to the root.
+
+Loxel never installs oxlint. If a project uses it with none installed, or with an older version, a notification says what to do. oxlint runs on the [Node version](#node-version) the worktree uses, which has to be one the installed oxlint supports. Until you trust a repository, oxlint doesn't run in it, and the status bar shows **Restricted** once you open a file in a project that uses it.
+
+A separate repository inside your worktree, such as a submodule or a clone that git doesn't ignore, has its own trust. If it has an oxlint config, oxlint waits until you trust that repository too or add it to `.gitignore`, and a notification says so. The same goes for a config above the worktree when the worktree's root has none.
+
+Changes to a config file apply right away, and so does installing or upgrading packages.
+
+If a project uses both ESLint and oxlint, both run, and a rule both enable shows up twice. [`eslint-plugin-oxlint`](https://github.com/oxc-project/eslint-plugin-oxlint) turns off in ESLint what oxlint already covers. **Fix All** lets you choose between them.
 
 ---
 
