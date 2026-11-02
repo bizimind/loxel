@@ -41,7 +41,7 @@ cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
 clangd looks for the file from each source file's folder upward, in each folder and its `build/` subfolder, so the `build` folder above is found without further setup, and each project in a monorepo can have its own. Other build systems have their own generators, such as `bear -- make` for Make.
 
-In a trusted repository, clangd asks the compiler a `compile_commands.json` names for its include paths, so cross-compilers work whatever they are called and wherever they are. Otherwise it asks only compilers in system folders.
+A project with its own compiler gets its include paths from that compiler once you [trust the repository](/docs/repository-trust), so cross-compilers work whatever they are called and wherever they are. Until then, clangd asks only compilers in system folders. Loxel doesn't always prompt for this, so run **Manage Repository Trust** from the command palette if your project needs it.
 
 For a small project, a `compile_flags.txt` file with one flag per line, at the project root, applies to every file:
 
