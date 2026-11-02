@@ -280,7 +280,7 @@ describe("trust", () => {
     writeFileSync(shim, `#!/bin/sh\npwd > "${home}/cwd"\necho v24.0.0\n`);
     chmodSync(shim, 0o755);
     await resolveNodeEnv(wt, { overridePath: null, env: { ...env, PATH: dirname(shim) } });
-    expect((await Bun.file(join(home, "cwd")).text()).trim()).toBe(realpathSync(home));
+    expect((await Bun.file(join(home, "cwd")).text()).trim()).toBe("/");
   });
 });
 
