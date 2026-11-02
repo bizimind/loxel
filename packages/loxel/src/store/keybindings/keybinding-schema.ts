@@ -95,6 +95,7 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   "panel.newTab": [`${SPLIT_LEADER} Enter`],
   "panel.open.localdb": [],
   "panel.close": ["Cmd+W"],
+  "panel.reopenClosed": ["Cmd+Shift+T"],
   // Free in Monaco (its Refactor is ⌃⇧R on macOS); dev builds' Force Reload menu item has no key
   // (electron/main.ts).
   "panel.rename": ["Cmd+Shift+R"],

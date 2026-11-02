@@ -46,6 +46,8 @@ The center area is the main content area. Every editor and interactive view open
 
 Double-click a terminal or file tab's title, right-click the tab and choose **Rename**, or press `Cmd+Shift+R` (**Rename Tab** in the command palette) to rename the active tab; renaming a file tab renames the file. Press `Enter` to apply the new name or `Esc` to cancel, and focus returns to the panel you were working in. The tab menu also copies a file's name or path, closes other tabs, and on macOS offers **Reveal in Finder** and **Open In**.
 
+Press `Cmd+Shift+T` (**Reopen Closed Tab** in the command palette) to bring back the tab you last closed in this worktree; keep pressing to go further back. It returns to its place among its group's tabs, or to the active group if its group is gone. Editors and browsers come back on the same file or page, a code editor with its cursor where you left it. A browser's back and forward history doesn't come back, and a terminal's session ended when you closed it, so you get a new terminal with the same title. Closed tabs are remembered until you close the window.
+
 ### Right sidebar
 
 The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads).
@@ -66,7 +68,7 @@ The status bar runs across the bottom edge of the window and is always visible. 
 - **Working tree counts** — staged, modified, untracked, and conflicted file counts
 - **Indentation and line endings** — while a code file is the active editor, its indentation and where it came from, and `LF` or `CRLF`; click the indentation to change it (see [Indentation](/docs/editor#indentation))
 - **Python interpreter** — while a Python file is the active editor, the worktree's interpreter; click it to choose another (see [Python environment](/docs/languages/python#python-environment))
-- **JDK** — while a Java file is the active editor, the worktree's JDK; click it to choose another (see [JDK detection](/docs/languages/java#jdk-detection))
+- **JDK** — while a Java or Kotlin file is the active editor, the worktree's JDK; click it to choose another (see [JDK detection](/docs/languages/java#jdk-detection))
 - **Rust toolchain** — while a Rust file is the active editor, the worktree's toolchain; click it to choose another (see [Rust toolchain](/docs/languages/rust#rust-toolchain))
 - **Chord progress** — the keys typed so far while a chord shortcut such as `Cmd+\` is waiting for its next key
 - **New panel buttons** — open a new markdown editor, drawing, browser, or terminal

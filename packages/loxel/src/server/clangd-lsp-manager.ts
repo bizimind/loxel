@@ -8,13 +8,24 @@ import {
 } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, dirname, join, normalize } from "node:path";
+import { delimiter, dirname, join, normalize, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
+import type { ServerWebSocket, Subprocess } from "bun";
+
+import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
+import {
+  ClangdFileChanges,
+  classifyChange,
+  INDEX_REFRESH_MIN_INTERVAL_MS,
+  INDEX_REFRESH_QUIET_MS,
+} from "./clangd-file-changes";
 import { config } from "./config";
 import { FSMONITOR_OFF } from "./git-commands";
 import { logger } from "./logger";
+import { fileUri } from "./lsp-file-uri";
 import { buildSpawnEnv } from "./shell-env";
 import {
   WorktreeLspManager,
@@ -178,7 +189,10 @@ const NO_DEVELOPER_TOOLS_MESSAGE =
   "Standard headers need Apple's developer tools: run xcode-select --install in a terminal, then Restart Language Servers";
 const PROBE_TIMEOUT_MS = 10_000;
 
-/** A command's exit code and output; a code of null means it could not run or timed out. */
+/**
+ * A command's exit code and output; a code of null means it could not run or timed out. It runs from
+ * the filesystem root, where a version manager's shim finds no project files to act on.
+ */
 async function probe(
   command: string[],
   timeoutMs: number = PROBE_TIMEOUT_MS,
@@ -186,6 +200,7 @@ async function probe(
 ): Promise<{ code: number | null; stdout: string }> {
   try {
     const proc = Bun.spawn(command, {
+      cwd: "/",
       stdin: "ignore",
       stdout: "pipe",
       stderr: "ignore",
@@ -300,6 +315,31 @@ const probeWithoutAppleStubs: typeof probe = (command, timeoutMs) => {
   return probe(command, timeoutMs, { ...env, PATH: withoutAppleStubs(env.PATH) });
 };
 
+/**
+ * Whether clangd finds a `compile_commands.json` for any of these documents, the way it looks: in
+ * each folder from the file's upward and its `build/` subfolder. Without one it has no index.
+ */
+export function hasCompileDatabase(documentUris: Iterable<string>): boolean {
+  for (const uri of documentUris) {
+    let dir = dirname(fileURLToPath(uri));
+    while (true) {
+      if (
+        existsSync(join(dir, "compile_commands.json")) ||
+        existsSync(join(dir, "build", "compile_commands.json"))
+      ) {
+        return true;
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return false;
+}
+
+/** Pre-check for a document's opening, change or closing, so other frames are not parsed. */
+const DOCUMENT_SYNC_METHOD = /"method"\s*:\s*"textDocument\/did(?:Open|Change|Close)"/;
+
 /** What a worktree's clangd starts with, worked out when its binary resolves. */
 interface ClangdLaunch {
   withoutIndex: boolean;
@@ -307,6 +347,13 @@ interface ClangdLaunch {
   resourceDir: string | null;
   /** False on a Mac where running Apple's stubs would offer to install the developer tools. */
   developerTools: boolean;
+}
+
+/** A live session's view of the files changing under it. */
+interface ClangdSessionFiles {
+  changes: ClangdFileChanges;
+  /** Each open document's URI and the version the client last gave it. */
+  openDocuments: Map<string, number>;
 }
 
 /**
@@ -324,6 +371,9 @@ export class ClangdLspManager extends WorktreeLspManager {
   /** Why clangd won't start for a worktree, per worktree since each starts on its own. */
   private readonly failureReasons = new Map<string, string>();
   private readonly launches = new Map<string, ClangdLaunch>();
+  private readonly sessionFiles = new Map<WtLspSession, ClangdSessionFiles>();
+  /** Per worktree, since a refresh is a restart and so ends the session that would remember. */
+  private readonly indexRefreshedAt = new Map<string, number>();
 
   constructor(
     private readonly platform: NodeJS.Platform = process.platform,
@@ -331,6 +381,27 @@ export class ClangdLspManager extends WorktreeLspManager {
     private readonly findDeveloperTools: () => Promise<boolean> = hasDeveloperTools,
   ) {
     super("clangd-lsp");
+  }
+
+  /**
+   * Keep open documents current with the disk, whichever file changed and whoever changed it. One
+   * `didSave` of any open document makes clangd check them all, so unlike the base's hook this does
+   * not depend on the changed file being open.
+   */
+  override notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
+    const root = resolve(wtPath);
+    for (const [session, files] of this.sessionFiles) {
+      if (resolve(session.wtPath) !== root) continue;
+      files.changes.pathsChanged(paths.map((changed) => relative(root, changed)));
+    }
+  }
+
+  override notifyIgnoredPathChanged(wtPath: string, relPath: string): void {
+    if (classifyChange(relPath) === null) return;
+    const root = resolve(wtPath);
+    for (const [session, files] of this.sessionFiles) {
+      if (resolve(session.wtPath) === root) files.changes.ignoredPathChanged(relPath);
+    }
   }
 
   protected async resolveBinary(context: WtLspContext): Promise<string | null> {
@@ -389,6 +460,129 @@ export class ClangdLspManager extends WorktreeLspManager {
           : QUERY_DRIVER_DIRS,
       )}`,
     ];
+  }
+
+  protected override buildSession(
+    ws: ServerWebSocket<unknown>,
+    proc: Subprocess,
+    context: WtLspContext,
+  ): WtLspSession {
+    const session = super.buildSession(ws, proc, context);
+    const openDocuments = new Map<string, number>();
+    this.sessionFiles.set(session, {
+      openDocuments,
+      changes: new ClangdFileChanges({
+        recheck: () => this.recheckOpenDocuments(session),
+        rebuild: () => this.rebuildOpenDocuments(session),
+        indexDirectoryChanged: () => void this.restartIfIndexDirectoryIsSymlink(session),
+        isOpen: (relPath) => openDocuments.has(fileUri(join(session.wtPath, relPath))),
+        refreshIndex: () => this.refreshIndex(session),
+      }),
+    });
+    return session;
+  }
+
+  protected override onSessionClosed(session: WtLspSession): void {
+    this.sessionFiles.get(session)?.changes.dispose();
+    this.sessionFiles.delete(session);
+  }
+
+  protected override handleClientData(session: WtLspSession, data: string): void {
+    if (DOCUMENT_SYNC_METHOD.test(data)) this.trackDocument(session, data);
+    super.handleClientData(session, data);
+  }
+
+  private trackDocument(session: WtLspSession, data: string): void {
+    let message: unknown;
+    try {
+      message = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (!isRecord(message) || !isRecord(message.params)) return;
+    const { textDocument } = message.params;
+    if (!isRecord(textDocument) || typeof textDocument.uri !== "string") return;
+    const { uri, version } = textDocument;
+    // A `loxel:` model reaches clangd too, but is no file: nothing here can name it to clangd.
+    if (!uri.startsWith("file:///")) return;
+    const openDocuments = this.sessionFiles.get(session)?.openDocuments;
+    if (message.method === "textDocument/didClose") {
+      openDocuments?.delete(uri);
+    } else if (typeof version === "number") {
+      openDocuments?.set(uri, version);
+    }
+  }
+
+  private recheckOpenDocuments(session: WtLspSession): void {
+    const [uri] = this.sessionFiles.get(session)?.openDocuments.keys() ?? [];
+    if (uri) {
+      this.notifyServer(session, "textDocument/didSave", { textDocument: { uri } });
+    }
+  }
+
+  /**
+   * With the client's version: clangd would otherwise number the rebuild itself, and stamp its quick
+   * fixes with a version the client does not have, which refuses them.
+   */
+  private rebuildOpenDocuments(session: WtLspSession): void {
+    for (const [uri, version] of this.sessionFiles.get(session)?.openDocuments ?? []) {
+      this.notifyServer(session, "textDocument/didChange", {
+        textDocument: { uri, version },
+        contentChanges: [],
+        forceRebuild: true,
+      });
+    }
+  }
+
+  private notifyServer(session: WtLspSession, method: string, params: unknown): void {
+    if (!this.isSessionLive(session)) return;
+    try {
+      this.writeToStdin(session, JSON.stringify({ jsonrpc: "2.0", method, params }));
+    } catch (err) {
+      // A server that has closed its stdin, not yet reaped: this runs in a timer.
+      this.log.debug(`Could not send ${method}`, { error: err });
+    }
+  }
+
+  /** Respawn under the check that clangd's start makes, which turns the index off. */
+  private async restartIfIndexDirectoryIsSymlink(session: WtLspSession): Promise<void> {
+    const launch = this.launches.get(session.wtPath);
+    if (!launch || launch.withoutIndex) return;
+    const isSymlink = await indexDirectoryIsSymlink(
+      session.wtPath,
+      launch.developerTools ? probe : probeWithoutAppleStubs,
+    );
+    if (!isSymlink || !this.isSessionLive(session)) return;
+    this.log.info("Restarting: the index directory is now a symlink", { wtPath: session.wtPath });
+    this.restart(session, "Index directory changed; reconnect");
+  }
+
+  private refreshIndex(session: WtLspSession): void {
+    const files = this.sessionFiles.get(session);
+    if (!files || this.launches.get(session.wtPath)?.withoutIndex) return;
+    const lastRefresh = this.indexRefreshedAt.get(session.wtPath);
+    const untilAllowed =
+      lastRefresh === undefined ? 0 : lastRefresh + INDEX_REFRESH_MIN_INTERVAL_MS - Date.now();
+    // Kept pending with nothing open, for the file opened next.
+    const waitMs = Math.max(
+      untilAllowed,
+      files.openDocuments.size === 0 ? INDEX_REFRESH_QUIET_MS : 0,
+    );
+    if (waitMs > 0) {
+      files.changes.refreshIndexAfter(waitMs);
+      return;
+    }
+    if (!hasCompileDatabase(files.openDocuments.keys())) return;
+    this.indexRefreshedAt.set(session.wtPath, Date.now());
+    this.log.info("Restarting: files changed on disk", { wtPath: session.wtPath });
+    this.restart(session, "Files changed on disk; reconnect");
+  }
+
+  /** The client reconnects at once and opens its documents again. */
+  private restart(session: WtLspSession, reason: string): void {
+    const { ws } = session;
+    this.detach(ws);
+    ws.close(LSP_RESTART_CLOSE_CODE, reason);
   }
 
   protected override handleServerFrame(session: WtLspSession, body: string): void {

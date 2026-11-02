@@ -1,11 +1,18 @@
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import type { BackendMode } from "./formatter-backends";
 import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
 
 /** The command a language module picked for a file. `{file}` / `{ext}` in `args` are substituted. */
 export interface FileFormatter {
   command: string;
   args: string;
+  /** Run through a persistent backend, with this command as the fallback. Default: `command`. */
+  backendMode?: BackendMode;
+  /** The directory a persistent backend serves, one per directory. Default: the worktree. */
+  backendDir?: string;
+  /** Where a persistent backend starts looking for the tool's install. Default: `backendDir`. */
+  backendToolDir?: string;
 }
 
 /**
@@ -85,12 +92,12 @@ export function projectNodeBinDirs(command: string, wtRoot: string): string[] {
   return [];
 }
 
-function nodeModulesBin(wtRoot: string): string {
+export function nodeModulesBin(wtRoot: string): string {
   return join(wtRoot, "node_modules", ".bin");
 }
 
 /** Whether the worktree's `node_modules/.bin` holds `command`, which a path does not look up. */
-export function projectHasCommand(command: string, wtRoot: string): boolean {
+function projectHasCommand(command: string, wtRoot: string): boolean {
   return !command.includes("/") && Bun.which(command, { PATH: nodeModulesBin(wtRoot) }) !== null;
 }
 
