@@ -821,7 +821,7 @@ async function solutionProjects(solution: string, projects: readonly string[]): 
  */
 function solutionFilterProjects(filter: string, text: string): string[] {
   try {
-    const parsed: unknown = Bun.JSONC.parse(text.replace(/^\uFEFF/, ""));
+    const parsed: unknown = Bun.JSONC.parse(text);
     const solution = isRecord(parsed) ? parsed.solution : null;
     if (!isRecord(solution) || typeof solution.path !== "string") return [];
     if (!Array.isArray(solution.projects)) return [];
