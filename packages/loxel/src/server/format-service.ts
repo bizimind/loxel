@@ -161,16 +161,6 @@ const DETECTION_RULES: {
     },
   },
   {
-    files: [".clang-format"],
-    check: (wtRoot) => existsSync(join(wtRoot, ".clang-format")),
-    formatter: {
-      command: "clang-format",
-      args: "--assume-filename={file}",
-      extensions: ["c", "cpp", "h", "hpp", "cc", "cxx"],
-      backendMode: "command",
-    },
-  },
-  {
     files: ["deno.json", "deno.jsonc"],
     check: (wtRoot) =>
       existsSync(join(wtRoot, "deno.json")) || existsSync(join(wtRoot, "deno.jsonc")),

@@ -74,7 +74,11 @@ Checks: "bugprone-*,modernize-use-nullptr"
 
 ## Formatting
 
-Formatting stays with [format on save](/docs/editor#formatter-auto-detection), which runs clang-format in projects with a `.clang-format` file.
+[Format on save](/docs/editor#formatter-auto-detection) runs your own `clang-format` for C, C++ and Objective-C files. Loxel never installs it: when it's missing, a message says what to run, such as `brew install clang-format` on a Mac (Xcode doesn't include it).
+
+A file is formatted when a `.clang-format` or `_clang-format` file sits in its folder or a parent folder inside the worktree, so each project in a monorepo can have its own, and `InheritParentConfig` works as usual. Without one, files are saved as they are rather than in clang-format's default style.
+
+Files matched by the nearest `.clang-format-ignore` are saved unformatted, with clang-format's own rules for that file. If clang-format can't use a config, for example because of an unknown key, a message shows the error once and the file is saved as it is.
 
 ---
 
