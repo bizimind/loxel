@@ -7,6 +7,7 @@ import { useCallback } from "react";
 
 import type { PanelPlacement, SplitDirection } from "@/api/panel-placement-model";
 import { isToolchainSelectAction } from "@/api/toolchain-status-model";
+import { toggleActiveGroupMaximized } from "@/lib/center-maximize";
 import { runEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import {
@@ -168,6 +169,10 @@ export function useActionHandler(): (actionId: ActionId) => void {
         renameActiveTab();
         break;
 
+      case "panel.toggleMaximize":
+        toggleActiveGroupMaximized();
+        break;
+
       case "browser.hardRefresh":
         getFocusedHardRefreshTarget()?.();
         break;
@@ -177,7 +182,8 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "panel.prev": {
         const api = getCenterApi();
         if (!api) break;
-        const allPanels = api.panels;
+        // Stay in a maximized group: leaving it for another group's tab would restore the layout.
+        const allPanels = api.hasMaximizedGroup() ? (api.activeGroup?.panels ?? []) : api.panels;
         if (allPanels.length === 0) break;
         const activeIdx = allPanels.findIndex((p) => p.api.isActive);
         const dir = actionId === "panel.next" ? 1 : -1;
@@ -225,6 +231,9 @@ export function useActionHandler(): (actionId: ActionId) => void {
         const posMap = { right: "right", left: "left", up: "top", down: "bottom" } as const;
         const position = posMap[direction];
 
+        // Moving changes the grid, which restores the layout anyway; do it first so the hidden groups
+        // are there to move to.
+        if (api.hasMaximizedGroup()) api.exitMaximizedGroup();
         const adjacent = findAdjacentCenterGroup(api, active.group, direction);
         if (adjacent) {
           active.api.moveTo({ group: adjacent, position: "center" });
