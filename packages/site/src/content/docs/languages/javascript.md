@@ -1,10 +1,10 @@
 ---
 title: JavaScript
-description: JavaScript projects, jsconfig.json, type checking plain JavaScript, inlay hints, format on save, ESLint, oxlint, the Node version, and tool configuration files.
+description: JavaScript projects, jsconfig.json, type checking plain JavaScript, inlay hints, format on save, ESLint, oxlint, Biome, the Node version, and tool configuration files.
 order: 13.5
 ---
 
-<!-- Later subsections go in "Linters", after oxlint: Biome. "Tool configuration files" stays last. -->
+<!-- "Tool configuration files" stays last. -->
 
 JavaScript files use the same language server as [TypeScript](/docs/languages/typescript), so `.js`, `.mjs`, `.cjs` and `.jsx` files get the same hover, navigation, completions and refactors. Types for your packages come from what is installed: install your dependencies, and the `@types` packages of those that ship no types.
 
@@ -137,6 +137,20 @@ A separate repository inside your worktree, such as a submodule or a clone that 
 Changes to a config file apply right away, and so does installing or upgrading packages.
 
 If a project uses both ESLint and oxlint, both run, and a rule both enable shows up twice. [`eslint-plugin-oxlint`](https://github.com/oxc-project/eslint-plugin-oxlint) turns off in ESLint what oxlint already covers. **Fix All** lets you choose between them.
+
+### Biome
+
+In a [trusted repository](/docs/repository-trust), JavaScript and TypeScript files in a project with a Biome config at the worktree root show Biome's lint problems in the editor as you type, with quick fixes for fixing a problem or suppressing a rule for a line or a file. Loxel runs the Biome your project has installed in `node_modules`, the install closest to the root, with your config and plugins.
+
+The config at the root is `biome.json`, `biome.jsonc`, `.biome.json` or `.biome.jsonc`. Packages of a monorepo can add their own with `"root": false`, as in a terminal. A package's config with none at the root isn't picked up.
+
+**Fix All** applies the safe fixes in the file and sorts its imports. If your config leaves Biome's formatter on, it formats the file too, like `biome check --write`. **Organize Imports** stays with the TypeScript server, so its order can differ from Biome's: use **Fix All**, or the quick fix on Biome's import problem, for Biome's order. Formatting stays with [format on save](#format-on-save).
+
+Loxel never installs Biome. If a project has a config and no Biome installed, a notification says what to run. Until you trust a repository, Biome's linter doesn't run in it, and the status bar shows **Restricted** once you open a file in a project with a config.
+
+A separate repository inside your worktree, such as a submodule or a clone, even one git ignores, has its own trust. If it has a Biome config, Biome waits until you trust that repository too, and a notification says so. The same goes for the folder above the worktree holding the config Biome would use, when your root config has `"root": false`.
+
+Changes to a config file apply right away, and so does installing or upgrading packages. If a project also uses ESLint or oxlint, each runs, and **Fix All** lets you choose between them.
 
 ---
 
