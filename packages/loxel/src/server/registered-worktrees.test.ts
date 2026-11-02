@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { executeAdd, executeMove, executeRemove } from "@bizimind/wt/lib";
@@ -114,8 +114,11 @@ describe.each(["bare", "regular"] as const)("RegisteredWorktrees, %s repo", (lay
   test("a list that cannot be read reports nothing and forgets nothing", async () => {
     const wtPath = await add("survives");
     await worktrees.refresh();
-    const broken = new RegisteredWorktrees(path.join(repo.root, "not-a-repo"));
-    expect(broken.refresh()).rejects.toThrow();
+    const aside = `${repo.root}-aside`;
+    renameSync(repo.root, aside);
+    await expect(worktrees.refresh()).rejects.toThrow();
+    renameSync(aside, repo.root);
+
     await executeRemove({ name: "survives", repoPath: repo.root, deleteBranch: true, force: true });
     expect(await worktrees.refresh()).toEqual({ removed: [wtPath], moved: [] });
   });
