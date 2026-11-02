@@ -9,7 +9,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import type { GoEnv } from "@/api/go-env-model";
@@ -178,14 +178,14 @@ describe("a version manager's shim", () => {
   }
   const setupShim = async (goroot: string | null) => setupShimIn(await setup(), goroot);
 
-  test("runs only from the home directory, and the real Go runs in the worktree", async () => {
+  test("runs only from the filesystem root, and the real Go runs in the worktree", async () => {
     const goroot = await makeDir("go-root-");
     await mkdir(join(goroot, "bin"));
     const { wt, shims, log, calls } = await setupShim(goroot);
     await writeExecutable(join(goroot, "bin", "go"), fakeGo("1.27.3", log));
     expect(await getGoEnv(wt)).toMatchObject({ binary: join(shims, "go"), version: "1.27.3" });
     const [first, second, ...rest] = await calls();
-    expect(first).toBe(`shim ${homedir()}`);
+    expect(first).toBe(`shim /`);
     expect(second?.startsWith(`${wt}|env -json GOVERSION`)).toBe(true);
     expect(rest).toEqual([]);
   });
@@ -193,7 +193,7 @@ describe("a version manager's shim", () => {
   test("counts as no go, and does not run in the worktree, when it names no GOROOT", async () => {
     const { wt, calls } = await setupShim(null);
     expect(await getGoEnv(wt)).toBeNull();
-    expect(await calls()).toEqual([`shim ${homedir()}`]);
+    expect(await calls()).toEqual([`shim /`]);
   });
 
   test("does not run the go of a GOROOT in the worktree", async () => {
@@ -204,7 +204,7 @@ describe("a version manager's shim", () => {
     await mkdir(join(goroot, "bin"), { recursive: true });
     await writeExecutable(join(goroot, "bin", "go"), fakeGo("1.27.3", log));
     expect(await getGoEnv(wt)).toBeNull();
-    expect(await calls()).toEqual([`shim ${homedir()}`]);
+    expect(await calls()).toEqual([`shim /`]);
   });
 
   test("is no tool to run in a worktree, and is left off what go can run", async () => {

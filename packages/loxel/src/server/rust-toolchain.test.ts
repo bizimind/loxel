@@ -732,6 +732,25 @@ describe("rust-analyzer", () => {
   });
 });
 
+describe("an install without rustup", () => {
+  test("takes no rustup proxy of cargo, which would pick its toolchain by directory", async () => {
+    const fixture = await makeFixture();
+    await writeExecutable(
+      join(fixture.bin, "rustc"),
+      `#!/bin/sh\nif [ "$1" = "--print" ]; then echo "${fixture.root}"; else echo "rustc 1.88.0"; fi\n`,
+    );
+    const proxies = join(fixture.root, "cargo-home-bin");
+    await mkdir(proxies);
+    await writeExecutable(join(proxies, "rustup"), "#!/bin/sh\n");
+    await symlink(join(proxies, "rustup"), join(proxies, "cargo"));
+    const env = { ...fixture.env, PATH: `${fixture.bin}:${proxies}` };
+    expect(await resolveRustToolchain(fixture.wt, { chosen: null, env })).toMatchObject({
+      source: "no-rustup",
+      tools: { cargo: null },
+    });
+  });
+});
+
 describe("the toolchain rule", () => {
   test("refuses a toolchain the repository tracks, and never runs it", async () => {
     const fixture = await makeFixture();
