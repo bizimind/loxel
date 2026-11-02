@@ -397,11 +397,11 @@ describe("goFormatter binaries", () => {
         DEFAULT_FORMATTING_SETTINGS,
       );
 
-    test("formats with the Go it stands for, running it only from the home directory", async () => {
+    test("formats with the Go it stands for, running it only from the filesystem root", async () => {
       const { log, canary } = await setupManager();
       expect((await saveWithLookup()).content).toStartWith("goroot-gofmt ");
       expect(existsSync(canary)).toBe(false);
-      expect(await Bun.file(log).text()).toBe(`go ${homedir()}\n`);
+      expect(await Bun.file(log).text()).toBe(`go /\n`);
     });
 
     test("does not take golangci-lint from it, so gofmt formats instead", async () => {
@@ -409,7 +409,7 @@ describe("goFormatter binaries", () => {
       await addFiles({ ".golangci.yml": V2_CONFIG });
       expect((await saveWithLookup()).content).toStartWith("goroot-gofmt ");
       expect(existsSync(canary)).toBe(false);
-      expect(await Bun.file(log).text()).toBe(`go ${homedir()}\n`);
+      expect(await Bun.file(log).text()).toBe(`go /\n`);
     });
   });
 

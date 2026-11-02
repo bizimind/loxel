@@ -11,6 +11,7 @@ import { TextMateScopeInspector } from "@/components/code-editor/TextMateScopeIn
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
+import { EditorBanner } from "@/components/editor/EditorBanner";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
 import {
   type MergeCallbacks,
@@ -215,7 +216,7 @@ export function CodeEditorPanel({
     editorFileState,
     isDeleted,
     isError,
-    isPaused,
+    retryLoad,
     saveNow,
     recreateFile,
     saveOptionsRef,
@@ -245,14 +246,22 @@ export function CodeEditorPanel({
   resolvedLangRef.current = resolvedLang;
   const language = useMemo(() => toMonacoLanguage(resolvedLang), [resolvedLang]);
   // Creating a model sends it to language servers, so it waits for the file's content, unless that
-  // cannot come (an error, or a query paused offline): `didOpen` carries the real text, and the
+  // cannot come (an error): `didOpen` carries the real text, and the
   // model's URI scheme and first language, which decide its servers, can come from that content (a
   // shebang script).
   // Latched: losing that content to a refetch must not dispose the editor and its unsaved edits.
   const canCreateModelRef = useRef(false);
-  canCreateModelRef.current ||= diskContent !== null || isError || isPaused;
+  canCreateModelRef.current ||= diskContent !== null || isError;
   const canCreateModel = canCreateModelRef.current;
   const waitedForContent = useRef(!canCreateModel);
+  // An empty model says nothing about the file until a load has succeeded: until then neither an
+  // edit nor a save may replace the file. A confirmed-missing file is a legitimate empty buffer.
+  // Latched like the model: losing loaded content to a refetch must not freeze unsaved edits.
+  const contentLoadedRef = useRef(false);
+  contentLoadedRef.current ||= diskContent !== null;
+  const contentUnknown = !contentLoadedRef.current && !isDeleted;
+  const contentUnknownRef = useRef(contentUnknown);
+  contentUnknownRef.current = contentUnknown;
 
   // Refetched when an `.editorconfig` above the file changes (see ws-bridge).
   const editorConfigQuery = useQuery({
@@ -269,8 +278,9 @@ export function CodeEditorPanel({
   const editorConfig = editorConfigData?.properties ?? NO_EDITORCONFIG;
   const editorConfigRef = useRef(editorConfig);
   editorConfigRef.current = editorConfig;
-  const editorConfigPendingRef = useRef(editorConfigPending);
-  editorConfigPendingRef.current = editorConfigPending;
+  const readOnly = editorConfigPending || contentUnknown;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
 
   // Detected when the file's content is loaded or replaced from disk, not on the echoes of its own
   // saves, so neither typing nor a conversion shifts it.
@@ -334,7 +344,7 @@ export function CodeEditorPanel({
     const editor = monaco.editor.create(container, {
       model,
       theme: getMonacoThemeName(darkMode),
-      readOnly: editorConfigPendingRef.current,
+      readOnly: readOnlyRef.current,
       rulers: rulersFor(editorConfigRef.current),
       // Editor-level tabSize/insertSpaces are global in standalone Monaco: setting them would reset
       // every open model's indentation. Indentation is set per model below; this constant flag only
@@ -455,6 +465,7 @@ export function CodeEditorPanel({
     // save actions, which would otherwise redo what the user just undid (and clear redo).
     let lastChangeWasUndo = false;
     getSerializedContentRef.current = (reason) => {
+      if (contentUnknownRef.current) return null;
       if (reason === "explicit" || !lastChangeWasUndo) {
         // The save actions are part of what gets written, not an edit that needs saving again.
         isProgrammaticRef.current = true;
@@ -483,6 +494,8 @@ export function CodeEditorPanel({
     editor.onDidChangeModelContent((e) => {
       setEol(e.eol === "\r\n" ? "CRLF" : "LF");
       if (isProgrammaticRef.current) return;
+      // `readOnly` does not stop a language server's edits. Staying clean lets the load replace them.
+      if (contentUnknownRef.current) return;
       lastChangeWasUndo = e.isUndoing || e.isRedoing;
       handleChange(editor.getModel()?.getValue() ?? "");
     });
@@ -534,9 +547,9 @@ export function CodeEditorPanel({
     addSaveAction(editor, () => void saveNow());
 
     // Navigate to initial line:column if provided (e.g. from search results).
-    // Only navigate now if diskContent is available. It is null here only after a failed or paused
-    // load: the editor is empty and Monaco would clamp to line 1, so the effect below navigates
-    // once a retry brings the content.
+    // Only navigate now if diskContent is available. It is null here only after a failed load: the
+    // editor is empty and Monaco would clamp to line 1, so the effect below navigates once a retry
+    // brings the content.
     let navRafId: number | undefined;
     if (initialLineRef.current && diskContent !== null) {
       navRafId = navigateToInitialPosition(editor);
@@ -585,7 +598,7 @@ export function CodeEditorPanel({
   }, [diskContent, filePath]);
 
   // Deferred initial navigation: when diskContent arrives after mount and initial refs are still pending.
-  // This handles the case where the editor was created with empty content (a failed or paused load)
+  // This handles the case where the editor was created with empty content (a failed load)
   // and the mount effect could not navigate. Declared after the content-update effect
   // so React runs them in order — content is set in the model before navigation fires.
   useEffect(() => {
@@ -632,11 +645,8 @@ export function CodeEditorPanel({
   }, [indentation]);
 
   useEffect(() => {
-    editorRef.current?.updateOptions({
-      readOnly: editorConfigPending,
-      rulers: rulersFor(editorConfig),
-    });
-  }, [editorConfigPending, editorConfig]);
+    editorRef.current?.updateOptions({ readOnly, rulers: rulersFor(editorConfig) });
+  }, [readOnly, editorConfig]);
 
   const convertIndentation = useCallback((insertSpaces: boolean) => {
     const editor = editorRef.current;
@@ -753,6 +763,13 @@ export function CodeEditorPanel({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       {isDeleted && <DeletedFileBanner onRecreate={recreateFile} />}
+      {contentUnknown && isError && (
+        <EditorBanner
+          tone="danger"
+          message="Could not load this file. Editing is off so nothing can overwrite it."
+          actions={[{ label: "Retry", onClick: retryLoad }]}
+        />
+      )}
       <MovedFileBanner movedFrom={movedFrom} filePath={filePath} panelApi={panelApi} />
       {editorFileState === "diverged" && (
         <ConflictBanner onAcceptDisk={handleAcceptDisk} onKeepMine={handleKeepMine} />
