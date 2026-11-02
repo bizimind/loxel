@@ -75,13 +75,14 @@ declare module "monaco-editor/platform/markdown/browser/markdownRenderer.js" {
   }
 
   /** Renders the markdown of hovers and documentation. */
-  export interface IMarkdownRendererService {
-    render(
+  export interface MarkdownRendererInstance {
+    render: (
       markdown: IMarkdownString,
       options?: MarkdownRenderOptions,
       outElement?: HTMLElement,
-    ): IDisposable & { readonly element: HTMLElement };
+    ) => IDisposable & { readonly element: HTMLElement };
   }
 
-  export const IMarkdownRendererService: ServiceIdentifier<IMarkdownRendererService>;
+  export const MarkdownRendererService: { readonly prototype: MarkdownRendererInstance };
+  export const IMarkdownRendererService: ServiceIdentifier<MarkdownRendererInstance>;
 }

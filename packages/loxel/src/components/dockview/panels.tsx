@@ -257,12 +257,7 @@ function CodeEditorPanelComponent(
 
 /** A language server's read-only document in the center group. */
 function VirtualDocumentPanelComponent(
-  props: IDockviewPanelProps<{
-    uri: string;
-    connectionId: string;
-    line?: number;
-    column?: number;
-  }>,
+  props: IDockviewPanelProps<{ uri: string; connectionId: string; line?: number; column?: number }>,
 ) {
   return (
     <VirtualDocumentPanel

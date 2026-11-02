@@ -56,7 +56,8 @@ export class LspCapabilitiesRegistry extends Disposable implements ILspCapabilit
             const r = new CapabilityRegistration(
               registration.id,
               capability,
-              registration.registerOptions,
+              // Optional in LSP, and jdtls sends none: features read their options unconditionally.
+              registration.registerOptions ?? {},
               false,
             );
             this._registerCapabilityOptions(r);

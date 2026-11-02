@@ -228,11 +228,7 @@ export class MonacoLspClient {
    * one) once the server has initialized, and resolves with its unverified result. Cancelling
    * `token` sends `$/cancelRequest` and rejects with a `Canceled` error.
    */
-  async request(
-    method: string,
-    params: object,
-    token: monaco.CancellationToken,
-  ): Promise<unknown> {
+  async request(method: string, params: object, token: monaco.CancellationToken): Promise<unknown> {
     await this._initPromise;
     return this._connection.cancellableRequests.request(
       unverifiedRequest<object, unknown>({ method }),

@@ -166,3 +166,20 @@ describe("LspCapabilitiesRegistry", () => {
     });
   });
 });
+
+describe("registrations without options", () => {
+  test("reach the handler with empty options, which LSP allows and jdtls sends", async () => {
+    const { channel, register } = createChannel();
+    const registry = new LspCapabilitiesRegistry(channel);
+    const handler = mock((options: { documentSelector?: unknown }) => {
+      expect(options.documentSelector).toBeUndefined();
+      return { dispose: () => {} };
+    });
+    registry.registerCapabilityHandler(capabilities.textDocumentHover, true, handler);
+
+    await register([{ id: "hover", method: "textDocument/hover" }]);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    registry.dispose();
+  });
+});

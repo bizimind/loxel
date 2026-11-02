@@ -38,7 +38,15 @@ Go-to-definition, rename, workspace symbols and hover on your own types need the
 
 ## JDK classes
 
-Hover on a JDK class shows its documentation when the JDK includes its sources (`src.zip`), and only its signature otherwise. Most JDK distributions include them; some Linux packages put them in a separate package. Go-to-definition into JDK classes is not available yet.
+Hover on a JDK class shows its documentation when the JDK includes its sources (`src.zip`), and only its signature otherwise. Most JDK distributions include them; some Linux packages put them in a separate package.
+
+## JDK and library sources
+
+Go to definition on a JDK or dependency class (`Cmd`-click or `F12`) opens its source in a read-only tab named after the class, and reuses that tab if it is already open. Hover, go-to-definition and symbols work inside it, so you can keep following definitions. Peek, **Go to Symbol in Workspace** and the **Source** link in a hover reach the same sources.
+
+- The source comes from what is on your machine: a JDK's `src.zip`, or a `-sources.jar` next to a dependency. Without one you see decompiled code, with a comment at the top saying so. Nothing is downloaded.
+- Workspace symbols from these classes open at the top of the file.
+- These tabs last as long as the language server session: they close when the server restarts, when you switch worktrees and when the window reloads. Go to the definition again to reopen one.
 
 ## JDK detection
 

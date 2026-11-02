@@ -44,12 +44,23 @@ Each folder gets one invisible project. jdtls infers its source root from the fi
 
 ## Client capabilities
 
-`extendedClientCapabilities` is not sent, so code actions come back with `data` and resolve to plain edits. jdtls resolves only the actions of its latest answer.
+`extendedClientCapabilities` holds only `classFileContentsSupport` (see [Library sources](#library-sources)), so code actions come back with `data` and resolve to plain edits. jdtls resolves only the actions of its latest answer.
 
 - `workspace.fileOperations.willRename` is removed from the `initialize` response. jdtls's rename edit already holds every reference, and `WorkspaceEditApplier` asks `willRenameFiles` for each rename operation in an edit, so a class rename would be applied twice.
 - `dropUnusableActions` removes the actions that run `java.action.applyRefactoringCommand`, a client command that needs a prompt, and `Ignore compiler problem(s)`, which has neither an edit nor a command.
 - Lenses are off (`referencesCodeLens`, `implementationCodeLens`), since their commands are the client's own in VS Code.
 - `language/status`, `language/eventNotification` and the other custom notifications reach the client, which drops them with a debug log. `ServiceReady` does not mean analysis finished, so tests wait for diagnostics on an opened file.
+
+## Library sources
+
+JDK and dependency classes open as [read-only documents](../LANGUAGE_SERVERS.md#read-only-documents) under the `jdt` scheme, declared in [java-lsp-client.ts](../../src/lib/java-lsp-client.ts). With `classFileContentsSupport`, definitions, workspace symbols, references and hover links lead to `jdt://` URIs, in both trust modes; without it jdtls answers a definition into a library with nothing.
+
+- **Text.** `workspace/textDocumentContent`, which jdtls answers whether or not the client declares it. It returns the JDK's `src.zip` or a dependency's `-sources.jar` already on disk, and otherwise Fernflower's output, starting with a comment that says so. Definition ranges match whichever it returned.
+- **URIs.** Each embeds the project name and absolute paths, and ends in `.class`. jdtls accepts Monaco's re-encoding of them, in which `/` and `=` in the query are escaped, and answers the same, so the model's URI is what goes to the server.
+- **Sync.** `textDocument/didOpen` with the `jdt://` URI itself. jdtls ignores its text and answers hover, definition, document symbols and semantic tokens from the class. A copy of the text in a file would not do: it gets bogus diagnostics, an empty hover and no definitions.
+- **References.** `java.references.includeDecompiledSources` is off: with it, a search from a project file fails on the first class it cannot decompile, and results in sourceless classes could not be navigated to anyway.
+
+Nothing is fetched: [audit-jdtls.ts](../../scripts/network-audit/audit-jdtls.ts) goes to JDK and dependency classes, with and without source, and uses the opened documents.
 
 ## Settings it pulls
 

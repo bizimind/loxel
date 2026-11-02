@@ -1,7 +1,7 @@
 /**
  * Proves at the socket level that the bundled Eclipse JDT LS makes no network requests when it runs
- * behind the real `loxel-server`, through opening files and every command a user can start, and that
- * with project import off it runs nothing from the project and leaves the project's files alone.
+ * behind the real `loxel-server`, through opening files, every command a user can start and reading
+ * JDK and dependency sources, and that with project import off it runs nothing from the project and leaves the project's files alone.
  * macOS only. Run it after changing the server's pin, its runtime or its manager; it exits non-zero
  * on any outbound attempt.
  *
@@ -749,6 +749,86 @@ async function exerciseFeatures(): Promise<void> {
 }
 
 /** Opening and editing a file in a project with build logic: none of it runs, its files stay. */
+/**
+ * Library sources: go to definition on JDK and dependency classes, with and without attached source,
+ * then read each document, open it and use it the way a read-only tab does.
+ */
+async function exerciseLibrarySources(): Promise<void> {
+  const root = path.join(work, "libraries");
+  const app = `package app;
+
+import dep.Bare;
+import dep.Attached;
+import java.util.List;
+
+public class App {
+  List<String> jdk;
+  Attached attached;
+  Bare bare;
+}
+`;
+  writeFiles(root, { "src/app/App.java": app });
+  const jars = path.join(work, "library-jars");
+  writeFiles(jars, {
+    "dep/Attached.java":
+      "package dep;\n/** Documented. */\npublic class Attached { public Bare bare; }\n",
+    "dep/Bare.java": "package dep;\npublic class Bare {}\n",
+  });
+  await $`${path.join(realHome, "bin", "javac")} -d out dep/Attached.java dep/Bare.java`
+    .cwd(jars)
+    .quiet();
+  mkdirSync(path.join(root, "lib"), { recursive: true });
+  await $`zip -qr ${path.join(root, "lib/attached.jar")} dep/Attached.class`
+    .cwd(path.join(jars, "out"))
+    .quiet();
+  await $`zip -qr ${path.join(root, "lib/bare.jar")} dep/Bare.class`
+    .cwd(path.join(jars, "out"))
+    .quiet();
+  await $`zip -qr ${path.join(root, "lib/attached-sources.jar")} dep/Attached.java`
+    .cwd(jars)
+    .quiet();
+  await gitInit(root);
+
+  const client = await startClient(root);
+  const textDocument = { uri: client.uri("src/app/App.java") };
+  await client.open("src/app/App.java");
+  for (const [name, needle, expected] of [
+    ["JDK class", "List<String>", "public interface List"],
+    ["dependency with sources", "Attached attached", "Documented."],
+    ["dependency without sources", "Bare bare", "decompiled"],
+  ] as const) {
+    const target = (await client.request("textDocument/definition", {
+      textDocument,
+      position: positionOf(app, needle, 1),
+    })) as { result?: Array<{ uri?: string; range?: Range }> };
+    const location = target.result?.[0];
+    check(location?.uri?.startsWith("jdt://") === true, `${name}: definition leads to its source`);
+    if (!location?.uri || !location.range) continue;
+    const document = { uri: location.uri };
+    const content = await client.request("workspace/textDocumentContent", document);
+    const text = (content.result as { text?: string } | undefined)?.text ?? "";
+    check(text.includes(expected), `${name}: its text is available`, text.slice(0, 80));
+    client.notify({
+      method: "textDocument/didOpen",
+      params: { textDocument: { ...document, languageId: "java", version: 1, text } },
+    });
+    const position = location.range.start;
+    const hover = await client.request("textDocument/hover", { textDocument: document, position });
+    check(hover.result !== null && !hover.error, `${name}: hover inside it`);
+    await client.request("textDocument/definition", { textDocument: document, position });
+    await client.request("textDocument/documentSymbol", { textDocument: document });
+    await client.request("textDocument/semanticTokens/full", { textDocument: document });
+    await client.request("textDocument/references", {
+      textDocument: document,
+      position,
+      context: { includeDeclaration: true },
+    });
+    client.notify({ method: "textDocument/didClose", params: { textDocument: document } });
+  }
+  await client.request("workspace/symbol", { query: "Attached" });
+  await stopClient(client);
+}
+
 async function exerciseProjects(jar: string): Promise<void> {
   for (const [name, write] of Object.entries(projectFixtures(jar))) {
     write();
@@ -783,6 +863,7 @@ try {
   await waitForServer(`http://127.0.0.1:${port}/`);
   const jar = await buildProcessorJar();
   await exerciseFeatures();
+  await exerciseLibrarySources();
   if (!values.control) await exerciseProjects(jar);
 } finally {
   server.kill();

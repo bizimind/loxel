@@ -3,8 +3,8 @@ import { describe, expect, mock, test } from "bun:test";
 import type { WorkspaceSymbolItem } from "@bizimind/monaco-lsp-client";
 import * as monaco from "monaco-editor";
 
-import type { WorkspaceSymbolResult, WorkspaceSymbolSource } from "./workspace-symbols";
 import { registerVirtualDocumentScheme } from "./virtual-documents";
+import type { WorkspaceSymbolResult, WorkspaceSymbolSource } from "./workspace-symbols";
 import {
   rankWorkspaceSymbols,
   resolveWorkspaceSymbolLocation,
