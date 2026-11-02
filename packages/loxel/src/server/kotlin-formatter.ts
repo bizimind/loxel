@@ -166,9 +166,9 @@ function ktfmtSettings(script: string): string {
   );
 }
 
-/** The text inside each `{ ... }` block that `opening`, a global regex ending at `{`, opens. */
-export function blockBodies(script: string, opening: RegExp): string[] {
-  return [...script.matchAll(opening)].map((match) => {
+/** The text inside each of the first `limit` `{ ... }` blocks that `opening`, a global regex ending at `{`, opens. */
+export function blockBodies(script: string, opening: RegExp, limit = Infinity): string[] {
+  return [...script.matchAll(opening)].slice(0, limit).map((match) => {
     const start = match.index + match[0].length;
     let depth = 1;
     let end = start;
@@ -193,7 +193,7 @@ export function buildScripts(dir: string): string[] {
 }
 
 /** The text of a file with its comments removed, so a commented-out plugin does not count. */
-function readCode(path: string, syntax: "kotlin" | "groovy" | "toml"): string {
+export function readCode(path: string, syntax: "kotlin" | "groovy" | "toml"): string {
   const text = readText(path);
   return syntax === "toml" ? text.replace(/#.*$/gm, "") : withoutComments(text, syntax);
 }

@@ -61,6 +61,8 @@ interface DetectedFormatter {
   backendDir?: string;
   /** See {@link FileFormatter.backendToolDir}. */
   backendToolDir?: string;
+  /** See {@link FileFormatter.prepare}. */
+  prepare?: FileFormatter["prepare"];
 }
 
 interface DetectionCache {
@@ -148,10 +150,11 @@ export class FormatService {
     }
 
     // 2. Auto-detect from project config
-    const fmt =
+    const detected =
       settings.autoDetect && worktreePath
         ? this.findDetectedFormatter(ext, filePath, worktreePath)
         : undefined;
+    const fmt = detected && (await prepareDetected(detected, filePath));
     if (!fmt || !worktreePath) {
       log.debug("No formatter found", { filePath, ext });
       return UNFORMATTED;
@@ -564,6 +567,21 @@ function detectFormatter(
   } catch (err) {
     log.warn("Formatter detection failed", { dir, error: errorMessage(err) });
     return null;
+  }
+}
+
+/** A detected formatter after its `prepare`; one that throws detects nothing, like `detect`. */
+async function prepareDetected(
+  detected: DetectedFormatter | FormatterDecline,
+  filePath: string,
+): Promise<DetectedFormatter | FormatterDecline | undefined> {
+  if ("notice" in detected || !detected.prepare) return detected;
+  try {
+    const prepared = await detected.prepare();
+    return "notice" in prepared ? prepared : { ...detected, ...prepared, prepare: undefined };
+  } catch (err) {
+    log.warn("Preparing a formatter failed", { filePath, error: errorMessage(err) });
+    return undefined;
   }
 }
 

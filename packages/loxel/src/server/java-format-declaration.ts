@@ -1,0 +1,647 @@
+import { statSync } from "node:fs";
+import { join } from "node:path";
+
+import { isRecord } from "@/lib/is-record";
+
+import { blockBodies, declaresPlugin, readCode, readText } from "./kotlin-formatter";
+import { dirsUpToRoot, type FormatterDecline } from "./language-formatter";
+import { readToml, recordAt } from "./toml-file";
+
+export const GOOGLE_JAVA_FORMAT = "google-java-format";
+export const PALANTIR_JAVA_FORMAT = "palantir-java-format";
+export type JavaFormatTool = typeof GOOGLE_JAVA_FORMAT | typeof PALANTIR_JAVA_FORMAT;
+
+/** What a project's build files say about formatting its Java. */
+export interface JavaFormatDeclaration {
+  tool: JavaFormatTool;
+  /** The version the build pins; null when it states none. */
+  pin: string | null;
+  /** The command-line flags matching the build's formatter settings. */
+  flags: string[];
+}
+
+/** How a build names a version, before looking at the other files it may be in. */
+type VersionRef =
+  | { kind: "none" }
+  | { kind: "literal"; version: string }
+  | { kind: "maven-property"; name: string }
+  | { kind: "gradle-variable"; name: string; script: string }
+  | { kind: "catalog-version"; alias: string }
+  | { kind: "catalog-library"; alias: string }
+  | { kind: "plugin"; script: string }
+  | { kind: "unreadable" };
+
+/** What one build file declares. */
+type BuildSignal =
+  | { kind: "formatter"; tool: JavaFormatTool; version: VersionRef; flags: string[] }
+  /** Its Java is formatted by something else, so what a parent directory declares does not apply. */
+  | { kind: "other" }
+  /** A Maven plugin applied here with its configuration in a `pluginManagement`, here or above. */
+  | { kind: "applied-elsewhere" }
+  /** Plugins applied through catalog aliases, which only the catalog can name. */
+  | { kind: "plugin-aliases"; aliases: string[] }
+  | FormatterDecline;
+
+const VERSION = /^\d+(?:\.\d+)+(?:[-.][\w.-]+)?$/;
+const CATALOG = join("gradle", "libs.versions.toml");
+
+const PALANTIR_PLUGIN = "com.palantir.java-format";
+const PALANTIR_PLUGIN_COORDINATE = "com.palantir.javaformat:gradle-palantir-java-format";
+
+const REFLOW = "--skip-reflowing-long-strings";
+const SKIP_JAVADOC = "--skip-javadoc-formatting";
+const SKIP_SORTING = "--skip-sorting-imports";
+const SKIP_UNUSED = "--skip-removing-unused-imports";
+
+const TOGGLE_NOTICE: FormatterDecline = {
+  notice:
+    "Format on save skipped: this project's Spotless config uses toggleOffOn, which the formatter's command can't apply. Run Spotless from your build instead.",
+};
+const FORK_NOTICE: FormatterDecline = {
+  notice:
+    "Format on save skipped: this project's Spotless config names its own formatter artifact, which Loxel can't match. Run Spotless from your build instead.",
+};
+const UNREADABLE_OPTION_NOTICE: FormatterDecline = {
+  notice:
+    "Format on save skipped: Loxel can't read this project's formatter options from its build files. Run Spotless from your build instead.",
+};
+const PALANTIR_JAVADOC_NOTICE: FormatterDecline = {
+  notice:
+    "Format on save skipped: this project formats Javadoc with palantir-java-format, which its command can't do. Run Spotless from your build instead.",
+};
+
+/**
+ * The formatter declared for files under `startDir`, from the nearest build file that says anything
+ * about it up to `wtRoot`. Only reads files as text: running a build to ask would run the
+ * repository's code on save. A formatter configured where the text does not show it, in a convention
+ * plugin or a parent POM that is not in a directory above, is not seen.
+ *
+ * A declaration whose version cannot be read declines, since no version could be shown to match.
+ */
+export function findJavaFormatDeclaration(
+  startDir: string,
+  wtRoot: string,
+): JavaFormatDeclaration | FormatterDecline | null {
+  const dirs = dirsUpToRoot(startDir, wtRoot);
+  let awaitingManaged = false;
+  for (const [i, dir] of dirs.entries()) {
+    const own = dirSignal(dir);
+    awaitingManaged ||= hasKind(own, "applied-elsewhere");
+    const found = awaitingManaged ? (managedSignal(dir) ?? own) : own;
+    const signal = hasKind(found, "plugin-aliases")
+      ? palantirByAlias(found.aliases, dirs.slice(i))
+      : found;
+    if (!signal || hasKind(signal, "applied-elsewhere") || hasKind(signal, "plugin-aliases")) {
+      continue;
+    }
+    if ("notice" in signal) return signal;
+    if (signal.kind === "other") return null;
+    const pin = resolveVersion(signal.version, dirs.slice(i));
+    if (pin === undefined) {
+      return {
+        notice: `Format on save skipped: Loxel can't read which ${signal.tool} version this project pins from its build files.`,
+      };
+    }
+    return { tool: signal.tool, pin, flags: signal.flags };
+  }
+  return null;
+}
+
+function hasKind<K extends string>(
+  signal: BuildSignal | null,
+  kind: K,
+): signal is Extract<BuildSignal, { kind: K }> {
+  return signal !== null && "kind" in signal && signal.kind === kind;
+}
+
+function managedSignal(dir: string): BuildSignal | null {
+  return cachedByFile(join(dir, "pom.xml"), managedMavenSignal, "managed");
+}
+
+function dirSignal(dir: string): BuildSignal | null {
+  return (
+    cachedByFile(join(dir, "pom.xml"), appliedMavenSignal) ??
+    cachedByFile(join(dir, "build.gradle.kts"), (path) => gradleSignal(readCode(path, "kotlin"))) ??
+    cachedByFile(join(dir, "build.gradle"), (path) => gradleSignal(readCode(path, "groovy")))
+  );
+}
+
+const signalCache = new Map<string, { fingerprint: string; signal: BuildSignal | null }>();
+const MAX_CACHED_SIGNALS = 1_000;
+
+/** `parse(path)`, kept while the file's size and mtime stay: this runs on every save. */
+function cachedByFile(
+  path: string,
+  parse: (path: string) => BuildSignal | null,
+  variant = "",
+): BuildSignal | null {
+  const info = statSync(path, { throwIfNoEntry: false });
+  if (!info) return null;
+  const fingerprint = `${info.size}:${info.mtimeMs}`;
+  const key = `${path}\0${variant}`;
+  const cached = signalCache.get(key);
+  if (cached?.fingerprint === fingerprint) return cached.signal;
+  const signal = parse(path);
+  if (signalCache.size >= MAX_CACHED_SIGNALS) signalCache.clear();
+  signalCache.set(key, { fingerprint, signal });
+  return signal;
+}
+
+// ---------------------------------------------------------------------------
+// Maven
+
+const FMT_PLUGIN_GROUPS = new Set(["com.spotify.fmt", "com.spotify", "com.coveo"]);
+const MAVEN_OPTIONS = ["style", "reflowLongStrings", "reorderImports", "formatJavadoc"];
+const OTHER_SPOTLESS_JAVA_ELEMENT = /<(eclipse|prettier|clangFormat|greclipse)\b/;
+
+/** What the POM's applied plugins say. A `pluginManagement` entry alone applies to no module. */
+function appliedMavenSignal(path: string): BuildSignal | null {
+  const xml = readPom(path);
+  let applied = "";
+  let from = 0;
+  for (const { start, end } of xmlBlocks(xml, "pluginManagement")) {
+    applied += xml.slice(from, start);
+    from = end;
+  }
+  return pluginsSignal(applied + xml.slice(from));
+}
+
+function managedMavenSignal(path: string): BuildSignal | null {
+  const signals = xmlBlocks(readPom(path), "pluginManagement").map(({ body }) =>
+    pluginsSignal(body),
+  );
+  return signals.find((signal) => signal && !hasKind(signal, "applied-elsewhere")) ?? null;
+}
+
+function readPom(path: string): string {
+  const text = readText(path);
+  return text.includes("-maven-plugin") || text.includes("<properties>")
+    ? withoutXmlComments(text)
+    : "";
+}
+
+function pluginsSignal(xml: string): BuildSignal | null {
+  let applied: BuildSignal | null = null;
+  for (const { body: plugin } of xmlBlocks(xml, "plugin")) {
+    const artifact = xmlElement(plugin, "artifactId");
+    const signal =
+      artifact === "spotless-maven-plugin"
+        ? spotlessMavenSignal(plugin)
+        : artifact === "fmt-maven-plugin" &&
+            FMT_PLUGIN_GROUPS.has(xmlElement(plugin, "groupId") ?? "")
+          ? fmtMavenSignal(plugin)
+          : null;
+    if (hasKind(signal, "applied-elsewhere")) applied = signal;
+    else if (signal) return signal;
+  }
+  return applied;
+}
+
+function spotlessMavenSignal(plugin: string): BuildSignal | null {
+  const java = xmlElement(plugin, "java");
+  if (java === null) {
+    return xmlElement(plugin, "configuration") === null ? { kind: "applied-elsewhere" } : null;
+  }
+  const google = xmlElement(java, "googleJavaFormat");
+  const palantir = google === null ? xmlElement(java, "palantirJavaFormat") : null;
+  if (google === null && palantir === null) {
+    return OTHER_SPOTLESS_JAVA_ELEMENT.test(java) ? { kind: "other" } : null;
+  }
+  if (xmlElement(java, "toggleOffOn") !== null) return TOGGLE_NOTICE;
+  const settings = google ?? palantir ?? "";
+  if (xmlElement(settings, "groupArtifact") !== null) return FORK_NOTICE;
+  const version = mavenVersion(xmlElement(settings, "version"));
+  const setting = (name: string) => xmlElement(settings, name)?.toLowerCase();
+  // A property here could turn out to be any value; only versions are worth following that far.
+  if (MAVEN_OPTIONS.some((name) => setting(name)?.includes("$"))) return UNREADABLE_OPTION_NOTICE;
+  const customImportOrder = xmlElement(java, "importOrder") !== null;
+  if (google !== null) {
+    return {
+      kind: "formatter",
+      tool: GOOGLE_JAVA_FORMAT,
+      version,
+      flags: googleFlags({
+        style: setting("style"),
+        reflow: setting("reflowLongStrings") === "true",
+        reorderImports: setting("reorderImports") === "true",
+        javadoc: setting("formatJavadoc") !== "false",
+        customImportOrder,
+      }),
+    };
+  }
+  if (setting("formatJavadoc") === "true") return PALANTIR_JAVADOC_NOTICE;
+  return {
+    kind: "formatter",
+    tool: PALANTIR_JAVA_FORMAT,
+    version,
+    flags: palantirFlags(setting("style"), customImportOrder),
+  };
+}
+
+/**
+ * The fmt plugin carries its own google-java-format, which only a plugin dependency overrides. Its
+ * own version says nothing about that one's, so with no override the project states no version.
+ */
+function fmtMavenSignal(plugin: string): BuildSignal {
+  const flag = (name: string, value: string, cliFlag: string) =>
+    xmlElement(plugin, name)?.toLowerCase() === value ? [cliFlag] : [];
+  const override = xmlBlocks(plugin, "dependency")
+    .map(({ body }) => body)
+    .find((dependency) => xmlElement(dependency, "artifactId") === GOOGLE_JAVA_FORMAT);
+  return {
+    kind: "formatter",
+    tool: GOOGLE_JAVA_FORMAT,
+    version: mavenVersion(override ? xmlElement(override, "version") : null),
+    flags: [
+      ...flag("style", "aosp", "--aosp"),
+      ...flag("skipSortingImports", "true", SKIP_SORTING),
+      ...flag("skipRemovingUnusedImports", "true", SKIP_UNUSED),
+      // Unlike the command's, the plugin's default is to leave long strings alone.
+      ...(xmlElement(plugin, "skipReflowingLongStrings")?.toLowerCase() === "false"
+        ? []
+        : [REFLOW]),
+    ],
+  };
+}
+
+function mavenVersion(text: string | null): VersionRef {
+  if (text === null) return { kind: "none" };
+  const property = /^\$\{([\w.-]+)\}$/.exec(text)?.[1];
+  return property ? { kind: "maven-property", name: property } : literalVersion(text);
+}
+
+/*
+ * These scan with `indexOf` and stop at the first element left open: a POM is the repository's, and
+ * a lazy regular expression over unclosed tags takes quadratic time on the server's only thread.
+ */
+
+function withoutXmlComments(xml: string): string {
+  let text = "";
+  let from = 0;
+  for (let open = xml.indexOf("<!--"); open !== -1; open = xml.indexOf("<!--", from)) {
+    text += xml.slice(from, open);
+    const close = xml.indexOf("-->", open + 4);
+    if (close === -1) return text;
+    from = close + 3;
+  }
+  return text + xml.slice(from);
+}
+
+/** Every `<name>...</name>` that does not nest in itself, as its range and inner text. */
+function xmlBlocks(xml: string, name: string): { start: number; end: number; body: string }[] {
+  const open = `<${name}>`;
+  const close = `</${name}>`;
+  const blocks = [];
+  for (let start = xml.indexOf(open); start !== -1;) {
+    const bodyStart = start + open.length;
+    const closeAt = xml.indexOf(close, bodyStart);
+    if (closeAt === -1) break;
+    const end = closeAt + close.length;
+    blocks.push({ start, end, body: xml.slice(bodyStart, closeAt) });
+    start = xml.indexOf(open, end);
+  }
+  return blocks;
+}
+
+/** The trimmed text of the first `<name>` element, empty when self-closed, null when absent. */
+function xmlElement(xml: string, name: string): string | null {
+  const open = `<${name}`;
+  for (let at = xml.indexOf(open); at !== -1; at = xml.indexOf(open, at + open.length)) {
+    if (!/[\s/>]/.test(xml.charAt(at + open.length))) continue;
+    const tagEnd = xml.indexOf(">", at);
+    if (tagEnd === -1) return null;
+    if (xml[tagEnd - 1] === "/") return "";
+    const close = xml.indexOf(`</${name}>`, tagEnd);
+    return close === -1 ? null : xml.slice(tagEnd + 1, close).trim();
+  }
+  return null;
+}
+
+function resolveMavenProperty(name: string, dirs: readonly string[]): string | undefined {
+  for (const dir of dirs) {
+    const properties = xmlElement(readPom(join(dir, "pom.xml")), "properties");
+    const value = properties === null ? null : xmlElement(properties, name);
+    if (value !== null) return VERSION.test(value) ? value : undefined;
+  }
+  return undefined;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ---------------------------------------------------------------------------
+// Gradle
+
+const OTHER_SPOTLESS_JAVA_STEP = /\b(eclipse|prettier|clangFormat|greclipse)\s*\(/;
+const JAVA_BLOCK = /\bjava\s*\{/g;
+/** Far above a real build; each block is scanned to its end, and the script is the repository's. */
+const MAX_JAVA_BLOCKS = 64;
+const TOGGLE_CALL = /\btoggleOffOn\s*\(/;
+const IMPORT_ORDER_CALL = /\bimportOrder(?:File)?\s*\(/;
+const APPLY_FALSE_LINE = /^.*\bapply\s*\(?\s*false.*$/gm;
+const PLUGIN_ALIAS = /\balias\(\s*libs\.plugins\.([\w.]+)\s*\)/g;
+const BOOLEAN_ARGUMENT = /^(true|false)?$/;
+const BOOLEAN_STEPS = ["reflowLongStrings", "reorderImports", "formatJavadoc"];
+
+function gradleSignal(script: string): BuildSignal | null {
+  const javaBlocks = blockBodies(script, JAVA_BLOCK, MAX_JAVA_BLOCKS);
+  const google = gradleCall(script, "googleJavaFormat");
+  const palantir = google ? null : gradleCall(script, "palantirJavaFormat");
+  const call = google ?? palantir;
+  if (call) {
+    if (javaBlocks.some((java) => TOGGLE_CALL.test(java))) return TOGGLE_NOTICE;
+    if (call.chain.has("groupArtifact")) return FORK_NOTICE;
+    const options = readGradleOptions(call.chain);
+    if (!options) return UNREADABLE_OPTION_NOTICE;
+    const version = gradleVersion(call.argument, script);
+    const customImportOrder = javaBlocks.some((java) => IMPORT_ORDER_CALL.test(java));
+    if (google) {
+      return {
+        kind: "formatter",
+        tool: GOOGLE_JAVA_FORMAT,
+        version,
+        flags: googleFlags({
+          style: call.chain.has("aosp") ? "aosp" : options.style,
+          reflow: options.enabled("reflowLongStrings"),
+          reorderImports: options.enabled("reorderImports"),
+          javadoc: !call.chain.has("skipJavadocFormatting") && options.javadoc !== "false",
+          customImportOrder,
+        }),
+      };
+    }
+    if (call.chain.has("formatJavadoc") && options.javadoc !== "false") {
+      return PALANTIR_JAVADOC_NOTICE;
+    }
+    return {
+      kind: "formatter",
+      tool: PALANTIR_JAVA_FORMAT,
+      version,
+      flags: palantirFlags(options.style, customImportOrder),
+    };
+  }
+  if (javaBlocks.some((java) => OTHER_SPOTLESS_JAVA_STEP.test(java))) return { kind: "other" };
+  // `apply false` only makes a plugin available, to the modules that go on to apply it.
+  const applied = script.replace(APPLY_FALSE_LINE, "");
+  if (declaresPlugin(applied, PALANTIR_PLUGIN) || applied.includes(PALANTIR_PLUGIN_COORDINATE)) {
+    return palantirPluginSignal(script);
+  }
+  const aliases = [...applied.matchAll(PLUGIN_ALIAS)].map(([, alias = ""]) => alias);
+  return aliases.length > 0 ? { kind: "plugin-aliases", aliases } : null;
+}
+
+function palantirPluginSignal(script: string): BuildSignal {
+  return {
+    kind: "formatter",
+    tool: PALANTIR_JAVA_FORMAT,
+    version: { kind: "plugin", script },
+    flags: palantirFlags(undefined, false),
+  };
+}
+
+/** The plugin, when one of `aliases` names it in the catalog that applies. */
+function palantirByAlias(aliases: readonly string[], dirs: readonly string[]): BuildSignal | null {
+  for (const catalog of catalogs(dirs)) {
+    const plugins = recordAt(catalog, "plugins");
+    for (const alias of aliases) {
+      const entry = aliasEntry(plugins, alias);
+      const id =
+        typeof entry === "string" ? entry.split(":")[0] : isRecord(entry) ? entry.id : null;
+      if (id === PALANTIR_PLUGIN) return palantirPluginSignal("");
+    }
+  }
+  return null;
+}
+
+/** A chain's options, or null when one is an expression that could turn out to be anything. */
+function readGradleOptions(chain: Map<string, string>) {
+  const styleArgument = chain.get("style");
+  const style = stringLiteral(styleArgument ?? "");
+  if (styleArgument !== undefined && style === undefined) return null;
+  const readable = BOOLEAN_STEPS.every((name) => BOOLEAN_ARGUMENT.test(chain.get(name) ?? ""));
+  if (!readable) return null;
+  return {
+    style: style?.toLowerCase(),
+    javadoc: chain.get("formatJavadoc"),
+    enabled: (name: string) => chain.has(name) && chain.get(name) !== "false",
+  };
+}
+
+/** `name(argument).step(argument)...` or Groovy's `name 'argument'`, not `libs.name` or `val name`. */
+function gradleCall(
+  script: string,
+  name: string,
+): { argument: string; chain: Map<string, string> } | null {
+  const start = new RegExp(
+    `(?<![.\\w"'-])(?<!\\b(?:task|fun|def|void)\\s+)${name}\\s*(\\(|(?=['"]))`,
+  ).exec(script);
+  if (!start) return null;
+  const after = start.index + start[0].length;
+  if (!start[1]) {
+    const groovyArgument = /^(['"])[^'"]*\1/.exec(script.slice(after))?.[0] ?? "";
+    return { argument: groovyArgument, chain: new Map() };
+  }
+  const end = closingParen(script, after);
+  const chain = new Map<string, string>();
+  const step = /\s*\.\s*(\w+)\s*\(/y;
+  step.lastIndex = end + 1;
+  for (let match = step.exec(script); match; match = step.exec(script)) {
+    const stepStart = step.lastIndex;
+    const stepEnd = closingParen(script, stepStart);
+    chain.set(match[1] ?? "", script.slice(stepStart, stepEnd).trim());
+    step.lastIndex = stepEnd + 1;
+  }
+  return { argument: script.slice(after, end).trim(), chain };
+}
+
+function closingParen(script: string, start: number): number {
+  let depth = 1;
+  let i = start;
+  for (; i < script.length; i += 1) {
+    if (script[i] === "(") depth += 1;
+    if (script[i] === ")") depth -= 1;
+    if (depth === 0) return i;
+  }
+  return i;
+}
+
+function gradleVersion(argument: string, script: string): VersionRef {
+  if (!argument) return { kind: "none" };
+  const literal = stringLiteral(argument);
+  if (literal !== undefined && !literal.includes("$")) return literalVersion(literal);
+  const catalogVersion = /^libs\.versions\.([\w.]+)\.get\(\)$/.exec(argument)?.[1];
+  if (catalogVersion) return { kind: "catalog-version", alias: catalogVersion };
+  const catalogLibrary = /^libs\.([\w.]+)\.get\(\)\.(?:version|getVersion\(\))$/.exec(
+    argument,
+  )?.[1];
+  if (catalogLibrary) return { kind: "catalog-library", alias: catalogLibrary };
+  const variable = /^["']?\$?\{?(\w+)\}?["']?$/.exec(argument)?.[1];
+  return variable ? { kind: "gradle-variable", name: variable, script } : { kind: "unreadable" };
+}
+
+function stringLiteral(text: string): string | undefined {
+  return /^(['"])([^'"]*)\1$/.exec(text)?.[2];
+}
+
+function resolveGradleVariable(
+  name: string,
+  script: string,
+  dirs: readonly string[],
+): string | undefined {
+  const assigned = new RegExp(
+    `\\b(?:def|val|var|String|ext\\.)\\s*${name}\\s*(?::\\s*String\\s*)?=\\s*['"]([^'"]+)['"]`,
+  ).exec(script)?.[1];
+  if (assigned) return versionOrUndefined(assigned);
+  const property = new RegExp(`^[ \\t]*${name}[ \\t]*[=:][ \\t]*(\\S+)[ \\t]*$`, "m");
+  for (const dir of dirs) {
+    const value = property.exec(readText(join(dir, "gradle.properties")))?.[1];
+    if (value) return versionOrUndefined(value);
+  }
+  return undefined;
+}
+
+function resolveCatalogVersion(alias: string, dirs: readonly string[]): string | undefined {
+  for (const catalog of catalogs(dirs)) {
+    const value = aliasEntry(recordAt(catalog, "versions"), alias);
+    if (typeof value === "string") return versionOrUndefined(value);
+  }
+  return undefined;
+}
+
+function resolveCatalogLibrary(alias: string, dirs: readonly string[]): string | undefined {
+  for (const catalog of catalogs(dirs)) {
+    const entry = aliasEntry(recordAt(catalog, "libraries"), alias);
+    if (entry !== undefined) return catalogEntryVersion(entry, catalog);
+  }
+  return undefined;
+}
+
+/** A catalog entry's version: `"g:a:v"`, `version = "v"` or `version.ref = "x"`. */
+function catalogEntryVersion(entry: unknown, catalog: Record<string, unknown>): string | undefined {
+  if (typeof entry === "string") return versionOrUndefined(entry.split(":")[2] ?? "");
+  if (!isRecord(entry)) return undefined;
+  const { version } = entry;
+  if (typeof version === "string") return versionOrUndefined(version);
+  const ref = isRecord(version) ? version.ref : undefined;
+  const referenced = typeof ref === "string" ? recordAt(catalog, "versions")?.[ref] : undefined;
+  return typeof referenced === "string" ? versionOrUndefined(referenced) : undefined;
+}
+
+function* catalogs(dirs: readonly string[]): Generator<Record<string, unknown>> {
+  for (const dir of dirs) {
+    const catalog = readToml(join(dir, CATALOG));
+    if (catalog) yield catalog;
+  }
+}
+
+/** The entry an accessor names: Gradle turns `-` and `_` in an alias into `.`. */
+function aliasEntry(table: Record<string, unknown> | undefined, alias: string): unknown {
+  if (!table) return undefined;
+  const key = Object.keys(table).find((name) => name.replace(/[-_]/g, ".") === alias);
+  return key === undefined ? undefined : table[key];
+}
+
+/** The plugin shares its version with the formatter, as they are released from one repository. */
+function resolvePluginVersion(script: string, dirs: readonly string[]): string | undefined {
+  const scripts = [
+    script,
+    ...dirs.flatMap((dir) => [
+      readCode(join(dir, "build.gradle.kts"), "kotlin"),
+      readCode(join(dir, "build.gradle"), "groovy"),
+      readCode(join(dir, "settings.gradle.kts"), "kotlin"),
+      readCode(join(dir, "settings.gradle"), "groovy"),
+    ]),
+  ];
+  const pattern = new RegExp(
+    `(?:${PALANTIR_PLUGIN_COORDINATE}:|["']${escapeRegExp(PALANTIR_PLUGIN)}["']\\s*\\)?\\s*version\\s*\\(?\\s*["'])([^"':]+)["']`,
+  );
+  for (const text of scripts) {
+    const version = pattern.exec(text)?.[1];
+    if (version) return versionOrUndefined(version);
+  }
+  for (const catalog of catalogs(dirs)) {
+    const version = pluginVersionInCatalog(catalog);
+    if (version) return version;
+  }
+  return undefined;
+}
+
+function pluginVersionInCatalog(catalog: Record<string, unknown>): string | undefined {
+  for (const entry of Object.values(recordAt(catalog, "plugins") ?? {})) {
+    if (typeof entry === "string" && entry.startsWith(`${PALANTIR_PLUGIN}:`)) {
+      return versionOrUndefined(entry.slice(PALANTIR_PLUGIN.length + 1));
+    }
+    if (isRecord(entry) && entry.id === PALANTIR_PLUGIN) return catalogEntryVersion(entry, catalog);
+  }
+  for (const entry of Object.values(recordAt(catalog, "libraries") ?? {})) {
+    const named =
+      typeof entry === "string"
+        ? entry.startsWith(PALANTIR_PLUGIN_COORDINATE)
+        : isRecord(entry) && entry.module === PALANTIR_PLUGIN_COORDINATE;
+    if (named) return catalogEntryVersion(entry, catalog);
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Shared
+
+/** The pin a reference leads to: null for none, undefined when it cannot be read. */
+function resolveVersion(ref: VersionRef, dirs: readonly string[]): string | null | undefined {
+  switch (ref.kind) {
+    case "none":
+      return null;
+    case "literal":
+      return ref.version;
+    case "maven-property":
+      return resolveMavenProperty(ref.name, dirs);
+    case "gradle-variable":
+      return resolveGradleVariable(ref.name, ref.script, dirs);
+    case "catalog-version":
+      return resolveCatalogVersion(ref.alias, dirs);
+    case "catalog-library":
+      return resolveCatalogLibrary(ref.alias, dirs);
+    case "plugin":
+      return resolvePluginVersion(ref.script, dirs);
+    case "unreadable":
+    default:
+      return undefined;
+  }
+}
+
+function literalVersion(text: string): VersionRef {
+  return VERSION.test(text) ? { kind: "literal", version: text } : { kind: "unreadable" };
+}
+
+/** Only a version: it goes into a cache path and a notice, and a project chooses it. */
+function versionOrUndefined(text: string): string | undefined {
+  return VERSION.test(text) ? text : undefined;
+}
+
+/**
+ * The flags reproducing Spotless's step, whose defaults differ from the command's: it leaves long
+ * strings alone, and sorts imports in Google order unless told to reorder them for the style. The
+ * command sorts in its style's order, so AOSP without `reorderImports` leaves imports as they are,
+ * as does an `importOrder` step, which has the last word on them in the build.
+ */
+function googleFlags(options: {
+  style: string | undefined;
+  reflow: boolean;
+  reorderImports: boolean;
+  javadoc: boolean;
+  customImportOrder: boolean;
+}): string[] {
+  const aosp = options.style === "aosp";
+  return [
+    ...(aosp ? ["--aosp"] : []),
+    ...((aosp && !options.reorderImports) || options.customImportOrder ? [SKIP_SORTING] : []),
+    ...(options.reflow ? [] : [REFLOW]),
+    ...(options.javadoc ? [] : [SKIP_JAVADOC]),
+  ];
+}
+
+/** The command's default style is Google's, while Spotless and the plugin default to Palantir's. */
+function palantirFlags(style: string | undefined, customImportOrder: boolean): string[] {
+  const styleFlags = style === "aosp" ? ["--aosp"] : style === "google" ? [] : ["--palantir"];
+  return [...styleFlags, ...(customImportOrder ? [SKIP_SORTING] : []), REFLOW];
+}
