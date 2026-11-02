@@ -193,7 +193,7 @@ export function buildScripts(dir: string): string[] {
 }
 
 /** The text of a file with its comments removed, so a commented-out plugin does not count. */
-function readCode(path: string, syntax: "kotlin" | "groovy" | "toml"): string {
+export function readCode(path: string, syntax: "kotlin" | "groovy" | "toml"): string {
   const text = readText(path);
   return syntax === "toml" ? text.replace(/#.*$/gm, "") : withoutComments(text, syntax);
 }
