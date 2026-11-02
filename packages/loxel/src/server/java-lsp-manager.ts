@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdirSync,
+  realpathSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -12,12 +13,35 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { JavaRuntime } from "@/api/java-env-model";
+import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
 import { config, hash12 } from "./config";
 import { getJavaEnv, javaExecutable, listJavaRuntimes, subscribeJavaEnv } from "./java-env";
+import {
+  applyImportSignal,
+  findBuildProjects,
+  gradleClientFlags,
+  importJavaToolOptions,
+  importSignal,
+  type ImportPlan,
+  type ImportState,
+  isProjectFile,
+  MAX_SCANNED_DIRS,
+  mayCarryImportSignal,
+  NOT_PROJECT_DIRS,
+  onJavaProjectsReload,
+  planImport,
+  projectIssue,
+  setJavaProjectIssue,
+  stopGradleDaemons,
+  trustedImportSettings,
+} from "./java-project-import";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
+import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
+import { buildSpawnEnv } from "./shell-env";
+import { isInside } from "./shipped-by-repo";
 import {
   type SpawnOptions,
   WorktreeLspManager,
@@ -37,15 +61,16 @@ const JAVA_SETTINGS = {
   implementationCodeLens: "none",
 };
 
-/** Directories never worth starting from when looking for a Java file. */
-const NOT_SOURCE_DIRS = new Set(["node_modules", "build", "target", "out", "bin"]);
 /** What jdtls itself runs on. A project on an older Java also needs a JDK of its own level. */
 const JDTLS_MIN_JAVA = 25;
 const NO_JDK_REASON = `Java needs JDK ${JDTLS_MIN_JAVA} or newer for its language server. Install one alongside your project's JDK.`;
-/** Where looking for a Java file stops, in a repository with none near the top. */
-const MAX_SCANNED_DIRS = 20_000;
+const JDK_IN_REPO_REASON =
+  "Java's language server won't run a JDK inside the repository until you trust it.";
 /** Longest a new server waits for the previous one to let go of its workspace directory. */
 const PREVIOUS_SERVER_EXIT_TIMEOUT_MS = 10_000;
+
+/** The id of the import request the manager sends itself, whose answer the client never sees. */
+const PROJECT_IMPORT_REQUEST_ID = "loxel-project-import";
 
 /** The client command behind the actions that need a prompt Loxel does not have. */
 const PROMPT_COMMAND = "java.action.applyRefactoringCommand";
@@ -103,8 +128,16 @@ export interface JdtlsPaths {
   hosts: string;
 }
 
+/** Where the Gradle daemons of a worktree's server register, inside its workspace directory. */
+function gradleDaemonDir(data: string): string {
+  return path.join(data, "gradle-daemons");
+}
+
 /** The JVM command line, what `bin/jdtls.py` would run plus Loxel's own flags. */
-export function jdtlsArgs({ home, configuration, data, hosts }: JdtlsPaths): readonly string[] {
+export function jdtlsArgs(
+  { home, configuration, data, hosts }: JdtlsPaths,
+  repoTrusted = false,
+): readonly string[] {
   const plugins = path.join(home, "plugins");
   const launcher = readdirSync(plugins).find((name) =>
     name.startsWith("org.eclipse.equinox.launcher_"),
@@ -121,11 +154,13 @@ export function jdtlsArgs({ home, configuration, data, hosts }: JdtlsPaths): rea
     "-Djava.import.generatesMetadataFilesAtProjectRoot=false",
     // The server makes no network requests: no host name resolves but localhost.
     `-Djdk.net.hosts.file=${hosts}`,
+    ...(repoTrusted ? gradleClientFlags(gradleDaemonDir(data)) : []),
     "-Djdk.xml.maxGeneralEntitySizeLimit=0",
     "-Djdk.xml.totalEntitySizeLimit=0",
     // A crash report would otherwise land in the working directory.
     `-XX:ErrorFile=${path.join(data, "hs_err_%p.log")}`,
-    "-Xmx1G",
+    // A loaded project's model and its dependencies' indexes take more than a folder of files.
+    repoTrusted ? "-Xmx2G" : "-Xmx1G",
     // Gives memory back when idle, since each worktree has its own server.
     "-XX:+UseParallelGC",
     "-XX:GCTimeRatio=4",
@@ -151,15 +186,28 @@ function sharedConfigDir(): string {
   return `config_linux${arm}`;
 }
 
-/** The workspace directory of a worktree's server, keyed by path: same-named projects collide. */
-export function jdtlsDataDir(wtPath: string): string {
-  return path.join(JDTLS_STATE_DIR, "data", hash12(wtPath));
+/**
+ * The workspace directory of a worktree's server, keyed by path: same-named projects collide. A
+ * trusted server's is its own, since a workspace keeps the projects it imported from then on.
+ */
+export function jdtlsDataDir(wtPath: string, repoTrusted = false): string {
+  return path.join(JDTLS_STATE_DIR, repoTrusted ? "data-trusted" : "data", hash12(wtPath));
 }
 
-/** Forget a removed worktree's workspace directory. */
+/** Forget a trusted server's workspace directory, after the daemons listed in it. */
+async function deleteTrustedJdtlsData(wtPath: string): Promise<void> {
+  const data = jdtlsDataDir(wtPath, true);
+  await stopGradleDaemons(gradleDaemonDir(data));
+  rmSync(data, { recursive: true, force: true });
+}
+
+/** Forget a removed worktree's workspace directories. */
 export function deleteJdtlsData(wtPath: string): void {
   try {
     rmSync(jdtlsDataDir(wtPath), { recursive: true, force: true });
+    void deleteTrustedJdtlsData(wtPath).catch((err: unknown) => {
+      logger.child("java-lsp").debug("Deleting the workspace directory failed", { error: err });
+    });
   } catch (err) {
     // Its server may still be writing; `onSessionClosed` deletes it once the server exits.
     logger.child("java-lsp").debug("Deleting the workspace directory failed", { error: err });
@@ -179,7 +227,7 @@ export async function firstJavaFile(wtPath: string): Promise<string | null> {
     for (const entry of entries) {
       if (entry.isFile() && entry.name.endsWith(".java"))
         return fileUri(path.join(dir, entry.name));
-      if (entry.isDirectory() && !entry.name.startsWith(".") && !NOT_SOURCE_DIRS.has(entry.name)) {
+      if (entry.isDirectory() && !entry.name.startsWith(".") && !NOT_PROJECT_DIRS.has(entry.name)) {
         queue.push(path.join(dir, entry.name));
       }
     }
@@ -225,9 +273,32 @@ export function dropUnusableActions(message: Record<string, unknown>): boolean {
   return true;
 }
 
-/** Whether one of `runtimes` can run the server. */
-export function canRunJdtls(runtimes: readonly JavaRuntime[]): boolean {
-  return runtimes.some((runtime) => runtime.majorVersion >= JDTLS_MIN_JAVA);
+/** Whether a JDK's home is in the worktree, by real paths. A path that cannot be read counts. */
+export function isJdkInWorktree(home: string, wtPath: string): boolean {
+  try {
+    return isInside(realpathSync(home), realpathSync(wtPath));
+  } catch {
+    return true;
+  }
+}
+
+/** Whether one of `runtimes` can run the server for a worktree. */
+export function canRunJdtls(
+  runtimes: readonly JavaRuntime[],
+  { wtPath, repoTrusted }: Pick<WtLspContext, "wtPath" | "repoTrusted">,
+): boolean {
+  return runtimes.some(
+    (runtime) =>
+      runtime.majorVersion >= JDTLS_MIN_JAVA &&
+      (repoTrusted || !isJdkInWorktree(runtime.path, wtPath)),
+  );
+}
+
+/** What to tell the user when no JDK can run the server for a worktree. */
+export function noJdkReason(runtimes: readonly Pick<JavaRuntime, "majorVersion">[]): string {
+  return runtimes.some((runtime) => runtime.majorVersion >= JDTLS_MIN_JAVA)
+    ? JDK_IN_REPO_REASON
+    : NO_JDK_REASON;
 }
 
 /** A JDK that can run the server appeared or went; the first look (`before` null) is neither. */
@@ -276,14 +347,37 @@ export function javaSettings(runtimes: readonly JavaRuntimeSetting[]): Record<st
   return { ...JAVA_SETTINGS, configuration: { runtimes } };
 }
 
+/** {@link javaSettings} for a trusted repository, where Maven and Gradle projects load. */
+export function trustedJavaSettings(
+  wtPath: string,
+  plan: ImportPlan,
+  runtimes: readonly JavaRuntimeSetting[],
+): Record<string, unknown> {
+  const trusted = trustedImportSettings(wtPath, plan, runtimes);
+  const { configuration } = trusted;
+  return {
+    ...JAVA_SETTINGS,
+    ...trusted,
+    configuration: { ...(isRecord(configuration) ? configuration : {}), runtimes },
+  };
+}
+
 /**
  * Manages Eclipse JDT LS child processes, one per worktree. The server is bundled and runs on the
- * newest JDK of the user's that is new enough, which is never a project's to choose.
- * Maven and Gradle project import is off and the server makes no network requests; see
- * `docs/languages/java.md`.
+ * newest JDK of the user's that is new enough, which is never a project's to choose. Maven and
+ * Gradle projects load only in a trusted repository, from what is already on the machine, and
+ * neither the server nor Gradle downloads anything; see `docs/languages/java.md`.
  */
 export class JavaLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
+  protected override readonly repoTrustRestriction = "Maven and Gradle projects aren't loaded.";
+  protected override readonly reportsRestrictionAtStart = false;
+  // Generated sources are read by jdtls but usually ignored by git.
+  protected override readonly watchedIgnoredGlobs = [
+    "**/target/generated-sources/**",
+    "**/target/generated-test-sources/**",
+    "**/build/generated/**",
+  ];
 
   /** By worktree: the file `initialize` names, found while the session's frames are held. */
   private readonly triggerFiles = new Map<string, string | null>();
@@ -295,9 +389,27 @@ export class JavaLspManager extends WorktreeLspManager {
   private readonly startedAt = new Map<string, number>();
   /** By worktree: the exit of its closed server, until that server is gone. */
   private readonly exiting = new Map<string, Promise<unknown>>();
+  /** By worktree, when trusted: what can be imported right now. */
+  private readonly importPlans = new Map<string, ImportPlan>();
+  /** Each trusted session's import, as the server has reported it so far. */
+  private readonly importStates = new Map<WtLspSession, ImportState>();
+  private readonly closedSessions = new WeakSet<WtLspSession>();
+  /** By worktree: what to say if no JDK ends up running its server. */
+  private readonly noJdkReasons = new Map<string, string>();
+  /** Each trusted session's handling of changed project files, one at a time. */
+  private readonly projectFollowers = new WeakMap<WtLspSession, Promise<void>>();
 
   constructor() {
     super("java-lsp");
+    onJavaProjectsReload((wtPath) => this.restart(wtPath, "Reloading projects; reconnect"));
+  }
+
+  private restart(wtPath: string, reason: string): void {
+    for (const [ws, session] of [...this.sessions]) {
+      if (session.wtPath !== wtPath) continue;
+      this.detach(ws);
+      ws.close(LSP_RESTART_CLOSE_CODE, reason);
+    }
   }
 
   protected async resolveBinary(context: WtLspContext): Promise<string | null> {
@@ -315,17 +427,25 @@ export class JavaLspManager extends WorktreeLspManager {
       clearTimeout(timer);
     }
     this.triggerFiles.set(context.wtPath, await firstJavaFile(context.wtPath));
-    const { java, runtimes } = await this.findJdks(context.wtPath);
+    const { java, runtimes } = await this.findJdks(context);
     this.runtimeSettings.set(context.wtPath, runtimes);
+    const projects = await findBuildProjects(context.wtPath);
+    if (context.repoTrusted) {
+      this.importPlans.set(context.wtPath, planImport(context.wtPath, projects, buildSpawnEnv()));
+    } else if (projects.dirs.length > 0) {
+      reportRepoRestriction(context.wtPath, this.repoTrustRestriction);
+    }
     return resolveBundledJdtls() && java;
   }
 
   /** The `java` to run the server on, by absolute path, and the runtimes to give it. */
-  private async findJdks(
-    wtPath: string,
-  ): Promise<{ java: string | null; runtimes: JavaRuntimeSetting[] }> {
+  private async findJdks({
+    wtPath,
+    repoTrusted,
+  }: WtLspContext): Promise<{ java: string | null; runtimes: JavaRuntimeSetting[] }> {
     const [runtimes, chosen] = await Promise.all([listJavaRuntimes(wtPath), getJavaEnv(wtPath)]);
-    const host = runtimes.find((runtime) => runtime.majorVersion >= JDTLS_MIN_JAVA);
+    const host = runtimes.find((runtime) => canRunJdtls([runtime], { wtPath, repoTrusted }));
+    this.noJdkReasons.set(wtPath, noJdkReason(runtimes));
     return {
       java: host ? javaExecutable(host.path) : null,
       runtimes: javaRuntimesSetting(runtimes, chosen),
@@ -336,20 +456,22 @@ export class JavaLspManager extends WorktreeLspManager {
     const home = resolveBundledJdtls();
     if (!home) throw new Error("jdtls is not bundled");
     const configuration = jdtlsConfigurationDir(home);
-    const data = jdtlsDataDir(context.wtPath);
+    const data = jdtlsDataDir(context.wtPath, context.repoTrusted);
     const hosts = path.join(JDTLS_STATE_DIR, "hosts");
     mkdirSync(configuration, { recursive: true });
     mkdirSync(data, { recursive: true });
     writeFileSync(hosts, "127.0.0.1 localhost\n");
     this.startedAt.set(context.wtPath, Date.now());
-    return jdtlsArgs({ home, configuration, data, hosts });
+    return jdtlsArgs({ home, configuration, data, hosts }, context.repoTrusted);
   }
 
   protected override serverFailureReason(context: WtLspContext): string | null {
     const home = resolveBundledJdtls();
     if (!home) return "The Java language server is missing from this build of Loxel";
     // No server was started, so there is no log of its own to read.
-    if (!this.startedAt.has(context.wtPath)) return NO_JDK_REASON;
+    if (!this.startedAt.has(context.wtPath)) {
+      return this.noJdkReasons.get(context.wtPath) ?? NO_JDK_REASON;
+    }
     const message = latestLogMessage(
       jdtlsConfigurationDir(home),
       this.startedAt.get(context.wtPath) ?? 0,
@@ -360,23 +482,39 @@ export class JavaLspManager extends WorktreeLspManager {
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
     return {
       // Not the worktree: nothing in it is read through the working directory.
-      cwd: jdtlsDataDir(context.wtPath),
+      cwd: jdtlsDataDir(context.wtPath, context.repoTrusted),
       // Options from the user's shell don't reach the server's JVM.
-      env: { JAVA_TOOL_OPTIONS: "", JDK_JAVA_OPTIONS: "", _JAVA_OPTIONS: "" },
+      env: {
+        JAVA_TOOL_OPTIONS: context.repoTrusted
+          ? importJavaToolOptions(path.join(JDTLS_STATE_DIR, "hosts"))
+          : "",
+        JDK_JAVA_OPTIONS: "",
+        _JAVA_OPTIONS: "",
+      },
     };
   }
 
   protected override getInitializationOptions(session: WtLspSession): Record<string, unknown> {
     const trigger = this.triggerFiles.get(session.wtPath);
-    const java = javaSettings(this.runtimeSettings.get(session.wtPath) ?? []);
-    return { settings: { java }, ...(trigger ? { triggerFiles: [trigger] } : {}) };
+    return {
+      settings: { java: this.settingsOf(session) },
+      ...(trigger ? { triggerFiles: [trigger] } : {}),
+    };
   }
 
   protected override onSessionClosed(session: WtLspSession): void {
-    const { proc, wtPath } = session;
+    // Fired again as the process exits, when a new server may already be running here.
+    if (this.closedSessions.has(session)) return;
+    this.closedSessions.add(session);
+    const { proc, repoTrusted, wtPath } = session;
     this.jdkSubscriptions.get(session)?.();
     this.jdkSubscriptions.delete(session);
-    const exited = proc.exited.then(() => {
+    this.importStates.delete(session);
+    if (repoTrusted) setJavaProjectIssue(wtPath, null);
+    const exited = proc.exited.then(async () => {
+      // Gradle's daemons outlive the server that started them.
+      if (repoTrusted) await stopGradleDaemons(gradleDaemonDir(jdtlsDataDir(wtPath, true)));
+      if (repoTrusted && !isRepoTrusted(wtPath)) await deleteTrustedJdtlsData(wtPath);
       if (this.exiting.get(wtPath) === exited) this.exiting.delete(wtPath);
       // The worktree went away while its server ran, which could write until it stopped.
       if (!existsSync(wtPath)) deleteJdtlsData(wtPath);
@@ -386,6 +524,7 @@ export class JavaLspManager extends WorktreeLspManager {
 
   protected override onClientInitialized(session: WtLspSession): void {
     this.pushSettings(session);
+    this.reportProjects(session);
     // The first update also reports the JDKs read a moment ago; only a difference is pushed.
     this.jdkSubscriptions.set(
       session,
@@ -394,17 +533,40 @@ export class JavaLspManager extends WorktreeLspManager {
     void getJavaEnv(session.wtPath);
   }
 
+  // Stopping Gradle's daemons, which would otherwise wait out their idle timeout, comes after this.
+  override async destroy(): Promise<void> {
+    await super.destroy();
+    await Promise.all(this.exiting.values());
+  }
+
   /** Give a running server the JDKs installed, removed or chosen since it started. */
   private async followJdks(session: WtLspSession): Promise<void> {
-    const { runtimes } = await this.findJdks(session.wtPath);
+    const { runtimes } = await this.findJdks(session);
     const previous = this.runtimeSettings.get(session.wtPath);
     if (JSON.stringify(runtimes) === JSON.stringify(previous)) return;
     this.runtimeSettings.set(session.wtPath, runtimes);
-    if (this.isSessionLive(session)) this.pushSettings(session);
+    if (!this.isSessionLive(session)) return;
+    const chosen = (settings?: JavaRuntimeSetting[]) => settings?.find((r) => r.default)?.path;
+    const gradle =
+      session.repoTrusted && this.importPlans.get(session.wtPath)?.projects.gradleRoots;
+    // Gradle's daemon runs on the chosen JDK, and jdtls checks that only as it starts.
+    if (gradle && gradle.length > 0 && chosen(runtimes) !== chosen(previous)) {
+      this.restart(session.wtPath, "The JDK changed; reconnect");
+      return;
+    }
+    this.pushSettings(session);
+  }
+
+  private settingsOf({ repoTrusted, wtPath }: WtLspSession): Record<string, unknown> {
+    const runtimes = this.runtimeSettings.get(wtPath) ?? [];
+    const plan = this.importPlans.get(wtPath);
+    return repoTrusted && plan
+      ? trustedJavaSettings(wtPath, plan, runtimes)
+      : javaSettings(runtimes);
   }
 
   private pushSettings(session: WtLspSession): void {
-    const java = javaSettings(this.runtimeSettings.get(session.wtPath) ?? []);
+    const java = this.settingsOf(session);
     this.writeToStdin(
       session,
       JSON.stringify({
@@ -430,7 +592,106 @@ export class JavaLspManager extends WorktreeLspManager {
     return section === TAB_SIZE_SECTION ? indentation.tabSize : indentation.insertSpaces;
   }
 
+  /** Tell the user what a trusted repository's projects need, as far as anyone knows yet. */
+  private reportProjects(session: WtLspSession): void {
+    const plan = this.importPlans.get(session.wtPath);
+    if (!session.repoTrusted || !plan) return;
+    setJavaProjectIssue(session.wtPath, projectIssue(plan, this.importStateOf(session)));
+  }
+
+  private importStateOf(session: WtLspSession): ImportState {
+    const state = this.importStates.get(session) ?? {
+      statusOk: null,
+      incompatible: null,
+      buildFileErrors: new Map(),
+    };
+    this.importStates.set(session, state);
+    return state;
+  }
+
+  // Generated sources only mean something to a server that loads projects.
+  override notifyIgnoredPathChanged(wtPath: string, relPath: string): void {
+    const sessions = [...this.sessions.values()];
+    if (sessions.some((s) => s.wtPath === wtPath && s.repoTrusted)) {
+      super.notifyIgnoredPathChanged(wtPath, relPath);
+    }
+  }
+
+  override notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
+    super.notifyWatchedFilesChanged(wtPath, paths);
+    const projectFiles = paths.filter(isProjectFile);
+    if (projectFiles.length === 0) return;
+    for (const session of this.sessions.values()) {
+      if (session.wtPath !== wtPath) continue;
+      if (!session.repoTrusted) {
+        if (projectFiles.some((file) => existsSync(file))) {
+          reportRepoRestriction(wtPath, this.repoTrustRestriction);
+        }
+        continue;
+      }
+      const previous = this.projectFollowers.get(session) ?? Promise.resolve();
+      const next = previous.then(() => this.followProjects(session));
+      this.projectFollowers.set(
+        session,
+        next.catch((err: unknown) => {
+          // The worktree may be going away: its removal changes its build files too.
+          this.log.debug("Could not follow the worktree's projects", { error: err });
+        }),
+      );
+    }
+  }
+
+  /**
+   * A wrapper changed or a build file came or went, with `git checkout` or an agent. jdtls follows
+   * the projects it knows, and needs asking to import a new one.
+   */
+  private async followProjects(session: WtLspSession): Promise<void> {
+    const { wtPath } = session;
+    const previous = this.importPlans.get(wtPath);
+    // The first settings go out with `initialized`, and jdtls takes nothing before them.
+    if (!previous || !this.jdkSubscriptions.has(session)) return;
+    const projects = await findBuildProjects(wtPath);
+    const plan = planImport(wtPath, projects, buildSpawnEnv());
+    this.importPlans.set(wtPath, plan);
+    if (!this.isSessionLive(session)) return;
+    this.reportProjects(session);
+    const blocked = (p: ImportPlan) => JSON.stringify(p.blocked.map(({ root }) => root));
+    if (blocked(plan) !== blocked(previous)) this.pushSettings(session);
+    const stillBlocked = new Set(plan.blocked.map(({ root }) => root));
+    const released = previous.blocked.some(({ root }) => !stillBlocked.has(root));
+    if (!released && !projects.dirs.some((dir) => !previous.projects.dirs.includes(dir))) return;
+    this.writeToStdin(
+      session,
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: PROJECT_IMPORT_REQUEST_ID,
+        method: "workspace/executeCommand",
+        params: { command: "java.project.import", arguments: [] },
+      }),
+    );
+  }
+
+  /** Keep what the user is told in step with what a frame says about a trusted repo's import. */
+  private trackImport(session: WtLspSession, body: string): void {
+    const plan = this.importPlans.get(session.wtPath);
+    if (!session.repoTrusted || !plan || !mayCarryImportSignal(body)) return;
+    // A closed server's last frames can't speak for the one that follows it.
+    if (!this.isSessionLive(session)) return;
+    let message: unknown;
+    try {
+      message = JSON.parse(body);
+    } catch {
+      return;
+    }
+    const signal = isRecord(message) ? importSignal(message) : null;
+    if (!signal) return;
+    applyImportSignal(this.importStateOf(session), signal);
+    this.reportProjects(session);
+  }
+
   protected override handleServerFrame(session: WtLspSession, body: string): void {
+    if (body.includes(`"id":"${PROJECT_IMPORT_REQUEST_ID}"`)) return;
+    this.trackImport(session, body);
     if (
       !body.includes('"willRename"') &&
       !body.includes(PROMPT_COMMAND) &&
