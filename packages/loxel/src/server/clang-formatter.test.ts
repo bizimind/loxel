@@ -179,12 +179,10 @@ describe("clangFormatter spawning", () => {
     expect(await save("a.c")).toEqual({ content: null });
   });
 
-  test("a manual override of another command keeps the defaults", async () => {
+  test("a manual override of another command keeps the default directory", async () => {
     await addFiles({ ".clang-format": "" });
-    const bin = join(wt, "node_modules", ".bin");
-    await mkdir(bin, { recursive: true });
-    await writeFile(join(bin, "my-fmt"), '#!/bin/sh\necho "other cwd=$PWD"\n');
-    await chmod(join(bin, "my-fmt"), 0o755);
+    await writeFile(join(tools, "my-fmt"), '#!/bin/sh\necho "other cwd=$PWD"\n');
+    await chmod(join(tools, "my-fmt"), 0o755);
     const result = await new FormatService().format("x", join(wt, "a.c"), wt, {
       ...DEFAULT_FORMATTING_SETTINGS,
       overrides: [{ id: "override", extensions: "c", command: "my-fmt", args: "" }],
