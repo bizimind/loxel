@@ -42,9 +42,10 @@ export interface PendingReveal {
   expand: boolean;
 }
 
-/** A panel waiting for its worktree's editor area to mount: a file for an editor, or a terminal. */
+/** A panel waiting for its worktree's editor area to mount: a file, a page or a terminal. */
 export type PendingOpen =
   | ({ kind: "file"; path: string } & PanelOpenOptions)
+  | ({ kind: "url"; url: string } & PanelOpenOptions)
   | { kind: "terminal"; terminal: OpenTerminalPanel };
 
 interface WorktreeUIState {

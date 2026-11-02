@@ -6,11 +6,13 @@
  * insert at the same spot; merging main locally then needs no edits.
  */
 import { goToolchainEnv } from "./go-toolchain-env";
+import { nodeToolchainEnv } from "./node-toolchain-env";
 import { pythonToolchainEnv } from "./python-toolchain-env";
 import type { ToolchainEnvContributor } from "./toolchain-env-contributor";
 
 export const toolchainEnvs: readonly ToolchainEnvContributor[] = [
   // This comment keeps the list on one line per entry whatever its length.
   goToolchainEnv,
+  nodeToolchainEnv,
   pythonToolchainEnv,
 ];

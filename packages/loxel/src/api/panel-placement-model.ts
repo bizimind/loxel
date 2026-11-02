@@ -32,6 +32,11 @@ export interface PanelPlacement {
   split?: SplitDirection;
   replace?: boolean;
   group?: PlacementTab;
+  /**
+   * Set on every placement of one command with several targets (`loxel --split right a b`). The
+   * first panel is placed as asked, and the others with the same `batch` join its group as tabs.
+   */
+  batch?: string;
 }
 
 /**
@@ -51,7 +56,7 @@ export function parsePanelPlacement(value: unknown): PanelPlacement | undefined 
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("placement must be an object");
   }
-  const { split, replace, group } = value as Record<string, unknown>;
+  const { split, replace, group, batch } = value as Record<string, unknown>;
   if (split !== undefined && !isSplitDirection(split)) {
     throw new Error(`placement.split must be one of ${SPLIT_DIRECTIONS.join(", ")}`);
   }
@@ -59,10 +64,14 @@ export function parsePanelPlacement(value: unknown): PanelPlacement | undefined 
     throw new Error("placement.replace must be a boolean");
   }
   if (split && replace) throw new Error("placement.split and placement.replace are exclusive");
+  if (batch !== undefined && typeof batch !== "string") {
+    throw new Error("placement.batch must be a string");
+  }
   return {
     ...(split ? { split } : {}),
     ...(replace ? { replace } : {}),
     ...(group === undefined ? {} : { group: parsePlacementTab(group) }),
+    ...(batch ? { batch } : {}),
   };
 }
 

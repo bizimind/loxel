@@ -48,6 +48,8 @@ Press `Cmd+S` to save immediately. Explicit save is the trigger for format on sa
 
 > **Note:** Format on save is per-language. If no formatter is detected for the current file type, `Cmd+S` saves without formatting. If a detected formatter isn't installed, can't start, or takes longer than 5 seconds, the file is saved unformatted and Loxel tells you once per session.
 
+If a file can't be loaded, the editor stays read-only and a banner says so, so nothing you type can overwrite the file. Click **Retry** in the banner to load it again.
+
 ---
 
 ## Formatter auto-detection

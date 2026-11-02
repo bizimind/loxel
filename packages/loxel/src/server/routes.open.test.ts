@@ -40,7 +40,7 @@ describe("POST /api/open terminals and placement", () => {
         sent.push({ windowId, msg });
         return true;
       },
-      sendToWorktreeWindows: () => {},
+      sendToWorktreeWindows: () => false,
       externalFolderConflict: () => null,
       getProject: () => undefined,
       findProjectForPath: () => undefined,
@@ -278,18 +278,25 @@ describe("POST /api/open terminals and placement", () => {
     expect(sent).toEqual([]);
   });
 
-  test("sends a URL to the worktree's windows, with the placement only for the one in use", async () => {
+  /** Make `root` a registered project, its own only worktree. */
+  function registerRootAsProject(): void {
+    git(root, "init", "-q");
+    ctx.findProjectForPath = () => ({ cwd: root, isBare: false }) as never;
+  }
+
+  test("sends a URL to the worktree's windows, with placement and focus only for the one in use", async () => {
     const calls: Array<{ windowId: string | null; msg: WsMessage; primary: WsMessage }> = [];
-    ctx.sendToWorktreeWindows = (_wtPath, windowId, msg, primary) =>
+    ctx.sendToWorktreeWindows = (_wtPath, windowId, msg, primary) => {
       calls.push({ windowId, msg, primary });
-    ctx.findProjectForPath = () => ({}) as never;
+      return true;
+    };
+    registerRootAsProject();
 
     const res = await open({
       url: "https://example.com",
       wtPath: root,
       windowId: "w1",
       placement: { replace: true },
-      focus: false,
     });
 
     expect(res.status).toBe(200);
@@ -300,10 +307,92 @@ describe("POST /api/open terminals and placement", () => {
         primary: {
           type: "open_url",
           wtPath: root,
-          data: { url: "https://example.com", placement: { replace: true }, focus: false },
+          data: { url: "https://example.com", placement: { replace: true } },
         },
       },
     ]);
+    expect(sent).toEqual([]);
+  });
+
+  test("a URL for a worktree no window shows goes to the window in use", async () => {
+    registerRootAsProject();
+
+    const res = await open({ url: "https://example.com", wtPath: root, windowId: "w1" });
+
+    expect(res.status).toBe(200);
+    expect(sent).toEqual([
+      {
+        windowId: "w1",
+        msg: { type: "open_url", wtPath: root, data: { url: "https://example.com" } },
+      },
+    ]);
+  });
+
+  test("a URL waits like a file while no window is connected", async () => {
+    registerRootAsProject();
+    window = null;
+
+    expect((await open({ url: "https://example.com", wtPath: root })).status).toBe(503);
+  });
+
+  test("rejects a URL for a path in no project's worktree", async () => {
+    expect((await open({ url: "https://example.com", wtPath: root })).status).toBe(404);
+    expect((await open({ url: "https://example.com" })).status).toBe(404);
+  });
+
+  test("--worktree pins a file and a terminal, and any path in the worktree names it", async () => {
+    registerRootAsProject();
+    await mkdir(join(root, "sub"));
+
+    await open({ filePath: join(root, "file.txt"), pinWtPath: join(root, "sub") });
+    expect(sent[0]!.msg).toEqual({
+      type: "open_file",
+      data: { filePath: join(root, "file.txt"), worktreePath: root },
+    });
+
+    sent = [];
+    await open({ terminal: { cwd: tmpdir() }, pinWtPath: root });
+    expect(sentTerminal().worktreePath).toBe(root);
+  });
+
+  test("rejects --worktree naming no project's worktree", async () => {
+    const res = await open({ filePath: join(root, "file.txt"), pinWtPath: root });
+
+    expect(res.status).toBe(404);
+    expect(sent).toEqual([]);
+  });
+
+  test("commandWtPath opens a file in the worktree when it is one, and is dropped when not", async () => {
+    await open({ filePath: join(root, "file.txt"), commandWtPath: root });
+    registerRootAsProject();
+    await open({ filePath: join(root, "file.txt"), commandWtPath: root });
+
+    expect(sent.map((s) => s.msg)).toEqual([
+      { type: "open_file", data: { filePath: join(root, "file.txt") } },
+      { type: "open_file", data: { filePath: join(root, "file.txt"), worktreePath: root } },
+    ]);
+  });
+
+  test("a placement batch travels with the placement", async () => {
+    await open({ filePath: join(root, "file.txt"), placement: { split: "up", batch: "b" } });
+
+    expect(sent[0]!.msg).toEqual({
+      type: "open_file",
+      data: { filePath: join(root, "file.txt"), placement: { split: "up", batch: "b" } },
+    });
+    const bad = await open({ filePath: root, placement: { batch: 1 } });
+    expect(bad.status).toBe(400);
+  });
+
+  test("warns that a folder ignores --worktree", async () => {
+    registerRootAsProject();
+
+    const res = await open({ filePath: root, pinWtPath: root });
+
+    expect(await res.json()).toEqual({
+      ok: true,
+      warning: "--worktree does not apply to a folder; it opens in the file tree",
+    });
   });
 
   test("forwards a terminal's focus only when it is off", async () => {

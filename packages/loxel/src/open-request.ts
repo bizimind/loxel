@@ -19,12 +19,17 @@ export interface OpenTerminalRequest {
 /**
  * Body of `POST /api/open`: a file or folder or a new terminal for the window in use (`windowId`'s,
  * else the focused one), or a URL for the windows showing a worktree (`windowId`'s gets the
- * placement). A folder, revealed in the file tree, ignores `placement` and needs focus.
+ * placement), else for the window in use. A folder, revealed in the file tree, ignores `placement`
+ * and `pinWtPath`, and needs focus.
+ *
+ * `pinWtPath` is the worktree to open in, overriding the one a file or terminal belongs to.
+ * `commandWtPath` does the same for a file sent with a URL for that worktree, but is dropped if it
+ * names no project's worktree, since the file can still open by itself.
  */
 export type OpenRequest = (
-  | { filePath: string }
+  | { filePath: string; pinWtPath?: string; commandWtPath?: string }
   | { url: string; wtPath: string }
-  | { terminal: OpenTerminalRequest }
+  | { terminal: OpenTerminalRequest; pinWtPath?: string }
 ) & { windowId?: string } & PanelOpenOptions;
 
 /** Reply to `POST /api/open`: `warning` notes part of the request that was ignored. */
@@ -78,4 +83,43 @@ export async function requestOpen(
       ? data.error
       : `Server returned ${res.status}`;
   throw new Error(message);
+}
+
+/** What became of {@link requestOpenAll}'s requests. */
+export interface OpenAllResult {
+  /** The distinct warnings of the requests that went through. */
+  warnings: string[];
+  /** The requests that failed, by index, and why. */
+  failures: Array<{ index: number; message: string }>;
+}
+
+/**
+ * Send `requests` in order, each once the last is accepted, so their panels open in that order. One
+ * that fails does not stop the rest. They share one wait for a window, so a window that never comes
+ * costs that wait once, not once per request.
+ */
+export async function requestOpenAll(
+  serverUrl: string,
+  requests: OpenRequest[],
+  { onWaiting, windowWaitMs = WINDOW_WAIT_MS }: RequestOpenOptions = {},
+): Promise<OpenAllResult> {
+  const deadline = Date.now() + windowWaitMs;
+  let announced = false;
+  const warnings = new Set<string>();
+  const failures: OpenAllResult["failures"] = [];
+  for (const [index, request] of requests.entries()) {
+    try {
+      const { warning } = await requestOpen(serverUrl, request, {
+        windowWaitMs: Math.max(0, deadline - Date.now()),
+        onWaiting: () => {
+          if (!announced) onWaiting?.();
+          announced = true;
+        },
+      });
+      if (warning) warnings.add(warning);
+    } catch (err) {
+      failures.push({ index, message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return { warnings: [...warnings], failures };
 }
