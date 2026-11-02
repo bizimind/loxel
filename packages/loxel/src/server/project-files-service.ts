@@ -455,7 +455,7 @@ export class ProjectFilesService {
       }),
       gitText(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], {
         cwd: this.worktreeCwd,
-        env: readOnlyGitEnv(),
+        env: readOnlyGitEnv(this.worktreeCwd),
       }).catch((err: unknown) => {
         if (existsSync(this.worktreeCwd)) {
           log.error("Failed to list ignored files for file tree", { error: err });
@@ -533,7 +533,7 @@ export class ProjectFilesService {
     // NUL-separated both ways: otherwise names with quotes or non-ASCII bytes come back quoted.
     const result = await runGit(["check-ignore", "--stdin", "-z"], {
       cwd: this.worktreeCwd,
-      env: readOnlyGitEnv(),
+      env: readOnlyGitEnv(this.worktreeCwd),
       stdin: paths.join("\0"),
       nothrow: true,
     });

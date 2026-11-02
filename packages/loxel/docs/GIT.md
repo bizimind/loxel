@@ -45,7 +45,7 @@ Not every Git call lives here. Project setup (`init`, `clone`) is in `routes.ts`
 
 All read paths run with `readOnlyGitEnv()`: a copy of `process.env` (a spawn's `env` replaces rather than merges the environment, so `PATH`/`HOME` must be copied) plus `GIT_OPTIONAL_LOCKS=0`. Without it, `git status` refreshes the index and writes `index.lock` on every call, which the Git-directory watcher reports as a status change, which runs another status: a feedback loop. Mutating commands in `operations.ts` and `staging.ts` deliberately do not use it. The working-tree diff's untracked half goes further and writes its intent-to-add entries to a throwaway index and object directory in a temp dir; see [WATCHERS.md](WATCHERS.md#git-directory-events) for why nothing a read path runs may touch `objects/`.
 
-Loxel never passes `-c core.fsmonitor=true`. Because `GIT_OPTIONAL_LOCKS=0` prevents Git from saving the fsmonitor token, forcing it gains nothing and leaves a daemon per Git directory (submodules included). Whether fsmonitor runs is the user's Git configuration; the full rationale is in [WATCHERS.md](WATCHERS.md#external-processes).
+`readOnlyGitEnv(cwd)` also sets `core.fsmonitor=false` unless the repository is trusted, where it is the user's Git configuration; Loxel never passes `core.fsmonitor=true`. See [WATCHERS.md](WATCHERS.md#external-processes).
 
 ### Parsers
 
@@ -147,7 +147,7 @@ There is no staging or commit UI.
 
 ## Invariants
 
-- **Read paths never write under the Git directory.** Use `readOnlyGitEnv()` for every read-only command and never add `-c core.fsmonitor`; see the checklist in [WATCHERS.md](WATCHERS.md#review-checklist).
+- **Read paths never write under the Git directory.** Use `readOnlyGitEnv(cwd)` for every read-only command; see the checklist in [WATCHERS.md](WATCHERS.md#review-checklist).
 - **Do not run Git in a worktree being removed.** The remove route suspends the worktree's watchers first; while suspended, `requestStatusRefresh`, `publishWorktreeStatus` and `liveWorktreeStatus` in [server.ts](../src/server/server.ts) skip it, so no status pass runs there. Tracker sweeps skip it as well. Removal itself is covered in [WATCHERS.md](WATCHERS.md#worktree-lifecycle) and [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md).
 - **`index.lock`.** One server runs every Git command, so windows do not contend with each other ([SHARED_SERVER.md](SHARED_SERVER.md)). Reads take no optional locks. A mutation racing another Git process (a terminal or an agent) can fail on `index.lock`; the route returns the error as a 500.
 - **Error messages.** A failed Git command's error includes Git's stderr, so the client can show why it failed.

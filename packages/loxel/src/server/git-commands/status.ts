@@ -11,7 +11,7 @@ import { gitText } from "./run-git";
 export async function getStatus(cwd: string): Promise<StatusInfo> {
   const result = await gitText(
     [...SUBMODULE_GITLINK_ONLY, "status", "--porcelain=v2", "--branch", "-z"],
-    { cwd, env: readOnlyGitEnv() },
+    { cwd, env: readOnlyGitEnv(cwd) },
   );
   return parseStatusOutput(result);
 }

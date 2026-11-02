@@ -5,7 +5,6 @@ import { dirname, join } from "node:path";
 
 import type { RustToolchain, RustTools } from "@/api/rust-toolchain-model";
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
-import "@/test/temp-state-dir";
 
 // The fakes here are scripts, which the lookup refuses; `rust-tool-shim.test.ts` covers that.
 mock.module("./rust-tool-shim", () => ({ isVersionManagerShim: async () => false }));
