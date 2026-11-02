@@ -844,6 +844,18 @@ describe("a manual override in an untrusted repository", () => {
     expect(result.notice).toBeUndefined();
   });
 
+  test.each(["--config /bin/sh {file}", "--config=/bin/sh {file}"])(
+    "runs a command by name with an absolute path outside the repository: %s",
+    async (args) => {
+      const wt = await worktreeWithScript();
+      const settings = overrideFor("loxel-missing-formatter");
+      settings.overrides[0]!.args = args;
+      const result = await new FormatService([]).format("x", "a.fake", wt, settings);
+      expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+      expect(result.notice).toContain("is not installed");
+    },
+  );
+
   test("runs a relative path once the repository is trusted", async () => {
     const wt = await worktreeWithScript();
     setRepoTrusted(wt, true);

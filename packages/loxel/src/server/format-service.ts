@@ -592,7 +592,8 @@ function overrideNamesRepoPath(override: FormatterOverride, worktreePath: string
   return splitArgs(override.args).some((arg) => {
     if (arg.includes("{file}")) return false;
     const value = arg.startsWith("-") ? arg.split("=").slice(1).join("=") : arg;
-    return value !== "" && (isRelativePath(value) || existsSync(resolve(worktreePath, value)));
+    if (value === "" || isAbsolute(value)) return false;
+    return isRelativePath(value) || existsSync(resolve(worktreePath, value));
   });
 }
 
