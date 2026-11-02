@@ -1,6 +1,6 @@
 import * as api from "@/api/client";
 import type { PanelOpenOptions } from "@/api/panel-placement-model";
-import type { OpenTerminalPanel } from "@/api/ws-protocol";
+import type { OpenFilePanel, OpenTerminalPanel } from "@/api/ws-protocol";
 import { showToast } from "@/components/ui/toast";
 import { queryKeys } from "@/queries/query-keys";
 import { queryClient } from "@/query-client";
@@ -17,12 +17,31 @@ import { dispatchOpenFile } from "./open-file";
 
 const log = frontendLog.child("files");
 
+/** The opens sent from outside the window so far: each runs once the last has finished. */
+let openChain: Promise<void> = Promise.resolve();
+
+/**
+ * Run an open after those before it, so the targets of one command keep their order even when one
+ * has to refresh a worktree list. A failure is reported and does not stop the ones after it.
+ */
+function inOrder(open: () => Promise<void>): Promise<void> {
+  openChain = openChain.then(open).catch((err: unknown) => {
+    log.error("Failed to open", { error: err instanceof Error ? err : undefined });
+    showToast(err instanceof Error ? err.message : "Failed to open");
+  });
+  return openChain;
+}
+
 /**
  * Show a folder in the project files panel. A folder inside a worktree is revealed in that
  * worktree, switching to it if needed; any other folder is opened in the active worktree's Others
  * section.
  */
-export async function openFolder(rawPath: string): Promise<void> {
+export function openFolder(rawPath: string): Promise<void> {
+  return inOrder(() => revealFolder(rawPath));
+}
+
+async function revealFolder(rawPath: string): Promise<void> {
   await whenProjectsLoaded();
   const path = rawPath.replace(/(.)\/+$/, "$1");
   const { projects } = useProjectStore.getState();
@@ -63,44 +82,81 @@ export async function openFolder(rawPath: string): Promise<void> {
     queryKey: queryKeys.externalFiles(projectPath, activeWorktreePath),
   });
   showPanel("projectFiles");
-  getCurrentWorktreeUI().getState().setPendingReveal({ path, expand: true });
+  getWorktreeUI(activeWorktreePath).getState().setPendingReveal({ path, expand: true });
 }
 
 /**
- * Open a file sent from outside the window (`loxel <file>`, Finder). A file inside a worktree opens
- * in that worktree, switching to it if needed; any other file opens in the active worktree's
- * Others section. `placement` is resolved in that worktree's layout once it is mounted.
+ * Open a file sent from outside the window (`loxel <file>`, Finder), in the worktree named by
+ * `worktreePath` if any. Otherwise a file inside a worktree opens in that worktree, switching to it
+ * if needed, and any other file in the active worktree's Others section. `placement` is resolved in
+ * that worktree's layout once it is mounted.
  */
-export async function openFile(path: string, options: PanelOpenOptions = {}): Promise<void> {
-  await whenProjectsLoaded();
-  const { projects } = useProjectStore.getState();
-  const { activeWorktreePath, byProject } = useWorktreeStore.getState();
+export function openFile({
+  filePath: path,
+  worktreePath,
+  ...options
+}: OpenFilePanel): Promise<void> {
+  return inOrder(async () => {
+    await whenProjectsLoaded();
+    if (worktreePath) await refreshIfUnlisted(worktreePath);
+    const { projects } = useProjectStore.getState();
+    const { activeWorktreePath, byProject } = useWorktreeStore.getState();
 
-  const target = deriveOwningWorktree(path, projects, byProject) ?? activeWorktreePath;
-  if (!target) {
-    showToast("Open a project before opening other files");
-    return;
-  }
+    const target =
+      worktreePath ?? deriveOwningWorktree(path, projects, byProject) ?? activeWorktreePath;
+    if (!target) {
+      showToast("Open a project before opening other files");
+      return;
+    }
 
-  await openInWorktree(target, { kind: "file", path, ...options });
+    await openInWorktree(target, { kind: "file", path, ...options });
+  });
 }
 
 /**
  * Open a terminal sent from outside the window (`loxel terminal`). The server has already started
  * its shell and picked its worktree; the panel goes there, switching to it if the open has focus.
- * A worktree created moments ago (`wt add` from a shell) may not be listed yet, so its project's
- * worktrees are refreshed first.
  */
-export async function openTerminal(terminal: OpenTerminalPanel): Promise<void> {
-  await whenProjectsLoaded();
+export function openTerminal(terminal: OpenTerminalPanel): Promise<void> {
+  return inOrder(async () => {
+    await whenProjectsLoaded();
+    await refreshIfUnlisted(terminal.worktreePath);
+    await openInWorktree(terminal.worktreePath, { kind: "terminal", terminal });
+  });
+}
+
+/**
+ * Open a page sent from outside the window (`loxel <url>`) in a browser panel of `worktreePath`,
+ * switching to it if the open has focus.
+ */
+export function openUrl(
+  worktreePath: string,
+  { url, ...options }: { url: string } & PanelOpenOptions,
+): Promise<void> {
+  return inOrder(async () => {
+    await whenProjectsLoaded();
+    await refreshIfUnlisted(worktreePath);
+    await openInWorktree(worktreePath, { kind: "url", url, ...options });
+  });
+}
+
+/**
+ * Make sure a worktree the server named is in the store: one created moments ago (`wt add` from a
+ * shell) may not be listed yet, so its project's worktrees are refreshed. The server vouched for
+ * the worktree, so a failed refresh does not stop the open.
+ */
+async function refreshIfUnlisted(worktreePath: string): Promise<void> {
   const { projects } = useProjectStore.getState();
   const { byProject, refreshProjectWorktrees } = useWorktreeStore.getState();
-  const target = terminal.worktreePath;
-  if (deriveOwningWorktree(target, projects, byProject) !== target) {
-    const project = deriveProject(target, projects);
-    if (project) await refreshProjectWorktrees(project.path);
-  }
-  await openInWorktree(target, { kind: "terminal", terminal });
+  if (deriveOwningWorktree(worktreePath, projects, byProject) === worktreePath) return;
+  const project = deriveProject(worktreePath, projects);
+  if (!project) return;
+  await refreshProjectWorktrees(project.path).catch((err: unknown) => {
+    log.warn("Could not refresh a project's worktrees", {
+      error: err instanceof Error ? err : undefined,
+      project: project.path,
+    });
+  });
 }
 
 /**
@@ -117,7 +173,7 @@ async function openInWorktree(target: string, open: PendingOpen): Promise<void> 
     return;
   }
   ui.queueOpen(open);
-  const focus = (open.kind === "file" ? open.focus : open.terminal.focus) !== false;
+  const focus = (open.kind === "terminal" ? open.terminal.focus : open.focus) !== false;
   if (focus && target !== activeWorktreePath) await switchWorktree(target);
 }
 
@@ -127,8 +183,25 @@ async function openInWorktree(target: string, open: PendingOpen): Promise<void> 
  * panel creators.
  */
 export function dispatchPendingOpen(open: PendingOpen): void {
-  if (open.kind === "file") dispatchOpenFile(open.path, undefined, open);
-  else dispatchLoxelEvent("loxel-create-terminal", open.terminal);
+  switch (open.kind) {
+    case "file":
+      dispatchOpenFile(open.path, undefined, open);
+      break;
+    case "url":
+      dispatchLoxelEvent("loxel-create-browser", {
+        url: open.url,
+        placement: open.placement,
+        focus: open.focus,
+      });
+      break;
+    case "terminal":
+      dispatchLoxelEvent("loxel-create-terminal", open.terminal);
+      break;
+    default: {
+      const _exhaustive: never = open;
+      throw new Error(`Unknown pending open: ${String(_exhaustive)}`);
+    }
+  }
 }
 
 /**

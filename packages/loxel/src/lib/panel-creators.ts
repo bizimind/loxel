@@ -9,6 +9,7 @@ import type {
   AddPanelOptions,
   AddPanelPositionOptions,
   DockviewApi,
+  DockviewGroupPanel,
   IDockviewPanel,
   PanelOptions,
 } from "dockview-react";
@@ -148,6 +149,28 @@ function placedPosition(
   return { referencePanel: ref.id, direction: "within" };
 }
 
+/** The group the latest placement batch opened in, in the layout it opened in. */
+let latestBatch: { id: string; dv: DockviewApi; group: DockviewGroupPanel } | null = null;
+
+/** The group a batched placement joins: its batch's, if that is still open in this layout. */
+function batchGroup(
+  dv: DockviewApi,
+  placement: PanelPlacement | undefined,
+): DockviewGroupPanel | undefined {
+  if (!latestBatch || latestBatch.id !== placement?.batch || latestBatch.dv !== dv)
+    return undefined;
+  return dv.groups.includes(latestBatch.group) ? latestBatch.group : undefined;
+}
+
+/** Remember where the first panel of a batch went, for the rest of it. */
+function rememberBatch(
+  dv: DockviewApi,
+  placement: PanelPlacement | undefined,
+  group: DockviewGroupPanel,
+): void {
+  if (placement?.batch) latestBatch = { id: placement.batch, dv, group };
+}
+
 /**
  * Add a panel where `placement` asks, closing the tab it replaces. With no tab open at all the
  * panel simply opens. Without `focus` it is added without activating it or its group.
@@ -158,13 +181,15 @@ function addPlacedPanel(
   options: PanelOptions & Pick<AddPanelOptions, "renderer">,
   focus = true,
 ): IDockviewPanel {
-  const ref = placementReference(dv, placement);
+  const joined = batchGroup(dv, placement);
+  const ref = joined ? undefined : placementReference(dv, placement);
   return keepingUserFocus(dv, focus, () => {
     const panel = dv.addPanel({
       ...options,
-      position: ref && placedPosition(ref, placement),
+      position: joined ? { referenceGroup: joined } : ref && placedPosition(ref, placement),
       inactive: !focus,
     });
+    if (!joined) rememberBatch(dv, placement, panel.group);
     // A background `renderer: "always"` tab (a browser) detaches the group's shown content.
     if (!focus) reattachActiveContent(panel.group);
     // Added before closing, so a group holding only the replaced tab isn't removed in between.
@@ -185,10 +210,15 @@ function movePlacedPanel(
   placement: PanelPlacement,
   focus: boolean,
 ): void {
-  const ref = placementReference(dv, placement);
+  const joined = batchGroup(dv, placement);
+  const ref = joined ? undefined : placementReference(dv, placement);
   const skipSetActive = !focus;
   keepingUserFocus(dv, focus, () => {
-    if (ref === panel) {
+    if (joined) {
+      if (panel.group !== joined) {
+        panel.api.moveTo({ group: joined, position: "center", skipSetActive });
+      }
+    } else if (ref === panel) {
       if (placement.split && panel.group.panels.length > 1) {
         panel.api.moveTo({
           group: panel.group,
@@ -216,6 +246,7 @@ function movePlacedPanel(
       }
     }
   });
+  if (!joined) rememberBatch(dv, placement, panel.group);
   if (focus) activatePanel(dv, panel);
 }
 

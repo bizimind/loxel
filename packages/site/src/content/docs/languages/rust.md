@@ -1,6 +1,6 @@
 ---
 title: Rust
-description: The Rust toolchain of each worktree, the status bar item and the toolchain picker.
+description: The Rust toolchain of each worktree, the status bar item, the toolchain picker and format on save.
 order: 13.5
 ---
 
@@ -43,6 +43,18 @@ Click the item, or run **Rust: Select Toolchain** from the command palette (`Cmd
 - The rest of the list is every toolchain you have installed with rustup. Without rustup there is nothing else to choose.
 
 The choice is saved for that worktree and survives restarts, and it takes precedence over a toolchain file. It doesn't change what `cargo` runs in your own terminals. If the chosen toolchain is later removed, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
+
+## Format on save
+
+A `.rs` file is formatted with `rustfmt` on save when it has a `Cargo.toml` in its folder or a folder above it, up to the worktree's root, or a `rustfmt.toml` or `.rustfmt.toml` there. The result matches `cargo fmt`:
+
+- **Edition.** The edition comes from the nearest `Cargo.toml`, or from `[workspace.package]` when the crate has `edition.workspace = true`. A package that names none is edition 2015, as in Cargo. As with `cargo fmt`, this also beats an `edition` set in your `rustfmt.toml`. A file with only a `rustfmt.toml` uses the edition set there. While a `Cargo.toml` can't be read, files under it are saved as they are.
+- **Config.** The nearest `rustfmt.toml` or `.rustfmt.toml` applies, so a crate can have its own. A config in a folder whose name has a space in it isn't supported, and a notice tells you when a save skips formatting because of that.
+- **Which rustfmt.** It's the one from the worktree's [toolchain](#rust-toolchain), including one you chose. A file with a syntax error is saved as it is, without a message.
+
+Formatting never installs anything. A notice tells you what to run when the save goes out unformatted because something is missing: `rustup component add rustfmt` for a toolchain without rustfmt, `rustup toolchain install` for a pinned toolchain you don't have, and how to install Rust when there is none.
+
+To run something else, add a manual override in **Settings > Editor**. An override that runs `rustfmt` by name still uses the worktree's toolchain, so give a full path for a different one.
 
 ---
 

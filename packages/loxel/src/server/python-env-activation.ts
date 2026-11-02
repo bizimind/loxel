@@ -9,6 +9,7 @@ import type { PythonEnv } from "@/api/python-env-model";
 
 import { logger } from "./logger";
 import { isShippedByRepo } from "./shipped-by-repo";
+import { putFirstOnPath } from "./toolchain-env-contributor";
 
 const log = logger.child("server");
 
@@ -51,8 +52,7 @@ export function setPythonEnvVars(
   options: { virtualEnv: boolean },
 ): void {
   const { binDir, venvPath } = activation;
-  const rest = (env.PATH ?? "").split(path.delimiter).filter((dir) => dir && dir !== binDir);
-  env.PATH = [binDir, ...rest].join(path.delimiter);
+  putFirstOnPath(env, binDir);
   delete env.PYTHONHOME;
   // An environment inherited from wherever Loxel was launched no longer applies.
   delete env.VIRTUAL_ENV_PROMPT;

@@ -322,15 +322,30 @@ describe("csharpFormatter repository trust", () => {
     expect(notice).toContain("`dotnet tool restore`");
   });
 
-  test("trusted: the SDK check still applies", async () => {
+  test("trusted: the project's global.json selects the SDK, as in the user's terminal", async () => {
     await install(tools, "dotnet");
     await addFiles({
       "svc/dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }),
       "svc/global.json": "{",
     });
     setRepoTrusted(wt, true);
-    expect(await save("svc/a.cs")).toEqual({ content: null });
-    expect(existsSync(ranMarker)).toBe(false);
+    expect((await save("svc/a.cs")).content).toContain("dotnet cwd=");
+  });
+
+  test("trusted: a version manager's shim runs in the project", async () => {
+    await install(join(temp, "shims"), "dotnet");
+    process.env.PATH = `${join(temp, "shims")}:${gitBin}`;
+    await LISTED();
+    setRepoTrusted(wt, true);
+    expect((await save("svc/a.cs")).content).toContain(`dotnet cwd=${join(wt, "svc")} `);
+  });
+
+  test("trusted: no dotnet says so", async () => {
+    await LISTED();
+    setRepoTrusted(wt, true);
+    const { content, notice } = await save("svc/a.cs");
+    expect(content).toBeNull();
+    expect(notice).toContain("Install the .NET SDK");
   });
 
   test("untrusted: a save uses csharpier on PATH and reports what is held back", async () => {
