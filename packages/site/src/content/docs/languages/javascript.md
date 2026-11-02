@@ -1,10 +1,10 @@
 ---
 title: JavaScript
-description: JavaScript projects, jsconfig.json, type checking plain JavaScript, the Node version, and tool configuration files.
+description: JavaScript projects, jsconfig.json, type checking plain JavaScript, ESLint, the Node version, and tool configuration files.
 order: 13.5
 ---
 
-<!-- Later headings go after "Type checking JavaScript", before "Node version": "Linters" (ESLint, oxlint, Biome). "Tool configuration files" stays last. -->
+<!-- Later subsections go in "Linters", after ESLint: oxlint, Biome. "Tool configuration files" stays last. -->
 
 JavaScript files use the same language server as [TypeScript](/docs/languages/typescript), so `.js`, `.mjs`, `.cjs` and `.jsx` files get the same hover, navigation, completions and refactors. Types for your packages come from what is installed: install your dependencies, and the `@types` packages of those that ship no types.
 
@@ -73,6 +73,25 @@ In a JavaScript project:
 ## Scripts without an extension
 
 A file with no extension gets the same features when its first line names a JavaScript or TypeScript runner, as in `bin/www`: `#!/usr/bin/env node`, `#!/usr/bin/env -S node --no-warnings`, `nodejs` and `bun` open as JavaScript, and `tsx` and `ts-node`, including through `npx`, as TypeScript. A file association in [settings](/docs/reference-env-files-cli-settings) works for any other name.
+
+---
+
+## Linters
+
+### ESLint
+
+In a [trusted repository](/docs/repository-trust), JavaScript and TypeScript files in a project that uses ESLint show its problems in the editor as you type, with quick fixes for fixing a problem or disabling a rule for a line or a file. **Fix All** applies everything fixable in the file. Loxel runs the ESLint your project has installed, with your config and plugins, so the results match running it in a terminal.
+
+A file is linted when both of these hold:
+
+- An ESLint config lies in its folder or above it, up to the worktree root: `eslint.config.js` (or `.cjs`, `.mjs`, `.ts`, `.mts`, `.cts`), `.eslintrc` in any form, or an `eslintConfig` key in `package.json`.
+- ESLint is installed in `node_modules` there or above it. In a Yarn Plug'n'Play project, set `nodeLinker: node-modules`.
+
+Each package of a monorepo uses its own config, and a package without one uses the root's.
+
+Loxel never installs ESLint. If a project has a config and no ESLint, a notification says what to run, for example `npm install`. ESLint runs on the [Node version](#node-version) the worktree uses; without any Node, a notification says to install one. Until you trust a repository, ESLint doesn't run in it, and the status bar shows **Restricted** once you open a file in a project that uses it.
+
+Changes to a config file apply right away, and so does installing or upgrading packages. Formatting stays with [format on save](/docs/editor#formatter-auto-detection), even when ESLint has fixable formatting rules.
 
 ---
 

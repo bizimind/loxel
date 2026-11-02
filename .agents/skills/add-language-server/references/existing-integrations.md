@@ -19,6 +19,7 @@ Quick reference for the quirks of the servers that existed before `docs/language
 | TOML (Tombi)            | downloaded    | worktree | lazy       | disabled        | no             | `lsp`           | schema map (post-init)        |
 | Go (gopls)              | built from Go | worktree | lazy       | enabled         | no             | `serve`         | settings (pulled)             |
 | Java (jdtls)            | bundled jar   | worktree | lazy       | enabled         | no             | JVM flags       | import off (init and pushed)  |
+| ESLint                  | bundled JS    | worktree | lazy       | n/a             | no             | `--stdio`       | settings per file (pulled)    |
 
 ## TypeScript — Do Not Use as Template
 
