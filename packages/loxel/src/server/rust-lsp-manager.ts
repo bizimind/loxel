@@ -10,11 +10,14 @@ import {
   findRustManifests,
   isRustManifestPath,
   planRustAnalyzer,
+  readDocumentLifecycle,
+  readServerStatus,
   type RustAnalyzerPlan,
   rustAnalyzerSettings,
-  readServerStatus,
+  rustManifestProblem,
   withRustClientCapabilities,
 } from "./rust-analyzer-run";
+import { findRustProject, isReadableRustManifest, RUST_MANIFEST } from "./rust-project-lookup";
 import { getRustToolchain, getRustToolchainNow, subscribeRustToolchain } from "./rust-toolchain";
 import {
   type SpawnOptions,
@@ -28,7 +31,22 @@ type RunPlan = Extract<RustAnalyzerPlan, { kind: "run" }>;
 
 interface SessionState {
   plan: RunPlan | null;
+  /** What a start loads by itself; a change to these restarts the server. */
   manifests: string[];
+  /** Projects added for files opened since the start, and the files outside any project. */
+  openedManifests: Set<string>;
+  looseFiles: Set<string>;
+  /** The Rust files open now; what they need is looked up again when a manifest changes. */
+  openFiles: Set<string>;
+  /** Manifests kept out for failing their check, until they pass it. */
+  refusedManifests: Set<string>;
+  /** Check what is linked at the next refresh: first at the start, then after a manifest change. */
+  recheckManifests: boolean;
+  /** No refresh has checked yet, so what fails now has never loaded. */
+  neverChecked: boolean;
+  /** One refresh at a time; one waiting to start covers any change made meanwhile. */
+  refreshing: Promise<void>;
+  refreshQueued: boolean;
   unsubscribe: () => void;
   /** One check at a time, so the last resolution decides. */
   checking: Promise<void>;
@@ -41,9 +59,18 @@ const METHOD_NOT_FOUND = -32601;
 const MESSAGE_TYPE_WARNING = 2;
 
 /**
+ * How many projects a session adds for opened files. Each stays loaded until the server restarts,
+ * and a project the size of ripgrep already takes 500 MB or more.
+ */
+export const MAX_OPENED_RUST_PROJECTS = 10;
+
+const SETTINGS_SECTION = "rust-analyzer";
+
+/**
  * Manages rust-analyzer child processes, one per worktree, running the user's own rust-analyzer from
  * the worktree's toolchain in a restricted mode (`docs/languages/rust.md`). A session starts only
- * when that holds, and restarts when the toolchain or the worktree's manifests change.
+ * when that holds, and restarts when the toolchain or the worktree's manifests change. Projects
+ * elsewhere in the worktree are added as their files open, without a restart.
  */
 export class RustLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
@@ -99,6 +126,14 @@ export class RustLspManager extends WorktreeLspManager {
     const state: SessionState = {
       plan: plan?.kind === "run" ? plan : null,
       manifests: findRustManifests(wtPath),
+      openedManifests: new Set(),
+      looseFiles: new Set(),
+      openFiles: new Set(),
+      refusedManifests: new Set(),
+      recheckManifests: true,
+      neverChecked: true,
+      refreshing: Promise.resolve(),
+      refreshQueued: false,
       unsubscribe: subscribeRustToolchain(wtPath, ({ toolchain }) => {
         this.queueCheck(session, state, () => Promise.resolve(toolchain));
       }),
@@ -119,13 +154,36 @@ export class RustLspManager extends WorktreeLspManager {
   protected override getInitializationOptions(session: WtLspSession): Record<string, unknown> {
     const state = this.states.get(session);
     if (!state?.plan) throw new Error("rust-analyzer session without a plan");
-    return rustAnalyzerSettings(state.plan, state.manifests);
+    return this.settingsOf(state.plan, state);
+  }
+
+  /**
+   * The server asks after {@link notifyConfigurationChanged}, and what it gets replaces what it was
+   * started with, so this is the whole of the restricted settings.
+   */
+  protected override workspaceConfiguration(
+    session: WtLspSession,
+    section: string | undefined,
+  ): Promise<unknown> {
+    const state = this.states.get(session);
+    if (section !== SETTINGS_SECTION || !state?.plan) return Promise.resolve(null);
+    return Promise.resolve(this.settingsOf(state.plan, state));
+  }
+
+  private settingsOf(plan: RunPlan, state: SessionState): Record<string, unknown> {
+    const manifests = new Set(
+      [...state.manifests, ...state.openedManifests].filter(
+        (manifest) => !state.refusedManifests.has(manifest),
+      ),
+    );
+    return rustAnalyzerSettings(plan, [...manifests], [...state.looseFiles]);
   }
 
   protected override handleClientData(session: WtLspSession, data: string): void {
     const blocked = blockedClientMethod(data);
     if (!blocked) {
       super.handleClientData(session, withRustClientCapabilities(data));
+      this.trackDocument(session, data);
       return;
     }
     this.log.debug("Not forwarding a client method", { method: blocked.method });
@@ -136,12 +194,12 @@ export class RustLspManager extends WorktreeLspManager {
   }
 
   protected override handleServerFrame(session: WtLspSession, body: string): void {
-    const status = readServerStatus(body);
+    const status = readServerStatus(body, session.wtPath);
     if (!status) {
       super.handleServerFrame(session, body);
       return;
     }
-    if (status.notice) this.report(session, status.notice.kind, status.notice.message);
+    for (const { kind, message } of status.notices) this.report(session, kind, message);
   }
 
   protected override onClientInitialized(session: WtLspSession): void {
@@ -165,15 +223,167 @@ export class RustLspManager extends WorktreeLspManager {
 
   override notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
     super.notifyWatchedFilesChanged(wtPath, paths);
-    if (!paths.some((changed) => isRustManifestPath(wtPath, changed))) return;
+    const manifestChanged = paths.some((changed) => path.basename(changed) === RUST_MANIFEST);
     const root = path.resolve(wtPath);
     for (const session of this.sessions.values()) {
       if (path.resolve(session.wtPath) !== root) continue;
       const state = this.states.get(session);
       if (!state) continue;
-      const manifests = findRustManifests(session.wtPath);
-      if (manifests.join("\0") !== state.manifests.join("\0"))
-        this.restart(session, "manifests changed");
+      if (paths.some((changed) => isRustManifestPath(wtPath, changed))) {
+        const manifests = findRustManifests(session.wtPath);
+        if (manifests.join("\0") !== state.manifests.join("\0")) {
+          this.restart(session, "manifests changed");
+          continue;
+        }
+      }
+      // Left to the refresh, so a check already running cannot overwrite what this one finds.
+      if (manifestChanged) state.recheckManifests = true;
+      if (manifestChanged || paths.some((changed) => state.openFiles.has(changed))) {
+        this.queueRefresh(session, state);
+      }
+    }
+  }
+
+  /** A build writes thousands of ignored files, but a crate in an ignored folder is still one. */
+  override notifyIgnoredPathChanged(wtPath: string, relPath: string): void {
+    super.notifyIgnoredPathChanged(wtPath, relPath);
+    const parts = relPath.split("/");
+    if (parts.at(-1) !== RUST_MANIFEST || parts.includes("target")) return;
+    this.notifyWatchedFilesChanged(wtPath, [path.join(wtPath, relPath)]);
+  }
+
+  /** Follow the client's open documents; a newly open one can need a project loaded. */
+  private trackDocument(session: WtLspSession, data: string): void {
+    const document = readDocumentLifecycle(data);
+    const state = this.states.get(session);
+    if (!document || !state) return;
+    if (!document.opened) {
+      state.openFiles.delete(document.file);
+      return;
+    }
+    state.openFiles.add(document.file);
+    this.queueRefresh(session, state);
+  }
+
+  private queueRefresh(session: WtLspSession, state: SessionState): void {
+    if (state.refreshQueued) return;
+    state.refreshQueued = true;
+    state.refreshing = state.refreshing
+      .then(() => {
+        state.refreshQueued = false;
+        return this.refreshProjects(session, state);
+      })
+      .catch((err: unknown) => {
+        this.log.warn("Could not update rust-analyzer's projects", { error: err });
+      });
+  }
+
+  /**
+   * Bring the session's projects up to date with its open files and the manifests on disk, and tell
+   * the server if that changed them. A project stays when its files close: unloading it would mean
+   * indexing it again on the next open.
+   */
+  private async refreshProjects(session: WtLspSession, state: SessionState): Promise<void> {
+    const { plan } = state;
+    if (!plan || !this.isSessionLive(session)) return;
+    const { wtPath } = session;
+    const before = JSON.stringify(this.settingsOf(plan, state));
+    for (const manifest of state.openedManifests) {
+      if (!isReadableRustManifest(manifest, wtPath)) state.openedManifests.delete(manifest);
+    }
+    for (const file of state.looseFiles) {
+      // Closed ones go too: they cost nothing to bring back.
+      const isLoose = findRustProject(file, wtPath)?.kind === "loose";
+      if (!isLoose || !state.openFiles.has(file)) state.looseFiles.delete(file);
+    }
+    if (state.recheckManifests && !(await this.recheckManifests(session, state, plan))) return;
+    for (const file of state.openFiles) {
+      const project = findRustProject(file, wtPath);
+      if (!project) continue;
+      const known =
+        project.kind === "loose"
+          ? state.looseFiles.has(project.file)
+          : state.manifests.includes(project.manifest) ||
+            state.openedManifests.has(project.manifest) ||
+            state.refusedManifests.has(project.manifest);
+      if (known) continue;
+      if (project.kind === "loose") {
+        state.looseFiles.add(project.file);
+        continue;
+      }
+      if (
+        state.openedManifests.size + (state.looseFiles.size > 0 ? 1 : 0) >=
+        MAX_OPENED_RUST_PROJECTS
+      ) {
+        this.report(
+          session,
+          "project-limit",
+          `Loxel adds at most ${MAX_OPENED_RUST_PROJECTS} Rust projects as their files open, so ${path.relative(wtPath, file)} has no language features. Close files from the others, then Restart Language Servers.`,
+        );
+        continue;
+      }
+      const problem = await rustManifestProblem(plan, project.manifest);
+      if (!this.isSessionLive(session)) return;
+      if (problem === null) {
+        state.openedManifests.add(project.manifest);
+        continue;
+      }
+      state.refusedManifests.add(project.manifest);
+      this.reportManifestProblem(session, project.manifest, problem);
+    }
+    if (JSON.stringify(this.settingsOf(plan, state)) === before) return;
+    this.log.info("Updating rust-analyzer's projects", {
+      wtPath,
+      opened: state.openedManifests.size,
+      looseFiles: state.looseFiles.size,
+    });
+    this.notifyConfigurationChanged(session);
+  }
+
+  /**
+   * Check every manifest that is linked or was refused, and tell about those that fail. One that
+   * never loaded stays out, since it would keep the server from taking in anything else. One that
+   * did stays linked: the server keeps its last good state, and fixing it lets the rest in. False
+   * when the session ended meanwhile.
+   */
+  private async recheckManifests(
+    session: WtLspSession,
+    state: SessionState,
+    plan: RunPlan,
+  ): Promise<boolean> {
+    state.recheckManifests = false;
+    this.forgetProjectReports(session);
+    const refused = new Set(state.refusedManifests);
+    const linked = [...state.manifests, ...state.openedManifests];
+    const refuseFailures = state.neverChecked;
+    state.neverChecked = false;
+    for (const manifest of new Set([...linked, ...refused])) {
+      const problem = await rustManifestProblem(plan, manifest);
+      if (!this.isSessionLive(session)) return false;
+      if (problem === null) {
+        state.refusedManifests.delete(manifest);
+        continue;
+      }
+      if (refuseFailures || refused.has(manifest)) state.refusedManifests.add(manifest);
+      this.reportManifestProblem(session, manifest, problem);
+    }
+    return true;
+  }
+
+  private reportManifestProblem(session: WtLspSession, manifest: string, problem: string): void {
+    const folder = path.relative(session.wtPath, path.dirname(manifest)) || "the worktree root";
+    this.report(
+      session,
+      `project:${manifest}`,
+      `Could not load the Rust project in ${folder}. ${problem}`,
+    );
+  }
+
+  /** Once a manifest changed, what failed may load now, and a new failure is worth telling. */
+  private forgetProjectReports(session: WtLspSession): void {
+    const reported = this.reported.get(session);
+    for (const kind of reported ?? []) {
+      if (kind === "project" || kind.startsWith("project:")) reported?.delete(kind);
     }
   }
 

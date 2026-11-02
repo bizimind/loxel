@@ -10,16 +10,24 @@ Loxel gives Rust files language features through your own rust-analyzer. It work
 
 Install rust-analyzer with `rustup component add rust-analyzer`, or any other way that puts it on your `PATH`, along with `rustup component add rust-src` for the standard library. Loxel never installs anything. If a part is missing, the status bar or a notification says what to run. Versions from before January 2025 aren't started.
 
-Opening a `.rs` file starts the server for that worktree, which gives you hover, go to definition (including into the standard library and dependencies), references, rename across crates and of modules, quick fixes, completion with auto-import, signature help, inlay hints, folding, symbols, and diagnostics as you type. To format Rust files, use [format on save](/docs/editor).
+Opening a `.rs` file starts the server for that worktree, which gives you hover, go to definition (including into the standard library and dependencies), references, rename across crates and of modules (from the definition; from a use in another crate, it adds a local alias instead), quick fixes, completion with auto-import, signature help, inlay hints, folding, symbols, and diagnostics as you type. To format Rust files, use [format on save](/docs/editor).
 
 Language features run without building your project:
 
 - **Build scripts and proc macros don't run**, so macros they generate aren't expanded and items that only exist after a build, such as `include!` of generated code, are unknown.
-- **`cargo check` doesn't run**, so diagnostics are rust-analyzer's own and not the compiler's.
+- **`cargo check` doesn't run**, so diagnostics are rust-analyzer's own and not the compiler's. **No marker doesn't mean no error.** You see syntax errors, wrong argument counts, missing struct fields, non-exhaustive matches and, in recent versions of rust-analyzer, mismatched types. Only `cargo check` in a terminal reports unknown names, types, methods, fields and macros, unimported items (the Import quick fix is still offered), unresolved `use` and `mod`, unmet trait bounds, and borrow checker errors such as use after move.
 - **Nothing is downloaded.** Dependencies that aren't in your local Cargo cache are unknown until you run `cargo fetch` in a terminal and then **Restart Language Servers**.
 - **Flags and cross targets in `.cargo/config.toml` don't apply to analysis**, which uses your compiler's own target. `rust-project.json` isn't read.
 
-Projects are found at the root of the worktree, or one folder down when the root has no `Cargo.toml`. A `.rs` file outside any project doesn't get language features yet.
+## Projects
+
+Monorepos work. Opening a `.rs` file loads the project it belongs to, however deep it is in the worktree: the nearest `Cargo.toml` above it, or that crate's workspace. A crate excluded from a workspace, such as `fuzz/`, loads on its own. The first file of a new project can take a moment while it loads, and nothing restarts. If a `Cargo.toml` can't be read, a notification names the folder, and the project loads once you fix it.
+
+The worktree's own `Cargo.toml`, or those one folder down when the root has none, load as soon as the server starts. Loxel adds up to 10 more projects as you open their files, and tells you when it reaches that. To free them, close the files you no longer need and run **Restart Language Servers**.
+
+A `.rs` file with no `Cargo.toml` above it in the worktree still gets language features, on its own, at edition 2024, with the standard library. It can use modules next to it, but not dependencies, including those in a cargo script's header.
+
+Files under `target` or `node_modules`, vendored crates and files outside the worktree don't load a project of their own. Files you reach with go to definition, such as the standard library, still work while the project that led there is loaded.
 
 ## Rust toolchain
 
