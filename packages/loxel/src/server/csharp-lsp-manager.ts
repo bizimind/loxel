@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -12,6 +12,8 @@ import {
   ASSETS_FILE,
   csharpRestoreState,
   discoverCSharpProjects,
+  dotnetGlobalToolsDir,
+  fileStamp,
   readSmallText,
   dotnetRuntimes,
   dotnetSdks,
@@ -39,6 +41,8 @@ import {
 } from "./stdio-lsp-manager";
 
 const CSHARP_LS = "csharp-ls";
+const DOTNET = "dotnet";
+const NETCORE_APP = "Microsoft.NETCore.App";
 /** First release with the `csharp.analyzersEnabled` setting that diagnostics rely on. */
 export const MIN_CSHARP_LS_VERSION = "0.24.0";
 /** A restore writes one assets file per project; a restart waits for this much quiet. */
@@ -140,6 +144,10 @@ interface HeldConnection {
   notice: GateNotice | null;
   sentNotice: string | null;
   recheck: ReturnType<typeof setInterval> | null;
+  /** What the last recheck saw of the toolchain, see {@link toolchainStamp}. */
+  toolchainStamp: string | null;
+  /** The last decision could not finish. */
+  retrying: boolean;
   /** Each runs at release. */
   stops: (() => void)[];
 }
@@ -210,6 +218,8 @@ export class CSharpLspManager extends WorktreeLspManager {
       notice: null,
       sentNotice: null,
       recheck: null,
+      toolchainStamp: null,
+      retrying: false,
       stops: [],
     };
     this.held.set(ws, held);
@@ -318,6 +328,7 @@ export class CSharpLspManager extends WorktreeLspManager {
     // A check that could not finish says nothing new, and is worth another look.
     const { notice } = gate.retry ? { notice: held.notice } : gate;
     const recheck = gate.retry === true || notice?.toolchain === true;
+    held.retrying = gate.retry === true;
     held.notice = notice;
     this.sendNotice(held);
     if (recheck && !held.recheck) {
@@ -327,13 +338,25 @@ export class CSharpLspManager extends WorktreeLspManager {
         // An install can add a directory the captured login-shell PATH lacks; a capture runs the
         // user's startup files, so it is rarer than the lookups.
         if (++ticks % LOGIN_SHELL_REFRESH_TICKS === 0) this.refreshToolchainEnv();
-        // Not while one runs: a slow machine must not keep a decision from ever finishing.
-        if (!held.deciding) void this.decide(held);
+        void this.recheckToolchain(held);
       }, this.recheckMs);
     } else if (!recheck && held.recheck) {
       clearInterval(held.recheck);
       held.recheck = null;
     }
+  }
+
+  /**
+   * A decision spawns git and `dotnet`, so a tick only takes one when something it depends on looks
+   * different, or the last one could not finish. Not while one runs: a slow machine must not keep a
+   * decision from ever finishing.
+   */
+  private async recheckToolchain(held: HeldConnection): Promise<void> {
+    const stamp = await toolchainStamp(held.context.wtPath);
+    if (this.held.get(held.ws) !== held || held.deciding) return;
+    if (stamp === held.toolchainStamp && !held.retrying) return;
+    held.toolchainStamp = stamp;
+    await this.decide(held);
   }
 
   protected refreshToolchainEnv(): void {
@@ -441,7 +464,7 @@ export class CSharpLspManager extends WorktreeLspManager {
    * quiet: there is nothing to do about a loose file, and csharp-ls exits with nothing to load. The
    * toolchain comes before the restored state, since `dotnet restore` needs it.
    */
-  private async gate({ wtPath, repoTrusted }: WtLspContext): Promise<CSharpGate> {
+  protected async gate({ wtPath, repoTrusted }: WtLspContext): Promise<CSharpGate> {
     try {
       if (!repoTrusted || !isRepoTrusted(wtPath)) return { open: false, notice: null };
       const { projects, solutions, defaultTarget } = await discoverCSharpProjects(wtPath);
@@ -675,9 +698,7 @@ function solutionTarget(
  * none of them that way: what is not restored only matters for what will load.
  */
 async function solutionProjects(solution: string, projects: readonly string[]): Promise<string[]> {
-  const text = await Bun.file(solution)
-    .text()
-    .catch(() => "");
+  const text = await readSmallText(solution).catch(() => "");
   const listed = new Set(
     [...text.matchAll(SOLUTION_PROJECT_RE)].map(([, relative]) =>
       path.resolve(path.dirname(solution), relative!.replaceAll("\\", "/")),
@@ -859,6 +880,34 @@ async function pickLocalTool(
     };
   }
   return { command: prepared.dotnetPath, prefixArgs, env };
+}
+
+/**
+ * What a toolchain decision depends on, with stats only: `dotnet` and csharp-ls and which ones they
+ * are, the SDKs and runtimes `dotnet` has, the worktree's own `global.json` and tool manifests, and
+ * the local tool cache that `dotnet tool restore` writes.
+ */
+async function toolchainStamp(wtPath: string): Promise<string> {
+  const env = buildSpawnEnv();
+  const search = { PATH: env.PATH ?? "" };
+  const dotnet = Bun.which(DOTNET, search);
+  const install = dotnet ? path.dirname(await realpath(dotnet).catch(() => dotnet)) : null;
+  const toolsHome = path.dirname(dotnetGlobalToolsDir(env));
+  const inputs = [
+    dotnet,
+    Bun.which(CSHARP_LS, search),
+    path.join(dotnetGlobalToolsDir(env), CSHARP_LS),
+    path.join(toolsHome, "toolResolverCache"),
+    ...(install ? [path.join(install, "sdk"), path.join(install, "shared", NETCORE_APP)] : []),
+    env.DOTNET_ROOT ? path.join(env.DOTNET_ROOT, "shared", NETCORE_APP) : null,
+    path.join(wtPath, "global.json"),
+    path.join(wtPath, "dotnet-tools.json"),
+    path.join(wtPath, ".config", "dotnet-tools.json"),
+  ].filter((input) => input !== null);
+  const stamps = await Promise.all(
+    inputs.map(async (input) => `${input}:${(await fileStamp(input)) ?? "missing"}`),
+  );
+  return [search.PATH, ...stamps].join("\0");
 }
 
 /** Per binary while the file is the same, since a held connection asks on every recheck. */

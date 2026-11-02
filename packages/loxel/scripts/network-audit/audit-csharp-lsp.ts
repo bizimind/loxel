@@ -159,7 +159,8 @@ class LspClient {
       }
       this.notify({ id: message.id, result: null });
     } else if (message.id !== undefined) {
-      this.pending.get(message.id)?.(message);
+      const resolve = this.pending.get(message.id);
+      if (typeof resolve === "function") resolve(message);
     }
   }
 

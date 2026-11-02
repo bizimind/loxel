@@ -20,7 +20,7 @@ Nothing is bundled, so there is no manifest under `scripts/language-servers/` an
 
 Frames that arrive before the first decision are kept. If the first decision opens the gate, the base's `startSession` runs and they replay to the real server. Once a hold has answered `initialize`, opening the gate closes the socket with `LSP_RESTART_CLOSE_CODE`, and the reconnect goes through the gate again. Only one decision runs at a time per connection, with a deadline so a stalled git or `dotnet` cannot leave `initialize` unanswered; checks that could not finish keep the last notice and try again on the timer.
 
-What makes a held connection decide again: `onRepoTrustChange` (a change restarts it, since `repoTrusted` is fixed for a connection), `subscribeCSharpRestore`, `notifyWatchedFilesChanged` for project, solution, `global.json` and tool manifest files, `onLoginShellEnvChange`, and, only while a toolchain notice is up, a timer, since nothing announces an install. The login-shell environment is captured again at the start of that wait and on every sixth tick.
+What makes a held connection decide again: `onRepoTrustChange` (a change restarts it, since `repoTrusted` is fixed for a connection), `subscribeCSharpRestore`, `notifyWatchedFilesChanged` for project, solution, `global.json` and tool manifest files, `onLoginShellEnvChange`, and, only while a toolchain notice is up, a timer, since nothing announces an install; a tick only decides when `toolchainStamp`, stats with no spawn, sees a difference, or the last decision could not finish. The login-shell environment is captured again at the start of that wait and on every sixth tick.
 
 ### Running sessions
 

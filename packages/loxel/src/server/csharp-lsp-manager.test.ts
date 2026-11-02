@@ -13,6 +13,7 @@ process.env.LOXEL_STATE_DIR = stateDir;
 const { CSharpLspManager, CSHARP_LS_SETTINGS, MIN_CSHARP_LS_VERSION, withClientRegistrations } =
   await import("./csharp-lsp-manager");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+type WtLspContext = import("./stdio-lsp-manager").WtLspContext;
 
 // Each test spawns git and scripts many times; how fast is not what these test.
 setDefaultTimeout(60_000);
@@ -29,6 +30,39 @@ class TestManager extends CSharpLspManager {
     super(SHORT_MS, SHORT_MS, SHORT_MS);
   }
   protected override refreshToolchainEnv(): void {}
+}
+
+/** Counts decisions and ticks, which the test waits on. */
+class CountingManager extends TestManager {
+  started = 0;
+  finished = 0;
+  refreshes = 0;
+  private readonly waiters: (() => void)[] = [];
+
+  protected override async gate(context: WtLspContext) {
+    this.started++;
+    const gate = await super.gate(context);
+    this.finished++;
+    this.wake();
+    return gate;
+  }
+
+  protected override refreshToolchainEnv(): void {
+    this.refreshes++;
+    this.wake();
+  }
+
+  private wake(): void {
+    for (const waiter of this.waiters.splice(0)) waiter();
+  }
+
+  async until(condition: () => boolean): Promise<void> {
+    while (!condition()) {
+      await new Promise<void>((resolve) => {
+        this.waiters.push(resolve);
+      });
+    }
+  }
 }
 
 /** With a deadline short enough to reach in a test. */
@@ -378,6 +412,24 @@ describe.skipIf(process.platform === "win32")("CSharpLspManager", () => {
         await makeRestoredRepo({ "global.json": '{"sdk":{"version":"7.0.100"}}' }),
       );
       await socket.untilMessage(".NET SDK 7.0.100");
+    });
+
+    test("rechecks decide nothing while the toolchain looks the same", async () => {
+      const { bin } = await installToolchain({ csharpLs: null });
+      const wt = await makeRestoredRepo();
+      const counting = new CountingManager();
+      manager = counting;
+      const socket = connect(wt);
+      await socket.untilMessage("dotnet tool install");
+      // The first tick takes one more decision, to have a stamp to compare.
+      await counting.until(() => counting.started >= 2 && counting.finished === counting.started);
+      const { started } = counting;
+      const { refreshes } = counting;
+      // A login-shell capture comes every few ticks, so these are ticks that have passed.
+      await counting.until(() => counting.refreshes >= refreshes + 2);
+      expect(counting.started).toBe(started);
+      await writeExecutable(join(bin, "csharp-ls"), fakeCSharpLs("0.23.0"));
+      await socket.untilMessage("dotnet tool update");
     });
 
     test("each message goes out once per connection across rechecks", async () => {

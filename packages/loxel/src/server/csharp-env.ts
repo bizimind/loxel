@@ -1258,7 +1258,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Identity of a file or directory, or null when it is missing. */
-async function fileStamp(file: string): Promise<string | null> {
+export async function fileStamp(file: string): Promise<string | null> {
   try {
     const info = await stat(file);
     return `${info.dev}:${info.ino}:${info.mtimeMs}:${info.size}`;
