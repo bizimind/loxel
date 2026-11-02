@@ -5,7 +5,7 @@ import { showToast } from "@/components/ui/toast";
 import { useLspStatusStore } from "@/store/lsp-status";
 
 import { frontendLog } from "./frontend-logger";
-import { isLiveEditorModel } from "./live-editor-model";
+import { isLiveEditorModel, isPreviewModel } from "./live-editor-model";
 import {
   createLspConnection,
   createStopToastFilter,
@@ -16,6 +16,7 @@ import {
 } from "./lsp-connection";
 import { createLspWorkspaceFiles } from "./lsp-workspace-files";
 import { SEMANTIC_TOKEN_STYLING } from "./monaco-theme";
+import { registerVirtualDocumentScheme, type VirtualDocumentOptions } from "./virtual-documents";
 
 const log = frontendLog.child("ui");
 
@@ -69,6 +70,8 @@ export interface LspClientOptions {
    * (mypy's setup problems, a Kotlin lint tool that is missing or failed).
    */
   showMessages?: boolean;
+  /** The server's read-only documents: tabs and peek widgets show them, read through this client. */
+  virtualDocuments?: VirtualDocumentOptions;
 }
 
 /**
@@ -79,7 +82,8 @@ export interface LspClientOptions {
  * YAML). Connecting to a different path disposes the old client and socket (killing the
  * server-side subprocess) and opens a new connection. Both the worktree switch and `disconnect()`
  * dispose the client (unregistering providers and closing synced documents) before the socket.
- * Only editor tabs' live models are synced to the server (see `isLiveEditorModel`). Workspace edits
+ * Only editor tabs' live models are synced to the server (see `isLiveEditorModel`), plus the tabs of
+ * its own read-only documents. Workspace edits
  * (rename, code actions) also change the worktree's files that are not open (see
  * `createLspWorkspaceFiles`), and a toast says why when one fails.
  *
@@ -94,9 +98,19 @@ export function createLspClient({
   languageId,
   onConnected,
   showMessages,
+  virtualDocuments,
 }: LspClientOptions) {
   const markerOwner = route.replace(/^ws\//, "");
   const showMessage = showMessages ? createServerMessageToasts(name) : undefined;
+  const languageIds = typeof languageId === "string" ? [languageId] : languageId;
+  const virtualDocumentScheme = virtualDocuments
+    ? registerVirtualDocumentScheme(virtualDocuments, languageIds[0] ?? "plaintext")
+    : undefined;
+  const ownsVirtualDocument = (model: Parameters<typeof isLiveEditorModel>[0]): boolean =>
+    model.uri.scheme === virtualDocuments?.scheme && !isPreviewModel(model);
+  /** Whether a model is this client's to sync, and so a reason to connect. */
+  const syncsModel = (model: Parameters<typeof isLiveEditorModel>[0]): boolean =>
+    isLiveEditorModel(model) || ownsVirtualDocument(model);
 
   async function open(wtPath: string | null, signal: AbortSignal): Promise<LspLink> {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -110,7 +124,9 @@ export function createLspClient({
     try {
       client = new MonacoLspClient(transport, {
         languageId,
-        modelFilter: isLiveEditorModel,
+        modelFilter: syncsModel,
+        // Their tabs are read-only, which stops typing but not a server's edit.
+        isReadOnlyModel: ownsVirtualDocument,
         // One client per route at a time: each takes over the markers' owner of the one before.
         markerOwner,
         workspaceFileSystem: wtPath === null ? undefined : createLspWorkspaceFiles(wtPath),
@@ -123,6 +139,7 @@ export function createLspClient({
       throw err;
     }
     connectedClients.set(client, wtPath);
+    const endVirtualDocuments = virtualDocumentScheme?.connected(client);
     const extension = onConnected?.(transport);
     return {
       closed,
@@ -130,6 +147,7 @@ export function createLspClient({
       // socket.
       dispose() {
         connectedClients.delete(client);
+        endVirtualDocuments?.();
         extension?.dispose();
         try {
           client.dispose();
@@ -164,7 +182,8 @@ export function createLspClient({
   return {
     connect: connection.connect,
     disconnect: connection.disconnect,
-    languageIds: typeof languageId === "string" ? [languageId] : languageId,
+    languageIds,
+    syncsModel,
     logCategory: markerOwner,
   };
 }

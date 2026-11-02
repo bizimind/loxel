@@ -33,6 +33,7 @@ import type { FilePanelType } from "@/lib/open-file";
 import { isWithin } from "@/lib/project-file-helpers";
 import { saveEditorContent } from "@/lib/save-editor-content";
 import { threeWayMerge } from "@/lib/three-way-merge";
+import { virtualDocumentConnection, virtualDocumentTitle } from "@/lib/virtual-documents";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
@@ -515,6 +516,34 @@ export function openFileBacked(
   return slot
     ? cApi.addPanel({ ...options, ...slot })
     : addPlacedPanel(cApi, placement, options, focus);
+}
+
+/**
+ * Open or focus the tab of a language server's read-only document, deduplicating by URI. The tab is
+ * tied to the connection that serves the document now; without one nothing opens.
+ */
+export function openVirtualDocument(
+  uri: string,
+  { line, column }: { line?: number; column?: number } = {},
+): void {
+  const cApi = getCenterApi();
+  const connection = virtualDocumentConnection(uri);
+  if (!cApi || !connection) return;
+  const panelId = `virtual-document-${uri}`;
+  const existing = cApi.getPanel(panelId);
+  if (existing) {
+    activatePanel(cApi, existing);
+    if (line) existing.api.updateParameters({ line, column });
+    return;
+  }
+  addPlacedPanel(cApi, undefined, {
+    id: panelId,
+    component: "virtualDocument",
+    tabComponent: "virtualDocumentTab",
+    title: virtualDocumentTitle(uri),
+    params: { uri, connectionId: connection.id, line, column },
+  });
+  uiLog.info("Panel created", { panelType: "virtualDocument" });
 }
 
 // -- File lifecycle handlers --

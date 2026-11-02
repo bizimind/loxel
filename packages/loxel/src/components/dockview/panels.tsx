@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 
 import { BrowserPanel, type BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { CodeEditorPanel } from "@/components/code-editor/CodeEditorPanel";
+import { VirtualDocumentPanel } from "@/components/code-editor/VirtualDocumentPanel";
 import { CompareFilesPanel } from "@/components/compare/CompareFilesPanel";
 import { DiffViewerPanel } from "@/components/diff-viewer/DiffViewerPanel";
 import { MarkdownEditorPanelComponent } from "@/components/editor/MarkdownEditorPanel";
@@ -45,6 +46,7 @@ import { MediaTab } from "./media-tab";
 import { PanelContext } from "./panel-context";
 import { PanelErrorBoundary } from "./panel-error-boundary";
 import { TerminalTab } from "./terminal-tab";
+import { VirtualDocumentTab } from "./virtual-document-tab";
 
 // ---------------------------------------------------------------------------
 // Icon map — derived from the panel registries so the error boundary fallback
@@ -253,6 +255,26 @@ function CodeEditorPanelComponent(
   );
 }
 
+/** A language server's read-only document in the center group. */
+function VirtualDocumentPanelComponent(
+  props: IDockviewPanelProps<{
+    uri: string;
+    connectionId: string;
+    line?: number;
+    column?: number;
+  }>,
+) {
+  return (
+    <VirtualDocumentPanel
+      uri={props.params.uri}
+      connectionId={props.params.connectionId}
+      line={props.params.line}
+      column={props.params.column}
+      panelApi={props.api}
+    />
+  );
+}
+
 /** Browser panel in the center group. */
 function BrowserPanelComponent(props: IDockviewPanelProps<BrowserPanelParams>) {
   return <BrowserPanel url={props.params.url} panelApi={props.api} />;
@@ -301,6 +323,7 @@ export const centerComponents = wrapPanelComponents(
     editor: MarkdownEditorPanelComponent,
     excalidraw: ExcalidrawPanelComponent,
     codeEditor: CodeEditorPanelComponent,
+    virtualDocument: VirtualDocumentPanelComponent,
     browser: BrowserPanelComponent,
     media: MediaViewerPanelComponent,
     localDb: LocalDbPanelComponent,
@@ -319,4 +342,5 @@ export const centerTabComponents = {
   mediaTab: MediaTab,
   terminalTab: TerminalTab,
   localDbTab: LocalDbTab,
+  virtualDocumentTab: VirtualDocumentTab,
 };

@@ -37,6 +37,9 @@ const JAVA_SETTINGS = {
   implementationCodeLens: "none",
 };
 
+/** Definitions and hovers lead to `jdt://` documents, which the client opens read-only. */
+const EXTENDED_CLIENT_CAPABILITIES = { classFileContentsSupport: true };
+
 /** Directories never worth starting from when looking for a Java file. */
 const NOT_SOURCE_DIRS = new Set(["node_modules", "build", "target", "out", "bin"]);
 /** What jdtls itself runs on. A project on an older Java also needs a JDK of its own level. */
@@ -369,7 +372,11 @@ export class JavaLspManager extends WorktreeLspManager {
   protected override getInitializationOptions(session: WtLspSession): Record<string, unknown> {
     const trigger = this.triggerFiles.get(session.wtPath);
     const java = javaSettings(this.runtimeSettings.get(session.wtPath) ?? []);
-    return { settings: { java }, ...(trigger ? { triggerFiles: [trigger] } : {}) };
+    return {
+      settings: { java },
+      extendedClientCapabilities: EXTENDED_CLIENT_CAPABILITIES,
+      ...(trigger ? { triggerFiles: [trigger] } : {}),
+    };
   }
 
   protected override onSessionClosed(session: WtLspSession): void {

@@ -20,6 +20,7 @@ import {
   openDiff,
   openLocalDb,
   openFileBacked,
+  openVirtualDocument,
 } from "@/lib/panel-creators";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
 
@@ -43,6 +44,9 @@ export function useLoxelEventListeners(): void {
           placement: d.placement,
           focus: d.focus,
         }),
+      ),
+      onLoxelEvent("loxel-open-virtual-document", (d) =>
+        openVirtualDocument(d.uri, { line: d.line, column: d.column }),
       ),
       onLoxelEvent("loxel-open-markdown-editor", (d) =>
         openFileBacked("editor", d.filePath, {

@@ -1,6 +1,7 @@
 /**
  * Narrow ambient typing for the Monaco internals `peek-text-models.ts` uses to resolve models for
- * peek widgets: the standalone service registry, the text model service and the `TextModel` class.
+ * peek widgets (the standalone service registry, the text model service and the `TextModel` class)
+ * and `virtual-document-links.ts` uses to keep links in rendered markdown.
  * The modules are reachable through monaco-editor's `./*` export map but ship without
  * declarations. Only that surface is declared. Verified against monaco-editor 0.57.0;
  * `peek-text-models.test.ts` exercises it against the real services to catch drift on upgrades.
@@ -62,4 +63,25 @@ declare module "monaco-editor/editor/common/model/textModel.js" {
 
   /** Only used as a constructor for `IInstantiationService.createInstance`. */
   export const TextModel: { readonly DEFAULT_CREATION_OPTIONS: TextModelCreationOptions };
+}
+
+declare module "monaco-editor/platform/markdown/browser/markdownRenderer.js" {
+  import type { IDisposable, IMarkdownString } from "monaco-editor";
+  import type { ServiceIdentifier } from "monaco-editor/platform/instantiation/common/instantiation.js";
+
+  /** The options of `render` that `virtual-document-links.ts` adds to; passed through otherwise. */
+  export interface MarkdownRenderOptions {
+    sanitizerConfig?: { allowedLinkSchemes?: { augment?: readonly string[] } };
+  }
+
+  /** Renders the markdown of hovers and documentation. */
+  export interface IMarkdownRendererService {
+    render(
+      markdown: IMarkdownString,
+      options?: MarkdownRenderOptions,
+      outElement?: HTMLElement,
+    ): IDisposable & { readonly element: HTMLElement };
+  }
+
+  export const IMarkdownRendererService: ServiceIdentifier<IMarkdownRendererService>;
 }

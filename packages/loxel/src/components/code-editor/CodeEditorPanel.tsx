@@ -20,6 +20,7 @@ import {
 } from "@/hooks/use-disk-synced-content";
 import { useFirstLoadGate } from "@/hooks/useFirstLoadGate";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { CODE_EDITOR_OPTIONS } from "@/lib/code-editor-options";
 import { computeLineEdits } from "@/lib/compute-line-edits";
 import { detectIndentation } from "@/lib/detect-indentation";
 import { applyEditorConfigOnSave } from "@/lib/editorconfig-save-actions";
@@ -342,37 +343,11 @@ export function CodeEditorPanel({
     }
 
     const editor = monaco.editor.create(container, {
+      ...CODE_EDITOR_OPTIONS,
       model,
       theme: getMonacoThemeName(darkMode),
       readOnly: readOnlyRef.current,
       rulers: rulersFor(editorConfigRef.current),
-      // Editor-level tabSize/insertSpaces are global in standalone Monaco: setting them would reset
-      // every open model's indentation. Indentation is set per model below; this constant flag only
-      // keeps Monaco from overriding it.
-      detectIndentation: false,
-      minimap: { enabled: false },
-      scrollBeyondLastLine: false,
-      lineHeight: 22,
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
-      automaticLayout: true,
-      contextmenu: false,
-      lineNumbers: "on",
-      glyphMargin: true,
-      folding: true,
-      fixedOverflowWidgets: true,
-      suggest: { insertMode: "replace", showIcons: true },
-      suggestFontSize: 13,
-      suggestLineHeight: 28,
-      "semanticHighlighting.enabled": true,
-      stickyScroll: { enabled: false },
-      renderLineHighlight: "line",
-      scrollbar: { vertical: "auto", horizontal: "auto" },
-      overviewRulerLanes: 3,
-      padding: { top: 4 },
-      // `gotoLocation` keeps Monaco's defaults: several targets open a peek widget, which shows
-      // files no tab has open through peek-text-models.ts; a single one opens a tab through the
-      // editor opener (editor-opener.ts).
     });
 
     editorRef.current = editor;

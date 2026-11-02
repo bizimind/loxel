@@ -13,7 +13,6 @@ import { useWorktreeStore } from "@/store/worktrees";
 
 import { createEditorOpener } from "./editor-opener";
 import { getHighlighter } from "./highlighter";
-import { isLiveEditorModel } from "./live-editor-model";
 import { type LspClient, resumeLanguageServers } from "./lsp-client";
 import { lazyLspClients } from "./lsp-clients";
 import { registerLoxelLanguages } from "./monaco-languages";
@@ -21,6 +20,7 @@ import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
 import { isWithin } from "./project-file-helpers";
 import { connectTsLsp } from "./ts-lsp-client";
+import { installVirtualDocumentLinks } from "./virtual-document-links";
 import { connectYamlLsp } from "./yaml-lsp-client";
 
 self.MonacoEnvironment = {
@@ -118,7 +118,7 @@ function createLazyLspConnector(opts: LspClient): void {
   const isMatch = (model: monaco.editor.ITextModel): boolean => {
     if (!opts.languageIds.includes(model.getLanguageId())) return false;
     if (!activeWt) return false;
-    if (!isLiveEditorModel(model)) return false;
+    if (!opts.syncsModel(model)) return false;
     if (isWithin(model.uri.path, activeWt)) return true;
     // Files outside every project (the Others section) are served by the active worktree's LSP.
     return !deriveProject(model.uri.path, useProjectStore.getState().projects);
@@ -196,3 +196,6 @@ monaco.editor.registerEditorOpener(createEditorOpener());
 // Peek widgets show files no tab has open as read-only snapshots.
 installPeekModelResolver();
 monaco.editor.onDidCreateEditor(keepPreviewModelsReadOnly);
+
+// Hover links to a language server's read-only documents survive Monaco's markdown sanitizer.
+installVirtualDocumentLinks();

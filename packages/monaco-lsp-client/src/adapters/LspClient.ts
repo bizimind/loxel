@@ -1,5 +1,5 @@
 import type { IMessageTransport, IRequestSender } from "@hediet/json-rpc";
-import { Channel, StreamBasedChannel, TypedChannel } from "@hediet/json-rpc";
+import { Channel, StreamBasedChannel, TypedChannel, unverifiedRequest } from "@hediet/json-rpc";
 import type * as monaco from "monaco-editor";
 
 import type { ClientCapabilities, ShowMessageParams } from "../types";
@@ -53,6 +53,11 @@ export interface MonacoLspClientOptions {
    * server.
    */
   modelFilter?: (textModel: monaco.editor.ITextModel) => boolean;
+  /**
+   * Open models workspace edits may not change, such as a read-only document of the server's own:
+   * an edit touching one is refused whole.
+   */
+  isReadOnlyModel?: (textModel: monaco.editor.ITextModel) => boolean;
   /**
    * Disk access for workspace edits (rename, code actions, `workspace/applyEdit`). With it they
    * can edit files that have no model and create, rename or delete files; without it they are
@@ -116,6 +121,7 @@ export class MonacoLspClient {
     this._edits = new WorkspaceEditApplier(s.server, this._capabilitiesRegistry, {
       fileSystem: options?.workspaceFileSystem,
       onFailure: options?.onWorkspaceEditFailure,
+      isReadOnlyModel: options?.isReadOnlyModel,
     });
 
     this._connection = new LspConnection(
@@ -215,6 +221,24 @@ export class MonacoLspClient {
     options?: { declared?: boolean },
   ): boolean {
     return this._codeActions.supportsKind(model, kind, options);
+  }
+
+  /**
+   * Sends a request the typed `server` interface does not have (a server's own method, a newer LSP
+   * one) once the server has initialized, and resolves with its unverified result. Cancelling
+   * `token` sends `$/cancelRequest` and rejects with a `Canceled` error.
+   */
+  async request(
+    method: string,
+    params: object,
+    token: monaco.CancellationToken,
+  ): Promise<unknown> {
+    await this._initPromise;
+    return this._connection.cancellableRequests.request(
+      unverifiedRequest<object, unknown>({ method }),
+      params,
+      token,
+    );
   }
 
   /** Typed LSP server interface. Call any LSP method directly. */

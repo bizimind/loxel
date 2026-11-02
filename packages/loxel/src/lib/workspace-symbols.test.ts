@@ -4,6 +4,7 @@ import type { WorkspaceSymbolItem } from "@bizimind/monaco-lsp-client";
 import * as monaco from "monaco-editor";
 
 import type { WorkspaceSymbolResult, WorkspaceSymbolSource } from "./workspace-symbols";
+import { registerVirtualDocumentScheme } from "./virtual-documents";
 import {
   rankWorkspaceSymbols,
   resolveWorkspaceSymbolLocation,
@@ -297,5 +298,29 @@ describe("resolveWorkspaceSymbolLocation", () => {
     );
     expect(failed).toBeUndefined();
     expect(hung).toBeUndefined();
+  });
+});
+
+describe("symbols in a server's read-only documents", () => {
+  test("are kept with their URI, after the project's files, and other schemes are dropped", async () => {
+    registerVirtualDocumentScheme({ scheme: "symbols-doc" }, "java");
+    const library = item("List", "symbols-doc://contents/java.util/List.java?=p/x%28List.class");
+    const own = item("List", `file://${WT}/src/List.java`);
+    const unknown = item("List", "unknown-scheme://contents/List.java");
+    const onResults = mock<(results: WorkspaceSymbolResult[], done: boolean) => void>();
+
+    await searchWorkspaceSymbols(
+      [source(() => Promise.resolve([library, own, unknown]))],
+      "List",
+      WT,
+      new monaco.CancellationTokenSource().token,
+      onResults,
+    );
+
+    const results = onResults.mock.calls.at(-1)?.[0] ?? [];
+    expect(results.map((r) => r.symbol.uri)).toEqual([own.uri, library.uri]);
+    expect(results[0]?.virtualDocumentUri).toBeUndefined();
+    expect(results[1]?.filePath).toBe("/java.util/List.java");
+    expect(results[1]?.virtualDocumentUri).toBe(monaco.Uri.parse(library.uri).toString());
   });
 });
