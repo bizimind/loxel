@@ -36,10 +36,11 @@ import { threeWayMerge } from "@/lib/three-way-merge";
 import { queryKeys } from "@/queries/query-keys";
 import { getQueryScope } from "@/queries/use-scope";
 import { queryClient } from "@/query-client";
+import { retargetClosedTabs, takeLastClosedTab } from "@/store/closed-tabs";
 import { useEditorStateStore } from "@/store/editor-state";
 import { activatePanel, reattachActiveContent } from "@/store/layout-actions";
-import { getCenterPanelDefByType } from "@/store/panel-config";
-import { getCenterApi } from "@/store/tools-bar";
+import { getCenterPanelDef, getCenterPanelDefByType } from "@/store/panel-config";
+import { getCenterApi, getCenterApiWorktree } from "@/store/tools-bar";
 import { getCurrentWorktreeToolsBar } from "@/store/worktree-tools-bar";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -469,6 +470,48 @@ export async function createCodeEditor(options?: {
   } finally {
     creatingCodeEditor = false;
   }
+}
+
+// -- Reopening closed tabs --
+
+/**
+ * Bring back the current worktree's most recently closed tab, active, where it was: at its old
+ * index if its group is still there, else as a tab of the active group. Its panel state comes back
+ * through its params; a terminal's session ended with the tab, so it opens a new one under the
+ * same title. The tabs of a removed group follow the first one reopened, keeping their order.
+ */
+export function reopenClosedTab(): void {
+  const dv = getCenterApi();
+  const worktreePath = getCenterApiWorktree();
+  // While switching worktrees the center is about to be replaced, and the panel with it.
+  if (!dv || !worktreePath || worktreePath !== useWorktreeStore.getState().activeWorktreePath) {
+    return;
+  }
+  const tab = takeLastClosedTab(worktreePath, (id) => dv.getPanel(id) !== undefined);
+  if (!tab) return;
+
+  const { groupId, index, ...options } = tab;
+  if (getCenterPanelDef(options.id)?.type === "terminal") {
+    const terminalId = crypto.randomUUID();
+    options.id = `terminal-${terminalId}`;
+    options.params = { ...options.params, terminalId };
+    const title = options.title ?? nextPanelTitle(dv, "Terminal");
+    options.title = title;
+    getCurrentWorktreeToolsBar().getState().addTerminal({ id: options.id, title, terminalId });
+  }
+
+  const group = dv.getGroup(groupId);
+  const panel = group
+    ? dv.addPanel({
+        ...options,
+        position: { referenceGroup: groupId, index: Math.min(index, group.panels.length) },
+      })
+    : addPlacedPanel(dv, undefined, options);
+  if (panel.group.id !== groupId) {
+    const newIndex = panel.group.panels.indexOf(panel);
+    retargetClosedTabs(worktreePath, groupId, panel.group.id, newIndex - index);
+  }
+  uiLog.info("Panel reopened", { panelId: options.id });
 }
 
 // -- File-backed panel opener --

@@ -34,11 +34,6 @@ export function resolveLanguage(
   return detectLanguage(filePath) ?? (content ? sniffLanguageFromContent(content) : null);
 }
 
-/** Whether only a file's content can name its language: its path names none (a shebang script). */
-export function languageNeedsContent(filePath: string, associations: FileAssociation[]): boolean {
-  return resolveLanguage(filePath, associations) === null;
-}
-
 // -- Content-based language sniffing ------------------------------------------
 
 const SHEBANG_MAP: Record<string, string> = {

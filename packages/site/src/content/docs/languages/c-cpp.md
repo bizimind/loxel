@@ -46,7 +46,15 @@ For a small project, a `compile_flags.txt` file with one flag per line, at the p
 -Iinclude
 ```
 
-The index clangd builds is saved in `.cache/clangd/index/` beside `compile_commands.json`, and it ignores itself in git. If that folder is a symlink, clangd runs without the index, and references and rename cover only the open files.
+The index clangd builds is saved in `.cache/clangd/index/` beside `compile_commands.json`, and it ignores itself in git. If that folder is a symlink, clangd skips the background index, and references and rename cover only the open files.
+
+## When files change on disk
+
+Open files follow what happens on disk, whoever makes the change: a saved header, an edit from an agent or another editor, or a `git checkout`. Diagnostics update within a second. Unsaved edits to an open header reach other files once you save.
+
+- **`compile_commands.json` and `compile_flags.txt`** apply within about 6 seconds of a change, and within about 31 seconds when the file is new, so you can run CMake in a terminal and keep working. Loxel never runs a build itself.
+- **`.clangd` and `.clang-tidy`** apply within about 6 seconds.
+- **References and Go to Symbol** catch up with files that aren't open about a minute after the changes stop, and at most every 5 minutes, when the server restarts itself. This takes a moment, and your open files and unsaved edits stay as they are.
 
 ## Configure clangd
 

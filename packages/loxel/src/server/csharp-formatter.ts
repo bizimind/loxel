@@ -23,6 +23,7 @@ import {
 } from "./language-formatter";
 import { logger } from "./logger";
 import { pathOutsideWorktree } from "./python-env";
+import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 import { isInside, isShippedByRepo } from "./shipped-by-repo";
 
@@ -44,6 +45,7 @@ export const csharpFormatter: LanguageFormatter = {
  * file is written as it is. A syntax error exits 1.
  */
 const STDIN_ARGS = `format --stdin-path {file}`;
+const LOCAL_TOOL: FileFormatter = { command: DOTNET, args: `tool run ${CSHARPIER} ${STDIN_ARGS}` };
 const PATH_TOOL: FileFormatter = { command: CSHARPIER, args: STDIN_ARGS };
 
 /** CSharpier's own config names, checked against 1.3.0, which also reads `.yml`. */
@@ -52,28 +54,37 @@ const CONFIG_FILES = [".csharpierrc", ".csharpierrc.json", ".csharpierrc.yaml", 
 const MAX_PROJECT_FILE_BYTES = 1_024 * 1_024;
 /** In what `dotnet tool run` prints for a manifest's tool that is not in the local tool cache. */
 const NOT_RESTORED_HINT = "dotnet tool restore";
+const LOCAL_TOOL_RESTRICTION = "The project's own CSharpier doesn't format on save.";
+const SHIM_RESTRICTION = "A version manager's `dotnet` doesn't run for format on save.";
 const LOCAL_TOOL_DECLINE: FormatterDecline = {
   notice:
-    "Format on save skipped: Loxel doesn't run a project's local CSharpier yet. It uses a `csharpier` on your PATH instead, which you can install with `dotnet tool install -g csharpier`.",
+    "Format on save skipped: this project's CSharpier runs only once you trust the repository. Trust it, or install `csharpier` on your PATH with `dotnet tool install -g csharpier`.",
 };
 
 /**
  * Pick how to run CSharpier for a file in `startDir`, walking up to `wtRoot`. A project opts in
- * with a tool manifest listing it or with a CSharpier config. Both run a `csharpier` from `PATH`:
- * the manifest's own version does not run until the repository trust gate restores
- * `dotnet tool run` for it. A bare project or `.editorconfig` formats nothing, like the other
+ * with a tool manifest listing it or with a CSharpier config. A manifest's pinned version runs in a
+ * trusted repository, since the manifest chooses what `dotnet tool run` executes; anything else
+ * runs a `csharpier` from `PATH`. A bare project or `.editorconfig` formats nothing, like the other
  * formatters' opt-in signals. CSharpier resolves its own nested options from `--stdin-path`.
  *
- * Not cached: a save costs a few `statSync` calls per directory level plus parsing the manifests
- * on the way, negligible next to spawning the formatter. So does the SDK check, which reads one
- * `global.json` and asks git only about its `sdk.paths` entries.
+ * Not cached, so a change of trust applies from the next save: a save costs a few `statSync` calls
+ * per directory level plus parsing the manifests on the way, negligible next to spawning the
+ * formatter. So does the SDK check in an untrusted repository, which reads one `global.json` and
+ * asks git only about its `sdk.paths` entries.
  */
 function detectCSharpFormatter(
   startDir: string,
   wtRoot: string,
+  fileName?: string,
 ): FileFormatter | FormatterDecline | null {
   const dirs = dirsUpToRoot(startDir, wtRoot);
-  if (findLocalToolDir(dirs)) return isOnPath(wtRoot) ? PATH_TOOL : LOCAL_TOOL_DECLINE;
+  if (findLocalToolDir(dirs)) {
+    if (isRepoTrusted(wtRoot)) return LOCAL_TOOL;
+    // Only a save is held back: listing the worktree's formatters in Settings should not ask.
+    if (fileName) reportRepoRestriction(wtRoot, LOCAL_TOOL_RESTRICTION);
+    return isOnPath(wtRoot) ? PATH_TOOL : LOCAL_TOOL_DECLINE;
+  }
   const hasConfig = dirs.some((dir) => CONFIG_FILES.some((name) => isSmallFile(join(dir, name))));
   return hasConfig ? PATH_TOOL : null;
 }
@@ -163,6 +174,7 @@ async function dotnetSpawnOptions(dir: string, wtRoot: string): Promise<Formatte
       };
     }
     if (await isVersionManagerShim(dotnet)) {
+      reportRepoRestriction(wtRoot, SHIM_RESTRICTION);
       return {
         skip: {
           notice:
