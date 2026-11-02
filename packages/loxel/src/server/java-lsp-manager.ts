@@ -58,6 +58,8 @@ const JAVA_SETTINGS = {
   // With the client reading `jdt://` documents, a search would otherwise decompile classes that have
   // no source, and fail the whole request on the first it cannot.
   references: { includeDecompiledSources: false },
+  // jdtls leaves this off unless a client asks.
+  signatureHelp: { enabled: true },
   telemetry: { enabled: false },
   // Their commands are the client's own in VS Code; Loxel has none to run.
   referencesCodeLens: { enabled: false },

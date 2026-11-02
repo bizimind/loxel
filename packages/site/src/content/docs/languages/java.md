@@ -20,6 +20,7 @@ Java files with no `pom.xml` or Gradle build in their folder or above it get the
 - Hover, go-to-definition, go-to-implementation and references across files
 - Rename across files, including renaming a class and its file
 - Completion, including types you have not imported yet, `sysout`-style templates and argument placeholders
+- Signature help while typing a call
 - Quick fixes and refactorings: add imports, organize imports, add unimplemented methods, generate getters and setters, surround with try/catch, extract to a variable, field or constant
 - Document and workspace symbols, inlay hints for parameter names, folding and semantic highlighting
 - **Format Document**
@@ -33,8 +34,11 @@ Maven and Gradle projects load once you trust the repository, which runs their b
 Until you trust the repository, a Java file with a `pom.xml` or Gradle build in its folder or a folder above it is treated as a separate file outside any project, and nothing from the build runs. It gets:
 
 - Syntax errors, but no type errors
-- Completion, code actions, document symbols, references within the file, folding and semantic highlighting
+- Hover, and go-to-definition within the file and into the JDK
+- Completion, signature help, code actions, document and workspace symbols, inlay hints, folding and semantic highlighting
 - **Format Document**
+
+Features that reach other files, such as references, go-to-definition and rename, depend on what the server has seen so far, so they can miss files until the project loads. Renaming a class doesn't rename its file there.
 
 ### What needs to be on your machine
 

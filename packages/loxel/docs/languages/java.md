@@ -66,6 +66,8 @@ Maven and Gradle projects load through `trustedJavaSettings`, with the exclusion
 - `workspace.fileOperations.willRename` is removed from the `initialize` response. jdtls's rename edit already holds every reference, and `WorkspaceEditApplier` asks `willRenameFiles` for each rename operation in an edit, so a class rename would be applied twice.
 - `dropUnusableActions` removes the actions that run `java.action.applyRefactoringCommand`, a client command that needs a prompt, and `Ignore compiler problem(s)`, which has neither an edit nor a command.
 - Lenses are off (`referencesCodeLens`, `implementationCodeLens`), since their commands are the client's own in VS Code.
+- `java.signatureHelp.enabled` is on, since jdtls registers signature help only when a client asks.
+- jdtls reports unused code, as warnings tagged unnecessary, only in a file with no errors, as the Eclipse compiler does.
 - `language/status`, `language/eventNotification` and the other custom notifications reach the client, which drops them with a debug log. `ServiceReady` does not mean analysis finished or that a project loaded, so tests wait for diagnostics on an opened file.
 
 ## Library sources
