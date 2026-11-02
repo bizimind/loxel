@@ -1,8 +1,7 @@
 import { readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 
-import type { RustToolchain } from "@/api/rust-toolchain-model";
+import type { RustToolchain, RustToolchainSource } from "@/api/rust-toolchain-model";
 import { isRecord } from "@/lib/is-record";
 
 import { pathOutsideWorktree } from "./python-env";
@@ -20,6 +19,17 @@ export const MIN_RUST_ANALYZER_DATE = "2025-01-07";
 
 /** The inline project for a worktree without a manifest: nothing is looked for on disk instead. */
 const NO_PROJECT = { sysroot: null, crates: [] };
+
+/** Where a toolchain named by path is the user's own doing, and not a file in the repository. */
+const USER_SELECTED_SOURCES: ReadonlySet<RustToolchainSource> = new Set([
+  "chosen",
+  "default",
+  "directory-override",
+  "environment",
+]);
+
+/** A toolchain name safe to print as part of a command to run; it can come from a repository. */
+const PLAIN_TOOLCHAIN_NAME = /^[\w.+-]+$/;
 
 /** How to start rust-analyzer for a worktree, or why it does not start. */
 export type RustAnalyzerPlan =
@@ -43,16 +53,17 @@ function refuse(reason: string): RustAnalyzerPlan {
 
 /** What to do about a toolchain nothing can run from. Each reason fits a WebSocket close frame. */
 function unusableReason(toolchain: Exclude<RustToolchain, { status: "active" }>): string {
-  switch (toolchain.status) {
-    case "not-installed":
-      return `Rust toolchain ${toolchain.name} is not installed. Run: rustup toolchain install ${toolchain.name}`;
-    case "refused":
-      return "The repository selects its own Rust toolchain. Pick an installed one: Rust: Select Toolchain";
-    case "none":
-      return toolchain.rustupPath
-        ? "rustup has no usable toolchain. Run: rustup default stable"
-        : "Rust was not found. Install it from https://rustup.rs";
+  if (toolchain.status === "not-installed") {
+    return PLAIN_TOOLCHAIN_NAME.test(toolchain.name)
+      ? `The selected Rust toolchain is not installed. Run: rustup toolchain install ${toolchain.name}`
+      : "The selected Rust toolchain is not installed.";
   }
+  if (toolchain.status === "refused") {
+    return "The repository selects its own Rust toolchain. Pick an installed one: Rust: Select Toolchain";
+  }
+  return toolchain.rustupPath
+    ? "rustup has no usable toolchain. Run: rustup default stable"
+    : "Rust was not found. Install it from https://rustup.rs";
 }
 
 async function capture(
@@ -117,7 +128,7 @@ export function rustAnalyzerEnv(
 
 /**
  * Decide how to start rust-analyzer for a worktree's toolchain. Everything run here runs from the
- * home directory with the toolchain pinned, so it answers for the binary the session will run and
+ * filesystem root with the toolchain pinned, so it answers for the binary the session will run and
  * no file in the worktree selects anything.
  */
 export async function planRustAnalyzer(
@@ -126,7 +137,8 @@ export async function planRustAnalyzer(
 ): Promise<RustAnalyzerPlan> {
   if (toolchain.status !== "active") return refuse(unusableReason(toolchain));
   // A toolchain file's `path`: outside the worktree, but still the repository's pick of a binary.
-  if (toolchain.source === "toolchain-file" && path.isAbsolute(toolchain.name ?? "")) {
+  // Anything but a source known to be the user's counts, also one rustup's wording hid.
+  if (path.isAbsolute(toolchain.name ?? "") && !USER_SELECTED_SOURCES.has(toolchain.source)) {
     return refuse(
       "The repository selects a Rust toolchain by path. Pick an installed one: Rust: Select Toolchain",
     );
@@ -143,13 +155,13 @@ export async function planRustAnalyzer(
   if (!toolchain.sysroot) return refuse("Could not find this Rust toolchain's root.");
 
   const spawnEnv = buildSpawnEnv();
-  const home = spawnEnv.HOME ?? homedir();
+  const root = path.parse(rustAnalyzer).root;
   const pinned = {
     ...spawnEnv,
     ...rustToolEnv(toolchain),
     ...(toolchain.name && { RUSTUP_TOOLCHAIN: toolchain.name }),
   };
-  const version = await capture([rustAnalyzer, "--version"], home, pinned);
+  const version = await capture([rustAnalyzer, "--version"], root, pinned);
   const date = version === null ? null : rustAnalyzerDate(version);
   if (date === null)
     return refuse("Could not read rust-analyzer's version, so it was not started.");
@@ -158,7 +170,7 @@ export async function planRustAnalyzer(
       `This rust-analyzer (${date}) is too old for Loxel. Update it, or pick a newer toolchain.`,
     );
   }
-  const compiler = await capture([toolchain.rustcPath, "-vV"], home, pinned);
+  const compiler = await capture([toolchain.rustcPath, "-vV"], root, pinned);
   const host = compiler === null ? null : /^host: (\S+)$/m.exec(compiler)?.[1];
   if (!host) return refuse("Could not read the Rust compiler's host target.");
 
@@ -242,7 +254,7 @@ export function rustAnalyzerSettings(
 
 /** rust-analyzer's project status: only this reports dependencies that could not be read. */
 const SERVER_STATUS = "experimental/serverStatus";
-const MISSING_DEPENDENCIES = /Failed to read Cargo metadata with dependencies/;
+const MISSING_DEPENDENCIES = "Failed to read Cargo metadata with dependencies";
 
 /**
  * The client's `initialize` frame, asking for the project status and to resolve completions'
@@ -254,6 +266,8 @@ export function withRustClientCapabilities(data: string): string {
   try {
     const frame: unknown = JSON.parse(data);
     if (!isRecord(frame) || frame.method !== "initialize" || !isRecord(frame.params)) return data;
+    // Nothing may override the restricted settings, which the manager adds next.
+    delete frame.params.initializationOptions;
     const { capabilities } = frame.params;
     if (!isRecord(capabilities)) return data;
     const experimental = isRecord(capabilities.experimental) ? capabilities.experimental : {};
@@ -273,6 +287,34 @@ export function withRustClientCapabilities(data: string): string {
   }
 }
 
+/** Client methods that can start something in the server, none of which Loxel's client uses. */
+const BLOCKED_METHODS: ReadonlySet<string> = new Set([
+  "textDocument/didSave",
+  "textDocument/formatting",
+  "textDocument/rangeFormatting",
+  "workspace/didChangeConfiguration",
+  "workspace/executeCommand",
+]);
+const BLOCKED_METHOD_PREFIXES = ["rust-analyzer/", "experimental/"];
+
+/**
+ * Whether a client frame must not reach the server. A save can re-read `checkOnSave` from the
+ * repository's `rust-analyzer.toml`, and a changed configuration replaces the restricted settings.
+ */
+export function blockedClientMethod(data: string): { id?: unknown; method: string } | null {
+  try {
+    const frame: unknown = JSON.parse(data);
+    if (!isRecord(frame) || typeof frame.method !== "string") return null;
+    const { method, id } = frame;
+    const blocked =
+      BLOCKED_METHODS.has(method) ||
+      BLOCKED_METHOD_PREFIXES.some((prefix) => method.startsWith(prefix));
+    return blocked ? { id, method } : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface RustServerStatus {
   /** What to tell the user, by kind so each is told once; null when there is nothing to tell. */
   notice: { kind: "dependencies" | "project"; message: string } | null;
@@ -289,7 +331,7 @@ export function readServerStatus(body: string): RustServerStatus | null {
     if (!isRecord(frame) || frame.method !== SERVER_STATUS || !isRecord(frame.params)) return null;
     const { health, message } = frame.params;
     const text = typeof message === "string" ? message : "";
-    if (MISSING_DEPENDENCIES.test(text)) {
+    if (text.includes(MISSING_DEPENDENCIES)) {
       return {
         notice: {
           kind: "dependencies",

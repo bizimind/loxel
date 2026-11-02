@@ -17,15 +17,19 @@ mock.module("./rust-tool-shim", () => ({ isVersionManagerShim: async () => false
 const stateDir = await mkdtemp(join(tmpdir(), "rust-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const {
+  blockedClientMethod,
   findRustManifests,
   isRustManifestPath,
   MIN_RUST_ANALYZER_DATE,
   planRustAnalyzer,
+  readServerStatus,
   rustAnalyzerDate,
   rustAnalyzerEnv,
   rustAnalyzerSettings,
+  withRustClientCapabilities,
 } = await import("./rust-analyzer-run");
 const { RustLspManager } = await import("./rust-lsp-manager");
+const { refreshRustToolchain } = await import("./rust-toolchain");
 
 const roots: string[] = [];
 let manager: InstanceType<typeof RustLspManager> | undefined;
@@ -91,6 +95,14 @@ process.stdin.on("data", (chunk) => {
         },
       },
     });
+    for (let i = 0; i < 2; i++) {
+      send({
+        jsonrpc: "2.0",
+        method: "experimental/serverStatus",
+        params: { health: "warning", message: "Failed to read Cargo metadata with dependencies" },
+      });
+    }
+    send({ jsonrpc: "2.0", method: "test/after-status" });
   }
 });
 `;
@@ -105,10 +117,14 @@ esac
 `;
 
 /** A Rust installed without rustup, under a fresh root, and a PATH limited to it and `git`. */
-async function installFakeRust(analyzer: string | null = fakeRustAnalyzer(RECENT)) {
+async function installFakeRust(
+  analyzer: string | null = fakeRustAnalyzer(RECENT),
+  { rustSrc = true } = {},
+) {
   const root = await makeDir("rust-install-");
   const bin = join(root, "bin");
   await mkdir(bin);
+  if (rustSrc) await mkdir(join(root, "lib/rustlib/src/rust/library"), { recursive: true });
   await writeExecutable(join(bin, "rustc"), FAKE_RUSTC);
   await writeExecutable(join(bin, "cargo"), "#!/bin/sh\n");
   if (analyzer) await writeExecutable(join(bin, "rust-analyzer"), analyzer);
@@ -119,9 +135,24 @@ async function installFakeRust(analyzer: string | null = fakeRustAnalyzer(RECENT
   return { root, bin };
 }
 
+/** What the fake server and the manager send; each test reads the fields its frame has. */
+interface TestFrame {
+  id?: number;
+  method?: string;
+  params: { message: string };
+  error?: { code: number };
+  result: {
+    args: string[];
+    cwd: string;
+    env: Record<string, string>;
+    settings: unknown;
+    capabilities: Record<string, unknown>;
+  };
+}
+
 /** Stands in for the WebSocket and the Monaco client behind it. */
 function fakeSocket() {
-  const frames: Record<string, any>[] = [];
+  const frames: TestFrame[] = [];
   const waiters: (() => void)[] = [];
   let close: { code: number; reason: string } | undefined;
   const wake = () => {
@@ -149,14 +180,17 @@ function fakeSocket() {
   };
   return {
     ws,
+    frames,
+    closedWith: () => close,
     untilClosed: () => until(() => close),
-    untilFrame: (match: (frame: Record<string, any>) => boolean) => until(() => frames.find(match)),
+    untilFrame: (match: (frame: TestFrame) => boolean) => until(() => frames.find(match)),
   };
 }
 
-const frame = (message: Record<string, unknown>) => JSON.stringify({ jsonrpc: "2.0", ...message });
-const INITIALIZE = frame({ id: 1, method: "initialize", params: { capabilities: {} } });
-const INITIALIZED = frame({ method: "initialized", params: {} });
+const frameOf = (message: Record<string, unknown>) =>
+  JSON.stringify({ jsonrpc: "2.0", ...message });
+const INITIALIZE = frameOf({ id: 1, method: "initialize", params: { capabilities: {} } });
+const INITIALIZED = frameOf({ method: "initialized", params: {} });
 
 function activeToolchain(
   overrides: Partial<Extract<RustToolchain, { status: "active" }>> = {},
@@ -240,6 +274,21 @@ describe("planRustAnalyzer", () => {
     ).toContain("by path");
   });
 
+  test("refuses a toolchain named by path from a source not known to be the user's", async () => {
+    const named = { name: "/elsewhere/toolchain" };
+    expect(await reasonFor(activeToolchain({ ...named, source: "unknown" }))).toContain("by path");
+  });
+
+  test("prints no command for a toolchain name that is not plain", async () => {
+    const reason = await reasonFor({
+      status: "not-installed",
+      source: "toolchain-file",
+      name: "x; touch y",
+      toolchainFile: null,
+    });
+    expect(reason).toBe("The selected Rust toolchain is not installed.");
+  });
+
   async function planWithVersion(version: string) {
     const { bin, root } = await installFakeRust(fakeRustAnalyzer(version));
     return planRustAnalyzer(
@@ -269,17 +318,20 @@ describe("planRustAnalyzer", () => {
 
 describe("rustAnalyzerEnv", () => {
   test("pins the toolchain, and takes every tool setting away from cargo's config", () => {
-    const env = rustAnalyzerEnv(activeToolchain(), "/c/cargo", "/a:/wt/tools:/b", "/wt");
-    expect(env).toMatchObject({
-      RUSTUP_TOOLCHAIN: "stable-host",
+    expect(rustAnalyzerEnv(activeToolchain(), "/c/cargo", "/a:/wt/tools:/b", "/wt")).toEqual({
       RUSTUP_AUTO_INSTALL: "0",
+      RUSTUP_TOOLCHAIN: "stable-host",
       PATH: "/a:/b",
       CARGO: "/c/cargo",
       RUSTC: "/toolchain/bin/rustc",
       RUSTC_WRAPPER: "",
       RUSTC_WORKSPACE_WRAPPER: "",
       CARGO_ENCODED_RUSTFLAGS: "",
+      CARGO_ENCODED_RUSTDOCFLAGS: "",
+      CARGO_TARGET_APPLIES_TO_HOST: "true",
+      CARGO_UNSTABLE_HOST_CONFIG: "false",
       CARGO_NET_OFFLINE: "true",
+      CARGO_NET_GIT_FETCH_WITH_CLI: "false",
     });
   });
 
@@ -345,6 +397,103 @@ describe("findRustManifests", () => {
   });
 });
 
+describe("withRustClientCapabilities", () => {
+  test("asks for the project status and a resolvable completion property", () => {
+    const frame = withRustClientCapabilities(
+      frameOf({
+        id: 1,
+        method: "initialize",
+        params: {
+          capabilities: {
+            textDocument: {
+              completion: {
+                completionItem: { resolveSupport: { properties: ["additionalTextEdits"] } },
+              },
+            },
+          },
+        },
+      }),
+    );
+    const { capabilities } = JSON.parse(frame).params;
+    expect(capabilities.experimental.serverStatusNotification).toBe(true);
+    expect(capabilities.textDocument.completion.completionItem.resolveSupport.properties).toEqual([
+      "additionalTextEdits",
+      "documentation",
+    ]);
+  });
+
+  test("drops the client's own settings", () => {
+    const frame = withRustClientCapabilities(
+      frameOf({
+        id: 1,
+        method: "initialize",
+        params: { capabilities: {}, initializationOptions: { checkOnSave: true } },
+      }),
+    );
+    expect(JSON.parse(frame).params.initializationOptions).toBeUndefined();
+  });
+
+  test("leaves other frames as they are", () => {
+    const other = frameOf({ method: "initialized", params: {} });
+    expect(withRustClientCapabilities(other)).toBe(other);
+    expect(withRustClientCapabilities("not json initialize")).toBe("not json initialize");
+  });
+});
+
+describe("blockedClientMethod", () => {
+  test("keeps out what can start something or undo the settings", () => {
+    for (const method of [
+      "textDocument/didSave",
+      "textDocument/formatting",
+      "textDocument/rangeFormatting",
+      "workspace/didChangeConfiguration",
+      "workspace/executeCommand",
+      "rust-analyzer/runFlycheck",
+      "rust-analyzer/rebuildProcMacros",
+      "experimental/runTest",
+    ]) {
+      expect(blockedClientMethod(frameOf({ method, params: {} }))?.method).toBe(method);
+    }
+  });
+
+  test("lets editing and queries through", () => {
+    for (const method of ["initialize", "textDocument/didChange", "textDocument/hover"]) {
+      expect(blockedClientMethod(frameOf({ id: 1, method, params: {} }))).toBeNull();
+    }
+    expect(blockedClientMethod("not json")).toBeNull();
+    expect(blockedClientMethod(frameOf({ id: 1, result: null }))).toBeNull();
+  });
+});
+
+describe("readServerStatus", () => {
+  const status = (params: Record<string, unknown>) =>
+    readServerStatus(frameOf({ method: "experimental/serverStatus", params }));
+
+  test("says what to run for dependencies that could not be read", () => {
+    const read = status({
+      health: "warning",
+      message: "Failed to read Cargo metadata with dependencies for `Cargo.toml`: offline",
+    });
+    expect(read?.notice?.kind).toBe("dependencies");
+    expect(read?.notice?.message).toContain("cargo fetch");
+  });
+
+  test("reports a project that does not load by its first error", () => {
+    const read = status({
+      health: "error",
+      message: "cargo metadata failed\nerror: failed to parse manifest\nmore",
+    });
+    expect(read?.notice?.kind).toBe("project");
+    expect(read?.notice?.message).toContain("error: failed to parse manifest");
+  });
+
+  test("tells nothing for other statuses, and leaves other frames alone", () => {
+    expect(status({ health: "ok" })).toEqual({ notice: null });
+    expect(status({ health: "warning", message: "something else" })).toEqual({ notice: null });
+    expect(readServerStatus(frameOf({ id: 1, result: null }))).toBeNull();
+  });
+});
+
 describe("RustLspManager", () => {
   async function start(wt: string) {
     manager = new RustLspManager();
@@ -396,14 +545,29 @@ describe("RustLspManager", () => {
   });
 
   test("says what to run when the standard library's sources are missing", async () => {
-    await installFakeRust();
+    await installFakeRust(undefined, { rustSrc: false });
     const socket = await start(await makeDir("rust-wt-"));
     await socket.untilFrame((message) => message.id === 1);
     manager?.handleMessage(socket.ws, INITIALIZED);
     const { params } = await socket.untilFrame(
-      (message) => message.method === "window/showMessage",
+      (message) =>
+        message.method === "window/showMessage" && message.params.message.includes("rust-src"),
     );
     expect(params.message).toContain("rustup component add rust-src");
+  });
+
+  test("takes the project status out, and tells what it reports once", async () => {
+    await installFakeRust();
+    const wt = await makeDir("rust-wt-");
+    await writeFile(join(wt, "Cargo.toml"), "");
+    const socket = await start(wt);
+    await socket.untilFrame((message) => message.method === "test/after-status");
+    expect(socket.frames.some((message) => message.method === "experimental/serverStatus")).toBe(
+      false,
+    );
+    const shown = socket.frames.filter((message) => message.method === "window/showMessage");
+    expect(shown).toHaveLength(1);
+    expect(shown[0]?.params.message).toContain("cargo fetch");
   });
 
   test("restarts when the worktree's manifests change, and not for other files", async () => {
@@ -414,9 +578,32 @@ describe("RustLspManager", () => {
 
     manager?.notifyWatchedFilesChanged(wt, [join(wt, "Cargo.toml")]);
     manager?.notifyWatchedFilesChanged(wt, [join(wt, "src", "main.rs")]);
+    expect(socket.closedWith()).toBeUndefined();
     await writeFile(join(wt, "Cargo.toml"), "");
     manager?.notifyWatchedFilesChanged(wt, [join(wt, "Cargo.toml")]);
+    expect(socket.closedWith()?.code).toBe(LSP_RESTART_CLOSE_CODE);
+  });
 
+  test("answers a blocked request itself, without the server", async () => {
+    await installFakeRust();
+    const wt = await makeDir("rust-wt-");
+    const socket = await start(wt);
+    await socket.untilFrame((message) => message.id === 1);
+    manager?.handleMessage(
+      socket.ws,
+      frameOf({ id: 7, method: "textDocument/formatting", params: {} }),
+    );
+    const answer = await socket.untilFrame((message) => message.id === 7);
+    expect(answer.error?.code).toBe(-32601);
+  });
+
+  test("restarts when the toolchain no longer offers what runs", async () => {
+    const { bin } = await installFakeRust();
+    const wt = await makeDir("rust-wt-");
+    const socket = await start(wt);
+    await socket.untilFrame((message) => message.id === 1);
+    await rm(join(bin, "rust-analyzer"));
+    refreshRustToolchain(wt);
     const closed = await socket.untilClosed();
     expect(closed.code).toBe(LSP_RESTART_CLOSE_CODE);
   });

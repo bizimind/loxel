@@ -304,7 +304,8 @@ async function resolvePlain(
   const sysroot = await readSysroot(rustcPath, env);
   const [version, cargo, rustfmt, cargoClippy, rustAnalyzer] = await Promise.all([
     rustVersion(rustcPath, env),
-    findTool(wtPath, "cargo", dirs),
+    // A rustup proxy would pick its toolchain by the directory it runs in, unchecked.
+    findTool(wtPath, "cargo", dirs, { skipProxies: true }),
     findTool(wtPath, "rustfmt", dirs),
     findTool(wtPath, "cargo-clippy", dirs),
     findTool(wtPath, "rust-analyzer", dirs, { skipProxies: true }),
