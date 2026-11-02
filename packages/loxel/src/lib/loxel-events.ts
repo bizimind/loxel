@@ -12,14 +12,12 @@ type OpenFileDetail = { filePath: string } & PanelOpenOptions;
 
 /** Detail shapes for all loxel custom events. */
 export interface LoxelEventMap {
-  "loxel-create-agent": { placement?: PanelPlacement };
   "loxel-create-terminal": CreateTerminalOptions;
   "loxel-create-editor": { placement?: PanelPlacement };
   "loxel-create-drawing": { placement?: PanelPlacement };
   "loxel-create-browser": { url?: string } & PanelOpenOptions;
   "loxel-create-code-editor": { ext?: string; placement?: PanelPlacement };
   "loxel-create-editor-with-content": { content: string; title: string };
-  "loxel-open-agent-devtools": { sessionId: string };
   "loxel-open-code-editor": OpenFileDetail & { line?: number; column?: number };
   "loxel-open-markdown-editor": OpenFileDetail & { line?: number; column?: number };
   "loxel-open-drawing-editor": OpenFileDetail;

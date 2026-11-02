@@ -126,7 +126,7 @@ Metadata needs per-worktree config (`extensions.worktreeConfig`). `POST /api/wor
 3. **Server subscription.** [useWsSubscription.ts](../src/hooks/useWsSubscription.ts) subscribes to the new worktree immediately and unsubscribes the previous one only after its pending saves drain, so auto-saves during panel unmount still find live server resources. On reconnect it resubscribes and re-registers open external files.
 4. **Queries** derive their scope (`activeProjectPath`, `activeWorktreePath`) from [use-scope.ts](../src/queries/use-scope.ts).
 5. **Language servers.** [monaco-env.ts](../src/lib/monaco-env.ts) reconnects the TypeScript server for the new worktree and recounts models for the lazily connected ones. See [LANGUAGE_SERVERS.md](LANGUAGE_SERVERS.md).
-6. **Terminals and agent sessions** are panels in the worktree's layout and capture their worktree when created (`usePanelWorktreePath`). Unmounting a terminal panel does not send `terminal_destroy`. See [TERMINALS.md](TERMINALS.md) and [CODING_AGENT_INTEGRATION.md](CODING_AGENT_INTEGRATION.md).
+6. **Terminals** are panels in the worktree's layout and capture their worktree when created (`usePanelWorktreePath`). Unmounting a terminal panel does not send `terminal_destroy`. See [TERMINALS.md](TERMINALS.md).
 
 ### Per-window state
 

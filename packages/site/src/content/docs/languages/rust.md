@@ -49,3 +49,4 @@ The choice is saved for that worktree and survives restarts, and it takes preced
 ## See also
 
 - [Language Intelligence](/docs/language-intelligence) — the features language servers provide, and how servers start and stop per worktree
+- [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code

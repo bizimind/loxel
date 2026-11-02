@@ -81,6 +81,10 @@ async function loadPostHog(key: string) {
     // No cookies or storage, so no consent banner: PostHog derives the visitor from a daily-salted
     // hash of IP and user agent. Requires cookieless tracking to be enabled in the project settings.
     cookieless_mode: "always",
+    // Set here so they stay off whatever the PostHog project's settings say: otherwise the SDK
+    // follows the project, and the privacy policy doesn't list what they send.
+    autocapture: false,
+    capture_heatmaps: false,
     // Only analytics is used, so skip the lazily loaded replay, surveys, and toolbar scripts.
     disable_external_dependency_loading: true,
   });

@@ -14,11 +14,8 @@ import type { LucideIcon } from "lucide-react";
 import { AlertTriangleIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { AgentDevToolsPanel } from "@/components/agent-devtools/AgentDevToolsPanel";
 import { BrowserPanel, type BrowserPanelParams } from "@/components/browser/BrowserPanel";
 import { CodeEditorPanel } from "@/components/code-editor/CodeEditorPanel";
-import { CodingAgentPanel } from "@/components/coding-agent/CodingAgentPanel";
-import { ForkTreePanel } from "@/components/coding-agent/ForkTreePanel";
 import { CompareFilesPanel } from "@/components/compare/CompareFilesPanel";
 import { DiffViewerPanel } from "@/components/diff-viewer/DiffViewerPanel";
 import { MarkdownEditorPanelComponent } from "@/components/editor/MarkdownEditorPanel";
@@ -36,11 +33,9 @@ import type { ActionId } from "@/store/keybindings/action-registry";
 import { getBindingsForAction, useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import { CENTER_PANELS, QUICKSTART_PANELS, SIDEBAR_PANELS } from "@/store/panel-config";
 
-import { AgentDevToolsTab } from "./agent-devtools-tab";
 import { BrowserTab } from "./browser-tab";
 import { CenterHostComponent } from "./CenterHost";
 import { CodeEditorTab } from "./code-editor-tab";
-import { CodingAgentTab } from "./coding-agent-tab";
 import { CompareTab } from "./compare-tab";
 import { DiffTab } from "./diff-tab";
 import { ExcalidrawEditorTab } from "./excalidraw-editor-tab";
@@ -215,10 +210,6 @@ function LogsPanelComponent(props: IDockviewPanelProps) {
   return <LogsPanel />;
 }
 
-function ForkTreePanelComponent(_props: IDockviewPanelProps) {
-  return <ForkTreePanel />;
-}
-
 /** Standalone excalidraw drawing panel in the center group. */
 function ExcalidrawPanelComponent(
   props: IDockviewPanelProps<{ filePath: string; worktreePath?: string; movedFrom?: string }>,
@@ -267,27 +258,6 @@ function BrowserPanelComponent(props: IDockviewPanelProps<BrowserPanelParams>) {
   return <BrowserPanel url={props.params.url} panelApi={props.api} />;
 }
 
-/** Coding agent panel in the center group. */
-function CodingAgentPanelComponent(
-  props: IDockviewPanelProps<{
-    sessionId: string;
-    worktreePath?: string;
-    forkedSessionId?: string;
-    forkPointMessageId?: string;
-  }>,
-) {
-  return (
-    <PanelContext.Provider value={{ worktreePath: props.params.worktreePath ?? null }}>
-      <CodingAgentPanel
-        sessionId={props.params.sessionId}
-        forkedSessionId={props.params.forkedSessionId}
-        forkPointMessageId={props.params.forkPointMessageId}
-        panelApi={props.api}
-      />
-    </PanelContext.Provider>
-  );
-}
-
 /** Media viewer panel in the center group. */
 function MediaViewerPanelComponent(
   props: IDockviewPanelProps<{ filePath: string; worktreePath?: string }>,
@@ -297,11 +267,6 @@ function MediaViewerPanelComponent(
       <MediaViewerPanel filePath={props.params.filePath} panelApi={props.api} />
     </PanelContext.Provider>
   );
-}
-
-/** Agent DevTools panel in the center group. */
-function AgentDevToolsPanelComponent(props: IDockviewPanelProps<{ sessionId: string }>) {
-  return <AgentDevToolsPanel sessionId={props.params.sessionId} />;
 }
 
 function LocalDbPanelComponent(_props: IDockviewPanelProps) {
@@ -319,14 +284,13 @@ export const outerComponents = wrapPanelComponents(
     git: GraphPanelComponent,
     comments: CommentsPanelComponent,
     logs: LogsPanelComponent,
-    forkTree: ForkTreePanelComponent,
     centerHost: CenterHostComponent,
   },
   false,
 );
 
 /**
- * Center dockview components: editor/terminal/agent panels.
+ * Center dockview components: editor/terminal panels.
  * Wrapped with {@link PanelErrorBoundary} — center-styled error fallback.
  */
 export const centerComponents = wrapPanelComponents(
@@ -339,8 +303,6 @@ export const centerComponents = wrapPanelComponents(
     codeEditor: CodeEditorPanelComponent,
     browser: BrowserPanelComponent,
     media: MediaViewerPanelComponent,
-    codingAgent: CodingAgentPanelComponent,
-    agentDevTools: AgentDevToolsPanelComponent,
     localDb: LocalDbPanelComponent,
   },
   true,
@@ -348,10 +310,8 @@ export const centerComponents = wrapPanelComponents(
 
 /** Custom tab components for center panels. */
 export const centerTabComponents = {
-  agentDevToolsTab: AgentDevToolsTab,
   browserTab: BrowserTab,
   codeEditorTab: CodeEditorTab,
-  codingAgentTab: CodingAgentTab,
   compareTab: CompareTab,
   diffTab: DiffTab,
   markdownEditorTab: MarkdownEditorTab,

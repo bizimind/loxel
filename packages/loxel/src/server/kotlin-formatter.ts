@@ -94,16 +94,40 @@ function detectKotlinFormatter(
   // A `root = true` file ends the search ktlint itself does, so what lies above it does not apply.
   let editorconfigApplies = true;
   for (const dir of dirs) {
-    const declared = [...buildScripts(dir), readCode(join(dir, VERSION_CATALOG), "toml")];
+    const declared = gradleDeclarations(dir);
     if (declared.some((text) => declaresPlugin(text, KTFMT_PLUGIN))) return ktfmtFor(dirs);
     const editorconfig = editorconfigApplies ? readText(join(dir, ".editorconfig")) : "";
-    if (KTLINT_PROPERTY.test(editorconfig)) return KTLINT;
-    if (declared.some((text) => KTLINT_PLUGINS.some((id) => declaresPlugin(text, id)))) {
-      return KTLINT;
-    }
+    if (signalsKtlint(editorconfig, declared)) return KTLINT;
     if (EDITORCONFIG_ROOT.test(editorconfig)) editorconfigApplies = false;
   }
   return null;
+}
+
+/**
+ * The nearest directory from `startDir` up to `wtRoot` that signals ktlint, by the same signals as
+ * format on save, except that ktfmt does not take its place: a project can format with ktfmt and
+ * still lint with ktlint.
+ */
+export function findKtlintProject(startDir: string, wtRoot: string): string | null {
+  let editorconfigApplies = true;
+  for (const dir of dirsUpToRoot(startDir, wtRoot)) {
+    const editorconfig = editorconfigApplies ? readText(join(dir, ".editorconfig")) : "";
+    if (signalsKtlint(editorconfig, gradleDeclarations(dir))) return dir;
+    if (EDITORCONFIG_ROOT.test(editorconfig)) editorconfigApplies = false;
+  }
+  return null;
+}
+
+function signalsKtlint(editorconfig: string, declared: string[]): boolean {
+  return (
+    KTLINT_PROPERTY.test(editorconfig) ||
+    declared.some((text) => KTLINT_PLUGINS.some((id) => declaresPlugin(text, id)))
+  );
+}
+
+/** A directory's build scripts and version catalog, comments removed. */
+export function gradleDeclarations(dir: string): string[] {
+  return [...buildScripts(dir), readCode(join(dir, VERSION_CATALOG), "toml")];
 }
 
 /**
@@ -135,7 +159,14 @@ function ktfmtFor(dirs: string[]): FileFormatter | FormatterDecline {
  * or Spotless's `ktfmt().googleStyle()` elsewhere in a build mean something else.
  */
 function ktfmtSettings(script: string): string {
-  const blocks = [...script.matchAll(KTFMT_BLOCK)].map((match) => {
+  return [...blockBodies(script, KTFMT_BLOCK), ...(script.match(KTFMT_DOTTED_SETTING) ?? [])].join(
+    "\n",
+  );
+}
+
+/** The text inside each `{ ... }` block that `opening`, a global regex ending at `{`, opens. */
+export function blockBodies(script: string, opening: RegExp): string[] {
+  return [...script.matchAll(opening)].map((match) => {
     const start = match.index + match[0].length;
     let depth = 1;
     let end = start;
@@ -146,17 +177,16 @@ function ktfmtSettings(script: string): string {
     }
     return script.slice(start, end);
   });
-  return [...blocks, ...(script.match(KTFMT_DOTTED_SETTING) ?? [])].join("\n");
 }
 
 /** A quoted plugin id: `id("x")`, `apply plugin: "x"`, a catalog's `id = "x"`, or `"x:plugin:1.0"`. */
-function declaresPlugin(text: string, id: string): boolean {
+export function declaresPlugin(text: string, id: string): boolean {
   return ['"', "'"].some(
     (quote) => text.includes(`${quote}${id}${quote}`) || text.includes(`${quote}${id}:`),
   );
 }
 
-function buildScripts(dir: string): string[] {
+export function buildScripts(dir: string): string[] {
   return BUILD_SCRIPTS.map(([name, syntax]) => readCode(join(dir, name), syntax));
 }
 
@@ -219,7 +249,7 @@ function endOfNestedBlockComment(script: string, start: number): number {
  * The file's text, empty when it cannot be read (a missing file is the usual case) or is not a
  * regular file of a reasonable size: detection runs synchronously on every save.
  */
-function readText(path: string): string {
+export function readText(path: string): string {
   try {
     const info = statSync(path);
     if (!info.isFile() || info.size > MAX_SIGNAL_FILE_SIZE) return "";
@@ -229,13 +259,17 @@ function readText(path: string): string {
   }
 }
 
+export const KTLINT_INSTALL_HINT = "brew install ktlint";
+
 /** What to run, since Loxel never installs a formatter. */
 const INSTALL_HINTS: Record<string, string> = {
   ktfmt: "brew install ktfmt",
-  ktlint: "brew install ktlint",
+  ktlint: KTLINT_INSTALL_HINT,
 };
 
-const NO_JAVA = /Unable to locate a Java Runtime|\bjava: (command )?not found/i;
+/** What a launcher prints without a JVM: the macOS stub, a shell, or a Gradle start script. */
+export const NO_JAVA =
+  /Unable to locate a Java Runtime|\bjava: (command )?not found|no 'java' command|JAVA_HOME is set to an invalid directory/i;
 const UNKNOWN_FLAG = /no such option|unknown option/i;
 
 function kotlinFailureNotice(failure: FormatterFailure): string | undefined {
@@ -280,7 +314,7 @@ async function kotlinSpawnOptions(
  * The login-shell `PATH` without the worktree's directories, under any spelling of their path, or
  * an entry whose `command` is something the repository ships, such as a symlink leading back in.
  */
-async function trustedPath(command: string, root: string): Promise<string> {
+export async function trustedPath(command: string, root: string): Promise<string> {
   const entries = pathOutsideWorktree(buildSpawnEnv().PATH ?? "", root).split(delimiter);
   const trusted = await Promise.all(entries.map((dir) => isTrustedPathEntry(dir, command, root)));
   return entries.filter((_, i) => trusted[i]).join(delimiter);

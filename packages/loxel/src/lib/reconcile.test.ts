@@ -218,8 +218,6 @@ describe("reconcile", () => {
 
   test("echo: identical trees return current reference", () => {
     const state = {
-      models: [{ id: "1", label: "test", provider: "openrouter", modelId: "m1", apiKey: "k1" }],
-      codingAgent: { baseModelId: "1", functionOverrides: {} },
       layout: {
         zoneDefaults: { left: false, bottom: false, right: false },
         zonePanelOrder: { left: [], bottom: [], right: [] },

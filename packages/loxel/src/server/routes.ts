@@ -71,6 +71,7 @@ import { LaunchServicesClient } from "./launch-services-client";
 import { handleLocalDbRequest } from "./localdb-routes";
 import { logger } from "./logger";
 import { handleOpenInRequest, runOpenCommand } from "./open-in-routes";
+import { SETTINGS_STORE_KEY, stripLegacyAgentSettings } from "./persisted-settings";
 import * as projectStore from "./project-store";
 import {
   childWorktreeOptions,
@@ -82,6 +83,7 @@ import {
   type ProjectWorktree,
   type WorktreeMetaUpdate,
 } from "./project-worktrees";
+import { getRepoTrustStatus, isRepoTrustStoreKey, setRepoTrusted } from "./repo-trust";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
@@ -90,12 +92,6 @@ import { scanSetupSuggestions } from "./setup-suggestions";
 import { buildSpawnEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 import * as storeDb from "./store-db";
-import {
-  decryptModelKeys,
-  encryptModelKeys,
-  hasPlaintextModelKeys,
-  isEncryptedStoreKey,
-} from "./store-encryption";
 import { stress } from "./stress-detector";
 import { toolchainStatusModules } from "./toolchain-statuses";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
@@ -549,6 +545,12 @@ async function handleFileContent(req: Request, ctx: RouteContext): Promise<Respo
   return json({ lines });
 }
 
+/** A project's file is data, never a page of this server: media tags and fetches ignore these. */
+const RAW_FILE_HEADERS = {
+  "Content-Security-Policy": "sandbox",
+  "X-Content-Type-Options": "nosniff",
+};
+
 // GET /api/file-raw - Serve raw binary file content with correct Content-Type
 async function handleFileRaw(req: Request, ctx: RouteContext): Promise<Response> {
   const url = new URL(req.url);
@@ -595,12 +597,13 @@ async function handleFileRaw(req: Request, ctx: RouteContext): Promise<Response>
           "Accept-Ranges": "bytes",
           "Content-Length": String(end - start + 1),
           "Content-Type": file.type,
+          ...RAW_FILE_HEADERS,
         },
       });
     }
   }
 
-  return new Response(file, { headers: { "Accept-Ranges": "bytes" } });
+  return new Response(file, { headers: { "Accept-Ranges": "bytes", ...RAW_FILE_HEADERS } });
 }
 
 // GET /api/media-frame - Serve HTML wrapper page for media content in a sandboxed iframe
@@ -1091,6 +1094,22 @@ const toolchainPostRoutes = Object.fromEntries(
       },
     ]),
 );
+
+async function handleGetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
+  const wtPath = await worktreeFromQuery(req, ctx);
+  return wtPath instanceof Response ? wtPath : json(getRepoTrustStatus(wtPath));
+}
+
+async function handleSetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  if (typeof body.trusted !== "boolean") return error("Missing 'trusted' boolean in body", 400);
+  const resolved = resolveProjectFromBody(body, ctx);
+  if (resolved instanceof Response) return resolved;
+  const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
+  if (wtPath instanceof Response) return wtPath;
+  setRepoTrusted(wtPath, body.trusted);
+  return json(getRepoTrustStatus(wtPath));
+}
 
 // ---------------------------------------------------------------------------
 // Service-dependent routes: files panel
@@ -3314,6 +3333,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/update/status": handleGetUpdateStatus,
     "/api/detected-formatters": handleDetectedFormatters,
     ...toolchainGetRoutes,
+    "/api/repo-trust": handleGetRepoTrust,
     "/api/editorconfig": handleEditorConfig,
   },
   POST: {
@@ -3368,6 +3388,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/external-folders/add": handleExternalFolderAdd,
     "/api/external-folders/remove": handleExternalFolderRemove,
     ...toolchainPostRoutes,
+    "/api/repo-trust": handleSetRepoTrust,
   },
 };
 
@@ -3452,25 +3473,24 @@ export async function handleRequest(req: Request, ctx: RouteContext): Promise<Re
   const storeKeyMatch = pathname.match(/^\/api\/stores\/([^/]+)$/);
   if (storeKeyMatch?.[1]) {
     const storeKey = decodeURIComponent(storeKeyMatch[1]);
-    const isSettings = isEncryptedStoreKey(storeKey);
+    const isSettings = storeKey === SETTINGS_STORE_KEY;
     try {
       if (method === "GET") {
-        let value = storeDb.getStore(storeKey);
-        if (isSettings && value && hasPlaintextModelKeys(value)) {
-          // Rows written before API keys were encrypted at rest are migrated on first read.
-          value = encryptModelKeys(value);
-          storeDb.putStore(storeKey, value);
-        }
-        return json({ value: isSettings && value ? decryptModelKeys(value) : value });
+        const value = storeDb.getStore(storeKey);
+        if (!isSettings || !value) return json({ value });
+        const stripped = stripLegacyAgentSettings(value);
+        if (stripped !== value) storeDb.putStore(storeKey, stripped);
+        return json({ value: stripped });
       }
       if (method === "PUT") {
+        if (isRepoTrustStoreKey(storeKey)) return error("Not writable through this route", 403);
         const body = await parseBody(req);
         if (typeof body.value !== "string") return error("Missing 'value' string in body", 400);
-        const stored = isSettings ? encryptModelKeys(body.value) : body.value;
+        const stored = isSettings ? stripLegacyAgentSettings(body.value) : body.value;
         storeDb.putStore(storeKey, stored);
-        // Broadcast to all clients for cross-tab sync (broadcast plaintext state)
+        // Broadcast to all clients for cross-tab sync
         try {
-          const parsed = JSON.parse(body.value);
+          const parsed = JSON.parse(stored);
           if (parsed?.state && typeof parsed.state === "object") {
             const nonce = typeof body.nonce === "string" ? body.nonce : undefined;
             ctx.broadcastAll({

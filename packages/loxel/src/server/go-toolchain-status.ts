@@ -1,14 +1,18 @@
-import path from "node:path";
+import {
+  type GoEnvResponse,
+  type GoToolchainCandidatesResponse,
+  goToolchain,
+} from "@/api/go-env-model";
 
-import { type GoEnvResponse, goToolchain } from "@/api/go-env-model";
-
-import { getGoEnv, refreshAllGoEnvs, refreshGoEnv, subscribeGoEnv } from "./go-env";
-import { json } from "./response-helpers";
+import { automaticGoEnv, getGoEnv, refreshAllGoEnvs, refreshGoEnv, subscribeGoEnv } from "./go-env";
+import { listGoToolchains, normalizeGoChoice } from "./go-toolchain-candidates";
+import { getGoChoice, goChoiceStoreKey, onGoChoiceChange, setGoChoice } from "./go-toolchain-store";
+import { error, json } from "./response-helpers";
 import { resolveLoginShellEnv } from "./shell-env";
 import type { ToolchainStatusModule } from "./toolchain-status-module";
 
 async function goEnvResponse(wtPath: string): Promise<Response> {
-  const response: GoEnvResponse = { env: await getGoEnv(wtPath) };
+  const response: GoEnvResponse = { env: await getGoEnv(wtPath), chosen: getGoChoice(wtPath) };
   return json(response);
 }
 
@@ -20,17 +24,41 @@ async function handleGoEnvRefresh(wtPath: string): Promise<Response> {
   return goEnvResponse(wtPath);
 }
 
+// GET /api/go-env/candidates?wt= — What the user can choose for a worktree
+async function handleGoEnvCandidates(wtPath: string): Promise<Response> {
+  const automatic = await automaticGoEnv(wtPath);
+  const candidates = await listGoToolchains(wtPath, automatic ?? (await getGoEnv(wtPath)));
+  const response: GoToolchainCandidatesResponse = {
+    candidates,
+    automatic,
+    chosen: getGoChoice(wtPath),
+  };
+  return json(response);
+}
+
+// POST /api/go-env/choice — Choose a worktree's Go, or (null) return to detection
+async function handleGoEnvChoice(wtPath: string, body: Record<string, unknown>): Promise<Response> {
+  const { goPath } = body;
+  if (goPath !== null && typeof goPath !== "string") {
+    return error("goPath must be a string or null", 400);
+  }
+  try {
+    setGoChoice(wtPath, goPath === null ? null : await normalizeGoChoice(wtPath, goPath));
+  } catch (err) {
+    return error(err instanceof Error ? err.message : "Invalid Go toolchain", 400);
+  }
+  return goEnvResponse(wtPath);
+}
+
 export const goToolchainStatus: ToolchainStatusModule = {
   toolchain: goToolchain,
   subscribe: subscribeGoEnv,
   refresh: refreshGoEnv,
   refreshAll: refreshAllGoEnvs,
-  // Go has no per-worktree choice to store.
-  onOverrideChange: () => () => undefined,
-  overrideStoreKey: (wtPath) => `go-toolchain:${path.resolve(wtPath)}`,
+  onOverrideChange: onGoChoiceChange,
+  overrideStoreKey: goChoiceStoreKey,
   routes: {
-    // GET /api/go-env?wt= — The Go toolchain Loxel uses for a worktree
-    GET: { "/api/go-env": goEnvResponse },
-    POST: { "/api/go-env/refresh": handleGoEnvRefresh },
+    GET: { "/api/go-env": goEnvResponse, "/api/go-env/candidates": handleGoEnvCandidates },
+    POST: { "/api/go-env/refresh": handleGoEnvRefresh, "/api/go-env/choice": handleGoEnvChoice },
   },
 };

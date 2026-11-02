@@ -113,8 +113,6 @@ Because the terminal already has `LOXEL_PORT` set, the CLI connects to the runni
 
 Any terminal-based coding agent runs normally in Loxel terminals. Claude Code, Codex, OpenCode, and Gemini CLI all work without special configuration. They inherit `LOXEL_WORKTREE`, which gives them the current worktree path as immediate context — no need to `cd` or pass a path manually. `Shift+Enter` and `Ctrl+Enter` send the modified-Enter sequences these agents use to insert a newline instead of submitting.
 
-These are distinct from Loxel's built-in coding agent, which has a dedicated timeline UI and runs outside the terminal. If you want the timeline, human interaction overlays, and structured tool calls integrated into your layout, see [Coding Agent](/docs/coding-agent). If you have an existing TUI agent workflow or want full CLI control, run it in a terminal here.
-
 ### Teach your agent about Loxel
 
 The [`loxel` agent skill](https://github.com/bizimind/loxel/tree/main/skills/loxel) tells Claude Code, or any other agent that supports skills, that it is running inside Loxel and how to use the `loxel` CLI: opening the files it wants you to review, showing the dev server or PR it just started in a browser panel, and starting long-running commands or other agents in their own terminals. The agent needs the `loxel` CLI on its `PATH`. To install the skill for Claude Code (run it again to update):
@@ -138,6 +136,5 @@ For other agents, put the `skills/loxel` folder in their skills directory.
 
 ## See also
 
-- [Coding Agent](/docs/coding-agent) — the built-in agent alternative with a dedicated timeline UI and human interaction overlays
 - [Panel Layout](/docs/panel-layout) — docking, splitting, and moving terminal panels
 - [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — full `loxel` CLI reference and terminal scrollback configuration

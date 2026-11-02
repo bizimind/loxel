@@ -10,6 +10,7 @@ import { prepareDotnet, resolveDotnet } from "./csharp-env";
 import {
   dirsUpToRoot,
   type FileFormatter,
+  type FormatterDecline,
   type FormatterFailure,
   type FormatterSpawnOptions,
   type LanguageFormatter,
@@ -37,7 +38,6 @@ export const csharpFormatter: LanguageFormatter = {
  * file is written as it is. A syntax error exits 1.
  */
 const STDIN_ARGS = `format --stdin-path {file}`;
-const LOCAL_TOOL: FileFormatter = { command: DOTNET, args: `tool run ${CSHARPIER} ${STDIN_ARGS}` };
 const PATH_TOOL: FileFormatter = { command: CSHARPIER, args: STDIN_ARGS };
 
 /** CSharpier's own config names, checked against 1.3.0, which also reads `.yml`. */
@@ -47,22 +47,38 @@ const MANIFEST_FILES = ["dotnet-tools.json", join(".config", "dotnet-tools.json"
 const MAX_PROJECT_FILE_BYTES = 1_024 * 1_024;
 /** In what `dotnet tool run` prints for a manifest's tool that is not in the local tool cache. */
 const NOT_RESTORED_HINT = "dotnet tool restore";
+const LOCAL_TOOL_DECLINE: FormatterDecline = {
+  notice:
+    "Format on save skipped: Loxel doesn't run a project's local CSharpier yet. It uses a `csharpier` on your PATH instead, which you can install with `dotnet tool install -g csharpier`.",
+};
 
 /**
  * Pick how to run CSharpier for a file in `startDir`, walking up to `wtRoot`. A project opts in
- * with a tool manifest listing it or with a CSharpier config, and the manifest's pinned version
- * wins. A bare project or `.editorconfig` formats nothing, like the other formatters' opt-in
- * signals. CSharpier resolves its own nested options from `--stdin-path`.
+ * with a tool manifest listing it or with a CSharpier config. Both run a `csharpier` from `PATH`:
+ * the manifest's own version does not run until the repository trust gate restores
+ * `dotnet tool run` for it. A bare project or `.editorconfig` formats nothing, like the other
+ * formatters' opt-in signals. CSharpier resolves its own nested options from `--stdin-path`.
  *
  * Not cached: a save costs a few `statSync` calls per directory level plus parsing the manifests
  * on the way, negligible next to spawning the formatter. So does the SDK check, which reads one
  * `global.json` and asks git only about its `sdk.paths` entries.
  */
-function detectCSharpFormatter(startDir: string, wtRoot: string): FileFormatter | null {
+function detectCSharpFormatter(
+  startDir: string,
+  wtRoot: string,
+): FileFormatter | FormatterDecline | null {
   const dirs = dirsUpToRoot(startDir, wtRoot);
-  if (findLocalToolDir(dirs)) return LOCAL_TOOL;
+  if (findLocalToolDir(dirs)) return isOnPath(wtRoot) ? PATH_TOOL : LOCAL_TOOL_DECLINE;
   const hasConfig = dirs.some((dir) => CONFIG_FILES.some((name) => isSmallFile(join(dir, name))));
   return hasConfig ? PATH_TOOL : null;
+}
+
+function isOnPath(wtRoot: string): boolean {
+  const PATH = pathOutsideWorktree(buildSpawnEnv().PATH ?? "", resolve(wtRoot))
+    .split(delimiter)
+    .filter(isAbsolute)
+    .join(delimiter);
+  return Bun.which(CSHARPIER, { PATH }) !== null;
 }
 
 /**
@@ -217,7 +233,7 @@ async function isUsableEntry(dir: string, command: string, root: string): Promis
 function csharpFailureNotice(failure: FormatterFailure): string | undefined {
   if (failure.kind === "not-installed") {
     return failure.command === CSHARPIER
-      ? "Format on save skipped: this project uses CSharpier, which is not on your PATH. Add it to the project's tool manifest and run `dotnet tool restore`, or install it with `dotnet tool install -g csharpier`."
+      ? "Format on save skipped: this project uses CSharpier, which is not on your PATH. Install it with `dotnet tool install -g csharpier`."
       : undefined;
   }
   return isDotnet(failure.command) && failure.stderr.includes(NOT_RESTORED_HINT)

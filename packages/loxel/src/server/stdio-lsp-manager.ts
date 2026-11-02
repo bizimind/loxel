@@ -6,6 +6,7 @@ import type { LspName } from "@/api/log-entry-model";
 import {
   LSP_EXITED_CLOSE_CODE,
   LSP_REPLACED_CLOSE_CODE,
+  LSP_RESTART_CLOSE_CODE,
   LSP_START_FAILED_CLOSE_CODE,
 } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
@@ -18,6 +19,7 @@ import {
   WatchedFilesForwarder,
   withWatchedFilesCapability,
 } from "./lsp-watched-files";
+import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 import {
@@ -43,11 +45,14 @@ export interface BaseLspSession {
 
 export interface WtLspContext {
   wtPath: string;
+  /**
+   * Whether this server may run the repository's code, fixed when it starts like its arguments.
+   * Never permits downloads. See {@link WorktreeLspManager.repoTrustRestriction}.
+   */
+  repoTrusted: boolean;
 }
 
-export interface WtLspSession extends BaseLspSession {
-  wtPath: string;
-}
+export interface WtLspSession extends BaseLspSession, WtLspContext {}
 
 export interface SpawnOptions {
   cwd?: string;
@@ -216,6 +221,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   protected spawnArgs(_context: TContext): readonly string[] {
     return ["--stdio"];
+  }
+
+  /** Whether the context went out of date during an async {@link resolveBinary}: spawn nothing. */
+  protected isContextOutdated(_context: TContext): boolean {
+    return false;
   }
 
   /**
@@ -723,6 +733,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    * fails visibly.
    */
   private spawnSession(ws: ServerWebSocket<unknown>, context: TContext, bin: string | null): void {
+    if (this.isContextOutdated(context)) {
+      this.detach(ws);
+      ws.close(LSP_RESTART_CLOSE_CODE, "Settings changed while starting; reconnect");
+      return;
+    }
     let reason: string;
     if (bin) {
       try {
@@ -1099,8 +1114,44 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
  * worktree. Subclasses supply what differs per server: the binary, its arguments and settings.
  */
 export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
+  /**
+   * Set by a server that behaves differently in a trusted repository: what it leaves out until
+   * then, as one sentence for the user ("Build scripts don't run"). Its hooks read `repoTrusted`
+   * from the context or session, and the base does the rest: the sentence is what asks the user to
+   * trust the repository, and the server restarts when the answer changes.
+   */
+  protected readonly repoTrustRestriction: string | null = null;
+  private unsubscribeRepoTrust: (() => void) | null = null;
+
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
+    const repoTrusted = isRepoTrusted(wtPath);
+    if (this.repoTrustRestriction) {
+      this.unsubscribeRepoTrust ??= onRepoTrustChange(() => {
+        for (const session of [...this.sessions.values()]) this.restartIfTrustChanged(session);
+      });
+      if (!repoTrusted) reportRepoRestriction(wtPath, this.repoTrustRestriction);
+    }
+    this.startSession(ws, { wtPath, repoTrusted });
+  }
+
+  override async destroy(): Promise<void> {
+    this.unsubscribeRepoTrust?.();
+    this.unsubscribeRepoTrust = null;
+    await super.destroy();
+  }
+
+  // A server must not start on an answer the user has just taken back.
+  protected override isContextOutdated({ wtPath, repoTrusted }: WtLspContext): boolean {
+    return this.repoTrustRestriction !== null && isRepoTrusted(wtPath) !== repoTrusted;
+  }
+
+  private restartIfTrustChanged(session: WtLspSession): void {
+    if (!this.isSessionLive(session)) return;
+    if (isRepoTrusted(session.wtPath) === session.repoTrusted) return;
+    const { ws } = session;
+    this.log.info("Restarting for a change of repository trust", { wtPath: session.wtPath });
+    this.detach(ws);
+    ws.close(LSP_RESTART_CLOSE_CODE, "Repository trust changed; reconnect");
   }
 
   destroySession(ws: ServerWebSocket<unknown>): void {
@@ -1120,6 +1171,7 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
       ws,
       proc,
       wtPath: context.wtPath,
+      repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
     };

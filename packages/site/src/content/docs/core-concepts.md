@@ -10,7 +10,7 @@ Before diving into specific features, it helps to understand the four ideas that
 
 ## Contexts
 
-Your unit of focus in Loxel is a **context**: one project plus one worktree. When you switch worktrees, Loxel restores exactly the state you left behind — open files, panel sizes and positions, agent sessions, search filters, and commit graph selection. Nothing resets.
+Your unit of focus in Loxel is a **context**: one project plus one worktree. When you switch worktrees, Loxel restores exactly the state you left behind — open files, panel sizes and positions, terminals, search filters, and commit graph selection. Nothing resets.
 
 Context state is saved by Loxel, so it survives reloads, restarts, and multiple windows. Each worktree has its own completely independent workspace.
 

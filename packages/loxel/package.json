@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/loxel",
-  "version": "0.1.282",
+  "version": "0.1.289",
   "description": "IDE for the agentic coding era",
   "homepage": "https://github.com/bizimind/loxel",
   "author": {
@@ -36,7 +36,6 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
-    "@bizimind/coding-agent": "workspace:*",
     "@bizimind/localdb-sdk": "workspace:*",
     "@bizimind/logger": "workspace:*",
     "@bizimind/monaco-lsp-client": "workspace:*",

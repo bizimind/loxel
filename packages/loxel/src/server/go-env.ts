@@ -1,11 +1,20 @@
-import { realpathSync, statSync, watch, type FSWatcher } from "node:fs";
+import {
+  accessSync,
+  constants,
+  readlinkSync,
+  realpathSync,
+  statSync,
+  watch,
+  type FSWatcher,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
-import type { GoEnv, GoProjectVersion } from "@/api/go-env-model";
+import type { GoEnv, GoEnvSource, GoProjectVersion } from "@/api/go-env-model";
 import { isDirectory } from "@/fs-utils";
 import { isRecord } from "@/lib/is-record";
 
+import { getGoChoice } from "./go-toolchain-store";
 import { logger } from "./logger";
 import { pathOutsideWorktree } from "./python-env";
 import { buildSpawnEnv } from "./shell-env";
@@ -26,11 +35,22 @@ export const GO_ENV = { GOPROXY: "off", GOTOOLCHAIN: "local", GOSUMDB: "off", GO
 export const GO = process.platform === "win32" ? "go.exe" : "go";
 export const GOPLS = process.platform === "win32" ? "gopls.exe" : "gopls";
 const GO_ENV_TIMEOUT_MS = 10_000;
+const MAX_LINK_HOPS = 16;
 const WATCH_DEBOUNCE_MS = 1000;
 /** Far above any real `go.mod`; the repository decides what this file is. */
 const MAX_PROJECT_FILE_BYTES = 1024 * 1024;
 const PROJECT_FILES = ["go.work", "go.mod"] as const;
-const GO_ENV_NAMES = ["GOVERSION", "GOROOT", "GOPATH", "GOMODCACHE", "GOMOD", "GOWORK", "GOFLAGS"];
+const GO_ENV_NAMES = [
+  "GOVERSION",
+  "GOROOT",
+  "GOPATH",
+  "GOMODCACHE",
+  "GOMOD",
+  "GOWORK",
+  "GOFLAGS",
+  "GOHOSTOS",
+  "GOHOSTARCH",
+];
 
 /** Login-shell variables that resolution reads, directly or through `go`. */
 const RESOLUTION_ENV_VAR = /^(PATH|GO[A-Z0-9_]+)$/;
@@ -51,6 +71,8 @@ interface WorktreeGoEnv {
   resolution: Promise<GoEnv | null> | null;
   /** The last finished resolution. */
   settled: { env: GoEnv | null } | null;
+  /** The choice the latest resolution read. */
+  chosen: string | null;
   watch: GoEnvWatch | null;
 }
 
@@ -69,7 +91,7 @@ export function subscribeGoEnv(
   const wtPath = path.resolve(worktreePath);
   let entry = worktreeEnvs.get(wtPath);
   if (!entry) {
-    entry = { listeners: new Set(), resolution: null, settled: null, watch: null };
+    entry = { listeners: new Set(), resolution: null, settled: null, chosen: null, watch: null };
     worktreeEnvs.set(wtPath, entry);
   }
   const subscribed = entry;
@@ -91,7 +113,9 @@ export async function getGoEnv(worktreePath: string): Promise<GoEnv | null> {
   const wtPath = path.resolve(worktreePath);
   const entry = worktreeEnvs.get(wtPath);
   if (!entry) return resolveGoEnv(wtPath);
-  return entry.resolution ?? startResolution(wtPath, entry);
+  // A choice just made may not have reached the store's change hook yet.
+  if (entry.resolution && entry.chosen === getGoChoice(wtPath)) return entry.resolution;
+  return startResolution(wtPath, entry);
 }
 
 /** Re-resolve a subscribed worktree's toolchain now. */
@@ -122,6 +146,7 @@ function startResolution(wtPath: string, entry: WorktreeGoEnv): Promise<GoEnv | 
   entry.watch ??= watchGoEnv(watchTargets(wtPath, null), onChange);
   const resolution = resolveGoEnv(wtPath);
   entry.resolution = resolution;
+  entry.chosen = getGoChoice(wtPath);
   void resolution.then((env) => {
     if (worktreeEnvs.get(wtPath) !== entry || entry.resolution !== resolution) return;
     const previous = entry.settled;
@@ -164,7 +189,7 @@ function rewatch(
 // ---------------------------------------------------------------------------
 // Resolution
 
-function realpathOr(target: string): string {
+export function realpathOr(target: string): string {
   try {
     return realpathSync(target);
   } catch {
@@ -185,33 +210,54 @@ export function goToolPath(wtPath: string): string {
 }
 
 /** A version manager's shim: asdf, mise and goenv all keep theirs in a directory of this name. */
-function isShim(binary: string): boolean {
-  return path.basename(path.dirname(binary)) === "shims";
+export function isShim(binary: string): boolean {
+  const inShims = (file: string) => path.basename(path.dirname(file)) === "shims";
+  // Each link on the way counts: mise's shims are themselves links to the `mise` binary.
+  let current = binary;
+  for (let hops = 0; hops < MAX_LINK_HOPS; hops++) {
+    if (inShims(current)) return true;
+    try {
+      current = path.resolve(path.dirname(current), readlinkSync(current));
+    } catch {
+      break;
+    }
+  }
+  return inShims(realpathOr(binary));
 }
 
 /**
  * What to set in the environment of anything that runs `go` for a worktree, without shim
- * directories, and with the Go that `env`'s shim stands for first.
+ * directories, and with the Go that `env` stands for first when that is not simply the PATH's. A
+ * chosen or cached Go gets its GOROOT too, over one the login shell may export for another Go.
  */
 export function goSpawnEnv(
   wtPath: string,
-  env: Pick<GoEnv, "binary" | "goroot"> | null,
+  env: Pick<GoEnv, "binary" | "goroot" | "source"> | null,
 ): Record<string, string> {
   const dirs = goToolPath(wtPath)
     .split(path.delimiter)
-    .filter((dir) => path.basename(dir) !== "shims");
-  const first = env?.goroot && isShim(env.binary) ? [path.join(env.goroot, "bin")] : [];
-  return { PATH: [...first, ...dirs].join(path.delimiter), ...GO_ENV };
+    .filter((dir) => path.basename(dir) !== "shims" && path.basename(realpathOr(dir)) !== "shims");
+  const goroot = env?.goroot;
+  const own: Record<string, string> = goroot && env.source !== "path" ? { GOROOT: goroot } : {};
+  const first = goroot && (env.source !== "path" || isShim(env.binary));
+  return {
+    PATH: [...(first ? [path.join(goroot, "bin")] : []), ...dirs].join(path.delimiter),
+    ...own,
+    ...GO_ENV,
+  };
 }
 
 /** The first `name` on {@link goToolPath}, unless the repository could have provided it. */
-async function trustedOnPath(wtPath: string, name: string): Promise<string | null> {
+export async function trustedOnPath(wtPath: string, name: string): Promise<string | null> {
   const binary = Bun.which(name, { PATH: goToolPath(wtPath) });
   return binary && (await isTrustedBinary(wtPath, binary)) ? binary : null;
 }
 
-async function isTrustedBinary(wtPath: string, binary: string): Promise<boolean> {
-  const inWorktree = isInside(realpathOr(binary), realpathOr(wtPath));
+export async function isTrustedBinary(wtPath: string, binary: string): Promise<boolean> {
+  // By what it resolves to, and by where the link itself is, which the repository can re-point.
+  const realRoot = realpathOr(wtPath);
+  const linkPath = path.join(realpathOr(path.dirname(binary)), path.basename(binary));
+  const inWorktree = isInside(realpathOr(binary), realRoot) || isInside(linkPath, realRoot);
   if (!inWorktree && !(await isShippedByRepo(wtPath, binary))) return true;
   log.warn("Ignoring a Go tool that the repository ships", { wtPath, binary });
   return false;
@@ -231,57 +277,229 @@ export async function trustedGoTool(wtPath: string, name: string): Promise<strin
  * The Go a shim stands for, found from the home directory: the `go` in the GOROOT it reports. Null
  * when it names none that can be trusted, since nothing else on the PATH has been checked.
  */
-async function goBehindShim(wtPath: string, shim: string): Promise<string | null> {
+export async function goBehindShim(wtPath: string, shim: string): Promise<string | null> {
   const { GOROOT } = await goEnvVariables(shim, homedir(), wtPath, ["GOROOT"]);
   if (!GOROOT || !path.isAbsolute(GOROOT)) return null;
   const go = Bun.which(GO, { PATH: path.join(GOROOT, "bin") });
   return go && (await isTrustedBinary(wtPath, go)) ? go : null;
 }
 
+export function isExecutableFile(file: string): boolean {
+  try {
+    if (!statSync(file).isFile()) return false;
+    accessSync(file, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The worktree's chosen Go when it can still be used, then what detection finds. Never rejects. */
 async function resolveGoEnv(wtPath: string): Promise<GoEnv | null> {
   try {
-    const binary = await trustedOnPath(wtPath, GO);
-    if (!binary) return null;
-    const go = isShim(binary) ? await goBehindShim(wtPath, binary) : binary;
-    if (!go) return null;
-    const [reported, project] = await Promise.all([
-      goEnvVariables(go, wtPath, wtPath, GO_ENV_NAMES),
-      readProjectVersions(wtPath),
-    ]);
-    const version = versionFromGoVersion(reported.GOVERSION);
-    const newerThanInstalled = (found: GoProjectVersion | null) =>
-      found && version && compareGoVersions(found.version, version) > 0 ? found : null;
-    return {
-      binary,
-      version,
-      goroot: go === binary ? (reported.GOROOT ?? null) : path.dirname(path.dirname(go)),
-      gopath: reported.GOPATH ?? null,
-      gomodcache: reported.GOMODCACHE ?? null,
-      gomod: projectFile(reported.GOMOD),
-      gowork: projectFile(reported.GOWORK),
-      goflags: reported.GOFLAGS ?? null,
-      gopls: await trustedGoTool(wtPath, GOPLS),
-      newerGoNeeded: newerThanInstalled(project.go),
-      newerToolchainSuggested: newerThanInstalled(project.toolchain),
-    };
+    const chosen = getGoChoice(wtPath);
+    return (chosen && (await chosenGoEnv(wtPath, chosen))) || (await detectGoEnv(wtPath));
   } catch (err) {
     log.warn("Could not resolve the Go toolchain", { wtPath, error: err });
     return null;
   }
 }
 
-/** The variables `go env` reports with a value, run in `cwd`; empty when it fails. */
+/** What detection finds for the worktree, whatever is chosen. */
+export async function automaticGoEnv(wtPath: string): Promise<GoEnv | null> {
+  try {
+    return await detectGoEnv(wtPath);
+  } catch (err) {
+    log.warn("Could not resolve the Go toolchain", { wtPath, error: err });
+    return null;
+  }
+}
+
+/** Null when the chosen Go is gone, or the trust rule refuses it or the GOROOT it reports. */
+async function chosenGoEnv(wtPath: string, chosen: string): Promise<GoEnv | null> {
+  if (isShim(chosen) || !isExecutableFile(chosen)) return null;
+  if (!(await isTrustedBinary(wtPath, chosen))) return null;
+  const env = await describeGo(wtPath, chosen, chosen, "chosen");
+  const inRoot = env.goroot && Bun.which(GO, { PATH: path.join(env.goroot, "bin") });
+  return inRoot && (await isTrustedBinary(wtPath, inRoot)) ? env : null;
+}
+
+async function detectGoEnv(wtPath: string): Promise<GoEnv | null> {
+  const binary = await trustedOnPath(wtPath, GO);
+  if (!binary) return null;
+  const go = isShim(binary) ? await goBehindShim(wtPath, binary) : binary;
+  if (!go) return null;
+  const detected = await describeGo(wtPath, binary, go, "path");
+  return (await moduleCacheGoEnv(wtPath, detected)) ?? detected;
+}
+
+/**
+ * The project's version from the module cache, when the project asks for newer than `detected`:
+ * the highest it asks for, or failing that the `go` line, which is what it needs to load.
+ */
+async function moduleCacheGoEnv(wtPath: string, detected: GoEnv): Promise<GoEnv | null> {
+  const { gomodcache, toolchainPlatform: platform } = detected;
+  if (!gomodcache || !platform) return null;
+  const wanted = [detected.newerToolchainSuggested, detected.newerGoNeeded]
+    .filter((found) => found !== null)
+    .map((found) => found.version)
+    .toSorted((a, b) => compareGoVersions(b, a));
+  for (const version of wanted) {
+    const name = cachedToolchainDirName(version, platform);
+    const go = name && (await cachedGo(wtPath, gomodcache, name));
+    if (!go) continue;
+    const env = await describeGo(wtPath, go, go, "module-cache");
+    if (env.version === releaseOf(version)) return env;
+    log.warn("A cached Go toolchain does not report its version", { go, version: env.version });
+  }
+  return null;
+}
+
+/** `go env` from `go`, in the worktree, as `binary`, with the project's versions compared to it. */
+async function describeGo(
+  wtPath: string,
+  binary: string,
+  go: string,
+  source: GoEnvSource,
+): Promise<GoEnv> {
+  const [reported, project] = await Promise.all([
+    goEnvVariables(go, wtPath, wtPath, GO_ENV_NAMES, source !== "path"),
+    readProjectVersions(wtPath),
+  ]);
+  const version = versionFromGoVersion(reported.GOVERSION);
+  const newerThanThis = (found: GoProjectVersion | null) =>
+    found && version && compareGoVersions(found.version, version) > 0 ? found : null;
+  const ownRoot = reported.GOROOT ?? path.dirname(path.dirname(realpathOr(go)));
+  const { GOHOSTOS: hostOs, GOHOSTARCH: hostArch } = reported;
+  let goroot = reported.GOROOT ?? null;
+  if (source !== "path") goroot = ownRoot;
+  else if (go !== binary) goroot = path.dirname(path.dirname(go));
+  return {
+    binary,
+    source,
+    version,
+    goroot,
+    gopath: reported.GOPATH ?? null,
+    gomodcache: reported.GOMODCACHE ?? null,
+    toolchainPlatform: hostOs && hostArch ? `${hostOs}-${hostArch}` : null,
+    gomod: projectFile(reported.GOMOD),
+    gowork: projectFile(reported.GOWORK),
+    goflags: reported.GOFLAGS ?? null,
+    gopls: await trustedGoTool(wtPath, GOPLS),
+    newerGoNeeded: newerThanThis(project.go),
+    newerToolchainSuggested: newerThanThis(project.toolchain),
+  };
+}
+
+/** A login-shell environment to run `go` in, for a Go that must work out its own GOROOT. */
+function ownGorootEnv(wtPath: string): Record<string, string | undefined> {
+  const { GOROOT: _, ...env } = buildSpawnEnv();
+  return { ...env, ...goSpawnEnv(wtPath, null) };
+}
+
+/**
+ * The version a `go` binary reports, from the home directory; null when it does not answer like a
+ * Go. Takes a binary not yet known to be Go, so the output is matched strictly.
+ */
+export async function goVersion(wtPath: string, go: string): Promise<string | null> {
+  try {
+    const proc = measureSpawn("go", () =>
+      Bun.spawn([go, "version"], {
+        cwd: homedir(),
+        env: ownGorootEnv(wtPath),
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+        timeout: GO_ENV_TIMEOUT_MS,
+        killSignal: "SIGKILL",
+      }),
+    );
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    if (exitCode !== 0) return null;
+    return versionFromGoVersion(/^go version (.+) \S+\/\S+$/.exec(stdout.trim())?.[1]);
+  } catch (err) {
+    log.debug("go version failed", { go, error: err });
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Toolchains in the module cache
+
+/** `v0.0.1` is the only version the Go project publishes toolchains under. */
+const TOOLCHAIN_PREFIX = "toolchain@v0.0.1-go";
+const TOOLCHAIN_PLATFORM = /^[a-z0-9]+-[a-z0-9]+$/;
+
+/**
+ * The toolchain that serves `version`: the first release of a language version, as `go` asks for
+ * (`go 1.26` in a `go.mod` means `go1.26.0`).
+ */
+function releaseOf(version: string): string {
+  return /^\d+\.\d+$/.test(version) ? `${version}.0` : version;
+}
+
+/**
+ * The directory name of `version`'s toolchain under `GOMODCACHE/golang.org`. The version comes from
+ * a repository's file, so anything but the exact shape of a Go version gives null.
+ */
+export function cachedToolchainDirName(version: string, platform: string): string | null {
+  if (!PROJECT_GO_VERSION.test(version) || !TOOLCHAIN_PLATFORM.test(platform)) return null;
+  return `${TOOLCHAIN_PREFIX}${releaseOf(version)}.${platform}`;
+}
+
+/** The inverse of {@link cachedToolchainDirName}; null for any other name. */
+export function cachedToolchainVersion(name: string, platform: string): string | null {
+  const suffix = `.${platform}`;
+  if (!name.startsWith(TOOLCHAIN_PREFIX) || !name.endsWith(suffix)) return null;
+  const version = name.slice(TOOLCHAIN_PREFIX.length, -suffix.length);
+  return cachedToolchainDirName(version, platform) === name ? version : null;
+}
+
+/**
+ * The `go` of toolchain directory `name` in the module cache, only if it is already there, runnable
+ * and trusted, and neither it nor its directory lead out of the cache through a symlink.
+ */
+export async function cachedGo(
+  wtPath: string,
+  gomodcache: string,
+  name: string,
+): Promise<string | null> {
+  if (!path.isAbsolute(gomodcache)) return null;
+  const dir = path.join(gomodcache, "golang.org", name);
+  const go = Bun.which(GO, { PATH: path.join(dir, "bin") });
+  if (!go) return null;
+  const realCache = realpathOr(gomodcache);
+  const realDir = realpathOr(dir);
+  if (
+    realDir === realCache ||
+    !isInside(realDir, realCache) ||
+    !isInside(realpathOr(go), realDir)
+  ) {
+    log.warn("Ignoring a cached Go toolchain that leads out of the module cache", { dir });
+    return null;
+  }
+  return (await isTrustedBinary(wtPath, go)) ? go : null;
+}
+
+// ---------------------------------------------------------------------------
+// Reading what Go and the project report
+
+/**
+ * The variables `go env` reports with a value, run in `cwd`; empty when it fails. With `ownGoroot`,
+ * a GOROOT the login shell exports, likely for another Go, does not reach it.
+ */
 async function goEnvVariables(
   binary: string,
   cwd: string,
   wtPath: string,
   names: readonly string[],
+  ownGoroot = false,
 ): Promise<Record<string, string>> {
   try {
     const proc = measureSpawn("go", () =>
       Bun.spawn([binary, "env", "-json", ...names], {
         cwd,
-        env: { ...buildSpawnEnv(), ...goSpawnEnv(wtPath, null) },
+        env: ownGoroot ? ownGorootEnv(wtPath) : { ...buildSpawnEnv(), ...goSpawnEnv(wtPath, null) },
         stdin: "ignore",
         stdout: "pipe",
         stderr: "ignore",
@@ -321,8 +539,8 @@ async function readProjectVersions(
     const text = await readProjectFile(path.join(wtPath, file));
     if (text === null) continue;
     const lineVersion = (line: RegExp) => {
-      const version = parseGoVersion(line.exec(text)?.[1]);
-      return version ? { file, version } : null;
+      const version = line.exec(text)?.[1];
+      return version && PROJECT_GO_VERSION.test(version) ? { file, version } : null;
     };
     go = higher(go, lineVersion(/^go[ \t]+(\S+)/m));
     toolchain = higher(toolchain, lineVersion(/^toolchain[ \t]+go(\S+)/m));
@@ -342,6 +560,9 @@ async function readProjectFile(file: string): Promise<string | null> {
 }
 
 const GO_VERSION = /^(\d+)\.(\d+)(?:\.(\d+)|(beta|rc)(\d+))?/;
+
+/** A version as a repository's file may state it, whole: nothing a path could be built from. */
+const PROJECT_GO_VERSION = /^\d{1,9}\.\d{1,9}(?:\.\d{1,9}|(?:beta|rc)\d{1,9})?$/;
 
 /** The start of `text` that is a Go version: `1.27`, `1.27.3`, `1.27rc1`. */
 function parseGoVersion(text: string | undefined): string | null {
@@ -391,7 +612,8 @@ type WatchTargets = Map<string, Set<string>>;
 
 /**
  * Call `onChange` (debounced) when the worktree's toolchain may have changed: a root `go.mod` or
- * `go.work` changing, or `go` or `gopls` appearing in, changing in or leaving a PATH directory.
+ * `go.work` changing, `go` or `gopls` appearing in, changing in or leaving a PATH directory, the
+ * chosen Go changing, or a toolchain the project asks for appearing in the module cache.
  * Watches are non-recursive and fixed to the layout seen when {@link watchTargets} ran.
  */
 function watchGoEnv(targets: WatchTargets, onChange: () => void): GoEnvWatch {
@@ -439,19 +661,36 @@ function watchTargets(wtPath: string, current: GoEnv | null): WatchTargets {
     if (names) names.add(name);
     else targets.set(dir, new Set([name]));
   };
+  // What may not exist yet, by the deepest ancestor that does: a tarball install removes its `bin`
+  // first, and that ancestor sees it come back.
+  const addByAncestor = (target: string) => {
+    let missing = target;
+    while (!isDirectory(path.dirname(missing)) && path.dirname(missing) !== missing) {
+      missing = path.dirname(missing);
+    }
+    add(path.dirname(missing), path.basename(missing));
+  };
   for (const file of PROJECT_FILES) add(wtPath, file);
   for (const dir of goToolPath(wtPath).split(path.delimiter).filter(Boolean)) {
     if (isDirectory(dir)) {
       add(dir, GO);
       add(dir, GOPLS);
-      continue;
+    } else {
+      addByAncestor(dir);
     }
-    // A tarball install removes its `bin` first: its deepest existing ancestor sees it come back.
-    let missing = dir;
-    while (!isDirectory(path.dirname(missing)) && path.dirname(missing) !== missing) {
-      missing = path.dirname(missing);
+  }
+  const chosen = getGoChoice(wtPath);
+  if (chosen) addByAncestor(chosen);
+  const { gomodcache, toolchainPlatform: platform } = current ?? {};
+  if (current && current.source !== "chosen" && gomodcache && platform) {
+    for (const wanted of [current.newerGoNeeded, current.newerToolchainSuggested]) {
+      const name = wanted && cachedToolchainDirName(wanted.version, platform);
+      if (!name || !path.isAbsolute(gomodcache)) continue;
+      const dir = path.join(gomodcache, "golang.org", name);
+      addByAncestor(dir);
+      // `go` makes its binaries executable only after unpacking.
+      if (isDirectory(path.join(dir, "bin"))) add(path.join(dir, "bin"), GO);
     }
-    add(path.dirname(missing), path.basename(missing));
   }
   if (current) {
     // `go` on the PATH is often a symlink, whose target can be replaced without touching the link.

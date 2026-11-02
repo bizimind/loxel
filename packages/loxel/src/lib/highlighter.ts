@@ -35,6 +35,7 @@ const BUNDLED_LANGUAGES = [
   "objective-cpp",
   "swift",
   "kotlin",
+  "scala",
   "ruby",
   "php",
   "sql",
@@ -295,7 +296,7 @@ export const EXT_TO_LANG: Record<string, string> = {
   java: "java",
   kt: "kotlin",
   kts: "kotlin",
-  scala: "java",
+  scala: "scala",
 
   // Gradle, Groovy and Java properties
   groovy: "groovy",

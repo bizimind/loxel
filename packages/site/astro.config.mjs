@@ -12,7 +12,10 @@ export default defineConfig({
   output: "static",
   prefetch: true,
   // Renamed pages keep their old URLs working.
-  redirects: { "/docs/typescript-intelligence": "/docs/language-intelligence" },
+  redirects: {
+    "/docs/typescript-intelligence": "/docs/language-intelligence",
+    "/docs/coding-agent": "/docs/terminals#tui-agents",
+  },
   integrations: [react(), mdx(), sitemap()],
   markdown: { processor: satteri({ hastPlugins: [satteriKbd] }) },
   vite: { plugins: [tailwindcss()] },

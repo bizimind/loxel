@@ -124,7 +124,7 @@ function getServerPaths(): { serverBin: string; rendererDir: string } {
   };
 }
 
-function startServer(options: { dekBase64: string }): void {
+function startServer(options: { dekBase64: string | null }): void {
   serverStartedAt = Date.now();
   if (IS_DEV) {
     // In dev, spawn bun running the server source directly
@@ -147,7 +147,8 @@ function startServer(options: { dekBase64: string }): void {
   }
 
   serverProcess.stdin!.on("error", () => {});
-  serverProcess.stdin!.write(options.dekBase64 + "\n");
+  // Closing stdin without a key tells the server that secret storage is unavailable.
+  if (options.dekBase64) serverProcess.stdin!.write(options.dekBase64 + "\n");
   serverProcess.stdin!.end();
 
   serverProcess.stdout?.on("data", (data: Buffer) => {
@@ -460,7 +461,14 @@ function parsePendingUpdate(raw: string): PendingUpdate {
  * `tsgo-lib` is the preview-era directory, included so the migration removes it on success while
  * retaining a rollback path if installation fails.
  */
-const UPDATE_RESOURCE_DIRS = ["renderer", "typescript-lib", "typeshed-fallback", "tsgo-lib"];
+const UPDATE_RESOURCE_DIRS = [
+  "renderer",
+  "typescript-lib",
+  "typeshed-fallback",
+  "clangd-resource",
+  "tsgo-lib",
+  "jdtls",
+];
 
 /** Compute SHA256 hash of a file synchronously. */
 function sha256File(filePath: string): string {

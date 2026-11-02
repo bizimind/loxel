@@ -18,3 +18,21 @@ export function persistedSettingsState(raw: string | null): Record<string, unkno
   if (!isRecord(parsed) || !isRecord(parsed.state)) return null;
   return parsed.state;
 }
+
+/**
+ * Removes what the built-in coding agent kept in persisted settings, API keys included, from a row
+ * of the settings store: old rows on read, and writes from windows still running an older renderer,
+ * which would otherwise put keys back. Returns `raw` itself when there is nothing to remove.
+ */
+export function stripLegacyAgentSettings(raw: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.state)) return raw;
+  if (!("models" in parsed.state) && !("codingAgent" in parsed.state)) return raw;
+  const { models: _models, codingAgent: _codingAgent, ...state } = parsed.state;
+  return JSON.stringify({ ...parsed, state });
+}

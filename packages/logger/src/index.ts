@@ -95,7 +95,7 @@ function wrapLogger(logger: Logger, baseContext: Record<string, unknown> = {}): 
  * ```typescript
  * // HTTP mode - logs sent to Axiom via HTTP
  * const logger = createLogger({
- *   source: 'ccm-daemon',
+ *   source: 'wt',
  *   mode: 'http',
  *   axiomToken: process.env.AXIOM_TOKEN,
  *   axiomDataset: process.env.AXIOM_DATASET,

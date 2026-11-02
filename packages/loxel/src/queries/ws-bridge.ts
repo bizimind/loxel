@@ -454,6 +454,10 @@ export function useWsBridge(): void {
           usePanelNotificationStore.getState().clearFromServer();
           break;
 
+        case "repo_trust_changed":
+          void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
+          break;
+
         case "store_updated":
           if (message.nonce && consumeNonce(message.nonce)) break;
           applyStoreUpdate(message.key, message.state);
@@ -462,11 +466,6 @@ export function useWsBridge(): void {
         case "terminal_exit":
         case "terminal_state":
         case "error":
-        case "agent_event":
-        case "agent_exit":
-        case "agent_sessions":
-        case "agent_replay_done":
-        case "agent_error":
           break;
 
         default: {

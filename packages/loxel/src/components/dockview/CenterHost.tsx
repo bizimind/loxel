@@ -3,7 +3,7 @@
  *
  * The outer dockview manages sidebar zones (left/bottom/right) and the center host.
  * This component renders a second PersistedLayoutComponent for center panels
- * (editors, terminals, agents, etc.) with their own persistence and tab management.
+ * (editors, terminals, etc.) with their own persistence and tab management.
  */
 import type { DockviewApi, IDockviewPanelProps } from "dockview-react";
 import { useCallback, useEffect, useRef } from "react";
@@ -13,7 +13,6 @@ import { withDrawingCachePreserved } from "@/components/excalidraw-editor/Excali
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchPendingOpen } from "@/lib/open-path";
-import { useAgentDevToolsStore } from "@/store/agent-devtools";
 import { reattachActiveContent } from "@/store/layout-actions";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
@@ -73,28 +72,6 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
           usePanelNotificationStore.getState().unregisterPanel(terminalId);
         }
         getCurrentWorktreeToolsBar().getState().removeTerminal(event.id);
-      }
-
-      if (removedDef?.type === "agentDevTools") {
-        const params = event.params;
-        const sessionId =
-          typeof params === "object" && params !== null && "sessionId" in params
-            ? String((params as Record<string, unknown>).sessionId)
-            : undefined;
-        if (sessionId) {
-          useAgentDevToolsStore.getState().removeSession(sessionId);
-        }
-      }
-
-      if (removedDef?.type === "agent") {
-        const params = event.params;
-        const sessionId =
-          typeof params === "object" && params !== null && "sessionId" in params
-            ? String((params as Record<string, unknown>).sessionId)
-            : undefined;
-        if (sessionId) {
-          wsClient.send({ type: "agent_detach", id: sessionId });
-        }
       }
 
       // Notify server when the last panel showing an external file closes, so its watcher can

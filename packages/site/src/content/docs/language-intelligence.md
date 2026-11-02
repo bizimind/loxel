@@ -22,6 +22,8 @@ Loxel runs language servers for TypeScript, Python, TOML and other languages and
 
 The active worktree gets its own language server processes; only the YAML server is shared. Switching worktrees stops them and starts fresh ones for the worktree you switch to, so expect a short warm-up after a switch. There is no shared server state between worktrees — if one worktree is using an older TypeScript config, a different Python environment or a different version of your packages, it does not affect any other worktree's language servers.
 
+A language feature that depends on running a repository's own code waits until you [trust the repository](/docs/repository-trust).
+
 ### When a language server stops
 
 If a language server crashes, Loxel starts it again within a few seconds and the editor picks up where it left off: diagnostics, hover and completions come back for the files you have open. The same happens when Loxel itself restarts. A server that keeps crashing right after it starts is given a few tries, then left stopped, with a notification saying so.
@@ -77,7 +79,7 @@ Symbols flagged as unused by the language server are dimmed in the editor, and d
 
 ## Other languages
 
-Each language server is independent of the others. A language with more to say has its own page in the docs navigation, such as [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python) and [TOML](/docs/languages/toml). These have none:
+Each language server is independent of the others. A language with more to say has its own page in the docs navigation, such as [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python), [TOML](/docs/languages/toml) and [Kotlin](/docs/languages/kotlin). These have none:
 
 | Language  | When it starts             | File types                                                       |
 | --------- | -------------------------- | ---------------------------------------------------------------- |

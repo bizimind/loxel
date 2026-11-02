@@ -30,13 +30,7 @@ function contributor(
   resolveForTerminal: ToolchainEnvContributor["resolveForTerminal"],
   overrides: Partial<ToolchainEnvContributor> = {},
 ): ToolchainEnvContributor {
-  return {
-    name: "Test",
-    resolveForTerminal,
-    resolveForAgent: async () => null,
-    subscribeForAgent: () => () => {},
-    ...overrides,
-  };
+  return { name: "Test", resolveForTerminal, ...overrides };
 }
 
 function createManager(toolchainEnvs: readonly ToolchainEnvContributor[] = []): TerminalManager {

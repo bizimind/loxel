@@ -79,7 +79,6 @@ Every issue carries one type label and at least one package label; component lab
 | `component:files`     | Project files explorer and Others folders         |
 | `component:browser`   | Browser panels                                    |
 | `component:lsp`       | Language servers and diagnostics                  |
-| `component:agent`     | Coding agent panel                                |
 | `component:layout`    | Panels, tabs, dockview, top bar                   |
 | `component:keyboard`  | Shortcuts, focus navigation, accessibility        |
 | `component:cli`       | loxel CLI                                         |
