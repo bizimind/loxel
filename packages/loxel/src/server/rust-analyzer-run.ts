@@ -5,13 +5,10 @@ import { fileURLToPath } from "node:url";
 import type { RustToolchain, RustToolchainSource } from "@/api/rust-toolchain-model";
 import { isRecord } from "@/lib/is-record";
 
-import { logger } from "./logger";
 import { pathOutsideWorktree } from "./python-env";
 import { isReadableRustManifest, RUST_MANIFEST, untrustedNestedRepo } from "./rust-project-lookup";
 import { rustToolEnv } from "./rust-toolchain";
 import { buildSpawnEnv } from "./shell-env";
-
-const log = logger.child("rust-lsp");
 
 const COMMAND_TIMEOUT_MS = 10_000;
 /** A manifest's check reads one file, but on a loaded machine a refusal is worse than a wait. */
@@ -465,66 +462,6 @@ export function readDocumentLifecycle(data: string): { opened: boolean; file: st
   } catch {
     return null;
   }
-}
-
-/** Every process below `pid` that a `ps` lists now, from the system's `ps` whatever `PATH` holds. */
-function descendantsOf(pid: number): number[] {
-  const { stdout, success } = Bun.spawnSync(["ps", "-A", "-o", "pid=,ppid="], {
-    env: { PATH: "/bin:/usr/bin" },
-    stdin: "ignore",
-    stderr: "ignore",
-  });
-  if (!success) return [];
-  const children = new Map<number, number[]>();
-  for (const line of stdout.toString().split("\n")) {
-    const [child, parent] = line.trim().split(/\s+/).map(Number);
-    if (child === undefined || parent === undefined) continue;
-    children.set(parent, [...(children.get(parent) ?? []), child]);
-  }
-  const found: number[] = [];
-  const queue = [pid];
-  for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
-    for (const child of children.get(next) ?? []) {
-      found.push(child);
-      queue.push(child);
-    }
-  }
-  return found;
-}
-
-/** How many times to look for processes started while the ones found so far were being stopped. */
-const MAX_STOP_ROUNDS = 5;
-
-function signalIfAlive(pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(pid, signal);
-  } catch {
-    // Finished on its own.
-  }
-}
-
-/**
- * End everything a server has started: `cargo`, what cargo runs, and its proc macro server. Stopping
- * rust-analyzer leaves them behind, since it starts some in process groups of its own and some in its
- * own group, with no handler to end either. A process is frozen before any is killed, as a killed
- * parent's children would no longer be found below the server, and a frozen one starts nothing new.
- */
-export function endServerChildren(pid: number): void {
-  const frozen = new Set<number>();
-  try {
-    for (let round = 0; round < MAX_STOP_ROUNDS; round++) {
-      const fresh = descendantsOf(pid).filter((child) => !frozen.has(child));
-      if (fresh.length === 0) break;
-      for (const child of fresh) {
-        signalIfAlive(child, "SIGSTOP");
-        frozen.add(child);
-      }
-    }
-  } catch (err) {
-    // No `ps` to run. What was found still goes, and closing the session must carry on regardless.
-    log.warn("Could not list what rust-analyzer started", { error: err });
-  }
-  for (const child of frozen) signalIfAlive(child, "SIGKILL");
 }
 
 export interface RustServerStatus {

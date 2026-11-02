@@ -5,11 +5,11 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import type { RustToolchain } from "@/api/rust-toolchain-model";
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
+import { killProcessTrees } from "./kill-process-tree";
 import { fileUri } from "./lsp-file-uri";
 import { onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import {
   blockedClientMethod,
-  endServerChildren,
   findRustManifests,
   isRustManifestPath,
   planRustAnalyzer,
@@ -189,11 +189,11 @@ export class RustLspManager extends WorktreeLspManager {
     state.unsubscribe();
     state.stopFollowingTrust();
     state.checks?.dispose();
-    // Only a trusted server has builds running, and a revoked repository must keep none. Once the
-    // server is gone so is its place in the process tree, and its number may be someone else's.
+    // rust-analyzer's own stop leaves `cargo` and what it runs behind, and only a trusted server has
+    // those. Once the server is gone so is its tree, and its number may be someone else's.
     const { proc } = session;
     if (session.repoTrusted && proc.exitCode === null && proc.signalCode === null) {
-      endServerChildren(proc.pid);
+      killProcessTrees([proc.pid]);
     }
   }
 
