@@ -304,10 +304,11 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   /**
    * Like {@link watchedFileGlobs}, and also matched against events inside git-ignored directories,
-   * which reach servers only through this: `build/compile_commands.json` (clangd),
-   * `obj/project.assets.json` (C#). Keep them narrow, since build output is the busiest part of
-   * a worktree. A manager that must act on such a file itself, rather than tell its server, can
-   * override {@link notifyWatchedFilesChanged}. Needs {@link forwardWatchedFiles}.
+   * which reach servers only through this: `obj/project.assets.json` (C#). Keep them narrow, since
+   * build output is the busiest part of a worktree. A manager that must act on such a file itself,
+   * rather than tell its server, can override {@link notifyWatchedFilesChanged}, or
+   * {@link notifyIgnoredPathChanged} to tell these paths from the rest (clangd). Needs
+   * {@link forwardWatchedFiles}.
    */
   protected readonly watchedIgnoredGlobs: readonly string[] = [];
 
@@ -1121,6 +1122,11 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
    * trust the repository, and the server restarts when the answer changes.
    */
   protected readonly repoTrustRestriction: string | null = null;
+  /**
+   * False for a server that only knows once it has looked at the machine whether anything is held
+   * back: it calls `reportRepoRestriction` itself, as a repository nothing is held back in stays quiet.
+   */
+  protected readonly reportsRestrictionAtStart: boolean = true;
   private unsubscribeRepoTrust: (() => void) | null = null;
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
@@ -1129,7 +1135,9 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
       this.unsubscribeRepoTrust ??= onRepoTrustChange(() => {
         for (const session of [...this.sessions.values()]) this.restartIfTrustChanged(session);
       });
-      if (!repoTrusted) reportRepoRestriction(wtPath, this.repoTrustRestriction);
+      if (!repoTrusted && this.reportsRestrictionAtStart) {
+        reportRepoRestriction(wtPath, this.repoTrustRestriction);
+      }
     }
     this.startSession(ws, { wtPath, repoTrusted });
   }

@@ -27,6 +27,7 @@ export type ActionId =
   | "panel.new.browser"
   | "panel.open.localdb"
   | "panel.close"
+  | "panel.reopenClosed"
   | "panel.newTab"
   | "panel.rename"
   | `panel.split.${SplitDirection}`
@@ -172,6 +173,7 @@ export const ACTIONS: readonly ActionDef[] = [
 
   // Panel management
   { id: "panel.close", label: "Close Panel", category: "panel" },
+  { id: "panel.reopenClosed", label: "Reopen Closed Tab", category: "panel" },
 
   // New tab of the active panel's type, in its group
   { id: "panel.newTab", label: "New Tab (Same Type)", category: "panel" },

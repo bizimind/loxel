@@ -460,6 +460,29 @@ export function toolClaimsCommand(tool: unknown, command: string): boolean {
   return isRecord(tool) && Array.isArray(tool.commands) && tool.commands.includes(command);
 }
 
+/**
+ * Whether these `dotnet` arguments run what a manifest in `dirs` names rather than what they say:
+ * `tool run x`, or `x` alone, since `dotnet x` falls back to a local tool for any `x` or `dotnet-x`
+ * that isn't one of its own commands. Not `dotnet`, or arguments naming neither, run as written.
+ */
+export function dotnetArgsRunProjectTool(
+  command: string,
+  args: string,
+  dirs: readonly string[],
+): boolean {
+  if (path.basename(command).toLowerCase() !== "dotnet") return false;
+  const [first, second] = args.split(/\s+/).filter(Boolean);
+  if (first === "tool" && second === "run") return true;
+  if (!first || first.startsWith("-")) return false;
+  return dirs.some((dir) =>
+    readDotnetToolManifests(dir).some(({ tools }) =>
+      Object.values(isRecord(tools) ? tools : {}).some(
+        (tool) => toolClaimsCommand(tool, first) || toolClaimsCommand(tool, `dotnet-${first}`),
+      ),
+    ),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // SDK and runtime versions
 

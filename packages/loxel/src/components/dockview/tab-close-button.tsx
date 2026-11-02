@@ -1,5 +1,7 @@
 import type { DockviewPanelApi } from "dockview-react";
 
+import { closeCenterTab } from "@/store/closed-tabs";
+
 /** Shared close button for custom dockview tabs. */
 export function TabCloseButton({ api }: { api: DockviewPanelApi }) {
   return (
@@ -7,7 +9,7 @@ export function TabCloseButton({ api }: { api: DockviewPanelApi }) {
       className="dv-default-tab-action"
       onClick={(e) => {
         e.stopPropagation();
-        api.close();
+        closeCenterTab(api);
       }}
     >
       <svg

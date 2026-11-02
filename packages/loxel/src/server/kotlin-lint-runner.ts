@@ -1,11 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isRecord } from "@/lib/is-record";
 
-import { NO_JAVA, trustedPath } from "./kotlin-formatter";
+import { NO_JAVA, trustedPath, withWorktreeJdk } from "./kotlin-formatter";
 import type { DetektProject, KotlinLintProject, KotlinLintTool } from "./kotlin-lint-config";
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
@@ -49,7 +49,8 @@ export type KotlinLintOutcome =
 
 interface Tool {
   executable: string;
-  path: string;
+  /** Over the login-shell environment. */
+  env: Record<string, string>;
 }
 
 interface ToolExit {
@@ -61,11 +62,11 @@ interface ToolExit {
 }
 
 /**
- * Lint `files` of `project`, from the machine's tool. The tool comes from the same `PATH` as format
- * on save, and it runs from the home directory, where a version manager's shim cannot take its
- * version from a `.tool-versions` the repository ships. No flag here is derived from a repository
- * file except the config path and the files: `--plugins`, `--classpath`, `--ruleset` and
- * `--baseline` would load or parse more of it.
+ * Lint `files` of `project`, from the machine's tool, on the worktree's JDK. The tool comes from the
+ * same `PATH` as format on save, and it runs from the filesystem root, where a version manager's
+ * shim finds no pin to act on. No flag here is derived from a repository file except the config path
+ * and the files: `--plugins`, `--classpath`, `--ruleset` and `--baseline` would load or parse more
+ * of it.
  */
 export async function runKotlinLint(
   project: KotlinLintProject,
@@ -90,7 +91,7 @@ async function findTool(name: KotlinLintTool, wtRoot: string): Promise<Tool | nu
   for (const command of COMMANDS[name]) {
     const path = await trustedPath(command, root);
     const executable = Bun.which(command, { PATH: path });
-    if (executable) return { executable, path };
+    if (executable) return { executable, env: await withWorktreeJdk(path, root) };
   }
   return null;
 }
@@ -206,8 +207,8 @@ async function runKtlint(
 async function spawnTool(tool: Tool, args: string[], signal: AbortSignal): Promise<ToolExit> {
   if (signal.aborted) return { exitCode: null, timedOut: false, stdout: "", stderr: "" };
   const proc = Bun.spawn([tool.executable, ...args], {
-    cwd: homedir(),
-    env: { ...buildSpawnEnv(), PATH: tool.path },
+    cwd: parse(tool.executable).root,
+    env: { ...buildSpawnEnv(), ...tool.env },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
