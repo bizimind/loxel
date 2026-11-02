@@ -1,3 +1,4 @@
+import { cCppToolchainStatus } from "./c-cpp-toolchain-status";
 import { goToolchainStatus } from "./go-toolchain-status";
 import { javaToolchainStatus } from "./java-toolchain-status";
 /**
@@ -13,6 +14,7 @@ import type { ToolchainStatusModule } from "./toolchain-status-module";
 
 export const toolchainStatusModules: readonly ToolchainStatusModule[] = [
   // This comment keeps the list on one line per entry whatever its length.
+  cCppToolchainStatus,
   goToolchainStatus,
   javaToolchainStatus,
   nodeToolchainStatus,

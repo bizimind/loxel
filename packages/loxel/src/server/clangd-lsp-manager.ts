@@ -22,11 +22,18 @@ import {
   INDEX_REFRESH_MIN_INTERVAL_MS,
   INDEX_REFRESH_QUIET_MS,
 } from "./clangd-file-changes";
+import {
+  compileCommandsDir,
+  refreshCompileDatabases,
+  resolveCompileDatabases,
+  subscribeCompileDatabases,
+} from "./compile-database";
 import { config } from "./config";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import { reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
+import { isInside } from "./shipped-by-repo";
 import {
   WorktreeLspManager,
   type SpawnOptions,
@@ -303,17 +310,26 @@ const INDEX_CHECK_TIMEOUT_MS = 3000;
 
 /**
  * Whether clangd's index directory, `.cache/clangd/index` beside a compile database, or a parent of
- * it up to `.cache`, is a symlink: at the worktree's root or tracked by git at any depth. clangd
- * follows such a link, so the index would be written outside the project tree. A git check that
- * does not finish, or finds no git, counts as yes: the worktree only loses the index.
+ * it up to `.cache`, is a symlink: at the worktree's root, under a folder passed to clangd as
+ * `databaseDir`, or tracked by git at any depth. So too the folders down to `databaseDir` inside the
+ * worktree. clangd follows such a link, so the index would be written outside the project tree. A
+ * git check that does not finish, or finds no git, counts as yes: the worktree only loses the index.
  */
 export async function indexDirectoryIsSymlink(
   wtPath: string,
   run: typeof probe = probe,
+  databaseDir: string | null = null,
 ): Promise<boolean> {
-  for (const part of INDEX_DIRECTORY_PARTS) {
+  const paths = INDEX_DIRECTORY_PARTS.map((part) => join(wtPath, part));
+  if (databaseDir) {
+    paths.push(...INDEX_DIRECTORY_PARTS.map((part) => join(databaseDir, part)));
+    for (let dir = databaseDir; dir !== wtPath && isInside(dir, wtPath); dir = dirname(dir)) {
+      paths.push(dir);
+    }
+  }
+  for (const candidate of paths) {
     try {
-      if ((await lstat(join(wtPath, part))).isSymbolicLink()) return true;
+      if ((await lstat(candidate)).isSymbolicLink()) return true;
     } catch {
       // Not there, which is the usual case.
     }
@@ -374,6 +390,8 @@ interface ClangdLaunch {
   resourceDir: string | null;
   /** False on a Mac where running Apple's stubs would offer to install the developer tools. */
   developerTools: boolean;
+  /** Passed as `--compile-commands-dir`; null leaves finding each file's database to clangd. */
+  compileCommandsDir: string | null;
 }
 
 /** A live session's view of the files changing under it. */
@@ -381,12 +399,13 @@ interface ClangdSessionFiles {
   changes: ClangdFileChanges;
   /** Each open document's URI and the version the client last gave it. */
   openDocuments: Map<string, number>;
+  stopFollowingDatabases: () => void;
 }
 
 /**
  * Manages clangd child processes, one per worktree, for C, C++ and Objective-C. clangd finds each
  * file's compile command itself, per file, so monorepos with several compile databases work without
- * `--compile-commands-dir`. In a trusted repository the binary is the login-shell PATH's, else the
+ * `--compile-commands-dir`, which goes only where that search finds nothing (compile-database.ts). In a trusted repository the binary is the login-shell PATH's, else the
  * bundled one; otherwise the bundled one, else the PATH's.
  */
 export class ClangdLspManager extends WorktreeLspManager {
@@ -454,9 +473,11 @@ export class ClangdLspManager extends WorktreeLspManager {
           binary === userClangd ? USER_CLANGD_RESTRICTION : BUNDLED_CLANGD_RESTRICTION,
         );
       }
+      const databaseDir = compileCommandsDir(await resolveCompileDatabases(context.wtPath));
       const withoutIndex = await indexDirectoryIsSymlink(
         context.wtPath,
         developerTools ? probe : probeWithoutAppleStubs,
+        databaseDir,
       );
       if (withoutIndex) {
         this.log.info("Background index off: its directory is or may be a symlink", {
@@ -468,6 +489,7 @@ export class ClangdLspManager extends WorktreeLspManager {
         withoutIndex,
         resourceDir: !usesUserClangd && existsSync(resourceDir) ? resourceDir : null,
         developerTools,
+        compileCommandsDir: databaseDir,
       });
       return binary;
     }
@@ -512,6 +534,9 @@ export class ClangdLspManager extends WorktreeLspManager {
       // Otherwise on by default. Skipped so index files aren't written outside the project tree.
       ...(launch?.withoutIndex ? ["--background-index=false"] : []),
       ...(launch?.resourceDir ? [`--resource-dir=${launch.resourceDir}`] : []),
+      ...(launch?.compileCommandsDir
+        ? [`--compile-commands-dir=${launch.compileCommandsDir}`]
+        : []),
       // The defaults cap results: references at 1000 and renames at 50 files.
       "--limit-references=0",
       "--rename-file-limit=0",
@@ -538,21 +563,30 @@ export class ClangdLspManager extends WorktreeLspManager {
   ): WtLspSession {
     const session = super.buildSession(ws, proc, context);
     const openDocuments = new Map<string, number>();
+    const stopFollowingDatabases = subscribeCompileDatabases(session.wtPath, ({ status }) => {
+      this.restartIfDatabaseDirChanged(session, compileCommandsDir(status));
+    });
+    // Anything that changed between this start's own look and the subscription.
+    refreshCompileDatabases(session.wtPath);
     this.sessionFiles.set(session, {
       openDocuments,
+      stopFollowingDatabases,
       changes: new ClangdFileChanges({
         recheck: () => this.recheckOpenDocuments(session),
         rebuild: () => this.rebuildOpenDocuments(session),
         indexDirectoryChanged: () => void this.restartIfIndexDirectoryIsSymlink(session),
         isOpen: (relPath) => openDocuments.has(fileUri(join(session.wtPath, relPath))),
         refreshIndex: () => this.refreshIndex(session),
+        databasesChanged: () => refreshCompileDatabases(session.wtPath),
       }),
     });
     return session;
   }
 
   protected override onSessionClosed(session: WtLspSession): void {
-    this.sessionFiles.get(session)?.changes.dispose();
+    const files = this.sessionFiles.get(session);
+    files?.changes.dispose();
+    files?.stopFollowingDatabases();
     this.sessionFiles.delete(session);
   }
 
@@ -618,15 +652,29 @@ export class ClangdLspManager extends WorktreeLspManager {
     const isSymlink = await indexDirectoryIsSymlink(
       session.wtPath,
       launch.developerTools ? probe : probeWithoutAppleStubs,
+      launch.compileCommandsDir,
     );
     if (!isSymlink || !this.isSessionLive(session)) return;
     this.log.info("Restarting: the index directory is now a symlink", { wtPath: session.wtPath });
     this.restart(session, "Index directory changed; reconnect");
   }
 
+  /** The flag applies from a start, so a different folder takes a new session. */
+  private restartIfDatabaseDirChanged(session: WtLspSession, databaseDir: string | null): void {
+    const launch = this.launches.get(session.wtPath);
+    if (!launch || !this.isSessionLive(session) || launch.compileCommandsDir === databaseDir)
+      return;
+    this.log.info("Restarting: the compile database changed", {
+      wtPath: session.wtPath,
+      databaseDir,
+    });
+    this.restart(session, "Compile database changed; reconnect");
+  }
+
   private refreshIndex(session: WtLspSession): void {
     const files = this.sessionFiles.get(session);
-    if (!files || this.launches.get(session.wtPath)?.withoutIndex) return;
+    const launch = this.launches.get(session.wtPath);
+    if (!files || launch?.withoutIndex) return;
     const lastRefresh = this.indexRefreshedAt.get(session.wtPath);
     const untilAllowed =
       lastRefresh === undefined ? 0 : lastRefresh + INDEX_REFRESH_MIN_INTERVAL_MS - Date.now();
@@ -639,7 +687,7 @@ export class ClangdLspManager extends WorktreeLspManager {
       files.changes.refreshIndexAfter(waitMs);
       return;
     }
-    if (!hasCompileDatabase(files.openDocuments.keys())) return;
+    if (!launch?.compileCommandsDir && !hasCompileDatabase(files.openDocuments.keys())) return;
     this.indexRefreshedAt.set(session.wtPath, Date.now());
     this.log.info("Restarting: files changed on disk", { wtPath: session.wtPath });
     this.restart(session, "Files changed on disk; reconnect");
