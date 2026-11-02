@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
 import {
   chmod,
   mkdir,
@@ -16,8 +16,15 @@ import { pathToFileURL } from "node:url";
 
 import { $, type ServerWebSocket } from "bun";
 
-import { LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
+import { LSP_RESTART_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
 
+import {
+  CACHED_FILE_DELAY_MS,
+  INDEX_REFRESH_MIN_INTERVAL_MS,
+  INDEX_REFRESH_QUIET_MS,
+  MISSING_DATABASE_DELAY_MS,
+  SOURCE_DEBOUNCE_MS,
+} from "./clangd-file-changes";
 import {
   checkClangd,
   clangdMajorVersion,
@@ -27,6 +34,7 @@ import {
   prepareClangdUserConfig,
   queryDriverGlobs,
 } from "./clangd-lsp-manager";
+import type { WtLspSession } from "./stdio-lsp-manager";
 
 /** A clangd the manager will run: Xcode's isn't supported. */
 const CLANGD = Bun.which("clangd");
@@ -77,9 +85,12 @@ class FakeClient {
     this.ws = ws as unknown as ServerWebSocket<unknown>;
   }
 
-  async start(wtPath: string): Promise<{ capabilities: Record<string, unknown> }> {
+  async start(
+    wtPath: string,
+    capabilities: Record<string, unknown> = {},
+  ): Promise<{ capabilities: Record<string, unknown> }> {
     this.server.createSession(this.ws, wtPath);
-    const result = await this.request("initialize", { processId: null, capabilities: {} });
+    const result = await this.request("initialize", { processId: null, capabilities });
     this.send({ method: "initialized", params: {} });
     return result as { capabilities: Record<string, unknown> };
   }
@@ -98,12 +109,19 @@ class FakeClient {
     return published;
   }
 
+  /** The next diagnostics clangd publishes for an open file; set up before causing them. */
+  nextDiagnostics(file: string): Promise<unknown[]> {
+    return new Promise((resolve) => {
+      this.diagnosticsWaiters.set(pathToFileURL(file).href, resolve);
+    });
+  }
+
   /** Ask clangd to shut down, and wait for its answer. */
   async shutdown(): Promise<void> {
     await this.request("shutdown", null);
   }
 
-  private request(method: string, params: unknown): Promise<unknown> {
+  request(method: string, params: unknown): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve) => {
       this.responses.set(id, resolve);
@@ -111,7 +129,7 @@ class FakeClient {
     });
   }
 
-  private send(message: Record<string, unknown>): void {
+  send(message: Record<string, unknown>): void {
     this.server.handleMessage(this.ws, JSON.stringify({ jsonrpc: "2.0", ...message }));
   }
 
@@ -354,7 +372,7 @@ describe("ClangdLspManager", () => {
       await writeFile(
         join(bin, "clangd"),
         `#!/bin/sh
-if [ "$1" = --version ]; then echo "clangd version 23.1.0"; exit 0; fi
+if [ "$1" = --version ]; then pwd > "${join(bin, "version-cwd.txt")}"; echo "clangd version 23.1.0"; exit 0; fi
 { echo "PATH=$PATH"; printf '%s\\n' "$@"; } > "${record}"
 printf 'Content-Length: ${answer.length}\\r\\n\\r\\n%s' '${answer}'
 exec /bin/cat > /dev/null
@@ -387,6 +405,11 @@ exec /bin/cat > /dev/null
 
       const fromPath = await launch({ developerTools: true, resourceDir: false });
       expect(fromPath.args.filter((arg) => arg.startsWith("--resource-dir"))).toEqual([]);
+    });
+
+    test("reads the version from the filesystem root", async () => {
+      const { bin } = await launch({ developerTools: true, resourceDir: true });
+      expect((await readFile(join(bin, "version-cwd.txt"), "utf8")).trim()).toBe("/");
     });
 
     test("leaves Apple's stubs alone with the developer tools installed", async () => {
@@ -455,6 +478,177 @@ exec /bin/cat > /dev/null
   );
 });
 
+describe.skipIf(process.platform === "win32")("ClangdLspManager when files change on disk", () => {
+  /** What the manager writes to its server. */
+  class RecordingManager extends ClangdLspManager {
+    readonly frames: { method?: string; params?: Record<string, unknown> }[] = [];
+
+    protected override writeToStdin(session: WtLspSession, json: string): void {
+      this.frames.push(JSON.parse(json) as (typeof this.frames)[number]);
+      super.writeToStdin(session, json);
+    }
+
+    liveSessions(): number {
+      return this.sessions.size;
+    }
+
+    sent(method: string): Record<string, unknown>[] {
+      return this.frames.filter((f) => f.method === method).map((f) => f.params ?? {});
+    }
+  }
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  /** A session on a stand-in clangd, with the given files open. */
+  async function start(open: readonly string[] = []) {
+    const bin = await makeDir();
+    const answer = '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}';
+    await writeFile(
+      join(bin, "clangd"),
+      `#!/bin/sh
+if [ "$1" = --version ]; then echo "clangd version 23.1.0"; exit 0; fi
+printf 'Content-Length: ${answer.length}\\r\\n\\r\\n%s' '${answer}'
+exec /bin/cat > /dev/null
+`,
+    );
+    await chmod(join(bin, "clangd"), 0o755);
+    const { PATH } = process.env;
+    process.env.PATH = `${bin}:${PATH}`;
+    try {
+      const recording = new RecordingManager(process.platform, await makeDir(), async () => true);
+      manager = recording;
+      const client = new FakeClient(recording);
+      const root = await makeDir();
+      await client.start(root);
+      const uris = open.map((file) => pathToFileURL(join(root, file)).href);
+      for (const uri of uris) {
+        const textDocument = { uri, languageId: "cpp", version: 1, text: "" };
+        client.send({ method: "textDocument/didOpen", params: { textDocument } });
+      }
+      return { recording, client, root, uris, bin };
+    } finally {
+      process.env.PATH = PATH;
+    }
+  }
+
+  test("a header that is not open re-checks one open document, once", async () => {
+    const { recording, root, uris } = await start(["a.cpp", "b.cpp"]);
+    jest.useFakeTimers();
+    recording.notifyWatchedFilesChanged(root, [join(root, "x.h")]);
+    recording.notifyWatchedFilesChanged(root, [join(root, "y.h"), join(root, "a.cpp")]);
+    jest.advanceTimersByTime(SOURCE_DEBOUNCE_MS);
+    expect(recording.sent("textDocument/didSave")).toEqual([{ textDocument: { uri: uris[0] } }]);
+    expect(recording.sent("workspace/didChangeWatchedFiles")).toEqual([]);
+  });
+
+  test("with nothing open there is nothing to re-check", async () => {
+    const { recording, client, root, uris } = await start(["a.cpp"]);
+    client.send({ method: "textDocument/didClose", params: { textDocument: { uri: uris[0] } } });
+    jest.useFakeTimers();
+    recording.notifyWatchedFilesChanged(root, [join(root, "x.h")]);
+    jest.advanceTimersByTime(SOURCE_DEBOUNCE_MS);
+    expect(recording.sent("textDocument/didSave")).toEqual([]);
+  });
+
+  test("a compile database in a git-ignored directory arrives, build output does not", async () => {
+    const { recording, root } = await start(["a.cpp"]);
+    jest.useFakeTimers();
+    recording.notifyIgnoredPathChanged(root, "build/CMakeFiles/a.dir/a.cpp.o");
+    jest.advanceTimersByTime(MISSING_DATABASE_DELAY_MS);
+    expect(recording.sent("textDocument/didSave")).toEqual([]);
+
+    recording.notifyIgnoredPathChanged(root, "build/compile_commands.json");
+    jest.advanceTimersByTime(CACHED_FILE_DELAY_MS);
+    expect(recording.sent("textDocument/didSave")).toHaveLength(1);
+    jest.advanceTimersByTime(MISSING_DATABASE_DELAY_MS - CACHED_FILE_DELAY_MS);
+    expect(recording.sent("textDocument/didSave")).toHaveLength(2);
+  });
+
+  test.each([".clangd", ".clang-tidy"])("%s rebuilds every open document", async (config) => {
+    const { recording, client, root, uris } = await start(["a.cpp", "b.cpp", "c.cpp"]);
+    client.send({ method: "textDocument/didClose", params: { textDocument: { uri: uris[2] } } });
+    jest.useFakeTimers();
+    recording.notifyWatchedFilesChanged(root, [join(root, config)]);
+    jest.advanceTimersByTime(CACHED_FILE_DELAY_MS);
+    const rebuilds = recording.sent("textDocument/didChange");
+    expect(rebuilds).toEqual(
+      uris
+        .slice(0, 2)
+        .map((uri) => ({
+          textDocument: { uri, version: 1 },
+          contentChanges: [],
+          forceRebuild: true,
+        })),
+    );
+  });
+
+  test("closing the session cancels what is pending", async () => {
+    const { recording, client, root } = await start(["a.cpp"]);
+    jest.useFakeTimers();
+    recording.notifyWatchedFilesChanged(root, [join(root, "x.h"), join(root, ".clangd")]);
+    recording.detach(client.ws);
+    jest.advanceTimersByTime(MISSING_DATABASE_DELAY_MS);
+    expect(recording.sent("textDocument/didSave")).toEqual([]);
+    expect(recording.sent("textDocument/didChange")).toEqual([]);
+  });
+
+  test("restarts for the index once files that are not open have gone quiet", async () => {
+    const { recording, client, root } = await start(["a.cpp"]);
+    await writeFile(join(root, "compile_commands.json"), "[]");
+    jest.useFakeTimers();
+    recording.notifyWatchedFilesChanged(root, [join(root, "a.cpp")]);
+    jest.advanceTimersByTime(INDEX_REFRESH_QUIET_MS);
+    expect(recording.sent("textDocument/didSave")).toHaveLength(1);
+    recording.notifyWatchedFilesChanged(root, [join(root, "other.cpp")]);
+    jest.advanceTimersByTime(INDEX_REFRESH_QUIET_MS);
+    expect((await client.closed).code).toBe(LSP_RESTART_CLOSE_CODE);
+  });
+
+  test("does not restart for the index without a compile database", async () => {
+    const { recording, root } = await start(["a.cpp"]);
+    jest.useFakeTimers();
+    recording.notifyWatchedFilesChanged(root, [join(root, "other.cpp")]);
+    jest.advanceTimersByTime(INDEX_REFRESH_QUIET_MS);
+    expect(recording.liveSessions()).toBe(1);
+  });
+
+  test("refreshes the index at most so often, and for the file opened next", async () => {
+    const { recording, client, root, uris, bin } = await start(["a.cpp"]);
+    await writeFile(join(root, "compile_commands.json"), "[]");
+    client.send({ method: "textDocument/didClose", params: { textDocument: { uri: uris[0] } } });
+    jest.useFakeTimers();
+    recording.notifyWatchedFilesChanged(root, [join(root, "other.cpp")]);
+    jest.advanceTimersByTime(INDEX_REFRESH_QUIET_MS * 3);
+    expect(recording.liveSessions()).toBe(1);
+
+    const textDocument = { uri: uris[0], languageId: "cpp", version: 1, text: "" };
+    client.send({ method: "textDocument/didOpen", params: { textDocument } });
+    jest.advanceTimersByTime(INDEX_REFRESH_QUIET_MS);
+    expect((await client.closed).code).toBe(LSP_RESTART_CLOSE_CODE);
+
+    const next = new FakeClient(recording);
+    const { PATH } = process.env;
+    process.env.PATH = `${bin}:${PATH}`;
+    await next.start(root);
+    process.env.PATH = PATH;
+    next.send({ method: "textDocument/didOpen", params: { textDocument } });
+    recording.notifyWatchedFilesChanged(root, [join(root, "other.cpp")]);
+    jest.advanceTimersByTime(INDEX_REFRESH_QUIET_MS);
+    expect(recording.liveSessions()).toBe(1);
+    jest.advanceTimersByTime(INDEX_REFRESH_MIN_INTERVAL_MS);
+    expect((await next.closed).code).toBe(LSP_RESTART_CLOSE_CODE);
+  });
+
+  test("restarts when the index directory becomes a symlink", async () => {
+    const { recording, client, root } = await start(["a.cpp"]);
+    await symlink(await makeDir(), join(root, ".cache"));
+    recording.notifyIgnoredPathChanged(root, ".cache");
+    expect((await client.closed).code).toBe(LSP_RESTART_CLOSE_CODE);
+  });
+});
+
 /** A project whose compile database runs `compiler` for `x.cpp`, with `flags` before the file. */
 async function writeProject(
   root: string,
@@ -483,6 +677,89 @@ describe.skipIf(!CLANGD_IS_SUPPORTED || process.platform === "win32")(
       await client.openAndWaitForDiagnostics(file);
       await client.shutdown();
     }
+
+    test(
+      "a header changing on disk reaches the open files that include it",
+      async () => {
+        const root = await makeDir();
+        const file = await writeProject(root, "/usr/bin/c++");
+        await writeFile(file, '#include "dep.h"\nint x = DEP;\n');
+        await writeFile(join(root, "dep.h"), "#define DEP 1\n");
+        manager = new ClangdLspManager(process.platform, await makeDir());
+        const client = new FakeClient(manager);
+        await client.start(root);
+        expect(await client.openAndWaitForDiagnostics(file)).toEqual([]);
+
+        const next = client.nextDiagnostics(file);
+        await writeFile(join(root, "dep.h"), "// DEP is gone\n");
+        manager.notifyWatchedFilesChanged(root, [join(root, "dep.h")]);
+        expect(await next).toHaveLength(1);
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      "a .clangd that only changes diagnostics applies to open files",
+      async () => {
+        const root = await makeDir();
+        const file = await writeProject(root, "/usr/bin/c++");
+        await writeFile(file, "int use(int x) { if (x) return 1; return 0; }\n");
+        manager = new ClangdLspManager(process.platform, await makeDir());
+        const client = new FakeClient(manager);
+        await client.start(root);
+        expect(await client.openAndWaitForDiagnostics(file)).toEqual([]);
+
+        const next = client.nextDiagnostics(file);
+        await writeFile(
+          join(root, ".clangd"),
+          "Diagnostics:\n  ClangTidy:\n    Add: [readability-braces-around-statements]\n",
+        );
+        manager.notifyWatchedFilesChanged(root, [join(root, ".clangd")]);
+        expect(await next).toHaveLength(1);
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      "quick fixes from a rebuild carry the version the client has",
+      async () => {
+        const root = await makeDir();
+        const file = await writeProject(root, "/usr/bin/c++");
+        await writeFile(file, "int use(int x) { if (x) return 1; return 0; }\n");
+        manager = new ClangdLspManager(process.platform, await makeDir());
+        const client = new FakeClient(manager);
+        await client.start(root, {
+          workspace: { workspaceEdit: { documentChanges: true } },
+          textDocument: {
+            codeAction: {
+              codeActionLiteralSupport: { codeActionKind: { valueSet: ["quickfix"] } },
+            },
+          },
+        });
+        await client.openAndWaitForDiagnostics(file);
+
+        const next = client.nextDiagnostics(file);
+        await writeFile(
+          join(root, ".clang-tidy"),
+          "Checks: 'readability-braces-around-statements'\n",
+        );
+        manager.notifyWatchedFilesChanged(root, [join(root, ".clang-tidy")]);
+        const diagnostics = await next;
+        expect(diagnostics).toHaveLength(1);
+
+        const actions = (await client.request("textDocument/codeAction", {
+          textDocument: { uri: pathToFileURL(file).href },
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 40 } },
+          context: { diagnostics },
+        })) as { edit?: { documentChanges?: { textDocument: { version: number } }[] } }[];
+        const versions = actions.flatMap((action) =>
+          (action.edit?.documentChanges ?? []).map((change) => change.textDocument.version),
+        );
+        expect(versions.length).toBeGreaterThan(0);
+        expect(new Set(versions)).toEqual(new Set([1]));
+      },
+      TEST_TIMEOUT_MS,
+    );
 
     test(
       "leaves formatting to format on save",
