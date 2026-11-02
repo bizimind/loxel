@@ -291,6 +291,10 @@ export class RustLspManager extends WorktreeLspManager {
     for (const manifest of state.openedManifests) {
       if (!isReadableRustManifest(manifest, wtPath)) state.openedManifests.delete(manifest);
     }
+    for (const manifest of state.refusedManifests) {
+      // One that is gone has nothing left to fix, and would be checked and reported again forever.
+      if (!isReadableRustManifest(manifest, wtPath)) state.refusedManifests.delete(manifest);
+    }
     for (const file of state.looseFiles) {
       // Closed ones go too: they cost nothing to bring back.
       const isLoose = findRustProject(file, wtPath)?.kind === "loose";

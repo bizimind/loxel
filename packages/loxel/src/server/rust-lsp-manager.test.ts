@@ -795,6 +795,29 @@ fi
       ]);
     });
 
+    test("forgets a refused manifest once it is gone", async () => {
+      const { bin } = await installFakeRust();
+      await writeExecutable(join(bin, "cargo"), CARGO_FAILS_ON_BROKEN);
+      const wt = await makeDir("rust-wt-");
+      const file = await makeCrate(wt, "deep/broken", "[package\n");
+      const socket = await started(wt);
+      open(socket, file);
+      const isNotice = (message: { method?: string; params: { message: string } }) =>
+        message.method === "window/showMessage" && message.params.message.includes("deep/broken");
+      await socket.untilFrame(isNotice);
+
+      await rm(join(wt, "deep/broken"), { recursive: true });
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "deep/broken/Cargo.toml")]);
+      // Adding this project is the sentinel: the change before it has been dealt with by then.
+      open(socket, await makeCrate(wt, "deep/other"));
+      await socket.untilPull(1);
+      await writeFile(join(wt, "deep/other/Cargo.toml"), "[package]\nname = 'other'\n");
+      manager?.notifyWatchedFilesChanged(wt, [join(wt, "deep/other/Cargo.toml")]);
+      open(socket, await makeCrate(wt, "deep/third"));
+      await socket.untilPull(2);
+      expect(socket.frames.filter(isNotice)).toHaveLength(1);
+    });
+
     test("says which loaded manifest broke, and keeps it linked", async () => {
       const { bin } = await installFakeRust();
       await writeExecutable(join(bin, "cargo"), CARGO_FAILS_ON_BROKEN);
