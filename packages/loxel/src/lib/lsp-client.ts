@@ -16,7 +16,11 @@ import {
 } from "./lsp-connection";
 import { createLspWorkspaceFiles } from "./lsp-workspace-files";
 import { SEMANTIC_TOKEN_STYLING } from "./monaco-theme";
-import { registerVirtualDocumentScheme, type VirtualDocumentOptions } from "./virtual-documents";
+import {
+  isVirtualDocumentUri,
+  registerVirtualDocumentScheme,
+  type VirtualDocumentOptions,
+} from "./virtual-documents";
 
 const log = frontendLog.child("ui");
 
@@ -115,9 +119,6 @@ export function createLspClient({
     : undefined;
   const ownsVirtualDocument = (model: Parameters<typeof isLiveEditorModel>[0]): boolean =>
     model.uri.scheme === virtualDocuments?.scheme && !isPreviewModel(model);
-  /** Whether a model is this client's to sync, and so a reason to connect. */
-  const syncsModel = (model: Parameters<typeof isLiveEditorModel>[0]): boolean =>
-    isLiveEditorModel(model) || ownsVirtualDocument(model);
 
   async function open(wtPath: string | null, signal: AbortSignal): Promise<LspLink> {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -131,9 +132,9 @@ export function createLspClient({
     try {
       client = new MonacoLspClient(transport, {
         languageId,
-        modelFilter: syncsModel,
-        // Their tabs are read-only, which stops typing but not a server's edit.
-        isReadOnlyModel: ownsVirtualDocument,
+        modelFilter: (model) => isLiveEditorModel(model) || ownsVirtualDocument(model),
+        // Any server's. Their tabs are read-only, which stops typing but not a server's edit.
+        isReadOnlyModel: (model) => isVirtualDocumentUri(model.uri.toString()),
         // One client per route at a time: each takes over the markers' owner of the one before.
         markerOwner,
         workspaceFileSystem: wtPath === null ? undefined : createLspWorkspaceFiles(wtPath),
@@ -190,7 +191,7 @@ export function createLspClient({
     connect: connection.connect,
     disconnect: connection.disconnect,
     languageIds,
-    syncsModel,
+    ownsVirtualDocument,
     keepsEditorUris,
     logCategory: markerOwner,
   };

@@ -782,7 +782,6 @@ async function exerciseFeatures(): Promise<void> {
   await stopClient(client);
 }
 
-/** Opening and editing a file in a project with build logic: none of it runs, its files stay. */
 /**
  * Library sources: go to definition on JDK and dependency classes, with and without attached source,
  * then read each document, open it and use it the way a read-only tab does.
@@ -867,6 +866,7 @@ public class App {
   await stopClient(client);
 }
 
+/** Opening and editing a file in a project with build logic: none of it runs, its files stay. */
 async function exerciseProjects(jar: string): Promise<void> {
   for (const [name, write] of Object.entries(projectFixtures(jar))) {
     write();

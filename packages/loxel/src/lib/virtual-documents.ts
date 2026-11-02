@@ -1,7 +1,10 @@
 import type { MonacoLspClient } from "@bizimind/monaco-lsp-client";
 import type * as monaco from "monaco-editor";
 
+import { frontendLog } from "./frontend-logger";
 import { isRecord } from "./is-record";
+
+const log = frontendLog.child("ui");
 
 /** How a language's client module exposes its server's read-only documents. */
 export interface VirtualDocumentOptions {
@@ -75,7 +78,14 @@ export function registerVirtualDocumentScheme(
       connections.set(scheme, connection);
       return () => {
         if (connections.get(scheme) === connection) connections.set(scheme, null);
-        for (const listener of listeners) listener();
+        // One that fails must not keep the others, or the socket's teardown after this, from running.
+        for (const listener of listeners) {
+          try {
+            listener();
+          } catch (error) {
+            log.error("Closing a read-only document failed", { error });
+          }
+        }
       };
     },
   };
@@ -96,10 +106,16 @@ export function virtualDocumentSchemes(): string[] {
   return [...connections.keys()];
 }
 
+/** The decoded path of `uri`, which for most servers says where the document came from. */
+export function virtualDocumentPath(uri: string): string {
+  const afterScheme = uri.slice(uri.indexOf(":") + 1).replace(/^\/\/[^/]*/, "");
+  return decodeURIComponent(afterScheme.split(/[?#]/, 1)[0] ?? afterScheme).replace(/^\//, "");
+}
+
 /** The last segment of `uri`'s path, for an icon. */
 export function virtualDocumentFileName(uri: string): string {
-  const path = uri.split(/[?#]/, 1)[0] ?? uri;
-  return decodeURIComponent(path.slice(path.lastIndexOf("/") + 1));
+  const path = virtualDocumentPath(uri);
+  return path.slice(path.lastIndexOf("/") + 1);
 }
 
 /** A tab's title: the file name without its extension, which for most servers is the class. */

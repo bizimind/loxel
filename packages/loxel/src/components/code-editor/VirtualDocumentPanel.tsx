@@ -4,10 +4,12 @@ import * as monaco from "monaco-editor";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { EditorBanner } from "@/components/editor/EditorBanner";
+import { showToast } from "@/components/ui/toast";
 import { inlayHintsOption, useInlayHintsOption } from "@/hooks/useInlayHintsOption";
-import { usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
+import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { CODE_EDITOR_OPTIONS } from "@/lib/code-editor-options";
 import { detectIndentation } from "@/lib/detect-indentation";
+import { frontendLog } from "@/lib/frontend-logger";
 import { getMonacoThemeName } from "@/lib/monaco-theme";
 import {
   VIRTUAL_DOCUMENT_READ_ONLY_MESSAGE,
@@ -16,6 +18,23 @@ import {
 } from "@/lib/virtual-documents";
 import { resolveIndentation, useSettingsStore } from "@/store/settings-store";
 import { useUIStore } from "@/store/ui";
+
+const log = frontendLog.child("ui");
+
+/** Whether the tabs restored together have said why they closed, once for all of them. */
+let restoredTabsNoticeShown = false;
+
+function noticeRestoredTabClosed(): void {
+  if (restoredTabsNoticeShown) return;
+  restoredTabsNoticeShown = true;
+  queueMicrotask(() => {
+    restoredTabsNoticeShown = false;
+  });
+  showToast(
+    "Library source tabs close when their language server session ends. Go to the definition again to reopen one.",
+    "info",
+  );
+}
 
 interface VirtualDocumentPanelProps {
   /** The document's URI, in Monaco's canonical form. */
@@ -57,6 +76,7 @@ export function VirtualDocumentPanel({
   const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
   const locationRef = useRef({ line, column });
   locationRef.current = { line, column };
+  const closedRef = useRef(false);
   const [loadError, setLoadError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const darkMode = useUIStore((s) => s.darkMode);
@@ -68,12 +88,18 @@ export function VirtualDocumentPanel({
   );
 
   useEffect(() => {
+    const close = () => {
+      if (closedRef.current) return;
+      closedRef.current = true;
+      panelApi.close();
+    };
     const connection = virtualDocumentConnection(uri);
     if (connection?.id !== connectionId) {
-      panelApi.close();
+      noticeRestoredTabClosed();
+      close();
       return;
     }
-    const closed = connection.onDidClose(() => panelApi.close());
+    const closed = connection.onDidClose(close);
     return () => closed.dispose();
   }, [uri, connectionId, panelApi]);
 
@@ -103,6 +129,8 @@ export function VirtualDocumentPanel({
           readOnlyMessage: { value: VIRTUAL_DOCUMENT_READ_ONLY_MESSAGE },
         });
         editorRef.current = editor;
+        // `usePanelActivationFocus` found no editor when the panel opened.
+        if (isActivatedPanel(panelApi)) editor.focus();
         // After `create`: the first editor flips the global `detectIndentation`, which resets models.
         model.updateOptions(
           resolveIndentation(useSettingsStore.getState().editor, virtualDocumentFileName(uri), {
@@ -118,8 +146,10 @@ export function VirtualDocumentPanel({
           });
         }
       },
-      () => {
-        if (!tokens.token.isCancellationRequested) setLoadError(true);
+      (error: unknown) => {
+        if (tokens.token.isCancellationRequested) return;
+        log.warn("A language server could not provide a read-only document", { error });
+        setLoadError(true);
       },
     );
 

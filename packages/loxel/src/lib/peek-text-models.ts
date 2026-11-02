@@ -55,18 +55,18 @@ export function installPeekModelResolver(
   service.createModelReference = async (resource) => {
     if (monaco.editor.getModel(resource)) return fallback(resource);
     const path = editorFilePath(resource);
-    const virtualDocument = path === null ? source.readVirtualDocument(resource.toString()) : null;
-    if (path === null && !virtualDocument) return fallback(resource);
+    const reading =
+      path === null
+        ? source.readVirtualDocument(resource.toString())
+        : source
+            .readFile(path)
+            .then((content) => ({ content, language: source.languageOf(path, content) }));
+    if (!reading) return fallback(resource);
 
     let content: string;
     let language: string;
     try {
-      if (virtualDocument) {
-        ({ content, language } = await virtualDocument);
-      } else {
-        content = await source.readFile(path ?? "");
-        language = source.languageOf(path ?? "", content);
-      }
+      ({ content, language } = await reading);
     } catch (error) {
       throw new Error(`Could not read ${path ?? resource.path} for a preview`, { cause: error });
     }
@@ -99,21 +99,18 @@ export function installPeekModelResolver(
  * follows its parent's options otherwise.
  */
 export function keepPreviewModelsReadOnly(editor: monaco.editor.ICodeEditor): void {
-  let readOnly = false;
+  let message: string | null = null;
   editor.onDidChangeModel(() => {
     const model = editor.getModel();
-    const virtual = model !== null && isVirtualDocumentUri(model.uri.toString());
-    const shouldBeReadOnly = virtual || (model !== null && isPreviewModel(model));
-    if (shouldBeReadOnly === readOnly) return;
-    readOnly = shouldBeReadOnly;
-    editor.updateOptions({
-      readOnly,
-      readOnlyMessage: {
-        value: virtual
-          ? VIRTUAL_DOCUMENT_READ_ONLY_MESSAGE
-          : "This is a preview. Open the file to edit it.",
-      },
-    });
+    let next: string | null = null;
+    if (model && isVirtualDocumentUri(model.uri.toString())) {
+      next = VIRTUAL_DOCUMENT_READ_ONLY_MESSAGE;
+    } else if (model && isPreviewModel(model)) {
+      next = "This is a preview. Open the file to edit it.";
+    }
+    if (next === message) return;
+    message = next;
+    editor.updateOptions({ readOnly: next !== null, readOnlyMessage: { value: next ?? "" } });
   });
 }
 

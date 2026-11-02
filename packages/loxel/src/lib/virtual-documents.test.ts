@@ -7,6 +7,7 @@ import {
   registerVirtualDocumentScheme,
   virtualDocumentConnection,
   virtualDocumentFileName,
+  virtualDocumentPath,
   virtualDocumentSchemes,
   virtualDocumentTitle,
 } from "./virtual-documents";
@@ -46,7 +47,15 @@ describe("registerVirtualDocumentScheme", () => {
     expect(listener).toHaveBeenCalledTimes(1);
     expect(removed).not.toHaveBeenCalled();
     expect(virtualDocumentConnection("doc-b:x")).toBe(second);
+
+    // One that throws doesn't stop the rest.
+    const after = mock();
+    second?.onDidClose(() => {
+      throw new Error("the panel is gone");
+    });
+    second?.onDidClose(after);
     endSecond();
+    expect(after).toHaveBeenCalledTimes(1);
   });
 
   test("reads through workspace/textDocumentContent unless the language says otherwise", async () => {
@@ -90,5 +99,9 @@ describe("names", () => {
     const csharp = "csharp:/repo/App.csproj/decompiled/System.Text.StringBuilder.cs";
     expect(virtualDocumentTitle(csharp)).toBe("System.Text.StringBuilder");
     expect(virtualDocumentTitle("x:/no-extension")).toBe("no-extension");
+    expect(virtualDocumentPath(java)).toBe("java.base/java.util/List.java");
+    expect(virtualDocumentPath(csharp)).toBe(
+      "repo/App.csproj/decompiled/System.Text.StringBuilder.cs",
+    );
   });
 });

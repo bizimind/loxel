@@ -1,7 +1,7 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 
 import { FileTypeIcon } from "@/lib/file-icons";
-import { virtualDocumentFileName } from "@/lib/virtual-documents";
+import { virtualDocumentFileName, virtualDocumentPath } from "@/lib/virtual-documents";
 
 import { Tab, usePanelTitle } from "./tab";
 
@@ -17,7 +17,7 @@ export function VirtualDocumentTab(props: IDockviewPanelHeaderProps<{ uri: strin
         />
       }
       title={usePanelTitle(props.api) ?? ""}
-      titleTooltip="Read-only source from the language server"
+      titleTooltip={`${virtualDocumentPath(props.params.uri)} (read-only)`}
     />
   );
 }

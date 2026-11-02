@@ -4,7 +4,7 @@ description: Java language features from Eclipse JDT LS, running on your JDK 25 
 order: 13.5
 ---
 
-The Java server starts the first time you open a `.java` file, and stops when none remain open. Loxel bundles [Eclipse JDT LS](https://github.com/eclipse-jdtls/eclipse.jdt.ls), and it works from what is already on your machine: neither it nor Gradle downloads anything to load a project, even in a trusted repository.
+The Java server starts the first time you open a `.java` file, and stops when none remain open, along with any [library source tabs](#jdk-and-library-sources). Loxel bundles [Eclipse JDT LS](https://github.com/eclipse-jdtls/eclipse.jdt.ls), and it works from what is already on your machine: neither it nor Gradle downloads anything to load a project, even in a trusted repository.
 
 ## Java 25 or newer
 
@@ -76,7 +76,7 @@ Go to definition on a JDK or dependency class (`Cmd`-click or `F12`) opens its s
 
 - The source comes from what is on your machine: a JDK's `src.zip`, or a `-sources.jar` next to a dependency. Without one you see decompiled code, with a comment at the top saying so. Nothing is downloaded.
 - Workspace symbols from these classes open at the top of the file.
-- These tabs last as long as the language server session: they close when the server restarts, when you switch worktrees and when the window reloads. Go to the definition again to reopen one.
+- These tabs last as long as the language server session: they close when the server restarts, when you switch worktrees and when the window reloads. Go to the definition again to reopen one. Hover a tab's title to see which JDK module or jar the class came from.
 
 ## JDK detection
 

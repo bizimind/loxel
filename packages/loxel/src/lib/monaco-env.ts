@@ -13,6 +13,7 @@ import { useWorktreeStore } from "@/store/worktrees";
 
 import { createEditorOpener } from "./editor-opener";
 import { getHighlighter } from "./highlighter";
+import { isLiveEditorModel } from "./live-editor-model";
 import { type LspClient, resumeLanguageServers } from "./lsp-client";
 import { lazyLspClients } from "./lsp-clients";
 import { registerLoxelLanguages } from "./monaco-languages";
@@ -118,7 +119,9 @@ function createLazyLspConnector(opts: LspClient): void {
   const isMatch = (model: monaco.editor.ITextModel): boolean => {
     if (!opts.languageIds.includes(model.getLanguageId())) return false;
     if (!activeWt) return false;
-    if (!opts.syncsModel(model)) return false;
+    // Wherever its URI's path seems to lead: it holds the connection it opened on.
+    if (opts.ownsVirtualDocument(model)) return true;
+    if (!isLiveEditorModel(model)) return false;
     if (isWithin(model.uri.path, activeWt)) return true;
     // Files outside every project (the Others section) are served by the active worktree's LSP.
     return !deriveProject(model.uri.path, useProjectStore.getState().projects);
@@ -128,7 +131,8 @@ function createLazyLspConnector(opts: LspClient): void {
     counted = new WeakSet();
     let n = 0;
     for (const model of monaco.editor.getModels()) {
-      if (!isMatch(model)) continue;
+      // Those open now belong to the connection this recount may end, and are no reason to start one.
+      if (!isMatch(model) || opts.ownsVirtualDocument(model)) continue;
       counted.add(model);
       n += 1;
     }
