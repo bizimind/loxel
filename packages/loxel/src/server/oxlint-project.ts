@@ -102,10 +102,11 @@ async function ignoredDirs(wtPath: string): Promise<Set<string>> {
   ]);
   if (exitCode !== 0) return new Set();
   return new Set(
+    // A directory ends in a slash and a link to one does not; `path.resolve` drops the slash.
     stdout
       .split("\0")
-      .filter((entry) => entry.endsWith("/"))
-      .map((entry) => path.join(wtPath, entry.slice(0, -1))),
+      .filter(Boolean)
+      .map((entry) => path.resolve(wtPath, entry)),
   );
 }
 
@@ -177,8 +178,9 @@ export async function scanWorktree(
     for (const entry of entries) {
       if (entry.name === "node_modules" || entry.name === ".git") continue;
       const child = path.join(dir, entry.name);
+      if (ignored.has(child)) continue;
       if (entry.isDirectory()) {
-        if (!ignored.has(child)) queue.push({ dir: child, repo });
+        queue.push({ dir: child, repo });
       } else if (entry.isSymbolicLink() && isDirectoryLink(child)) {
         const target = realpathSync(child);
         if (linkTargets.has(target)) continue;

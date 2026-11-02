@@ -176,6 +176,15 @@ describe("scanWorktree", () => {
     expect((await scanWorktree(wt)).nestedConfigRepos).toEqual([path.join(wt, "link")]);
   });
 
+  test("skips a link a .gitignore covers", async () => {
+    git("init", "-q");
+    write(".gitignore", "link\n");
+    mkdirSync(path.join(top, "elsewhere"));
+    writeFileSync(path.join(top, "elsewhere/.oxlintrc.json"), "");
+    symlinkSync(path.join(top, "elsewhere"), path.join(wt, "link"));
+    expect((await scanWorktree(wt)).nestedConfigRepos).toEqual([]);
+  });
+
   test("a link to a parent ends", async () => {
     write("a/x.js");
     symlinkSync(wt, path.join(wt, "a/up"));
