@@ -665,6 +665,26 @@ export async function discoverCSharpProjects(worktreePath: string): Promise<CSha
   return { solutions, solutionFilters, projects, defaultTarget };
 }
 
+/** What can be chosen to load: csharp-ls's `--solution` takes these, and no `.csproj`. */
+export function csharpSelectableSolutions({
+  solutions,
+  solutionFilters,
+}: CSharpProjects): string[] {
+  return [...solutions, ...solutionFilters].toSorted();
+}
+
+/**
+ * What csharp-ls loads when nothing was chosen, which it would pick itself: the one solution at the
+ * root, else the first solution, the same one every time. Null with no solution: it then loads the
+ * projects.
+ */
+export function automaticCSharpSolution({
+  solutions,
+  defaultTarget,
+}: CSharpProjects): string | null {
+  return defaultTarget?.kind === "solution" ? defaultTarget.path : (solutions[0] ?? null);
+}
+
 function rootEntries(wtPath: string): string[] {
   try {
     return readdirSync(wtPath)

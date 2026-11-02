@@ -4,13 +4,21 @@ import path from "node:path";
 
 import type { ServerWebSocket, Subprocess } from "bun";
 
-import type { CSharpProjects, CSharpRestoreState } from "@/api/csharp-env-model";
+import {
+  type CSharpBlock,
+  type CSharpLspState,
+  type CSharpProjects,
+  type CSharpRestoreState,
+  csharpToolchain,
+} from "@/api/csharp-env-model";
 import { LSP_REPLACED_CLOSE_CODE, LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
 import {
   ASSETS_FILE,
+  automaticCSharpSolution,
   csharpRestoreState,
+  csharpSelectableSolutions,
   discoverCSharpProjects,
   dotnetGlobalToolsDir,
   fileStamp,
@@ -30,6 +38,8 @@ import {
   subscribeCSharpRestore,
   toolClaimsCommand,
 } from "./csharp-env";
+import { announceCSharpStatus, publishCSharpLspState } from "./csharp-lsp-state";
+import { getCSharpSolution, onCSharpSolutionChange } from "./csharp-solution-store";
 import { mapWithConcurrency } from "./git-commands";
 import { isRepoTrusted, onRepoTrustChange } from "./repo-trust";
 import { buildSpawnEnv, onLoginShellEnvChange, refreshLoginShellEnv } from "./shell-env";
@@ -66,12 +76,16 @@ const PROJECT_SDK_RE = /\bSdk\s*=\s*"([^"]*)"|<Sdk\s+Name\s*=\s*"([^"]*)"/g;
 const BUNDLED_SDK_RE = /^Microsoft\.NET\.Sdk(?:\.[\w.]+)?$/i;
 /** A project path in a `.sln` (`"src\\App\\App.csproj"`) or `.slnx` (`Path="src/App/App.csproj"`). */
 const SOLUTION_PROJECT_RE = /"([^"]+\.csproj)"/g;
+const SOLUTION_FILTER_EXTENSION = ".slnf";
 const MAX_NAMED_PROJECTS = 3;
 /** A load reports its failures one by one; they are told together after this much quiet. */
 const LOAD_FAILURE_SETTLE_MS = 2_000;
 const LOAD_FAILURE_RE = /\[Failure\][^']*'([^']+\.csproj)'(?: with message: (.{1,200}))?/;
+/** csharp-ls tells the user this itself, and goes on running with nothing loaded. */
+const SOLUTION_LOAD_FAILURE = "could not be loaded";
+const MAX_FAILURE_LENGTH = 400;
 /** Changes to these can change what the gate says. */
-const PROJECT_FILE = /(?:\.csproj|\.sln|\.slnx|[\\/]global\.json|[\\/]dotnet-tools\.json)$/;
+const PROJECT_FILE = /(?:\.csproj|\.sln|\.slnx|\.slnf|[\\/]global\.json|[\\/]dotnet-tools\.json)$/;
 
 /** Answered for the `csharp` section of `workspace/configuration`. */
 export const CSHARP_LS_SETTINGS = { analyzersEnabled: true };
@@ -92,16 +106,18 @@ const INSTALL_COMMAND = `dotnet tool install --global ${CSHARP_LS}`;
 const UPDATE_COMMAND = `dotnet tool update --global ${CSHARP_LS}`;
 
 const NO_FEATURES = "Until then, C# files get syntax highlighting only.";
+const TRUST_RESTRICTION = "C# projects don't load, so C# files get syntax highlighting only.";
 
 /** What the user is told while nothing can load, and whether a recheck could find the way out. */
 interface GateNotice {
   message: string;
   /** Nothing the worktree's files would announce: looked for on a timer. */
   toolchain: boolean;
+  block: CSharpBlock;
 }
 
-function toolchainNotice(message: string): GateNotice {
-  return { message: `${message} ${NO_FEATURES}`, toolchain: true };
+function toolchainNotice(block: CSharpBlock, message: string): GateNotice {
+  return { message: `${message} ${NO_FEATURES}`, toolchain: true, block };
 }
 
 /** How to run csharp-ls for a worktree. */
@@ -113,20 +129,42 @@ interface CSharpLaunch {
   env: Record<string, string | undefined>;
   /** What the user should know about what it will load. */
   notices: readonly string[];
+  /** The `--solution` it gets; null when it loads the projects. */
+  target: string | null;
+  /** The projects that load. */
+  projects: readonly string[];
+  sdkVersion: string;
 }
 
-type ToolLaunch = Omit<CSharpLaunch, "args" | "notices">;
+type ToolLaunch = Pick<CSharpLaunch, "command" | "prefixArgs" | "env" | "sdkVersion">;
 
 interface ClosedGate {
   open: false;
   notice: GateNotice | null;
+  /** What the status shows; null when the checks could not finish. */
+  state: CSharpLspState | null;
   /** The checks could not finish, which says nothing about the state. */
   retry?: boolean;
 }
 
 type CSharpGate = { open: true; launch: CSharpLaunch } | ClosedGate;
 
-const COULD_NOT_TELL: ClosedGate = { open: false, notice: null, retry: true };
+const COULD_NOT_TELL: ClosedGate = { open: false, notice: null, state: null, retry: true };
+const NO_PROJECT: ClosedGate = { open: false, notice: null, state: { kind: "no-project" } };
+const UNTRUSTED: ClosedGate = {
+  open: false,
+  notice: null,
+  state: {
+    kind: "blocked",
+    block: "untrusted",
+    message: `This repository is not trusted. ${TRUST_RESTRICTION}`,
+  },
+};
+
+function closedBy(notice: GateNotice): ClosedGate {
+  const { block, message } = notice;
+  return { open: false, notice, state: { kind: "blocked", block, message } };
+}
 
 /**
  * A connection with no server behind it. It answers the LSP handshake so the client stays
@@ -162,8 +200,7 @@ interface HeldConnection {
  * Loxel never installs or restores anything: the notices say what to run in a terminal.
  */
 export class CSharpLspManager extends WorktreeLspManager {
-  protected override readonly repoTrustRestriction =
-    "C# projects don't load, so C# files get syntax highlighting only.";
+  protected override readonly repoTrustRestriction = TRUST_RESTRICTION;
   protected override readonly forwardWatchedFiles = true;
   /** For {@link restartAfterRestore}: csharp-ls does not read these again by itself. */
   protected override readonly watchedIgnoredGlobs = ["**/obj/**/project.assets.json"];
@@ -175,6 +212,8 @@ export class CSharpLspManager extends WorktreeLspManager {
   private readonly restoreStops = new Map<WtLspSession, () => void>();
   /** What a running server's connection is told once initialized, from the gate's decision. */
   private readonly launchNotices = new Map<WtLspSession, readonly string[]>();
+  /** What a running server was told to load, to tell whether a choice changes that. */
+  private readonly launchTargets = new Map<WtLspSession, string | null>();
   /** Projects a running server's load failed on, waiting to be told together. */
   private readonly loadFailures = new Map<
     WtLspSession,
@@ -185,6 +224,7 @@ export class CSharpLspManager extends WorktreeLspManager {
   private readonly restoreRestarts = new Map<WtLspSession, ReturnType<typeof setTimeout>>();
   private unsubscribeTrust: (() => void) | null = null;
   private unsubscribeLoginShell: (() => void) | null = null;
+  private unsubscribeSolution: (() => void) | null = null;
 
   constructor(
     private readonly recheckMs = TOOLCHAIN_RECHECK_MS,
@@ -207,6 +247,12 @@ export class CSharpLspManager extends WorktreeLspManager {
     });
     this.unsubscribeLoginShell ??= onLoginShellEnvChange(() => {
       for (const held of [...this.held.values()]) void this.decide(held);
+    });
+    this.unsubscribeSolution ??= onCSharpSolutionChange((wtPath) => {
+      for (const held of [...this.held.values()]) {
+        if (held.context.wtPath === wtPath) void this.decide(held);
+      }
+      void this.restartForTarget(wtPath);
     });
     const held: HeldConnection = {
       ws,
@@ -247,6 +293,8 @@ export class CSharpLspManager extends WorktreeLspManager {
     this.unsubscribeTrust = null;
     this.unsubscribeLoginShell?.();
     this.unsubscribeLoginShell = null;
+    this.unsubscribeSolution?.();
+    this.unsubscribeSolution = null;
     for (const ws of [...this.held.keys()]) this.releaseHeld(ws);
     await super.destroy();
   }
@@ -261,8 +309,28 @@ export class CSharpLspManager extends WorktreeLspManager {
     }
     if (!paths.some((file) => PROJECT_FILE.test(file))) return;
     refreshCSharpRestore(wtPath);
+    // Whether a chosen solution is there, or an untrusted repository has a project, may be different.
+    announceCSharpStatus(wtPath);
+    if (getCSharpSolution(wtPath) !== null) void this.restartForTarget(wtPath);
     for (const held of [...this.held.values()]) {
       if (held.context.wtPath === wtPath) void this.decide(held);
+    }
+  }
+
+  /**
+   * The choice changed, or its file came or went. csharp-ls loads one thing for its whole life, so a
+   * server loading something else starts again, and the reconnect goes through the gate.
+   */
+  private async restartForTarget(wtPath: string): Promise<void> {
+    const running = [...this.sessions.values()].filter((session) => session.wtPath === wtPath);
+    if (running.length === 0) return;
+    const target = loadTarget(await discoverCSharpProjects(wtPath), getCSharpSolution(wtPath));
+    for (const session of running) {
+      if (!this.isSessionLive(session) || this.launchTargets.get(session) === target) continue;
+      this.log.info("Restarting csharp-ls: it should load something else", { wtPath, target });
+      const { ws } = session;
+      this.detach(ws);
+      ws.close(LSP_RESTART_CLOSE_CODE, "The C# solution changed; reconnect");
     }
   }
 
@@ -327,6 +395,7 @@ export class CSharpLspManager extends WorktreeLspManager {
     }
     // A check that could not finish says nothing new, and is worth another look.
     const { notice } = gate.retry ? { notice: held.notice } : gate;
+    if (gate.state) publishCSharpLspState(held.context.wtPath, gate.state);
     const recheck = gate.retry === true || notice?.toolchain === true;
     held.retrying = gate.retry === true;
     held.notice = notice;
@@ -364,7 +433,7 @@ export class CSharpLspManager extends WorktreeLspManager {
   }
 
   private watchForChanges(held: HeldConnection): void {
-    // Nothing that could spawn git in a repository that is not trusted.
+    // No watching, and none of the git it spawns, for a repository that is not trusted.
     if (!held.context.repoTrusted) return;
     held.stops.push(
       subscribeCSharpRestore(held.context.wtPath, () => {
@@ -466,33 +535,35 @@ export class CSharpLspManager extends WorktreeLspManager {
    */
   protected async gate({ wtPath, repoTrusted }: WtLspContext): Promise<CSharpGate> {
     try {
-      if (!repoTrusted || !isRepoTrusted(wtPath)) return { open: false, notice: null };
-      const { projects, solutions, defaultTarget } = await discoverCSharpProjects(wtPath);
-      if (projects.length === 0) return { open: false, notice: null };
+      if (!repoTrusted || !isRepoTrusted(wtPath)) return UNTRUSTED;
+      const discovered = await discoverCSharpProjects(wtPath);
+      const { projects, solutions, defaultTarget } = discovered;
+      if (projects.length === 0) return NO_PROJECT;
       const pick = await pickCSharpLs(wtPath);
       if (pick === null) return COULD_NOT_TELL;
-      if ("notice" in pick) return { open: false, notice: pick.notice };
-      const target = solutionTarget(solutions, defaultTarget);
+      if ("notice" in pick) return closedBy(pick.notice);
+      const chosen = getCSharpSolution(wtPath);
+      const target = loadTarget(discovered, chosen);
       const loaded = target ? await solutionProjects(target, projects) : projects;
       const states = await mapWithConcurrency(loaded, CHECK_CONCURRENCY, (project) =>
         csharpRestoreState(wtPath, project),
       );
       if (!states.some(isLoadable)) {
-        return {
-          open: false,
-          notice: {
-            message: `Run \`dotnet restore\` in a terminal to load this repository's C# projects. ${NO_FEATURES}`,
-            toolchain: false,
-          },
-        };
+        return closedBy({
+          message: `Run \`dotnet restore\` in a terminal to load this repository's C# projects. ${NO_FEATURES}`,
+          toolchain: false,
+          block: "not-restored",
+        });
       }
       return {
         open: true,
         launch: {
           ...pick,
           args: target ? ["--solution", target] : [],
+          target,
+          projects: loaded,
           notices: [
-            ...launchNotices(wtPath, defaultTarget, solutions, target, states),
+            ...launchNotices(wtPath, defaultTarget, solutions, target, target === chosen, states),
             ...(await nugetSdkNotices(loaded)),
           ],
         },
@@ -533,7 +604,17 @@ export class CSharpLspManager extends WorktreeLspManager {
     context: WtLspContext,
   ): WtLspSession {
     const session = super.buildSession(ws, proc, context);
-    this.launchNotices.set(session, this.launches.get(context.wtPath)?.notices ?? []);
+    const launch = this.launches.get(context.wtPath);
+    this.launchNotices.set(session, launch?.notices ?? []);
+    this.launchTargets.set(session, launch?.target ?? null);
+    if (launch) {
+      publishCSharpLspState(context.wtPath, {
+        kind: "running",
+        target: launch.target,
+        projects: [...launch.projects],
+        sdkVersion: launch.sdkVersion,
+      });
+    }
     let restored: string | null = null;
     this.restoreStops.set(
       session,
@@ -552,6 +633,15 @@ export class CSharpLspManager extends WorktreeLspManager {
 
   /** csharp-ls only logs a project that fails to load, in a message nothing shows. */
   protected override handleServerFrame(session: WtLspSession, body: string): void {
+    const unloaded = solutionLoadFailureIn(body);
+    // A stopped server's last frames still arrive, after its replacement has decided.
+    if (unloaded && this.isSessionLive(session)) {
+      publishCSharpLspState(session.wtPath, {
+        kind: "blocked",
+        block: "load-failed",
+        message: unloaded,
+      });
+    }
     const failure = loadFailureIn(body);
     if (failure) this.noteLoadFailure(session, path.basename(failure[1]!), failure[2] ?? null);
     super.handleServerFrame(session, withClientRegistrations(body));
@@ -583,6 +673,10 @@ export class CSharpLspManager extends WorktreeLspManager {
 
   protected override onSessionClosed(session: WtLspSession): void {
     this.launchNotices.delete(session);
+    // This runs again when the process has exited, by when a newer connection may have decided.
+    if (this.launchTargets.delete(session)) {
+      publishCSharpLspState(session.wtPath, { kind: "stopped" });
+    }
     clearTimeout(this.loadFailures.get(session)?.timer);
     this.loadFailures.delete(session);
     this.restoreStops.get(session)?.();
@@ -668,6 +762,21 @@ function loadFailureIn(body: string): RegExpExecArray | null {
   }
 }
 
+/** The words of csharp-ls's own message that a solution did not load, or null. */
+function solutionLoadFailureIn(body: string): string | null {
+  if (!body.includes(SOLUTION_LOAD_FAILURE)) return null;
+  try {
+    const frame: unknown = JSON.parse(body);
+    if (!isRecord(frame) || frame.method !== "window/showMessage") return null;
+    const message = isRecord(frame.params) ? frame.params.message : null;
+    if (typeof message !== "string" || !message.includes(SOLUTION_LOAD_FAILURE)) return null;
+    // What follows the first line is the exception's stack.
+    return message.split("\n", 1)[0]!.slice(0, MAX_FAILURE_LENGTH);
+  } catch {
+    return null;
+  }
+}
+
 function definedEnv(env: Record<string, string | undefined>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
@@ -682,15 +791,11 @@ function isLoadable(state: CSharpRestoreState): boolean {
   return state.restored || state.assetsPath === null;
 }
 
-/**
- * What csharp-ls loads, which it would pick itself: the one solution at the root, else the first
- * solution, the same one every time. Null with no solution: it then loads the projects.
- */
-function solutionTarget(
-  solutions: readonly string[],
-  defaultTarget: CSharpProjects["defaultTarget"],
-): string | null {
-  return defaultTarget?.kind === "solution" ? defaultTarget.path : (solutions[0] ?? null);
+/** The choice, while discovery still lists it, else what detection picks. */
+function loadTarget(discovered: CSharpProjects, chosen: string | null): string | null {
+  return chosen !== null && csharpSelectableSolutions(discovered).includes(chosen)
+    ? chosen
+    : automaticCSharpSolution(discovered);
 }
 
 /**
@@ -700,12 +805,33 @@ function solutionTarget(
 async function solutionProjects(solution: string, projects: readonly string[]): Promise<string[]> {
   const text = await readSmallText(solution).catch(() => "");
   const listed = new Set(
-    [...text.matchAll(SOLUTION_PROJECT_RE)].map(([, relative]) =>
-      path.resolve(path.dirname(solution), relative!.replaceAll("\\", "/")),
-    ),
+    path.extname(solution) === SOLUTION_FILTER_EXTENSION
+      ? solutionFilterProjects(solution, text)
+      : [...text.matchAll(SOLUTION_PROJECT_RE)].map(([, relative]) =>
+          path.resolve(path.dirname(solution), relative!.replaceAll("\\", "/")),
+        ),
   );
   const members = projects.filter((project) => listed.has(project));
   return members.length > 0 ? members : [...projects];
+}
+
+/**
+ * What a `.slnf` lists, which is JSON naming its projects relative to the solution it filters. Empty
+ * when it does not read that way.
+ */
+function solutionFilterProjects(filter: string, text: string): string[] {
+  try {
+    const parsed: unknown = Bun.JSONC.parse(text.replace(/^\uFEFF/, ""));
+    const solution = isRecord(parsed) ? parsed.solution : null;
+    if (!isRecord(solution) || typeof solution.path !== "string") return [];
+    if (!Array.isArray(solution.projects)) return [];
+    const solutionPath = path.resolve(path.dirname(filter), solution.path.replaceAll("\\", "/"));
+    return solution.projects
+      .filter((project): project is string => typeof project === "string")
+      .map((project) => path.resolve(path.dirname(solutionPath), project.replaceAll("\\", "/")));
+  } catch {
+    return [];
+  }
 }
 
 function launchNotices(
@@ -713,13 +839,14 @@ function launchNotices(
   defaultTarget: CSharpProjects["defaultTarget"],
   solutions: readonly string[],
   target: string | null,
+  chosen: boolean,
   states: readonly CSharpRestoreState[],
 ): string[] {
   const notices: string[] = [];
   // One solution at the root is the repository's own, and is not worth a word.
-  if (target && solutions.length > 1 && defaultTarget?.kind !== "solution") {
+  if (target && !chosen && solutions.length > 1 && defaultTarget?.kind !== "solution") {
     notices.push(
-      `This repository has ${solutions.length} solutions, and csharp-ls loads one: ${path.relative(wtPath, target)}. Files outside it get syntax highlighting only.`,
+      `This repository has ${solutions.length} solutions, and csharp-ls loads one: ${path.relative(wtPath, target)}. Files outside it get syntax highlighting only. To load another, click the C# item in the status bar or run ${csharpToolchain.selectAction.label}.`,
     );
   }
   const unrestored = states.filter((state) => !isLoadable(state));
@@ -770,6 +897,7 @@ async function pickCSharpLs(wtPath: string): Promise<ToolLaunch | { notice: Gate
   if (!dotnet) {
     return {
       notice: toolchainNotice(
+        "no-dotnet",
         `C# language features need the .NET SDK, which Loxel did not find on your PATH. Install the .NET ${MIN_RUNTIME_MAJOR} SDK, then run \`${INSTALL_COMMAND}\` in a terminal.`,
       ),
     };
@@ -786,6 +914,7 @@ async function pickCSharpLs(wtPath: string): Promise<ToolLaunch | { notice: Gate
     const then = local || globalTool ? "" : `, then run \`${INSTALL_COMMAND}\``;
     return {
       notice: toolchainNotice(
+        "no-dotnet",
         `csharp-ls needs .NET ${MIN_RUNTIME_MAJOR}. Install the .NET ${MIN_RUNTIME_MAJOR} SDK next to the ones you have, which your projects keep using${then}.`,
       ),
     };
@@ -793,12 +922,15 @@ async function pickCSharpLs(wtPath: string): Promise<ToolLaunch | { notice: Gate
   if (sdks.length === 0) {
     return {
       notice: toolchainNotice(
+        "no-dotnet",
         "Loading a C# project needs a .NET SDK, and Loxel found only a runtime. Install the .NET SDK.",
       ),
     };
   }
   const selectedSdk = await dotnetSdkVersion(wtPath, { env: spawnEnv });
-  if (!selectedSdk) return { notice: toolchainNotice(await missingSdkMessage(wtPath, spawnEnv)) };
+  if (!selectedSdk) {
+    return { notice: toolchainNotice("no-dotnet", await missingSdkMessage(wtPath, spawnEnv)) };
+  }
 
   const env: Record<string, string | undefined> = {
     ...dotnetSpawnEnv(wtPath, spawnEnv),
@@ -806,12 +938,15 @@ async function pickCSharpLs(wtPath: string): Promise<ToolLaunch | { notice: Gate
     // csharp-ls's launcher looks here for its runtime, which a `dotnet` on PATH does not tell it.
     DOTNET_ROOT: runtimes.runtime10Root,
   };
-  if (local) return pickLocalTool(wtPath, env);
-  if (!globalTool) return { notice: toolchainNotice(installMessage(sdks, selectedSdk)) };
+  if (local) return pickLocalTool(wtPath, env, selectedSdk);
+  if (!globalTool) {
+    return { notice: toolchainNotice("no-csharp-ls", installMessage(sdks, selectedSdk)) };
+  }
   const version = await globalToolVersion(globalTool, env);
   if (!version) {
     return {
       notice: toolchainNotice(
+        "csharp-ls-failed",
         "csharp-ls is installed but did not run. Run `csharp-ls --version` in a terminal to see why.",
       ),
     };
@@ -819,11 +954,12 @@ async function pickCSharpLs(wtPath: string): Promise<ToolLaunch | { notice: Gate
   if (Bun.semver.order(version, MIN_CSHARP_LS_VERSION) < 0) {
     return {
       notice: toolchainNotice(
+        "old-csharp-ls",
         `csharp-ls ${version} is older than Loxel needs (${MIN_CSHARP_LS_VERSION}). Run \`${UPDATE_COMMAND}\` in a terminal.`,
       ),
     };
   }
-  return { command: globalTool, prefixArgs: [], env };
+  return { command: globalTool, prefixArgs: [], env, sdkVersion: selectedSdk };
 }
 
 /**
@@ -856,18 +992,22 @@ async function missingSdkMessage(
 async function pickLocalTool(
   wtPath: string,
   env: Record<string, string | undefined>,
+  sdkVersion: string,
 ): Promise<ToolLaunch | { notice: GateNotice } | null> {
   // A manifest's tool is the repository's choice: this runs it, unlike anything before it.
   if (!isRepoTrusted(wtPath)) return null;
   const prepared = await prepareDotnet(wtPath, { env });
   if (!prepared) {
-    return { notice: toolchainNotice("Loxel could not run `dotnet` in this repository.") };
+    return {
+      notice: toolchainNotice("no-dotnet", "Loxel could not run `dotnet` in this repository."),
+    };
   }
   const prefixArgs = ["tool", "run", CSHARP_LS, "--"];
   const version = await readVersion(prepared.dotnetPath, [...prefixArgs, "--version"], wtPath, env);
   if (!version) {
     return {
       notice: toolchainNotice(
+        "csharp-ls-failed",
         "This repository's tool manifest lists csharp-ls, which did not run. Run `dotnet tool restore` in a terminal; if it still does not start, `dotnet tool run csharp-ls -- --version` shows why.",
       ),
     };
@@ -875,11 +1015,12 @@ async function pickLocalTool(
   if (Bun.semver.order(version, MIN_CSHARP_LS_VERSION) < 0) {
     return {
       notice: toolchainNotice(
+        "old-csharp-ls",
         `This repository's tool manifest pins csharp-ls ${version}, older than Loxel needs (${MIN_CSHARP_LS_VERSION}). Update it in the manifest, then run \`dotnet tool restore\`.`,
       ),
     };
   }
-  return { command: prepared.dotnetPath, prefixArgs, env };
+  return { command: prepared.dotnetPath, prefixArgs, env, sdkVersion };
 }
 
 /**
