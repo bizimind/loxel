@@ -39,6 +39,8 @@ export const fakeMonaco = {
   commands: new Map<string, CommandHandler>(),
   /** Language providers registered through `monaco.languages.register<Kind>Provider`, by kind. */
   providers: new Map<string, unknown>(),
+  /** The selector each provider in `providers` was registered with, by kind. */
+  providerSelectors: new Map<string, unknown>(),
   didCreateModel: new FakeEmitter<monaco.editor.ITextModel>(),
   willDisposeModel: new FakeEmitter<monaco.editor.ITextModel>(),
   /** owner → model URI → markers, as set through `setModelMarkers`. */
@@ -58,6 +60,7 @@ export const fakeMonaco = {
     this.commands.clear();
     this.markers.clear();
     this.providers.clear();
+    this.providerSelectors.clear();
   },
 };
 
@@ -73,8 +76,9 @@ const languagesNamespace: unknown = new Proxy(
     get: (_target, key) => {
       const kind = /^register(\w+)Provider$/.exec(String(key))?.[1];
       if (!kind) return anyEnum;
-      return (_selector: unknown, provider: unknown): IDisposable => {
+      return (selector: unknown, provider: unknown): IDisposable => {
         fakeMonaco.providers.set(kind, provider);
+        fakeMonaco.providerSelectors.set(kind, selector);
         return { dispose: () => fakeMonaco.providers.delete(kind) };
       };
     },

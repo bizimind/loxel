@@ -45,6 +45,7 @@ export class LspCapabilitiesRegistry extends Disposable implements ILspCapabilit
       this._connection.registerRequestHandler(
         api.client.clientRegisterCapability,
         async (params) => {
+          const failures: string[] = [];
           for (const registration of textSyncFirst(params.registrations)) {
             const capability = capabilitiesByMethod.get(registration.method);
             if (!capability) {
@@ -53,15 +54,26 @@ export class LspCapabilitiesRegistry extends Disposable implements ILspCapabilit
               );
               continue;
             }
-            const r = new CapabilityRegistration(
-              registration.id,
-              capability,
-              // Optional in LSP, and some servers send none: features read their options unconditionally.
-              registration.registerOptions ?? {},
-              false,
-            );
-            this._registerCapabilityOptions(r);
+            // One bad entry must not cost the others in the request, which are still registered.
+            try {
+              const r = new CapabilityRegistration(
+                registration.id,
+                capability,
+                optionsOfRegistration(capability, registration.registerOptions),
+                false,
+              );
+              this._registerCapabilityOptions(r);
+            } catch (error) {
+              console.error(
+                `[LspCapabilitiesRegistry] Registration failed: ${registration.method} (${registration.id})`,
+                error,
+              );
+              const reason = error instanceof Error ? error.message : String(error);
+              failures.push(`${registration.method}: ${reason}`);
+            }
           }
+          // Returned, not thrown: the channel hides a thrown error's message from the server.
+          if (failures.length > 0) return { errorMessage: failures.join("; ") };
           return { ok: null };
         },
       ),
@@ -77,12 +89,14 @@ export class LspCapabilitiesRegistry extends Disposable implements ILspCapabilit
             if (!capability) continue;
             const info = this._registrations.get(capability);
             const handlerInfo = info?.registrations.get(unregistration.id);
+            // A registration that failed has nothing to undo, and must not cost the others here.
             if (!handlerInfo) {
-              throw new Error(
-                `No registration for method ${unregistration.method} with id ${unregistration.id}`,
+              console.warn(
+                `[LspCapabilitiesRegistry] No registration for method ${unregistration.method} with id ${unregistration.id}`,
               );
+              continue;
             }
-            handlerInfo?.handlerDisposables.forEach((d) => d.dispose());
+            handlerInfo.handlerDisposables.forEach((d) => d.dispose());
             info?.registrations.delete(unregistration.id);
           }
           return { ok: null };
@@ -214,6 +228,25 @@ const capabilitiesByMethod = new Map<string, Capability<unknown>>([
   // The spec registers semantic tokens under this method; the table has only the request methods.
   ["textDocument/semanticTokens", capabilities.textDocumentSemanticTokensFull],
 ]);
+
+/** The capabilities whose handlers need options the spec requires, so cannot do without them. */
+const capabilitiesRequiringOptions = new Set<Capability<unknown>>([
+  capabilities.textDocumentDidChange,
+  capabilities.textDocumentSemanticTokensFull,
+  capabilities.textDocumentOnTypeFormatting,
+  capabilities.workspaceExecuteCommand,
+  capabilities.workspaceWillRenameFiles,
+]);
+
+/**
+ * `registerOptions` is optional in the spec. Without it, as with a static `hoverProvider: true`,
+ * there is no document selector, so the feature applies to the client's own languages.
+ */
+function optionsOfRegistration(capability: Capability<unknown>, registerOptions: unknown): unknown {
+  if (registerOptions !== undefined && registerOptions !== null) return registerOptions;
+  if (capabilitiesRequiringOptions.has(capability)) throw new Error("registerOptions is required");
+  return {};
+}
 
 /**
  * Registering `textDocument/didChange` starts the synchronizer, which sends `didOpen` for existing
