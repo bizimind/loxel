@@ -31,11 +31,14 @@ const MAX_IGNORE_BYTES = 64 * 1_024;
 /** Far above what real patterns take on one file, and small enough not to be felt on a save. */
 const MAX_MATCH_STEPS = 5_000_000;
 
-/** Every C-family extension of `EXT_TO_LANG` in `highlighter.ts`; a test keeps the two in step. */
+/**
+ * The C-family extensions of `EXT_TO_LANG` in `highlighter.ts`, kept in step by a test, without `.m`
+ * and `.i`: they are also MATLAB and SWIG, which clang-format rewrites into something else, with no
+ * error. A statement can end up inside a comment. A manual override formats them on request.
+ */
 export const clangFormatter: LanguageFormatter = {
   extensions: [
     "c",
-    "i",
     "h",
     "cpp",
     "cc",
@@ -57,7 +60,6 @@ export const clangFormatter: LanguageFormatter = {
     "ccm",
     "cxxm",
     "c++m",
-    "m",
     "mm",
   ],
   detect: detectClangFormat,
@@ -153,7 +155,7 @@ function withoutDots(dir: string, pattern: string): string {
 }
 
 /**
- * clang-format's file pattern matching: POSIX `*`, `?`, `[...]` and `\`, where none of them cross a
+ * The behavior of clang's `MatchFilePath.cpp`, which clang-format uses for ignore files: POSIX `*`, `?`, `[...]` and `\`, where none of them cross a
  * `/`, plus `**` as a whole path segment. A pattern is the repository's, and this runs on the
  * server's thread, so a position that failed once is never tried again, and running out of `budget`
  * throws, which format-service takes as no formatter: the file is left alone.

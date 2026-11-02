@@ -27,7 +27,7 @@ C, C++ and Objective-C files are served by clangd. Shared language-server archit
 
 ## Formatting
 
-[clang-formatter.ts](../../src/server/clang-formatter.ts) is the `LanguageFormatter` for the C-family extensions of `EXT_TO_LANG`, which a test keeps in step since the server does not import the highlighter (seam: [Formatting](../LANGUAGE_SERVERS.md#formatting)).
+[clang-formatter.ts](../../src/server/clang-formatter.ts) is the `LanguageFormatter` for the C-family extensions of `EXT_TO_LANG`, which a test keeps in step since the server does not import the highlighter. `.m` and `.i` are left out: they are also MATLAB and SWIG, which clang-format rewrites with exit 0, so they format only through a manual override, which then runs with the seam's defaults (seam: [Formatting](../LANGUAGE_SERVERS.md#formatting)).
 
 - **Detection.** clang-format applies LLVM style and exits 0 when it finds no config, so the module only returns it when a `.clang-format` or `_clang-format` lies between the file and the worktree root. clang-format itself then finds the nearest config from `--assume-filename` and handles `InheritParentConfig`.
 - **Binary.** The user's `clang-format` from `PATH`, with the worktree's directories removed and `binDirs` empty. It runs from `/` with an absolute `{file}`, so that what it resolves to does not depend on files in the repository. It reads config only and runs no repository code, so it does not depend on repository trust. A manual override of `clang-format` runs the same way, since `spawnOptions` covers overrides, so a relative path in its args is relative to `/`.

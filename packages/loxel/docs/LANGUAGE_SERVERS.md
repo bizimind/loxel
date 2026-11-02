@@ -134,7 +134,7 @@ Formatting runs on the server as part of `POST /api/file-write` when the request
 
 **Kotlin** (`.kt`, `.kts`) is another, `kotlinFormatter`: see [languages/kotlin.md](languages/kotlin.md#formatting).
 
-**C, C++ and Objective-C** are `clangFormatter`: see [languages/c-cpp.md](languages/c-cpp.md#formatting).
+**C, C++ and Objective-C++** are `clangFormatter`: see [languages/c-cpp.md](languages/c-cpp.md#formatting).
 
 **Rust** (`.rs`) is `rustFormatter`: see [languages/rust.md](languages/rust.md#formatting).
 

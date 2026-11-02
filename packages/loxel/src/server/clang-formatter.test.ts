@@ -14,6 +14,8 @@ import { FormatService } from "./format-service";
 const REAL_CLANG_FORMAT = process.env.LOXEL_TEST_CLANG_FORMAT;
 const REAL_PATH = process.env.PATH;
 const C_FAMILY = new Set(["c", "cpp", "objective-c", "objective-cpp"]);
+/** Also MATLAB and SWIG, which clang-format would corrupt, so left to a manual override. */
+const NOT_AUTO_FORMATTED = new Set(["m", "i"]);
 
 let temp: string;
 let tools: string;
@@ -62,9 +64,9 @@ afterAll(() => {
 });
 
 describe("clangFormatter selection", () => {
-  test("claims every C-family extension the editor highlights", () => {
+  test("claims the C-family extensions the editor highlights, except the ambiguous ones", () => {
     const family = Object.entries(EXT_TO_LANG)
-      .filter(([, language]) => C_FAMILY.has(language))
+      .filter(([ext, language]) => C_FAMILY.has(language) && !NOT_AUTO_FORMATTED.has(ext))
       .map(([ext]) => ext);
     expect([...clangFormatter.extensions].sort()).toEqual(family.sort());
   });
@@ -76,6 +78,20 @@ describe("clangFormatter selection", () => {
     expect((await save("a.H")).content).toStartWith("fake ");
   });
 
+  test("leaves .m and .i alone, and a manual override still formats them", async () => {
+    await addFiles({ ".clang-format": "", "node_modules/.keep": "" });
+    await installFake();
+    expect(await save("a.m")).toEqual({ content: null });
+    expect(await save("a.i")).toEqual({ content: null });
+    const result = await new FormatService().format("x", join(wt, "a.m"), wt, {
+      ...DEFAULT_FORMATTING_SETTINGS,
+      overrides: [
+        { id: "objc", extensions: "m", command: "clang-format", args: "--assume-filename={file}" },
+      ],
+    });
+    expect(result.content).toBe(`fake cwd=${wt} args=--assume-filename=${join(wt, "a.m")}\n`);
+  });
+
   test("does nothing without a config, where clang-format would apply LLVM style", async () => {
     await installFake();
     expect(await save("a.c")).toEqual({ content: null });
@@ -85,7 +101,7 @@ describe("clangFormatter selection", () => {
   test("finds the nearest config of either name, from the file up to the worktree", async () => {
     await addFiles({ "native/.clang-format": "", "other/lib/_clang-format": "" });
     expect(detects("native/src/a.cpp")).toBe(true);
-    expect(detects("other/lib/a.m")).toBe(true);
+    expect(detects("other/lib/a.mm")).toBe(true);
     expect(detects("other/a.c")).toBe(false);
     expect(detects("a.c")).toBe(false);
   });
