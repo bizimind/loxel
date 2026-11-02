@@ -67,7 +67,7 @@ Supported formatters:
 | `ruff`          | `ruff.toml`, `.ruff.toml`, a `[tool.ruff]` table, or a `ruff` dependency | `.py` and `.pyi` files                               |
 | `black`         | A `[tool.black]` table in `pyproject.toml`, or a `black` dependency      | `.py` and `.pyi` files                               |
 | `ktfmt/ktlint`  | [A Gradle plugin or `ktlint_*`](/docs/languages/kotlin#format-on-save)   | `.kt` and `.kts` files                               |
-| `clang-format`  | `.clang-format`                                                          | C and C++ files                                      |
+| `clang-format`  | [`.clang-format` or `_clang-format`](/docs/languages/c-cpp#formatting)   | C, C++ and Objective-C++ files                       |
 | `deno`          | `deno.json`                                                              | JS and TS files                                      |
 | `golangci-lint` | A `version: "2"` `.golangci.*` config that enables formatters            | `.go` files                                          |
 | `gofmt`         | `go.mod` or `go.work`                                                    | `.go` files                                          |
