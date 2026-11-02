@@ -128,6 +128,8 @@ describe("tool manifests", () => {
     const { tools } = manifest as { tools: { x: unknown } };
     expect(toolClaimsCommand(tools.x, "x-cmd")).toBe(true);
     expect(toolClaimsCommand(tools.x, "other")).toBe(false);
+    expect(toolClaimsCommand(tools.x, "X-Cmd")).toBe(true);
+    expect(toolClaimsCommand({ commands: ["X-CMD"] }, "x-cmd")).toBe(true);
   });
 });
 

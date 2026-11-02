@@ -11,7 +11,7 @@ import type {
   GlobalJsonInfo,
   GlobalJsonSdkPath,
 } from "@/api/csharp-env-model";
-import { isDirectory } from "@/fs-utils";
+import { findFileAbove, isDirectory } from "@/fs-utils";
 
 import { mapWithConcurrency } from "./git-commands";
 import { logger } from "./logger";
@@ -219,9 +219,7 @@ export async function isDotnetSafeToRun(
       if (!applying) return true;
       const info = await readGlobalJson(wtPath, applying, options);
       if (!isGlobalJsonSafe(info)) return false;
-      // A repository git cannot read reports nothing as tracked, which says nothing about `paths`.
-      if (!info.sdkPaths?.length) return true;
-      return (await canGitReadRepo(wtPath)) || !findFileAbove(".git", wtPath);
+      return !info.sdkPaths?.length || (await canGitReadRepo(wtPath));
     }
     // Later callers run dotnet from project directories, whose global.json can differ.
     // `icase`: on a case-insensitive disk the host opens any casing of the name.
@@ -457,7 +455,10 @@ export function readDotnetToolManifests(dir: string): Record<string, unknown>[] 
 
 /** Whether a manifest's tool entry gives `dotnet tool run` this command. */
 export function toolClaimsCommand(tool: unknown, command: string): boolean {
-  return isRecord(tool) && Array.isArray(tool.commands) && tool.commands.includes(command);
+  if (!isRecord(tool) || !Array.isArray(tool.commands)) return false;
+  // dotnet matches a manifest's command names without regard to case.
+  const wanted = command.toLowerCase();
+  return tool.commands.some((name) => typeof name === "string" && name.toLowerCase() === wanted);
 }
 
 /**
@@ -893,17 +894,6 @@ function resolveImport(project: string, file: string): string | null | undefined
   const expanded = project.trim().replace(THIS_FILE_DIR, `${fileDir}/`).replaceAll("\\", "/");
   if (expanded.includes("$(") || expanded.includes("*")) return null;
   return path.resolve(fileDir, expanded);
-}
-
-function findFileAbove(name: string, startDir: string): string | null {
-  let current = startDir;
-  for (;;) {
-    const candidate = path.join(current, name);
-    if (existsSync(candidate)) return candidate;
-    const parent = path.dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
 }
 
 /** `Sdk` imports, and imports under a condition or a `Choose`, which this module does not follow. */

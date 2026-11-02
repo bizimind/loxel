@@ -84,7 +84,7 @@ export async function revertToHead(cwd: string, files: string[]): Promise<void> 
       "--untracked-files=all",
       "--no-renames",
     ],
-    { cwd, env: readOnlyGitEnv() },
+    { cwd, env: readOnlyGitEnv(cwd) },
   );
   for (const entry of status.split("\0")) {
     const file = entry.slice(3);
