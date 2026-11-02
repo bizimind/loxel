@@ -480,8 +480,7 @@ export class ClangdLspManager extends WorktreeLspManager {
       }
       const databases = await resolveCompileDatabases(context.wtPath);
       const databaseDir = compileCommandsDir(databases);
-      // clangd would put the index beside a database an untrusted `.clangd` names, wherever it is.
-      // The flag goes before `.clangd`.
+      // The index goes beside the database, and stays in the project tree. The flag beats `.clangd`.
       const indexLeavesWorktree =
         !context.repoTrusted && databaseDir === null && databases.namesOutsideDatabase;
       const withoutIndex =

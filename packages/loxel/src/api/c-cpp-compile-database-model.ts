@@ -24,7 +24,7 @@ export interface CompileDatabaseStatus {
   foundByClangd: string[];
   /** The worktree was too large to search whole, so nothing is picked without being chosen. */
   searchCut: boolean;
-  /** A `.clangd` names a database folder outside the worktree. */
+  /** A `.clangd` names a database folder outside the worktree, where the index would go with it. */
   namesOutsideDatabase: boolean;
 }
 
