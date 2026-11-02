@@ -421,13 +421,14 @@ describe.skipIf(process.platform === "win32")("CSharpLspManager", () => {
       manager = counting;
       const socket = connect(wt);
       await socket.untilMessage("dotnet tool install");
-      // The first tick takes one more decision, to have a stamp to compare.
-      await counting.until(() => counting.started >= 2 && counting.finished === counting.started);
-      const { started } = counting;
-      const { refreshes } = counting;
-      // A login-shell capture comes every few ticks, so these are ticks that have passed.
-      await counting.until(() => counting.refreshes >= refreshes + 2);
-      expect(counting.started).toBe(started);
+      // The first tick that finds no decision running takes one more, to have a stamp to compare.
+      // Then a stretch of ticks passes with none, or this runs into the test's timeout. A
+      // login-shell capture comes every few ticks, so captures count ticks.
+      for (;;) {
+        const { started, refreshes } = counting;
+        await counting.until(() => counting.refreshes >= refreshes + 2);
+        if (counting.started === started) break;
+      }
       await writeExecutable(join(bin, "csharp-ls"), fakeCSharpLs("0.23.0"));
       await socket.untilMessage("dotnet tool update");
     });
