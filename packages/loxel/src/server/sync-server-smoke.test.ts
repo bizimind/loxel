@@ -372,12 +372,16 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         const done = path.join(stateDir, `${name}.done`);
 
         terminal.type(
-          `"${wtBinDir}/wt" rm --force --delete-branch ${name} --json; echo $? > "${done}"`,
+          `"${wtBinDir}/wt" rm --force --delete-branch ${name} --json > "${done}.log" 2>&1; echo $? > "${done}"`,
         );
         await untilDead(terminal.pid);
 
         expect(readFileSync(done, "utf8").trim()).toBe("0");
-        expect(await git(repo.root, "branch", "--list", name)).toBe("");
+        // `wt` only warns when it could not delete the branch: its output says why.
+        expect({
+          branch: await git(repo.root, "branch", "--list", name),
+          output: readFileSync(`${done}.log`, "utf8"),
+        }).toMatchObject({ branch: "" });
         expect(existsSync(wtPath)).toBe(false);
         const worktreesDir = (
           await readJson<{ projects: Array<{ path: string; worktreesDir: string }> }>(
