@@ -96,7 +96,7 @@ In one folder, a config file beats a dependency, and among them Biome comes befo
 
 The project's own install runs, a subproject's before the root's, under the [Node version](#node-version) of the worktree. Without one, Loxel uses the tool on your `PATH`.
 
-These tools run code from the project, so they wait for you to [trust the repository](/docs/repository-trust): Prettier and oxfmt because their config files and plugins are code, and a project's own Biome because it is installed by the project. Until then the file saves unformatted and Loxel tells you, except that a Biome on your `PATH` still runs, since Biome's config is only data. If you stop trusting a repository, its formatters stop right away.
+These tools wait for you to [trust the repository](/docs/repository-trust), also when they are on your `PATH`. Until then the file saves unformatted and Loxel tells you. If you stop trusting a repository, its formatters stop right away.
 
 If Biome or Deno would start through a version manager's shim, Loxel skips formatting and says so. Add the tool's own directory to your `PATH`.
 
