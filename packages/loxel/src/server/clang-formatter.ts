@@ -155,10 +155,11 @@ function withoutDots(dir: string, pattern: string): string {
 }
 
 /**
- * The behavior of clang's `MatchFilePath.cpp`, which clang-format uses for ignore files: POSIX `*`, `?`, `[...]` and `\`, where none of them cross a
- * `/`, plus `**` as a whole path segment. A pattern is the repository's, and this runs on the
- * server's thread, so a position that failed once is never tried again, and running out of `budget`
- * throws, which format-service takes as no formatter: the file is left alone.
+ * The behavior of clang's `MatchFilePath.cpp`, which clang-format uses for ignore files: POSIX
+ * `*`, `?`, `[...]` and `\`, where none of them cross a `/`, plus `**` as a whole path segment. A
+ * pattern is the repository's, and this runs on the server's thread, so a position that failed
+ * once is never tried again, and running out of `budget` throws, which format-service takes as no
+ * formatter: the file is left alone.
  */
 function matchesGlob(pattern: string, path: string, budget: { steps: number }): boolean {
   const failed = new Set<number>();
@@ -208,6 +209,8 @@ function matchesGlob(pattern: string, path: string, budget: { steps: number }): 
     return i === pattern.length;
   };
 
+  // Adapted and changed from LLVM's clang/lib/Format/MatchFilePath.cpp, under Apache-2.0 WITH
+  // LLVM-exception. License text: packages/loxel/scripts/language-servers/licenses/clangd.txt
   const matchStar = (star: number, at: number): boolean => {
     let next = star;
     while (pattern[next] === "*") next++;
@@ -234,7 +237,12 @@ function matchesGlob(pattern: string, path: string, budget: { steps: number }): 
   return match(0, 0);
 }
 
-/** The `[...]` at `open`, or undefined when it is a literal `[`: unpaired, empty or with a `/`. */
+/**
+ * The `[...]` at `open`, or undefined when it is a literal `[`: unpaired, empty or with a `/`.
+ *
+ * Adapted and changed from LLVM's clang/lib/Format/MatchFilePath.cpp, under Apache-2.0 WITH
+ * LLVM-exception. License text: packages/loxel/scripts/language-servers/licenses/clangd.txt
+ */
 function bracketSet(
   pattern: string,
   open: number,
