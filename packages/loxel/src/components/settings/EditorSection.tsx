@@ -6,7 +6,7 @@ import * as api from "@/api/client";
 import { Input } from "@/components/ui/input";
 import type { FormatterOverride } from "@/lib/formatting-model";
 import { cn } from "@/lib/utils";
-import type { IndentationOverride } from "@/store/settings-store";
+import type { IndentationOverride, InlayHintsMode } from "@/store/settings-store";
 import {
   BUILTIN_LANGUAGE_INDENTATION,
   DEFAULT_EDITOR_SETTINGS,
@@ -21,6 +21,13 @@ const BUILTIN_INDENTATION_SUMMARY = [...BUILTIN_LANGUAGE_INDENTATION]
   )
   .join(", ");
 
+const INLAY_HINTS_OPTIONS: readonly { value: InlayHintsMode; label: string }[] = [
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" },
+  { value: "onUnlessPressed", label: "On, hidden while holding Ctrl+Alt" },
+  { value: "offUnlessPressed", label: "Off, shown while holding Ctrl+Alt" },
+];
+
 export function EditorSection() {
   const indentation = useSettingsStore((s) => s.editor.indentation);
   const overrides = useSettingsStore((s) => s.editor.overrides);
@@ -28,6 +35,9 @@ export function EditorSection() {
   const addEditorOverride = useSettingsStore((s) => s.addEditorOverride);
   const updateEditorOverride = useSettingsStore((s) => s.updateEditorOverride);
   const removeEditorOverride = useSettingsStore((s) => s.removeEditorOverride);
+
+  const inlayHints = useSettingsStore((s) => s.editor.inlayHints);
+  const setEditorInlayHints = useSettingsStore((s) => s.setEditorInlayHints);
 
   const formatting = useSettingsStore((s) => s.editor.formatting);
   const updateFormatting = useSettingsStore((s) => s.updateFormatting);
@@ -90,7 +100,7 @@ export function EditorSection() {
       <div>
         <h3 className="text-foreground text-sm font-medium">Editor</h3>
         <p className="text-muted-foreground mt-1 text-xs">
-          Configure editor indentation and formatting.
+          Configure editor indentation, inlay hints and formatting.
         </p>
       </div>
 
@@ -163,6 +173,31 @@ export function EditorSection() {
           <PlusIcon className="size-3.5" />
           Add Override
         </button>
+      </div>
+
+      {/* --- Inlay Hints --- */}
+      <div className="border-border space-y-1.5 border-t pt-4">
+        <label htmlFor="editor-inlay-hints" className="text-muted-foreground text-xs">
+          Inlay Hints
+        </label>
+        <p className="text-muted-foreground text-[10px]">
+          Types and parameter names that language servers show inline in the code.
+        </p>
+        <select
+          id="editor-inlay-hints"
+          value={inlayHints}
+          onChange={(e) => {
+            const option = INLAY_HINTS_OPTIONS.find(({ value }) => value === e.target.value);
+            if (option) setEditorInlayHints(option.value);
+          }}
+          className="border-input bg-background text-foreground block h-7 rounded border px-1 text-xs"
+        >
+          {INLAY_HINTS_OPTIONS.map(({ value, label }) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* --- Formatting --- */}

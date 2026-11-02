@@ -1,10 +1,10 @@
 ---
 title: JavaScript
-description: JavaScript projects, jsconfig.json, type checking plain JavaScript, the Node version, and tool configuration files.
+description: JavaScript projects, jsconfig.json, type checking plain JavaScript, inlay hints, format on save, ESLint, the Node version, and tool configuration files.
 order: 13.5
 ---
 
-<!-- Later headings go after "Type checking JavaScript", before "Node version": "Linters" (ESLint, oxlint, Biome). "Tool configuration files" stays last. -->
+<!-- Later subsections go in "Linters", after ESLint: oxlint, Biome. "Tool configuration files" stays last. -->
 
 JavaScript files use the same language server as [TypeScript](/docs/languages/typescript), so `.js`, `.mjs`, `.cjs` and `.jsx` files get the same hover, navigation, completions and refactors. Types for your packages come from what is installed: install your dependencies, and the `@types` packages of those that ship no types.
 
@@ -76,6 +76,51 @@ A file with no extension gets the same features when its first line names a Java
 
 ---
 
+## Inlay hints
+
+[Inlay hints](/docs/editor#inlay-hints) work as in [TypeScript](/docs/languages/typescript): inferred variable and return types, and the parameter names of literal arguments. A value TypeScript knows nothing about shows `: any`, which is common for packages without types and goes away once their types are installed. To turn hints off or show them only on demand, use **Settings > Editor**.
+
+---
+
+## Format on save
+
+Loxel formats with the tool your project uses, found from the file's folder upward, so each project in a monorepo can use its own. The closest folder with a sign of a formatter decides:
+
+| Formatter | Detected from                                                                          | Formats                                                             |
+| --------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Biome     | `biome.json` or `biome.jsonc`, or an `@biomejs/biome` dependency                       | JS/TS, JSON, CSS, GraphQL                                           |
+| Prettier  | A Prettier config file, a `prettier` key in `package.json`, or a `prettier` dependency | JS/TS, CSS, JSON, markdown, YAML, HTML, Vue, Svelte, Astro, GraphQL |
+| oxfmt     | An `.oxfmtrc.*` file or an `oxfmt` dependency                                          | The same as Prettier without Svelte and Astro, plus TOML            |
+
+In one folder, a config file beats a dependency, and among them Biome comes before Prettier, then oxfmt. A tool only counts for the files it can format, so with Biome and Prettier side by side, Biome formats your code and Prettier your markdown and YAML. A `biome.json` with `"formatter": { "enabled": false }` is for linting only and doesn't select Biome. With only a `prettier` dependency and no config, files get Prettier's defaults.
+
+The project's own install runs, a subproject's before the root's, under the [Node version](#node-version) of the worktree. Without one, Loxel uses the tool on your `PATH`.
+
+These tools run code from the project, so they wait for you to [trust the repository](/docs/repository-trust): Prettier and oxfmt because their config files and plugins are code, and a project's own Biome because it is installed by the project. Until then the file saves unformatted and Loxel tells you, except that a Biome on your `PATH` still runs, since Biome's config is only data. If you stop trusting a repository, its formatters stop right away.
+
+If Biome or Deno would start through a version manager's shim, Loxel skips formatting and says so. Add the tool's own directory to your `PATH`.
+
+---
+
+## Linters
+
+### ESLint
+
+In a [trusted repository](/docs/repository-trust), JavaScript and TypeScript files in a project that uses ESLint show its problems in the editor as you type, with quick fixes for fixing a problem or disabling a rule for a line or a file. **Fix All** applies everything fixable in the file. Loxel runs the ESLint your project has installed, with your config and plugins, so the results match running it in a terminal.
+
+A file is linted when both of these hold:
+
+- An ESLint config lies in its folder or above it, up to the worktree root: `eslint.config.js` (or `.cjs`, `.mjs`, `.ts`, `.mts`, `.cts`), `.eslintrc` in any form, or an `eslintConfig` key in `package.json`.
+- ESLint is installed in `node_modules` there or above it. In a Yarn Plug'n'Play project, set `nodeLinker: node-modules`.
+
+Each package of a monorepo uses its own config, and a package without one uses the root's.
+
+Loxel never installs ESLint. If a project has a config and no ESLint, a notification says what to run, for example `npm install`. ESLint runs on the [Node version](#node-version) the worktree uses; without any Node, a notification says to install one. Until you trust a repository, ESLint doesn't run in it, and the status bar shows **Restricted** once you open a file in a project that uses it.
+
+Changes to a config file apply right away, and so does installing or upgrading packages. Formatting stays with [format on save](#format-on-save), even when ESLint has fixable formatting rules.
+
+---
+
 ## Node version
 
 While a JavaScript or TypeScript file is the active editor, the status bar shows the Node version the worktree uses, for example `Node 22.11.0 (nvm)`. Hover it to see the full path and how it was found.
@@ -101,6 +146,8 @@ Versions are found for nvm, fnm, Volta, asdf, mise and n, including custom locat
 Loxel never installs Node. If the pinned version is not installed, the status bar item turns to its warning color, Loxel uses `node` from `PATH`, and the tooltip says what to run in a terminal, for example `nvm install 22`.
 
 Click the item, or run **Node: Select Version** from the command palette (`Cmd+Shift+P`), to choose an installed version for this worktree, or to go back to automatic detection. The list shows what your version managers have installed and the `node` on `PATH`.
+
+New [terminals](/docs/terminals#node-version) use this version when it comes from a pin or an installed version you chose. When it is the `node` on your `PATH`, found or chosen, they are left as they are.
 
 ---
 
@@ -130,5 +177,6 @@ Turn one off in **Settings > Schemas** to stop checking files against it. Other 
 ## See also
 
 - [TypeScript](/docs/languages/typescript) — the shared language server and how outside changes reach it
+- [Terminals](/docs/terminals#node-version) — new terminals start with the worktree's Node version first on `PATH`
 - [Language Intelligence](/docs/language-intelligence) — the features every language server provides, and how servers start and stop per worktree
 - [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code

@@ -676,8 +676,9 @@ function buildAppMenu(): void {
     {
       label: "View",
       submenu: [
-        // Not the forceReload role: its ⇧⌘R is Rename Tab in the renderer, and macOS menus take
-        // their keys before the page (`registerAccelerator: false` is ignored there).
+        // Not the forceReload role: its ⇧⌘R is Rename Tab, or a focused browser panel's hard refresh,
+        // in the renderer, and macOS menus take their keys before the page
+        // (`registerAccelerator: false` is ignored there).
         ...(IS_DEV
           ? [
               { role: "reload" as const },

@@ -7,7 +7,6 @@ import {
   watch,
   type FSWatcher,
 } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 
 import type { GoEnv, GoEnvSource, GoProjectVersion } from "@/api/go-env-model";
@@ -274,11 +273,11 @@ export async function trustedGoTool(wtPath: string, name: string): Promise<strin
 }
 
 /**
- * The Go a shim stands for, found from the home directory: the `go` in the GOROOT it reports. Null
+ * The Go a shim stands for, found from the filesystem root: the `go` in the GOROOT it reports. Null
  * when it names none that can be trusted, since nothing else on the PATH has been checked.
  */
 export async function goBehindShim(wtPath: string, shim: string): Promise<string | null> {
-  const { GOROOT } = await goEnvVariables(shim, homedir(), wtPath, ["GOROOT"]);
+  const { GOROOT } = await goEnvVariables(shim, "/", wtPath, ["GOROOT"]);
   if (!GOROOT || !path.isAbsolute(GOROOT)) return null;
   const go = Bun.which(GO, { PATH: path.join(GOROOT, "bin") });
   return go && (await isTrustedBinary(wtPath, go)) ? go : null;
@@ -398,14 +397,14 @@ function ownGorootEnv(wtPath: string): Record<string, string | undefined> {
 }
 
 /**
- * The version a `go` binary reports, from the home directory; null when it does not answer like a
+ * The version a `go` binary reports, from the filesystem root; null when it does not answer like a
  * Go. Takes a binary not yet known to be Go, so the output is matched strictly.
  */
 export async function goVersion(wtPath: string, go: string): Promise<string | null> {
   try {
     const proc = measureSpawn("go", () =>
       Bun.spawn([go, "version"], {
-        cwd: homedir(),
+        cwd: "/",
         env: ownGorootEnv(wtPath),
         stdin: "ignore",
         stdout: "pipe",

@@ -30,6 +30,7 @@ import {
   subscribeCompileDatabases,
 } from "./compile-database";
 import { config } from "./config";
+import { FSMONITOR_OFF } from "./git-commands";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import { reportRepoRestriction } from "./repo-trust";
@@ -338,7 +339,7 @@ export async function indexDirectoryIsSymlink(
   const pathspecs = INDEX_DIRECTORY_PARTS.map((part) => `:(glob)**/${part}`);
   const { code, stdout } = await run(
     // The repository's own config must not pick a program to run.
-    ["git", "-c", "core.fsmonitor=false", "-C", wtPath, "ls-files", "-s", "-z", "--", ...pathspecs],
+    ["git", ...FSMONITOR_OFF, "-C", wtPath, "ls-files", "-s", "-z", "--", ...pathspecs],
     INDEX_CHECK_TIMEOUT_MS,
   );
   // Git exits with an error outside a repository; a null code is a timeout or no git to run.
@@ -406,7 +407,8 @@ interface ClangdSessionFiles {
 /**
  * Manages clangd child processes, one per worktree, for C, C++ and Objective-C. clangd finds each
  * file's compile command itself, per file, so monorepos with several compile databases work without
- * `--compile-commands-dir`, which goes only where that search finds nothing (compile-database.ts). In a trusted repository the binary is the login-shell PATH's, else the
+ * `--compile-commands-dir`, which goes only where that search finds nothing (compile-database.ts).
+ * In a trusted repository the binary is the login-shell PATH's, else the
  * bundled one; otherwise the bundled one, else the PATH's.
  */
 export class ClangdLspManager extends WorktreeLspManager {

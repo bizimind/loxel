@@ -1,23 +1,31 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import type { FileSink } from "bun";
 
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 
-import type { BackendMode, FormatterBackend } from "./formatter-backends";
+import { dotnetArgsRunProjectTool } from "./csharp-env";
 import {
+  type BackendMode,
+  FORMAT_REJECTED,
+  type FormatterBackend,
+  killProcessGroup,
+} from "./formatter-backends";
+import {
+  dirsUpToRoot,
   type FileFormatter,
   type FormatterDecline,
   type FormatterFailure,
   type FormatterSpawnOptions,
   type LanguageFormatter,
-  nodeModulesBin,
+  projectNodeBinDirs,
 } from "./language-formatter";
 import { languageFormatters } from "./language-formatters";
 import { logger } from "./logger";
 import { OxfmtLspBackend } from "./oxfmt-lsp-backend";
 import { PrettierLibBackend } from "./prettier-lib-backend";
+import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 
@@ -49,6 +57,10 @@ interface DetectedFormatter {
   args: string;
   extensions: Set<string>;
   backendMode: BackendMode;
+  /** See {@link FileFormatter.backendDir}. */
+  backendDir?: string;
+  /** See {@link FileFormatter.backendToolDir}. */
+  backendToolDir?: string;
 }
 
 interface DetectionCache {
@@ -56,50 +68,6 @@ interface DetectionCache {
   fingerprint: string;
   formatters: DetectedFormatter[];
 }
-
-/** Config files oxfmt discovers on its own (see `oxfmt --help`, "Config Options"). */
-const OXFMT_CONFIG_FILES = [
-  ".oxfmtrc.json",
-  ".oxfmtrc.jsonc",
-  ".oxfmtrc.ts",
-  ".oxfmtrc.mts",
-  ".oxfmtrc.cts",
-  ".oxfmtrc.js",
-  ".oxfmtrc.mjs",
-  ".oxfmtrc.cjs",
-];
-
-/**
- * Extensions both prettier and oxfmt format out of the box (verified against prettier 3.9
- * `--support-info` and oxfmt 0.68.0 via `--stdin-filepath` and `--lsp`). Alias spellings
- * (yml, mjs, scss, mdx, ...) are listed explicitly so that a project with both formatters
- * routes the whole language to the same formatter, not just the canonical extension.
- */
-const SHARED_FORMAT_EXTENSIONS = [
-  "ts",
-  "tsx",
-  "mts",
-  "cts",
-  "js",
-  "jsx",
-  "mjs",
-  "cjs",
-  "css",
-  "scss",
-  "less",
-  "json",
-  "jsonc",
-  "json5",
-  "md",
-  "mdx",
-  "markdown",
-  "yaml",
-  "yml",
-  "html",
-  "vue",
-  "graphql",
-  "gql",
-];
 
 /** Config files to check and the formatter they imply. */
 const DETECTION_RULES: {
@@ -109,63 +77,8 @@ const DETECTION_RULES: {
   check: (wtRoot: string) => boolean;
   formatter: Omit<DetectedFormatter, "extensions"> & { extensions: string[] };
 }[] = [
-  // NOTE: backendMode is set per rule — "lsp" for oxfmt, "library" for prettier, "command" for others.
   // Rules are evaluated in array order and `format()` picks the first detected formatter whose
-  // extension set contains the file's extension. Prettier is listed first, so when a project has
-  // both a prettier config and oxfmt, prettier handles every extension it claims (e.g. `md`, `json`).
-  {
-    files: [
-      ".prettierrc",
-      ".prettierrc.json",
-      ".prettierrc.yml",
-      ".prettierrc.yaml",
-      ".prettierrc.json5",
-      ".prettierrc.toml",
-      ".prettierrc.js",
-      ".prettierrc.cjs",
-      ".prettierrc.mjs",
-      "prettier.config.js",
-      "prettier.config.cjs",
-      "prettier.config.mjs",
-      "prettier.config.ts",
-    ],
-    check: (wtRoot) => {
-      // Check config files
-      for (const f of DETECTION_RULES[0]!.files) {
-        if (existsSync(join(wtRoot, f))) return true;
-      }
-      // Check package.json for "prettier" key
-      return packageJsonHasKey(wtRoot, "prettier");
-    },
-    formatter: {
-      command: "prettier",
-      args: "--stdin-filepath {file}",
-      // `toml` is intentionally absent: prettier has no TOML support.
-      extensions: [...SHARED_FORMAT_EXTENSIONS, "svelte", "astro"],
-      backendMode: "library",
-    },
-  },
-  {
-    files: OXFMT_CONFIG_FILES,
-    check: (wtRoot) => {
-      if (OXFMT_CONFIG_FILES.some((f) => existsSync(join(wtRoot, f)))) return true;
-      return packageJsonHasDep(wtRoot, "oxfmt");
-    },
-    formatter: {
-      command: "oxfmt",
-      args: "--stdin-filepath={file}",
-      // Deliberately excluded (oxfmt 0.68.0): `svelte` (disabled unless the project enables the
-      // `svelte` config option and installs `svelte`) and `astro` (unsupported).
-      extensions: [...SHARED_FORMAT_EXTENSIONS, "toml"],
-      backendMode: "lsp",
-    },
-  },
-  {
-    files: ["rustfmt.toml", ".rustfmt.toml"],
-    check: (wtRoot) =>
-      existsSync(join(wtRoot, "rustfmt.toml")) || existsSync(join(wtRoot, ".rustfmt.toml")),
-    formatter: { command: "rustfmt", args: "", extensions: ["rs"], backendMode: "command" },
-  },
+  // extension set contains the file's extension.
   {
     files: [".clang-format"],
     check: (wtRoot) => existsSync(join(wtRoot, ".clang-format")),
@@ -182,8 +95,8 @@ const DETECTION_RULES: {
       existsSync(join(wtRoot, "deno.json")) || existsSync(join(wtRoot, "deno.jsonc")),
     formatter: {
       command: "deno",
-      args: "fmt --stdin --ext {ext}",
-      extensions: ["ts", "tsx", "js", "jsx"],
+      args: "fmt --ext {ext} -",
+      extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],
       backendMode: "command",
     },
   },
@@ -196,6 +109,8 @@ const DETECTION_RULES: {
 export class FormatService {
   private cacheByWorktree = new Map<string, DetectionCache>();
   private backends = new Map<string, FormatterBackend>();
+  private running = new Set<{ worktreePath: string; pid: number; stopped: boolean }>();
+  private readonly unsubscribeRepoTrust = onRepoTrustChange(() => this.stopUntrusted());
 
   constructor(private readonly languages: readonly LanguageFormatter[] = languageFormatters) {}
 
@@ -218,6 +133,26 @@ export class FormatService {
     // 1. Check manual overrides first
     const override = findMatchingOverride(settings.overrides, ext);
     if (override) {
+      // Overrides apply to every repository, and a relative path or a manifest names a different
+      // file or tool in each.
+      if (
+        worktreePath &&
+        !isRepoTrusted(worktreePath) &&
+        (overrideNamesRepoPath(override, worktreePath) ||
+          dotnetArgsRunProjectTool(
+            override.command,
+            override.args,
+            dirsUpToRoot(fileDir(filePath, worktreePath), worktreePath),
+          ))
+      ) {
+        const named = `${override.command} ${override.args}`.trim();
+        log.info("Holding back an override that runs a project's file or tool", { filePath });
+        reportRepoRestriction(
+          worktreePath,
+          `Format on save doesn't run ${named} from this repository.`,
+        );
+        return UNFORMATTED;
+      }
       log.info("Formatting with manual override", { command: override.command, filePath });
       return this.runFormatter(override.command, override.args, content, filePath, worktreePath);
     }
@@ -271,6 +206,8 @@ export class FormatService {
 
   /** Shut down all persistent formatter backends. */
   destroy(): void {
+    this.unsubscribeRepoTrust();
+    for (const run of this.running) killProcessGroup(run.pid);
     for (const backend of this.backends.values()) {
       backend.destroy();
     }
@@ -280,6 +217,23 @@ export class FormatService {
   // -------------------------------------------------------------------------
   // Private
   // -------------------------------------------------------------------------
+
+  /**
+   * End what a repository that is no longer trusted has running: its backends, which hold its code
+   * and config, and its formatters in flight. A save waiting on one goes out unformatted.
+   */
+  private stopUntrusted(): void {
+    for (const [key, backend] of this.backends) {
+      if (isRepoTrusted(key.slice(0, key.indexOf("\0")))) continue;
+      backend.destroy();
+      this.backends.delete(key);
+    }
+    for (const run of this.running) {
+      if (isRepoTrusted(run.worktreePath)) continue;
+      run.stopped = true;
+      killProcessGroup(run.pid);
+    }
+  }
 
   /**
    * The auto-detected formatter for a file: per file from the language modules claiming its
@@ -324,7 +278,7 @@ export class FormatService {
     return {
       ...options,
       cwd: options?.cwd ?? worktreePath,
-      binDirs: options?.binDirs ?? [nodeModulesBin(worktreePath)],
+      binDirs: options?.binDirs ?? projectNodeBinDirs(command, worktreePath),
     };
   }
 
@@ -344,7 +298,7 @@ export class FormatService {
     filePath: string,
     worktreePath: string,
   ): Promise<FormatResult> {
-    const key = `${worktreePath}\0${fmt.command}`;
+    const key = [worktreePath, fmt.command, fmt.backendDir, fmt.backendToolDir].join("\0");
     let backend = this.backends.get(key);
 
     // Lazy start or restart on crash
@@ -360,13 +314,17 @@ export class FormatService {
       this.backends.set(key, backend);
     }
 
-    const result = await backend.format(content, filePath);
+    const result = await backend.format(content, resolve(worktreePath, filePath));
+    if (result === FORMAT_REJECTED) return UNFORMATTED;
     if (result !== null) return { content: result };
 
     // Backend failed — destroy and fall back to command mode for this request
-    log.warn("Daemon formatter failed, falling back to command mode", { command: fmt.command });
     backend.destroy();
-    this.backends.delete(key);
+    // A concurrent save may have replaced it, and the replacement must stay reachable.
+    if (this.backends.get(key) === backend) this.backends.delete(key);
+    // Backends run only in a trusted repository, and the command would load the same config.
+    if (!isRepoTrusted(worktreePath)) return UNFORMATTED;
+    log.warn("Daemon formatter failed, falling back to command mode", { command: fmt.command });
     return this.runFormatter(fmt.command, fmt.args, content, filePath, worktreePath);
   }
 
@@ -374,11 +332,13 @@ export class FormatService {
     fmt: DetectedFormatter,
     worktreePath: string,
   ): FormatterBackend | undefined {
+    const dir = fmt.backendDir ?? worktreePath;
+    const toolDir = fmt.backendToolDir ?? dir;
     switch (fmt.command) {
       case "oxfmt":
-        return new OxfmtLspBackend(worktreePath);
+        return new OxfmtLspBackend(dir, toolDir, worktreePath);
       case "prettier":
-        return new PrettierLibBackend(worktreePath);
+        return new PrettierLibBackend(dir, toolDir, worktreePath);
       default:
         return undefined;
     }
@@ -455,6 +415,8 @@ export class FormatService {
       return { content: null, notice };
     }
 
+    const run = worktreePath ? { worktreePath, pid: proc.pid, stopped: false } : null;
+    if (run) this.running.add(run);
     try {
       feedStdin(proc.stdin, content, command);
 
@@ -467,13 +429,15 @@ export class FormatService {
       ]);
 
       if (exitCode === "timeout") {
-        proc.kill();
+        killProcessGroup(proc.pid);
         log.warn("Formatter timed out", { command, filePath });
         return {
           content: null,
           notice: `Format on save skipped: "${command}" timed out after ${FORMAT_TIMEOUT_MS / 1_000}s.`,
         };
       }
+
+      if (run?.stopped) return UNFORMATTED;
 
       if (exitCode !== 0) {
         const stderr = await new Response(proc.stderr).text();
@@ -497,6 +461,8 @@ export class FormatService {
     } catch (err) {
       log.warn("Formatter failed", { command, filePath, error: errorMessage(err) });
       return UNFORMATTED;
+    } finally {
+      if (run) this.running.delete(run);
     }
   }
 }
@@ -507,7 +473,7 @@ function spawnFormatter(
   env: Record<string, string | undefined>,
 ) {
   return measureSpawn("formatter", () =>
-    Bun.spawn(argv, { stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd, env }),
+    Bun.spawn(argv, { stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd, env, detached: true }),
   );
 }
 
@@ -563,6 +529,26 @@ function spawnFailureNotice(
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** A command with a directory in it that isn't absolute, which resolves against the worktree. */
+function isRelativePath(command: string): boolean {
+  return command.includes("/") && !isAbsolute(command);
+}
+
+/**
+ * Whether an override's command or an argument names a path in the worktree it runs in: `node
+ * tools/fmt.js {file}` runs the repository's script as surely as `tools/fmt.js` does. The saved
+ * file's own `{file}` doesn't count, and a value is read from `--flag=value`.
+ */
+function overrideNamesRepoPath(override: FormatterOverride, worktreePath: string): boolean {
+  if (isRelativePath(override.command)) return true;
+  return splitArgs(override.args).some((arg) => {
+    if (arg.includes("{file}")) return false;
+    const value = arg.startsWith("-") ? arg.split("=").slice(1).join("=") : arg;
+    if (value === "" || isAbsolute(value)) return false;
+    return isRelativePath(value) || existsSync(resolve(worktreePath, value));
+  });
+}
+
 function extractExtension(filePath: string): string | null {
   const lastSlash = filePath.lastIndexOf("/");
   const basename = filePath.slice(lastSlash + 1);
@@ -599,7 +585,11 @@ function toDetectedFormatter(
   formatter: FileFormatter,
   language: LanguageFormatter,
 ): DetectedFormatter {
-  return { ...formatter, extensions: new Set(language.extensions), backendMode: "command" };
+  return {
+    ...formatter,
+    extensions: new Set(language.extensions),
+    backendMode: formatter.backendMode ?? "command",
+  };
 }
 
 function findMatchingOverride(
@@ -634,7 +624,6 @@ function computeFingerprint(worktreePath: string): string {
       allConfigFiles.add(f);
     }
   }
-  allConfigFiles.add("package.json"); // used for dep checks
 
   for (const f of [...allConfigFiles].sort()) {
     const fullPath = join(worktreePath, f);
@@ -650,32 +639,4 @@ function computeFingerprint(worktreePath: string): string {
     }
   }
   return parts.join("|");
-}
-
-/** Synchronously read and parse the worktree's package.json. Returns null if missing/invalid. */
-function readPackageJson(wtRoot: string): Record<string, unknown> | null {
-  const pkgPath = join(wtRoot, "package.json");
-  if (!existsSync(pkgPath)) return null;
-  try {
-    const content = readFileSync(pkgPath, "utf-8");
-    return JSON.parse(content) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-/** Check if package.json has a top-level key. */
-function packageJsonHasKey(wtRoot: string, key: string): boolean {
-  const raw = readPackageJson(wtRoot);
-  return raw !== null && key in raw;
-}
-
-/** Check if package.json has a dependency (any dep type). */
-function packageJsonHasDep(wtRoot: string, pkg: string): boolean {
-  const raw = readPackageJson(wtRoot);
-  if (!raw) return false;
-  const deps = raw.dependencies as Record<string, string> | undefined;
-  const devDeps = raw.devDependencies as Record<string, string> | undefined;
-  const peerDeps = raw.peerDependencies as Record<string, string> | undefined;
-  return Boolean(deps?.[pkg] || devDeps?.[pkg] || peerDeps?.[pkg]);
 }

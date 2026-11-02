@@ -1,4 +1,5 @@
 import { cCppToolchain } from "./c-cpp-compile-database-model";
+import { csharpToolchain } from "./csharp-env-model";
 import { goToolchain } from "./go-env-model";
 import { javaToolchain } from "./java-env-model";
 /**
@@ -14,6 +15,7 @@ import { rustToolchain } from "./rust-toolchain-model";
 export const toolchainStatuses = [
   // This comment keeps the list on one line per entry whatever its length.
   cCppToolchain,
+  csharpToolchain,
   goToolchain,
   javaToolchain,
   nodeToolchain,

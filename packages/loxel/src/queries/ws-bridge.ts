@@ -7,7 +7,7 @@ import { toolchainStatuses } from "@/api/toolchain-statuses";
 import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
-import { openFile, openFolder, openTerminal } from "@/lib/open-path";
+import { openFile, openFolder, openTerminal, openUrl } from "@/lib/open-path";
 import { handleFileMoved } from "@/lib/panel-creators";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
@@ -342,10 +342,7 @@ export function useWsBridge(): void {
         }
 
         case "open_file":
-          void openFile(message.data.filePath, {
-            placement: message.data.placement,
-            focus: message.data.focus,
-          });
+          void openFile(message.data);
           break;
 
         case "open_folder":
@@ -357,7 +354,7 @@ export function useWsBridge(): void {
           break;
 
         case "open_url":
-          dispatchLoxelEvent("loxel-create-browser", message.data);
+          void openUrl(message.wtPath, message.data);
           break;
 
         // --- Project-scoped events (carry projectPath) ---
@@ -456,6 +453,8 @@ export function useWsBridge(): void {
 
         case "repo_trust_changed":
           void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
+          // What a toolchain reports can depend on trust, such as a shim's version.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.toolchainStatusAll() });
           break;
 
         case "store_updated":

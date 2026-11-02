@@ -23,7 +23,7 @@ const TREE_ACTION_IDS = new Set<TreeActionId>([
 export function getTreeActionForEvent(e: ReactKeyboardEvent): TreeActionId | null {
   const actionId = useKeybindingStore
     .getState()
-    .lookup.get(eventToKeyCombo(e as unknown as KeyboardEvent));
+    .lookup.get(eventToKeyCombo(e as unknown as KeyboardEvent))?.[0];
   if (!isTreeActionId(actionId)) return null;
   return actionId;
 }

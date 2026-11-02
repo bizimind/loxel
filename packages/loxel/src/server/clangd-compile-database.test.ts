@@ -79,6 +79,16 @@ describe.skipIf(process.platform === "win32")("the start's arguments", () => {
     expect(flagOf(args)).toBe(`--compile-commands-dir=${join(root, "cmake-build-debug")}`);
   });
 
+  test.each([false, true])("name a chosen folder, trusted: %p", async (repoTrusted) => {
+    const root = await makeDir();
+    const outside = await makeDir();
+    await write(outside, "compile_commands.json", "[]");
+    setCompileDatabaseChoice(root, outside);
+    const args = await (await starting()).argsFor(root, repoTrusted);
+    setCompileDatabaseChoice(root, null);
+    expect(flagOf(args)).toBe(`--compile-commands-dir=${outside}`);
+  });
+
   test("leave the search to clangd when it finds a subproject's", async () => {
     const root = await makeDir();
     await write(root, "cmake-build-debug/compile_commands.json", "[]");

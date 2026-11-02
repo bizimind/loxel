@@ -60,6 +60,11 @@ const PREFERENCES = {
   includeCompletionsForImportStatements: true,
   includeAutomaticOptionalChainCompletions: true,
   importModuleSpecifierPreference: "shortest",
+  // Whether they show is the editor's inlay hints setting. Names on literal arguments only, where
+  // the call doesn't say what the value means: `all` is about 3 to 4 times as many on real JavaScript.
+  includeInlayParameterNameHints: "literals",
+  includeInlayVariableTypeHints: true,
+  includeInlayFunctionLikeReturnTypeHints: true,
   // Loxel never fetches dependencies by itself: TypeScript would otherwise run `npm` for `@types`.
   automaticTypeAcquisitionEnabled: false,
 } as const;
@@ -290,7 +295,7 @@ function sameIndentation(a: DocumentIndentation, b: DocumentIndentation | undefi
   );
 }
 
-function textDocumentUri(params: unknown): string | undefined {
+export function textDocumentUri(params: unknown): string | undefined {
   const textDocument = isRecord(params) ? params.textDocument : undefined;
   return isRecord(textDocument) && typeof textDocument.uri === "string"
     ? textDocument.uri
@@ -308,7 +313,7 @@ function requestDocumentPath(method: string, params: unknown): string | null {
 }
 
 /** The file path of a client or server document URI, or null for any other URI. */
-function documentPath(uri: string | undefined): string | null {
+export function documentPath(uri: string | undefined): string | null {
   if (uri === undefined) return null;
   const serverUri = toServerUris(uri);
   if (!serverUri.startsWith("file:")) return null;

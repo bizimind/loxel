@@ -700,13 +700,19 @@ describe("rust-analyzer", () => {
     await makeRustup(fixture, { active: STABLE });
     const brew = join(fixture.root, "brew");
     await writeExecutable(join(brew, "rustc"), `#!/bin/sh\necho "rustc 1.88.0"\n`);
+    for (const tool of ["cargo", "rustfmt", "cargo-clippy", "rust-analyzer"]) {
+      await symlink(join(fixture.bin, "rustup"), join(fixture.bin, tool)).catch(() => {});
+    }
 
     expect(
       await resolveRustToolchain(fixture.wt, {
         chosen: null,
         env: { ...fixture.env, PATH: `${brew}:${fixture.bin}` },
       }),
-    ).toMatchObject({ source: "no-rustup", tools: { rustAnalyzer: null } });
+    ).toMatchObject({
+      source: "no-rustup",
+      tools: { cargo: null, rustfmt: null, cargoClippy: null, rustAnalyzer: null },
+    });
   });
 
   test("without rustup it is the PATH binary, skipping a tracked one", async () => {
@@ -723,6 +729,25 @@ describe("rust-analyzer", () => {
         env: { ...fixture.env, PATH: `${committed}:${fixture.bin}` },
       }),
     ).toMatchObject({ source: "no-rustup", tools: { rustAnalyzer: real } });
+  });
+});
+
+describe("an install without rustup", () => {
+  test("takes no rustup proxy of cargo, which would pick its toolchain by directory", async () => {
+    const fixture = await makeFixture();
+    await writeExecutable(
+      join(fixture.bin, "rustc"),
+      `#!/bin/sh\nif [ "$1" = "--print" ]; then echo "${fixture.root}"; else echo "rustc 1.88.0"; fi\n`,
+    );
+    const proxies = join(fixture.root, "cargo-home-bin");
+    await mkdir(proxies);
+    await writeExecutable(join(proxies, "rustup"), "#!/bin/sh\n");
+    await symlink(join(proxies, "rustup"), join(proxies, "cargo"));
+    const env = { ...fixture.env, PATH: `${fixture.bin}:${proxies}` };
+    expect(await resolveRustToolchain(fixture.wt, { chosen: null, env })).toMatchObject({
+      source: "no-rustup",
+      tools: { cargo: null },
+    });
   });
 });
 

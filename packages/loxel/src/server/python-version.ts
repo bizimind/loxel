@@ -1,6 +1,8 @@
 import { stat } from "node:fs/promises";
+import path from "node:path";
 
 import { logger } from "./logger";
+import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
 
@@ -18,10 +20,12 @@ const cache = new Map<string, Promise<string | null>>();
  * failures are not cached.
  * Only pass interpreters the resolver accepted: this executes the file. CPython prints the
  * version before reading any configuration or importing `site`, so no project code runs.
- * Runs in `cwd`, the worktree the interpreter is for: a version-manager shim (pyenv, asdf)
- * picks its Python by directory, from the worktree's `.python-version`.
+ * A version-manager shim (pyenv, asdf) picks its Python by directory. In a trusted repository this
+ * runs in the worktree, so a shim reports what the worktree selects. Otherwise it runs from the
+ * filesystem root, so the worktree's files have no say, and a shim reports its global version.
  */
-export async function pythonVersion(pythonPath: string, cwd: string): Promise<string | null> {
+export async function pythonVersion(pythonPath: string, wtPath: string): Promise<string | null> {
+  const cwd = isRepoTrusted(wtPath) ? wtPath : path.parse(path.resolve(wtPath)).root;
   let key: string;
   try {
     const info = await stat(pythonPath);

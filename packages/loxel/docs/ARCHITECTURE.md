@@ -54,8 +54,8 @@ Server-to-client delivery uses helpers in server.ts, chosen by scope:
 - `broadcastToSubscribers(wtPath)`: clients subscribed to a worktree (`status_changed`, `files_dir_changed`, `file_content_changed`, ...).
 - `broadcastToProject(projectPath)`: clients subscribed to any worktree of the project, deduplicated (`refs_changed`, `log_changed`, `worktree_status_changed`, `localdb_changed`).
 - `broadcastAll`: every app client (`store_updated`, notifications, `log_error_count`, `update_status_changed`).
-- `sendToActiveWindow(windowId)`: one window (`open_file`, `open_folder`, `open_terminal`), see [Per-window identity](#per-window-identity).
-- `sendToWorktreeWindows(wtPath, windowId)`: every subscriber of a worktree, with a different message for the window in use among them (`open_url` and its placement).
+- `sendToActiveWindow(windowId)`: one window (`open_file`, `open_folder`, `open_terminal`, and `open_url` when no window shows its worktree), see [Per-window identity](#per-window-identity).
+- `sendToWorktreeWindows(wtPath, windowId)`: every subscriber showing a worktree, with a different message for the window in use among them (`open_url` with its placement and focus); returns false when no window shows it, and `open_url` then goes through `sendToActiveWindow`.
 - `sendTo(owner)`: terminal events go only to the connection that owns the session.
 
 On the client, [client.ts](../src/api/client.ts) exports a singleton `wsClient` that reconnects every 2 s, queues JSON messages sent before the first connection (messages queued during a later disconnect are discarded on reconnect, since `onReconnect` listeners re-create server-side state), and on reconnect compares the server version from `/api/version` with the first one it saw: a change reloads the page, otherwise `onReconnect` listeners run so features re-create server-side state (worktree subscription, log subscription, terminal reattach).
@@ -124,7 +124,7 @@ Services by scope:
 
 ## Testing
 
-- **Unit tests** sit next to the code as `*.test.ts`. `pnpm run test` runs `bun test src --isolate` with two preloads: [dom-preload.ts](../src/test/dom-preload.ts) registers happy-dom globally and [jest-dom-preload.ts](../src/test/jest-dom-preload.ts) adds jest-dom matchers. There is no `bunfig.toml` in the package, so running one file with `bun test` directly needs the same `--preload` flags if it touches the DOM.
+- **Unit tests** sit next to the code as `*.test.ts`. `pnpm run test` runs `bun test src --isolate` with two preloads: [dom-preload.ts](../src/test/dom-preload.ts) registers happy-dom globally and [jest-dom-preload.ts](../src/test/jest-dom-preload.ts) adds jest-dom matchers. Running one file with `bun test` directly needs the same `--preload` flags if it touches the DOM. The package's `bunfig.toml` preloads [temp-state-dir.ts](../src/test/temp-state-dir.ts) for tests run from the package directory, including `bun test --cwd packages/loxel`, which keeps their state out of the real state directory.
 - **`*.dom.test.tsx`** marks tests that render React with Testing Library (keybindings, find bar, tree, sidebar, menus, panels). It is a naming convention only: the preloads apply to every test.
 - **Server tests** use temporary directories and real Git repos ([git-commands/test-utils.ts](../src/server/git-commands/test-utils.ts)); route tests call `handleRequest` with a fake `RouteContext` (`routes.*.test.ts`).
 - **E2E** ([e2e/](../e2e/)): `pnpm run e2e` runs Playwright with [global-setup.ts](../e2e/global-setup.ts), which builds the renderer with `VITE_SCREENSHOT=1`, starts the server from source on a free port in 17434 to 17534 with a throwaway `LOXEL_STATE_DIR`, and waits for `/api/version`. The current specs in `e2e/screenshots/` produce site screenshots into `packages/site/public/screenshots` and run with one worker against the shared server.

@@ -1,10 +1,25 @@
 ---
 title: Rust
-description: The Rust toolchain of each worktree, the status bar item and the toolchain picker.
+description: Language features through your own rust-analyzer, the toolchain of each worktree, the status bar item, the toolchain picker and format on save.
 order: 13.5
 ---
 
-Loxel works out which Rust toolchain each worktree uses, shows it while you edit a Rust file, and lets you choose another installed one. Each worktree has its own.
+Loxel gives Rust files language features through your own rust-analyzer. It works out which Rust toolchain each worktree uses, shows it while you edit a Rust file, and lets you choose another installed one. Each worktree has its own.
+
+## Language features
+
+Install rust-analyzer with `rustup component add rust-analyzer`, or any other way that puts it on your `PATH`, along with `rustup component add rust-src` for the standard library. Loxel never installs anything. If a part is missing, the status bar or a notification says what to run. Versions from before January 2025 aren't started.
+
+Opening a `.rs` file starts the server for that worktree, which gives you hover, go to definition (including into the standard library and dependencies), references, rename across crates and of modules, quick fixes, completion with auto-import, signature help, inlay hints, folding, symbols, and diagnostics as you type. To format Rust files, use [format on save](/docs/editor).
+
+Language features run without building your project:
+
+- **Build scripts and proc macros don't run**, so macros they generate aren't expanded and items that only exist after a build, such as `include!` of generated code, are unknown.
+- **`cargo check` doesn't run**, so diagnostics are rust-analyzer's own and not the compiler's.
+- **Nothing is downloaded.** Dependencies that aren't in your local Cargo cache are unknown until you run `cargo fetch` in a terminal and then **Restart Language Servers**.
+- **Flags and cross targets in `.cargo/config.toml` don't apply to analysis**, which uses your compiler's own target. `rust-project.json` isn't read.
+
+Projects are found at the root of the worktree, or one folder down when the root has no `Cargo.toml`. A `.rs` file outside any project doesn't get language features yet.
 
 ## Rust toolchain
 
@@ -42,7 +57,19 @@ Click the item, or run **Rust: Select Toolchain** from the command palette (`Cmd
 - **Use automatic detection** goes back to the order above.
 - The rest of the list is every toolchain you have installed with rustup. Without rustup there is nothing else to choose.
 
-The choice is saved for that worktree and survives restarts, and it takes precedence over a toolchain file. It doesn't change what `cargo` runs in your own terminals. If the chosen toolchain is later removed, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
+The language server follows the toolchain, restarting when it changes. The choice is saved for that worktree and survives restarts, and it takes precedence over a toolchain file. New terminals in the worktree use it too, so `cargo` and `rustc` there run the chosen toolchain. A terminal that is already open keeps the toolchain it started with, so open a new one after changing the choice. A `RUSTUP_TOOLCHAIN` your shell's startup files export still wins in a terminal, since they run after Loxel starts the shell. If the chosen toolchain is later removed, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
+
+## Format on save
+
+A `.rs` file is formatted with `rustfmt` on save when it has a `Cargo.toml` in its folder or a folder above it, up to the worktree's root, or a `rustfmt.toml` or `.rustfmt.toml` there. The result matches `cargo fmt`:
+
+- **Edition.** The edition comes from the nearest `Cargo.toml`, or from `[workspace.package]` when the crate has `edition.workspace = true`. A package that names none is edition 2015, as in Cargo. As with `cargo fmt`, this also beats an `edition` set in your `rustfmt.toml`. A file with only a `rustfmt.toml` uses the edition set there. While a `Cargo.toml` can't be read, files under it are saved as they are.
+- **Config.** The nearest `rustfmt.toml` or `.rustfmt.toml` applies, so a crate can have its own. A config in a folder whose name has a space in it isn't supported, and a notice tells you when a save skips formatting because of that.
+- **Which rustfmt.** It's the one from the worktree's [toolchain](#rust-toolchain), including one you chose. A file with a syntax error is saved as it is, without a message.
+
+Formatting never installs anything. A notice tells you what to run when the save goes out unformatted because something is missing: `rustup component add rustfmt` for a toolchain without rustfmt, `rustup toolchain install` for a pinned toolchain you don't have, and how to install Rust when there is none.
+
+To run something else, add a manual override in **Settings > Editor**. An override that runs `rustfmt` by name still uses the worktree's toolchain, so give a full path for a different one.
 
 ---
 

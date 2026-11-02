@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { BUILTIN_FILE_ASSOCIATIONS } from "@/store/settings-store";
 
 import { toMonacoLanguage } from "./monaco-theme";
-import { languageNeedsContent, resolveLanguage } from "./resolve-language";
+import { resolveLanguage } from "./resolve-language";
 
 function resolve(path: string, content?: string): string | null {
   return resolveLanguage(path, BUILTIN_FILE_ASSOCIATIONS, content);
@@ -89,24 +89,6 @@ describe("resolveLanguage for shebang scripts", () => {
 
   test("the path wins over the shebang", () => {
     expect(resolve("/repo/bin/a.py", "#!/usr/bin/env node\n")).toBe("python");
-  });
-});
-
-describe("languageNeedsContent", () => {
-  test.each(["/repo/a.js", "/repo/a.ts", "/repo/a.py", "/repo/Dockerfile", "/repo/data.json"])(
-    "%s opens by its name, without waiting for content",
-    (path) => {
-      expect(languageNeedsContent(path, BUILTIN_FILE_ASSOCIATIONS)).toBe(false);
-    },
-  );
-
-  test("a file association names the language", () => {
-    const associations = [{ id: "www", glob: "**/bin/www", language: "javascript", enabled: true }];
-    expect(languageNeedsContent("/repo/bin/www", associations)).toBe(false);
-  });
-
-  test("an extensionless script waits for its content", () => {
-    expect(languageNeedsContent("/repo/bin/www", BUILTIN_FILE_ASSOCIATIONS)).toBe(true);
   });
 });
 

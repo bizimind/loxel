@@ -20,9 +20,13 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 | New browser                        | `Cmd+Shift+B`                                                |
 | New tab of the active panel's type | `Cmd+\` then `Enter`                                         |
 | Close panel                        | `Cmd+W`                                                      |
+| Reopen closed tab                  | `Cmd+Shift+T`                                                |
 | Rename the active tab              | `Cmd+Shift+R`                                                |
+| Hard refresh a browser tab         | `Cmd+Shift+R` while the browser tab has focus                |
 | Next / previous tab                | `Cmd+Shift+]` / `Cmd+Shift+[`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Focus panel 1–9                    | `Cmd+1` – `Cmd+9`                                            |
+
+`Cmd+Shift+R` depends on focus: in a browser tab, its page or its toolbar, it reloads the page and bypasses the cache; anywhere else it renames the active tab. Settings > Keybindings lists them as **Hard Refresh Browser Tab** and **Rename Tab**, and remapping one leaves the other on `Cmd+Shift+R`.
 
 ---
 
@@ -109,6 +113,7 @@ Back/forward work like a browser's history, across all projects. Worktree number
 | Organize Imports               | `Shift+Alt+O`                           |
 | Source Action…                 | `Ctrl+Alt+S`                            |
 | Refactor…                      | `Ctrl+Alt+R`                            |
+| C#: Select Solution            | unbound — command palette or status bar |
 | C/C++: Select Compile Database | unbound — command palette or status bar |
 | Go: Select Toolchain           | unbound — command palette or status bar |
 | Node: Select Version           | unbound — command palette or status bar |

@@ -9,6 +9,7 @@ import { focusActiveCenterPanel } from "@/lib/focus-navigation";
 import { relativeTo } from "@/lib/project-file-helpers";
 import { registerTabRename } from "@/lib/tab-rename";
 import { cn } from "@/lib/utils";
+import { closeCenterTab } from "@/store/closed-tabs";
 
 import { TabCloseButton } from "./tab-close-button";
 
@@ -72,6 +73,7 @@ interface TabProps {
    * name. Enter or Escape returns focus to the active panel.
    */
   onRename?: (newName: string) => void;
+  onClick?: () => void;
   /** When renaming, initially select only the part before the extension (file names). */
   selectBaseName?: boolean;
   /** Extra classes for the title text (e.g. a deleted-file strikethrough). */
@@ -92,6 +94,7 @@ export function Tab({
   trailing,
   contextMenuItems,
   onRename,
+  onClick,
   selectBaseName,
   titleClassName,
   titleTooltip,
@@ -147,23 +150,28 @@ export function Tab({
     setCtxOpen(true);
   }, []);
 
-  const handleClose = useCallback(() => api.close(), [api]);
+  const handleClose = useCallback(() => closeCenterTab(api), [api]);
 
   const handleCloseOthers = useCallback(() => {
     for (const panel of Array.from(api.group.panels)) {
-      if (panel.id !== api.id) panel.api.close();
+      if (panel.id !== api.id) closeCenterTab(panel.api);
     }
   }, [api]);
 
   const handleCloseAll = useCallback(() => {
     for (const panel of Array.from(api.group.panels)) {
-      panel.api.close();
+      closeCenterTab(panel.api);
     }
   }, [api]);
 
   return (
     <>
-      <div ref={tabRef} className="dv-default-tab" onContextMenu={handleContextMenu}>
+      <div
+        ref={tabRef}
+        className="dv-default-tab"
+        onClick={onClick}
+        onContextMenu={handleContextMenu}
+      >
         <div className="dv-default-tab-content flex items-center gap-1.5">
           {leading}
           {icon}

@@ -21,6 +21,7 @@ import {
   setPythonOverride,
 } from "./python-override-store";
 import { pythonVersion } from "./python-version";
+import { isRepoTrusted } from "./repo-trust";
 import { error, json } from "./response-helpers";
 import type { ToolchainStatusModule } from "./toolchain-status-module";
 
@@ -67,7 +68,13 @@ async function handlePythonOverride(
     }
     // Language servers and terminals will run it, so take only what answers like a Python.
     if (!(await pythonVersion(chosen, wtPath))) {
-      return error(`${chosen} did not report a Python version; is it a Python interpreter?`, 400);
+      const shimHint = isRepoTrusted(wtPath)
+        ? ""
+        : " A version manager's shim may need the repository to be trusted first.";
+      return error(
+        `${chosen} did not report a Python version; is it a Python interpreter?${shimHint}`,
+        400,
+      );
     }
   }
   setPythonOverride(wtPath, chosen);

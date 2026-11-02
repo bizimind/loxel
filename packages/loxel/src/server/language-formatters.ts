@@ -6,14 +6,18 @@
  */
 import { csharpFormatter } from "./csharp-formatter";
 import { goFormatter } from "./go-formatter";
+import { jsFormatters } from "./js-formatter";
 import { kotlinFormatter } from "./kotlin-formatter";
 import type { LanguageFormatter } from "./language-formatter";
 import { pythonFormatter } from "./python-formatter";
+import { rustFormatter } from "./rust-formatter";
 
 export const languageFormatters: readonly LanguageFormatter[] = [
   // This comment keeps the formatter from joining the entries onto one line.
   csharpFormatter,
   goFormatter,
+  ...jsFormatters,
   kotlinFormatter,
   pythonFormatter,
+  rustFormatter,
 ];

@@ -1,6 +1,6 @@
 {
   "name": "@bizimind/loxel",
-  "version": "0.1.289",
+  "version": "0.1.296",
   "description": "IDE for the agentic coding era",
   "homepage": "https://github.com/bizimind/loxel",
   "author": {
@@ -110,10 +110,15 @@
     "electron": "^44.9.1",
     "electron-builder": "^26.15.3",
     "remark-stringify": "^11.0.0",
+    "semver": "^7.8.5",
     "tailwindcss": "^4.3.3",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "vite": "^8.3.4",
     "vite-plugin-electron": "^1.1.2",
+    "vscode-languageserver": "10.1.0",
+    "vscode-languageserver-protocol": "3.18.2",
+    "vscode-languageserver-textdocument": "1.0.13",
+    "vscode-uri": "^3.2.0",
     "yaml-language-server": "^1.24.0"
   }
 }

@@ -89,6 +89,7 @@ describe("JDK routes", () => {
       },
       overridePath: picked,
       ignoredJavaHome: null,
+      projectIssue: null,
     });
     expect(getJavaOverride(wt)).toBe(picked);
 
