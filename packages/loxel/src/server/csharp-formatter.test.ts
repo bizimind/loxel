@@ -56,9 +56,12 @@ function save(name: string): Promise<{ content: string | null; notice?: string }
 }
 
 /** A manual override, the one way `dotnet` runs in an untrusted repository, through its checks. */
-function saveWithDotnet(name: string): Promise<{ content: string | null; notice?: string }> {
-  const args = "tool run csharpier format --stdin-path {file}";
-  const overrides = [{ id: "o1", extensions: "cs", command: "dotnet", args }];
+function saveWithDotnet(
+  name: string,
+  args = "format --stdin-path {file}",
+  command = "dotnet",
+): Promise<{ content: string | null; notice?: string }> {
+  const overrides = [{ id: "o1", extensions: "cs,fs", command, args }];
   const settings = { ...DEFAULT_FORMATTING_SETTINGS, overrides };
   return new FormatService().format("class A { }\n", join(wt, name), wt, settings);
 }
@@ -149,7 +152,7 @@ describe("csharpFormatter local tool", () => {
       const { content } = await saveWithDotnet("svc/src/deep/a.cs");
       const file = join(wt, "svc/src/deep/a.cs");
       expect(content).toContain(
-        `dotnet cwd=${join(wt, "svc")} args=tool run csharpier format --stdin-path ${file} telemetry=1 nologo=1`,
+        `dotnet cwd=${join(wt, "svc")} args=format --stdin-path ${file} telemetry=1 nologo=1`,
       );
     },
   );
@@ -219,18 +222,6 @@ describe("csharpFormatter local tool", () => {
     const padding = " ".repeat(1_024 * 1_024);
     await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) + padding });
     expect(await save("a.cs")).toEqual({ content: null });
-  });
-
-  test("a tool that is not restored says what to run", async () => {
-    await install(
-      tools,
-      "dotnet",
-      `#!/bin/sh\necho 'Run "dotnet tool restore" to make the "csharpier" command available.' >&2\nexit 1\n`,
-    );
-    await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
-    const { content, notice } = await saveWithDotnet("a.cs");
-    expect(content).toBeNull();
-    expect(notice).toContain("`dotnet tool restore`");
   });
 
   test("no dotnet says so, and nothing runs", async () => {
@@ -388,6 +379,45 @@ describe("csharpFormatter repository trust", () => {
     expect((await save("svc/a.cs")).content).toContain("dotnet cwd=");
     setRepoTrusted(wt, false);
     expect((await save("svc/a.cs")).content).toContain("csharpier cwd=");
+  });
+});
+
+describe("a manual dotnet override that runs a project's tool", () => {
+  const TOOL_RUN = "tool run csharpier format --stdin-path {file}";
+  const BY_NAME = "csharpier format --stdin-path {file}";
+
+  test.each([
+    ["tool run", "a.cs", TOOL_RUN],
+    ["its name alone, which dotnet looks up in the manifest", "a.cs", BY_NAME],
+    ["tool run for another language's files", "a.fs", TOOL_RUN],
+  ])("is held back in an untrusted repository: %s", async (_name, file, args) => {
+    await install(tools, "dotnet");
+    await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
+    expect(await saveWithDotnet(file, args)).toEqual({ content: null });
+    expect(existsSync(ranMarker)).toBe(false);
+    expect(getRepoTrustStatus(wt).restrictions).toHaveLength(1);
+  });
+
+  test("is held back when given as a path", async () => {
+    await install(tools, "dotnet");
+    expect(await saveWithDotnet("a.cs", TOOL_RUN, join(tools, "dotnet"))).toEqual({
+      content: null,
+    });
+    expect(existsSync(ranMarker)).toBe(false);
+  });
+
+  test.each([TOOL_RUN, BY_NAME])("runs in a trusted repository: %s", async (args) => {
+    await install(tools, "dotnet");
+    await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
+    setRepoTrusted(wt, true);
+    expect((await saveWithDotnet("a.cs", args)).content).toContain("dotnet cwd=");
+  });
+
+  test("a name no manifest claims runs as written", async () => {
+    await install(tools, "dotnet");
+    await addFiles({ "dotnet-tools.json": manifest({ csharpier: CSHARPIER_TOOL }) });
+    expect((await saveWithDotnet("a.cs", "format {file}")).content).toContain("dotnet cwd=");
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 });
 
