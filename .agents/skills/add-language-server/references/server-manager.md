@@ -1,6 +1,6 @@
 # Server Manager
 
-The manager (`packages/loxel/src/server/<name>-lsp-manager.ts`) is a thin proxy over `StdioLspManager` in `stdio-lsp-manager.ts`; how the base works is in `packages/loxel/docs/LANGUAGE_SERVERS.md`. Extend `WorktreeLspManager`, which supplies one session per worktree, `createSession(ws, wtPath)` / `destroySession(ws)` for `server.ts`, `cwd` and the worktree as `rootUri` / `workspaceFolders`. Extend `StdioLspManager` directly only when the session holds more state (Python, ruff), and copy that plumbing from `WorktreeLspManager`.
+The manager (`packages/loxel/src/server/<name>-lsp-manager.ts`) is a thin proxy over `StdioLspManager` in `stdio-lsp-manager.ts`; how the base works is in `packages/loxel/docs/LANGUAGE_SERVERS.md`. Extend `WorktreeLspManager`, which supplies one session per worktree, `createSession(ws, wtPath)` / `destroySession(ws)` for `server.ts`, `cwd` and the worktree as `rootUri` / `workspaceFolders`. Extend `WorktreeSessionLspManager<TSession>` when the session holds more state (Python, ruff); `WorktreeLspManager` is that base specialized for the plain session.
 
 ## Hooks
 
