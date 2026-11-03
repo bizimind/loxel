@@ -20,7 +20,7 @@ import { registerLoxelLanguages } from "./monaco-languages";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
 import { isWithin } from "./project-file-helpers";
-import { connectTsLsp } from "./ts-lsp-client";
+import { connectTsLsp, disconnectTsLsp } from "./ts-lsp-client";
 import { installVirtualDocumentLinks } from "./virtual-document-links";
 import { connectYamlLsp } from "./yaml-lsp-client";
 
@@ -101,9 +101,10 @@ wsClient.onReconnect(resumeLanguageServers);
   const initialWt = useWorktreeStore.getState().activeWorktreePath;
   if (initialWt) reconnectPerWorktree(initialWt);
   useWorktreeStore.subscribe((state, prev) => {
-    if (state.activeWorktreePath && state.activeWorktreePath !== prev.activeWorktreePath) {
-      reconnectPerWorktree(state.activeWorktreePath);
-    }
+    if (state.activeWorktreePath === prev.activeWorktreePath) return;
+    if (state.activeWorktreePath) reconnectPerWorktree(state.activeWorktreePath);
+    // The last worktree of a bare project was removed: nothing is left to serve.
+    else disconnectTsLsp();
   });
 }
 
@@ -164,7 +165,7 @@ function createLazyLspConnector(opts: LspClient): void {
   });
 
   useWorktreeStore.subscribe((state, prev) => {
-    if (!state.activeWorktreePath || state.activeWorktreePath === prev.activeWorktreePath) return;
+    if (state.activeWorktreePath === prev.activeWorktreePath) return;
     activeWt = state.activeWorktreePath;
     modelCount = countExistingModels();
     syncConnection();

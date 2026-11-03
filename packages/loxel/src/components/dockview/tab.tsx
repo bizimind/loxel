@@ -4,12 +4,18 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { OpenInMenuItems, isOpenInSupported } from "@/components/menus/OpenInMenuItems";
 import { InlineRenameInput } from "@/components/tree";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
+import {
+  canTogglePanelMaximized,
+  maximizeGroupLabel,
+  togglePanelMaximized,
+} from "@/lib/center-maximize";
 import { copyToClipboard } from "@/lib/clipboard";
 import { focusActiveCenterPanel } from "@/lib/focus-navigation";
 import { relativeTo } from "@/lib/project-file-helpers";
 import { registerTabRename } from "@/lib/tab-rename";
 import { cn } from "@/lib/utils";
 import { closeCenterTab } from "@/store/closed-tabs";
+import { getCenterApi } from "@/store/tools-bar";
 
 import { TabCloseButton } from "./tab-close-button";
 
@@ -42,6 +48,19 @@ export function FileContextMenuItems({
       {isOpenInSupported && <ContextMenuSeparator />}
       <OpenInMenuItems path={filePath} />
     </>
+  );
+}
+
+/** Maximize or restore the tab's group, and bring the tab to the front when maximizing. */
+function MaximizeMenuItem({ api }: { api: DockviewPanelApi }) {
+  const panel = getCenterApi()?.getPanel(api.id);
+  return (
+    <ContextMenuItem
+      disabled={!panel || !canTogglePanelMaximized(panel)}
+      onClick={() => panel && togglePanelMaximized(panel)}
+    >
+      {maximizeGroupLabel(api.isMaximized())}
+    </ContextMenuItem>
   );
 }
 
@@ -208,6 +227,8 @@ export function Tab({
         )}
         {contextMenuItems}
         {contextMenuItems && <ContextMenuSeparator />}
+        <MaximizeMenuItem api={api} />
+        <ContextMenuSeparator />
         <ContextMenuItem onClick={handleClose}>Close</ContextMenuItem>
         <ContextMenuItem disabled={api.group.panels.length <= 1} onClick={handleCloseOthers}>
           Close Others

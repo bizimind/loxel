@@ -1,7 +1,4 @@
-import { realpath } from "node:fs/promises";
-import path from "node:path";
-
-const VERSION_MANAGERS = new Set(["mise", "rtx", "volta-shim"]);
+import { linksToVersionManager } from "./version-manager-link";
 
 /**
  * Whether a tool on the lookup path is a version manager's shim rather than the tool: a script, as
@@ -10,7 +7,8 @@ const VERSION_MANAGERS = new Set(["mise", "rtx", "volta-shim"]);
  */
 export async function isVersionManagerShim(filePath: string): Promise<boolean> {
   try {
-    if (VERSION_MANAGERS.has(path.basename(await realpath(filePath)))) return true;
+    // A link that can't be followed fails the read below, so it counts too.
+    if (await linksToVersionManager(filePath)) return true;
     return (await Bun.file(filePath).slice(0, 2).text()) === "#!";
   } catch {
     return true;

@@ -26,9 +26,9 @@ const MESSAGE_TYPE_WARNING = 2;
 /** JSON-RPC's `MethodNotFound`. */
 const METHOD_NOT_FOUND = -32601;
 
-/** How to run a linter: under which Node, plus whatever else its manager needs. */
+/** How to run a linter: under which Node, or null for a native binary, plus what its manager needs. */
 export interface LinterLaunch {
-  node: string;
+  node: string | null;
 }
 
 /** Why no server can run, with what to tell the user of a project using the linter, if anything. */
@@ -302,6 +302,7 @@ export abstract class ProjectLinterLspManager<
     const session = super.buildSession(ws, proc, context);
     this.sessionContexts.set(session, context);
     const node = this.launches.get(context)?.node;
+    if (node === null) return session;
     this.stopWatchingNode.set(
       session,
       subscribeNodeEnv(context.wtPath, ({ env }) => {

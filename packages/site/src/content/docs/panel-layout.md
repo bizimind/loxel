@@ -48,6 +48,8 @@ Double-click a terminal or file tab's title, right-click the tab and choose **Re
 
 Press `Cmd+Shift+T` (**Reopen Closed Tab** in the command palette) to bring back the tab you last closed in this worktree; keep pressing to go further back. It returns to its place among its group's tabs, or to the active group if its group is gone. Editors and browsers come back on the same file or page, a code editor with its cursor where you left it. A browser's back and forward history doesn't come back, and a terminal's session ended when you closed it, so you get a new terminal with the same title. Closed tabs are remembered until you close the window.
 
+Press `Ctrl+Shift+Enter` (**Maximize Group** in the command palette), or right-click a tab and choose **Maximize Group**, to let a group fill the center area. The other groups stay open behind it, and terminals in them keep running at their size. The tool panels and sidebars stay where they are. Next and previous tab stay inside the group, and `Ctrl+Shift+Arrow` skips the hidden groups. To get them back, press the shortcut again, choose **Restore Group Size**, or click the icon at the right of the group's tabs. Going to a tab in another group, opening a new split, or reloading the window also restores them, and switching to another worktree and back does too.
+
 ### Right sidebar
 
 The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads).

@@ -20,6 +20,7 @@ function fakePanelApi(initialTitle: string) {
   const api = {
     id: "panel-1",
     close: jest.fn(),
+    isMaximized: () => false,
     group: { panels: [] },
     get title() {
       return title;
@@ -181,7 +182,7 @@ describe("Rename Tab action", () => {
     const group = {
       activePanel: null as unknown,
       element: document.createElement("div"),
-      api: { isMaximized: () => false, setActive() {} },
+      api: { isMaximized: () => false, setActive() {}, location: { type: "grid" } },
     };
     const panel = {
       id: panelId,
@@ -189,7 +190,12 @@ describe("Rename Tab action", () => {
       view: { content: { element: document.createElement("div") } },
     };
     group.activePanel = panel;
-    setCenterApi({ activePanel: panel, hasMaximizedGroup: () => false } as unknown as DockviewApi);
+    setCenterApi({
+      activePanel: panel,
+      groups: [group],
+      getPanel: () => panel,
+      hasMaximizedGroup: () => false,
+    } as unknown as DockviewApi);
     return group.element;
   }
 

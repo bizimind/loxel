@@ -6,7 +6,7 @@ import type { RustToolchain, RustToolchainSource } from "@/api/rust-toolchain-mo
 import { isRecord } from "@/lib/is-record";
 
 import { pathOutsideWorktree } from "./python-env";
-import { isReadableRustManifest, RUST_MANIFEST } from "./rust-project-lookup";
+import { isReadableRustManifest, RUST_MANIFEST, untrustedNestedRepo } from "./rust-project-lookup";
 import { rustToolEnv } from "./rust-toolchain";
 import { buildSpawnEnv } from "./shell-env";
 
@@ -16,7 +16,8 @@ const MANIFEST_CHECK_TIMEOUT_MS = 30_000;
 
 /**
  * The oldest rust-analyzer Loxel starts, by the date in its version. Older ones are not known to
- * honor the settings the restricted mode rests on.
+ * honor the settings the restricted mode rests on. Trust does not lower it: what keeps a trusted
+ * server from installing anything rests on settings as well (`cargo.sysroot`).
  */
 export const MIN_RUST_ANALYZER_DATE = "2025-01-07";
 
@@ -28,6 +29,9 @@ const LOOSE_FILE_EDITION = "2024";
 
 /** What a server whose toolchain has them finds the standard library's sources under. */
 const SYSROOT_LIBRARY = "lib/rustlib/src/rust/library";
+
+/** What expands proc macros, in the toolchain the macros were compiled with. */
+const SYSROOT_PROC_MACRO_SERVER = "libexec/rust-analyzer-proc-macro-srv";
 
 /** Where a toolchain named by path is the user's own doing, and not a file in the repository. */
 const USER_SELECTED_SOURCES: ReadonlySet<RustToolchainSource> = new Set([
@@ -52,6 +56,10 @@ export type RustAnalyzerPlan =
       host: string;
       /** The toolchain has the standard library's sources. */
       rustSrc: boolean;
+      /** Whether the repository's code may run: decides the settings and the environment. */
+      repoTrusted: boolean;
+      /** What a trusted server checks with: clippy, where the toolchain has it. */
+      checkCommand: "check" | "clippy";
       /** Whether two plans run the same thing; a different one calls for a restart. */
       key: string;
     }
@@ -113,19 +121,35 @@ function fileStamp(file: string): string {
   }
 }
 
-/** The variables that keep a session on the resolved toolchain and away from the repository's. */
+/**
+ * The variables a session runs with. In both modes it stays on the resolved toolchain and installs
+ * nothing: `RUSTUP_TOOLCHAIN` beats a toolchain file for every proxy the server starts,
+ * `RUSTUP_AUTO_INSTALL` and the `CARGO_NET_*` pair keep rustup and cargo from fetching, `PATH` holds
+ * no worktree entries, and `CARGO` is the cargo the server asks.
+ *
+ * Untrusted, the rest takes every tool setting away from cargo's configuration files, which cargo
+ * reads even for `cargo metadata`. Trusted, those files mean what they mean by hand, wrappers, flags
+ * and target included, so these stay unset. So does `RUSTC`, which beats `build.rustc`, except without
+ * a rustup toolchain: then no proxy finds the compiler, which the lookup may have found off `PATH`.
+ */
 export function rustAnalyzerEnv(
   toolchain: Extract<RustToolchain, { status: "active" }>,
   cargo: string,
   inheritedPath: string,
   wtPath: string,
+  repoTrusted: boolean,
 ): Record<string, string> {
-  return {
+  const pinned = {
     ...rustToolEnv(toolchain),
-    // Beats a toolchain file for every proxy the server starts.
     ...(toolchain.name && { RUSTUP_TOOLCHAIN: toolchain.name }),
     PATH: pathOutsideWorktree(inheritedPath, wtPath),
     CARGO: cargo,
+    CARGO_NET_OFFLINE: "true",
+    CARGO_NET_GIT_FETCH_WITH_CLI: "false",
+  };
+  if (repoTrusted) return { ...pinned, ...(!toolchain.name && { RUSTC: toolchain.rustcPath }) };
+  return {
+    ...pinned,
     RUSTC: toolchain.rustcPath,
     RUSTC_WRAPPER: "",
     RUSTC_WORKSPACE_WRAPPER: "",
@@ -133,8 +157,6 @@ export function rustAnalyzerEnv(
     CARGO_ENCODED_RUSTDOCFLAGS: "",
     CARGO_TARGET_APPLIES_TO_HOST: "true",
     CARGO_UNSTABLE_HOST_CONFIG: "false",
-    CARGO_NET_OFFLINE: "true",
-    CARGO_NET_GIT_FETCH_WITH_CLI: "false",
   };
 }
 
@@ -146,6 +168,7 @@ export function rustAnalyzerEnv(
 export async function planRustAnalyzer(
   wtPath: string,
   toolchain: RustToolchain,
+  repoTrusted: boolean,
 ): Promise<RustAnalyzerPlan> {
   if (toolchain.status !== "active") return refuse(unusableReason(toolchain));
   // A toolchain file's `path`: outside the worktree, but still the repository's pick of a binary.
@@ -155,7 +178,7 @@ export async function planRustAnalyzer(
       "The repository selects a Rust toolchain by path. Pick an installed one: Rust: Select Toolchain",
     );
   }
-  const { rustAnalyzer, cargo, rustSrc } = toolchain.tools;
+  const { rustAnalyzer, cargo, cargoClippy, rustSrc } = toolchain.tools;
   if (!rustAnalyzer) {
     return refuse(
       toolchain.name
@@ -185,15 +208,18 @@ export async function planRustAnalyzer(
   const compiler = await capture([toolchain.rustcPath, "-vV"], root, pinned);
   const host = compiler === null ? null : /^host: (\S+)$/m.exec(compiler)?.[1];
   if (!host) return refuse("Could not read the Rust compiler's host target.");
+  const checkCommand = cargoClippy ? "clippy" : "check";
 
   return {
     kind: "run",
     binary: rustAnalyzer,
     cargo,
-    env: rustAnalyzerEnv(toolchain, cargo, spawnEnv.PATH ?? "", wtPath),
+    env: rustAnalyzerEnv(toolchain, cargo, spawnEnv.PATH ?? "", wtPath, repoTrusted),
     sysroot: toolchain.sysroot,
     host,
     rustSrc,
+    repoTrusted,
+    checkCommand,
     key: JSON.stringify([
       rustAnalyzer,
       fileStamp(rustAnalyzer),
@@ -204,12 +230,18 @@ export async function planRustAnalyzer(
       cargo,
       toolchain.sysroot,
       rustSrc,
+      // A restricted server runs no check, so a new clippy is no reason to restart it.
+      repoTrusted && checkCommand,
     ]),
   };
 }
 
-/** What rust-analyzer loads from the start: the worktree's manifest, or else those one level down. */
-export function findRustManifests(wtPath: string): string[] {
+/**
+ * What rust-analyzer loads from the start: the worktree's manifest, or else those one level down. A
+ * trusted server runs what it loads on the worktree's trust, so an untrusted repository in a folder
+ * there stays out.
+ */
+export function findRustManifests(wtPath: string, repoTrusted: boolean): string[] {
   const own = path.join(wtPath, RUST_MANIFEST);
   if (isReadableRustManifest(own, wtPath)) return [own];
   try {
@@ -217,6 +249,7 @@ export function findRustManifests(wtPath: string): string[] {
       .filter((entry) => entry.isDirectory())
       .map((entry) => path.join(wtPath, entry.name, RUST_MANIFEST))
       .filter((manifest) => isReadableRustManifest(manifest, wtPath))
+      .filter((manifest) => !repoTrusted || untrustedNestedRepo(manifest, wtPath) === null)
       .toSorted();
   } catch {
     return [];
@@ -279,7 +312,13 @@ export async function rustManifestProblem(
  * a project file can name a toolchain, and opening a file would start a search from that file.
  */
 export function rustAnalyzerSettings(
-  { sysroot, host, rustSrc }: Pick<RunPlan, "sysroot" | "host" | "rustSrc">,
+  {
+    sysroot,
+    host,
+    rustSrc,
+    repoTrusted,
+    checkCommand,
+  }: Pick<RunPlan, "sysroot" | "host" | "rustSrc" | "repoTrusted" | "checkCommand">,
   manifests: readonly string[],
   looseFiles: readonly string[] = [],
 ): Record<string, unknown> {
@@ -297,16 +336,22 @@ export function rustAnalyzerSettings(
     });
   }
   return {
-    checkOnSave: false,
+    checkOnSave: repoTrusted,
+    ...(repoTrusted && { check: { command: checkCommand } }),
     cargo: {
-      buildScripts: { enable: false },
+      buildScripts: { enable: repoTrusted },
       // Left to search for one, it installs the sources when they are missing; a named one without
       // sources fails the whole project, where none still serves the project's own crates.
       sysroot: rustSrc ? sysroot : null,
-      // Beats the `build.target` of cargo's config, which can name a file of the repository.
-      target: host,
+      // Trusted: its own build directory, so a build in a terminal does not wait on its lock.
+      // Untrusted: beats the `build.target` of cargo's config, which can name a repository's file.
+      ...(repoTrusted ? { targetDir: true } : { target: host }),
     },
-    procMacro: { enable: false },
+    procMacro: {
+      enable: repoTrusted,
+      // Found through the sysroot otherwise, and none is named without the standard library's sources.
+      ...(repoTrusted && !rustSrc && { server: path.join(sysroot, SYSROOT_PROC_MACRO_SERVER) }),
+    },
     linkedProjects: linkedProjects.length > 0 ? linkedProjects : [NO_PROJECT],
   };
 }
@@ -319,19 +364,24 @@ const MISSING_DEPENDENCIES = "Failed to read Cargo metadata with dependencies";
  * The client's `initialize` frame, asking for the project status and to resolve completions'
  * documentation. rust-analyzer offers resolving, and so auto-imports, only when some property other
  * than `additionalTextEdits` is resolvable. Other frames as they are.
+ *
+ * A trusted server also loses pull diagnostics, since it has two kinds to show. It serves its own by
+ * pull and sends `cargo check`'s by push, and both land on one marker owner in the client, so one
+ * replaces the other. Without the capability it pushes the two merged.
  */
-export function withRustClientCapabilities(data: string): string {
+export function withRustClientCapabilities(data: string, repoTrusted: boolean): string {
   if (!data.includes('"initialize"')) return data;
   try {
     const frame: unknown = JSON.parse(data);
     if (!isRecord(frame) || frame.method !== "initialize" || !isRecord(frame.params)) return data;
-    // Nothing may override the restricted settings, which the manager adds next.
+    // Nothing may override the settings, which the manager adds next.
     delete frame.params.initializationOptions;
     const { capabilities } = frame.params;
     if (!isRecord(capabilities)) return JSON.stringify(frame);
     const experimental = isRecord(capabilities.experimental) ? capabilities.experimental : {};
     capabilities.experimental = { ...experimental, serverStatusNotification: true };
     const { textDocument } = capabilities;
+    if (repoTrusted && isRecord(textDocument)) delete textDocument.diagnostic;
     const completion = isRecord(textDocument) ? textDocument.completion : undefined;
     const item = isRecord(completion) ? completion.completionItem : undefined;
     if (isRecord(item) && isRecord(item.resolveSupport)) {
@@ -343,6 +393,24 @@ export function withRustClientCapabilities(data: string): string {
     return JSON.stringify(frame);
   } catch {
     return data;
+  }
+}
+
+/**
+ * A server frame without the pull diagnostics rust-analyzer offers whatever the client said, so the
+ * client does not ask for them on top of the merged push. Other frames as they are.
+ */
+export function withoutPullDiagnostics(body: string): string {
+  if (!body.includes('"diagnosticProvider"')) return body;
+  try {
+    const frame: unknown = JSON.parse(body);
+    if (!isRecord(frame) || !isRecord(frame.result) || !isRecord(frame.result.capabilities)) {
+      return body;
+    }
+    delete frame.result.capabilities.diagnosticProvider;
+    return JSON.stringify(frame);
+  } catch {
+    return body;
   }
 }
 

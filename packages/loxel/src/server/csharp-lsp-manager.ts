@@ -39,6 +39,7 @@ import {
   toolClaimsCommand,
 } from "./csharp-env";
 import { announceCSharpStatus, publishCSharpLspState } from "./csharp-lsp-state";
+import { writeProjectsSolution } from "./csharp-projects-solution";
 import { getCSharpSolution, onCSharpSolutionChange } from "./csharp-solution-store";
 import { mapWithConcurrency } from "./git-commands";
 import { isRepoTrusted, onRepoTrustChange } from "./repo-trust";
@@ -85,7 +86,8 @@ const LOAD_FAILURE_RE = /\[Failure\][^']*'([^']+\.csproj)'(?: with message: (.{1
 const SOLUTION_LOAD_FAILURE = "could not be loaded";
 const MAX_FAILURE_LENGTH = 400;
 /** Changes to these can change what the gate says. */
-const PROJECT_FILE = /(?:\.csproj|\.sln|\.slnx|\.slnf|[\\/]global\.json|[\\/]dotnet-tools\.json)$/;
+const PROJECT_FILE =
+  /(?:\.csproj|\.sln|\.slnx|\.slnf|[\\/]\.gitignore|[\\/]global\.json|[\\/]dotnet-tools\.json)$/;
 
 /** Answered for the `csharp` section of `workspace/configuration`. */
 export const CSHARP_LS_SETTINGS = { analyzersEnabled: true };
@@ -125,7 +127,6 @@ interface CSharpLaunch {
   command: string;
   /** What comes before csharp-ls's own arguments. */
   prefixArgs: readonly string[];
-  args: readonly string[];
   env: Record<string, string | undefined>;
   /** What the user should know about what it will load. */
   notices: readonly string[];
@@ -135,6 +136,9 @@ interface CSharpLaunch {
   projects: readonly string[];
   sdkVersion: string;
 }
+
+/** A launch that passed the gate, with what `--solution` will say. */
+type OpenLaunch = CSharpLaunch & { solution: string };
 
 type ToolLaunch = Pick<CSharpLaunch, "command" | "prefixArgs" | "env" | "sdkVersion">;
 
@@ -207,7 +211,7 @@ export class CSharpLspManager extends WorktreeLspManager {
 
   private readonly held = new Map<ServerWebSocket<unknown>, HeldConnection>();
   /** The launch the gate chose, from opening until the server is spawned. */
-  private readonly launches = new Map<string, CSharpLaunch>();
+  private readonly launches = new Map<string, OpenLaunch>();
   /** Stops watching a running server's restored state. */
   private readonly restoreStops = new Map<WtLspSession, () => void>();
   /** What a running server's connection is told once initialized, from the gate's decision. */
@@ -373,8 +377,20 @@ export class CSharpLspManager extends WorktreeLspManager {
       ws.close(LSP_RESTART_CLOSE_CODE, "csharp-ls can start now; reconnect");
       return;
     }
+    // Here rather than in the gate: a gate overtaken by a newer one must not rewrite this file.
+    let solution: string;
+    try {
+      solution = launch.target ?? writeProjectsSolution(context.wtPath, launch.projects);
+    } catch (err) {
+      this.log.warn("Could not write the list of C# projects", {
+        wtPath: context.wtPath,
+        error: err,
+      });
+      this.keepHolding(held, COULD_NOT_TELL);
+      return;
+    }
     this.releaseHeld(ws);
-    this.launches.set(context.wtPath, launch);
+    this.launches.set(context.wtPath, { ...launch, solution });
     super.startSession(ws, context);
     this.launches.delete(context.wtPath);
     for (const frame of frames) super.handleMessage(ws, frame);
@@ -559,7 +575,6 @@ export class CSharpLspManager extends WorktreeLspManager {
         open: true,
         launch: {
           ...pick,
-          args: target ? ["--solution", target] : [],
           target,
           projects: loaded,
           notices: [
@@ -583,7 +598,12 @@ export class CSharpLspManager extends WorktreeLspManager {
 
   protected override spawnArgs(context: WtLspContext): readonly string[] {
     const launch = this.launches.get(context.wtPath);
-    return [...(launch?.prefixArgs ?? []), "--loglevel", "information", ...(launch?.args ?? [])];
+    return [
+      ...(launch?.prefixArgs ?? []),
+      "--loglevel",
+      "information",
+      ...(launch ? ["--solution", launch.solution] : []),
+    ];
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
@@ -615,13 +635,18 @@ export class CSharpLspManager extends WorktreeLspManager {
         sdkVersion: launch.sdkVersion,
       });
     }
+    // csharp-ls keeps to a list it was given, so a different list needs a new server.
+    const listed = launch?.target === null ? JSON.stringify(launch.projects) : null;
     let restored: string | null = null;
     this.restoreStops.set(
       session,
       subscribeCSharpRestore(context.wtPath, ({ states }) => {
         const now = JSON.stringify(states.filter(isLoadable).map((state) => state.project));
         restored ??= now;
-        if (now !== restored) this.restartAfterRestore(session);
+        const discovered = JSON.stringify(states.map((state) => state.project));
+        if (now !== restored || (listed !== null && discovered !== listed)) {
+          this.restartAfterRestore(session);
+        }
       }),
     );
     return session;
@@ -702,9 +727,10 @@ export class CSharpLspManager extends WorktreeLspManager {
   }
 
   /**
-   * A restore changed what a running server should load, or `obj` went away. csharp-ls goes on with
-   * the references it read at load, reported files or not, so it starts again: on the new connection
-   * the gate decides, which may mean no server. Waits for a restore's writes to end.
+   * A restore changed what a running server should load, `obj` went away, or the projects it was
+   * given a list of are different. csharp-ls goes on with the references it read at load, reported
+   * files or not, so it starts again: on the new connection the gate decides, which may mean no
+   * server. Waits for a restore's writes to end.
    */
   private restartAfterRestore(session: WtLspSession): void {
     clearTimeout(this.restoreRestarts.get(session));
@@ -713,12 +739,12 @@ export class CSharpLspManager extends WorktreeLspManager {
       setTimeout(() => {
         this.restoreRestarts.delete(session);
         if (!this.isSessionLive(session) || !this.mayRestartForRestore(session.wtPath)) return;
-        this.log.info("Restarting csharp-ls: the restored state changed", {
+        this.log.info("Restarting csharp-ls: the projects or their restored state changed", {
           wtPath: session.wtPath,
         });
         const { ws } = session;
         this.detach(ws);
-        ws.close(LSP_RESTART_CLOSE_CODE, "The restored state changed; reconnect");
+        ws.close(LSP_RESTART_CLOSE_CODE, "The projects or their restored state changed; reconnect");
       }, this.restoreSettleMs),
     );
   }

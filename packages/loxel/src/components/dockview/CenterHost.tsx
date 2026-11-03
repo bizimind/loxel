@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
+import { restoreLayoutWhenAnotherGroupActivates } from "@/lib/center-maximize";
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchPendingOpen } from "@/lib/open-path";
@@ -23,6 +24,7 @@ import { getWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { syncTerminalsFromLayout } from "./default-layout";
+import { MaximizedGroupActions } from "./maximized-group-actions";
 import { CenterWatermark, centerComponents, centerTabComponents } from "./panels";
 import { PersistedLayoutComponent, isOuterSwapping } from "./PersistedLayout";
 
@@ -47,6 +49,8 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
 
     // Populate terminal instances from restored layout
     syncTerminalsFromLayout(api);
+
+    restoreLayoutWhenAnotherGroupActivates(api);
 
     // Background `renderer: "always"` tabs (browser panels) blank their group when re-added by a
     // move. The move event fires once the move has settled; add events are suppressed during moves
@@ -134,6 +138,7 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
         components={centerComponents}
         tabComponents={centerTabComponents}
         watermarkComponent={CenterWatermark}
+        rightHeaderActionsComponent={MaximizedGroupActions}
         scrollbars="native"
         apiRef={centerApiRef}
         swappingRef={swappingRef}

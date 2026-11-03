@@ -7,6 +7,7 @@
 import { clangFormatter } from "./clang-formatter";
 import { csharpFormatter } from "./csharp-formatter";
 import { goFormatter } from "./go-formatter";
+import { javaFormatter } from "./java-formatter";
 import { jsFormatters } from "./js-formatter";
 import { kotlinFormatter } from "./kotlin-formatter";
 import type { LanguageFormatter } from "./language-formatter";
@@ -18,6 +19,7 @@ export const languageFormatters: readonly LanguageFormatter[] = [
   clangFormatter,
   csharpFormatter,
   goFormatter,
+  javaFormatter,
   ...jsFormatters,
   kotlinFormatter,
   pythonFormatter,
