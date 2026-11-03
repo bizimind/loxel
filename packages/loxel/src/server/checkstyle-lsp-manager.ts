@@ -24,9 +24,9 @@ import {
 import { getJavaEnv, subscribeJavaEnv } from "./java-env";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
+import { isInside } from "./path-containment";
 import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import type { WorktreeLspServer } from "./server-state";
-import { isInside } from "./shipped-by-repo";
 
 const log = logger.child("checkstyle-lsp");
 

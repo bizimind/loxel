@@ -13,7 +13,7 @@ import { isRecord } from "@/lib/is-record";
 import { readConfigFile } from "./config-file-read";
 import { blockBodies, buildScripts, declaresPlugin, readCode } from "./kotlin-formatter";
 import { dirsUpToRoot } from "./language-formatter";
-import { isInside } from "./shipped-by-repo";
+import { isInside } from "./path-containment";
 import { readToml, recordAt } from "./toml-file";
 import { withoutXmlComments } from "./xml-comments";
 
