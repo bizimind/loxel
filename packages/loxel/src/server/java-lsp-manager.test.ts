@@ -454,9 +454,10 @@ describe("JavaLspManager, trusted", () => {
 });
 
 describe("JavaLspManager, closing a session", () => {
+  /** Releases a session as the base manager does when it closes or its server exits. */
   class ClosingManager extends JavaLspManager {
     close(session: WtLspSession): void {
-      this.onSessionClosed(session);
+      this["releaseSession"](session);
     }
   }
 

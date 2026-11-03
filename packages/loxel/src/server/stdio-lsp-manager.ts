@@ -114,6 +114,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private readonly watchedFiles = new Map<TSession, WatchedFilesForwarder>();
   /** Servers told to stop that have not exited yet, whichever session they belonged to. */
   private readonly stopping = new Set<Promise<unknown>>();
+  /** Sessions whose process trees were ended, so that a second release leaves a newer one's alone. */
+  private readonly treesEnded = new WeakSet<TSession>();
   protected readonly log: ReturnType<typeof logger.child>;
 
   constructor(readonly name: LspName) {
@@ -298,6 +300,16 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
    */
   protected stopsProcessTree(_session: TSession): boolean {
     return false;
+  }
+
+  /**
+   * Processes of the session's beside its server, such as daemons the server detached from itself,
+   * whose trees end with the server's in the same pass when the session is released, even if the
+   * server has already exited. Asked once per session, after {@link onSessionClosed}. Each number
+   * must still be the process it names, since an ended process's number can be reused.
+   */
+  protected processTreeRoots(_session: TSession): readonly number[] {
+    return [];
   }
 
   /**
@@ -921,11 +933,15 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     this.watchedFiles.get(session)?.dispose();
     this.watchedFiles.delete(session);
     this.onSessionClosed(session);
+    // Released again as the process exits, when a newer session may hold the roots by then.
+    if (this.treesEnded.has(session)) return;
+    this.treesEnded.add(session);
     // Once the server is gone so is its tree, and its number may be someone else's.
     const { proc } = session;
-    if (proc.exitCode === null && proc.signalCode === null && this.stopsProcessTree(session)) {
-      killProcessTrees([proc.pid]);
-    }
+    const alive = proc.exitCode === null && proc.signalCode === null;
+    const server = alive && this.stopsProcessTree(session) ? [proc.pid] : [];
+    const roots = [...server, ...this.processTreeRoots(session)];
+    if (roots.length > 0) killProcessTrees(roots);
   }
 
   /**

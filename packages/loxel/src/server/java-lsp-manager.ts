@@ -43,7 +43,6 @@ import {
   stopGradleDaemons,
   trustedImportSettings,
 } from "./java-project-import";
-import { killProcessTrees } from "./kill-process-tree";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
@@ -516,7 +515,6 @@ export class JavaLspManager extends WorktreeLspManager {
     this.importStates.delete(session);
     if (repoTrusted) setJavaProjectIssue(wtPath, null);
     const daemonDir = gradleDaemonDir(jdtlsDataDir(wtPath, true));
-    this.endProcessTrees(session, daemonDir);
     const exited = proc.exited.then(() => {
       try {
         // Usually none are left by now; one that started as the server was ended may be.
@@ -533,18 +531,17 @@ export class JavaLspManager extends WorktreeLspManager {
     this.exiting.set(wtPath, exited);
   }
 
-  /**
-   * End the server, the Gradle daemons it started, and every process below them, before the server
-   * is asked to stop. A project's build code can start processes in process groups and sessions of
-   * their own, which neither stop reaches. The daemons are detached from the server, so each is a
-   * root of its own, found while it still runs. Once the server is gone so is its tree, and its
-   * number may be someone else's. Killing rather than asking loses nothing: jdtls saves no state as
-   * it is asked to stop, and Gradle recovers its caches from a daemon that died.
-   */
-  private endProcessTrees({ proc, repoTrusted }: WtLspSession, daemonDir: string): void {
-    const server = proc.exitCode === null && proc.signalCode === null ? [proc.pid] : [];
-    const roots = [...server, ...(repoTrusted ? liveGradleDaemons(daemonDir) : [])];
-    if (roots.length > 0) killProcessTrees(roots);
+  // A project's build code, run by jdtls for Maven or by Gradle's daemons, can start processes in
+  // process groups and sessions of their own, which neither's stop reaches. Killing rather than
+  // asking loses nothing: jdtls saves no state as it is asked to stop, and Gradle recovers its
+  // caches from a daemon that died.
+  protected override stopsProcessTree(): boolean {
+    return true;
+  }
+
+  // The daemons are detached from jdtls, so each is a root of its own, read while it still runs.
+  protected override processTreeRoots({ repoTrusted, wtPath }: WtLspSession): readonly number[] {
+    return repoTrusted ? liveGradleDaemons(gradleDaemonDir(jdtlsDataDir(wtPath, true))) : [];
   }
 
   protected override onClientInitialized(session: WtLspSession): void {
