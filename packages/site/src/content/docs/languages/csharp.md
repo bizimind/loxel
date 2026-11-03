@@ -44,7 +44,7 @@ Completion lists what is already imported. For a type from a namespace you haven
 - A project csharp-ls can't load gets a notice naming it, and its files may have fewer features.
 - A project using an MSBuild SDK delivered through NuGet, such as `MSTest.Sdk` or `Aspire.AppHost.Sdk`, loads without that SDK, since loading it could download it. A notice names it, and its files show errors.
 
-After a `dotnet restore`, or when `obj` goes away, the server restarts to pick up the change. A large solution takes a little while to load again.
+After a `dotnet restore`, or when `obj` goes away, the server restarts to pick up the change. A large solution takes a little while to load again. Stopping csharp-ls also stops its child processes.
 
 A `.cs` file outside any loaded project, or in a repository with no project at all, gets syntax highlighting only.
 

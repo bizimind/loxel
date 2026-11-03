@@ -42,6 +42,7 @@ import { announceCSharpStatus, publishCSharpLspState } from "./csharp-lsp-state"
 import { writeProjectsSolution } from "./csharp-projects-solution";
 import { getCSharpSolution, onCSharpSolutionChange } from "./csharp-solution-store";
 import { mapWithConcurrency } from "./git-commands";
+import { killProcessTrees } from "./kill-process-tree";
 import { isRepoTrusted, onRepoTrustChange } from "./repo-trust";
 import { buildSpawnEnv, onLoginShellEnvChange, refreshLoginShellEnv } from "./shell-env";
 import {
@@ -708,6 +709,10 @@ export class CSharpLspManager extends WorktreeLspManager {
     this.restoreStops.delete(session);
     clearTimeout(this.restoreRestarts.get(session));
     this.restoreRestarts.delete(session);
+    // csharp-ls's own stop leaves its build host and what a project's build is running behind. Once
+    // the server is gone so is its tree, and its number may be someone else's.
+    const { proc } = session;
+    if (proc.exitCode === null && proc.signalCode === null) killProcessTrees([proc.pid]);
   }
 
   /**

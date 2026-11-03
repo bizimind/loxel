@@ -164,7 +164,11 @@ process.stdin.on("data", (chunk) => {
     if (buffer.length < end + 4 + length) return;
     const msg = JSON.parse(buffer.slice(end + 4, end + 4 + length));
     buffer = buffer.slice(end + 4 + length);
-    if (msg.method === "initialize") {
+    if (msg.method === "test/startChild") {
+      // In a process group of its own, as a build's children can be.
+      const child = require("node:child_process").spawn("/bin/sleep", ["1000"], { detached: true, stdio: "ignore" });
+      send({ jsonrpc: "2.0", method: "test/childStarted", params: { pid: child.pid } });
+    } else if (msg.method === "initialize") {
       send({
         jsonrpc: "2.0",
         id: msg.id,
@@ -287,6 +291,14 @@ function connect(wt: string) {
 }
 
 const isHold = (result: Record<string, unknown>) => result.args === undefined;
+
+/** A killed process lingers until its parent or init has collected it, which is why this waits. */
+function isRunning(pid: number): boolean {
+  const state = Bun.spawnSync(["ps", "-o", "stat=", "-p", String(pid)], {
+    env: { PATH: "/bin:/usr/bin" },
+  }).stdout.toString();
+  return state.trim() !== "" && !state.startsWith("Z");
+}
 
 /** A repository that is trusted, with one project that `dotnet restore` has run for. */
 async function makeRestoredRepo(files: Record<string, string> = {}): Promise<string> {
@@ -689,6 +701,26 @@ describe.skipIf(process.platform === "win32")("CSharpLspManager", () => {
       await socket.untilInitialized();
       manager?.notifyWatchedFilesChanged(wt, [join(wt, "obj", "project.assets.json")]);
       expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    });
+
+    test("stopping the server ends what it started, in another process group too", async () => {
+      await installToolchain();
+      const socket = connect(await makeRestoredRepo());
+      await socket.untilInitialized();
+      manager?.handleMessage(
+        socket.ws,
+        JSON.stringify({ jsonrpc: "2.0", method: "test/startChild", params: {} }),
+      );
+      const started = await socket.untilFrame((frame) => frame.method === "test/childStarted");
+      const { pid } = started.params as { pid: number };
+      try {
+        expect(isRunning(pid)).toBe(true);
+        manager?.destroySession(socket.ws);
+        while (isRunning(pid)) await Bun.sleep(20);
+      } finally {
+        // A failure must not leave it running.
+        if (isRunning(pid)) process.kill(pid, "SIGKILL");
+      }
     });
 
     test("trust taken away restarts the server into a hold", async () => {
