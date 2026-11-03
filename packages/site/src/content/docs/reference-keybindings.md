@@ -69,6 +69,8 @@ Splits are chords: press `Cmd+\`, release, then press the next key. The status b
 
 In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G` / `Cmd+Shift+G` (or `Enter` / `Shift+Enter` in the bar) step through the matches and `Esc` closes it. In a code editor, `Cmd+F` opens the editor's own find widget.
 
+macOS window tiling shortcuts (macOS 15 and later) work in the editor, terminals and the rest of Loxel (in a browser tab, the page gets them first): `Fn+Ctrl+Arrow` moves the window to a half of the screen, `Fn+Ctrl+Shift+Arrow` arranges it with the window behind it, and `Fn+Ctrl+F` fills the screen. They are also listed under Window > Move & Resize in the menu bar. On Mac keyboards `Fn+Arrow` is `Home`, `End`, `Page Up` or `Page Down`, so binding one of those with `Ctrl` in Settings > Keybindings takes it from macOS.
+
 ---
 
 ## Tool panel toggles

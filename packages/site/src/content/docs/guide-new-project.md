@@ -34,7 +34,7 @@ Use this when you're starting from a GitHub, GitLab, or other remote URL. Paste 
 
 **Single-workspace** clones as a regular repo — standard `git clone`. One working tree, one branch at a time. The right choice for solo projects or repos where you won't run multiple agents in parallel.
 
-**Multi-workspace** clones as a bare repo and creates the first worktree alongside it. Optional setup choices are written to a repo-root `init.wt.sh` lifecycle hook. Choose this if you plan to run parallel workstreams from day one. You can always convert later, but starting bare is cleaner.
+**Multi-workspace** clones as a bare repo and creates the first worktree alongside it. Optional setup choices are written to a repo-root `init.wt.sh` lifecycle hook, which runs in [trusted](/docs/repository-trust) repositories; for a new clone, Loxel asks before running it. Choose this if you plan to run parallel workstreams from day one. You can always convert later, but starting bare is cleaner.
 
 > **Tip:** The dialog defaults to multi-workspace for URLs, new projects, and folders without git, and to single-workspace for repos already on disk. If you're unsure, single-workspace is the simpler start — you can convert to bare later, as long as you have a clean working tree.
 

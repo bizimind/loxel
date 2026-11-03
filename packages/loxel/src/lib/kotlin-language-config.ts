@@ -1,6 +1,7 @@
 import * as monaco from "monaco-editor";
 
 import { frontendLog } from "./frontend-logger";
+import { stepOverTripleQuotesIn } from "./triple-quote-step-over";
 
 const log = frontendLog.child("ui");
 
@@ -69,6 +70,7 @@ export function extendKotlinConfiguration(
  * Resolves once ours is registered, or failed to (logged), after the first Kotlin model.
  */
 export function registerLanguageConfiguration(): Promise<void> {
+  stepOverTripleQuotesIn("kotlin");
   return new Promise((resolve) => {
     monaco.languages.onLanguageEncountered("kotlin", () => {
       import("monaco-editor/languages/definitions/kotlin/kotlin.js")

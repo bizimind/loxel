@@ -22,7 +22,6 @@ import {
 } from "@/api/ws-protocol";
 
 import { config, getDetachedDir, hash12 } from "./config";
-import { deleteProjectsSolution } from "./csharp-projects-solution";
 import { DetachedFilesService } from "./detached-files-service";
 import { ExternalFilesService } from "./external-files-service";
 import {
@@ -35,7 +34,6 @@ import { FileWatcher } from "./file-watcher";
 import { FormatService } from "./format-service";
 import { getGitRoot, getRefs, getWorktrees, isBareRepo } from "./git-commands";
 import { gitExecClient } from "./git-exec-client";
-import { deleteJdtlsData } from "./java-lsp-manager";
 import { tomlLspManager, worktreeLspManagers } from "./language-servers";
 import { logger } from "./logger";
 import { NodeModulesChanges } from "./node-modules-changes";
@@ -616,10 +614,14 @@ async function reconcileWorktrees(project: ProjectState): Promise<void> {
   }
 }
 
+/** Delete what language servers keep outside a worktree that no longer exists. */
+function forgetWorktreeInLanguageServers(wtPath: string): void {
+  for (const manager of worktreeLspManagers) manager.forgetWorktree?.(wtPath);
+}
+
 /** Stop serving a worktree path that no longer exists. */
 function releaseWorktreeResources(wtPath: string): void {
-  deleteJdtlsData(wtPath);
-  deleteProjectsSolution(wtPath);
+  forgetWorktreeInLanguageServers(wtPath);
   const resources = wtResources.get(wtPath);
   if (!resources) return;
   for (const ws of resources.subscribers) {
@@ -774,7 +776,7 @@ async function initializeProject(repoPath: string): Promise<InitProjectResult> {
   const registeredPaths = new Set(managed.map((wt) => wt.path));
   for (const wtPath of deleteRowsOfMissingWorktrees(worktreesDir, registeredPaths)) {
     log.info(`Worktree removed while its project was not watched, deleted its rows: ${wtPath}`);
-    deleteJdtlsData(wtPath);
+    forgetWorktreeInLanguageServers(wtPath);
   }
 
   const filteredWorktrees: WorktreeEntry[] = managed

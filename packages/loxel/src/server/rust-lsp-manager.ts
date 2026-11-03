@@ -5,8 +5,8 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import type { RustToolchain } from "@/api/rust-toolchain-model";
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
-import { killProcessTrees } from "./kill-process-tree";
 import { fileUri } from "./lsp-file-uri";
+import { isInside } from "./path-containment";
 import { onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import {
   blockedClientMethod,
@@ -29,7 +29,6 @@ import {
   untrustedNestedRepo,
 } from "./rust-project-lookup";
 import { getRustToolchain, getRustToolchainNow, subscribeRustToolchain } from "./rust-toolchain";
-import { isInside } from "./shipped-by-repo";
 import {
   type SpawnOptions,
   type SuppressibleFeature,
@@ -189,12 +188,12 @@ export class RustLspManager extends WorktreeLspManager {
     state.unsubscribe();
     state.stopFollowingTrust();
     state.checks?.dispose();
-    // rust-analyzer's own stop leaves `cargo` and what it runs behind, and only a trusted server has
-    // those. Once the server is gone so is its tree, and its number may be someone else's.
-    const { proc } = session;
-    if (session.repoTrusted && proc.exitCode === null && proc.signalCode === null) {
-      killProcessTrees([proc.pid]);
-    }
+  }
+
+  // rust-analyzer's own stop leaves `cargo` and what it runs behind, and only a trusted server has
+  // those.
+  protected override stopsProcessTree({ repoTrusted }: WtLspSession): boolean {
+    return repoTrusted;
   }
 
   // A throw ends the session as a start failure: the server must not run without these settings.

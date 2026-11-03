@@ -11,6 +11,7 @@ import {
 } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
+import { killProcessTrees } from "./kill-process-tree";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import {
@@ -111,8 +112,6 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private readonly _pendingFrames = new Map<ServerWebSocket<unknown>, string[]>();
   /** Each session's file-change forwarder, when {@link forwardWatchedFiles} and it has a worktree. */
   private readonly watchedFiles = new Map<TSession, WatchedFilesForwarder>();
-  /** Each session's open document URIs, tracked when {@link didSaveOnFileChange}. */
-  private readonly openDocuments = new Map<TSession, Set<string>>();
   /** Servers told to stop that have not exited yet, whichever session they belonged to. */
   private readonly stopping = new Set<Promise<unknown>>();
   protected readonly log: ReturnType<typeof logger.child>;
@@ -136,33 +135,12 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   /**
    * Forward changed files of a worktree, as reported by its file watcher, to the language servers
    * rooted there with a matching file watcher. Only managers with
-   * {@link forwardWatchedFiles} have such servers. With {@link didSaveOnFileChange}, changed files
-   * the session has open also get `textDocument/didSave`.
+   * {@link forwardWatchedFiles} have such servers.
    */
   notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
     const root = path.resolve(wtPath);
     for (const [session, forwarder] of this.watchedFiles) {
       if (forwarder.root === root && this.isSessionLive(session)) forwarder.queue(paths);
-    }
-    for (const [session, openUris] of this.openDocuments) {
-      const workspace = this.getSessionWorkspace(session);
-      if (!workspace || path.resolve(workspace) !== root || !this.isSessionLive(session)) continue;
-      try {
-        for (const uri of paths.map(fileUri)) {
-          if (!openUris.has(uri)) continue;
-          this.writeToStdin(
-            session,
-            JSON.stringify({
-              jsonrpc: "2.0",
-              method: "textDocument/didSave",
-              params: { textDocument: { uri } },
-            }),
-          );
-        }
-      } catch (err) {
-        // A server that has closed its stdin, not yet reaped: this runs in file-watcher callbacks.
-        this.log.debug("Could not send didSave", { error: err });
-      }
     }
   }
 
@@ -313,14 +291,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   protected readonly watchedIgnoredGlobs: readonly string[] = [];
 
   /**
-   * Set to true for servers that only react to `textDocument/didSave` (clangd reparses): a change
-   * the file watcher reports to a document the session has open is sent as one, without text. monaco-lsp-client saves nothing itself, since saving goes
-   * through the file routes. The client keeps advertising `didSave: false`: these servers take the
-   * notification regardless, and advertising it would have rust-analyzer register it dynamically
-   * with a client that cannot send it. A subclass overriding {@link handleClientData} must pass
-   * `didOpen` and `didClose` to the base. Needs {@link getSessionWorkspace}.
+   * Return true for a server whose own stop leaves the processes it started running (a build in a
+   * process group of its own). Releasing the session then ends the server's whole process tree
+   * while the server is still there to find it from (see `kill-process-tree.ts`), after
+   * {@link onSessionClosed}, so it must not depend on state that hook clears.
    */
-  protected readonly didSaveOnFileChange: boolean = false;
+  protected stopsProcessTree(_session: TSession): boolean {
+    return false;
+  }
 
   /**
    * Return a dedup key for this session context. When non-null, the base class
@@ -449,7 +427,6 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
           this.onClientInitialized(session);
           return;
         }
-        if (this.didSaveOnFileChange) this.trackOpenDocument(session, parsed);
         if (this.requiresFullTextSync) {
           if (msg.method === "textDocument/didOpen") {
             this.trackDidOpen(session, parsed);
@@ -471,19 +448,6 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       // Not JSON — forward as-is.
     }
     this.writeToStdin(session, data);
-  }
-
-  /** Keep {@link openDocuments} current from a client notification. */
-  private trackOpenDocument(session: TSession, msg: object): void {
-    if (!("method" in msg) || !("params" in msg) || !isRecord(msg.params)) return;
-    const { textDocument } = msg.params;
-    if (!isRecord(textDocument) || typeof textDocument.uri !== "string") return;
-    if (msg.method === "textDocument/didOpen") {
-      const openUris = this.openDocuments.get(session) ?? new Set<string>();
-      this.openDocuments.set(session, openUris.add(textDocument.uri));
-    } else if (msg.method === "textDocument/didClose") {
-      this.openDocuments.get(session)?.delete(textDocument.uri);
-    }
   }
 
   /**
@@ -956,8 +920,12 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private releaseSession(session: TSession): void {
     this.watchedFiles.get(session)?.dispose();
     this.watchedFiles.delete(session);
-    this.openDocuments.delete(session);
     this.onSessionClosed(session);
+    // Once the server is gone so is its tree, and its number may be someone else's.
+    const { proc } = session;
+    if (proc.exitCode === null && proc.signalCode === null && this.stopsProcessTree(session)) {
+      killProcessTrees([proc.pid]);
+    }
   }
 
   /**

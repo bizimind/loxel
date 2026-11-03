@@ -23,6 +23,7 @@ import type {
   DetectPathResult,
   InitProjectRequest,
   Project,
+  ProjectSetupResult,
   ProjectsResponse,
   ProjectWorktreesResponse,
   ScanSuggestionsResult,
@@ -599,11 +600,17 @@ export async function createProject(req: CreateProjectRequest) {
 }
 
 export async function cloneProject(req: CloneProjectRequest) {
-  return fetchJson<Project>("/projects/clone", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/clone", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 export async function initProject(req: InitProjectRequest) {
-  return fetchJson<Project>("/projects/init", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/init", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 export async function convertProject(req: ConvertProjectRequest) {
@@ -675,6 +682,14 @@ export async function createWorktree(
   return fetchJson<import("@bizimind/wt/lib").AddResult>("/worktree/create", {
     method: "POST",
     body: JSON.stringify({ projectPath, name, ...options }),
+  });
+}
+
+/** Run the `init.wt.sh` a worktree's creation held back, once its repository is trusted. */
+export async function runInitHook(projectPath: string, wtPath: string) {
+  return fetchJson<{ hookRan: boolean }>("/worktree/run-init-hook", {
+    method: "POST",
+    body: JSON.stringify({ projectPath, path: wtPath }),
   });
 }
 

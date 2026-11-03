@@ -4,13 +4,14 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import type { WorktreeEntry } from "@/api/git-models";
 import type { EnrichedProject } from "@/api/project-model";
+import { ToastContainer } from "@/components/ui/toast";
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   useProjectStore,
 } from "@/store/projects";
-import { useWorktreeStore } from "@/store/worktrees";
+import { type CreateStarted, useWorktreeStore } from "@/store/worktrees";
 
 mock.module("../projects/AddProjectWizard", () => ({ AddProjectWizard: () => null }));
 
@@ -60,6 +61,37 @@ afterEach(() => {
     autoExpandedProjectIds: [],
   });
   useWorktreeStore.getState().reset();
+});
+
+describe("Sidebar remove worktree dialog", () => {
+  const removePlan = {
+    name: "topic",
+    worktreePath: "/repo/.worktrees/topic",
+    wtPath: "/repo/.worktrees/topic",
+    projectPath: project.path,
+    branch: "topic",
+    dirty: false,
+    isMain: false,
+    locked: false,
+    hasHook: true,
+    nested: [],
+  };
+
+  test("says clean.wt.sh won't run while the repository is untrusted, and offers trust", () => {
+    useWorktreeStore.setState({ pendingRemovePlan: { ...removePlan, cleanHookHeld: true } });
+    render(<Sidebar />);
+
+    expect(screen.getByText(/hooks run in trusted repositories/)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Trust repository and run it" })).toBeDefined();
+  });
+
+  test("says nothing about hooks once the repository is trusted", () => {
+    useWorktreeStore.setState({ pendingRemovePlan: { ...removePlan, cleanHookHeld: false } });
+    render(<Sidebar />);
+
+    expect(screen.getByRole("button", { name: "Remove worktree" })).toBeDefined();
+    expect(screen.queryByText(/hooks run in trusted repositories/)).toBeNull();
+  });
 });
 
 describe("Sidebar regular-repository worktrees", () => {
@@ -344,6 +376,25 @@ describe("Sidebar worktree nesting", () => {
     expect(setWorktreeParent).toHaveBeenCalledWith(project.path, child.path, null);
   });
 
+  test("a failed worktree action shows its error in a toast that can be dismissed", async () => {
+    const setWorktreeParent = mock(() => Promise.reject(new Error("wt: worktree is locked")));
+    setNesting(true);
+    useWorktreeStore.setState({ setWorktreeParent });
+    render(
+      <>
+        <Sidebar />
+        <ToastContainer />
+      </>,
+    );
+
+    fireEvent.contextMenu(screen.getByText("Child task"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Move to top level" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("wt: worktree is locked");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   test("new child worktree works on a worktree with nothing nested below it yet", async () => {
     setNesting(true, [parent]);
     render(<Sidebar />);
@@ -358,7 +409,7 @@ describe("Sidebar worktree nesting", () => {
     let finish = () => {};
     const createWorktree = mock(
       () =>
-        new Promise<void>((resolve) => {
+        new Promise<CreateStarted | null>((resolve) => {
           finish = () => {
             // What the store does when the branch already exists.
             useWorktreeStore.setState({
@@ -370,7 +421,7 @@ describe("Sidebar worktree nesting", () => {
                 branchConflict: { kind: "exists" },
               },
             });
-            resolve();
+            resolve(null);
           };
         }),
     );
@@ -387,8 +438,40 @@ describe("Sidebar worktree nesting", () => {
     expect(useWorktreeStore.getState().pendingAddPlan).toBeNull();
   });
 
+  test("the dialog closes once the create has started, without waiting for it to finish", async () => {
+    // The create (the repo's init hook, mostly) never finishes in this test.
+    const createWorktree = mock(() =>
+      Promise.resolve<CreateStarted>({ created: new Promise<boolean>(() => {}) }),
+    );
+    setNesting(true);
+    useWorktreeStore.setState({ createWorktree });
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Add worktree"));
+    fireEvent.change(screen.getByPlaceholderText("worktree-name"), { target: { value: "slow" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
+    });
+
+    expect(screen.queryByPlaceholderText("worktree-name")).toBeNull();
+  });
+
+  test("a create that cannot start keeps the dialog open with the reason", async () => {
+    const createWorktree = mock(() => Promise.reject(new Error("Invalid worktree name")));
+    setNesting(true);
+    useWorktreeStore.setState({ createWorktree });
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Add worktree"));
+    fireEvent.change(screen.getByPlaceholderText("worktree-name"), { target: { value: "bad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
+
+    expect(await screen.findByText("Invalid worktree name")).toBeDefined();
+    expect(screen.getByPlaceholderText("worktree-name")).toBeDefined();
+  });
+
   test("new child worktree opens the dialog, whose name follows the title", async () => {
-    const createWorktree = mock(() => Promise.resolve());
+    const createWorktree = mock(() => Promise.resolve(null));
     setNesting(true);
     useWorktreeStore.setState({ createWorktree });
     render(<Sidebar />);

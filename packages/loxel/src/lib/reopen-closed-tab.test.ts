@@ -18,7 +18,7 @@ const { closeCenterTab, forgetClosedTabGroup, registerClosedTabParams } =
   await import("@/store/closed-tabs");
 const { setCenterApi } = await import("@/store/tools-bar");
 const { getCurrentWorktreeToolsBar } = await import("@/store/worktree-tools-bar");
-const { purgeWorktreeStores, setActiveWorktreeKey } = await import("@/store/worktree-store");
+const { purgeWorktreeStores } = await import("@/store/worktree-store");
 const { useWorktreeStore } = await import("@/store/worktrees");
 
 const WT = "/repo/wt";
@@ -37,7 +37,6 @@ function createCenter(worktreePath = WT): DockviewApi {
   const api = new DockviewApi(dockview);
   setCenterApi(api, worktreePath);
   useWorktreeStore.setState({ activeWorktreePath: worktreePath });
-  setActiveWorktreeKey(worktreePath);
   return api;
 }
 

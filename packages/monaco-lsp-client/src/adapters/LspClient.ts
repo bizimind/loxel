@@ -34,7 +34,7 @@ import { LspSignatureHelpFeature } from "./languageFeatures/LspSignatureHelpFeat
 import { LspTypeDefinitionFeature } from "./languageFeatures/LspTypeDefinitionFeature";
 import type { WorkspaceSymbolItem } from "./languageFeatures/LspWorkspaceSymbolFeature";
 import { LspWorkspaceSymbolFeature } from "./languageFeatures/LspWorkspaceSymbolFeature";
-import { LspCancellableRequests } from "./LspCancellableRequests";
+import { LspCancellableRequests, rejectingServerCancellations } from "./LspCancellableRequests";
 import type { OptionsOf, RegistrableCapability } from "./LspCapabilitiesRegistry";
 import { LspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 import { LspConnection } from "./LspConnection";
@@ -95,11 +95,15 @@ export class MonacoLspClient {
 
   constructor(transport: IMessageTransport, options?: MonacoLspClientOptions) {
     // `TypedChannel.fromTransport`, keeping the request sender it connects (in `startListen`)
-    // for requests that must know their JSON-RPC id to be cancelled.
+    // for requests that must know their JSON-RPC id to be cancelled. Requests the server cancels
+    // reject as cancelled, for every caller.
     const streamChannel = StreamBasedChannel.createChannel(transport, undefined);
     let requestSender: IRequestSender | undefined;
     const c = new TypedChannel(
-      new Channel((listener) => (requestSender = streamChannel.connect(listener))),
+      new Channel(
+        (listener) =>
+          (requestSender = rejectingServerCancellations(streamChannel.connect(listener))),
+      ),
     );
     const s = api.getServer(c, {});
     c.startListen();
