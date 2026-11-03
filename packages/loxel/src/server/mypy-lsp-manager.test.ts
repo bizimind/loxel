@@ -1,5 +1,15 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -369,6 +379,36 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
     await restricted(wt);
     expect(manager.ownsTypeChecking(wt, main)).toBe(false);
     expect(await runs(wt)).toHaveLength(1);
+  });
+
+  test("a repository folder replaced with no trust event stops every root", async () => {
+    const wt = await makeWorktree({
+      "a/mypy.ini": "[mypy]\n",
+      "a/.dmypy-output": `${report("main.py", 1, "In A")}\n`,
+      "b/mypy.ini": "[mypy]\n",
+    });
+    manager = new MypyLspManager();
+    const client = new FakeClient(manager);
+    await client.start(wt);
+    const inA = join(wt, "a", "main.py");
+    client.open(inA);
+    await client.waitFor(
+      (m) => client.diagnosticsFor(inA)(m) && m.params?.diagnostics?.length === 1,
+    );
+
+    // A copy in its place is another folder to trust, and nothing announces that.
+    await cp(wt, `${wt}.copy`, { recursive: true });
+    await rm(wt, { recursive: true });
+    await rename(`${wt}.copy`, wt);
+    const before = client.received.length;
+    client.open(join(wt, "b", "main.py"));
+    const cleared = await client.waitFor(client.diagnosticsFor(inA), before);
+    expect(cleared.params?.diagnostics).toEqual([]);
+    await restricted(wt);
+    expect(manager.ownsTypeChecking(wt, inA)).toBe(false);
+
+    manager.notifyWatchedFilesChanged(wt, [inA]);
+    expect(await runs(join(wt, "a"))).toHaveLength(1);
   });
 
   test("reports no restriction when mypy is not installed", async () => {

@@ -307,8 +307,12 @@ export class MypyLspManager implements ExternalTypeChecker, WorktreeLspServer {
     if (project.generation !== generation || !this.isLive(session)) return;
     // Asked again rather than read from the session: trust as of now decides what starts.
     const trusted = isRepoTrusted(session.wtPath);
-    // Recorded, so `followTrust` does not mistake the next change for no change.
-    session.trusted = trusted;
+    if (trusted !== session.trusted) {
+      // Changed with no store event (a replaced repository folder): the whole session follows it,
+      // which records the answer and sets this project up again.
+      this.followTrust();
+      return;
+    }
     if (dmypy && !trusted) {
       this.setState(session, project, "unavailable");
       this.publish(session, project, new Map());
