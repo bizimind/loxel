@@ -252,6 +252,13 @@ describe("fmt-maven-plugin", () => {
     });
   });
 
+  test("an option it cannot read declines", async () => {
+    const body = "<configuration><style>${fmt.style}</style></configuration>";
+    expect(await declared({ "pom.xml": fmtPom("com.spotify.fmt", body) })).toEqual({
+      notice: expect.stringContaining("options"),
+    });
+  });
+
   test("a dependency override pins the version, and strings can be set to reflow", async () => {
     const body = `<configuration><skipReflowingLongStrings>false</skipReflowingLongStrings></configuration>
       <dependencies><dependency>

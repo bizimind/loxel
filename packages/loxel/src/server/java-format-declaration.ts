@@ -91,7 +91,7 @@ const FORK_NOTICE: FormatterDecline = {
 };
 const UNREADABLE_OPTION_NOTICE: FormatterDecline = {
   notice:
-    "Format on save skipped: Loxel can't read this project's formatter options from its build files. Run Spotless from your build instead.",
+    "Format on save skipped: Loxel can't read this project's formatter options from its build files. Format from your build instead.",
 };
 const PALANTIR_JAVADOC_NOTICE: FormatterDecline = {
   notice:
@@ -211,6 +211,12 @@ const FMT_SCOPE_SETTINGS = [
   "filesPathPattern",
   "skipSourceDirectory",
   "skipTestSourceDirectory",
+];
+const FMT_OPTIONS = [
+  "style",
+  "skipSortingImports",
+  "skipRemovingUnusedImports",
+  "skipReflowingLongStrings",
 ];
 const MAVEN_OPTIONS = ["style", "reflowLongStrings", "reorderImports", "formatJavadoc"];
 const OTHER_SPOTLESS_JAVA_ELEMENT = /<(eclipse|prettier|clangFormat|greclipse)\b/;
@@ -337,6 +343,7 @@ function fmtMavenSignal(plugins: readonly string[]): BuildSignal {
   };
   const flag = (name: string, value: string, cliFlag: string) =>
     setting(name)?.toLowerCase() === value ? [cliFlag] : [];
+  if (FMT_OPTIONS.some((name) => setting(name)?.includes("$"))) return UNREADABLE_OPTION_NOTICE;
   const override = plugins
     .flatMap((plugin) => xmlBlocks(plugin, "dependency"))
     .map(({ body }) => body)
