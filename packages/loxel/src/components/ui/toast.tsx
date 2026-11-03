@@ -87,11 +87,11 @@ function ToastItem({ toast }: { toast: Toast }) {
         toast.variant === "error" && "border-destructive/30",
       )}
     >
-      {/* Errors from git and wt can span several lines (hook output, paths): keep their breaks. */}
+      {/* Errors from git and wt can span several lines and carry long unbroken paths. */}
       <span
         role={toast.variant === "error" ? "alert" : "status"}
         className={cn(
-          "max-h-60 flex-1 overflow-y-auto text-xs break-words whitespace-pre-wrap",
+          "max-h-60 min-w-0 flex-1 overflow-y-auto text-xs wrap-anywhere whitespace-pre-wrap",
           toast.variant === "error" ? "text-destructive" : "text-foreground",
         )}
       >
