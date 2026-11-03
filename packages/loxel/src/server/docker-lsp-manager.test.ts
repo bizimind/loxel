@@ -71,6 +71,8 @@ class TestDockerLspManager extends DockerLspManager {
   }
 
   protected override resolveBinary(): string {
+    // The real one still runs, so anything it reports is seen here.
+    super.resolveBinary();
     return process.execPath;
   }
 
@@ -130,10 +132,11 @@ test.skipIf(process.platform === "win32")(
   "never runs Docker's build checks, which contact registries, trusted or not",
   async () => {
     expect(await dockerSeenByServer(false)).toBeNull();
+    // Nothing waits for trust, so an untrusted repository has nothing to report.
+    expect(getRepoTrustStatus(wt!).restrictions).toEqual([]);
     await manager?.destroy();
     await rm(wt!, { recursive: true, force: true });
     expect(await dockerSeenByServer(true)).toBeNull();
-    expect(getRepoTrustStatus(wt!).restrictions).toEqual([]);
   },
 );
 
