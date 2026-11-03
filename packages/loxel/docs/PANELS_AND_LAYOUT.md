@@ -39,17 +39,18 @@ Drop rules are enforced in `setupOuterDockview` (`onWillShowOverlay`): no edge d
 
 ## Panel identity and reuse
 
-| Type          | Dockview id             | Key params                                   | Open behavior                                                                         |
-| ------------- | ----------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `terminal`    | `terminal-<terminalId>` | `terminalId`, `worktreePath`, `cwd?`         | Always new                                                                            |
-| `browser`     | `browser-<uuid>`        | `url`, `faviconUrl`                          | Always new; `renderer: "always"`                                                      |
-| `editor` (md) | `editor-<filePath>`     | `filePath`, `worktreePath`, `line`, `column` | Reuse by path                                                                         |
-| `codeEditor`  | `codeeditor-<filePath>` | `filePath`, `worktreePath`, `line`, `column` | Reuse by path; `line`/`column` pushed via `updateParameters` and cleared once applied |
-| `excalidraw`  | `drawing-<filePath>`    | `filePath`, `worktreePath`                   | Reuse by path                                                                         |
-| `media`       | `media-<filePath>`      | `filePath`, `worktreePath`                   | Reuse by path                                                                         |
-| `diff`        | `diff`                  | none                                         | Singleton                                                                             |
-| `compare`     | `compare-<uuid>`        | `oldPath`, `newPath`, `worktreePath`         | Always new; a split duplicates the comparison                                         |
-| `localDb`     | `localdb-main`          | none                                         | Singleton                                                                             |
+| Type              | Dockview id              | Key params                                   | Open behavior                                                                                                                                                              |
+| ----------------- | ------------------------ | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `terminal`        | `terminal-<terminalId>`  | `terminalId`, `worktreePath`, `cwd?`         | Always new                                                                                                                                                                 |
+| `browser`         | `browser-<uuid>`         | `url`, `faviconUrl`                          | Always new; `renderer: "always"`                                                                                                                                           |
+| `editor` (md)     | `editor-<filePath>`      | `filePath`, `worktreePath`, `line`, `column` | Reuse by path                                                                                                                                                              |
+| `codeEditor`      | `codeeditor-<filePath>`  | `filePath`, `worktreePath`, `line`, `column` | Reuse by path; `line`/`column` pushed via `updateParameters` and cleared once applied                                                                                      |
+| `virtualDocument` | `virtual-document-<uri>` | `uri`, `connectionId`, `line`, `column`      | A language server's [read-only document](LANGUAGE_SERVERS.md#read-only-documents). Reuse by URI; not in `CENTER_PANELS`, so no split or reopen; closes with its connection |
+| `excalidraw`      | `drawing-<filePath>`     | `filePath`, `worktreePath`                   | Reuse by path                                                                                                                                                              |
+| `media`           | `media-<filePath>`       | `filePath`, `worktreePath`                   | Reuse by path                                                                                                                                                              |
+| `diff`            | `diff`                   | none                                         | Singleton                                                                                                                                                                  |
+| `compare`         | `compare-<uuid>`         | `oldPath`, `newPath`, `worktreePath`         | Always new; a split duplicates the comparison                                                                                                                              |
+| `localDb`         | `localdb-main`           | none                                         | Singleton                                                                                                                                                                  |
 
 File-backed ids embed the absolute path, so a file has at most one editor tab per worktree layout; compare panels can show it again (see [EDITOR.md](EDITOR.md#several-editors-of-one-file)). Reuse always goes through `activatePanel()`, never `panel.api.setActive()` (see [KEYBINDINGS.md](KEYBINDINGS.md#focus-navigation) and the browser note in [ELECTRON.md](ELECTRON.md#browser-panels)).
 

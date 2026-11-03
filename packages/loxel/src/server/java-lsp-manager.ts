@@ -59,11 +59,19 @@ const JDTLS_STATE_DIR = path.join(config.stateDir, "jdtls");
 const JAVA_SETTINGS = {
   import: { maven: { enabled: false }, gradle: { enabled: false }, exclusions: ["**"] },
   autobuild: { enabled: false },
+  // With the client reading `jdt://` documents, a search would otherwise decompile classes that have
+  // no source, and fail the whole request on the first it cannot.
+  references: { includeDecompiledSources: false },
+  // jdtls leaves this off unless a client asks.
+  signatureHelp: { enabled: true },
   telemetry: { enabled: false },
   // Their commands are the client's own in VS Code; Loxel has none to run.
   referencesCodeLens: { enabled: false },
   implementationCodeLens: "none",
 };
+
+/** Definitions and hovers lead to `jdt://` documents, which the client opens read-only. */
+const EXTENDED_CLIENT_CAPABILITIES = { classFileContentsSupport: true };
 
 /** What jdtls itself runs on. A project on an older Java also needs a JDK of its own level. */
 const JDTLS_MIN_JAVA = 25;
@@ -493,6 +501,7 @@ export class JavaLspManager extends WorktreeLspManager {
     const trigger = this.triggerFiles.get(session.wtPath);
     return {
       settings: { java: this.settingsOf(session) },
+      extendedClientCapabilities: EXTENDED_CLIENT_CAPABILITIES,
       ...(trigger ? { triggerFiles: [trigger] } : {}),
     };
   }

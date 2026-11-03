@@ -4,7 +4,7 @@ description: Java language features from Eclipse JDT LS, running on your JDK 25 
 order: 13.5
 ---
 
-The Java server starts the first time you open a `.java` file, and stops when none remain open. Loxel bundles [Eclipse JDT LS](https://github.com/eclipse-jdtls/eclipse.jdt.ls), and it works from what is already on your machine: neither it nor Gradle downloads anything to load a project, even in a trusted repository.
+The Java server starts the first time you open a `.java` file, and stops when none remain open, along with any [library source tabs](#jdk-and-library-sources). Loxel bundles [Eclipse JDT LS](https://github.com/eclipse-jdtls/eclipse.jdt.ls), and it works from what is already on your machine: neither it nor Gradle downloads anything to load a project, even in a trusted repository.
 
 ## Java 25 or newer
 
@@ -20,6 +20,7 @@ Java files with no `pom.xml` or Gradle build in their folder or above it get the
 - Hover, go-to-definition, go-to-implementation and references across files
 - Rename across files, including renaming a class and its file
 - Completion, including types you have not imported yet, `sysout`-style templates and argument placeholders
+- Signature help while typing a call
 - Quick fixes and refactorings: add imports, organize imports, add unimplemented methods, generate getters and setters, surround with try/catch, extract to a variable, field or constant
 - Document and workspace symbols, inlay hints for parameter names, folding and semantic highlighting
 - **Format Document**
@@ -33,8 +34,11 @@ Maven and Gradle projects load once you trust the repository, which runs their b
 Until you trust the repository, a Java file with a `pom.xml` or Gradle build in its folder or a folder above it is treated as a separate file outside any project, and nothing from the build runs. It gets:
 
 - Syntax errors, but no type errors
-- Completion, code actions, document symbols, references within the file, folding and semantic highlighting
+- Hover, and go-to-definition within the file and into the JDK
+- Completion, signature help, code actions, document and workspace symbols, inlay hints, folding and semantic highlighting
 - **Format Document**
+
+Features that reach other files, such as references, go-to-definition and rename, depend on what the server has seen so far, so they can miss files until the project loads. Renaming a class doesn't rename its file there.
 
 ### What needs to be on your machine
 
@@ -91,7 +95,15 @@ Otherwise the file is saved unformatted, and a notice says which version the pro
 
 ## JDK classes
 
-Hover on a JDK class shows its documentation when the JDK includes its sources (`src.zip`), and only its signature otherwise. Most JDK distributions include them; some Linux packages put them in a separate package. Go-to-definition into JDK classes is not available yet.
+Hover on a JDK class shows its documentation when the JDK includes its sources (`src.zip`), and only its signature otherwise. Most JDK distributions include them; some Linux packages put them in a separate package.
+
+## JDK and library sources
+
+Go to definition on a JDK or dependency class (`Cmd`-click or `F12`) opens its source in a read-only tab named after the class, and reuses that tab if it is already open. Hover, go-to-definition and symbols work inside it, so you can keep following definitions. Peek, **Go to Symbol in Workspace** and the **Source** link in a hover reach the same sources.
+
+- The source comes from what is on your machine: a JDK's `src.zip`, or a `-sources.jar` next to a dependency. Without one you see decompiled code, with a comment at the top saying so. Nothing is downloaded.
+- Workspace symbols from these classes open at the top of the file.
+- These tabs last as long as the language server session: they close when the server restarts, when you switch worktrees and when the window reloads. Go to the definition again to reopen one. Hover a tab's title to see which JDK module or jar the class came from.
 
 ## JDK detection
 
