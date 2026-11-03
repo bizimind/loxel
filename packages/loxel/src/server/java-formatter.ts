@@ -125,7 +125,7 @@ function unavailableNotice(
 }
 
 /** Every copy of `tool` on the trusted part of `PATH`, without version managers' shims. */
-async function toolsOnPath(
+export async function toolsOnPath(
   tool: string,
   root: string,
 ): Promise<{ tools: string[]; sawShim: boolean }> {
