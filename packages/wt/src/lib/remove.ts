@@ -31,6 +31,8 @@ export interface RemovePlan {
   isMain: boolean;
   /** Locked with `git worktree lock`; removal refuses until it is unlocked */
   locked: boolean;
+  /** The repository has a clean.wt.sh, which removing runs first */
+  hasHook: boolean;
 }
 
 export interface RemoveParams {
@@ -50,6 +52,12 @@ export interface RemoveParams {
    * a resolved shell PATH when calling from a non-shell context (e.g. a GUI app).
    */
   hookEnv?: HookContext["baseEnv"];
+  /**
+   * Asked with the worktree's path before clean.wt.sh runs; false removes the
+   * worktree without running it (`hookSkipped` in the result). For a caller
+   * that runs a repository's hooks only when its user allows it.
+   */
+  allowHook?: (worktreePath: string) => boolean;
 }
 
 export interface RemoveResult {
@@ -60,6 +68,8 @@ export interface RemoveResult {
   branchDeleted: boolean;
   /** clean.wt.sh existed and succeeded */
   hookRan: boolean;
+  /** clean.wt.sh exists but did not run, because `allowHook` said no */
+  hookSkipped?: true;
 }
 
 /**
@@ -76,6 +86,7 @@ export async function planRemove(params: { name: string; repoPath: string }): Pr
     dirty: await isWorktreeDirty(worktree.path),
     isMain: worktree.path === root,
     locked: worktree.locked,
+    hasHook: await pathExists(join(root, HOOK_CLEAN)),
   };
 }
 
@@ -122,14 +133,17 @@ export async function executeRemove(
   }
 
   const hookExists = await pathExists(join(root, HOOK_CLEAN));
-  const hookRan = await runHook(
-    HOOK_CLEAN,
-    { root, name, worktreePath: worktree.path, branch: worktree.branch, baseEnv: params.hookEnv },
-    progress,
-  );
+  const hookSkipped = hookExists && params.allowHook?.(worktree.path) === false;
+  const hookRan =
+    !hookSkipped &&
+    (await runHook(
+      HOOK_CLEAN,
+      { root, name, worktreePath: worktree.path, branch: worktree.branch, baseEnv: params.hookEnv },
+      progress,
+    ));
   // Detaching skips git's own clean check, so a change made while the hook ran
   // must be caught here instead.
-  if (!force && hookExists) {
+  if (!force && hookExists && !hookSkipped) {
     const reason = forceReason(name, await isWorktreeDirty(worktree.path));
     if (reason)
       throw new Error(`${reason} after ${HOOK_CLEAN} ran. Use force to remove it anyway.`);
@@ -152,7 +166,14 @@ export async function executeRemove(
     if (parked) deleteInBackground(parked);
   }
 
-  return { name, path: worktree.path, removed: true, branchDeleted, hookRan };
+  return {
+    name,
+    path: worktree.path,
+    removed: true,
+    branchDeleted,
+    hookRan,
+    ...(hookSkipped ? { hookSkipped } : {}),
+  };
 }
 
 /** `git worktree remove` refuses a locked worktree even with --force; say what unlocks it. */

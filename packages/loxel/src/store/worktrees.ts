@@ -1,3 +1,4 @@
+import type { AddResult } from "@bizimind/wt/lib";
 import { create } from "zustand";
 import { createJSONStorage, persist, subscribeWithSelector } from "zustand/middleware";
 
@@ -223,7 +224,7 @@ export interface WorktreeState {
     projectPath: string,
     name: string,
     options?: Pick<CreateWorktreeOptions, "branch" | "parentPath" | "title">,
-  ) => Promise<void>;
+  ) => Promise<AddResult | null>;
   requestRemoveWorktree: (projectPath: string, wt: WorktreeEntry) => Promise<void>;
   confirmRemoveWorktree: (options: {
     deleteBranch: boolean;
@@ -241,7 +242,10 @@ export interface WorktreeState {
   /** Turn on worktree metadata for the project, so its worktrees can nest. */
   enableWorktreeMetadata: (projectPath: string) => Promise<void>;
   dismissPendingPlan: () => void;
-  confirmCreateWorktree: (branchResolution: "use-existing" | "delete-and-create") => Promise<void>;
+  /** The created worktree, or null when there was no pending plan to confirm. */
+  confirmCreateWorktree: (
+    branchResolution: "use-existing" | "delete-and-create",
+  ) => Promise<AddResult | null>;
 
   requestCreateWorktree: () => void;
   clearCreateWorktreeRequest: () => void;
@@ -417,13 +421,14 @@ export const useWorktreeStore = create<WorktreeState>()(
               );
             }
             set({ pendingAddPlan: { ...plan, projectPath, parentPath, title } });
-            return;
+            return null;
           }
 
           addOptimisticEntry(set, projectPath, plan.worktreePath, name, { parentPath, title });
 
+          let result: AddResult;
           try {
-            await api.createWorktree(projectPath, name, {
+            result = await api.createWorktree(projectPath, name, {
               branch: options?.branch,
               parentPath,
               title,
@@ -434,25 +439,32 @@ export const useWorktreeStore = create<WorktreeState>()(
           }
 
           await get().refreshProjectWorktrees(projectPath);
+          return result;
         },
 
         confirmCreateWorktree: async (branchResolution) => {
           const { pendingAddPlan } = get();
-          if (!pendingAddPlan) return;
+          if (!pendingAddPlan) return null;
 
           const { name, worktreePath, projectPath, parentPath, title } = pendingAddPlan;
           set({ pendingAddPlan: null });
 
           addOptimisticEntry(set, projectPath, worktreePath, name, { parentPath, title });
 
+          let result: AddResult;
           try {
-            await api.createWorktree(projectPath, name, { branchResolution, parentPath, title });
+            result = await api.createWorktree(projectPath, name, {
+              branchResolution,
+              parentPath,
+              title,
+            });
           } catch (err) {
             removeOptimisticEntry(set, projectPath, worktreePath);
             throw err;
           }
 
           await get().refreshProjectWorktrees(projectPath);
+          return result;
         },
 
         requestRemoveWorktree: async (projectPath, wt) => {

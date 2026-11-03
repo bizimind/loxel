@@ -1,8 +1,10 @@
+import type { AddResult } from "@bizimind/wt/lib";
 import { useRef, useState } from "react";
 
 import type { WorktreeEntry } from "@/api/git-models";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
+import { offerToRunInitHook } from "@/lib/repo-trust-dialog";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { worktreeLabel, worktreeNameFromTitle } from "./worktree-labels";
@@ -55,11 +57,12 @@ export function NewWorktreeDialog({
     onClose();
   };
 
-  const run = async (action: () => Promise<void>) => {
+  const run = async (action: () => Promise<AddResult | null>) => {
     setBusy(true);
     setError(null);
     try {
-      await action();
+      const created = await action();
+      if (created?.hookSkipped) void offerToRunInitHook(projectPath, created.path);
       // A branch conflict keeps the dialog open to ask how to resolve it.
       const pending = useWorktreeStore.getState().pendingAddPlan;
       const conflicted =

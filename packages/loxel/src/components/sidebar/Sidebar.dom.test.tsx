@@ -63,6 +63,37 @@ afterEach(() => {
   useWorktreeStore.getState().reset();
 });
 
+describe("Sidebar remove worktree dialog", () => {
+  const removePlan = {
+    name: "topic",
+    worktreePath: "/repo/.worktrees/topic",
+    wtPath: "/repo/.worktrees/topic",
+    projectPath: project.path,
+    branch: "topic",
+    dirty: false,
+    isMain: false,
+    locked: false,
+    hasHook: true,
+    nested: [],
+  };
+
+  test("says clean.wt.sh won't run while the repository is untrusted, and offers trust", () => {
+    useWorktreeStore.setState({ pendingRemovePlan: { ...removePlan, cleanHookHeld: true } });
+    render(<Sidebar />);
+
+    expect(screen.getByText(/hooks run in trusted repositories/)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Trust repository and run it" })).toBeDefined();
+  });
+
+  test("says nothing about hooks once the repository is trusted", () => {
+    useWorktreeStore.setState({ pendingRemovePlan: { ...removePlan, cleanHookHeld: false } });
+    render(<Sidebar />);
+
+    expect(screen.getByRole("button", { name: "Remove worktree" })).toBeDefined();
+    expect(screen.queryByText(/hooks run in trusted repositories/)).toBeNull();
+  });
+});
+
 describe("Sidebar regular-repository worktrees", () => {
   test("shows linked worktrees and the create action under a regular repo", () => {
     render(<Sidebar />);
@@ -378,7 +409,7 @@ describe("Sidebar worktree nesting", () => {
     let finish = () => {};
     const createWorktree = mock(
       () =>
-        new Promise<void>((resolve) => {
+        new Promise<null>((resolve) => {
           finish = () => {
             // What the store does when the branch already exists.
             useWorktreeStore.setState({
@@ -390,7 +421,7 @@ describe("Sidebar worktree nesting", () => {
                 branchConflict: { kind: "exists" },
               },
             });
-            resolve();
+            resolve(null);
           };
         }),
     );
@@ -408,7 +439,7 @@ describe("Sidebar worktree nesting", () => {
   });
 
   test("new child worktree opens the dialog, whose name follows the title", async () => {
-    const createWorktree = mock(() => Promise.resolve());
+    const createWorktree = mock(() => Promise.resolve(null));
     setNesting(true);
     useWorktreeStore.setState({ createWorktree });
     render(<Sidebar />);

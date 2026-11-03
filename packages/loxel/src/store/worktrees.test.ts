@@ -86,7 +86,9 @@ beforeEach(() => {
     dirty: true,
     isMain: false,
     locked: false,
+    hasHook: false,
     nested: [],
+    cleanHookHeld: false,
   };
   useWorktreeStore.setState({
     byProject: { [PROJECT]: { worktrees: [worktree] } },
