@@ -32,7 +32,7 @@ export function RepoTrustStatus() {
     if (!restricted || !repository || toldRepositories.has(repository)) return;
     toldRepositories.add(repository);
     showToast(
-      "Some language features are restricted until you trust this repository. Click Restricted in the status bar to choose.",
+      "Some features are restricted until you trust this repository. Click Restricted in the status bar to choose.",
       "info",
     );
   }, [restricted, repository]);

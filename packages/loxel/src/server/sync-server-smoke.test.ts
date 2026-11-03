@@ -470,6 +470,14 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         expect(await readRows(wtPath)).toEqual(rowsOf(wtPath).map(() => "{}"));
         expect(isAlive(terminal.pid)).toBe(true);
 
+        // Worktree hooks run only in a trusted repository.
+        const trust = await fetch(`${baseUrl}/api/repo-trust`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ worktreePath: wtPath, trusted: true }),
+        });
+        expect(trust.ok).toBe(true);
+
         // The hook waits for this test, so the shell must still be running while it does.
         const hook = path.join(repo.root, "clean.wt.sh");
         const hookStarted = path.join(stateDir, `${name}.hook-started`);

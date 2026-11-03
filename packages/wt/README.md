@@ -605,7 +605,7 @@ const parent = await findWorktreeById(parentId, repoPath); // ManagedWorktree | 
 
 `getWorktreeMeta`, `unsetWorktreeMeta`, `isWorktreeMetadataEnabled` and `parseMetaAssignments` cover the rest; writes throw `METADATA_OFF_MESSAGE` while metadata is off.
 
-Each `execute*` also accepts `hookEnv`, the base environment for the hook (for example a resolved shell `PATH` when calling from a GUI app). The full export list, including worktree listing, repo helpers and the hook filename constants, is in [`src/lib/index.ts`](src/lib/index.ts).
+Each `execute*` also accepts `hookEnv`, the base environment for the hook (for example a resolved shell `PATH` when calling from a GUI app). `executeAdd` and `executeRemove` accept `allowHook(worktreePath)`, asked before an existing hook runs, for an app that runs a repository's hooks only when its user allows it: false skips the hook, and the result says `hookSkipped` when there was one. `planRemove` reports `hasHook`, and `runInitHook` runs `init.wt.sh` later in an existing worktree. The CLI always runs the hooks. The full export list, including worktree listing, repo helpers and the hook filename constants, is in [`src/lib/index.ts`](src/lib/index.ts).
 
 ---
 

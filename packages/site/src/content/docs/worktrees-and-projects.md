@@ -12,7 +12,7 @@ Loxel tracks your repositories as **projects** and surfaces each worktree as a d
 
 Click **Add project** in the worktree sidebar. The dialog has two tabs: **New Project** creates a new repository in a folder you choose, and **Import Existing** brings in a folder or a remote URL in one of the ways below.
 
-When you choose multi-workspace (see [Clone](#clone)) for a new or imported repository, an extra step lets you list files to copy into each new worktree (such as `.env`) and setup commands to run in it. Loxel writes them to the repo-root `init.wt.sh` hook.
+When you choose multi-workspace (see [Clone](#clone)) for a new or imported repository, an extra step lets you list files to copy into each new worktree (such as `.env`) and setup commands to run in it. Loxel writes them to the repo-root `init.wt.sh` hook. Hooks run in [trusted](/docs/repository-trust) repositories. A new project starts trusted, so its hook runs right away; for a repository you import, Loxel asks before running it in the first worktree.
 
 Loxel pre-fills both lists from what the repository contains: `.env` files, direnv and mise configuration, the install command for a JavaScript lockfile (Bun, pnpm, npm, Yarn), and one command that creates the worktree's Python environment:
 
@@ -68,7 +68,7 @@ Use a bare repo when you plan to run multiple parallel workstreams on the same r
 
 Use a regular repo for solo work or when you only ever need one working tree checked out at a time.
 
-Loxel creates worktrees with `wt` in both bare and regular repositories. When you create a worktree in Loxel, `wt` sets up its branch and runs the repo-root `init.wt.sh` hook if the repo has one.
+Loxel creates worktrees with `wt` in both bare and regular repositories. When you create a worktree in Loxel, `wt` sets up its branch and runs the repo-root `init.wt.sh` hook if the repo has one, and removing a worktree runs `clean.wt.sh` first. Hooks run in trusted repositories: in one you haven't [trusted](/docs/repository-trust), Loxel says which hook won't run and offers to trust the repository and run it.
 
 > **Note:** You can convert a regular repo to bare at any time via the Convert path — but you'll need a clean working tree. Commit everything first.
 
@@ -126,7 +126,7 @@ Each window keeps its own layout for every worktree, saved as you work, so two w
 
 ## Switching worktrees
 
-Click a worktree in the sidebar to switch to it. Use `Ctrl+Alt+[` and `Ctrl+Alt+]` to go back and forward through the worktrees you visited (across all projects), or `Ctrl+Alt+1`–`8` to jump to one of the active project's worktrees by its position in the sidebar, counting nested worktrees except those you folded away (`Ctrl+Alt+9` is the last one, `Ctrl+Alt+0` the tenth; archived worktrees are skipped). `Ctrl+Alt+N`, or **Add worktree** at the end of a project's worktrees, opens the New worktree dialog. Type a title and the name (the worktree's directory and branch) follows it, in lowercase with dashes; edit the name directly to set it yourself. The title is shown in the sidebar instead of the name, and needs worktree nesting on (see above); without it the dialog asks only for a name. If the branch already exists, the dialog asks whether to use it or recreate it.
+Click a worktree in the sidebar to switch to it. Use `Ctrl+Alt+[` and `Ctrl+Alt+]` to go back and forward through the worktrees you visited (across all projects), or `Ctrl+Alt+1`–`8` to jump to one of the active project's worktrees by its position in the sidebar, counting nested worktrees except those you folded away (`Ctrl+Alt+9` is the last one, `Ctrl+Alt+0` the tenth; archived worktrees are skipped). `Ctrl+Alt+N`, or **Add worktree** at the end of a project's worktrees, opens the New worktree dialog. Type a title and the name (the worktree's directory and branch) follows it, in lowercase with dashes; edit the name directly to set it yourself. The title is shown in the sidebar instead of the name, and needs worktree nesting on (see above); without it the dialog asks only for a name. If the branch already exists, the dialog asks whether to use it or recreate it. Once you click **Create worktree**, the dialog closes and the new worktree appears in the sidebar with a spinner while it is created, which includes running the repo's `init.wt.sh` hook; it becomes clickable when it is ready. If creating it fails, a message says why.
 
 The switch is immediate: Loxel saves the outgoing worktree's layout and restores the incoming one.
 

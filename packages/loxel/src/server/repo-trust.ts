@@ -116,7 +116,10 @@ export function isRepoTrusted(wtPath: string): boolean {
 const restrictionsByRepo = new Map<string, Set<string>>();
 const restrictionListeners = new Set<() => void>();
 
-/** Trust or stop trusting the repository `wtPath` belongs to. Only the user's choice calls this. */
+/**
+ * Trust or stop trusting the repository `wtPath` belongs to. Only the user's choice calls this: their
+ * answer to the trust question, or creating a project from scratch, whose repository starts trusted.
+ */
 export function setRepoTrusted(wtPath: string, trusted: boolean): void {
   const identity = repoIdentity(wtPath);
   const key = `${KEY_PREFIX}${identity.id}`;
