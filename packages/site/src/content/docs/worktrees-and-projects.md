@@ -12,7 +12,7 @@ Loxel tracks your repositories as **projects** and surfaces each worktree as a d
 
 Click **Add project** in the worktree sidebar. The dialog has two tabs: **New Project** creates a new repository in a folder you choose, and **Import Existing** brings in a folder or a remote URL in one of the ways below.
 
-When you choose multi-workspace (see [Clone](#clone)) for a new or imported repository, an extra step lets you list files to copy into each new worktree (such as `.env`) and setup commands to run in it. Loxel writes them to the repo-root `init.wt.sh` hook.
+When you choose multi-workspace (see [Clone](#clone)) for a new or imported repository, an extra step lets you list files to copy into each new worktree (such as `.env`) and setup commands to run in it. Loxel writes them to the repo-root `init.wt.sh` hook. Hooks run in [trusted](/docs/repository-trust) repositories. A new project starts trusted, so its hook runs right away; for a repository you import, Loxel asks before running it in the first worktree.
 
 Loxel pre-fills both lists from what the repository contains: `.env` files, direnv and mise configuration, the install command for a JavaScript lockfile (Bun, pnpm, npm, Yarn), and one command that creates the worktree's Python environment:
 
@@ -68,7 +68,7 @@ Use a bare repo when you plan to run multiple parallel workstreams on the same r
 
 Use a regular repo for solo work or when you only ever need one working tree checked out at a time.
 
-Loxel creates worktrees with `wt` in both bare and regular repositories. When you create a worktree in Loxel, `wt` sets up its branch and runs the repo-root `init.wt.sh` hook if the repo has one.
+Loxel creates worktrees with `wt` in both bare and regular repositories. When you create a worktree in Loxel, `wt` sets up its branch and runs the repo-root `init.wt.sh` hook if the repo has one, and removing a worktree runs `clean.wt.sh` first. Hooks run in trusted repositories: in one you haven't [trusted](/docs/repository-trust), Loxel says which hook won't run and offers to trust the repository and run it.
 
 > **Note:** You can convert a regular repo to bare at any time via the Convert path — but you'll need a clean working tree. Commit everything first.
 

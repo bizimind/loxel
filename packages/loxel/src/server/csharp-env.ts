@@ -15,10 +15,10 @@ import { findFileAbove, isDirectory } from "@/fs-utils";
 
 import { mapWithConcurrency } from "./git-commands";
 import { logger } from "./logger";
-import { pathOutsideWorktree } from "./python-env";
+import { isInside, pathOutsideWorktree } from "./path-containment";
 import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
-import { canGitReadRepo, isInside, isShippedByRepo, runGit } from "./shipped-by-repo";
+import { canGitReadRepo, isShippedByRepo, runGit } from "./shipped-by-repo";
 
 const log = logger.child("server");
 

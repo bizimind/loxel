@@ -3,8 +3,8 @@ import path from "node:path";
 
 import { readConfigFile } from "./config-file-read";
 import { dirsUpToRoot } from "./language-formatter";
+import { isInside } from "./path-containment";
 import { isRepoTrusted } from "./repo-trust";
-import { isInside } from "./shipped-by-repo";
 import { parseToml, recordAt } from "./toml-file";
 
 export const RUST_MANIFEST = "Cargo.toml";

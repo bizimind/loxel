@@ -7,10 +7,9 @@ import { pathToFileURL } from "node:url";
 import {
   assertCanTransformToBare,
   planAdd,
-  executeAdd,
   planRemove,
-  executeRemove,
   getWorktreeName,
+  HOOK_INIT,
   listManagedWorktrees,
   detectRepoType,
   hasUncommittedChanges,
@@ -22,6 +21,7 @@ import {
   planInit,
   shellQuote,
   type AddPlan,
+  type AddResult,
   type InitActionId,
   type ProgressHandler,
   type RemovePlan,
@@ -39,6 +39,8 @@ import type {
   BrowseEntry,
   DetectPathResult,
   ProjectsResponse,
+  Project,
+  ProjectSetupResult,
   ScanSuggestionsResult,
   WorkspaceSetup,
 } from "@/api/project-model";
@@ -95,6 +97,13 @@ import { stress } from "./stress-detector";
 import { toolchainStatusModules } from "./toolchain-statuses";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
 import { getCurrentVersion } from "./version";
+import {
+  addFirstWorktreeOfNewRepo,
+  addWorktree,
+  isCleanHookHeld,
+  removeWorktree,
+  runHeldInitHook,
+} from "./worktree-hooks";
 import { isLayoutRowOfMissingWorktree } from "./worktree-rows";
 import { findWorkspacePackages } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
@@ -1841,11 +1850,13 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
 
   mkdirSync(projectDir, { recursive: true });
 
+  // Everything in a project created from scratch is the user's, so its repository starts trusted.
   if (setup === "single") {
     const result = measureSpawn("git init", () =>
       Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: projectDir }),
     );
     if (result.exitCode !== 0) return error("git init failed", 500);
+    setRepoTrusted(projectDir, true);
   } else {
     await initBareRepo(projectDir, "main");
     await createInitialCommit(projectDir);
@@ -1853,8 +1864,8 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
     await writeInitHook(projectDir, copyFiles, setupCommands);
 
     try {
-      await executeAdd(
-        { name: "main", branch: "main", repoPath: projectDir, hookEnv: buildSpawnEnv() },
+      await addFirstWorktreeOfNewRepo(
+        { name: "main", branch: "main", repoPath: projectDir },
         wtProgress,
       );
     } catch (err) {
@@ -1872,6 +1883,13 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
 
   ctx.broadcastAll(worktreesChangedMessage(project.path));
   return json(project);
+}
+
+/** A set-up project, saying when its first worktree's `init.wt.sh` was held back. */
+function projectSetupResult(project: Project, firstWorktree?: AddResult): ProjectSetupResult {
+  return firstWorktree?.hookSkipped
+    ? { ...project, initHookSkippedAt: firstWorktree.path }
+    : project;
 }
 
 // POST /api/projects/clone — clone a remote repo
@@ -1934,8 +1952,8 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
   await ensureWorktreesDir(bareDir);
   await writeInitHook(bareDir, copyFiles, setupCommands);
 
-  await executeAdd(
-    { name: baseBranch, branch: baseBranch, repoPath: bareDir, hookEnv: buildSpawnEnv() },
+  const firstWorktree = await addWorktree(
+    { name: baseBranch, branch: baseBranch, repoPath: bareDir },
     wtProgress,
   );
 
@@ -1947,7 +1965,7 @@ async function handleCloneProject(req: Request, ctx: RouteContext): Promise<Resp
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(projectSetupResult(project, firstWorktree));
 }
 
 // POST /api/projects/init — initialize git in an existing non-repo folder
@@ -1967,6 +1985,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     return error("Path does not exist", 400);
   }
 
+  let firstWorktree: AddResult | undefined;
   if (setup === "single") {
     const result = measureSpawn("git init", () =>
       Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: dirPath }),
@@ -2006,8 +2025,8 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     const hasMain = (await listManagedWorktrees(dirPath)).some((wt) => wt.name === "main");
     if (!hasMain) {
       try {
-        await executeAdd(
-          { name: "main", branch: "main", repoPath: dirPath, hookEnv: buildSpawnEnv() },
+        firstWorktree = await addWorktree(
+          { name: "main", branch: "main", repoPath: dirPath },
           wtProgress,
         );
       } catch (err) {
@@ -2024,7 +2043,7 @@ async function handleInitProject(req: Request, ctx: RouteContext): Promise<Respo
     return error(err instanceof Error ? err.message : "Failed to initialize", 500);
   }
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(project);
+  return json(projectSetupResult(project, firstWorktree));
 }
 
 // POST /api/projects/convert — convert regular repo to bare+wt
@@ -2095,8 +2114,6 @@ async function handleConvertProject(req: Request, ctx: RouteContext): Promise<Re
   return json(project);
 }
 
-/** Name of the wt add hook script, run in each new worktree. */
-const INIT_HOOK_NAME = "init.wt.sh";
 /** Repo-root directory holding local-only files copied into new worktrees. */
 const LOCAL_RES_DIR = ".wt-local-res";
 
@@ -2157,7 +2174,7 @@ export async function writeInitHook(
     lines.push(...commands);
   }
 
-  const hookPath = join(repoDir, INIT_HOOK_NAME);
+  const hookPath = join(repoDir, HOOK_INIT);
   await Bun.write(hookPath, `${lines.join("\n")}\n`);
   chmodSync(hookPath, 0o755);
 }
@@ -2314,13 +2331,12 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
   try {
     const child = parentPath ? await childWorktreeOptions(project.cwd, parentPath) : undefined;
     const meta = { ...child?.meta, ...titleMeta(title) };
-    const result = await executeAdd(
+    const result = await addWorktree(
       {
         name,
         branch,
         branchResolution,
         repoPath: project.cwd,
-        hookEnv: buildSpawnEnv(),
         ...(child ? { base: child.base } : {}),
         ...(Object.keys(meta).length > 0 ? { meta } : {}),
       },
@@ -2332,6 +2348,28 @@ async function handleCreateWorktree(req: Request, ctx: RouteContext): Promise<Re
   } catch (err) {
     wtLog.error(`Failed to create worktree '${name}'`, { error: err });
     return error(describeError(err, "Failed to create worktree"));
+  }
+}
+
+// POST /api/worktree/run-init-hook — run the init.wt.sh its creation held back, once trusted
+async function handleRunInitHook(req: Request, ctx: RouteContext): Promise<Response> {
+  const body = await parseBody(req);
+  const project = ctx.getProject(requireString(body, "projectPath"));
+  if (!project) return error("Project not found", 404);
+  const wtPath = requireString(body, "path");
+  await git.validateWorktreePath(wtPath, project.cwd);
+  const name = getWorktreeName(wtPath, project.worktreesDir);
+
+  wtLog.info(`Running ${HOOK_INIT} in '${name}'`);
+  try {
+    const hookRan = await runHeldInitHook(
+      { name, repoPath: project.cwd, worktreePath: wtPath },
+      wtProgress,
+    );
+    return json({ hookRan });
+  } catch (err) {
+    wtLog.error(`Failed to run ${HOOK_INIT} in '${name}'`, { error: err });
+    return error(describeError(err, `Failed to run ${HOOK_INIT}`));
   }
 }
 
@@ -2433,7 +2471,11 @@ async function handlePlanRemoveWorktree(req: Request, ctx: RouteContext): Promis
         dirty: (await planRemove({ name: wt.wtName, repoPath: project.cwd })).dirty,
       })),
     );
-    const response: WorktreeRemovePlan = { ...plan, nested };
+    const response: WorktreeRemovePlan = {
+      ...plan,
+      nested,
+      cleanHookHeld: isCleanHookHeld(plan.worktreePath, plan.hasHook),
+    };
     return json(response);
   } catch (err) {
     return error(describeError(err, "Failed to inspect worktree"));
@@ -2454,7 +2496,7 @@ async function removeOneWorktree(
   wtLog.info(`Removing worktree '${name}'`, options);
   const resumeWatchers = await ctx.suspendWorktreeWatchers(wtPath);
   try {
-    const result = await executeRemove(
+    const result = await removeWorktree(
       {
         name,
         deleteBranch: options.deleteBranch,
@@ -2467,7 +2509,6 @@ async function removeOneWorktree(
         force: options.force,
         repoPath: project.cwd,
         expectedPath: wtPath,
-        hookEnv: buildSpawnEnv(),
       },
       wtProgress,
     );
@@ -3380,6 +3421,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/file-write": handleFileWrite,
     "/api/worktree/plan-add": handlePlanAddWorktree,
     "/api/worktree/create": handleCreateWorktree,
+    "/api/worktree/run-init-hook": handleRunInitHook,
     "/api/worktree/plan-remove": handlePlanRemoveWorktree,
     "/api/worktree/remove": handleRemoveWorktree,
     "/api/worktree/meta": handleUpdateWorktreeMeta,

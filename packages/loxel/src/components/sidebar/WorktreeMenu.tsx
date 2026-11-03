@@ -24,6 +24,7 @@ import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { showToast } from "@/components/ui/toast";
 import { copyToClipboard } from "@/lib/clipboard";
+import { askToTrustRepo } from "@/lib/repo-trust-dialog";
 import { archivedSet, resolveParents } from "@/lib/worktree-hierarchy";
 import { useWorktreeStore } from "@/store/worktrees";
 
@@ -266,6 +267,23 @@ function RemoveWorktreeDialog({
   const [nested, setNested] = useState<NestedRemoval>("move-up");
   const worktrees =
     useWorktreeStore((s) => s.byProject[plan.projectPath]?.worktrees) ?? EMPTY_WORKTREES;
+  const requestRemoveWorktree = useWorktreeStore((s) => s.requestRemoveWorktree);
+  // Once trusted, planning again clears the notice, and the removal runs clean.wt.sh.
+  const trustForCleanHook = async () => {
+    try {
+      const trusted = await askToTrustRepo(plan.wtPath, {
+        title: "Trust this repository and run clean.wt.sh?",
+        reason: "Removing the worktree runs the repository's clean.wt.sh once it is trusted.",
+        confirmLabel: "Trust Repository",
+      });
+      const entry = worktrees.find((wt) => wt.path === plan.wtPath);
+      // Not when the removal was cancelled meanwhile: planning again would reopen the dialog.
+      const stillAsking = useWorktreeStore.getState().pendingRemovePlan?.wtPath === plan.wtPath;
+      if (trusted && entry && stillAsking) await requestRemoveWorktree(plan.projectPath, entry);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not change repository trust");
+    }
+  };
 
   const nestedCount = plan.nested.length;
   const them = nestedCount === 1 ? "it" : "them";
@@ -348,6 +366,23 @@ function RemoveWorktreeDialog({
                 ? "This worktree has uncommitted or untracked files. They will be lost."
                 : "Some of these worktrees have uncommitted or untracked files. They will be lost."}
             </p>
+          </div>
+        )}
+
+        {plan.cleanHookHeld && (
+          <div className="border-border mt-3 rounded-md border p-2.5">
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              The repository&rsquo;s <code>clean.wt.sh</code> won&rsquo;t run: hooks run in trusted
+              repositories.
+            </p>
+            <Button
+              variant="link"
+              size="xs"
+              className="h-auto px-0 text-[11px]"
+              onClick={() => void trustForCleanHook()}
+            >
+              Trust repository and run it
+            </Button>
           </div>
         )}
 

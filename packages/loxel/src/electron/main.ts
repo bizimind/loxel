@@ -67,6 +67,7 @@ import {
   trackWebviewDialogs,
 } from "./javascript-dialogs";
 import { startMainProcessMonitor } from "./main-perf-monitor";
+import { updateResourceDirs } from "./update-resource-dirs";
 import { configurePasskeys, installAccountChooser } from "./webauthn";
 import { installWebviewCopyImage } from "./webview-copy-image";
 import { forwardWebviewKeystrokes, installWebviewKeystrokeForwarding } from "./webview-keystrokes";
@@ -452,23 +453,13 @@ function parsePendingUpdate(raw: string): PendingUpdate {
   ) {
     throw new Error("Invalid pending.json: missing or invalid fields");
   }
+  // An update replaces every directory in its target, so it installs only where the server was
+  // told to (`LOXEL_RESOURCES_DIR`).
+  if (path.resolve((data as Record<string, unknown>).targetDir as string) !== EXTERNAL_RESOURCES) {
+    throw new Error("Invalid pending.json: targetDir is not the external resources directory");
+  }
   return data as PendingUpdate;
 }
-
-/**
- * Resource directories an update replaces wholesale instead of extracting over, so files dropped
- * by the new version do not linger (stale typeshed stubs would shadow the bundled ones).
- * `tsgo-lib` is the preview-era directory, included so the migration removes it on success while
- * retaining a rollback path if installation fails.
- */
-const UPDATE_RESOURCE_DIRS = [
-  "renderer",
-  "typescript-lib",
-  "typeshed-fallback",
-  "clangd-resource",
-  "tsgo-lib",
-  "jdtls",
-];
 
 /** Compute SHA256 hash of a file synchronously. */
 function sha256File(filePath: string): string {
@@ -518,9 +509,8 @@ function handlePendingUpdateSync(): void {
       const src = path.join(targetDir, file);
       if (fs.existsSync(src)) fs.copyFileSync(src, path.join(backupDir, file));
     }
-    for (const dir of UPDATE_RESOURCE_DIRS) {
+    for (const dir of updateResourceDirs(targetDir)) {
       const source = path.join(targetDir, dir);
-      if (!fs.existsSync(source)) continue;
       fs.cpSync(source, path.join(backupDir, dir), { recursive: true });
       fs.rmSync(source, { recursive: true });
     }
@@ -572,9 +562,8 @@ function handlePendingUpdateSync(): void {
           const backup = path.join(backupDir, file);
           if (fs.existsSync(backup)) fs.copyFileSync(backup, path.join(targetDir, file));
         }
-        for (const dir of UPDATE_RESOURCE_DIRS) {
+        for (const dir of updateResourceDirs(backupDir)) {
           const backup = path.join(backupDir, dir);
-          if (!fs.existsSync(backup)) continue;
           const dest = path.join(targetDir, dir);
           if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
           fs.cpSync(backup, dest, { recursive: true });

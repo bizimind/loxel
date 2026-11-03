@@ -33,9 +33,9 @@ import { config } from "./config";
 import { FSMONITOR_OFF } from "./git-commands";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
+import { isInside } from "./path-containment";
 import { reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv, refreshLoginShellEnv } from "./shell-env";
-import { isInside } from "./shipped-by-repo";
 import {
   WorktreeLspManager,
   type SpawnOptions,

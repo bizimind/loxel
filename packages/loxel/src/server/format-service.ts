@@ -5,7 +5,6 @@ import type { FileSink } from "bun";
 
 import type { FormatterOverride, FormattingSettings } from "@/lib/formatting-model";
 
-import { dotnetArgsRunProjectTool } from "./csharp-env";
 import {
   type BackendMode,
   FORMAT_REJECTED,
@@ -137,11 +136,7 @@ export class FormatService {
         worktreePath &&
         !isRepoTrusted(worktreePath) &&
         (overrideNamesRepoPath(override, worktreePath) ||
-          dotnetArgsRunProjectTool(
-            override.command,
-            override.args,
-            dirsUpToRoot(fileDir(filePath, worktreePath), worktreePath),
-          ))
+          this.overrideRunsProjectTool(override, filePath, worktreePath))
       ) {
         const named = `${override.command} ${override.args}`.trim();
         log.info("Holding back an override that runs a project's file or tool", { filePath });
@@ -174,6 +169,19 @@ export class FormatService {
       return this.formatWithBackend(fmt, content, filePath, worktreePath);
     }
     return this.runFormatter(fmt.command, fmt.args, content, filePath, worktreePath, fmt.spawn);
+  }
+
+  /** Whether a language module finds that `override` runs a tool the repository names. */
+  private overrideRunsProjectTool(
+    override: FormatterOverride,
+    filePath: string,
+    worktreePath: string,
+  ): boolean {
+    const dirs = dirsUpToRoot(fileDir(filePath, worktreePath), worktreePath);
+    return this.languages.some(
+      (language) =>
+        language.overrideRunsProjectTool?.(override.command, override.args, dirs) === true,
+    );
   }
 
   /**

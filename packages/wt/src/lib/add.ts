@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   addWorktree,
@@ -25,6 +25,7 @@ import {
   METADATA_OFF_MESSAGE,
   writableMeta,
 } from "./meta.ts";
+import { locateWorktree } from "./worktrees.ts";
 
 /**
  * A branch that stands in the way of creating a worktree named after it.
@@ -69,6 +70,12 @@ export interface AddParams {
    * a resolved shell PATH when calling from a non-shell context (e.g. a GUI app).
    */
   hookEnv?: HookContext["baseEnv"];
+  /**
+   * Asked with the new worktree's path before init.wt.sh runs; false creates
+   * the worktree without running it (`hookSkipped` in the result). For a caller
+   * that runs a repository's hooks only when its user allows it.
+   */
+  allowHook?: (worktreePath: string) => boolean;
 }
 
 export interface AddResult {
@@ -84,6 +91,8 @@ export interface AddResult {
   base?: string;
   /** init.wt.sh existed and succeeded */
   hookRan: boolean;
+  /** init.wt.sh exists but did not run, because `allowHook` said no */
+  hookSkipped?: true;
   /** The new worktree's metadata, its `wt-id` included; empty while metadata is off */
   meta: WorktreeMeta;
 }
@@ -140,21 +149,51 @@ export async function executeAdd(
     });
   }
 
+  const created = { name, path: worktreePath, branch, created: true, ...(base ? { base } : {}) };
+  if (
+    params.allowHook &&
+    (await pathExists(join(root, HOOK_INIT))) &&
+    !params.allowHook(worktreePath)
+  ) {
+    return { ...created, hookRan: false, hookSkipped: true, meta };
+  }
   const hookRan = await runHook(
     HOOK_INIT,
     { root, name, worktreePath, branch, baseEnv: params.hookEnv },
     progress,
   );
+  return { ...created, hookRan, meta };
+}
 
-  return {
-    name,
-    path: worktreePath,
-    branch,
-    created: true,
-    ...(base ? { base } : {}),
-    hookRan,
-    meta,
-  };
+/**
+ * Run init.wt.sh in an existing managed worktree, as `executeAdd` does right
+ * after creating one: for a caller that held the hook back with `allowHook`
+ * and was later allowed to run it.
+ *
+ * @returns true when the script existed and exited 0
+ */
+export async function runInitHook(
+  params: Pick<AddParams, "name" | "repoPath" | "hookEnv"> & {
+    /** When provided, reject if `name` resolves to a different worktree path. */
+    expectedPath?: string;
+  },
+  progress: ProgressHandler = silentProgress,
+): Promise<boolean> {
+  const { root, worktree } = await locateWorktree(params.name, params.repoPath);
+  if (params.expectedPath && resolve(worktree.path) !== resolve(params.expectedPath)) {
+    throw new Error(`Worktree '${params.name}' resolved to an unexpected path: ${worktree.path}`);
+  }
+  return runHook(
+    HOOK_INIT,
+    {
+      root,
+      name: params.name,
+      worktreePath: worktree.path,
+      branch: worktree.branch,
+      baseEnv: params.hookEnv,
+    },
+    progress,
+  );
 }
 
 interface AddContext {

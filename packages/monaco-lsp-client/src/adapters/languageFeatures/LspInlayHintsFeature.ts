@@ -138,12 +138,11 @@ class LspInlayHintsProvider implements monaco.languages.InlayHintsProvider {
     if (!this._client.bridge.isSyncedModel(model)) return null;
     const translated = this._client.bridge.translate(model, range.getStartPosition());
 
-    const result = await retryOnContentModified(() =>
-      this._client.server.textDocumentInlayHint({
-        textDocument: translated.textDocument,
-        range: this._client.bridge.translateRange(model, range),
-      }),
-    );
+    // A request an edit made stale rejects as cancelled; Monaco asks again for the new content.
+    const result = await this._client.server.textDocumentInlayHint({
+      textDocument: translated.textDocument,
+      range: this._client.bridge.translateRange(model, range),
+    });
 
     if (!result) {
       return null;
@@ -175,22 +174,6 @@ class LspInlayHintsProvider implements monaco.languages.InlayHintsProvider {
       }),
       dispose: () => {},
     };
-  }
-}
-
-async function retryOnContentModified<T>(cb: () => Promise<T>): Promise<T> {
-  const nRetries = 3;
-  let triesLeft = nRetries;
-  while (true) {
-    try {
-      return await cb();
-    } catch (e) {
-      if (e instanceof Error && e.message === "content modified" && triesLeft > 0) {
-        triesLeft--;
-        continue;
-      }
-      throw e;
-    }
   }
 }
 

@@ -24,6 +24,8 @@ let createCalls: string[] = [];
 /** When set, the create request does not resolve until this does. */
 let createGate: Promise<void> | null = null;
 let toasts: string[] = [];
+let createHookSkipped = false;
+let initHookOffers: string[] = [];
 
 const actualClient = await import("@/api/client");
 
@@ -53,7 +55,17 @@ mock.module("@/api/client", () => ({
   planAddWorktree: () => Promise.resolve(addPlan),
   createWorktree: (_projectPath: string, name: string) => {
     createCalls.push(name);
-    return createGate ?? Promise.resolve();
+    return (createGate ?? Promise.resolve()).then(() => ({
+      path: NEW_PATH,
+      hookRan: false,
+      ...(createHookSkipped ? { hookSkipped: true } : {}),
+    }));
+  },
+}));
+mock.module("@/lib/repo-trust-dialog", () => ({
+  offerToRunInitHook: (_projectPath: string, wtPath: string) => {
+    initHookOffers.push(wtPath);
+    return Promise.resolve();
   },
 }));
 mock.module("@/components/ui/toast", () => ({
@@ -97,6 +109,8 @@ beforeEach(() => {
   createCalls = [];
   createGate = null;
   toasts = [];
+  createHookSkipped = false;
+  initHookOffers = [];
   addPlan = { name: "new-wt", worktreePath: NEW_PATH, branch: "new-wt" };
   plan = {
     name: "feat-x",
@@ -105,7 +119,9 @@ beforeEach(() => {
     dirty: true,
     isMain: false,
     locked: false,
+    hasHook: false,
     nested: [],
+    cleanHookHeld: false,
   };
   useWorktreeStore.setState({
     byProject: { [PROJECT]: { worktrees: [worktree] } },
@@ -634,6 +650,17 @@ describe("createWorktree", () => {
     expect(await started?.created).toBe(true);
     expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([worktree, created]);
     expect(toasts).toEqual([]);
+    expect(initHookOffers).toEqual([]);
+  });
+
+  test("offers to run init.wt.sh when the create held it back", async () => {
+    createHookSkipped = true;
+    listResult = { worktrees: [worktree, created] };
+
+    const started = await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+
+    expect(await started?.created).toBe(true);
+    expect(initHookOffers).toEqual([NEW_PATH]);
   });
 
   test("a second create of a worktree still being created does not start", async () => {

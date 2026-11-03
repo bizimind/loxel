@@ -17,11 +17,10 @@ import {
 } from "./language-formatter";
 import { logger } from "./logger";
 import { getNodeEnv } from "./node-env";
-import { pathOutsideWorktree } from "./python-env";
+import { isInside, pathOutsideWorktree } from "./path-containment";
 import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
 import { isVersionManagerShim } from "./rust-tool-shim";
 import { buildSpawnEnv } from "./shell-env";
-import { isInside } from "./shipped-by-repo";
 import { recordAt } from "./toml-file";
 
 const log = logger.child("format");
