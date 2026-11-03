@@ -15,6 +15,7 @@ import { blockBodies, buildScripts, declaresPlugin, readCode } from "./kotlin-fo
 import { dirsUpToRoot } from "./language-formatter";
 import { isInside } from "./shipped-by-repo";
 import { readToml, recordAt } from "./toml-file";
+import { withoutXmlComments } from "./xml-comments";
 
 const PLUGIN_ID = "checkstyle";
 const MAVEN_PLUGIN = "maven-checkstyle-plugin";
@@ -385,24 +386,6 @@ function commaList(value: string | undefined): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
-}
-
-/**
- * XML text without its comments, read left to right as a parser does, so text that a removal joins
- * up is never taken for markup.
- */
-export function withoutXmlComments(xml: string): string {
-  let result = "";
-  let from = 0;
-  for (;;) {
-    const open = xml.indexOf("<!--", from);
-    if (open === -1) return result + xml.slice(from);
-    result += xml.slice(from, open);
-    const close = xml.indexOf("-->", open + 4);
-    // An unclosed comment runs to the end, where a parser would stop.
-    if (close === -1) return result;
-    from = close + 3;
-  }
 }
 
 /** The text of the first `<name>` element, or undefined when there is none. */

@@ -17,9 +17,10 @@ import {
   type CheckstyleOutcome,
   checkstyleVersion,
   findCheckstyle,
+  newestJdk,
   runCheckstyle,
 } from "./checkstyle-runner";
-import { subscribeJavaEnv } from "./java-env";
+import { getJavaEnv, subscribeJavaEnv } from "./java-env";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
@@ -53,6 +54,8 @@ interface CheckstyleSession {
   failedConfigs: Set<string>;
   /** Bumped when that set is cleared, so a run that started before doesn't add to it after. */
   configEpoch: number;
+  /** The JDK runs use, as the last run or JDK change saw it; undefined before either. */
+  newestJdk: string | null | undefined;
   notices: Set<string>;
   /** Stops the running tool when the session ends or trust goes away. */
   abort: AbortController;
@@ -106,12 +109,9 @@ export class CheckstyleLspManager implements WorktreeLspServer {
       configEpoch: 0,
       notices: new Set(),
       abort: new AbortController(),
-      // A new JDK can run what an older one could not. Asked for by the first run, not a change.
-      unsubscribeJdk: subscribeJavaEnv(wtPath, ({ first, changed }) => {
-        if (first || !changed) return;
-        forgetFailures(session);
-        this.schedule(session, [...session.openFiles]);
-      }),
+      newestJdk: undefined,
+      // Runs use the newest JDK, which can change while the chosen one stays the same.
+      unsubscribeJdk: subscribeJavaEnv(wtPath, () => void this.followJdks(session)),
     };
     this.sessions.set(ws, session);
     this.sessionsByWorktree.set(wtPath, session);
@@ -189,6 +189,16 @@ export class CheckstyleLspManager implements WorktreeLspServer {
     } else {
       this.send(session, { id, error: { code: -32601, message: `Unhandled method ${method}` } });
     }
+  }
+
+  /** A newer JDK can run what an older one could not. */
+  private async followJdks(session: CheckstyleSession): Promise<void> {
+    const newest = (await newestJdk(session.wtPath))?.path ?? null;
+    const before = session.newestJdk;
+    session.newestJdk = newest;
+    if (before === undefined || before === newest || !this.isLive(session)) return;
+    forgetFailures(session);
+    this.schedule(session, [...session.openFiles]);
   }
 
   private followTrust(): void {
@@ -278,8 +288,12 @@ export class CheckstyleLspManager implements WorktreeLspServer {
     files: string[],
     signal: AbortSignal,
   ): Promise<CheckstyleOutcome> {
+    // Resolving the worktree's JDK arms the watch that tells about JDKs installed later.
+    void getJavaEnv(session.wtPath);
     try {
-      return await runCheckstyle(project, files, session.wtPath, signal);
+      const { outcome, jdk } = await runCheckstyle(project, files, session.wtPath, signal);
+      session.newestJdk ??= jdk;
+      return outcome;
     } catch (err) {
       log.error("Checkstyle run failed", { root: project.dir, error: err });
       return { kind: "failed", message: err instanceof Error ? err.message : String(err) };

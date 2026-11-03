@@ -8,7 +8,6 @@ import {
   findCheckstyleProject,
   mayAffectCheckstyle,
   parsePropertiesText,
-  withoutXmlComments,
 } from "./checkstyle-config";
 
 let wt: string;
@@ -384,13 +383,6 @@ test("discovery remembers until cleared, which build file changes do", async () 
   expect(mayAffectCheckstyle(join(wt, "gradle/libs.versions.toml"))).toBe(true);
   expect(mayAffectCheckstyle(join(wt, "buildSrc/src/Conv.java"))).toBe(true);
   expect(mayAffectCheckstyle(file)).toBe(false);
-});
-
-test("withoutXmlComments reads comments left to right, as a parser does", () => {
-  expect(withoutXmlComments("a<!-- b -->c<!--d-->e")).toBe("ace");
-  expect(withoutXmlComments("<!<!-- x -->-- y -->z")).toBe("<!-- y -->z");
-  expect(withoutXmlComments("a<!-- open")).toBe("a");
-  expect(withoutXmlComments("<!-- a --> -->")).toBe(" -->");
 });
 
 test("parsePropertiesText reads key=value lines", () => {

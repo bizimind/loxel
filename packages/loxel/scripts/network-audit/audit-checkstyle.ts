@@ -165,6 +165,8 @@ const FETCHING_CONFIGS: Record<string, string> = {
     '<module name="ConstantName"/>',
     '<module name="ImportControl"><property name="file" value="http://192.0.2.15/i.xml"/></module>',
   ),
+  // A processing instruction holds the `<!--`, so a parser reads what follows it.
+  "pi-hides-ftp": config(`<?x <!-- ?>${filter("ftp://192.0.2.23/s.xml")}`),
   "dtd-ftp": config(
     "",
     '<!DOCTYPE module PUBLIC "-//Canary//DTD Nothing//EN" "ftp://192.0.2.21/canary.dtd">',

@@ -6,7 +6,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { type CheckstyleProject, withoutXmlComments } from "./checkstyle-config";
+import type { JavaRuntime } from "@/api/java-env-model";
+
+import type { CheckstyleProject } from "./checkstyle-config";
 import { readConfigFile } from "./config-file-read";
 import { killProcessGroup } from "./formatter-backends";
 import { isJdkInWorktree, listJavaRuntimes } from "./java-env";
@@ -15,6 +17,7 @@ import { importJavaToolOptions } from "./java-project-import";
 import { jdkToolEnv, NO_JAVA, trustedPath } from "./kotlin-formatter";
 import { logger } from "./logger";
 import { buildSpawnEnv } from "./shell-env";
+import { scanXmlComments } from "./xml-comments";
 
 const log = logger.child("checkstyle-lsp");
 
@@ -26,8 +29,6 @@ const VERSION_TIMEOUT_MS = 15_000;
 const MAX_FAILURE_LENGTH = 600;
 /** Checkstyle's default, which its `column` counts a tab as, up to the next multiple. */
 const DEFAULT_TAB_WIDTH = 8;
-/** What `google_checks.xml`, inside the jar, sets. */
-const BUNDLED_TAB_WIDTH: Record<string, number> = { "google_checks.xml": 2 };
 /** A short-lived JVM: these take a fifth off every run. */
 const JVM_FLAGS = ["-XX:TieredStopAtLevel=1", "-XX:+UseSerialGC", "-Xshare:auto"];
 /** Beyond what project import's options cover, for the URL schemes and sockets those don't. */
@@ -88,6 +89,17 @@ export async function runCheckstyle(
   files: readonly string[],
   wtPath: string,
   signal: AbortSignal,
+): Promise<{ outcome: CheckstyleOutcome; jdk: string | null }> {
+  const jdk = await newestJdk(wtPath);
+  return { outcome: await runWith(project, files, wtPath, jdk, signal), jdk: jdk?.path ?? null };
+}
+
+async function runWith(
+  project: CheckstyleProject,
+  files: readonly string[],
+  wtPath: string,
+  jdk: JavaRuntime | null,
+  signal: AbortSignal,
 ): Promise<CheckstyleOutcome> {
   const tool = await findCheckstyle(wtPath);
   if (!("executable" in tool)) {
@@ -95,7 +107,7 @@ export async function runCheckstyle(
   }
   const scratch = await mkdtemp(path.join(tmpdir(), "loxel-checkstyle-"));
   try {
-    const prepared = await prepareRun(project, tool, wtPath, scratch);
+    const prepared = await prepareRun(project, tool, jdk, scratch);
     if ("message" in prepared) return { kind: "config-failed", message: prepared.message };
     const diagnostics = new Map<string, CheckstyleDiagnostic[]>();
     let remaining = [...files];
@@ -114,19 +126,21 @@ export async function runCheckstyle(
       if (NO_JAVA.test(exit.stderr)) return { kind: "no-java" };
       if (exit.stderr.includes("UnsupportedClassVersionError")) return { kind: "needs-newer-java" };
       const report = parseCheckstyleXml(exit.stdout, remaining);
-      if (!report) {
+      // Before 14.2.0 a file that stops the run leaves no report at all, so this comes first.
+      const stoppedAt = stoppedAtFile(exit.stderr, remaining);
+      if (!report && stoppedAt === null) {
         // A JVM that was killed or died silently says nothing about the config.
         const silent = exit.exitCode === null || !`${exit.stderr}${exit.stdout}`.trim();
         return { kind: silent ? "failed" : "config-failed", message: failureMessage(exit) };
       }
-      for (const [file, errors] of report.errors) {
+      for (const [file, errors] of report?.errors ?? []) {
         const list = await toDiagnostics(file, errors, prepared.tabWidth);
         if (list.length > 0) diagnostics.set(file, list);
       }
-      const stoppedAt = stoppedAtFile(exit.stderr, remaining);
       if (stoppedAt === null) break;
       log.debug("Checkstyle could not process a file", { file: stoppedAt });
-      remaining = remaining.filter((file) => !report.errors.has(file) && file !== stoppedAt);
+      // Without a report, the files before it are checked again.
+      remaining = remaining.filter((file) => !report?.errors.has(file) && file !== stoppedAt);
     }
     return { kind: "reported", diagnostics };
   } finally {
@@ -143,7 +157,7 @@ export async function checkstyleVersion(
   if (!("executable" in tool)) return null;
   const scratch = await mkdtemp(path.join(tmpdir(), "loxel-checkstyle-"));
   try {
-    const { env } = await toolEnv(tool, wtPath, scratch);
+    const { env } = await toolEnv(tool, await newestJdk(wtPath), scratch);
     const limited = AbortSignal.any([signal, AbortSignal.timeout(VERSION_TIMEOUT_MS)]);
     const exit = await spawnCheckstyle(tool.executable, ["--version"], env, scratch, limited);
     return /version:?\s*(\d[\w.-]*)/i.exec(exit.stdout)?.[1] ?? null;
@@ -164,7 +178,7 @@ interface PreparedRun {
 async function prepareRun(
   project: CheckstyleProject,
   tool: { path: string },
-  wtPath: string,
+  jdk: JavaRuntime | null,
   scratch: string,
 ): Promise<PreparedRun | { message: string }> {
   const { config } = project;
@@ -180,13 +194,14 @@ async function prepareRun(
       "checkstyle.cache.file": path.join(scratch, "cache"),
     }),
   );
-  const { env } = await toolEnv(tool, wtPath, scratch);
+  const { env } = await toolEnv(tool, jdk, scratch);
   const common = ["-f", "xml", "-p", properties];
   if (config.kind === "bundled") {
     return {
       args: [...common, "-c", `/${config.name}`],
       env,
-      tabWidth: BUNDLED_TAB_WIDTH[config.name] ?? DEFAULT_TAB_WIDTH,
+      // Neither bundled config sets one.
+      tabWidth: DEFAULT_TAB_WIDTH,
     };
   }
   const text = await readFile(config.path, "utf8").catch(() => null);
@@ -194,16 +209,10 @@ async function prepareRun(
   const baseDirs = [project.dir, project.rootDir, path.dirname(config.path)];
   const local = prepareConfig(text, project.properties, baseDirs);
   if ("refused" in local) return { message: local.refused };
-  let configFile = config.path;
-  if (!local.same) {
-    configFile = path.join(scratch, "checkstyle.xml");
-    await Bun.write(configFile, local.text);
-  }
-  return {
-    args: [...common, "-c", configFile],
-    env,
-    tabWidth: configTabWidth(text, project.properties),
-  };
+  // Always the text read here, never the file, so what runs is what was checked.
+  const configFile = path.join(scratch, "checkstyle.xml");
+  await Bun.write(configFile, local.text);
+  return { args: [...common, "-c", configFile], env, tabWidth: local.tabWidth };
 }
 
 /**
@@ -213,12 +222,9 @@ async function prepareRun(
  */
 async function toolEnv(
   tool: { path: string },
-  wtPath: string,
+  jdk: JavaRuntime | null,
   scratch: string,
 ): Promise<{ env: Record<string, string> }> {
-  const root = path.resolve(wtPath);
-  const runtimes = await listJavaRuntimes(root);
-  const jdk = runtimes.find((runtime) => !isJdkInWorktree(runtime.path, root)) ?? null;
   const hosts = path.join(scratch, "hosts");
   await Bun.write(hosts, "127.0.0.1 localhost\n");
   return {
@@ -231,6 +237,13 @@ async function toolEnv(
       _JAVA_OPTIONS: "",
     },
   };
+}
+
+/** The JDK runs use: the newest on the machine, outside the worktree. */
+export async function newestJdk(wtPath: string): Promise<JavaRuntime | null> {
+  const root = path.resolve(wtPath);
+  const runtimes = await listJavaRuntimes(root);
+  return runtimes.find((runtime) => !isJdkInWorktree(runtime.path, root)) ?? null;
 }
 
 interface ToolExit {
@@ -298,33 +311,33 @@ const UNPROXIED_URL = /(?:^|[,\s])(?:url:)?(?:jar:)?(?:ftp|mailto):/i;
 const UNFETCHED_NOTICE = "it names an FTP or mail URL, which Loxel doesn't fetch.";
 
 /**
- * What a run should read for a config: its text, with `cacheFile` out and a relative file made
- * absolute, since the project's build resolves those against its directory, or `same` when that
- * changes nothing. `baseDirs` are where to look for one, in order. Refused with a message for
- * something that can't be read reliably as text, such as a DOCTYPE's own declarations, which can
- * supply a property's name.
+ * What a run should read for a config, which it reads instead of the file: the text without
+ * comments, `cacheFile` out and a relative file made absolute, since the project's build resolves
+ * those against its directory, and the tab width it sets. `baseDirs` are where to look for a file,
+ * in order. Refused with a message for something that can't be read reliably as text, such as a
+ * DOCTYPE's own declarations, which can supply a property's name, or an unclosed comment.
  */
 export function prepareConfig(
   text: string,
   properties: Record<string, string>,
   baseDirs: readonly string[],
-): { refused: string } | { text: string; same: boolean } {
-  const bare = withoutXmlComments(text);
+): { refused: string } | { text: string; tabWidth: number } {
+  const { text: bare, unclosed } = scanXmlComments(text);
+  // A parser can read past it, as when a processing instruction holds the `<!--`.
+  if (unclosed) return { refused: "it has a comment that isn't closed." };
   const doctype = refusedDoctype(bare);
   if (doctype) return { refused: doctype };
-  let same = true;
+  let tabWidth: number | null = null;
   let refused: string | null = null;
   let found = 0;
   const local = bare.replace(PROPERTY_ELEMENT, (whole: string, attributes: string) => {
     found += 1;
     const attrs = xmlAttributes(attributes);
     const name = attrs.get("name")?.trim();
-    if (name === "cacheFile") {
-      same = false;
-      return "";
-    }
+    if (name === "cacheFile") return "";
     const expand = (value: string) =>
       value.replace(/\$\{([^}]+)\}/g, (ref, key: string) => properties[key] ?? ref);
+    if (name === "tabWidth") tabWidth ??= positiveInteger(expand(attrs.get("value") ?? ""));
     const values = [attrs.get("value"), attrs.get("default")].flatMap((v) =>
       v ? [expand(v)] : [],
     );
@@ -334,7 +347,6 @@ export function prepareConfig(
     const file = localFile(expand(value), baseDirs);
     if (file) refused ??= refusedDoctype(readConfigFile(file) ?? "");
     if (!file || file === value) return whole;
-    same = false;
     attrs.set("value", file);
     return `<property${[...attrs].map(([key, v]) => ` ${key}="${xmlEscape(v)}"`).join("")}/>`;
   });
@@ -343,7 +355,12 @@ export function prepareConfig(
   if (found !== [...bare.matchAll(/<property\b/g)].length) {
     return { refused: "it has a property Loxel can't read." };
   }
-  return { text: local, same };
+  return { text: local, tabWidth: tabWidth ?? DEFAULT_TAB_WIDTH };
+}
+
+function positiveInteger(text: string): number | null {
+  const value = Number(text.trim());
+  return Number.isInteger(value) && value > 0 ? value : null;
 }
 
 /** The file a property names, when it is a path on this machine that exists. */
@@ -374,17 +391,6 @@ function xmlEscape(text: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
-}
-
-/** The width a config sets for tabs, which `column` counts in. */
-export function configTabWidth(text: string, properties: Record<string, string>): number {
-  const value = /<property\b[^>]*\bname\s*=\s*["']tabWidth["'][^>]*\bvalue\s*=\s*["']([^"']+)/.exec(
-    text,
-  )?.[1];
-  if (!value) return DEFAULT_TAB_WIDTH;
-  const expanded = value.replace(/^\$\{(.+)\}$/, (_, name: string) => properties[name] ?? "");
-  const width = Number(expanded);
-  return Number.isInteger(width) && width > 0 ? width : DEFAULT_TAB_WIDTH;
 }
 
 /** Text for `-p`: Latin-1 with escapes, as `java.util.Properties` loads it. */

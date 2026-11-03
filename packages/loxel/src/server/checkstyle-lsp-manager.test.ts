@@ -11,13 +11,14 @@ import { fileUri } from "./lsp-file-uri";
 const stateDir = await mkdtemp(join(tmpdir(), "checkstyle-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { CheckstyleLspManager } = await import("./checkstyle-lsp-manager");
+const { refreshJavaEnv } = await import("./java-env");
 const { getRepoTrustStatus, onRepoTrustStatusChange, setRepoTrusted } =
   await import("./repo-trust");
 type Manager = InstanceType<typeof CheckstyleLspManager>;
 
 // Drives the manager the way the Monaco client does, with a stand-in `checkstyle` on `PATH`. It
 // records each run, reports a violation for every file with a `<file>.bad` next to it, fails to load
-// a config other than `fine.xml` while `$RUNS_DIR/config-fails` exists, and stops at a file with
+// a config other than one named `fine` while `$RUNS_DIR/config-fails` exists, and stops at a file with
 // `<file>.broken` as Checkstyle stops at one that does not parse.
 
 const canRun = process.platform !== "win32";
@@ -25,8 +26,11 @@ const originalPath = process.env.PATH;
 
 const FAKE_CHECKSTYLE = `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "Checkstyle version: 14.3.0"; exit 0; fi
-echo "$PWD|$JAVA_HOME|$JAVA_TOOL_OPTIONS|$*" >> "$RUNS_DIR/runs"
-if [ -f "$RUNS_DIR/config-fails" ] && ! echo "$*" | grep -q fine.xml; then
+config=""
+previous=""
+for arg in "$@"; do [ "$previous" = "-c" ] && config="$arg"; previous="$arg"; done
+echo "$PWD|$JAVA_HOME|$JAVA_TOOL_OPTIONS|$*|$(cat "$config" 2>/dev/null)" >> "$RUNS_DIR/runs"
+if [ -f "$RUNS_DIR/config-fails" ] && ! grep -q '"fine"' "$config" 2>/dev/null; then
   if [ -f "$RUNS_DIR/hold-failure" ]; then
     touch "$RUNS_DIR/holding"
     while [ -f "$RUNS_DIR/hold-failure" ]; do sleep 0.01; done
@@ -37,6 +41,8 @@ fi
 if [ -f "$RUNS_DIR/hang" ]; then sleep 300 & echo $! > "$RUNS_DIR/pid"; wait; fi
 if [ -f "$RUNS_DIR/no-java" ]; then echo "Unable to locate a Java Runtime." >&2; exit 1; fi
 if [ -f "$RUNS_DIR/old-java" ]; then echo "java.lang.UnsupportedClassVersionError: x" >&2; exit 1; fi
+exec 3>&1
+if [ -f "$RUNS_DIR/old-report" ]; then exec 1>"$RUNS_DIR/report"; fi
 echo '<?xml version="1.0" encoding="UTF-8"?>'
 echo '<checkstyle version="14.3.0">'
 stopped=""
@@ -47,12 +53,15 @@ for arg in "$@"; do
   esac
   echo "<file name=\\"$arg\\">"
   if [ -f "$arg.bad" ]; then
-    echo '<error line="1" column="1" severity="warning" message="checkstyle says" source="com.puppycrawl.tools.checkstyle.checks.naming.MemberNameCheck"/>'
+    column=$(cat "$RUNS_DIR/column" 2>/dev/null || echo 1)
+    echo '<error line="1" column="'"$column"'" severity="warning" message="checkstyle says" source="com.puppycrawl.tools.checkstyle.checks.naming.MemberNameCheck"/>'
   fi
   echo "</file>"
   if [ -f "$arg.broken" ]; then stopped="$arg"; break; fi
 done
 echo '</checkstyle>'
+# Before 14.2.0 a file that stops the run leaves no report on stdout at all.
+if [ -f "$RUNS_DIR/old-report" ] && [ -z "$stopped" ]; then cat "$RUNS_DIR/report" >&3; fi
 if [ -n "$stopped" ]; then
   echo "com.puppycrawl.tools.checkstyle.api.CheckstyleException: Exception was thrown while processing $stopped" >&2
   exit 254
@@ -210,6 +219,20 @@ async function writeTool(file: string): Promise<void> {
   await chmod(file, 0o755);
 }
 
+/** A directory laid out like a JDK home, outside the worktree. */
+async function makeJdk(name: string, version: string): Promise<string> {
+  const home = join(bin, name);
+  await mkdir(join(home, "bin"), { recursive: true });
+  await mkdir(join(home, "lib"));
+  for (const launcher of ["java", "javac"]) {
+    await writeFile(join(home, "bin", launcher), "#!/bin/sh\n");
+    await chmod(join(home, "bin", launcher), 0o755);
+  }
+  await writeFile(join(home, "lib", "ct.sym"), "");
+  await writeFile(join(home, "release"), `JAVA_VERSION="${version}"\n`);
+  return home;
+}
+
 async function runs(): Promise<string[]> {
   const text = await readFile(join(runsDir, "runs"), "utf8").catch(() => "");
   return text.split("\n").filter(Boolean);
@@ -234,7 +257,7 @@ async function drain(client: FakeClient): Promise<void> {
   await write({
     "other/build.gradle":
       "apply plugin: 'checkstyle'\ncheckstyle { configFile = file('fine.xml') }\n",
-    "other/fine.xml": "<module/>",
+    "other/fine.xml": '<module name="fine"/>',
     "other/src/main/java/Z.java": "class Z {}\n",
     "other/src/main/java/Z.java.bad": "",
   });
@@ -277,25 +300,26 @@ describe.skipIf(!canRun)("in a trusted repository", () => {
     expect(options).toContain("-Djdk.net.hosts.file=");
     expect(options).toContain("-Dhttp.proxyPort=9");
     expect(options).toContain("-DsocksProxyPort=9");
-    expect(args).toContain(`-c ${join(wt, "config/checkstyle/checkstyle.xml")}`);
+    // The text that was checked, from the run's scratch directory.
+    expect(args).toContain(`/${basename(cwd)}/checkstyle.xml`);
     expect(args).toContain(file);
     expect(args).toContain("-f xml");
     expect(args).toContain("-p ");
   });
 
-  test("a config's cacheFile goes, in a copy of the scratch directory's", async () => {
+  test("a config's cacheFile goes from the text that runs", async () => {
     const client = await setUp({
       ...GRADLE_PROJECT,
       "config/checkstyle/checkstyle.xml":
-        '<module name="Checker"><property name="cacheFile" value="x"/></module>',
+        '<module name="Checker"><property name="cacheFile" value="x"/><property name="kept" value="y"/></module>',
     });
     const file = await badFile();
     client.open(file);
     await client.diagnostics(file, ["checkstyle says"]);
     const [run = ""] = await runs();
-    const [cwd = "", , , args = ""] = run.split("|");
-    expect(args).toContain(`/${basename(cwd)}/checkstyle.xml`);
+    const [, , , args = "", config = ""] = run.split("|");
     expect(args).not.toContain(join(wt, "config"));
+    expect(config).toBe('<module name="Checker"><property name="kept" value="y"/></module>');
   });
 
   test("a file in a subproject belongs to its own config", async () => {
@@ -303,7 +327,7 @@ describe.skipIf(!canRun)("in a trusted repository", () => {
       ...GRADLE_PROJECT,
       "other/build.gradle":
         "apply plugin: 'checkstyle'\ncheckstyle { configFile = file('own.xml') }\n",
-      "other/own.xml": "<module/>",
+      "other/own.xml": '<module name="own"/>',
       "other/src/main/java/B.java": "class B {}\n",
       "other/src/main/java/B.java.bad": "",
     });
@@ -314,10 +338,8 @@ describe.skipIf(!canRun)("in a trusted repository", () => {
     await client.diagnostics(a, ["checkstyle says"]);
     await client.diagnostics(b, ["checkstyle says"]);
     const all = await runs();
-    expect(all.some((run) => run.includes(join(wt, "other/own.xml")))).toBe(true);
-    expect(
-      all.some((run) => run.includes(`-c ${join(wt, "config/checkstyle/checkstyle.xml")}`)),
-    ).toBe(true);
+    const configs = all.map((run) => run.split("|").at(-1));
+    expect(new Set(configs)).toEqual(new Set(["<module/>", '<module name="own"/>']));
   });
 
   test("a build without Checkstyle starts nothing, and says nothing", async () => {
@@ -371,6 +393,37 @@ describe.skipIf(!canRun)("in a trusted repository", () => {
     await write({ "build.gradle": "plugins { id 'java' }\n" });
     manager?.notifyWatchedFilesChanged(wt, [join(wt, "build.gradle")]);
     await client.diagnostics(file, []);
+  });
+
+  test("before 14.2.0 too, a file that doesn't parse leaves the others checked", async () => {
+    const client = await setUp(GRADLE_PROJECT);
+    await writeFile(join(runsDir, "old-report"), "");
+    const broken = await badFile("Broken");
+    await write({ "src/main/java/Broken.java.broken": "" });
+    await rm(`${broken}.bad`);
+    const after = await badFile("After");
+    client.open(broken);
+    client.open(after);
+    await client.diagnostics(after, ["checkstyle says"]);
+    expect(client.notices()).toEqual([]);
+  });
+
+  test("a bundled config's columns count a tab as 8", async () => {
+    const client = await setUp({
+      "pom.xml": `<project><artifactId>a</artifactId><build><plugins><plugin><artifactId>maven-checkstyle-plugin</artifactId><configuration><configLocation>google_checks.xml</configLocation></configuration></plugin></plugins></build></project>`,
+    });
+    const file = join(wt, "src/main/java/A.java");
+    await write({
+      "src/main/java/A.java": "\t\tint bad_name = 1;\n",
+      "src/main/java/A.java.bad": "",
+    });
+    await writeFile(join(runsDir, "column"), "21");
+    client.open(file);
+    const reported = await client.diagnostics(file, ["checkstyle says"]);
+    expect(reported.params?.diagnostics?.[0]).toMatchObject({
+      range: { start: { line: 0, character: 6 }, end: { line: 0, character: 14 } },
+    });
+    expect((await runs())[0]).toContain("-c /google_checks.xml");
   });
 
   test("a file deleted from disk is cleared, and doesn't fail the project", async () => {
@@ -454,6 +507,22 @@ describe.skipIf(!canRun)("a config that doesn't load", () => {
     manager?.notifyWatchedFilesChanged(wt, [join(wt, "config/checkstyle/checkstyle.xml")]);
     await rm(join(runsDir, "hold-failure"));
     await client.diagnostics(file, ["checkstyle says"]);
+  });
+
+  test("a newer JDK on the machine tries it again, though the worktree's stays the same", async () => {
+    const client = await setUp(GRADLE_PROJECT);
+    process.env.JAVA_HOME = await makeJdk("chosen", "21.0.5");
+    refreshJavaEnv(wt);
+    await writeFile(join(runsDir, "config-fails"), "");
+    const file = await badFile();
+    client.open(file);
+    await client.notice(/could not load/);
+    await rm(join(runsDir, "config-fails"));
+    const newer = await makeJdk("newer", "99.0.1");
+    process.env.PATH = `${bin}:${join(newer, "bin")}:/usr/bin:/bin`;
+    refreshJavaEnv(wt);
+    await client.diagnostics(file, ["checkstyle says"]);
+    expect((await runs()).at(-1)?.split("|")[1]).toBe(newer);
   });
 
   test("a config that isn't in the repository runs nothing", async () => {
@@ -578,7 +647,7 @@ describe.skipIf(!canRun)("in an untrusted repository", () => {
       ...GRADLE_PROJECT,
       "other/build.gradle":
         "apply plugin: 'checkstyle'\ncheckstyle { configFile = file('fine.xml') }\n",
-      "other/fine.xml": "<module/>",
+      "other/fine.xml": '<module name="fine"/>',
       "other/src/main/java/B.java": "class B {}\n",
       "other/src/main/java/B.java.bad": "",
     });
@@ -593,7 +662,7 @@ describe.skipIf(!canRun)("in an untrusted repository", () => {
     setRepoTrusted(wt, false);
     await rm(join(runsDir, "hold-failure"));
     await restricted();
-    expect((await runs()).filter((run) => run.includes("fine.xml"))).toEqual([]);
+    expect((await runs()).filter((run) => run.includes('"fine"'))).toEqual([]);
   });
 
   test("taking trust back stops a run and clears its findings", async () => {

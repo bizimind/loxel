@@ -8,6 +8,7 @@ import { blockBodies, declaresPlugin, readCode, readText } from "./kotlin-format
 import { dirsUpToRoot, type FormatterDecline } from "./language-formatter";
 import { buildSpawnEnv } from "./shell-env";
 import { readToml, recordAt } from "./toml-file";
+import { withoutXmlComments } from "./xml-comments";
 
 export const GOOGLE_JAVA_FORMAT = "google-java-format";
 export const PALANTIR_JAVA_FORMAT = "palantir-java-format";
@@ -426,19 +427,6 @@ function mavenVersion(text: string): VersionRef {
  * These scan with `indexOf` and stop at the first element left open: a POM is the repository's, and
  * a lazy regular expression over unclosed tags takes quadratic time on the server's only thread.
  */
-
-function withoutXmlComments(xml: string): string {
-  let text = "";
-  let from = 0;
-  for (let open = xml.indexOf("<!--"); open !== -1; open = xml.indexOf("<!--", from)) {
-    text += xml.slice(from, open);
-    const close = xml.indexOf("-->", open + 4);
-    if (close === -1) return text;
-    from = close + 3;
-  }
-  return text + xml.slice(from);
-}
-
 /** Every `<name>...</name>` that does not nest in itself, as its range and inner text. */
 function xmlBlocks(xml: string, name: string): { start: number; end: number; body: string }[] {
   const open = `<${name}>`;

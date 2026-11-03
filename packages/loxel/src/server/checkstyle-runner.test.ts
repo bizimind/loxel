@@ -5,7 +5,6 @@ import { join } from "node:path";
 
 import {
   type CheckstyleError,
-  configTabWidth,
   failureMessage,
   parseCheckstyleXml,
   prepareConfig,
@@ -236,39 +235,40 @@ describe("prepareConfig", () => {
       `<property value="a>b" name="cache&#70;ile"/>`,
     ]) {
       const text = `<module name="Checker">${property}<property name="cacheFileX" value="kept"/></module>`;
-      const result = prepareConfig(text, {}, [dir]);
-      expect(result).toMatchObject({ same: false });
-      expect(textOf(result)).toBe(
+      expect(textOf(prepareConfig(text, {}, [dir]))).toBe(
         '<module name="Checker"><property name="cacheFileX" value="kept"/></module>',
       );
     }
   });
 
-  test("a mention in a comment changes nothing", async () => {
+  test("comments go, and one left open is refused", async () => {
     await inDir();
     const text = `<module><!-- <property name="cacheFile" value="x"/> --></module>`;
-    expect(prepareConfig(text, {}, [dir])).toMatchObject({ same: true });
+    expect(textOf(prepareConfig(text, {}, [dir]))).toBe("<module></module>");
+    // A parser reads past the `<!--` in a processing instruction, so this must not run.
+    const hidden = `<module><?x <!-- ?><property name="file" value="ftp://192.0.2.1/h"/></module>`;
+    expect(prepareConfig(hidden, {}, [dir])).toEqual({
+      refused: "it has a comment that isn't closed.",
+    });
   });
 
   test("makes a relative file absolute, where it exists", async () => {
     await inDir();
     const result = prepareConfig(filter('name="file" value="s.xml"'), {}, ["/nowhere", dir]);
-    expect(result).toMatchObject({ same: false });
     expect(textOf(result)).toBe(filter(`name="file" value="${join(dir, "s.xml")}"`));
     expect(
-      prepareConfig(`<property value="s.xml" name='headerFile' default="d"/>`, {}, [dir]),
-    ).toMatchObject({ same: false });
+      textOf(prepareConfig(`<property value="s.xml" name='headerFile' default="d"/>`, {}, [dir])),
+    ).toContain(join(dir, "s.xml"));
     for (const value of ["gone.xml", "/abs/s.xml", "${config_loc}/s.xml", "http://x/s.xml"]) {
-      expect(prepareConfig(filter(`name="file" value="${value}"`), {}, [dir])).toMatchObject({
-        same: true,
-      });
+      const text = filter(`name="file" value="${value}"`);
+      expect(textOf(prepareConfig(text, {}, [dir]))).toBe(text);
     }
   });
 
   test("leaves a config with nothing to change as it is", async () => {
     await inDir();
     const text = `<module name="Checker"><property name="severity" value="warning"/></module>`;
-    expect(prepareConfig(text, {}, [dir])).toEqual({ text, same: true });
+    expect(prepareConfig(text, {}, [dir])).toEqual({ text, tabWidth: 8 });
   });
 
   test("refuses a URL the proxies don't reach, however spelled", async () => {
@@ -296,8 +296,8 @@ describe("prepareConfig", () => {
     await inDir();
     for (const value of ["^.*(http|ftp)://.*$", "a|ftp://", "http://x/s.xml", "${u}", "file.xml"]) {
       expect(
-        prepareConfig(filter(`name="ignorePattern" value="${value}"`), {}, [dir]),
-      ).toMatchObject({ same: true });
+        "text" in prepareConfig(filter(`name="ignorePattern" value="${value}"`), {}, [dir]),
+      ).toBe(true);
     }
   });
 
@@ -318,7 +318,7 @@ describe("prepareConfig", () => {
         {},
         [dir],
       ),
-    ).toMatchObject({ same: true });
+    ).toMatchObject({ tabWidth: 8 });
   });
 
   test("the same for a suppressions file it names", async () => {
@@ -333,21 +333,27 @@ describe("prepareConfig", () => {
     ).toEqual({ refused: "it names an FTP or mail URL, which Loxel doesn't fetch." });
   });
 
+  test("the tab width it sets, however written, outside comments", async () => {
+    await inDir();
+    const width = (text: string, properties: Record<string, string> = {}) =>
+      (prepareConfig(text, properties, [dir]) as { tabWidth: number }).tabWidth;
+    const tab = (value: string) => `<property name="tabWidth" value="${value}"/>`;
+    expect(width(tab("4"))).toBe(4);
+    expect(width(`<property value="4" name='tabWidth'/>`)).toBe(4);
+    expect(width(tab("${w}"), { w: "2" })).toBe(2);
+    expect(width(tab("${w}"))).toBe(8);
+    expect(width(tab("x"))).toBe(8);
+    expect(width(`<!-- ${tab("2")} -->`)).toBe(8);
+    expect(width(`<!-- ${tab("2")} -->${tab("4")}`)).toBe(4);
+    expect(width("<module/>")).toBe(8);
+  });
+
   test("refuses a property it can't read", async () => {
     await inDir();
     expect(prepareConfig(`<property name="cacheFile" value=unquoted/>`, {}, [dir])).toEqual({
       refused: "it has a property Loxel can't read.",
     });
   });
-});
-
-test("configTabWidth reads the config, a property it names, or the default", () => {
-  const config = (value: string) => `<property name="tabWidth" value="${value}"/>`;
-  expect(configTabWidth(config("4"), {})).toBe(4);
-  expect(configTabWidth(config("${w}"), { w: "2" })).toBe(2);
-  expect(configTabWidth(config("${w}"), {})).toBe(8);
-  expect(configTabWidth(config("x"), {})).toBe(8);
-  expect(configTabWidth("<module/>", {})).toBe(8);
 });
 
 test("propertiesFileText escapes what java.util.Properties would read otherwise", () => {
