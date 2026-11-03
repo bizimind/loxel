@@ -15,6 +15,7 @@ import {
 import { buildChordPrefixes, buildReverseLookup } from "./keybinding-resolver";
 import type { BindingTemplate } from "./keybinding-schema";
 import { TEMPLATES, validateBindings, validateCoverage } from "./keybinding-schema";
+import { isMacWindowTilingKeystroke } from "./mac-window-tiling";
 
 // ---------------------------------------------------------------------------
 // Template validation
@@ -346,6 +347,17 @@ describe("no overlap with critical system shortcuts", () => {
         .map((binding) => getBindingSteps(binding)[0]!);
       const conflicts = firstSteps.filter((combo) => SYSTEM_SHORTCUTS.includes(combo));
       expect(conflicts).toEqual([]);
+    });
+  }
+});
+
+describe("no default binding takes a macOS window tiling shortcut", () => {
+  for (const [name, template] of Object.entries(TEMPLATES)) {
+    test(`${name} template leaves fn⌃ / fn⌃⇧ arrows to the Window menu`, () => {
+      const firstSteps = Object.values(template)
+        .flat()
+        .map((binding) => getBindingSteps(binding)[0]!);
+      expect(firstSteps.filter((combo) => isMacWindowTilingKeystroke(combo, "15.0.0"))).toEqual([]);
     });
   }
 });
