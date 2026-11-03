@@ -12,12 +12,34 @@ Install rust-analyzer with `rustup component add rust-analyzer`, or any other wa
 
 Opening a `.rs` file starts the server for that worktree, which gives you hover, go to definition (including into the standard library and dependencies), references, rename across crates and of modules (from the definition; from a use in another crate, it adds a local alias instead), quick fixes, completion with auto-import, signature help, inlay hints, folding, symbols, and diagnostics as you type. To format Rust files, use [format on save](/docs/editor).
 
+What else you get depends on whether you [trust the repository](/docs/repository-trust). While it isn't trusted, the status bar shows **Restricted** once a project with a `Cargo.toml` loads. Click it to choose. Language servers restart by themselves when you do.
+
+### In a repository you trust
+
+Your project is analyzed the way it builds:
+
+- **Build scripts and proc macros run**, so macros are expanded and generated code, such as `include!` of a build script's output, resolves.
+- **Clippy runs on every change.** Compiler errors and clippy lints appear with their code, along with quick fixes where they suggest one, next to what rust-analyzer reports as you type. Your lints in `clippy.toml` and `[lints.clippy]` apply. A toolchain without clippy (`rustup component add clippy`) runs `cargo check` instead. A check starts whenever a `.rs` file or `Cargo.toml` changes on disk, whoever changed it: saving, an agent's edit or a `git checkout`.
+- **`.cargo/config.toml` means what it means in a terminal**, including wrappers, flags and the target.
+- **It takes disk space.** These builds go to `target/rust-analyzer`, separate from your own, so a `cargo build` in a terminal doesn't wait for them. The folder is about the size of a debug build, and you can delete it whenever you like.
+
+Loxel still doesn't download or install anything: it runs your tools offline. Build scripts and proc macros are your project's own code, though, and run with your permissions, so what they do is up to them, as it is when you run `cargo build`. That includes those of path dependencies outside the repository.
+
+A repository inside the one you trust, including a submodule, has its own answer. Its crates don't load until you open it as a project and trust it, and a notification says so when you open one of its files. A dependency your `Cargo.toml` names there does build, as it does in a terminal.
+
+`rust-project.json` isn't read in any repository, so projects without a `Cargo.toml` work like single files.
+
+### In a repository you don't trust
+
 Language features run without building your project:
 
 - **Build scripts and proc macros don't run**, so macros they generate aren't expanded and items that only exist after a build, such as `include!` of generated code, are unknown.
 - **`cargo check` doesn't run**, so diagnostics are rust-analyzer's own and not the compiler's. **No marker doesn't mean no error.** You see syntax errors, wrong argument counts, missing struct fields, non-exhaustive matches and, in recent versions of rust-analyzer, mismatched types. Only `cargo check` in a terminal reports unknown names, types, methods, fields and macros, unimported items (the Import quick fix is still offered), unresolved `use` and `mod`, unmet trait bounds, and borrow checker errors such as use after move.
-- **Nothing is downloaded.** Dependencies that aren't in your local Cargo cache are unknown until you run `cargo fetch` in a terminal and then **Restart Language Servers**.
-- **Flags and cross targets in `.cargo/config.toml` don't apply to analysis**, which uses your compiler's own target. `rust-project.json` isn't read.
+- **Flags and cross targets in `.cargo/config.toml` don't apply to analysis**, which uses your compiler's own target.
+
+### In every repository
+
+**Nothing is downloaded.** Dependencies that aren't in your local Cargo cache are unknown until you run `cargo fetch` in a terminal and then **Restart Language Servers**.
 
 ## Projects
 
@@ -25,7 +47,7 @@ Monorepos work. Opening a `.rs` file loads the project it belongs to, however de
 
 The worktree's own `Cargo.toml`, or those one folder down when the root has none, load as soon as the server starts. Loxel adds up to 10 more projects as you open their files, and tells you when it reaches that. To free them, close the files you no longer need and run **Restart Language Servers**.
 
-A `.rs` file with no `Cargo.toml` above it in the worktree still gets language features, on its own, at edition 2024, with the standard library. It can use modules next to it, but not dependencies, including those in a cargo script's header.
+A `.rs` file with no `Cargo.toml` above it in the worktree still gets language features, on its own, at edition 2024, with the standard library. It can use modules next to it, but not dependencies, including those in a cargo script's header. `cargo check` and clippy don't run on it.
 
 Files under `target` or `node_modules`, vendored crates and files outside the worktree don't load a project of their own. Files you reach with go to definition, such as the standard library, still work while the project that led there is loaded.
 

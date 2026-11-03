@@ -190,6 +190,7 @@ A language calls its own routes from its own client file (`src/api/<language>-*-
 - Toolchain status items: [Toolchain status items](#toolchain-status-items).
 - Per-language modules: the [languages/](languages/) files.
 - Repository trust: [repo-trust.ts](../src/server/repo-trust.ts).
+- Ending a server's child processes: [kill-process-tree.ts](../src/server/kill-process-tree.ts), for a server whose own stop leaves them running. It freezes then kills whole trees from their root pids, across process groups. It cannot find a process that already left its tree, so call it while the root is alive.
 - Bridge helpers: [lsp-watched-files.ts](../src/server/lsp-watched-files.ts), [node-modules-changes.ts](../src/server/node-modules-changes.ts), [lsp-workspace-files.ts](../src/lib/lsp-workspace-files.ts), [shipped-by-repo.ts](../src/server/shipped-by-repo.ts).
 - Schemas: [schema-service.ts](../src/server/schema-service.ts), [schema-glob.ts](../src/lib/schema-glob.ts), [schema-sync.ts](../src/lib/schema-sync.ts), [json-schema-registry.ts](../src/lib/json-schema-registry.ts), [toml-lsp-manager.ts](../src/server/toml-lsp-manager.ts).
 - Highlighting: [highlighter.ts](../src/lib/highlighter.ts), [resolve-language.ts](../src/lib/resolve-language.ts).
