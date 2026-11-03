@@ -1,6 +1,6 @@
 ---
 title: Java
-description: Java language features from Eclipse JDT LS, running on your JDK 25 or newer, Maven and Gradle projects in trusted repositories, format on save, and the JDK Loxel uses for each worktree.
+description: Java language features from Eclipse JDT LS, running on your JDK 25 or newer, Maven and Gradle projects in trusted repositories, format on save, Checkstyle diagnostics, and the JDK Loxel uses for each worktree.
 order: 13.5
 ---
 
@@ -93,6 +93,27 @@ Otherwise the file is saved unformatted, and a notice says which version the pro
 
 **Format Document** uses the language server's own formatter, which doesn't follow these settings.
 
+## Checkstyle
+
+If your build runs [Checkstyle](https://checkstyle.org), its findings appear in the editor next to the compiler's, marked `checkstyle`, with the build's severity, the check's name and a link to its documentation. Checkstyle runs in trusted repositories, on your own `checkstyle` from your `PATH`. Run `brew install checkstyle`, or use another install method from its site. If it's missing, Loxel tells you once. Loxel never downloads it.
+
+A file is checked when you open it and each time it changes on disk, so unsaved edits aren't checked. Nothing is written to your project.
+
+### What counts as using Checkstyle
+
+A build counts when it names Checkstyle itself. A config file nothing refers to doesn't turn it on.
+
+- **Maven:** `maven-checkstyle-plugin` applied in a `pom.xml` or a parent above it, or configured with a `configLocation` under `pluginManagement`. Loxel reads `configLocation`, `suppressionsLocation`, `propertyExpansion`, `propertiesLocation`, `includeTestSourceDirectory`, `sourceDirectories`, `includes`, `excludes` and `skip`. Test code is checked only if `includeTestSourceDirectory` says so, as with the plugin.
+- **Gradle:** the `checkstyle` plugin in a build script, in a parent's `subprojects` or `allprojects`, in `buildSrc` or `build-logic`, or in a script applied with `apply from:`. Loxel reads `configFile`, `configDirectory`, `configProperties`, `sourceSets` and each task's `exclude` and `include`, and uses `config/checkstyle/checkstyle.xml` at the root project by default.
+
+Each file belongs to the nearest build file above it, so subprojects with their own config get their own. Loxel reads builds as text and never runs them, so settings it can't see in that text, such as a value computed by a script, aren't applied.
+
+### When a config doesn't load
+
+A config can fail in the version of Checkstyle you have, for example one that names a check a newer release removed, a custom check that isn't on Checkstyle's classpath, or a property only the build can work out. Loxel then shows Checkstyle's own message once, with the version your project pins if it can tell, and shows no Checkstyle findings for that project until a config or build file changes.
+
+Loxel runs the `checkstyle` you have, whichever version your build pins. A different version can report different findings than your build does. Custom checks don't load, and a config's URLs and `cacheFile` aren't used: Loxel doesn't fetch what a config names, and a config that needs that doesn't load.
+
 ## JDK classes
 
 Hover on a JDK class shows its documentation when the JDK includes its sources (`src.zip`), and only its signature otherwise. Most JDK distributions include them; some Linux packages put them in a separate package.
@@ -107,7 +128,7 @@ Go to definition on a JDK or dependency class (`Cmd`-click or `F12`) opens its s
 
 ## JDK detection
 
-Each worktree has one JDK that Java features in Loxel use, and so do [Kotlin's ktlint and detekt](/docs/languages/kotlin#jdk). Loxel uses the first of:
+Each worktree has one JDK that Java features in Loxel use, and so do [Kotlin's ktlint and detekt](/docs/languages/kotlin#jdk). [Checkstyle](#checkstyle) is the exception: it runs on the newest JDK Loxel finds, since recent releases need a recent Java and every release runs on one. Loxel uses the first of:
 
 1. The JDK you chose for the worktree (see below).
 2. `JAVA_HOME`, if it points to a JDK. If it does not, for example after the JDK it named was removed, Loxel ignores it and says so when you hover the status bar item.
