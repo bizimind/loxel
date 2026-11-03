@@ -20,6 +20,7 @@ import { registerLoxelLanguages } from "./monaco-languages";
 import { enhanceMonacoThemes, registerMonacoThemes } from "./monaco-theme";
 import { installPeekModelResolver, keepPreviewModelsReadOnly } from "./peek-text-models";
 import { isWithin } from "./project-file-helpers";
+import { installRenameSummary } from "./rename-summary";
 import { connectTsLsp, disconnectTsLsp } from "./ts-lsp-client";
 import { installVirtualDocumentLinks } from "./virtual-document-links";
 import { connectYamlLsp } from "./yaml-lsp-client";
@@ -200,6 +201,9 @@ monaco.editor.registerEditorOpener(createEditorOpener());
 
 // Peek widgets show files no tab has open as read-only snapshots.
 installPeekModelResolver();
+
+// Rename announcements say what a language server's rename changed.
+installRenameSummary();
 monaco.editor.onDidCreateEditor(keepPreviewModelsReadOnly);
 
 // Hover links to a language server's read-only documents survive Monaco's markdown sanitizer.

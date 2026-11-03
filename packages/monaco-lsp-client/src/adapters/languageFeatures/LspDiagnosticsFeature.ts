@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import { api, capabilities } from "../../types";
 import { Disposable, DisposableStore } from "../../utils";
+import { CancellationError, ServerCancellationError } from "../LspCancellableRequests";
 import { LspConnection } from "../LspConnection";
 import {
   lspDiagnosticTagToMonacoMarkerTag,
@@ -225,11 +226,23 @@ export class LspDiagnosticsFeature extends Disposable {
   }
 }
 
+/** Whether a server cancelled a diagnostic request with `retriggerRequest: false`. */
+function declinesRetrigger(error: CancellationError): boolean {
+  if (!(error instanceof ServerCancellationError)) return false;
+  const { data } = error;
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "retriggerRequest" in data &&
+    data.retriggerRequest === false
+  );
+}
+
 /**
  * Manages pull diagnostics for a single text model
  */
 class ModelDiagnosticProvider extends Disposable {
-  private _updateHandle: number | undefined;
+  private _updateHandle: ReturnType<typeof setTimeout> | undefined;
   /** Set on dispose, so an answer arriving afterwards does not overwrite a later client's markers. */
   private _disposed = false;
   private _previousResultId: string | undefined;
@@ -261,7 +274,7 @@ class ModelDiagnosticProvider extends Disposable {
       clearTimeout(this._updateHandle);
     }
 
-    this._updateHandle = window.setTimeout(() => {
+    this._updateHandle = setTimeout(() => {
       this._updateHandle = undefined;
       this._requestDiagnostics();
     }, 500);
@@ -287,7 +300,14 @@ class ModelDiagnosticProvider extends Disposable {
 
       this._handleDiagnosticReport(result);
     } catch (error) {
-      console.error("Error requesting diagnostics:", error);
+      if (!(error instanceof CancellationError)) {
+        console.error("Error requesting diagnostics:", error);
+        return;
+      }
+      // The server dropped the request (rust-analyzer does while it is busy): ask again, unless it
+      // said asking again is pointless (`retriggerRequest: false`).
+      if (this._disposed || declinesRetrigger(error)) return;
+      this._scheduleDiagnosticUpdate();
     }
   }
 

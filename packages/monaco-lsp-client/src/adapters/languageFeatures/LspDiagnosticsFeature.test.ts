@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, jest, mock, spyOn, test } from "bun:test";
 
 import type * as monaco from "monaco-editor";
 
 import { fakeMonaco, fakeMonacoModule } from "../../testing/fake-monaco";
-import type { Diagnostic, PublishDiagnosticsParams } from "../../types";
+import type { Diagnostic, DocumentDiagnosticReport, PublishDiagnosticsParams } from "../../types";
+import { LSPErrorCodes } from "../../types";
+import { ServerCancellationError } from "../LspCancellableRequests";
 import type { LspConnection } from "../LspConnection";
 
 mock.module("monaco-editor", () => fakeMonacoModule);
@@ -98,5 +100,130 @@ describe("LspDiagnosticsFeature", () => {
 
     mypy.send("Plain code", { code: 7 });
     expect(fakeMonaco.markers.get("mypy-lsp")?.get(URI)?.[0]?.code).toBe("7");
+  });
+});
+
+describe("pull diagnostics", () => {
+  const PULL_DELAY_MS = 500;
+  let errors: ReturnType<typeof spyOn<Console, "error">>;
+
+  beforeEach(() => {
+    fakeMonaco.reset();
+    jest.useFakeTimers();
+    errors = spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errors.mockRestore();
+    jest.useRealTimers();
+  });
+
+  /** A synced model with pull diagnostics registered, whose server answers from `answers`. */
+  function pull(answers: (() => Promise<DocumentDiagnosticReport>)[]) {
+    const model = {
+      uri: { toString: () => URI },
+      getLanguageId: () => "rust",
+      isDisposed: () => false,
+      onDidChangeContent: () => ({ dispose: () => {} }),
+      onWillDispose: () => ({ dispose: () => {} }),
+    } as unknown as monaco.editor.ITextModel;
+    fakeMonaco.models.push(model);
+    const noop = { dispose: () => {} };
+    let register: ((options: unknown) => monaco.IDisposable) | undefined;
+    const requests: unknown[] = [];
+    const answered: Promise<unknown>[] = [];
+    const connection = {
+      capabilities: {
+        addStaticClientCapabilities: () => noop,
+        registerCapabilityHandler: (_c: unknown, _s: boolean, handler: typeof register) => {
+          register = handler;
+          return noop;
+        },
+      },
+      connection: { registerNotificationHandler: () => noop, registerRequestHandler: () => noop },
+      bridge: {
+        isSyncedModel: () => true,
+        translate: () => ({ textDocument: { uri: URI } }),
+        translateBack: () => ({ textModel: model }),
+      },
+      server: {
+        textDocumentDiagnostic: (params: unknown) => {
+          requests.push(params);
+          const answer = answers.shift();
+          if (!answer) throw new Error("no more answers");
+          const promise = answer();
+          answered.push(promise);
+          return promise;
+        },
+      },
+    } as unknown as LspConnection;
+    const feature = new LspDiagnosticsFeature(connection, "rust-lsp");
+    register?.({
+      documentSelector: null,
+      interFileDependencies: true,
+      workspaceDiagnostics: false,
+    });
+
+    /**
+     * Fires the scheduled pull and waits until the provider has handled its answer: the provider
+     * awaited the answer first, so it has run by the time a later reaction to it does.
+     */
+    async function pullNow(): Promise<void> {
+      jest.advanceTimersByTime(PULL_DELAY_MS);
+      await answered.at(-1)?.then(
+        () => {},
+        () => {},
+      );
+    }
+    return { feature, requests, pullNow };
+  }
+
+  const cancelled = (data?: unknown) => () =>
+    Promise.reject(
+      new ServerCancellationError(LSPErrorCodes.ServerCancelled, "server cancelled", data),
+    );
+  const report =
+    (message: string): (() => Promise<DocumentDiagnosticReport>) =>
+    async () => ({
+      kind: "full",
+      items: [
+        { message, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } },
+      ],
+    });
+
+  test("asks again when the server cancels with retriggerRequest, without logging an error", async () => {
+    const { feature, requests, pullNow } = pull([
+      cancelled({ retriggerRequest: true }),
+      report("late"),
+    ]);
+
+    await pullNow();
+    expect(requests).toHaveLength(1);
+    expect(jest.getTimerCount()).toBe(1);
+
+    await pullNow();
+    expect(requests).toHaveLength(2);
+    expect(messagesByOwner()).toEqual([["late"]]);
+    expect(errors).not.toHaveBeenCalled();
+    feature.dispose();
+  });
+
+  test("does not ask again when the server says retriggering is pointless", async () => {
+    const { feature, requests, pullNow } = pull([cancelled({ retriggerRequest: false })]);
+
+    await pullNow();
+    expect(jest.getTimerCount()).toBe(0);
+    expect(requests).toHaveLength(1);
+    expect(errors).not.toHaveBeenCalled();
+    feature.dispose();
+  });
+
+  test("logs a request that failed, and does not ask again", async () => {
+    const { feature, pullNow } = pull([() => Promise.reject(new Error("internal error"))]);
+
+    await pullNow();
+    expect(jest.getTimerCount()).toBe(0);
+    expect(errors).toHaveBeenCalledTimes(1);
+    feature.dispose();
   });
 });
