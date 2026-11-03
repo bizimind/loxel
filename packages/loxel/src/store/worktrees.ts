@@ -24,7 +24,7 @@ import { useFileSearchStore } from "./file-search";
 import { deriveProject, useProjectStore } from "./projects";
 import { serverWorktreesStorage } from "./server-storage";
 import { purgeWorktreeCache, transitionWorktreeState } from "./worktree-cache";
-import { purgeWorktreeStores, setActiveWorktreeKey } from "./worktree-store";
+import { purgeWorktreeStores } from "./worktree-store";
 
 const ACTIVE_WT_SESSION_KEY = `${STORAGE_PREFIX}-activeWorktreePath`;
 const refreshRequestIds = new Map<string, number>();
@@ -336,12 +336,8 @@ export const useWorktreeStore = create<WorktreeState>()(
                   : first.path
                 : null;
               set({ activeWorktreePath: fallback });
-              if (fallback) setActiveWorktreeKey(fallback);
-              return;
             }
           }
-
-          if (activeWorktreePath) setActiveWorktreeKey(activeWorktreePath);
         },
 
         refreshProjectWorktrees: async (projectPath) => {
@@ -390,18 +386,17 @@ export const useWorktreeStore = create<WorktreeState>()(
 
           const fallback = project.isBare ? (data.worktrees[0]?.path ?? null) : project.path;
           set({ activeWorktreePath: fallback });
-          if (fallback) transitionWorktreeState(active, fallback);
-          else setActiveWorktreeKey("");
+          if (fallback) transitionWorktreeState();
         },
 
         switchWorktree: async (path) => {
           // 1. Set activeWorktreePath OPTIMISTICALLY (before API calls)
           set({ activeWorktreePath: path });
 
-          // 2. Transition worktree state (sets activeWorktreeKey, clears comments)
-          transitionWorktreeState(null, path);
+          // 2. Transition worktree state (clears comments)
+          transitionWorktreeState();
 
-          // 4. No server API call needed — server supports concurrent projects.
+          // 3. No server API call needed — server supports concurrent projects.
           // WebSocket subscription is handled by the subscription lifecycle in App.tsx.
         },
 

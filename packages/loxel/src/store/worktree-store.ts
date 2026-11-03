@@ -7,7 +7,8 @@
  * When no worktree is active, hooks return a static no-op store with initial
  * state values. Mutations to the no-op store log a warning.
  *
- * Imperative code (store actions, event handlers) uses activeWorktreeKey.
+ * Hooks and imperative code (store actions, event handlers) both resolve the instance from
+ * `useWorktreeStore`'s `activeWorktreePath`, so they always agree on the active worktree.
  */
 
 import { useStore } from "zustand/react";
@@ -21,17 +22,13 @@ import { useWorktreeStore } from "./worktrees";
 const log = frontendLog.child("worktrees");
 
 /**
- * Module-level worktree key for imperative access (store actions, event handlers).
- * Set synchronously by switchWorktree before React re-renders.
+ * The active worktree's scope key for imperative access (store actions, event handlers). It is the
+ * same state the hooks subscribe to, never a copy: a copy can lag behind (as it did while
+ * `activeWorktreePath` was restored from session storage on reload), and then a component writing
+ * through a hook and reading through `getCurrent()` sees two different stores.
  */
-let activeWorktreeKey: string | null = null;
-
 export function getActiveWorktreeKey(): string | null {
-  return activeWorktreeKey;
-}
-
-export function setActiveWorktreeKey(key: string): void {
-  activeWorktreeKey = key;
+  return useWorktreeStore.getState().activeWorktreePath;
 }
 
 /** Registry of all worktree store factories for bulk operations (purge, etc.). */
@@ -89,11 +86,12 @@ export function createWorktreeStore<T>(stateCreator: StateCreator<T>) {
 
   /** Imperative: get the current scope's store (for actions, event handlers). */
   function getCurrent(): StoreApi<T> {
-    if (!activeWorktreeKey) {
+    const scopeKey = getActiveWorktreeKey();
+    if (!scopeKey) {
       log.warn("getCurrent called with no active worktree, returning no-op store");
       return getNoopStore();
     }
-    return getStore(activeWorktreeKey);
+    return getStore(scopeKey);
   }
 
   /** Delete a scope's store instance (worktree removal cleanup). */
