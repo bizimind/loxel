@@ -14,18 +14,18 @@ Loxel doesn't ask when you open a project. When a feature is restricted for lack
 
 Trust belongs to the repository, not to a worktree, so a new worktree of a trusted repository doesn't ask again. Moving or replacing the repository's folder means choosing again.
 
-A trusted repository's own solution files and project references are loaded as it names them, including ones in nested repositories.
-
 In a repository you haven't trusted, format on save doesn't run Biome, Prettier or oxfmt, formatters from the project's `node_modules`, or a formatter override that names a file by its path in the repository, and a Python installed through a version manager such as pyenv shows its global version in the status bar.
 
 Trust a repository only if you would be willing to run its code yourself. Language servers that depend on trust restart as soon as you choose.
 
 ## Stop trusting a repository
 
-A trusted repository shows a shield in the status bar. Click it, or run **Manage Repository Trust**, to stop trusting it. Language servers that depend on trust restart restricted.
+A trusted repository shows a shield in the status bar. Click it, or run **Manage Repository Trust**, to stop trusting it. Language servers that depend on trust restart restricted. Processes left behind by a language server that crashed, such as a build it started, aren't stopped and run until they finish. A process that the repository's code started and detached to run on its own can also keep running after you stop trusting the repository.
 
-## What trust does not do
+## What trust covers
 
-Trust lets those features run code that is already in the repository. It doesn't let Loxel download or install anything: dependencies and toolchains stay yours to install, in a repository you trust as in any other.
+Trust lets the repository's own code run. It doesn't let Loxel download or install anything: Loxel and the tools it runs never fetch dependencies or toolchains, in a repository you trust as in any other, and installing them stays yours. Code that a trusted repository runs, such as a build script or a project plugin, can reach the network itself, as it can when you build the project in a terminal.
+
+Trust is per repository, and a nested repository has its own. A trusted repository's own project files are still loaded as they are written, including the nested repositories they name, such as a solution that references a project in a submodule.
 
 Nothing in a repository can mark itself as trusted. Your answer is stored in Loxel's own state on your machine and is never sent anywhere.

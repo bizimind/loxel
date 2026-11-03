@@ -440,8 +440,8 @@ export class ClangdLspManager extends WorktreeLspManager {
 
   /**
    * Keep open documents current with the disk, whichever file changed and whoever changed it. One
-   * `didSave` of any open document makes clangd check them all, so unlike the base's hook this does
-   * not depend on the changed file being open.
+   * `didSave` of any open document makes clangd check them all, so the changed file need not be
+   * open.
    */
   override notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void {
     const root = resolve(wtPath);
