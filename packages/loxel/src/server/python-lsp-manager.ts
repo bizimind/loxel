@@ -7,13 +7,8 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import type { PythonEnv } from "@/api/python-env-model";
 import { isRecord } from "@/lib/is-record";
 
-import {
-  getPythonEnv,
-  getPythonEnvNow,
-  isSamePythonEnv,
-  pathOutsideWorktree,
-  subscribePythonEnv,
-} from "./python-env";
+import { pathOutsideWorktree } from "./path-containment";
+import { getPythonEnv, getPythonEnvNow, isSamePythonEnv, subscribePythonEnv } from "./python-env";
 import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 import {

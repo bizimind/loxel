@@ -1,6 +1,6 @@
 ---
 title: Rust
-description: Language features through your own rust-analyzer, the toolchain of each worktree, the status bar item, the toolchain picker and format on save.
+description: Rust language features through your own rust-analyzer, the toolchain of each worktree, the status bar item, the toolchain picker and format on save.
 order: 13.5
 ---
 

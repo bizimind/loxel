@@ -5,7 +5,6 @@ import * as monaco from "monaco-editor";
 
 import { getHighlighter } from "./highlighter";
 import { closingTextBlockAction, registerLanguageConfiguration } from "./java-language-config";
-import { registerLanguageConfiguration as registerPythonLanguageConfiguration } from "./python-language-config";
 
 /** Internal model surface (not in monaco.d.ts) used to tokenize synchronously. */
 interface InternalTextModel {
@@ -29,7 +28,6 @@ describe("Java editing in Monaco", () => {
       },
     );
     const registered = registerLanguageConfiguration();
-    void registerPythonLanguageConfiguration(); // owns the triple-quote keydown hook
     container = document.createElement("div");
     document.body.append(container);
     const model = monaco.editor.createModel("", "java");

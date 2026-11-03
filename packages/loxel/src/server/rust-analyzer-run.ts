@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { RustToolchain, RustToolchainSource } from "@/api/rust-toolchain-model";
 import { isRecord } from "@/lib/is-record";
 
-import { pathOutsideWorktree } from "./python-env";
+import { pathOutsideWorktree } from "./path-containment";
 import { isReadableRustManifest, RUST_MANIFEST, untrustedNestedRepo } from "./rust-project-lookup";
 import { rustToolEnv } from "./rust-toolchain";
 import { buildSpawnEnv } from "./shell-env";

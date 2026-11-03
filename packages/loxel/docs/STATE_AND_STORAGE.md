@@ -27,7 +27,7 @@ Some global stores are keyed internally by worktree or session rather than using
 [worktree-store.ts](../src/store/worktree-store.ts) provides `createWorktreeStore(stateCreator)`, which keeps one vanilla zustand store per worktree path and returns `{ useStore, getStore, getCurrent, purge }`:
 
 - `useStore(selector)` subscribes to the instance for `useWorktreeStore.activeWorktreePath`, so a worktree switch re-renders components against the new instance.
-- `getCurrent()` resolves the module-level `activeWorktreeKey` for imperative code (actions, event handlers). `switchWorktree` in [worktrees.ts](../src/store/worktrees.ts) sets it synchronously through `transitionWorktreeState` before React re-renders, so imperative and hook access agree.
+- `getCurrent()` resolves the instance for imperative code (actions, event handlers) from the same `activeWorktreePath` in [worktrees.ts](../src/store/worktrees.ts) that the hooks read, never from a copy of it, so imperative and hook access always agree, including while `activeWorktreePath` is restored from session storage on reload.
 - With no active worktree, both return a shared no-op instance that logs a warning on `setState`.
 - Every factory registers itself; `purgeWorktreeStores(path)` drops that worktree's instance from all of them. [worktrees.ts](../src/store/worktrees.ts) calls it, together with `purgeWorktreeCache`, when a worktree is removed or disappears from its project.
 

@@ -14,7 +14,7 @@ movedAnchors:
   toml: /docs/languages/toml
 ---
 
-Loxel runs language servers for TypeScript, Python, TOML and other languages and connects them to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per worktree, with no cross-worktree interference.
+Loxel runs language servers for TypeScript, JavaScript, Python, Go, Rust, C and C++, Java, C#, TOML and other languages and connects them to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per worktree, with no cross-worktree interference.
 
 ---
 
@@ -79,7 +79,7 @@ Symbols flagged as unused by the language server are dimmed in the editor, and d
 
 ## Other languages
 
-Each language server is independent of the others. A language with more to say has its own page in the docs navigation, such as [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python), [TOML](/docs/languages/toml) and [Kotlin](/docs/languages/kotlin). These have none:
+Each language server is independent of the others. A language with more to say has its own page in the docs navigation: [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python), [Go](/docs/languages/go), [Rust](/docs/languages/rust), [C and C++](/docs/languages/c-cpp), [Java](/docs/languages/java), [Kotlin](/docs/languages/kotlin), [C#](/docs/languages/csharp) and [TOML](/docs/languages/toml). These have none:
 
 | Language  | When it starts             | File types                                                       |
 | --------- | -------------------------- | ---------------------------------------------------------------- |

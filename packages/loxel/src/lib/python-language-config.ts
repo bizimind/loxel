@@ -1,11 +1,9 @@
 import * as monaco from "monaco-editor";
 
 import { frontendLog } from "./frontend-logger";
+import { stepOverTripleQuotesIn } from "./triple-quote-step-over";
 
 const log = frontendLog.child("ui");
-
-/** Languages whose configuration auto-closes `"""` / `'''` (TOML's is set in `monaco-languages.ts`). */
-const TRIPLE_QUOTE_LANGUAGES = new Set(["python", "toml", "kotlin"]);
 
 /**
  * Enter after a block-ending statement dedents the next line. Lines whose code (before any
@@ -42,49 +40,6 @@ export function extendPythonConfiguration(
 }
 
 /**
- * Whether `column` sits strictly inside a run of exactly three `quote` characters, i.e. within a
- * triple-quote delimiter. Typing another `quote` there would only make a stray fourth quote.
- */
-export function isInsideTripleQuote(line: string, column: number, quote: string): boolean {
-  const offset = column - 1;
-  let start = offset;
-  while (start > 0 && line[start - 1] === quote) start -= 1;
-  let end = offset;
-  while (end < line.length && line[end] === quote) end += 1;
-  return start < offset && offset < end && end - start === 3;
-}
-
-/** Adds a language, whose configuration auto-closes `"""` or `'''`, to the step-over below. */
-export function stepOverTripleQuotesIn(language: string): void {
-  TRIPLE_QUOTE_LANGUAGES.add(language);
-}
-
-/**
- * Monaco overtypes only the first character of a multi-character auto-closed pair, so typing the
- * closing `"""` of an auto-closed docstring would leave two stray quotes. Step over the rest of a
- * triple-quote delimiter instead, which also covers closing quotes Monaco never auto-inserted.
- */
-function overtypeTripleQuotes(editor: monaco.editor.ICodeEditor): void {
-  editor.onKeyDown((e) => {
-    const quote = e.browserEvent.key;
-    if (quote !== '"' && quote !== "'") return;
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (editor.getOption(monaco.editor.EditorOption.readOnly)) return;
-    const model = editor.getModel();
-    const selections = editor.getSelections();
-    if (!model || !TRIPLE_QUOTE_LANGUAGES.has(model.getLanguageId())) return;
-    if (selections?.length !== 1) return;
-    const [selection] = selections;
-    if (!selection?.isEmpty()) return;
-    const { lineNumber, column } = selection.getPosition();
-    if (!isInsideTripleQuote(model.getLineContent(lineNumber), column, quote)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    editor.setPosition({ lineNumber, column: column + 1 });
-  });
-}
-
-/**
  * Monaco registers its built-in Python configuration when the first Python model appears, and
  * language configurations merge field by field with the last registration winning, so ours has
  * to land after it. Importing the same module resolves no earlier than Monaco's own loader, and
@@ -93,7 +48,7 @@ function overtypeTripleQuotes(editor: monaco.editor.ICodeEditor): void {
  * Resolves once ours is registered, or failed to (logged), after the first Python model.
  */
 export function registerLanguageConfiguration(): Promise<void> {
-  monaco.editor.onDidCreateEditor(overtypeTripleQuotes);
+  stepOverTripleQuotesIn("python");
   return new Promise((resolve) => {
     monaco.languages.onLanguageEncountered("python", () => {
       import("monaco-editor/languages/definitions/python/python.js")

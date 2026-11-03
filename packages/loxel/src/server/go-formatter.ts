@@ -19,7 +19,7 @@ import {
   type LanguageFormatter,
 } from "./language-formatter";
 import { logger } from "./logger";
-import { isInside } from "./shipped-by-repo";
+import { isInside } from "./path-containment";
 import { recordAt } from "./toml-file";
 
 const log = logger.child("format");

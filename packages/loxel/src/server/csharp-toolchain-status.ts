@@ -20,9 +20,9 @@ import {
   onCSharpSolutionChange,
   setCSharpSolution,
 } from "./csharp-solution-store";
+import { isInside } from "./path-containment";
 import { isRepoTrusted } from "./repo-trust";
 import { error, json } from "./response-helpers";
-import { isInside } from "./shipped-by-repo";
 import type { ToolchainStatusModule } from "./toolchain-status-module";
 
 /**

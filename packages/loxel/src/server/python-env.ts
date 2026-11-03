@@ -7,9 +7,10 @@ import type { PythonEnv, PythonEnvSource } from "@/api/python-env-model";
 import { isDirectory } from "@/fs-utils";
 
 import { logger } from "./logger";
+import { isInside } from "./path-containment";
 import { getPythonOverride } from "./python-override-store";
 import { buildSpawnEnv } from "./shell-env";
-import { isEnvShippedByRepo, isInside, isShippedByRepo, runGit } from "./shipped-by-repo";
+import { isEnvShippedByRepo, isShippedByRepo, runGit } from "./shipped-by-repo";
 import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");
@@ -809,15 +810,4 @@ async function isExecutable(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * `PATH` without the worktree's own directories, for processes that look up `python` themselves
- * (basedpyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
- */
-export function pathOutsideWorktree(PATH: string, wtPath: string): string {
-  const root = path.resolve(wtPath);
-  return PATH.split(path.delimiter)
-    .filter((dir) => dir && !isInside(path.resolve(root, dir), root))
-    .join(path.delimiter);
 }

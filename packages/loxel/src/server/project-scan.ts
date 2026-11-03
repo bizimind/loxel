@@ -6,8 +6,9 @@ import path from "node:path";
 import { isRecord } from "@/lib/is-record";
 
 import { isFile, namesDependency, readPackageJson } from "./js-project";
+import { isInside } from "./path-containment";
 import { isRepoTrusted } from "./repo-trust";
-import { isInside, runGit } from "./shipped-by-repo";
+import { runGit } from "./shipped-by-repo";
 import type { WtLspContext } from "./stdio-lsp-manager";
 
 /**
