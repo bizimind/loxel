@@ -8,9 +8,8 @@ import type { ServerWebSocket } from "bun";
 // Before the imports that read it: trust is stored in the state directory.
 const stateDir = await mkdtemp(join(tmpdir(), "docker-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
-const { DOCKER_REPO_TRUST_RESTRICTION, DockerLspManager } = await import("./docker-lsp-manager");
+const { DockerLspManager } = await import("./docker-lsp-manager");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
-type WtLspContext = import("./stdio-lsp-manager").WtLspContext;
 
 const ORIGINAL_PATH = process.env.PATH;
 
@@ -71,8 +70,7 @@ class TestDockerLspManager extends DockerLspManager {
     super();
   }
 
-  protected override resolveBinary(context: WtLspContext): string {
-    super.resolveBinary(context);
+  protected override resolveBinary(): string {
     return process.execPath;
   }
 
@@ -129,13 +127,13 @@ async function dockerSeenByServer(trusted: boolean): Promise<unknown> {
 }
 
 test.skipIf(process.platform === "win32")(
-  "runs Docker's build checks only in a trusted repository, and says so",
+  "never runs Docker's build checks, which contact registries, trusted or not",
   async () => {
     expect(await dockerSeenByServer(false)).toBeNull();
-    expect(getRepoTrustStatus(wt!).restrictions).toEqual([DOCKER_REPO_TRUST_RESTRICTION]);
     await manager?.destroy();
     await rm(wt!, { recursive: true, force: true });
-    expect(await dockerSeenByServer(true)).toBe(join(wt!, "tools", "docker"));
+    expect(await dockerSeenByServer(true)).toBeNull();
+    expect(getRepoTrustStatus(wt!).restrictions).toEqual([]);
   },
 );
 
