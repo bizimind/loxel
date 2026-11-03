@@ -420,6 +420,29 @@ describe("executeRemove detaching the checkout", () => {
     expect(await git(["worktree", "list", "--porcelain"], repo.root)).toContain(added.path);
   });
 
+  test("deletes the branch even when run from inside the worktree it removes", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "from-inside", repoPath: repo.root });
+    const script = join(repo.root, "remove-from-inside.ts");
+    await Bun.write(
+      script,
+      `import { executeRemove } from ${JSON.stringify(join(import.meta.dir, "remove.ts"))};
+const result = await executeRemove({
+  name: "from-inside", repoPath: process.cwd(), deleteBranch: true, forceBranch: true, force: true,
+});
+console.log(result.branchDeleted);`,
+    );
+
+    const child = Bun.spawn(["bun", script], {
+      cwd: added.path,
+      stdout: "pipe",
+      stderr: "inherit",
+    });
+
+    expect((await new Response(child.stdout).text()).trim()).toBe("true");
+    expect(await child.exited).toBe(0);
+  });
+
   test("deletes only its own checkout from the trash", async () => {
     repo = await createTestRepo({ bare: true });
     // Another removal's checkout, possibly still registered while it is parked here.

@@ -15,7 +15,7 @@ This skill covers what an agent can do from a Loxel terminal. It does not cover 
 ## The user's workspace
 
 - **Projects and worktrees.** Loxel's sidebar lists the user's projects (git repositories) and each project's worktrees, so the user moves between repos and branches in one window. Projects are often bare repos with every checkout under `<repo>/.worktrees/<name>`.
-- **One layout per worktree.** In each window, every worktree keeps its own panel layout (open editors, terminals, browser tabs). The window shows one worktree at a time. Switching swaps the whole layout, and terminals in the other worktrees keep running, so the user may be looking at a different worktree than yours.
+- **One layout per worktree.** In each window, every worktree keeps its own panel layout (open editors, terminals, browser tabs). The window shows one worktree at a time. Switching swaps the whole layout, and terminals in the other worktrees keep running, so the user may be looking at a different worktree than yours. Removing a worktree ends its terminals, even if you run `wt rm` from one of them: the removal finishes, and your terminal ends about a minute later, so finish anything else first and make it among your last commands.
 - **Your terminal's environment.** Loxel sets these variables in every terminal it opens:
 
 | Variable          | Value                                                          |

@@ -36,8 +36,18 @@ export function setWorktreeInnerLayout(containerId: string, layout: SerializedDo
   setWorktreeValue(containerId, layout);
 }
 
+/** Each mounted layout's own cache of the layouts it has shown, keyed by worktree. */
+const layoutCaches = new Set<Map<string, unknown>>();
+
+/** Have `cache` purged with its worktree. Returns an unregister function. */
+export function registerLayoutCache(cache: Map<string, unknown>): () => void {
+  layoutCaches.add(cache);
+  return () => layoutCaches.delete(cache);
+}
+
 /** Purge cached values for a worktree (worktree removal cleanup). */
 export function purgeWorktreeCache(scopeKey: string): void {
+  for (const cache of layoutCaches) cache.delete(scopeKey);
   const prefix = `${scopeKey}::`;
   for (const key of worktreeCache.keys()) {
     if (key.startsWith(prefix)) worktreeCache.delete(key);

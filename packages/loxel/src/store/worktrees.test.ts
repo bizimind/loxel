@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 import type { WorktreeEntry } from "@/api/git-models";
 import type { WorktreeRemovePlan } from "@/api/worktree-removal-model";
@@ -45,8 +45,14 @@ mock.module("@/api/client", () => ({
   getProjectWorktrees: () => listResponses.shift() ?? Promise.resolve(listResult),
 }));
 
+const { queryClient } = await import("@/query-client");
+const { queryKeys } = await import("@/queries/query-keys");
+const { useFileSearchStore } = await import("./file-search");
+const { registerLayoutCache } = await import("./worktree-cache");
+const { getWorktreeUI } = await import("./worktree-ui");
 const {
   deriveOwningWorktree,
+  isListedWorktree,
   getNumberedWorktrees,
   getWorktreeRows,
   getWorktreeTrees,
@@ -304,6 +310,86 @@ describe("refreshProjectWorktrees", () => {
 
 afterEach(() => {
   useWorktreeStore.getState().reset();
+});
+
+describe("a worktree removed outside the app", () => {
+  const OTHER_WT = "/repo/.worktrees/other";
+
+  beforeEach(() => {
+    useProjectStore.setState({
+      projects: [
+        { id: "p", path: PROJECT, name: "repo", addedAt: "", isBare: true, worktrees: [] },
+      ] as never,
+    });
+    useWorktreeStore.setState({
+      activeWorktreePath: OTHER_WT,
+      byProject: {
+        [PROJECT]: { worktrees: [worktree, { ...worktree, path: OTHER_WT, wtName: "other" }] },
+      },
+    });
+    listResult = { worktrees: [{ ...worktree, path: OTHER_WT, wtName: "other" }] };
+  });
+
+  test("releases a worktree that was not the active one", async () => {
+    const worktreeUi = getWorktreeUI(WT_PATH);
+    worktreeUi.getState().queueOpen({ kind: "file", filePath: `${WT_PATH}/a.ts` } as never);
+    const layoutCache = new Map<string, unknown>([
+      [WT_PATH, {}],
+      [OTHER_WT, {}],
+    ]);
+    const unregister = registerLayoutCache(layoutCache);
+    useFileSearchStore.getState().setFiles(WT_PATH, ["a.ts"], false);
+    useFileSearchStore.getState().recordOpen(WT_PATH, "a.ts");
+    queryClient.setQueryData(queryKeys.status(PROJECT, WT_PATH), { stale: true });
+    queryClient.setQueryData(queryKeys.dirContents(PROJECT, `${WT_PATH}/src`), []);
+    queryClient.setQueryData(queryKeys.status(PROJECT, OTHER_WT), { kept: true });
+    const sent: unknown[] = [];
+    const send = spyOn(actualClient.wsClient, "send").mockImplementation((message) => {
+      sent.push(message);
+    });
+
+    try {
+      await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+
+      expect(useWorktreeStore.getState().activeWorktreePath).toBe(OTHER_WT);
+      expect(getWorktreeUI(WT_PATH)).not.toBe(worktreeUi);
+      expect(layoutCache.has(WT_PATH)).toBe(false);
+      expect(layoutCache.has(OTHER_WT)).toBe(true);
+      expect(useFileSearchStore.getState().indexByWorktree.has(WT_PATH)).toBe(false);
+      expect(useFileSearchStore.getState().mruByWorktree.has(WT_PATH)).toBe(false);
+      expect(queryClient.getQueryData(queryKeys.status(PROJECT, WT_PATH))).toBeUndefined();
+      expect(
+        queryClient.getQueryData(queryKeys.dirContents(PROJECT, `${WT_PATH}/src`)),
+      ).toBeUndefined();
+      const kept: unknown = queryClient.getQueryData(queryKeys.status(PROJECT, OTHER_WT));
+      expect(kept).toEqual({ kept: true });
+      expect(sent).toContainEqual({ type: "unsubscribe_worktree", worktreePath: WT_PATH });
+      expect(isListedWorktree(WT_PATH)).toBe(false);
+      expect(isListedWorktree(OTHER_WT)).toBe(true);
+    } finally {
+      send.mockRestore();
+      unregister();
+      queryClient.clear();
+    }
+  });
+
+  test("leaves an entry still being created alone", async () => {
+    useWorktreeStore.setState({
+      byProject: {
+        [PROJECT]: {
+          worktrees: [
+            { ...worktree, path: OTHER_WT, wtName: "other" },
+            { ...worktree, pending: "creating" },
+          ],
+        },
+      },
+    });
+    const worktreeUi = getWorktreeUI(WT_PATH);
+
+    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+
+    expect(getWorktreeUI(WT_PATH)).toBe(worktreeUi);
+  });
 });
 
 describe("applyEnrichedProjects", () => {

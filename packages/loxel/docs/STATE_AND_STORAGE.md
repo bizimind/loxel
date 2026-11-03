@@ -20,7 +20,7 @@ The renderer owns UI state in zustand stores under [src/store/](../src/store/). 
 | [worktrees.ts](../src/store/worktrees.ts)                                                                                                                                                                                                                                                                                                                                                                                                                       | `worktrees`   | `byProject` (worktree lists per project path) and `activeWorktreePath`; only `customOrder`/`archivedPaths`/`collapsedPaths` per project are persisted |
 | [editor-state.ts](../src/store/editor-state.ts), [comments.ts](../src/store/comments.ts), [logs.ts](../src/store/logs.ts), [panel-badges.ts](../src/store/panel-badges.ts), [panel-notifications.ts](../src/store/panel-notifications.ts), [file-search.ts](../src/store/file-search.ts), [command-palette.ts](../src/store/command-palette.ts), [symbol-search.ts](../src/store/symbol-search.ts), [editor-indentation.ts](../src/store/editor-indentation.ts) | none          | Ephemeral runtime state                                                                                                                               |
 
-Some global stores are keyed internally by worktree or session rather than using the per-worktree factory: `file-search.ts` keeps `Map`s keyed by worktree. `panel-notifications.ts` mirrors server state (the server's in-memory `NotificationStore`) and is not a source of truth. `comments.ts` is cleared on every worktree switch by `transitionWorktreeState` in [worktree-cache.ts](../src/store/worktree-cache.ts).
+Some global stores are keyed internally by worktree or session rather than using the per-worktree factory: `file-search.ts` keeps `Map`s keyed by worktree, dropped when the worktree is released. `panel-notifications.ts` mirrors server state (the server's in-memory `NotificationStore`) and is not a source of truth. `comments.ts` is cleared on every worktree switch by `transitionWorktreeState` in [worktree-cache.ts](../src/store/worktree-cache.ts).
 
 ### Per-worktree
 
@@ -69,15 +69,15 @@ Per-worktree state survives switching within a window's lifetime but not a reloa
 
 ### Server: `/api/stores/:key` and `stores.db`
 
-The route in [routes.ts](../src/server/routes.ts) reads or upserts the row through [store-db.ts](../src/server/store-db.ts). After a PUT whose value parses to an object with a `state` field, it broadcasts `{ type: "store_updated", key, state, nonce }` to every app client ([ws-protocol.ts](../src/api/ws-protocol.ts)). Values without `state` (layouts, server-owned keys) are stored without a broadcast.
+The route in [routes.ts](../src/server/routes.ts) reads or upserts the row through [store-db.ts](../src/server/store-db.ts). It accepts and drops a PUT of the layout row of a worktree path that no longer exists (see [Layout persistence](#layout-persistence)). After a PUT whose value parses to an object with a `state` field, it broadcasts `{ type: "store_updated", key, state, nonce }` to every app client ([ws-protocol.ts](../src/api/ws-protocol.ts)). Values without `state` (layouts, server-owned keys) are stored without a broadcast.
 
 `stores.db` is a single table `stores(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)`, opened lazily in WAL mode with a 5-second busy timeout. Key namespaces in use:
 
 | Key                                                                | Writer                                                                                                                     |
 | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | `settings`, `keybindings`, `ui`, `search`, `worktrees`, `projects` | Renderer, via `createServerStorage`                                                                                        |
-| `layout:session:<windowId>:<scope>:<worktreePath>`                 | Renderer, via `PersistedLayout`                                                                                            |
-| `layout:canonical:<scope>:<worktreePath>`                          | Server (promotion), renderer (legacy layout migration)                                                                     |
+| `layout:session:<windowId>:<scope>:<worktreePath>`                 | Renderer, via `PersistedLayout`; deleted when the worktree is removed                                                      |
+| `layout:canonical:<scope>:<worktreePath>`                          | Server (promotion), renderer (legacy layout migration); deleted when the worktree is removed                               |
 | `external-folders:<worktreePath>`                                  | Server, [external-folders-service.ts](../src/server/external-folders-service.ts); deleted when the worktree is removed     |
 | `python-interpreter:<worktreePath>`                                | Server, [python-override-store.ts](../src/server/python-override-store.ts); deleted when the worktree is removed           |
 | `java-home:<worktreePath>`                                         | Server, [java-override-store.ts](../src/server/java-override-store.ts); deleted when the worktree is removed               |
@@ -114,7 +114,8 @@ Panel structure is described in [PANELS_AND_LAYOUT.md](PANELS_AND_LAYOUT.md); th
 - **Promotion.** When a window closes, Electron main calls `POST /api/layout/promote` with its window ID ([main.ts](../src/electron/main.ts)), and `promoteLayoutSession` moves that window's session rows to canonical in one transaction. The route accepts only UUID-shaped IDs so the `LIKE` prefix cannot match other windows' rows. New windows wait for in-flight promotions before reading.
 - **Crash recovery.** On server boot, `recoverOrphanLayoutSessions` copies the most recent session row per `<scope>:<worktreePath>` to canonical and deliberately keeps the session rows, so renderers reloaded after a server crash still find their own layout.
 
-Inner dockviews (for example the graph panel) are kept only in [worktree-cache.ts](../src/store/worktree-cache.ts). [layout-actions.ts](../src/store/layout-actions.ts) holds imperative collapse/expand logic that reads and writes `sidebarSizes` in the per-worktree tools-bar store; it does not persist anything itself. A worktree's layout rows are deleted when the worktree is removed.
+Inner dockviews (for example the graph panel) are kept only in [worktree-cache.ts](../src/store/worktree-cache.ts). [layout-actions.ts](../src/store/layout-actions.ts) holds imperative collapse/expand logic that reads and writes `sidebarSizes` in the per-worktree tools-bar store; it does not persist anything itself.
+A worktree's rows, in every window's session and in canonical, are deleted when the worktree is removed, by `deleteWorktreeRows` in [worktree-rows.ts](../src/server/worktree-rows.ts), along with its other per-worktree rows, so a worktree recreated at that path restores nothing and reattaches to no old terminal. A window goes on writing for a moment after that (a pending save, the save as it swaps away from the layout), and a window that is closing can too, so the store route drops a layout write whose worktree path no longer exists; that takes no bookkeeping, and a recreated path is writable at once. The swap skips a worktree no longer listed when it caches the outgoing layout, and `releaseWorktree` purges the other windows' caches through `registerLayoutCache` in [worktree-cache.ts](../src/store/worktree-cache.ts). A worktree moved by `wt mv` keeps the rows under its old path until the next project start, which treats them like any other path that is gone.
 
 ## Server state directory
 
@@ -179,6 +180,7 @@ The renderer uses browser storage only where state is per window or must exist b
 
 - [src/store/server-storage.ts](../src/store/server-storage.ts), [src/store/store-sync.ts](../src/store/store-sync.ts), [src/lib/reconcile.ts](../src/lib/reconcile.ts): client persistence and cross-window sync
 - [src/store/worktree-store.ts](../src/store/worktree-store.ts), [src/store/worktree-cache.ts](../src/store/worktree-cache.ts): per-worktree store factory and cache
+- [src/server/worktree-rows.ts](../src/server/worktree-rows.ts): the rows kept per worktree, and deleting them
 - [src/server/store-db.ts](../src/server/store-db.ts), `/api/stores/:key` and `/api/layout/promote` in [src/server/routes.ts](../src/server/routes.ts): server persistence
 - [src/components/dockview/PersistedLayout.tsx](../src/components/dockview/PersistedLayout.tsx), [src/lib/layout-key-schema.ts](../src/lib/layout-key-schema.ts): layout storage
 - [src/server/config.ts](../src/server/config.ts), [src/server/project-store.ts](../src/server/project-store.ts), [src/server/review-db.ts](../src/server/review-db.ts): state directory and databases
