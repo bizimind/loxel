@@ -152,6 +152,11 @@ export interface WorktreeLspServer {
   handleMessage(ws: ServerWebSocket<unknown>, data: string): void;
   notifyWatchedFilesChanged(wtPath: string, paths: readonly string[]): void;
   notifyIgnoredPathChanged?(wtPath: string, relPath: string): void;
+  /**
+   * The worktree at `wtPath` is gone: delete what the server keeps for it outside the worktree. It
+   * may run more than once for a path, and for one the server never served.
+   */
+  forgetWorktree?(wtPath: string): void;
   /** May settle once its processes have exited; server shutdown waits for that. */
   destroy(): void | Promise<void>;
 }

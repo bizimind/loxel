@@ -9,7 +9,7 @@ import {
   readText,
 } from "./kotlin-formatter";
 import { dirsUpToRoot } from "./language-formatter";
-import { isInside } from "./shipped-by-repo";
+import { isInside } from "./path-containment";
 
 export interface DetektProject {
   tool: "detekt";

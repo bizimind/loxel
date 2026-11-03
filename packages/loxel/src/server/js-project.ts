@@ -6,7 +6,7 @@ import { isRecord } from "@/lib/is-record";
 
 import { readConfigFile } from "./config-file-read";
 import { dirsUpToRoot } from "./language-formatter";
-import { isInside } from "./shipped-by-repo";
+import { isInside } from "./path-containment";
 
 /** The commands of each package manager, by its lockfile, first match per directory. */
 const PACKAGE_MANAGERS = [

@@ -8,7 +8,7 @@ import { getGoEnv, goSpawnEnv } from "./go-env";
 import { golangciConfigIn, isFile, readGolangciConfig } from "./golangci-lint-config";
 import { dirsUpToRoot, type FileFormatter, type LanguageFormatter } from "./language-formatter";
 import { logger } from "./logger";
-import { isInside } from "./shipped-by-repo";
+import { isInside } from "./path-containment";
 import { recordAt } from "./toml-file";
 
 const log = logger.child("format");

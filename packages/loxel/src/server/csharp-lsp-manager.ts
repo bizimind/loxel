@@ -39,7 +39,7 @@ import {
   toolClaimsCommand,
 } from "./csharp-env";
 import { announceCSharpStatus, publishCSharpLspState } from "./csharp-lsp-state";
-import { writeProjectsSolution } from "./csharp-projects-solution";
+import { deleteProjectsSolution, writeProjectsSolution } from "./csharp-projects-solution";
 import { getCSharpSolution, onCSharpSolutionChange } from "./csharp-solution-store";
 import { mapWithConcurrency } from "./git-commands";
 import { killProcessTrees } from "./kill-process-tree";
@@ -302,6 +302,10 @@ export class CSharpLspManager extends WorktreeLspManager {
     this.unsubscribeSolution = null;
     for (const ws of [...this.held.keys()]) this.releaseHeld(ws);
     await super.destroy();
+  }
+
+  forgetWorktree(wtPath: string): void {
+    deleteProjectsSolution(wtPath);
   }
 
   /** A project or SDK file changed: what a held connection waits for may be there now. */

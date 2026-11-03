@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -192,6 +193,18 @@ test("jdtlsDataDir keeps same-named worktrees apart", () => {
 
 test("jdtlsDataDir keeps a trusted server's imported projects from a restricted one", () => {
   expect(jdtlsDataDir("/a/project", true)).not.toBe(jdtlsDataDir("/a/project"));
+});
+
+test("forgetWorktree deletes a removed worktree's restricted workspace directory", async () => {
+  const manager = new JavaLspManager();
+  const data = jdtlsDataDir("/removed/project");
+  mkdirSync(data, { recursive: true });
+  try {
+    manager.forgetWorktree("/removed/project");
+    expect(existsSync(data)).toBe(false);
+  } finally {
+    await manager.destroy();
+  }
 });
 
 describe("dropWillRename", () => {
