@@ -188,6 +188,7 @@ jobs:
           mkdir -p staging
           cp packages/loxel/build/loxel-server staging/
           cp -R packages/loxel/build/language-servers/. staging/
+          cp packages/loxel/build/THIRD_PARTY_NOTICES.txt staging/
           cp -r packages/loxel/dist staging/renderer
           bun packages/loxel/scripts/check-binary-arch.ts "$PLATFORM" staging
           tar czf "$ARCHIVE" -C staging .
@@ -311,7 +312,7 @@ jobs:
         run: |
           cd packages/loxel
           ELECTRON=1 pnpm exec vite build
-          pnpm exec electron-builder --mac --${{ matrix.arch }} \
+          bun scripts/build-app.ts --mac --${{ matrix.arch }} \
             --config.mac.provisioningProfile=/tmp/loxel.provisionprofile
         env:
           CSC_LINK: ${{ secrets.LOXEL_CERTIFICATE }}

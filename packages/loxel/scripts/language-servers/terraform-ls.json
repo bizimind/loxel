@@ -1,1 +1,8 @@
-{ "script": "download-terraform-ls.ts", "resources": ["terraform-ls"] }
+{
+  "script": "download-terraform-ls.ts",
+  "resources": ["terraform-ls"],
+  "license": "MPL-2.0",
+  "source": "https://github.com/hashicorp/terraform-ls/tree/v0.36.3",
+  "licenseFile": "licenses/terraform-ls.txt",
+  "note": "Statically links the Go runtime (BSD-3-Clause) and the Go modules listed in go.mod at the source address."
+}

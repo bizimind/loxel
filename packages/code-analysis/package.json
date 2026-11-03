@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun src/cli.ts",
-    "build": "bun build.ts",
+    "build": "bun build.ts && bun ../loxel/scripts/third-party-notices.ts . dist/THIRD_PARTY_NOTICES.txt",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "pnpm -w run lint",

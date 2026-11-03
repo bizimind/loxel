@@ -1,1 +1,7 @@
-{ "script": "build-astro-ls.ts", "resources": ["astro-ls"] }
+{
+  "script": "build-astro-ls.ts",
+  "resources": ["astro-ls"],
+  "license": "MIT",
+  "source": "https://github.com/withastro/astro/tree/main/packages/language-tools/language-server",
+  "npm": ["@astrojs/language-server"]
+}

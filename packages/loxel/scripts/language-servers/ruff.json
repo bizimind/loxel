@@ -1,1 +1,7 @@
-{ "script": "download-ruff.ts", "resources": ["ruff"] }
+{
+  "script": "download-ruff.ts",
+  "resources": ["ruff"],
+  "license": "MIT",
+  "source": "https://github.com/astral-sh/ruff/tree/0.17.2",
+  "licenseFile": "licenses/ruff.txt"
+}

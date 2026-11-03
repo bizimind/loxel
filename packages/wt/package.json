@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "bun src/cli.ts",
-    "build": "bun build --compile --minify src/cli.ts --outfile dist/wt",
+    "build": "bun build --compile --minify src/cli.ts --outfile dist/wt && bun ../loxel/scripts/third-party-notices.ts . dist/THIRD_PARTY_NOTICES.txt",
     "typecheck": "tsc --noEmit",
     "test": "bun test --timeout 30000",
     "lint": "pnpm -w run lint",

@@ -10,7 +10,7 @@ The editor is Monaco-based with a few Loxel-specific behaviors layered on top: f
 
 ## Quick Open
 
-Press `Cmd+P` to open Quick Open. Type any part of a file path and results filter with fuzzy matching. File icons follow JetBrains conventions, so project structure is recognizable at a glance.
+Press `Cmd+P` to open Quick Open. Type any part of a file path and results filter with fuzzy matching. File icons reflect file type and language, so project structure is recognizable at a glance.
 
 When the query is empty, Quick Open shows your 15 most recently opened files — useful for returning to files you were working in without retyping.
 

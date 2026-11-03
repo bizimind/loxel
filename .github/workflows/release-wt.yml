@@ -137,6 +137,9 @@ jobs:
         run: |
           aws s3 cp packages/wt/dist/wt "s3://loxel/wt/${{ matrix.platform }}/wt" \
             --content-type application/octet-stream
+          aws s3 cp packages/wt/dist/THIRD_PARTY_NOTICES.txt \
+            "s3://loxel/wt/${{ matrix.platform }}/THIRD_PARTY_NOTICES.txt" \
+            --content-type text/plain
 
   release:
     needs: [build-matrix, check-and-bump, build]
@@ -200,6 +203,8 @@ jobs:
           ${LINKS}
           Or install via: \`curl -fsSL https://loxel.bizimind.io/wt/install.sh | bash\`
 
-          Shell helpers: [wt.sh](${BASE}/wt.sh)"
+          Shell helpers: [wt.sh](${BASE}/wt.sh)
+
+          Third-party notices: THIRD_PARTY_NOTICES.txt next to each platform's binary, for example [linux-x64](${BASE}/linux-x64/THIRD_PARTY_NOTICES.txt)"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
