@@ -35,6 +35,8 @@ Before spawning, `resolveBinary` asks for the toolchain, capturing the login-she
 
 A running session subscribes to the toolchain. When the `go` binary, its version, its GOROOT, the gopls to use or that file differs from what the session started with, `restartIfChanged` closes the socket with `LSP_RESTART_CLOSE_CODE` and the client reconnects, since gopls does not notice a new `go` by itself. A `go` that is gone or does not answer leaves gopls running, because it may be an install in progress; the status item shows the state until a working `go` decides.
 
+gopls cancels the `go` commands of its package loading only when the request that started them ends, and has no signal handler, so a stopped gopls would leave them running next to the next server's. `stopsProcessTree` is true, so the base ends gopls's whole process tree when a session closes, and, when gopls exits by itself, what the base's last list of that tree found.
+
 ## Setup problems
 
 gopls reports a `go.mod` needing a newer Go as a log-level `showMessage` and a missing module as `could not import` diagnostics, neither of which says what to do. `goSetupProblem` recognizes them in server frames, and `report` sends one warning `window/showMessage` per session and kind, which the client's `showMessages` shows as a toast, once per distinct text while Loxel runs. A command that fails on a module lookup is covered too, since `LspServerCommands` only logs command errors.
