@@ -6,7 +6,7 @@ order: 13.2
 
 Some features can do more by running code from the repository you opened: build scripts, project plugins, a linter's or formatter's config file, the repository's worktree hooks. A repository you just cloned could put anything there, so a feature that depends on trust works in a restricted form until you say you trust the repository.
 
-Every repository starts untrusted, including projects you already had. Editing, Git and everything else keep working.
+A project you create from scratch with **New Project** starts trusted, since everything in it is yours. Every other repository starts untrusted, including ones you clone and projects you already had. Editing, Git and everything else keep working.
 
 ## Trusting a repository
 

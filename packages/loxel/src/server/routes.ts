@@ -97,7 +97,13 @@ import { stress } from "./stress-detector";
 import { toolchainStatusModules } from "./toolchain-statuses";
 import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
 import { getCurrentVersion } from "./version";
-import { addWorktree, isCleanHookHeld, removeWorktree, runHeldInitHook } from "./worktree-hooks";
+import {
+  addFirstWorktreeOfNewRepo,
+  addWorktree,
+  isCleanHookHeld,
+  removeWorktree,
+  runHeldInitHook,
+} from "./worktree-hooks";
 import { isLayoutRowOfMissingWorktree } from "./worktree-rows";
 import { findWorkspacePackages } from "./worktree-utils";
 import { worktreesChangedMessage } from "./ws-messages";
@@ -1844,12 +1850,13 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
 
   mkdirSync(projectDir, { recursive: true });
 
-  let firstWorktree: AddResult | undefined;
+  // Everything in a project created from scratch is the user's, so its repository starts trusted.
   if (setup === "single") {
     const result = measureSpawn("git init", () =>
       Bun.spawnSync(["git", "init", "--initial-branch=main"], { cwd: projectDir }),
     );
     if (result.exitCode !== 0) return error("git init failed", 500);
+    setRepoTrusted(projectDir, true);
   } else {
     await initBareRepo(projectDir, "main");
     await createInitialCommit(projectDir);
@@ -1857,7 +1864,7 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
     await writeInitHook(projectDir, copyFiles, setupCommands);
 
     try {
-      firstWorktree = await addWorktree(
+      await addFirstWorktreeOfNewRepo(
         { name: "main", branch: "main", repoPath: projectDir },
         wtProgress,
       );
@@ -1875,7 +1882,7 @@ async function handleCreateProject(req: Request, ctx: RouteContext): Promise<Res
   }
 
   ctx.broadcastAll(worktreesChangedMessage(project.path));
-  return json(projectSetupResult(project, firstWorktree));
+  return json(project);
 }
 
 /** A set-up project, saying when its first worktree's `init.wt.sh` was held back. */

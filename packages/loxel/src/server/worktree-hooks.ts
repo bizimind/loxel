@@ -15,7 +15,7 @@ import {
   type RemoveResult,
 } from "@bizimind/wt/lib";
 
-import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
+import { isRepoTrusted, reportRepoRestriction, setRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 
 /** What an untrusted repository holds back, as the trust UI lists it. */
@@ -34,6 +34,28 @@ export async function addWorktree(
   );
   if (result.hookSkipped) reportRepoRestriction(result.path, WORKTREE_HOOKS_RESTRICTION);
   return result;
+}
+
+/**
+ * Add the first worktree of a repository Loxel has just created from scratch, which starts trusted:
+ * nothing in it came from anyone else. Trust is given on the new worktree, since a bare root does
+ * not stand for the repository its worktrees belong to, and only then does `init.wt.sh` run.
+ */
+export async function addFirstWorktreeOfNewRepo(
+  params: Omit<AddParams, HookOptions>,
+  progress: ProgressHandler,
+): Promise<AddResult> {
+  const { hookSkipped, ...created } = await executeAdd(
+    { ...params, hookEnv: buildSpawnEnv(), allowHook: () => false },
+    progress,
+  );
+  setRepoTrusted(created.path, true);
+  if (!hookSkipped) return created;
+  const hookRan = await runInitHook(
+    { name: params.name, repoPath: params.repoPath, hookEnv: buildSpawnEnv() },
+    progress,
+  );
+  return { ...created, hookRan };
 }
 
 /**

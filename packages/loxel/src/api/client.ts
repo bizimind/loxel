@@ -596,10 +596,7 @@ export async function scanSuggestions(path: string) {
 }
 
 export async function createProject(req: CreateProjectRequest) {
-  return fetchJson<ProjectSetupResult>("/projects/create", {
-    method: "POST",
-    body: JSON.stringify(req),
-  });
+  return fetchJson<Project>("/projects/create", { method: "POST", body: JSON.stringify(req) });
 }
 
 export async function cloneProject(req: CloneProjectRequest) {

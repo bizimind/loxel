@@ -8,7 +8,7 @@ import { join } from "node:path";
 const stateDir = await mkdtemp(join(tmpdir(), "routes-worktree-hooks-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { handleRequest } = await import("./routes");
-const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+const { getRepoTrustStatus, isRepoTrusted, setRepoTrusted } = await import("./repo-trust");
 const { WORKTREE_HOOKS_RESTRICTION } = await import("./worktree-hooks");
 type RouteContext = import("./routes").RouteContext;
 
@@ -135,5 +135,39 @@ describe("worktree hooks in a trusted repository", () => {
 
     await post(ctx, "/api/worktree/remove", target);
     expect(existsSync(join(repo, "clean-ran-feat"))).toBe(true);
+  });
+});
+
+describe("a project created from scratch", () => {
+  const projectCtx = {
+    initializeProject: async () => ({}),
+    broadcastAll: () => {},
+  } as unknown as RouteContext;
+
+  async function createProject(setup: "single" | "multi") {
+    const location = await realpath(await mkdtemp(join(tmpdir(), "routes-worktree-hooks-new-")));
+    roots.push(location);
+    const [status] = await post(projectCtx, "/api/projects/create", {
+      name: "fresh",
+      location,
+      setup,
+      copyFiles: [],
+      setupCommands: ['touch "$WT_ROOT/setup-ran"'],
+    });
+    expect(status).toBe(200);
+    return join(location, "fresh");
+  }
+
+  test("starts trusted, so its first worktree's init.wt.sh runs", async () => {
+    const projectDir = await createProject("multi");
+    const firstWorktree = join(projectDir, ".worktrees", "main");
+
+    expect(isRepoTrusted(firstWorktree)).toBe(true);
+    expect(existsSync(join(projectDir, "setup-ran"))).toBe(true);
+    expect(getRepoTrustStatus(firstWorktree).restrictions).toEqual([]);
+  });
+
+  test("starts trusted as a single checkout", async () => {
+    expect(isRepoTrusted(await createProject("single"))).toBe(true);
   });
 });

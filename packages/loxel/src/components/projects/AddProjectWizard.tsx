@@ -180,7 +180,7 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      const project = await api.createProject({
+      await api.createProject({
         name: newName.trim(),
         location: newLocation,
         setup: newSetup,
@@ -189,7 +189,6 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
       });
       await fetchProjects();
       onClose();
-      offerHeldInitHook(project);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to create project");
     } finally {
