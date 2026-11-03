@@ -16,9 +16,23 @@ Trust belongs to the repository, not to a worktree, so a new worktree of a trust
 
 A trusted repository's own solution files and project references are loaded as it names them, including ones in nested repositories.
 
-In a repository you haven't trusted, format on save doesn't run Biome, Prettier or oxfmt, formatters from the project's `node_modules`, or a formatter override that names a file by its path in the repository, and a Python installed through a version manager such as pyenv shows its global version in the status bar.
-
 Trust a repository only if you would be willing to run its code yourself. Language servers that depend on trust restart as soon as you choose.
+
+## What waits for trust
+
+In a repository you haven't trusted:
+
+- **C and C++**: on macOS, Loxel's own clangd runs instead of yours. clangd asks only compilers in system folders for include paths, and leaves out compile flags that write output files or pass options through to the compiler. A `.clangd` that names a compile database outside the worktree turns off the background index. See [C and C++](/docs/languages/c-cpp).
+- **C#**: projects don't load, so C# files get syntax highlighting only. Format on save doesn't run the CSharpier your project's tool manifest names, or a version manager's `dotnet`. See [C#](/docs/languages/csharp).
+- **Go**: golangci-lint doesn't run. gopls and format on save work as usual. See [Go](/docs/languages/go).
+- **Java**: Maven and Gradle projects aren't loaded, so each Java file is analyzed on its own. A JDK inside the worktree isn't used, and doesn't reach new terminals. See [Java](/docs/languages/java).
+- **JavaScript and TypeScript**: ESLint, oxlint and Biome's linter don't run. Format on save doesn't run Biome, Prettier or oxfmt, or formatters from the project's `node_modules`. The TypeScript language server works as usual. See [JavaScript](/docs/languages/javascript).
+- **Python**: mypy doesn't run, so basedpyright checks types. A Python installed through a version manager such as pyenv shows its global version in the status bar. See [Python](/docs/languages/python).
+- **Rust**: build scripts, proc macros and `cargo check` don't run, and flags from `.cargo/config.toml` don't apply to analysis. See [Rust](/docs/languages/rust).
+- **Terraform**: Terraform itself doesn't run, so provider schemas come from the language server's built-in set rather than your initialized providers.
+- **Every language**: format on save doesn't run a formatter override that names a file by its path in the repository, or one that runs a tool your project's .NET tool manifest names.
+
+Kotlin, TOML and YAML features work the same in every repository, and so do gofmt, rustfmt, clang-format, ktfmt, ktlint and the Java formatters: they read the repository's files as settings and run nothing from it.
 
 ## Stop trusting a repository
 

@@ -5,8 +5,19 @@ import type { GoEnv } from "@/api/go-env-model";
 import { isDirectory } from "@/fs-utils";
 
 import { getGoEnv, goSpawnEnv } from "./go-env";
-import { golangciConfigIn, isFile, readGolangciConfig } from "./golangci-lint-config";
-import { dirsUpToRoot, type FileFormatter, type LanguageFormatter } from "./language-formatter";
+import {
+  golangciConfigIn,
+  isFile,
+  type GolangciFormatVerdict,
+  judgeGolangciFormatConfig,
+  readGolangciConfig,
+} from "./golangci-lint-config";
+import {
+  dirsUpToRoot,
+  type FileFormatter,
+  type FormatterDecline,
+  type LanguageFormatter,
+} from "./language-formatter";
 import { logger } from "./logger";
 import { isInside } from "./shipped-by-repo";
 import { recordAt } from "./toml-file";
@@ -16,6 +27,13 @@ const log = logger.child("format");
 const GOFMT: FileFormatter = { command: "gofmt", args: "" };
 
 const GOLANGCI_LINT = "golangci-lint";
+
+const FORMAT_CONFIG_NOTICES: Record<Exclude<GolangciFormatVerdict, "runnable">, string> = {
+  custom:
+    "Format on save skipped: this project's golangci-lint config has settings for custom formatters, which Loxel doesn't run.",
+  unreadable:
+    "Format on save skipped: Loxel couldn't read this project's golangci-lint config. Run `golangci-lint config verify` in a terminal to see why.",
+};
 
 /** Often deliberately unformatted, or not the project's own code. */
 const SKIPPED_DIRS: ReadonlySet<string> = new Set(["vendor", "testdata"]);
@@ -62,8 +80,9 @@ export function isSkippedGoDir(dir: string, root: string): boolean {
 /**
  * Pick the Go formatter for a file in `startDir`, walking up to `wtRoot`. The nearest `.golangci.*`
  * decides alone, as golangci-lint never merges configs: with `version: "2"` and enabled formatters
- * it selects `golangci-lint fmt`, when that is installed. Anything else gets gofmt inside a module
- * or workspace, and no formatter outside one.
+ * it selects `golangci-lint fmt`, when that is installed, unless {@link judgeGolangciFormatConfig}
+ * refuses the config, which declines. Anything else gets gofmt inside a module or workspace, and no
+ * formatter outside one.
  *
  * Not cached: a save costs a few `statSync` calls per directory level plus parsing one config,
  * negligible next to spawning the formatter.
@@ -72,7 +91,7 @@ function detectGoFormatter(
   startDir: string,
   wtRoot: string,
   fileName?: string,
-): FileFormatter | null {
+): FileFormatter | FormatterDecline | null {
   const root = resolve(wtRoot);
   const dir = resolve(root, startDir);
   if (isSkippedGoDir(dir, root)) return null;
@@ -84,6 +103,8 @@ function detectGoFormatter(
     if (fileName && isExcluded(config, configPath, join(dir, fileName), dirs, root)) return null;
     const configArg = configArgFrom(existingDir(dir, root), configPath);
     if (configArg && Bun.which(GOLANGCI_LINT, { PATH: goSpawnEnv(root, null).PATH })) {
+      const verdict = judgeGolangciFormatConfig(configPath);
+      if (verdict !== "runnable") return { notice: FORMAT_CONFIG_NOTICES[verdict] };
       // Explicit, since its own search can leave the worktree.
       return { command: GOLANGCI_LINT, args: `fmt --stdin --config ${configArg}` };
     }

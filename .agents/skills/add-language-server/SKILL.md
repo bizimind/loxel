@@ -21,12 +21,20 @@ Resolve these with the user before starting:
 | **Scope**           | Worktree (one subprocess per worktree)    | Global (YAML: one shared subprocess)                                                                   |
 | **Connection**      | Lazy (spawned when matching models exist) | Eager (TypeScript: always connected, explicit in `monaco-env.ts`)                                      |
 | **Binary source**   | The user's installed tooling              | Bundled, only when easy and license-clean, or with no user toolchain to match (YAML, TOML)             |
-| **Repo code**       | Runs none                                 | Runs it once trusted: set `repoTrustRestriction`, read `repoTrusted` in hooks                          |
+| **Repo code**       | Runs none, with the policy's evidence     | Runs it once trusted: set `repoTrustRestriction`, read `repoTrusted` in hooks                          |
 | **Settings**        | None                                      | Init options, pushed after `initialized`, or pulled with `workspace/configuration`                     |
 | **Overlap**         | Only server for its languages             | A second server on the same languages (ruff next to basedpyright): suppress the features it duplicates |
 | **Semantic tokens** | Enabled                                   | Disabled (`disableSemanticTokens = true`) if buggy or TextMate is better                               |
 | **Text sync**       | Incremental                               | Full-text (`requiresFullTextSync = true`) if the server mishandles incremental                         |
 | **Spawn args**      | `["--stdio"]`                             | `["serve"]` (terraform-ls), `["start", "--stdio"]` (docker-ls), `["server"]` (ruff), `["lsp"]` (Tombi) |
+
+## Trust policy
+
+Follow [Trust policy](../../../packages/loxel/docs/LANGUAGE_SERVERS.md#trust-policy) for the server and for every linter, formatter, resolver and terminal contributor you add:
+
+- Repository code (build files, dependencies and what an install put in the worktree, a toolchain inside the worktree, config that can name code to load) runs only in a trusted repository. Untrusted, hold it back or restrict it, report what is held back, and follow trust changes.
+- Never run a binary git tracks. An ungated tool also takes nothing from the worktree or a version-manager shim, and is asked its version from `/`.
+- "Runs no repository code" needs evidence in `docs/languages/<language>.md`: the tool's source or docs, plus a canary that a positive control shows firing elsewhere, covering the oldest version Loxel accepts. Add the language's row to the policy table.
 
 ## Steps
 
