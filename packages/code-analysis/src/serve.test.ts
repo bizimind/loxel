@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { realpathSync } from "node:fs";
-import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 
+import { buildD3Notices, D3_NOTICES_PATH } from "./d3-notices.ts";
 import { VizTypeSchema } from "./plugin.ts";
 import { buildHtml, D3_SCRIPT, D3_SCRIPT_PATH } from "./serve.ts";
 
@@ -39,31 +38,11 @@ describe.each(VizTypeSchema.options)("the %s page", (vizType) => {
   });
 });
 
-// d3's build bundles code from these packages beyond d3's own, under their own notices. Each is
-// found next to the package that depends on it, as pnpm lays them out.
-const BUNDLED_LICENSES: Array<{ name: string; from: string }> = [
-  { name: "d3", from: "d3" },
-  { name: "d3-delaunay", from: "d3" },
-  { name: "d3-ease", from: "d3" },
-  { name: "d3-geo", from: "d3" },
-  { name: "d3-scale-chromatic", from: "d3" },
-  { name: "delaunator", from: "d3-delaunay" },
-];
+test("the shipped d3 notices match d3's installed dependency tree", async () => {
+  // Fails after the installed d3 tree changes; regenerate with `bun src/d3-notices.ts`.
+  expect(await Bun.file(D3_NOTICES_PATH).text()).toBe(buildD3Notices());
+});
 
-function installedPackageDir(name: string, from: string): string {
-  const d3Dir = realpathSync(join(import.meta.dir, "../node_modules/d3"));
-  const fromDir = from === "d3" ? d3Dir : realpathSync(join(d3Dir, "..", from));
-  return join(fromDir, "..", name);
-}
-
-test.each(BUNDLED_LICENSES)(
-  "the served d3 script carries $name's license text, as installed",
-  async ({ name, from }) => {
-    const license = await Bun.file(join(installedPackageDir(name, from), "LICENSE")).text();
-    expect(D3_SCRIPT.slice(0, D3_SCRIPT.indexOf("*/"))).toContain(license.trim());
-  },
-);
-
-test("the served d3 script opens with its notices", () => {
-  expect(D3_SCRIPT).toStartWith("/*!\nNotices for d3 ");
+test("the served d3 script opens with the shipped notices", async () => {
+  expect(D3_SCRIPT).toStartWith(`/*!\n${await Bun.file(D3_NOTICES_PATH).text()}*/\n`);
 });
