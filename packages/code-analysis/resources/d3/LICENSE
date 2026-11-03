@@ -1,4 +1,4 @@
-Notices for d3 and the packages its bundled build (dist/d3.min.js) includes, which code-analysis serves to its --web pages. Each text is copied verbatim from the installed package LICENSE files named above it.
+Notices for d3 and the packages its bundled build (dist/d3.min.js) includes, which code-analysis serves to its --web pages. Each text is copied verbatim from the installed package files named above it: their LICENSE files, and source comments for notices that exist only there.
 
 === d3-array@3.2.4, d3@7.9.0 ===
 
@@ -304,3 +304,8 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <http://unlicense.org>
+
+=== d3-array@3.2.4 src/quickselect.js (notice from a source comment) ===
+
+Based on https://github.com/mourner/quickselect
+ISC license, Copyright 2018 Vladimir Agafonkin.
