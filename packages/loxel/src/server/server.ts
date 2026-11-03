@@ -22,6 +22,7 @@ import {
 } from "@/api/ws-protocol";
 
 import { config, getDetachedDir, hash12 } from "./config";
+import { deleteProjectsSolution } from "./csharp-projects-solution";
 import { DetachedFilesService } from "./detached-files-service";
 import { ExternalFilesService } from "./external-files-service";
 import {
@@ -618,6 +619,7 @@ async function reconcileWorktrees(project: ProjectState): Promise<void> {
 /** Stop serving a worktree path that no longer exists. */
 function releaseWorktreeResources(wtPath: string): void {
   deleteJdtlsData(wtPath);
+  deleteProjectsSolution(wtPath);
   const resources = wtResources.get(wtPath);
   if (!resources) return;
   for (const ws of resources.subscribers) {

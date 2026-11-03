@@ -4,9 +4,9 @@ C# files are served by the user's own csharp-ls, behind a gate on repository tru
 
 ## Manager
 
-| Manager                                                         | Binary      | Args                                               | Scope    | Flags and config                                                                                                                |
-| --------------------------------------------------------------- | ----------- | -------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| [csharp-lsp-manager.ts](../../src/server/csharp-lsp-manager.ts) | `csharp-ls` | `--loglevel information`, `--solution` when one is | worktree | no process until the gate opens; watched files; pulled settings (`csharp` section); code lenses dropped; `repoTrustRestriction` |
+| Manager                                                         | Binary      | Args                                           | Scope    | Flags and config                                                                                                                |
+| --------------------------------------------------------------- | ----------- | ---------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| [csharp-lsp-manager.ts](../../src/server/csharp-lsp-manager.ts) | `csharp-ls` | `--loglevel information`, `--solution`, always | worktree | no process until the gate opens; watched files; pulled settings (`csharp` section); code lenses dropped; `repoTrustRestriction` |
 
 Nothing is bundled, so there is no manifest under `scripts/language-servers/` and no third-party notice.
 
@@ -24,7 +24,7 @@ What makes a held connection decide again: `onRepoTrustChange` (a change restart
 
 ### Running sessions
 
-csharp-ls reads a project's references when it loads and does not read `project.assets.json` again, reported or not. So a rewritten assets file (`watchedIgnoredGlobs`) or a change in which projects are restored (`subscribeCSharpRestore`, which also covers layouts outside `obj`) restarts the session once writes have settled, and the reconnect goes through the gate, which may hold it. These restarts stop at a cap per worktree, for a build target that rewrites its assets file while loading. The base restarts a session when trust changes.
+csharp-ls reads a project's references when it loads and does not read `project.assets.json` again, reported or not. So a rewritten assets file (`watchedIgnoredGlobs`), a change in which projects are restored (`subscribeCSharpRestore`, which also covers layouts outside `obj`), or a discovered project list that differs from the generated solution's restarts the session once writes have settled, and the reconnect goes through the gate, which may hold it. These restarts share a cap per worktree, for a build target that rewrites its assets file while loading. The base restarts a session when trust changes.
 
 ## Finding csharp-ls
 
@@ -42,7 +42,7 @@ The spawn environment is `dotnetSpawnEnv` (no worktree directories on `PATH`) pl
 
 ## What loads
 
-`loadTarget` passes `--solution` for the worktree's chosen solution while discovery still lists it, else `automaticCSharpSolution` from [csharp-env.ts](../../src/server/csharp-env.ts): the single solution at the root, else the first solution by path, which is what csharp-ls's own search takes, so the choice is known and can be named in the notice. With no solution csharp-ls loads every project. `solutionProjects` reads a solution's text, or a `.slnf`'s JSON, for the projects it lists, so unrestored projects it does not list (samples beside a root solution) neither hold the gate nor get a notice. A failed project is only a `window/logMessage` from csharp-ls; `handleServerFrame` collects these and sends one warning naming them.
+`loadTarget` passes `--solution` for the worktree's chosen solution while discovery still lists it, else `automaticCSharpSolution` from [csharp-env.ts](../../src/server/csharp-env.ts): the single solution at the root, else the first solution by path, which is what csharp-ls's own search takes, so the choice is known and can be named in the notice. With no solution, csharp-ls still gets `--solution`, because without it csharp-ls searches the disk, past what `discoverCSharpProjects` lists. [csharp-projects-solution.ts](../../src/server/csharp-projects-solution.ts) writes one listing every discovered project, restored or not, to the state directory, so it loads exactly the projects Loxel discovered and what they reference. `openGate` writes it, since only the decision that opens the gate may. It is private, keeps its name for the worktree, is written only when its content changes, and goes when the worktree is removed; if it cannot be written the connection stays held. It is a `.sln` because SDKs before .NET 9 cannot read a `.slnx`, with each project in a solution folder of its own because a solution refuses two projects with the same file name. A path the format cannot hold (a double quote, a backslash or a line break) is left out and logged. A project loaded this way sees `$(SolutionDir)` as the state directory. `solutionProjects` reads a solution's text, or a `.slnf`'s JSON, for the projects it lists, so unrestored projects it does not list (samples beside a root solution) neither hold the gate nor get a notice. A failed project is only a `window/logMessage` from csharp-ls; `handleServerFrame` collects these and sends one warning naming them.
 
 ## Status item and solution choice
 
