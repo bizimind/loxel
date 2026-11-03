@@ -314,23 +314,60 @@ export function registeredDaemons(daemonDir: string): { pid: number; log: string
   );
 }
 
-/** Whether `pid` has the log open, which only the daemon the log was named for does. */
-async function holdsLog(pid: number, log: string): Promise<boolean> {
-  const open = await Bun.$`lsof -a -p ${pid} -Fn`.nothrow().quiet().text();
-  return open.split("\n").includes(`n${log}`);
+/** How long the one `lsof` may take: a closing session waits for it. */
+const LSOF_TIMEOUT_MS = 2000;
+
+/**
+ * The files each of `pids` has open, from one `lsof` that skips what could block, such as a hung
+ * network mount. Without `lsof`, as on Windows, none.
+ */
+function openFiles(pids: readonly number[]): Map<number, Set<string>> {
+  const open = new Map<number, Set<string>>();
+  if (pids.length === 0) return open;
+  try {
+    const { stdout } = Bun.spawnSync(["lsof", "-b", "-w", "-p", pids.join(","), "-Fpn"], {
+      stdin: "ignore",
+      stderr: "ignore",
+      timeout: LSOF_TIMEOUT_MS,
+    });
+    let files: Set<string> | undefined;
+    for (const line of stdout.toString().split("\n")) {
+      if (line.startsWith("p")) {
+        files = new Set();
+        open.set(Number(line.slice(1)), files);
+      } else if (line.startsWith("n")) files?.add(line.slice(1));
+    }
+  } catch {
+    // No `lsof`.
+  }
+  return open;
 }
 
 /**
- * Stop the daemons a closed server started, and only those, then forget their registry. The id in
- * a log's name may have gone to another process since. Without `lsof`, as on Windows, nothing
- * stops here and the idle timeout ends the daemon.
+ * The daemons registered in `daemonDir` that are still running, and only those: a daemon has its
+ * log open, and a process that took the id in the log's name since does not. Without `lsof`, as on
+ * Windows, there are none.
  */
-export async function stopGradleDaemons(daemonDir: string): Promise<void> {
-  if (!existsSync(daemonDir)) return;
-  const real = realpathSync(daemonDir);
-  for (const { pid, log } of registeredDaemons(real)) {
+export function liveGradleDaemons(daemonDir: string): number[] {
+  try {
+    if (!existsSync(daemonDir)) return [];
+    const daemons = registeredDaemons(realpathSync(daemonDir));
+    const open = openFiles(daemons.map(({ pid }) => pid));
+    return daemons.filter(({ pid, log }) => open.get(pid)?.has(log)).map(({ pid }) => pid);
+  } catch (err) {
+    logger.child("java-lsp").debug("Reading the Gradle daemon registry failed", { error: err });
+    return [];
+  }
+}
+
+/**
+ * Stop the daemons a server started, and only those, then forget their registry. A daemon left
+ * running without `lsof`, as on Windows, leaves on its idle timeout.
+ */
+export function stopGradleDaemons(daemonDir: string): void {
+  for (const pid of liveGradleDaemons(daemonDir)) {
     try {
-      if (await holdsLog(pid, log)) process.kill(pid, "SIGTERM");
+      process.kill(pid, "SIGTERM");
     } catch (err) {
       logger.child("java-lsp").debug("Stopping a Gradle daemon failed", { pid, error: err });
     }

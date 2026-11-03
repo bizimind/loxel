@@ -29,6 +29,7 @@ import {
   projectIssue,
   registeredDaemons,
   setJavaProjectIssue,
+  liveGradleDaemons,
   stopGradleDaemons,
   trustedImportSettings,
   wrapperDistribution,
@@ -346,7 +347,7 @@ describe("stopGradleDaemons", () => {
     const placeholder = path.join(registry, "9.8.2", "held.log");
     const daemon = holding(placeholder);
     renameSync(placeholder, path.join(registry, "9.8.2", `daemon-${daemon.pid}.out.log`));
-    await stopGradleDaemons(registry);
+    stopGradleDaemons(registry);
     expect(await daemon.exited).toBe(143);
     expect(existsSync(registry)).toBe(false);
   });
@@ -354,7 +355,7 @@ describe("stopGradleDaemons", () => {
   test("leaves a process alone that took the id of a daemon that is gone", async () => {
     const other = Bun.spawn(["sleep", "60"]);
     const registry = dir({ [`9.8.2/daemon-${other.pid}.out.log`]: "" });
-    await stopGradleDaemons(registry);
+    stopGradleDaemons(registry);
     expect(other.exitCode).toBeNull();
     expect(existsSync(registry)).toBe(false);
     other.kill();
@@ -369,7 +370,7 @@ describe("stopGradleDaemons", () => {
     const { PATH } = process.env;
     process.env.PATH = dir();
     try {
-      await stopGradleDaemons(registry);
+      stopGradleDaemons(registry);
     } finally {
       process.env.PATH = PATH;
     }
@@ -378,14 +379,28 @@ describe("stopGradleDaemons", () => {
     await daemon.exited;
   });
 
-  test("carries on past a daemon that has already gone", async () => {
+  test("carries on past a daemon that has already gone", () => {
     const registry = dir({ "9.8.2/daemon-999999.out.log": "" });
-    await stopGradleDaemons(registry);
+    stopGradleDaemons(registry);
     expect(existsSync(registry)).toBe(false);
   });
 
-  test("has nothing to do without a registry", async () => {
-    await stopGradleDaemons(path.join(scratch, "missing"));
+  test("has nothing to do without a registry", () => {
+    stopGradleDaemons(path.join(scratch, "missing"));
+  });
+
+  test("lists as live only the processes that hold their logs", async () => {
+    const registry = dir({ "9.8.2/.keep": "" });
+    const placeholder = path.join(registry, "9.8.2", "held.log");
+    const daemon = holding(placeholder);
+    renameSync(placeholder, path.join(registry, "9.8.2", `daemon-${daemon.pid}.out.log`));
+    const other = Bun.spawn(["sleep", "60"]);
+    writeFileSync(path.join(registry, "9.8.2", `daemon-${other.pid}.out.log`), "");
+    expect(liveGradleDaemons(registry)).toEqual([daemon.pid]);
+    expect(liveGradleDaemons(path.join(scratch, "missing"))).toEqual([]);
+    daemon.kill();
+    other.kill();
+    await Promise.all([daemon.exited, other.exited]);
   });
 });
 

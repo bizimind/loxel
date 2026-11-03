@@ -32,6 +32,7 @@ import {
   type ImportPlan,
   type ImportState,
   isProjectFile,
+  liveGradleDaemons,
   MAX_SCANNED_DIRS,
   mayCarryImportSignal,
   NOT_PROJECT_DIRS,
@@ -42,6 +43,7 @@ import {
   stopGradleDaemons,
   trustedImportSettings,
 } from "./java-project-import";
+import { killProcessTrees } from "./kill-process-tree";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
@@ -207,9 +209,9 @@ export function jdtlsDataDir(wtPath: string, repoTrusted = false): string {
 }
 
 /** Forget a trusted server's workspace directory, after the daemons listed in it. */
-async function deleteTrustedJdtlsData(wtPath: string): Promise<void> {
+function deleteTrustedJdtlsData(wtPath: string): void {
   const data = jdtlsDataDir(wtPath, true);
-  await stopGradleDaemons(gradleDaemonDir(data));
+  stopGradleDaemons(gradleDaemonDir(data));
   rmSync(data, { recursive: true, force: true });
 }
 
@@ -217,9 +219,7 @@ async function deleteTrustedJdtlsData(wtPath: string): Promise<void> {
 function deleteJdtlsData(wtPath: string): void {
   try {
     rmSync(jdtlsDataDir(wtPath), { recursive: true, force: true });
-    void deleteTrustedJdtlsData(wtPath).catch((err: unknown) => {
-      logger.child("java-lsp").debug("Deleting the workspace directory failed", { error: err });
-    });
+    deleteTrustedJdtlsData(wtPath);
   } catch (err) {
     // Its server may still be writing; `onSessionClosed` deletes it once the server exits.
     logger.child("java-lsp").debug("Deleting the workspace directory failed", { error: err });
@@ -515,15 +515,36 @@ export class JavaLspManager extends WorktreeLspManager {
     this.jdkSubscriptions.delete(session);
     this.importStates.delete(session);
     if (repoTrusted) setJavaProjectIssue(wtPath, null);
-    const exited = proc.exited.then(async () => {
-      // Gradle's daemons outlive the server that started them.
-      if (repoTrusted) await stopGradleDaemons(gradleDaemonDir(jdtlsDataDir(wtPath, true)));
-      if (repoTrusted && !isRepoTrusted(wtPath)) await deleteTrustedJdtlsData(wtPath);
-      if (this.exiting.get(wtPath) === exited) this.exiting.delete(wtPath);
-      // The worktree went away while its server ran, which could write until it stopped.
-      if (!existsSync(wtPath)) deleteJdtlsData(wtPath);
+    const daemonDir = gradleDaemonDir(jdtlsDataDir(wtPath, true));
+    this.endProcessTrees(session, daemonDir);
+    const exited = proc.exited.then(() => {
+      try {
+        // Usually none are left by now; one that started as the server was ended may be.
+        if (repoTrusted) stopGradleDaemons(daemonDir);
+        if (repoTrusted && !isRepoTrusted(wtPath)) deleteTrustedJdtlsData(wtPath);
+        // The worktree went away while its server ran, which could write until it stopped.
+        if (!existsSync(wtPath)) deleteJdtlsData(wtPath);
+      } catch (err) {
+        logger.child("java-lsp").warn("Cleaning up after the server failed", { error: err });
+      } finally {
+        if (this.exiting.get(wtPath) === exited) this.exiting.delete(wtPath);
+      }
     });
     this.exiting.set(wtPath, exited);
+  }
+
+  /**
+   * End the server, the Gradle daemons it started, and every process below them, before the server
+   * is asked to stop. A project's build code can start processes in process groups and sessions of
+   * their own, which neither stop reaches. The daemons are detached from the server, so each is a
+   * root of its own, found while it still runs. Once the server is gone so is its tree, and its
+   * number may be someone else's. Killing rather than asking loses nothing: jdtls saves no state as
+   * it is asked to stop, and Gradle recovers its caches from a daemon that died.
+   */
+  private endProcessTrees({ proc, repoTrusted }: WtLspSession, daemonDir: string): void {
+    const server = proc.exitCode === null && proc.signalCode === null ? [proc.pid] : [];
+    const roots = [...server, ...(repoTrusted ? liveGradleDaemons(daemonDir) : [])];
+    if (roots.length > 0) killProcessTrees(roots);
   }
 
   protected override onClientInitialized(session: WtLspSession): void {
@@ -537,7 +558,7 @@ export class JavaLspManager extends WorktreeLspManager {
     void getJavaEnv(session.wtPath);
   }
 
-  // Stopping Gradle's daemons, which would otherwise wait out their idle timeout, comes after this.
+  // Deleting a revoked repository's workspace directory comes after this.
   override async destroy(): Promise<void> {
     await super.destroy();
     await Promise.all(this.exiting.values());

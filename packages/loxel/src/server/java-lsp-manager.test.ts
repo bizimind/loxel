@@ -1,9 +1,10 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -449,5 +450,121 @@ describe("JavaLspManager, trusted", () => {
     manager.notifyWatchedFilesChanged(wtPath, [path.join(wtPath, "pom.xml")]);
     expect(manager.settled(session)).toBeUndefined();
     expect(written).toEqual([]);
+  });
+});
+
+describe("JavaLspManager, closing a session", () => {
+  class ClosingManager extends JavaLspManager {
+    close(session: WtLspSession): void {
+      this.onSessionClosed(session);
+    }
+  }
+
+  /** Every process a test started, ended here whatever the test's outcome. */
+  const started: number[] = [];
+  afterEach(() => {
+    for (const pid of started.splice(0)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  });
+
+  /** Neither gone, nor killed and only waiting to be collected. */
+  function isRunning(pid: number): boolean {
+    const state = Bun.spawnSync(["ps", "-o", "stat=", "-p", String(pid)]).stdout.toString();
+    return state.trim() !== "" && !state.startsWith("Z");
+  }
+
+  /** A grandchild's end raises no event here, so this asks `ps` until it is gone. */
+  async function untilGone(pid: number): Promise<void> {
+    while (isRunning(pid)) await Bun.sleep(20);
+  }
+
+  /** The first pid a stream prints. */
+  async function pidPrinted(stream: ReadableStream<Uint8Array>): Promise<number> {
+    let text = "";
+    for await (const chunk of stream) {
+      text += Buffer.from(chunk).toString();
+      if (text.includes("\n")) break;
+    }
+    return Number(text.trim());
+  }
+
+  /** A shell that starts a `sleep` in a process group of its own, and prints its pid. */
+  const TREE = "(set -m; /bin/sleep 30 & echo $! >&2; wait) & wait";
+
+  /** A stand-in for jdtls, whose build started a process in another process group. */
+  async function server() {
+    const proc = Bun.spawn(["/bin/sh", "-c", TREE], { stdin: "ignore", stderr: "pipe" });
+    started.push(proc.pid);
+    const child = await pidPrinted(proc.stderr);
+    started.push(child);
+    return { proc, child };
+  }
+
+  /** A stand-in for one of the worktree's Gradle daemons, holding its log, with a build child. */
+  async function daemon(registry: string) {
+    mkdirSync(path.join(registry, "9.8.2"), { recursive: true });
+    const placeholder = path.join(registry, "9.8.2", "held.log");
+    const proc = Bun.spawn(["/bin/sh", "-c", TREE], {
+      stdin: "ignore",
+      stdout: Bun.file(placeholder),
+      stderr: "pipe",
+    });
+    started.push(proc.pid);
+    const child = await pidPrinted(proc.stderr);
+    started.push(child);
+    renameSync(placeholder, path.join(registry, "9.8.2", `daemon-${proc.pid}.out.log`));
+    return { proc, child };
+  }
+
+  function session(proc: Bun.Subprocess, repoTrusted: boolean) {
+    const wtPath = realpathSync(mkdtempSync(path.join(scratch, "wt-close-")));
+    const registry = path.join(jdtlsDataDir(wtPath, true), "gradle-daemons");
+    const value = { ws: {}, proc, wtPath, repoTrusted } as unknown as WtLspSession;
+    return { session: value, registry };
+  }
+
+  test("ends the server, its daemons and what both started, and forgets the registry", async () => {
+    const jdtls = await server();
+    const { session: closed, registry } = session(jdtls.proc, true);
+    const gradle = await daemon(registry);
+    const manager = new ClosingManager();
+    manager.close(closed);
+    await Promise.all([
+      jdtls.proc.exited,
+      gradle.proc.exited,
+      untilGone(jdtls.child),
+      untilGone(gradle.child),
+    ]);
+    expect(jdtls.proc.signalCode).toBe("SIGKILL");
+    expect(gradle.proc.signalCode).toBe("SIGKILL");
+    await manager.destroy();
+    expect(existsSync(registry)).toBe(false);
+  });
+
+  test("ends a dead server's daemons, and leaves a process that took a stale entry's id", async () => {
+    const jdtls = Bun.spawn(["/usr/bin/true"]);
+    await jdtls.exited;
+    const { session: closed, registry } = session(jdtls, true);
+    const gradle = await daemon(registry);
+    const bystander = Bun.spawn(["/bin/sleep", "30"]);
+    started.push(bystander.pid);
+    writeFileSync(path.join(registry, "9.8.2", `daemon-${bystander.pid}.out.log`), "");
+    new ClosingManager().close(closed);
+    await Promise.all([gradle.proc.exited, untilGone(gradle.child)]);
+    expect(isRunning(bystander.pid)).toBe(true);
+  });
+
+  test("ends a restricted server's tree, without reading the trusted registry", async () => {
+    const jdtls = await server();
+    const { session: closed, registry } = session(jdtls.proc, false);
+    const gradle = await daemon(registry);
+    new ClosingManager().close(closed);
+    await Promise.all([jdtls.proc.exited, untilGone(jdtls.child)]);
+    expect(isRunning(gradle.proc.pid)).toBe(true);
   });
 });
