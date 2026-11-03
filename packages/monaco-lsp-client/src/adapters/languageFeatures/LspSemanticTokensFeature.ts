@@ -4,6 +4,7 @@ import type { SemanticTokensRegistrationOptions } from "../../types";
 import { capabilities, TokenFormat, api } from "../../types";
 import type { IDisposable } from "../../utils";
 import { Disposable } from "../../utils";
+import { CancellationError } from "../LspCancellableRequests";
 import { LspConnection } from "../LspConnection";
 import { toMonacoLanguageSelector } from "./common";
 
@@ -232,15 +233,20 @@ export class LspSemanticTokensProvider implements monaco.languages.DocumentSeman
       return { resultId: undefined, data: new Uint32Array(0) };
     }
 
-    // Tokens describe the content the request was made for. Monaco keeps the edits made while the
-    // request is out, shifts the answer's tokens across them and asks again, so the answer must
-    // not be swapped for a newer one: Monaco would shift that across the same edits a second time
-    // and paint tokens off their text, past line ends ("Invalid Semantic Tokens Data").
+    // An answer may only be painted for the content it was made for. Monaco shifts an answer
+    // across the edits made while the request was out, which suits a server answering for the
+    // request's content, but rust-analyzer can answer for newer content, and such an answer
+    // would be shifted across edits it already holds, landing tokens off their text and past
+    // line ends ("Invalid Semantic Tokens Data"). Which content an answer is for is not known, so
+    // an answer the model moved past is dropped as cancelled: Monaco keeps its shifted tokens and
+    // asks again. Re-requesting here instead would hand Monaco newer tokens to shift twice.
+    const version = model.getVersionId();
     const result = await this._client.server.textDocumentSemanticTokensFull({
       textDocument: translated.textDocument,
     });
 
     if (!result || token.isCancellationRequested || model.isDisposed()) return null;
+    if (model.getVersionId() !== version) throw new CancellationError();
 
     const mask = this._modifierMask;
     // Each token is five integers, the last of them its modifier bits.

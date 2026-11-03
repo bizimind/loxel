@@ -82,13 +82,13 @@ describe("LspSemanticTokensProvider", () => {
     expect(tokens).toMatchObject({ data: new Uint32Array([0, 0, 1, 2, 0b011]) });
   });
 
-  test("answers with the tokens of the request even when the model changed meanwhile", async () => {
-    // Monaco shifts the answer across the edits made while it was out: an answer for the newer
-    // content would be shifted across them twice.
+  test("drops an answer the model moved past, without asking again itself", async () => {
+    // Which content the answer is for is not known (rust-analyzer can answer for newer content),
+    // so Monaco keeps its own shifted tokens and asks again.
     const { provider, model, requests, edit, whenRequested } = setup([0, 0, 1, 2, 0]);
     whenRequested(edit);
-    const tokens = await provider.provideDocumentSemanticTokens(model, null, cancellation);
+    const answer = provider.provideDocumentSemanticTokens(model, null, cancellation);
+    await expect(answer).rejects.toMatchObject({ name: "Canceled", message: "Canceled" });
     expect(requests).toHaveLength(1);
-    expect(tokens).toMatchObject({ data: new Uint32Array([0, 0, 1, 2, 0]) });
   });
 });
