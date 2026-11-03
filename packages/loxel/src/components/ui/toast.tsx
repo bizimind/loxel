@@ -1,5 +1,5 @@
 import { XIcon } from "lucide-react";
-import { useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
@@ -73,14 +73,33 @@ export function ToastContainer() {
 }
 
 function ToastItem({ toast }: { toast: Toast }) {
+  // While the pointer or keyboard focus is on a toast it stays up, so a long message can be read.
+  // The two are tracked apart, so one of them ending does not restart the countdown under the other.
+  const hovered = useRef(false);
+  const focused = useRef(false);
+  const syncDismissTimer = () => {
+    if (hovered.current || focused.current) clearDismissTimer(toast.id);
+    else scheduleDismiss(toast.id);
+  };
+
   return (
-    // While the pointer or keyboard focus is on a toast it stays up, so a long message can be read.
     <div
-      onMouseEnter={() => clearDismissTimer(toast.id)}
-      onMouseLeave={() => scheduleDismiss(toast.id)}
-      onFocus={() => clearDismissTimer(toast.id)}
+      onMouseEnter={() => {
+        hovered.current = true;
+        syncDismissTimer();
+      }}
+      onMouseLeave={() => {
+        hovered.current = false;
+        syncDismissTimer();
+      }}
+      onFocus={() => {
+        focused.current = true;
+        syncDismissTimer();
+      }}
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) scheduleDismiss(toast.id);
+        if (e.currentTarget.contains(e.relatedTarget)) return;
+        focused.current = false;
+        syncDismissTimer();
       }}
       className={cn(
         "animate-in slide-in-from-bottom-2 fade-in bg-popover border-border flex max-w-80 items-start gap-2 rounded-lg border px-3 py-2 shadow-lg",

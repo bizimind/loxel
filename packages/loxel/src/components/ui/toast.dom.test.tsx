@@ -62,6 +62,30 @@ describe("toasts", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  test("stays up until both the pointer and keyboard focus have left it", () => {
+    render(<ToastContainer />);
+    act(() => showToast("Held two ways"));
+    const toast = screen.getByRole("alert").parentElement!;
+    const dismiss = screen.getByRole("button", { name: "Dismiss" });
+
+    // Focus first, then the pointer passes over and leaves: focus still holds it.
+    act(() => dismiss.focus());
+    fireEvent.mouseEnter(toast);
+    fireEvent.mouseLeave(toast);
+    act(() => jest.advanceTimersByTime(60_000));
+    expect(screen.getByRole("alert")).toBeDefined();
+
+    // The pointer comes back, then focus leaves: the pointer still holds it.
+    fireEvent.mouseEnter(toast);
+    act(() => dismiss.blur());
+    act(() => jest.advanceTimersByTime(60_000));
+    expect(screen.getByRole("alert")).toBeDefined();
+
+    fireEvent.mouseLeave(toast);
+    act(() => jest.advanceTimersByTime(5_000));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   test("shows a toast raised before the container mounted", () => {
     showToast("Raised early");
     render(<ToastContainer />);
