@@ -342,27 +342,28 @@ export function prepareConfig(
     if (name === "cacheFile") return "";
     const expand = (value: string) =>
       value.replace(/\$\{([^}]+)\}/g, (ref, key: string) => properties[key] ?? ref);
-    if (name === "tabWidth") tabWidth ??= positiveInteger(expand(attrs.get("value") ?? ""));
     const values = [attrs.get("value"), attrs.get("default")].flatMap((v) =>
       v ? [expand(v)] : [],
     );
-    if (values.some(namesUnproxiedUrl)) refused = UNFETCHED_NOTICE;
+    if (values.some(namesUnproxiedUrl)) refused ??= UNFETCHED_NOTICE;
+    // Checkstyle takes `default` whole when `value` names a property that isn't set, and only then.
+    const expanded = expand(attrs.get("value") ?? "");
+    const fallback = attrs.get("default");
+    const used = expanded.includes("${") && fallback !== undefined ? "default" : "value";
+    const effective = used === "default" ? expand(fallback ?? "") : expanded;
+    if (name === "tabWidth") tabWidth ??= positiveInteger(effective);
     if (!name || !FILE_PROPERTIES.has(name)) return whole;
     let changed = false;
-    // Checkstyle takes `default` whole when `value` names a property that isn't set.
-    for (const key of ["value", "default"]) {
-      const written = attrs.get(key);
-      if (written === undefined) continue;
-      const entries = (name === "headerFiles" ? written.split(",") : [written]).map((entry) => {
-        const file = localFile(expand(entry.trim()), baseDirs);
-        if (!file) return entry;
-        if (name === XML_FILE_PROPERTY) refused ??= refusedXml(readConfigFile(file) ?? "");
-        if (file !== entry.trim()) changed = true;
-        return file;
-      });
-      attrs.set(key, entries.join(","));
-    }
+    // Split after expanding, as Checkstyle does, so a property can hold a list.
+    const entries = (name === "headerFiles" ? effective.split(",") : [effective]).map((entry) => {
+      const file = localFile(entry.trim(), baseDirs);
+      if (!file) return entry;
+      if (name === XML_FILE_PROPERTY) refused ??= refusedXml(readConfigFile(file) ?? "");
+      if (file !== entry.trim()) changed = true;
+      return file;
+    });
     if (!changed) return whole;
+    attrs.set(used, entries.join(","));
     return `<property${[...attrs].map(([key, v]) => ` ${key}="${xmlEscape(v)}"`).join("")}/>`;
   });
   if (refused) return { refused };

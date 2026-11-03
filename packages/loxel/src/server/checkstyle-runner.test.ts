@@ -284,6 +284,31 @@ describe("prepareConfig", () => {
     );
   });
 
+  test("a default counts only when value names a property that isn't set", async () => {
+    await inDir({
+      "stale.xml": `<!DOCTYPE suppressions SYSTEM "ftp://192.0.2.1/x.dtd"><suppressions/>`,
+    });
+    for (const [attributes, properties] of [
+      ['name="file" value="s.xml" default="stale.xml"', {}],
+      ['name="file" value="${p}" default="stale.xml"', { p: "s.xml" }],
+    ] as const) {
+      expect("text" in prepareConfig(filter(attributes), properties, [dir])).toBe(true);
+    }
+    expect(
+      "refused" in
+        prepareConfig(filter('name="file" value="${unset}" default="stale.xml"'), {}, [dir]),
+    ).toBe(true);
+  });
+
+  test("headerFiles from a property holding a list", async () => {
+    await inDir({ "h1.txt": "a", "h2.txt": "b" });
+    expect(
+      textOf(
+        prepareConfig(filter('name="headerFiles" value="${hs}"'), { hs: "h1.txt,h2.txt" }, [dir]),
+      ),
+    ).toBe(filter(`name="headerFiles" value="${join(dir, "h1.txt")},${join(dir, "h2.txt")}"`));
+  });
+
   test("leaves a config with nothing to change as it is", async () => {
     await inDir();
     const text = `<module name="Checker"><property name="severity" value="warning"/></module>`;
@@ -402,6 +427,8 @@ describe("prepareConfig", () => {
     expect(width(tab("x"))).toBe(8);
     expect(width(`<!-- ${tab("2")} -->`)).toBe(8);
     expect(width(`<!-- ${tab("2")} -->${tab("4")}`)).toBe(4);
+    expect(width(`<property name="tabWidth" value="\${t}" default="4"/>`)).toBe(4);
+    expect(width(`<property name="tabWidth" value="\${t}" default="4"/>`, { t: "2" })).toBe(2);
     expect(width("<module/>")).toBe(8);
   });
 
