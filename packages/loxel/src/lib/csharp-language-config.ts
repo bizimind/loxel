@@ -2,7 +2,7 @@ import * as monaco from "monaco-editor";
 import { conf as typescriptConf } from "monaco-editor/languages/definitions/typescript/typescript.js";
 
 import { frontendLog } from "./frontend-logger";
-import { stepOverTripleQuotesIn } from "./python-language-config";
+import { stepOverTripleQuotesIn } from "./triple-quote-step-over";
 
 const log = frontendLog.child("ui");
 

@@ -214,7 +214,7 @@ async function deleteTrustedJdtlsData(wtPath: string): Promise<void> {
 }
 
 /** Forget a removed worktree's workspace directories. */
-export function deleteJdtlsData(wtPath: string): void {
+function deleteJdtlsData(wtPath: string): void {
   try {
     rmSync(jdtlsDataDir(wtPath), { recursive: true, force: true });
     void deleteTrustedJdtlsData(wtPath).catch((err: unknown) => {
@@ -611,6 +611,10 @@ export class JavaLspManager extends WorktreeLspManager {
     };
     this.importStates.set(session, state);
     return state;
+  }
+
+  forgetWorktree(wtPath: string): void {
+    deleteJdtlsData(wtPath);
   }
 
   // Generated sources only mean something to a server that loads projects.

@@ -5,7 +5,6 @@ import * as monaco from "monaco-editor";
 
 import { getHighlighter } from "./highlighter";
 import { registerLanguageConfiguration } from "./kotlin-language-config";
-import { registerLanguageConfiguration as registerPythonLanguageConfiguration } from "./python-language-config";
 import { resolveLanguage } from "./resolve-language";
 
 /** Internal model surface (not in monaco.d.ts) used to tokenize synchronously. */
@@ -33,8 +32,6 @@ describe("Kotlin editing in Monaco", () => {
       },
     );
     const registered = registerLanguageConfiguration();
-    // Owns the triple-quote step-over hook; it never resolves here since no Python model appears.
-    void registerPythonLanguageConfiguration();
     // The app tokenizes with Shiki rather than Monarch, and `notIn` reads the resulting token types.
     shikiToMonaco(await getHighlighter(), monaco);
     container = document.createElement("div");

@@ -15,9 +15,9 @@ import { isRecord } from "@/lib/is-record";
 
 import { getGoChoice } from "./go-toolchain-store";
 import { logger } from "./logger";
-import { pathOutsideWorktree } from "./python-env";
+import { isInside, pathOutsideWorktree } from "./path-containment";
 import { buildSpawnEnv } from "./shell-env";
-import { isInside, isShippedByRepo } from "./shipped-by-repo";
+import { isShippedByRepo } from "./shipped-by-repo";
 import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");

@@ -6,6 +6,7 @@ import { findFileAbove, isDirectory } from "@/fs-utils";
 
 import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
+import { isInside } from "./path-containment";
 import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");
@@ -278,9 +279,4 @@ export async function runGit(
   } catch {
     return { exitCode: GIT_FAILED, stdout: "" };
   }
-}
-
-export function isInside(child: string, parent: string): boolean {
-  const relative = path.relative(parent, child);
-  return !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..";
 }

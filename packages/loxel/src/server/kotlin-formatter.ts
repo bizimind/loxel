@@ -13,9 +13,9 @@ import {
   type FormatterSpawnOptions,
   type LanguageFormatter,
 } from "./language-formatter";
-import { pathOutsideWorktree } from "./python-env";
+import { isInside, pathOutsideWorktree } from "./path-containment";
 import { buildSpawnEnv } from "./shell-env";
-import { isInside, isShippedByRepo } from "./shipped-by-repo";
+import { isShippedByRepo } from "./shipped-by-repo";
 
 export const kotlinFormatter: LanguageFormatter = {
   extensions: ["kt", "kts"],
