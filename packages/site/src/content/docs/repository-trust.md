@@ -20,7 +20,7 @@ Trust a repository only if you would be willing to run its code yourself. Langua
 
 ## Stop trusting a repository
 
-A trusted repository shows a shield in the status bar. Click it, or run **Manage Repository Trust**, to stop trusting it. Language servers that depend on trust restart restricted. Processes left behind by a language server that crashed, such as a build it started, aren't stopped and run until they finish. A process that the repository's code started and detached to run on its own can also keep running after you stop trusting the repository.
+A trusted repository shows a shield in the status bar. Click it, or run **Manage Repository Trust**, to stop trusting it. Language servers that depend on trust restart restricted. When a language server that runs builds (Rust, C#, Go) crashes, Loxel also stops the builds it had running, except one started in the few seconds before the crash. A process that the repository's code started and detached to run on its own can keep running after you stop trusting the repository.
 
 ## What trust covers
 
