@@ -755,6 +755,15 @@ describe("which files a declaration formats", () => {
     expect(await inScope(files, "lib/A.java")).toBe(true);
   });
 
+  test("a trailing comma before a closing parenthesis is just style", async () => {
+    const java = 'target(\n  "src/main/java/**/*.java",\n)\ntargetExclude(\n  "**/gen/**",\n)\n';
+    expect(await inScope({ "build.gradle.kts": gradle(java) }, "src/main/java/A.java")).toBe(true);
+    await clean();
+    expect(await inScope({ "build.gradle.kts": gradle(java) }, "src/main/java/gen/A.java")).toBe(
+      false,
+    );
+  });
+
   test("a list that ends in a comma was not read whole", async () => {
     const java = "targetExclude 'a/**',\n  someVariable\n";
     expect(await inScope({ "build.gradle": gradle(java) }, "src/main/java/A.java")).toBe(false);
@@ -817,10 +826,14 @@ describe("which files a declaration formats", () => {
     expect(await inScope({ "pom.xml": spotless }, "src/main/java/A.java")).toBe(true);
   });
 
-  test("the fmt plugin's settings that move its files format nothing", async () => {
+  test.each([
+    "<sourceDirectory>gen</sourceDirectory>",
+    "<filesNamePattern>Foo.java</filesNamePattern>",
+    "<filesPathPattern>.*/api/.*</filesPathPattern>",
+  ])("the fmt plugin's %s formats nothing", async (setting) => {
     const pom = fmtPom(
       "com.spotify.fmt",
-      `<configuration><sourceDirectory>gen</sourceDirectory></configuration>
+      `<configuration>${setting}</configuration>
        <dependencies><dependency><artifactId>google-java-format</artifactId><version>1.30.0</version></dependency></dependencies>`,
     );
     expect(await inScope({ "pom.xml": pom }, "src/main/java/A.java")).toBe(false);

@@ -208,6 +208,7 @@ const FMT_SCOPE_SETTINGS = [
   "testSourceDirectory",
   "additionalSourceDirectories",
   "filesNamePattern",
+  "filesPathPattern",
   "skipSourceDirectory",
   "skipTestSourceDirectory",
 ];
@@ -561,8 +562,10 @@ function gradleGlobs(blocks: string, name: string): string[] | null | undefined 
   const argumentText = paren
     ? blocks.slice(after + paren[0].length, closingParen(blocks, after + paren[0].length))
     : groovy?.[1];
-  // Ending in a comma, the list was cut short, and a lost exclude would be formatted.
-  if (argumentText === undefined || argumentText.trimEnd().endsWith(",")) return undefined;
+  // Without parentheses, ending in a comma means the list was cut short, losing an exclude.
+  if (argumentText === undefined || (!paren && argumentText.trimEnd().endsWith(","))) {
+    return undefined;
+  }
   const globs = argumentText
     .split(",")
     .map((argument) => argument.trim())
