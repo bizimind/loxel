@@ -22,6 +22,7 @@ const { MYPY_REPO_TRUST_RESTRICTION: RESTRICTION, MypyLspManager } =
   await import("./mypy-lsp-manager");
 const { getRepoTrustStatus, onRepoTrustStatusChange, setRepoTrusted } =
   await import("./repo-trust");
+const { setPythonOverride } = await import("./python-override-store");
 const { fileUri } = await import("./lsp-file-uri");
 
 // Drives the manager the way the Monaco client does, against a worktree whose `.venv` holds a
@@ -138,17 +139,23 @@ async function makeWorktree(
     await mkdir(join(wt, name, ".."), { recursive: true });
     await writeFile(join(wt, name), content);
   }
-  const bin = join(wt, ".venv", "bin");
+  await makeVenv(join(wt, ".venv"), withMypy);
+  if (trusted) setRepoTrusted(wt, true);
+  return wt;
+}
+
+/** A venv at `dir` whose `python` runs the real one, with the stand-in dmypy unless `withMypy` is false. */
+async function makeVenv(dir: string, withMypy = true): Promise<string> {
+  const bin = join(dir, "bin");
   await mkdir(bin, { recursive: true });
-  await writeFile(join(wt, ".venv", "pyvenv.cfg"), "home = /usr/bin\n");
+  await writeFile(join(dir, "pyvenv.cfg"), "home = /usr/bin\n");
   await writeFile(join(bin, "python"), `#!/bin/sh\nexec '${python3}' "$@"\n`);
   await chmod(join(bin, "python"), 0o755);
   if (withMypy) {
     await writeFile(join(bin, "dmypy"), FAKE_DMYPY);
     await chmod(join(bin, "dmypy"), 0o755);
   }
-  if (trusted) setRepoTrusted(wt, true);
-  return wt;
+  return join(bin, "python");
 }
 
 /** Resolves once `wtPath`'s repository reports the mypy restriction. */
@@ -387,6 +394,10 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
       "a/.dmypy-output": `${report("main.py", 1, "In A")}\n`,
       "b/mypy.ini": "[mypy]\n",
     });
+    // The environment lives outside the folder being replaced, so replacing it changes nothing the
+    // environment's watch follows, and only the trust check can notice.
+    await rm(join(wt, ".venv"), { recursive: true });
+    setPythonOverride(wt, await makeVenv(join(root ?? wt, "env")));
     manager = new MypyLspManager();
     const client = new FakeClient(manager);
     await client.start(wt);
@@ -397,9 +408,8 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
     );
 
     // A copy in its place is another folder to trust, and nothing announces that.
-    await cp(wt, `${wt}.copy`, { recursive: true });
-    await rm(wt, { recursive: true });
-    await rename(`${wt}.copy`, wt);
+    await rename(wt, `${wt}.old`);
+    await cp(`${wt}.old`, wt, { recursive: true });
     const before = client.received.length;
     client.open(join(wt, "b", "main.py"));
     const cleared = await client.waitFor(client.diagnosticsFor(inA), before);
