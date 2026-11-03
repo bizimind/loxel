@@ -85,7 +85,10 @@ A plain click on a link opens it in the same tab. Links you open in a new tab or
 
 - **`Cmd`-click or middle-click** opens the link in a background tab and keeps you on the current page, so you can hold `Cmd` and click several links in a row. The new tabs keep the order you clicked them in.
 - **`Cmd+Shift`-click** opens the link in a new tab and switches to it.
-- **Links that open a new window** (`target="_blank"`, or a page opening a window when you click something) open in a new tab and switch to it. Windows a page tries to open without you clicking or typing are blocked, and each click opens at most one tab.
+- **Links that open a new window** (`target="_blank"`, or a page opening a window when you click something) open in a new tab and switch to it.
+- **Popup windows** a page opens at a set size, such as a "Sign in with Google" window, open as a separate small window over Loxel, so the sign-in can finish and return to the page. The window's title shows the site it belongs to, and `Cmd+W` closes it.
+
+Windows a page tries to open without you clicking or typing are blocked, and each click opens at most one tab or popup.
 
 Right-click in a page for a context menu that matches what you clicked:
 
