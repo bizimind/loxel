@@ -259,6 +259,29 @@ describe("fmt-maven-plugin", () => {
     });
   });
 
+  test("a module re-declaring the plugin inherits its parent's applied settings", async () => {
+    const config = (body: string) =>
+      fmtPom(
+        "com.spotify.fmt",
+        `${body}<dependencies><dependency><artifactId>google-java-format</artifactId><version>1.30.0</version></dependency></dependencies>`,
+      );
+    const parent =
+      "<configuration><style>aosp</style><skipSortingImports>true</skipSortingImports></configuration>";
+    expect(
+      await declared({ "pom.xml": config(parent), "a/pom.xml": config("") }, "a/src/main/java"),
+    ).toMatchObject({ flags: ["--aosp", "--skip-sorting-imports", REFLOW] });
+    await rm(wt ?? "", { recursive: true, force: true });
+    expect(
+      await declared(
+        {
+          "pom.xml": config("<configuration><style>${fmt.style}</style></configuration>"),
+          "a/pom.xml": config(""),
+        },
+        "a/src/main/java",
+      ),
+    ).toEqual({ notice: expect.stringContaining("options") });
+  });
+
   test("a dependency override pins the version, and strings can be set to reflow", async () => {
     const body = `<configuration><skipReflowingLongStrings>false</skipReflowingLongStrings></configuration>
       <dependencies><dependency>

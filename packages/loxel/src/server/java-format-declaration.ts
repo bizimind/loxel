@@ -122,7 +122,11 @@ export function findJavaFormatDeclaration(
     const signal = hasKind(found, "plugin-aliases")
       ? palantirByAlias(found.aliases, dirs.slice(i))
       : hasKind(found, "fmt-plugin")
-        ? fmtMavenSignal([found.plugin, ...managedFmtPlugins(dirs.slice(i))])
+        ? fmtMavenSignal([
+            found.plugin,
+            ...appliedFmtPlugins(dirs.slice(i + 1)),
+            ...managedFmtPlugins(dirs.slice(i)),
+          ])
         : found;
     if (
       !signal ||
@@ -223,14 +227,17 @@ const OTHER_SPOTLESS_JAVA_ELEMENT = /<(eclipse|prettier|clangFormat|greclipse)\b
 
 /** What the POM's applied plugins say. A `pluginManagement` entry alone applies to no module. */
 function appliedMavenSignal(path: string): BuildSignal | null {
-  const xml = readPom(path);
+  return pluginsSignal(withoutPluginManagement(readPom(path)));
+}
+
+function withoutPluginManagement(xml: string): string {
   let applied = "";
   let from = 0;
   for (const { start, end } of xmlBlocks(xml, "pluginManagement")) {
     applied += xml.slice(from, start);
     from = end;
   }
-  return pluginsSignal(applied + xml.slice(from));
+  return applied + xml.slice(from);
 }
 
 function managedMavenSignal(path: string): BuildSignal | null {
@@ -251,6 +258,15 @@ function isFmtPlugin(plugin: string): boolean {
   return (
     xmlElement(plugin, "artifactId") === "fmt-maven-plugin" &&
     FMT_PLUGIN_GROUPS.has(xmlElement(plugin, "groupId") ?? "")
+  );
+}
+
+/** The fmt plugin's applied entries in these directories, nearest first, which a module inherits. */
+function appliedFmtPlugins(dirs: readonly string[]): string[] {
+  return dirs.flatMap((dir) =>
+    xmlBlocks(withoutPluginManagement(readPom(join(dir, "pom.xml"))), "plugin")
+      .map((plugin) => plugin.body)
+      .filter(isFmtPlugin),
   );
 }
 
@@ -329,8 +345,8 @@ function spotlessMavenSignal(plugin: string): BuildSignal | null {
 }
 
 /**
- * The fmt plugin's settings from its applied entry, then the `pluginManagement` entries it inherits,
- * nearest first, as Maven merges them. Its version of the formatter is the override's, else what
+ * The fmt plugin's settings from its applied entry, then the applied entries above it, then the
+ * `pluginManagement` entries it inherits, each nearest first, as Maven merges them. Its version of the formatter is the override's, else what
  * its own POM names.
  */
 function fmtMavenSignal(plugins: readonly string[]): BuildSignal {
