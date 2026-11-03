@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -84,11 +84,18 @@ describe("worktree hooks in an untrusted repository", () => {
     const outside = await realpath(await mkdtemp(join(tmpdir(), "routes-worktree-hooks-other-")));
     roots.push(outside);
 
-    for (const path of [outside, repo]) {
+    // A worktree outside `.worktrees` whose name matches a managed one must not run the other's.
+    await post(ctx, "/api/worktree/create", { projectPath: repo, name: "feat" });
+    const unmanaged = join(outside, "feat");
+    await Bun.$`git -C ${repo} worktree add -q -b unmanaged ${unmanaged}`;
+    await rm(join(repo, "init-ran-feat"));
+
+    for (const path of [outside, repo, unmanaged]) {
       const [status] = await post(ctx, "/api/worktree/run-init-hook", { projectPath: repo, path });
       expect(status).not.toBe(200);
     }
     expect(existsSync(join(repo, "init-ran-main"))).toBe(false);
+    expect(existsSync(join(repo, "init-ran-feat"))).toBe(false);
   });
 
   test("removing a worktree says clean.wt.sh is held back, and does not run it", async () => {
@@ -139,6 +146,22 @@ describe("worktree hooks in a trusted repository", () => {
 });
 
 describe("a project created from scratch", () => {
+  // The route makes the initial commit with the server's environment, which has no identity in CI.
+  const identity = {
+    GIT_AUTHOR_NAME: "T",
+    GIT_AUTHOR_EMAIL: "t@example.com",
+    GIT_COMMITTER_NAME: "T",
+    GIT_COMMITTER_EMAIL: "t@example.com",
+  };
+  const saved = Object.fromEntries(Object.keys(identity).map((key) => [key, process.env[key]]));
+  beforeAll(() => Object.assign(process.env, identity));
+  afterAll(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
   const projectCtx = {
     initializeProject: async () => ({}),
     broadcastAll: () => {},

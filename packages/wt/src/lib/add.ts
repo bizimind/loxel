@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   addWorktree,
@@ -173,10 +173,16 @@ export async function executeAdd(
  * @returns true when the script existed and exited 0
  */
 export async function runInitHook(
-  params: Pick<AddParams, "name" | "repoPath" | "hookEnv">,
+  params: Pick<AddParams, "name" | "repoPath" | "hookEnv"> & {
+    /** When provided, reject if `name` resolves to a different worktree path. */
+    expectedPath?: string;
+  },
   progress: ProgressHandler = silentProgress,
 ): Promise<boolean> {
   const { root, worktree } = await locateWorktree(params.name, params.repoPath);
+  if (params.expectedPath && resolve(worktree.path) !== resolve(params.expectedPath)) {
+    throw new Error(`Worktree '${params.name}' resolved to an unexpected path: ${worktree.path}`);
+  }
   return runHook(
     HOOK_INIT,
     {

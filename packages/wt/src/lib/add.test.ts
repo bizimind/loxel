@@ -451,7 +451,14 @@ describe("executeAdd", () => {
     expect(result).toMatchObject({ created: true, hookRan: false, hookSkipped: true });
     expect(await pathExists(join(result.path, "hook.txt"))).toBe(false);
 
-    expect(await runInitHook({ name: "held", repoPath: repo.root })).toBe(true);
+    await expect(
+      runInitHook({ name: "held", repoPath: repo.root, expectedPath: repo.root }),
+    ).rejects.toThrow("unexpected path");
+    expect(await pathExists(join(result.path, "hook.txt"))).toBe(false);
+
+    expect(
+      await runInitHook({ name: "held", repoPath: repo.root, expectedPath: result.path }),
+    ).toBe(true);
     expect(await pathExists(join(result.path, "hook.txt"))).toBe(true);
   });
 

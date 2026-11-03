@@ -92,18 +92,27 @@ export async function askToTrustRepo(
   return confirmed;
 }
 
+/** The offers still to show, one at a time: a newer confirmation would cancel the one showing. */
+let offers: Promise<void> = Promise.resolve();
+
 /**
  * Says that a new worktree's `init.wt.sh` did not run because its repository is not trusted, and
- * offers to trust the repository and run it now.
+ * offers to trust the repository and run it now. Offers queue, so worktrees created together each
+ * get theirs; one whose repository was trusted meanwhile runs its hook without asking again.
  */
-export async function offerToRunInitHook(projectPath: string, wtPath: string): Promise<void> {
+export function offerToRunInitHook(projectPath: string, wtPath: string): Promise<void> {
+  offers = offers.then(() => offerOnce(projectPath, wtPath));
+  return offers;
+}
+
+async function offerOnce(projectPath: string, wtPath: string): Promise<void> {
   try {
     const trusted = await askToTrustRepo(wtPath, {
       title: "Trust this repository and run init.wt.sh?",
       reason: (
         <>
-          The new worktree was created without running the repository&rsquo;s{" "}
-          <code>init.wt.sh</code>: hooks run in trusted repositories.
+          The new worktree <strong>{wtPath.split("/").pop()}</strong> was created without running
+          the repository&rsquo;s <code>init.wt.sh</code>: hooks run in trusted repositories.
         </>
       ),
       confirmLabel: "Trust and Run",

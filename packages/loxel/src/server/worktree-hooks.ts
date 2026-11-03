@@ -86,7 +86,12 @@ export async function runHeldInitHook(
     throw new Error(`${HOOK_INIT} did not run: hooks run in trusted repositories.`);
   }
   return runInitHook(
-    { name: params.name, repoPath: params.repoPath, hookEnv: buildSpawnEnv() },
+    {
+      name: params.name,
+      repoPath: params.repoPath,
+      expectedPath: params.worktreePath,
+      hookEnv: buildSpawnEnv(),
+    },
     progress,
   );
 }
