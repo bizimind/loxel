@@ -114,6 +114,14 @@ function openUrl(event: MouseEvent, url: string) {
 
 const termLog = frontendLog.child("terminal");
 
+/**
+ * Whether the panel is on screen. A panel can be its group's active tab, and so count as visible,
+ * while its group is hidden behind a maximized one.
+ */
+function isOnScreen(panelApi: DockviewPanelApi): boolean {
+  return panelApi.isVisible && panelApi.group.api.isVisible;
+}
+
 /** Fit the terminal to its container and sync changed dimensions to the PTY. */
 function fitAndSendResize(terminalId: string, terminal: XTerm, fitAddon: FitAddon) {
   const { cols, rows } = terminal;
@@ -420,11 +428,18 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
     // WebGL only while visible: hidden tabs don't count against Chromium's context cap. Switching
     // renderers changes the cell size; the ResizeObserver refits when the panel is shown again.
     const webglRenderer = createWebglRenderer(terminal, terminalId, () => {
-      if (attachedRef.current) fitAndSendResize(terminalId, terminal, fitAddon);
+      if (attachedRef.current && isOnScreen(panelApi)) {
+        fitAndSendResize(terminalId, terminal, fitAddon);
+      }
     });
-    const visibility = panelApi.onDidVisibilityChange(({ isVisible }) => {
-      if (isVisible) webglRenderer.attach();
-      else webglRenderer.detach();
+    // Deferred to act on where the state settles: saving a layout while a group is maximized shows
+    // and re-hides the other groups synchronously, which must not cost a WebGL context each time.
+    const visibility = panelApi.onDidVisibilityChange(() => {
+      queueMicrotask(() => {
+        if (disposed) return;
+        if (isOnScreen(panelApi)) webglRenderer.attach();
+        else webglRenderer.detach();
+      });
     });
 
     const output = new OutputStream(terminalId, terminal);
@@ -561,6 +576,9 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       resizeTimerRef.current = setTimeout(() => {
         if (!fitAddonRef.current || !xtermRef.current) return;
+        // A group hidden behind a maximized one has no size to fit, and the program running here
+        // must keep its dimensions. Showing the group resizes the container, which refits.
+        if (!isOnScreen(panelApi)) return;
         fitAndSendResize(terminalId, xtermRef.current, fitAddonRef.current);
         xtermRef.current.scrollToBottom();
       }, RESIZE_DEBOUNCE_MS);
@@ -585,7 +603,7 @@ export function Terminal({ terminalId, cwd, onClose, onCreateNew, panelApi }: Te
       observer.disconnect();
       dprQuery?.removeEventListener("change", onDevicePixelRatioChange);
     };
-  }, [terminalId]);
+  }, [terminalId, panelApi]);
 
   // Update terminal theme when dark mode changes
   useEffect(() => {

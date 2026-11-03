@@ -154,7 +154,10 @@ function moveInCenter(direction: MoveDirection): boolean {
 function enterCenter(from: CenterEdge): boolean {
   const api = getCenterApi();
   if (!api) return false;
-  const groups = api.groups.filter((g) => g.panels.length > 0);
+  // A maximized group is the only one on screen.
+  const groups = api.groups.filter(
+    (g) => g.panels.length > 0 && (!api.hasMaximizedGroup() || g.api.isMaximized()),
+  );
   if (groups.length === 0) return false;
 
   const rects = new Map(groups.map((g) => [g, g.element.getBoundingClientRect()]));

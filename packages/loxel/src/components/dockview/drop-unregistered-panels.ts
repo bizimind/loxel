@@ -1,5 +1,7 @@
 import type { IDockviewReactProps, SerializedDockview } from "dockview-react";
 
+import { withoutMaximizedNode } from "./layout-snapshot";
+
 type GridNode = SerializedDockview["grid"]["root"];
 type GroupPanelViewState = Exclude<GridNode["data"], GridNode[]>;
 type RegisteredComponents = Pick<IDockviewReactProps, "components" | "tabComponents">;
@@ -36,8 +38,7 @@ export function dropUnregisteredPanels(
   const activeGroup =
     layout.activeGroup && groupIds.includes(layout.activeGroup) ? layout.activeGroup : groupIds[0];
   // A maximized node is addressed by its location in the grid, which pruning may have moved.
-  const grid: SerializedDockview["grid"] & { maximizedNode?: unknown } = { ...layout.grid, root };
-  delete grid.maximizedNode;
+  const grid = withoutMaximizedNode({ ...layout.grid, root });
   return {
     ...layout,
     grid,

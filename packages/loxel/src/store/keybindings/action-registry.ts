@@ -7,6 +7,7 @@ import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
 import type { ToolchainSelectActionId } from "@/api/toolchain-status-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
+import { activeGroupMaximizeLabel, canToggleActiveGroupMaximized } from "@/lib/center-maximize";
 import type { EditorCodeActionId } from "@/lib/editor-code-actions";
 import { canRunEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
@@ -31,6 +32,7 @@ export type ActionId =
   | "panel.reopenClosed"
   | "panel.newTab"
   | "panel.rename"
+  | "panel.toggleMaximize"
   | "browser.hardRefresh"
   | `panel.split.${SplitDirection}`
   | `panel.split.${SplitPanelType}.${SplitDirection}`
@@ -138,6 +140,8 @@ export type ActionCategory =
 export interface ActionDef {
   id: ActionId;
   label: string;
+  /** What the command palette calls the action now, when that depends on the state it would change. */
+  contextLabel?: () => string;
   category: ActionCategory;
   hidden?: boolean;
   /**
@@ -188,6 +192,14 @@ export const ACTIONS: readonly ActionDef[] = [
   // Inline rename of the active center tab; when that tab isn't renameable the key is left to
   // what focus holds: a browser panel's hard refresh, or the focused widget.
   { id: "panel.rename", label: "Rename Tab", category: "panel", isEnabled: canRenameActiveTab },
+
+  {
+    id: "panel.toggleMaximize",
+    label: "Maximize / Restore Group",
+    contextLabel: activeGroupMaximizeLabel,
+    category: "panel",
+    isEnabled: canToggleActiveGroupMaximized,
+  },
 
   // Reload the focused browser panel's page, bypassing the cache.
   {

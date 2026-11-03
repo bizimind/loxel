@@ -8,6 +8,7 @@ import { layoutCanonicalKey, layoutSessionKey } from "@/lib/layout-key-schema";
 import { IS_FIRST_WINDOW, WINDOW_ID } from "@/lib/window-id";
 
 import { dropUnregisteredPanels } from "./drop-unregistered-panels";
+import { layoutSnapshot } from "./layout-snapshot";
 
 interface PersistedLayout {
   version: number;
@@ -289,7 +290,7 @@ export function PersistedLayoutComponent({
    */
   const settleAfterRestore = useCallback(
     (dvApi: DockviewApi, key: string, sourceWasServer: boolean) => {
-      const data = dvApi.toJSON();
+      const data = layoutSnapshot(dvApi);
       const snapshot = JSON.stringify({ version: layoutVersion, data });
       lastSavedRef.current = snapshot;
       cacheRef.current.set(key, data);
@@ -315,7 +316,7 @@ export function PersistedLayoutComponent({
 
     // Save the old layout (in-memory cache + flush pending debounce + immediate write)
     if (dvApi.panels.length > 0) {
-      const data = dvApi.toJSON();
+      const data = layoutSnapshot(dvApi);
       const snapshot = JSON.stringify({ version: layoutVersion, data });
       cacheRef.current.set(oldKey, data);
       flushPendingSave();
@@ -398,7 +399,7 @@ export function PersistedLayoutComponent({
 
       dvApi.onDidLayoutChange(() => {
         if (swappingRef.current || outerSwapping) return;
-        const data = dvApi.toJSON();
+        const data = layoutSnapshot(dvApi);
         const snapshot = JSON.stringify({ version: layoutVersion, data });
         if (snapshot === lastSavedRef.current) return;
         lastSavedRef.current = snapshot;
