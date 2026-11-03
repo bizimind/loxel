@@ -11,6 +11,7 @@ import { showToast } from "@/components/ui/toast";
 import { STORAGE_PREFIX } from "@/lib/env";
 import { frontendLog } from "@/lib/frontend-logger";
 import { findTreeRoot } from "@/lib/project-file-helpers";
+import { offerToRunInitHook } from "@/lib/repo-trust-dialog";
 import { toggleSet } from "@/lib/set-utils";
 import {
   archivedSet,
@@ -746,7 +747,8 @@ async function finishCreate(
 ): Promise<boolean> {
   let created = true;
   try {
-    await api.createWorktree(projectPath, name, options);
+    const result = await api.createWorktree(projectPath, name, options);
+    if (result.hookSkipped) void offerToRunInitHook(projectPath, result.path);
   } catch (err) {
     created = false;
     const reason = err instanceof Error ? err.message : String(err);
