@@ -71,7 +71,7 @@ export function closingTextBlockAction(
 
 /**
  * Java text blocks span lines, so the cursor reaches the closing delimiter at its start, where
- * Monaco no longer overtypes it and the keydown hook in `python-language-config.ts` does not apply.
+ * Monaco no longer overtypes it and the keydown hook in `triple-quote-step-over.ts` does not apply.
  * Without this, typing `"""` to close one would leave six quotes, and on a block with no closing
  * delimiter the `"""` pair would add a second one.
  */

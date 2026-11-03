@@ -453,6 +453,11 @@ function parsePendingUpdate(raw: string): PendingUpdate {
   ) {
     throw new Error("Invalid pending.json: missing or invalid fields");
   }
+  // An update replaces every directory in its target, so it installs only where the server was
+  // told to (`LOXEL_RESOURCES_DIR`).
+  if (path.resolve((data as Record<string, unknown>).targetDir as string) !== EXTERNAL_RESOURCES) {
+    throw new Error("Invalid pending.json: targetDir is not the external resources directory");
+  }
   return data as PendingUpdate;
 }
 
