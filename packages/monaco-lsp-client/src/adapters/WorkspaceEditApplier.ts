@@ -57,6 +57,20 @@ export interface WorkspaceEditApplierOptions {
   isReadOnlyModel?: (model: monaco.editor.ITextModel) => boolean;
 }
 
+/**
+ * What an applied edit changed, as Monaco summarizes its own edits: its text edits and file
+ * operations, and the files they left changed (a renamed file counts once, by its new path).
+ */
+export interface WorkspaceEditSummary {
+  readonly edits: number;
+  readonly files: number;
+}
+
+/** The answer to a workspace edit and, when it applied, what it changed. */
+export type WorkspaceEditOutcome = ApplyWorkspaceEditResult & {
+  readonly summary?: WorkspaceEditSummary;
+};
+
 type Step = { change: number; label: string } & (
   | {
       kind: "model";
@@ -65,7 +79,14 @@ type Step = { change: number; label: string } & (
       versionId: number | undefined;
       operations: monaco.editor.IIdentifiedSingleEditOperation[];
     }
-  | { kind: "write"; uri: monaco.Uri; expected: string; content: string }
+  | {
+      kind: "write";
+      uri: monaco.Uri;
+      expected: string;
+      content: string;
+      /** The text edits (or the overwrite) the new content makes. */
+      edits: number;
+    }
   | { kind: "create"; uri: monaco.Uri }
   | { kind: "rename"; source: monaco.Uri; target: monaco.Uri }
   | { kind: "delete"; uri: monaco.Uri }
@@ -159,7 +180,7 @@ export class WorkspaceEditApplier extends Disposable {
     super.dispose();
   }
 
-  apply(edit: WorkspaceEdit): Promise<ApplyWorkspaceEditResult> {
+  apply(edit: WorkspaceEdit): Promise<WorkspaceEditOutcome> {
     const run = async () => {
       const result = await this._apply(edit);
       if (!result.applied) this._options.onFailure?.(result.failureReason ?? "The edit failed");
@@ -170,7 +191,7 @@ export class WorkspaceEditApplier extends Disposable {
     return next;
   }
 
-  private async _apply(edit: WorkspaceEdit): Promise<ApplyWorkspaceEditResult> {
+  private async _apply(edit: WorkspaceEdit): Promise<WorkspaceEditOutcome> {
     if (this._disposed) return { applied: false, failureReason: CLOSED_REASON };
     const unsupported = this.unsupportedReason(edit);
     if (unsupported) return { applied: false, failureReason: unsupported };
@@ -210,7 +231,7 @@ export class WorkspaceEditApplier extends Disposable {
         };
       }
     }
-    return { applied: true };
+    return { applied: true, summary: summarize(steps) };
   }
 
   /**
@@ -270,6 +291,39 @@ export class WorkspaceEditApplier extends Disposable {
 }
 
 const CLOSED_REASON = "The language server connection closed";
+
+function summarize(steps: readonly Step[]): WorkspaceEditSummary {
+  const files = new Set<string>();
+  let edits = 0;
+  for (const step of steps) {
+    switch (step.kind) {
+      case "model":
+        edits += step.operations.length;
+        files.add(key(step.model.uri));
+        break;
+      case "write":
+        edits += step.edits;
+        files.add(key(step.uri));
+        break;
+      case "rename":
+        // A file edited before its rename is the renamed file.
+        edits += 1;
+        files.delete(key(step.source));
+        files.add(key(step.target));
+        break;
+      case "create":
+      case "delete":
+        edits += 1;
+        files.add(key(step.uri));
+        break;
+      default: {
+        const _exhaustive: never = step;
+        throw new Error(`Unknown edit step: ${String(_exhaustive)}`);
+      }
+    }
+  }
+  return { edits, files: files.size };
+}
 
 function isStale(step: Extract<Step, { kind: "model" }>): boolean {
   return step.versionId !== undefined && step.model.getVersionId() !== step.versionId;
@@ -379,7 +433,15 @@ class EditPlanner {
     } catch (error) {
       throw new Error(`The edits to ${label}: ${errorMessage(error)}`, { cause: error });
     }
-    this._steps.push({ change, label, kind: "write", uri, expected: entry.text, content });
+    this._steps.push({
+      change,
+      label,
+      kind: "write",
+      uri,
+      expected: entry.text,
+      content,
+      edits: edits.length,
+    });
     entry.text = content;
   }
 
@@ -412,7 +474,15 @@ class EditPlanner {
       }
       if (entry.type !== "disk") throw new Error(`Overwriting ${label} is not supported`);
       entry.text ??= await requireFs(this._fs).readFile(entry.readFrom);
-      this._steps.push({ change, label, kind: "write", uri, expected: entry.text, content: "" });
+      this._steps.push({
+        change,
+        label,
+        kind: "write",
+        uri,
+        expected: entry.text,
+        content: "",
+        edits: 1,
+      });
       entry.text = "";
       return;
     }

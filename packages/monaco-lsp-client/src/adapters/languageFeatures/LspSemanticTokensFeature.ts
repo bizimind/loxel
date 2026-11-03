@@ -34,12 +34,7 @@ export class LspSemanticTokensFeature extends Disposable {
         textDocument: {
           semanticTokens: {
             dynamicRegistration: true,
-            // Disable delta tokens. The server augments FULL responses with
-            // custom JSX tokens (see ts-lsp-manager.augmentSemanticTokens);
-            // delta responses would be computed by TypeScript against its
-            // NON-augmented token sequence, so applying them on the client
-            // (which holds the augmented sequence) drifts positions and
-            // produces the offset highlighting seen during live editing.
+            // Delta requests are not made: `provideDocumentSemanticTokensEdits` asks for all tokens.
             requests: { range: true, full: { delta: false } },
             tokenTypes: [
               "namespace",
@@ -237,45 +232,24 @@ export class LspSemanticTokensProvider implements monaco.languages.DocumentSeman
       return { resultId: undefined, data: new Uint32Array(0) };
     }
 
-    // Loop inline on version-staleness: the model can move under us between
-    // the request leaving and the response arriving, but Monaco's `null`
-    // return means "no change" — leaving the previous (naively edit-shifted)
-    // tokens painted — and firing the emitter to trigger a re-entry causes a
-    // visible Monarch flash on every rapid keystroke. Instead, keep fetching
-    // inline until we get a response that matches the current model version
-    // (or Monaco cancels the whole thing, which is its own signal that a new
-    // request is already queued).
-    while (true) {
-      const requestedVersion = model.getVersionId();
+    // Tokens describe the content the request was made for. Monaco keeps the edits made while the
+    // request is out, shifts the answer's tokens across them and asks again, so the answer must
+    // not be swapped for a newer one: Monaco would shift that across the same edits a second time
+    // and paint tokens off their text, past line ends ("Invalid Semantic Tokens Data").
+    const result = await this._client.server.textDocumentSemanticTokensFull({
+      textDocument: translated.textDocument,
+    });
 
-      // We intentionally do NOT use delta requests. Our proxy augments FULL
-      // token responses with custom JSX tokens; delta responses would drift.
-      const result = await this._client.server.textDocumentSemanticTokensFull({
-        textDocument: translated.textDocument,
-      });
+    if (!result || token.isCancellationRequested || model.isDisposed()) return null;
 
-      if (!result || token.isCancellationRequested || model.isDisposed()) {
-        // Monaco will schedule its own refetch; returning null keeps the
-        // currently painted tokens in place (no Monarch flash).
-        return null;
-      }
-
-      if (model.getVersionId() !== requestedVersion) {
-        // Retry inline with the current version. No onDidChange refire —
-        // firing the emitter here caused Monaco to drop tokens mid-fetch
-        // and produced a visible Monarch flash during rapid typing.
-        continue;
-      }
-
-      const mask = this._modifierMask;
-      // Each token is five integers, the last of them its modifier bits.
-      const data = new Uint32Array(
-        mask === undefined
-          ? result.data
-          : result.data.map((value, index) => (index % 5 === 4 ? value & mask : value)),
-      );
-      return { resultId: result.resultId, data };
-    }
+    const mask = this._modifierMask;
+    // Each token is five integers, the last of them its modifier bits.
+    const data = new Uint32Array(
+      mask === undefined
+        ? result.data
+        : result.data.map((value, index) => (index % 5 === 4 ? value & mask : value)),
+    );
+    return { resultId: result.resultId, data };
   }
 
   async provideDocumentSemanticTokensEdits?(
