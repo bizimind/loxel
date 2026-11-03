@@ -167,6 +167,11 @@ const FETCHING_CONFIGS: Record<string, string> = {
   ),
   // A processing instruction holds the `<!--`, so a parser reads what follows it.
   "pi-hides-ftp": config(`<?x <!-- ?>${filter("ftp://192.0.2.23/s.xml")}`),
+  // A processing instruction shadowing the DOCTYPE that a parser reads.
+  "pi-shadows-doctype": config(
+    "",
+    '<?p <!DOCTYPE x> ?><!DOCTYPE module PUBLIC "-//Canary//DTD Nothing//EN" "ftp://192.0.2.24/canary.dtd">',
+  ),
   "dtd-ftp": config(
     "",
     '<!DOCTYPE module PUBLIC "-//Canary//DTD Nothing//EN" "ftp://192.0.2.21/canary.dtd">',
@@ -340,6 +345,18 @@ try {
   const suppressionRun = await open(suppressionDtd);
   await suppressionRun.client.waitFor((m) => m.method === "window/showMessage");
   suppressionRun.client.close();
+
+  const shadowed = await fixture(
+    "suppressions-pi-shadows-doctype",
+    config(filter("config/checkstyle/s.xml")),
+    {
+      "config/checkstyle/s.xml":
+        '<?p <!DOCTYPE d> ?><!DOCTYPE suppressions PUBLIC "-//Canary//Nothing//EN" "ftp://192.0.2.25/s.dtd"><suppressions/>\n',
+    },
+  );
+  const shadowedRun = await open(shadowed);
+  await shadowedRun.client.waitFor((m) => m.method === "window/showMessage");
+  shadowedRun.client.close();
 
   const custom = await fixture("custom-class", config('<module name="canary.NotOnTheClasspath"/>'));
   const customRun = await open(custom);

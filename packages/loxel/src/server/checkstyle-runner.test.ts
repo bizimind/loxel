@@ -301,36 +301,67 @@ describe("prepareConfig", () => {
     }
   });
 
-  test("refuses a DOCTYPE with declarations of its own, or an FTP one", async () => {
+  const CONFIG_DOCTYPE =
+    '<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN" "https://checkstyle.org/dtds/configuration_1_3.dtd">';
+
+  test("takes only Checkstyle's own DOCTYPEs, or none", async () => {
     await inDir();
     const body = "<module/>";
-    for (const doctype of [
-      `<!DOCTYPE module [<!ENTITY a "cacheFile">]>`,
-      `<!DOCTYPE module PUBLIC "-//X//" "x.dtd" [<!ATTLIST property name NMTOKEN "cacheFile">]>`,
-      `<!DOCTYPE module PUBLIC "-//X//" "ftp://192.0.2.1/x.dtd">`,
-      `<!DOCTYPE module SYSTEM 'jar:ftp://192.0.2.1/x.jar!/x.dtd'>`,
+    for (const head of [
+      "",
+      CONFIG_DOCTYPE,
+      '<?xml version="1.0" encoding="UTF-8"?>\n' + CONFIG_DOCTYPE,
+      "\uFEFF<?xml version='1.0'?>",
+      '<!DOCTYPE module PUBLIC "-//Puppy Crawl//DTD Check Configuration 1.3//EN" "http://www.puppycrawl.com/dtds/configuration_1_3.dtd">',
+      '<!DOCTYPE suppressions PUBLIC\n  "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"\n  "https://checkstyle.org/dtds/suppressions_1_2.dtd">',
     ]) {
-      expect("refused" in prepareConfig(doctype + body, {}, [dir])).toBe(true);
+      expect(prepareConfig(head + body, {}, [dir])).toMatchObject({ tabWidth: 8 });
     }
-    expect(
-      prepareConfig(
-        `<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN" "https://checkstyle.org/dtds/configuration_1_3.dtd">${body}`,
-        {},
-        [dir],
-      ),
-    ).toMatchObject({ tabWidth: 8 });
   });
 
-  test("the same for a suppressions file it names", async () => {
+  test("refuses any other DOCTYPE, processing instruction or CDATA, however placed", async () => {
+    await inDir();
+    const body = "<module/>";
+    for (const text of [
+      `<!DOCTYPE module [<!ENTITY a "cacheFile">]>${body}`,
+      `${CONFIG_DOCTYPE.slice(0, -1)} [<!ATTLIST property name NMTOKEN "cacheFile">]>${body}`,
+      `<!DOCTYPE module PUBLIC "-//X//DTD Y//EN" "https://x.example/x.dtd">${body}`,
+      `<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN" "ftp://192.0.2.1/x.dtd">${body}`,
+      `<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN" "local.dtd">${body}`,
+      `<!DOCTYPE module SYSTEM "https://checkstyle.org/dtds/configuration_1_3.dtd">${body}`,
+      // A processing instruction shadowing the DOCTYPE that counts.
+      `<?p <!DOCTYPE x> ?><!DOCTYPE module SYSTEM "ftp://192.0.2.1/x.dtd">${body}`,
+      `<?p <!DOCTYPE x> ?>${CONFIG_DOCTYPE}${body}`,
+      `${CONFIG_DOCTYPE}<!DOCTYPE module SYSTEM "ftp://192.0.2.1/x.dtd">${body}`,
+      `${CONFIG_DOCTYPE}<module><?p x?></module>`,
+      `<module><![CDATA[ <property name="cacheFile" value="x"/> ]]></module>`,
+      `<module><!-- a --><?p <!-- b --> ?></module>`,
+    ]) {
+      expect("refused" in prepareConfig(text, {}, [dir])).toBe(true);
+    }
+  });
+
+  test("the same for a suppressions file it names, which runs as it is", async () => {
     await inDir({
-      "bad.xml": `<!DOCTYPE suppressions SYSTEM "ftp://192.0.2.1/x.dtd"><suppressions/>`,
+      "ftp.xml": `<!DOCTYPE suppressions SYSTEM "ftp://192.0.2.1/x.dtd"><suppressions/>`,
+      "shadow.xml": `<?pi <!DOCTYPE d> ?><!DOCTYPE suppressions SYSTEM "ftp://192.0.2.1/x.dtd"><suppressions/>`,
+      "open.xml": `<?pi <!-- ?><suppressions/>`,
+      "fine.xml": `<?xml version="1.0"?>\n<!DOCTYPE suppressions PUBLIC "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN" "https://checkstyle.org/dtds/suppressions_1_2.dtd"><suppressions/>`,
+      "header.txt": "/* Licensed <here> */",
     });
-    expect(prepareConfig(filter('name="file" value="bad.xml"'), {}, [dir])).toEqual({
-      refused: "it names an FTP or mail URL, which Loxel doesn't fetch.",
-    });
-    expect(
-      prepareConfig(filter(`name="file" value="\${s}"`), { s: join(dir, "bad.xml") }, [dir]),
-    ).toEqual({ refused: "it names an FTP or mail URL, which Loxel doesn't fetch." });
+    for (const name of ["ftp.xml", "shadow.xml", "open.xml"]) {
+      expect("refused" in prepareConfig(filter(`name="file" value="${name}"`), {}, [dir])).toBe(
+        true,
+      );
+      expect(
+        "refused" in
+          prepareConfig(filter(`name="file" value="\${s}"`), { s: join(dir, name) }, [dir]),
+      ).toBe(true);
+    }
+    expect("text" in prepareConfig(filter('name="file" value="fine.xml"'), {}, [dir])).toBe(true);
+    expect("text" in prepareConfig(filter('name="headerFile" value="header.txt"'), {}, [dir])).toBe(
+      true,
+    );
   });
 
   test("the tab width it sets, however written, outside comments", async () => {

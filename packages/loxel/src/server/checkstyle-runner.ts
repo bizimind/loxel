@@ -89,9 +89,9 @@ export async function runCheckstyle(
   files: readonly string[],
   wtPath: string,
   signal: AbortSignal,
-): Promise<{ outcome: CheckstyleOutcome; jdk: string | null }> {
+): Promise<{ outcome: CheckstyleOutcome; jdk: JavaRuntime | null }> {
   const jdk = await newestJdk(wtPath);
-  return { outcome: await runWith(project, files, wtPath, jdk, signal), jdk: jdk?.path ?? null };
+  return { outcome: await runWith(project, files, wtPath, jdk, signal), jdk };
 }
 
 async function runWith(
@@ -322,11 +322,9 @@ export function prepareConfig(
   properties: Record<string, string>,
   baseDirs: readonly string[],
 ): { refused: string } | { text: string; tabWidth: number } {
-  const { text: bare, unclosed } = scanXmlComments(text);
-  // A parser can read past it, as when a processing instruction holds the `<!--`.
-  if (unclosed) return { refused: "it has a comment that isn't closed." };
-  const doctype = refusedDoctype(bare);
-  if (doctype) return { refused: doctype };
+  const scanned = readableXml(text);
+  if ("refused" in scanned) return scanned;
+  const bare = scanned.text;
   let tabWidth: number | null = null;
   let refused: string | null = null;
   let found = 0;
@@ -345,7 +343,9 @@ export function prepareConfig(
     if (!name || !FILE_PROPERTIES.has(name)) return whole;
     const value = attrs.get("value") ?? "";
     const file = localFile(expand(value), baseDirs);
-    if (file) refused ??= refusedDoctype(readConfigFile(file) ?? "");
+    const named = file ? readConfigFile(file) : undefined;
+    // Checkstyle reads it as XML when it is one, a suppressions or import control file.
+    if (named?.trimStart().startsWith("<")) refused ??= refusedXml(named);
     if (!file || file === value) return whole;
     attrs.set("value", file);
     return `<property${[...attrs].map(([key, v]) => ` ${key}="${xmlEscape(v)}"`).join("")}/>`;
@@ -370,13 +370,40 @@ function localFile(value: string, baseDirs: readonly string[]): string | null {
   return baseDirs.map((dir) => path.join(dir, value)).find((file) => Bun.file(file).size) ?? null;
 }
 
-/** Why an XML file's DOCTYPE won't do: its own declarations, or a URL that isn't proxied. */
-function refusedDoctype(xml: string): string | null {
-  const doctype = /<!DOCTYPE\b(?:"[^"]*"|'[^']*'|[^>"'[])*(\[)?/.exec(xml);
-  if (!doctype) return null;
-  if (doctype[1]) return "it declares things in its DOCTYPE, which Loxel doesn't read.";
-  const literals = [...doctype[0].matchAll(/"([^"]*)"|'([^']*)'/g)];
-  return literals.some(([, a, b]) => namesUnproxiedUrl(a ?? b ?? "")) ? UNFETCHED_NOTICE : null;
+/**
+ * Checkstyle's own DOCTYPEs, which it resolves from its jar. One with an `http(s)` system id it
+ * doesn't know goes to the dead-end proxy. Every real config and file it names uses one of these
+ * or none.
+ */
+const CHECKSTYLE_DOCTYPE =
+  /^<!DOCTYPE\s+[\w:.-]+\s+PUBLIC\s+(["'])-\/\/(?:Puppy Crawl|Checkstyle)\/\/DTD [^"'<>]+\/\/EN\1\s+(["'])https?:\/\/[^"'<>]*\2\s*>/;
+/** The XML declaration, the one processing instruction allowed, as it can only come first. */
+const XML_DECLARATION = /^\uFEFF?\s*<\?xml\s(?:"[^"]*"|'[^']*'|[^?<>"'])*\?>/;
+
+/**
+ * XML text without comments, or why it is refused: anything that can say more than elements and
+ * attributes, or make a parser read the text other than as this reader does. That is a comment
+ * left open, a processing instruction other than the XML declaration, a CDATA section, and a
+ * DOCTYPE other than Checkstyle's own, since one of its own declares nothing in the file and can
+ * load a local DTD or one at a URL that isn't proxied.
+ */
+function readableXml(xml: string): { text: string } | { refused: string } {
+  const { text, unclosed } = scanXmlComments(xml);
+  if (unclosed) return { refused: "it has a comment that isn't closed." };
+  const body = text.replace(XML_DECLARATION, "");
+  if (body.includes("<?") || body.includes("<![CDATA[")) {
+    return { refused: "it has processing instructions or CDATA, which Loxel doesn't read." };
+  }
+  const doctypes = [...body.matchAll(/<!/g)].map(({ index }) => body.slice(index));
+  if (doctypes.length > 1 || doctypes.some((rest) => !CHECKSTYLE_DOCTYPE.test(rest))) {
+    return { refused: "its DOCTYPE isn't one of Checkstyle's own, which Loxel needs." };
+  }
+  return { text };
+}
+
+function refusedXml(xml: string): string | null {
+  const result = readableXml(xml);
+  return "refused" in result ? result.refused : null;
 }
 
 function namesUnproxiedUrl(value: string): boolean {

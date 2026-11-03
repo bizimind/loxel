@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import type { ServerWebSocket } from "bun";
 
+import type { JavaRuntime } from "@/api/java-env-model";
 import { LSP_REPLACED_CLOSE_CODE } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
@@ -193,7 +194,7 @@ export class CheckstyleLspManager implements WorktreeLspServer {
 
   /** A newer JDK can run what an older one could not. */
   private async followJdks(session: CheckstyleSession): Promise<void> {
-    const newest = (await newestJdk(session.wtPath))?.path ?? null;
+    const newest = jdkKey(await newestJdk(session.wtPath));
     const before = session.newestJdk;
     session.newestJdk = newest;
     if (before === undefined || before === newest || !this.isLive(session)) return;
@@ -292,7 +293,7 @@ export class CheckstyleLspManager implements WorktreeLspServer {
     void getJavaEnv(session.wtPath);
     try {
       const { outcome, jdk } = await runCheckstyle(project, files, session.wtPath, signal);
-      session.newestJdk ??= jdk;
+      session.newestJdk = jdkKey(jdk);
       return outcome;
     } catch (err) {
       log.error("Checkstyle run failed", { root: project.dir, error: err });
@@ -440,6 +441,11 @@ export class CheckstyleLspManager implements WorktreeLspServer {
       log.debug("send() on a closed Checkstyle WebSocket threw", { error: err });
     }
   }
+}
+
+/** A JDK by path and version, since one upgraded in place, as Homebrew's is, keeps its path. */
+function jdkKey(jdk: JavaRuntime | null): string | null {
+  return jdk ? `${jdk.path}\0${jdk.version}` : null;
 }
 
 function forgetFailures(session: CheckstyleSession): void {

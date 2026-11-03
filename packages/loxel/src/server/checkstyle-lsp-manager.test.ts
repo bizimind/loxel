@@ -525,6 +525,21 @@ describe.skipIf(!canRun)("a config that doesn't load", () => {
     expect((await runs()).at(-1)?.split("|")[1]).toBe(newer);
   });
 
+  test("a JDK upgraded in place, at the same path, tries it again", async () => {
+    const client = await setUp(GRADLE_PROJECT);
+    const home = await makeJdk("in-place", "98.0.1");
+    process.env.PATH = `${bin}:${join(home, "bin")}:/usr/bin:/bin`;
+    refreshJavaEnv(wt);
+    await writeFile(join(runsDir, "config-fails"), "");
+    const file = await badFile();
+    client.open(file);
+    await client.notice(/could not load/);
+    await rm(join(runsDir, "config-fails"));
+    await writeFile(join(home, "release"), 'JAVA_VERSION="99.0.1"\n');
+    refreshJavaEnv(wt);
+    await client.diagnostics(file, ["checkstyle says"]);
+  });
+
   test("a config that isn't in the repository runs nothing", async () => {
     const client = await setUp({
       "settings.gradle": "",
