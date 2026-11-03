@@ -1,10 +1,8 @@
-import type { AddResult } from "@bizimind/wt/lib";
 import { useRef, useState } from "react";
 
 import type { WorktreeEntry } from "@/api/git-models";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
-import { offerToRunInitHook } from "@/lib/repo-trust-dialog";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { worktreeLabel, worktreeNameFromTitle } from "./worktree-labels";
@@ -17,7 +15,9 @@ function normalizeName(value: string): string {
 /**
  * Creates a worktree: a title (when the project's worktrees have metadata) and a name, which
  * follows the title until it is edited directly. With `parent`, the worktree is nested under it.
- * A branch that already exists is resolved here too.
+ * A branch that already exists is resolved here too. The dialog closes as soon as the create has
+ * started: the sidebar shows the worktree as pending while it is created (the repo's init hook can
+ * take a while), and a failure from then on comes as a toast.
  */
 export function NewWorktreeDialog({
   projectPath,
@@ -48,7 +48,7 @@ export function NewWorktreeDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  /** Set when the dialog is closed while a create is still in flight. */
+  /** Set when the dialog is closed while a create is still being planned. */
   const abandoned = useRef(false);
 
   const cancel = () => {
@@ -57,12 +57,11 @@ export function NewWorktreeDialog({
     onClose();
   };
 
-  const run = async (action: () => Promise<AddResult | null>) => {
+  const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
     try {
-      const created = await action();
-      if (created?.hookSkipped) void offerToRunInitHook(projectPath, created.path);
+      await action();
       // A branch conflict keeps the dialog open to ask how to resolve it.
       const pending = useWorktreeStore.getState().pendingAddPlan;
       const conflicted =
