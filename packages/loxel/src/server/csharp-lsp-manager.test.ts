@@ -15,7 +15,7 @@ const { CSharpLspManager, CSHARP_LS_SETTINGS, MIN_CSHARP_LS_VERSION, withClientR
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 const { getCSharpLspState, subscribeCSharpStatus } = await import("./csharp-lsp-state");
 const { setCSharpSolution } = await import("./csharp-solution-store");
-const { projectsSolutionPath } = await import("./csharp-projects-solution");
+const { projectsSolutionPath, writeProjectsSolution } = await import("./csharp-projects-solution");
 type WtLspContext = import("./stdio-lsp-manager").WtLspContext;
 type WtLspSession = import("./stdio-lsp-manager").WtLspSession;
 
@@ -87,6 +87,13 @@ afterEach(async () => {
 
 afterAll(async () => {
   await rm(stateDir, { recursive: true, force: true });
+});
+
+test("forgetWorktree deletes a removed worktree's projects solution", async () => {
+  const file = writeProjectsSolution("/removed/project", ["/removed/project/App.csproj"]);
+  manager = new TestManager();
+  manager.forgetWorktree("/removed/project");
+  expect(await Bun.file(file).exists()).toBe(false);
 });
 
 async function makeDir(prefix: string): Promise<string> {

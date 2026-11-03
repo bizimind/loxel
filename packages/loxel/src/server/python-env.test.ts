@@ -11,7 +11,6 @@ const {
   refreshAllPythonEnvs,
   listPythonEnvs,
   normalizePythonOverride,
-  pathOutsideWorktree,
   resolvePythonEnv,
   subscribePythonEnv,
   watchPythonEnv,
@@ -520,14 +519,6 @@ describe("shared resolution", () => {
       setPythonOverride(wt, null);
       unsubscribe();
     }
-  });
-});
-
-describe("pathOutsideWorktree", () => {
-  test("drops the worktree's own directories and keeps the rest in order", () => {
-    expect(pathOutsideWorktree("/wt/bin:/usr/bin:/wt:/wt-other/bin:bin:/opt/bin", "/wt")).toBe(
-      "/usr/bin:/wt-other/bin:/opt/bin",
-    );
   });
 });
 

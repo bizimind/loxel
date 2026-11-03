@@ -9,9 +9,10 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import * as api from "@/api/client";
-import type { DetectPathResult, WorkspaceSetup } from "@/api/project-model";
+import type { DetectPathResult, ProjectSetupResult, WorkspaceSetup } from "@/api/project-model";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
+import { offerToRunInitHook } from "@/lib/repo-trust-dialog";
 import { cn } from "@/lib/utils";
 import { useProjectStore } from "@/store/projects";
 
@@ -30,6 +31,11 @@ type ImportStep =
   | "workspace-config";
 
 type NewStep = "form" | "workspace-config";
+
+/** Offers to run the first worktree's setup hook when the new project's repository held it back. */
+function offerHeldInitHook(project: ProjectSetupResult): void {
+  if (project.initHookSkippedAt) void offerToRunInitHook(project.path, project.initHookSkippedAt);
+}
 
 interface AddProjectWizardProps {
   open: boolean;
@@ -195,7 +201,7 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      await api.cloneProject({
+      const project = await api.cloneProject({
         url: detection.path,
         destination: cloneDestination,
         setup: importSetup,
@@ -204,6 +210,7 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
       });
       await fetchProjects();
       onClose();
+      offerHeldInitHook(project);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to clone");
     } finally {
@@ -216,7 +223,7 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      await api.initProject({
+      const project = await api.initProject({
         path: detection.path,
         name: importName || undefined,
         setup: importSetup,
@@ -225,6 +232,7 @@ export function AddProjectWizard({ open, onClose }: AddProjectWizardProps) {
       });
       await fetchProjects();
       onClose();
+      offerHeldInitHook(project);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to initialize");
     } finally {

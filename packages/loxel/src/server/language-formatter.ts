@@ -83,6 +83,14 @@ export interface LanguageFormatter {
    * several modules claiming an extension, the first one's applies.
    */
   failureNotice?(failure: FormatterFailure): string | undefined;
+  /**
+   * Whether a manual override running `command` with `args` runs what the repository names rather
+   * than what it says, such as a tool a project manifest selects. `dirs` are the saved file's
+   * directory and its ancestors up to the worktree. Asked of every module whatever the file's
+   * extension, since the override's command is what runs; true from any of them holds the override
+   * back in an untrusted repository.
+   */
+  overrideRunsProjectTool?(command: string, args: string, dirs: readonly string[]): boolean;
 }
 
 /**
