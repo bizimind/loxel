@@ -11,7 +11,7 @@ import {
 } from "@/api/ws-protocol";
 import { isRecord } from "@/lib/is-record";
 
-import { killProcessTrees } from "./kill-process-tree";
+import { ProcessTreeRecord, killProcessTrees } from "./kill-process-tree";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
 import {
@@ -112,6 +112,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
   private readonly _pendingFrames = new Map<ServerWebSocket<unknown>, string[]>();
   /** Each session's file-change forwarder, when {@link forwardWatchedFiles} and it has a worktree. */
   private readonly watchedFiles = new Map<TSession, WatchedFilesForwarder>();
+  /** What each session's server is running, when {@link stopsProcessTree}. */
+  private readonly processTrees = new Map<TSession, ProcessTreeRecord>();
   /** Servers told to stop that have not exited yet, whichever session they belonged to. */
   private readonly stopping = new Set<Promise<unknown>>();
   protected readonly log: ReturnType<typeof logger.child>;
@@ -292,9 +294,12 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   /**
    * Return true for a server whose own stop leaves the processes it started running (a build in a
-   * process group of its own). Releasing the session then ends the server's whole process tree
-   * while the server is still there to find it from (see `kill-process-tree.ts`), after
-   * {@link onSessionClosed}, so it must not depend on state that hook clears.
+   * process group of its own, or a server with no signal handler to stop its children). Releasing
+   * the session then ends the server's whole process tree while the server is still there to find
+   * it from (see `kill-process-tree.ts`), after {@link onSessionClosed}, so it must not depend on
+   * state that hook clears. Asked once the session is built too: a server that exits on its own
+   * then has what it had running at the last look, a few seconds old at most, ended once it has
+   * gone.
    */
   protected stopsProcessTree(_session: TSession): boolean {
     return false;
@@ -748,6 +753,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
       throw err;
     }
     this.sessions.set(ws, session);
+    if (this.stopsProcessTree(session))
+      this.processTrees.set(session, new ProcessTreeRecord(proc.pid));
     // From the start, so changes made before the server registers its watchers reach it too.
     const watchedRoot = this.forwardWatchedFiles ? this.getSessionWorkspace(session) : null;
     if (watchedRoot) {
@@ -780,6 +787,8 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     proc.exited.then(async (code) => {
       this.log.info(`${this.name} exited with code ${code}`);
       throttle.dispose();
+      // Now, not once stderr has drained: what the server left running may hold stderr open.
+      this.takeProcessTree(session)?.killSurvivors();
       // Wait for the stderr stream to drain before checking recent lines —
       // proc.exited may resolve before the last stderr chunk is delivered.
       await stderrDone;
@@ -921,11 +930,25 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     this.watchedFiles.get(session)?.dispose();
     this.watchedFiles.delete(session);
     this.onSessionClosed(session);
-    // Once the server is gone so is its tree, and its number may be someone else's.
+    const record = this.takeProcessTree(session);
     const { proc } = session;
-    if (proc.exitCode === null && proc.signalCode === null && this.stopsProcessTree(session)) {
-      killProcessTrees([proc.pid]);
+    // Once the server is gone so is its tree, and its number may be someone else's.
+    if (proc.exitCode !== null || proc.signalCode !== null) record?.killSurvivors();
+    else {
+      record?.dispose();
+      if (this.stopsProcessTree(session)) killProcessTrees([proc.pid]);
     }
+  }
+
+  private takeProcessTree(session: TSession): ProcessTreeRecord | undefined {
+    const record = this.processTrees.get(session);
+    this.processTrees.delete(session);
+    return record;
+  }
+
+  /** Look at each server's process tree now, rather than at the next tick. */
+  protected async recordProcessTrees(): Promise<void> {
+    await Promise.all([...this.processTrees.values()].map((record) => record.record()));
   }
 
   /**

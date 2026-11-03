@@ -51,7 +51,7 @@ Also: serves two language IDs via array, overrides `resolveBinary()` for Windows
 
 ## Terraform
 
-Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexing.ignoreDirectoryNames` via init options.
+Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexing.ignoreDirectoryNames` via init options. In an untrusted repository its `PATH` holds no `terraform` (`pathWithoutCommand` from `shell-env.ts`), since reading provider schemas through `terraform` starts the providers under `.terraform`; the restriction is reported only when a `terraform` would have been found.
 
 ## Python (basedpyright)
 
@@ -65,7 +65,7 @@ The pattern for a second server and for project-provided binaries is in `server-
 
 ## mypy — A Tool Without a Language Server
 
-`mypy-lsp-manager.ts` is not a `StdioLspManager`: it speaks LSP over the WebSocket itself (handshake, open/close, `publishDiagnostics`, `window/showMessage`) and runs the project's `dmypy` per config root, so a CLI checker's results still go through the regular client pipeline. It mirrors the stdio managers' public surface (`createSession`, `destroySession`, `handleMessage`, `notifyWatchedFilesChanged`, `destroy`) so `server.ts` wires it like the others. It is basedpyright's `ExternalTypeChecker`: where it type-checks a file, `PythonLspManager` drops basedpyright's type errors. See LANGUAGE_SERVERS.md "basedpyright, ruff and mypy".
+`mypy-lsp-manager.ts` is not a `StdioLspManager`: it speaks LSP over the WebSocket itself (handshake, open/close, `publishDiagnostics`, `window/showMessage`) and runs the project's `dmypy` per config root, only in a trusted repository, so a CLI checker's results still go through the regular client pipeline. It mirrors the stdio managers' public surface (`createSession`, `destroySession`, `handleMessage`, `notifyWatchedFilesChanged`, `destroy`) so `server.ts` wires it like the others. It is basedpyright's `ExternalTypeChecker`: where it type-checks a file, `PythonLspManager` drops basedpyright's type errors. See LANGUAGE_SERVERS.md "basedpyright, ruff and mypy".
 
 ## Astro — Use as Template
 
