@@ -8,7 +8,7 @@ import { isRecord } from "@/lib/is-record";
 
 import { readConfigFile } from "./config-file-read";
 import { logger } from "./logger";
-import { isInside } from "./shipped-by-repo";
+import { isInside } from "./path-containment";
 
 /**
  * Loading Maven and Gradle projects in a trusted repository: which projects can load from what is

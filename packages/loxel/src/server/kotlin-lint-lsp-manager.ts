@@ -22,8 +22,8 @@ import {
 } from "./kotlin-lint-runner";
 import { logger } from "./logger";
 import { fileUri } from "./lsp-file-uri";
+import { isInside } from "./path-containment";
 import type { WorktreeLspServer } from "./server-state";
-import { isInside } from "./shipped-by-repo";
 
 const log = logger.child("kotlin-lint-lsp");
 

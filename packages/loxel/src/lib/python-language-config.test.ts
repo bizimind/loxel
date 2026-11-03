@@ -2,11 +2,8 @@ import { type Mock, afterAll, beforeAll, describe, expect, spyOn, test } from "b
 
 import * as monaco from "monaco-editor";
 
-import {
-  PYTHON_DEDENT_AFTER,
-  isInsideTripleQuote,
-  registerLanguageConfiguration,
-} from "./python-language-config";
+import { registerLoxelLanguages } from "./monaco-languages";
+import { PYTHON_DEDENT_AFTER, registerLanguageConfiguration } from "./python-language-config";
 
 describe("PYTHON_DEDENT_AFTER", () => {
   test.each([
@@ -42,34 +39,6 @@ describe("PYTHON_DEDENT_AFTER", () => {
   });
 });
 
-/** A single `|` marks the cursor. */
-function insideTripleQuote(marked: string, quote: string): boolean {
-  const cursor = marked.indexOf("|");
-  const line = marked.slice(0, cursor) + marked.slice(cursor + 1);
-  return isInsideTripleQuote(line, cursor + 1, quote);
-}
-
-describe("isInsideTripleQuote", () => {
-  test.each([
-    [`"""a"|""`, `"`],
-    [`"""a""|"`, `"`],
-    [`x = ''|'`, `'`],
-  ])("%p", (marked, quote) => {
-    expect(insideTripleQuote(marked, quote)).toBe(true);
-  });
-
-  test.each([
-    [`"""a|"""`, `"`], // at the edge of the run, not inside
-    [`""|`, `"`],
-    [`"|"`, `"`],
-    [`""|""`, `"`],
-    [`""""|""`, `"`],
-    [`"""a"|""`, `'`],
-  ])("not %p", (marked, quote) => {
-    expect(insideTripleQuote(marked, quote)).toBe(false);
-  });
-});
-
 /** Internal model surface (not in monaco.d.ts) used to tokenize synchronously. */
 interface InternalTextModel {
   tokenization: { forceTokenization(lineNumber: number): void };
@@ -92,7 +61,8 @@ describe("Python editing in Monaco", () => {
       },
     );
     const registered = registerLanguageConfiguration();
-    monaco.languages.register({ id: "toml" }); // registered by monaco-languages.ts in the app
+    // Registers TOML and joins it to the triple-quote step-over, as `monaco-env.ts` does in the app.
+    registerLoxelLanguages();
     container = document.createElement("div");
     document.body.append(container);
     const model = monaco.editor.createModel("", "python");

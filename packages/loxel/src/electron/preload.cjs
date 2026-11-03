@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(OPEN_IN_NEW_BROWSER_TAB, handler);
     return () => ipcRenderer.removeListener(OPEN_IN_NEW_BROWSER_TAB, handler);
   },
+  macOSVersion: process.platform === "darwin" ? process.getSystemVersion() : undefined,
   setDockBadge: (count) => ipcRenderer.send(SET_DOCK_BADGE, count),
   onWindowFocusChange: (callback) => {
     const handler = (_event, focused) => callback(focused);

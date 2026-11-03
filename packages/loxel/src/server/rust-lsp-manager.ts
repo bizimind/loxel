@@ -6,6 +6,7 @@ import type { RustToolchain } from "@/api/rust-toolchain-model";
 import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
 import { fileUri } from "./lsp-file-uri";
+import { isInside } from "./path-containment";
 import { onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import {
   blockedClientMethod,
@@ -28,7 +29,6 @@ import {
   untrustedNestedRepo,
 } from "./rust-project-lookup";
 import { getRustToolchain, getRustToolchainNow, subscribeRustToolchain } from "./rust-toolchain";
-import { isInside } from "./shipped-by-repo";
 import {
   type SpawnOptions,
   type SuppressibleFeature,

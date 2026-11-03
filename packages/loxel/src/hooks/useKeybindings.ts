@@ -11,6 +11,7 @@ import { onFocusTargetsChange } from "@/lib/focus-target-registry";
 import type { KeyCombo } from "@/store/keybindings/key-combo";
 import { eventToKeyCombo, getBindingSteps, isModifierKey } from "@/store/keybindings/key-combo";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
+import { isMacWindowTilingKeystroke } from "@/store/keybindings/mac-window-tiling";
 import {
   cancelPendingChord,
   enabledActionOf,
@@ -85,7 +86,15 @@ export function useKeybindings(): void {
       // complete a chord in progress.
       if (!hasPendingChord() && isTextInput(e.target) && !e.metaKey && !e.ctrlKey) return;
 
-      if (!handleKeystroke(eventToKeyCombo(e), e.repeat)) return;
+      const combo = eventToKeyCombo(e);
+      if (!handleKeystroke(combo, e.repeat)) {
+        // Keep macOS window tiling keys from widgets that would consume them (the editor, the
+        // terminal), without preventDefault, so the unhandled key reaches the Window menu.
+        if (isMacWindowTilingKeystroke(combo, window.electronAPI?.macOSVersion)) {
+          e.stopPropagation();
+        }
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
     }

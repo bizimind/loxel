@@ -10,7 +10,7 @@ Java files are served by Eclipse JDT LS (jdtls), which Loxel bundles and runs on
 
 ## Binary
 
-[download-jdtls.ts](../../scripts/download-jdtls.ts) fetches the jdtls release, one archive for every platform, unmodified apart from an added `LICENSE` and `NOTICE` at its top level, about 53 MiB. The `jdtls` directory is in `UPDATE_RESOURCE_DIRS`, since stale jars next to new ones would break the server. The macOS natives inside its jars are signed by the Eclipse Foundation, and natives for other platforms stay inside jars, so no foreign binary sits loose in the app.
+[download-jdtls.ts](../../scripts/download-jdtls.ts) fetches the jdtls release, one archive for every platform, unmodified apart from an added `LICENSE` and `NOTICE` at its top level, about 53 MiB. An in-place update replaces the `jdtls` directory whole, as it does every resource directory ([update-resource-dirs.ts](../../src/electron/update-resource-dirs.ts)), since stale jars next to new ones would break the server. The macOS natives inside its jars are signed by the Eclipse Foundation, and natives for other platforms stay inside jars, so no foreign binary sits loose in the app.
 
 ## Choosing the JVM
 

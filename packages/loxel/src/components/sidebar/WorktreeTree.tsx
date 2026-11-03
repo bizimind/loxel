@@ -18,7 +18,13 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import { ArchiveIcon, ArchiveRestoreIcon, ChevronUpIcon, GitBranchPlusIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  ChevronUpIcon,
+  GitBranchPlusIcon,
+  LoaderIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -26,6 +32,7 @@ import type { WorktreeEntry } from "@/api/git-models";
 import type { Project } from "@/api/project-model";
 import { InlineRenameInput } from "@/components/tree";
 import { NotificationDot } from "@/components/ui/notification-dot";
+import { showToast } from "@/components/ui/toast";
 import { getTreeActionForEvent } from "@/hooks/useTreeKeyboardNav";
 import { focusSidebarEntryForPath } from "@/lib/focus-navigation";
 import { sidebarEntryProps } from "@/lib/focus-targets";
@@ -108,7 +115,7 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
   const homeDir = useProjectStore((s) => s.homeDir);
 
   const menu = useWorktreeContextMenu(project.path);
-  const { handleSetParent, setError: setMenuError } = menu;
+  const { handleSetParent } = menu;
 
   const trees = useMemo(() => getWorktreeTrees(ps), [ps]);
   const collapsedSet = useMemo(() => new Set(ps.collapsedPaths), [ps.collapsedPaths]);
@@ -191,10 +198,10 @@ export function WorktreeTree({ project, expanded }: { project: Project; expanded
         // Setting it back to the worktree's own name clears the title.
         await setWorktreeTitle(project.path, wt.path, value === worktreeName(wt) ? "" : value);
       } catch (err) {
-        setMenuError(err instanceof Error ? err.message : "Failed to change the title");
+        showToast(err instanceof Error ? err.message : "Failed to change the title");
       }
     },
-    [setWorktreeTitle, project.path, setMenuError],
+    [setWorktreeTitle, project.path],
   );
 
   // --- @dnd-kit: drop onto a row to nest, between rows to place it there ---
@@ -714,6 +721,12 @@ function TreeRow({
         <div className="wt-row-icon" data-active-inside={activeInside || undefined}>
           <WorktreeIcon name={worktreeName(wt)} size="sm" active={isActive && !expanded} />
           {hasNotification && !isActive && <NotificationDot />}
+          {/* Also on the rail, which has no room for the "Creating..." subtitle. */}
+          {pending && (
+            <span className="bg-background absolute -right-1 -bottom-1 rounded-full p-px">
+              <LoaderIcon className="text-foreground size-2.5 animate-spin" />
+            </span>
+          )}
         </div>
         <div className="wt-row-label">
           {isEditingTitle ? (

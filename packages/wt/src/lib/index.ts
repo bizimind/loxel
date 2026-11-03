@@ -5,7 +5,7 @@
  * repositories: git itself is the source of truth.
  */
 
-export { executeAdd, planAdd } from "./add.ts";
+export { executeAdd, planAdd, runInitHook } from "./add.ts";
 export type { AddParams, AddPlan, AddResult, BranchConflict } from "./add.ts";
 export { executeMove, planMove } from "./move.ts";
 export type { BranchSkipReason, MoveParams, MovePlan, MoveResult, MoveTarget } from "./move.ts";
