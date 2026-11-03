@@ -215,7 +215,7 @@ function readPom(dir: string): PomFile | null {
   const file = path.join(dir, "pom.xml");
   const text = readConfigFile(file);
   if (text === undefined) return null;
-  const xml = text.replace(/<!--[\s\S]*?-->/g, "");
+  const xml = withoutXmlComments(text);
   return { dir, file, xml, main: removeBlocks(xml, "profiles") };
 }
 
@@ -385,6 +385,24 @@ function commaList(value: string | undefined): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+/**
+ * XML text without its comments, read left to right as a parser does, so text that a removal joins
+ * up is never taken for markup.
+ */
+export function withoutXmlComments(xml: string): string {
+  let result = "";
+  let from = 0;
+  for (;;) {
+    const open = xml.indexOf("<!--", from);
+    if (open === -1) return result + xml.slice(from);
+    result += xml.slice(from, open);
+    const close = xml.indexOf("-->", open + 4);
+    // An unclosed comment runs to the end, where a parser would stop.
+    if (close === -1) return result;
+    from = close + 3;
+  }
 }
 
 /** The text of the first `<name>` element, or undefined when there is none. */

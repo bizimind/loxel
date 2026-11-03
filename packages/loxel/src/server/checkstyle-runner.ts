@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { CheckstyleProject } from "./checkstyle-config";
+import { type CheckstyleProject, withoutXmlComments } from "./checkstyle-config";
 import { readConfigFile } from "./config-file-read";
 import { killProcessGroup } from "./formatter-backends";
 import { isJdkInWorktree, listJavaRuntimes } from "./java-env";
@@ -309,7 +309,7 @@ export function prepareConfig(
   properties: Record<string, string>,
   baseDirs: readonly string[],
 ): { refused: string } | { text: string; same: boolean } {
-  const bare = text.replace(/<!--[\s\S]*?-->/g, "");
+  const bare = withoutXmlComments(text);
   const doctype = refusedDoctype(bare);
   if (doctype) return { refused: doctype };
   let same = true;
