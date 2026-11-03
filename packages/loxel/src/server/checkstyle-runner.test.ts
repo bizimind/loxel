@@ -265,6 +265,25 @@ describe("prepareConfig", () => {
     }
   });
 
+  test("makes a relative default absolute too, and each of headerFiles", async () => {
+    await inDir({ "h1.txt": "a", "h2.txt": "b" });
+    const s = join(dir, "s.xml");
+    expect(
+      textOf(
+        prepareConfig(filter('name="file" value="${x}" default="s.xml" optional="true"'), {}, [
+          dir,
+        ]),
+      ),
+    ).toBe(filter(`name="file" value="\${x}" default="${s}" optional="true"`));
+    expect(
+      textOf(
+        prepareConfig(filter('name="headerFiles" value="h1.txt, h2.txt,gone.txt"'), {}, [dir]),
+      ),
+    ).toBe(
+      filter(`name="headerFiles" value="${join(dir, "h1.txt")},${join(dir, "h2.txt")},gone.txt"`),
+    );
+  });
+
   test("leaves a config with nothing to change as it is", async () => {
     await inDir();
     const text = `<module name="Checker"><property name="severity" value="warning"/></module>`;
@@ -326,6 +345,8 @@ describe("prepareConfig", () => {
       `<!DOCTYPE module [<!ENTITY a "cacheFile">]>${body}`,
       `${CONFIG_DOCTYPE.slice(0, -1)} [<!ATTLIST property name NMTOKEN "cacheFile">]>${body}`,
       `<!DOCTYPE module PUBLIC "-//X//DTD Y//EN" "https://x.example/x.dtd">${body}`,
+      // An id Checkstyle doesn't know, so it would read the DTD at the system id.
+      `<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.4//EN" "http://127.0.0.1:8095/c.dtd">${body}`,
       `<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN" "ftp://192.0.2.1/x.dtd">${body}`,
       `<!DOCTYPE module PUBLIC "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN" "local.dtd">${body}`,
       `<!DOCTYPE module SYSTEM "https://checkstyle.org/dtds/configuration_1_3.dtd">${body}`,
@@ -359,6 +380,11 @@ describe("prepareConfig", () => {
       ).toBe(true);
     }
     expect("text" in prepareConfig(filter('name="file" value="fine.xml"'), {}, [dir])).toBe(true);
+    // Checkstyle takes `default` when the property `value` names isn't set.
+    for (const name of ["ftp.xml", "shadow.xml"]) {
+      const attributes = `name="file" value="\${unset}" default="${join(dir, name)}"`;
+      expect("refused" in prepareConfig(filter(attributes), {}, [dir])).toBe(true);
+    }
     expect("text" in prepareConfig(filter('name="headerFile" value="header.txt"'), {}, [dir])).toBe(
       true,
     );

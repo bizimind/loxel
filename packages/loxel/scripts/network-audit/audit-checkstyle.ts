@@ -141,6 +141,18 @@ function config(body: string, doctype?: string): string {
   return `<?xml version="1.0"?>\n${declared}\n<module name="Checker">${body}<module name="TreeWalker"><module name="ConstantName"/></module></module>\n`;
 }
 
+// A listener on loopback, which the JVM's default would reach past the proxy.
+let loopbackRequests = 0;
+const loopback = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch() {
+    loopbackRequests += 1;
+    return new Response("<suppressions/>");
+  },
+});
+const LOOPBACK = `127.0.0.1:${loopback.port}`;
+
 const filter = (url: string) =>
   `<module name="SuppressionFilter"><property name="file" value="${url}"/></module>`;
 
@@ -156,6 +168,11 @@ const FETCHING_CONFIGS: Record<string, string> = {
   "suppressions-url-ftp": config(filter("url:ftp://192.0.2.19/s.xml")),
   "suppressions-default-ftp": config(
     `<module name="SuppressionFilter"><property name="file" value="\${unset}" default="ftp://192.0.2.20/s.xml"/></module>`,
+  ),
+  "suppressions-loopback": config(filter(`http://${LOOPBACK}/s.xml`)),
+  "suppressions-localhost": config(filter(`http://localhost:${loopback.port}/s.xml`)),
+  "suppressions-default-loopback": config(
+    `<module name="SuppressionFilter"><property name="file" value="\${unset}" default="http://${LOOPBACK}/d.xml"/></module>`,
   ),
   "suppressions-jar-ip": config(filter("jar:http://192.0.2.13/s.jar!/s.xml")),
   header: config(
@@ -391,6 +408,8 @@ const events = all.filter((line) => line.split(" ")[2] !== "loaded");
 for (const line of new Set(events.map((entry) => entry.split(" ").slice(1).join(" ")))) {
   console.log(`     ${line}`);
 }
+void loopback.stop(true);
+check(loopbackRequests === 0, "nothing reached the loopback listener", loopbackRequests);
 const outbound = events.filter((line) => line.endsWith(" BLOCKED"));
 check(outbound.length === 0, "no outbound connection attempts", outbound.length);
 

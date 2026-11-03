@@ -37,6 +37,11 @@ const MORE_DEAD_ENDS = [
   "-Dftp.proxyPort=9",
   "-DsocksProxyHost=127.0.0.1",
   "-DsocksProxyPort=9",
+  // Empty, since the JVM's default sends loopback addresses past the proxy, straight to them.
+  "-Dhttp.nonProxyHosts=",
+  "-Dhttps.nonProxyHosts=",
+  "-Dftp.nonProxyHosts=",
+  "-DsocksNonProxyHosts=",
 ];
 
 const CHECKS_PACKAGE = "com.puppycrawl.tools.checkstyle.checks.";
@@ -301,7 +306,9 @@ async function spawnCheckstyle(
 const PROPERTY_ELEMENT =
   /<property\b((?:\s+[^\s=<>/]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(?:\/>|>\s*<\/property\s*>)/g;
 /** Properties naming a file to read, whose relative paths a run from elsewhere would miss. */
-const FILE_PROPERTIES = new Set(["file", "headerFile"]);
+const FILE_PROPERTIES = new Set(["file", "headerFile", "headerFiles"]);
+/** Of those, the ones naming XML that Checkstyle parses, a suppressions or import control file. */
+const XML_FILE_PROPERTY = "file";
 /**
  * A URL the JVM would reach without its proxy options: its FTP client goes straight to a literal
  * address. Only as a value's start or a list's entry, since patterns such as `ignorePattern`'s often
@@ -341,13 +348,21 @@ export function prepareConfig(
     );
     if (values.some(namesUnproxiedUrl)) refused = UNFETCHED_NOTICE;
     if (!name || !FILE_PROPERTIES.has(name)) return whole;
-    const value = attrs.get("value") ?? "";
-    const file = localFile(expand(value), baseDirs);
-    const named = file ? readConfigFile(file) : undefined;
-    // Checkstyle reads it as XML when it is one, a suppressions or import control file.
-    if (named?.trimStart().startsWith("<")) refused ??= refusedXml(named);
-    if (!file || file === value) return whole;
-    attrs.set("value", file);
+    let changed = false;
+    // Checkstyle takes `default` whole when `value` names a property that isn't set.
+    for (const key of ["value", "default"]) {
+      const written = attrs.get(key);
+      if (written === undefined) continue;
+      const entries = (name === "headerFiles" ? written.split(",") : [written]).map((entry) => {
+        const file = localFile(expand(entry.trim()), baseDirs);
+        if (!file) return entry;
+        if (name === XML_FILE_PROPERTY) refused ??= refusedXml(readConfigFile(file) ?? "");
+        if (file !== entry.trim()) changed = true;
+        return file;
+      });
+      attrs.set(key, entries.join(","));
+    }
+    if (!changed) return whole;
     return `<property${[...attrs].map(([key, v]) => ` ${key}="${xmlEscape(v)}"`).join("")}/>`;
   });
   if (refused) return { refused };
@@ -371,12 +386,39 @@ function localFile(value: string, baseDirs: readonly string[]): string | null {
 }
 
 /**
- * Checkstyle's own DOCTYPEs, which it resolves from its jar. One with an `http(s)` system id it
- * doesn't know goes to the dead-end proxy. Every real config and file it names uses one of these
- * or none.
+ * The public ids Checkstyle resolves from its jar, as 14.3.0 lists them; 8.39 has all but the
+ * newest few, whose system id then goes to the dead-end proxy. Every real config and file it names
+ * uses one of these or no DOCTYPE.
  */
-const CHECKSTYLE_DOCTYPE =
-  /^<!DOCTYPE\s+[\w:.-]+\s+PUBLIC\s+(["'])-\/\/(?:Puppy Crawl|Checkstyle)\/\/DTD [^"'<>]+\/\/EN\1\s+(["'])https?:\/\/[^"'<>]*\2\s*>/;
+const CHECKSTYLE_PUBLIC_IDS = new Set([
+  ...["1.0", "1.1", "1.2", "1.3"].flatMap((v) => [
+    `-//Checkstyle//DTD Checkstyle Configuration ${v}//EN`,
+    `-//Puppy Crawl//DTD Check Configuration ${v}//EN`,
+  ]),
+  ...["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"].flatMap((v) => [
+    `-//Checkstyle//DTD ImportControl Configuration ${v}//EN`,
+    `-//Puppy Crawl//DTD Import Control ${v}//EN`,
+  ]),
+  ...["1.0", "1.1", "1.2"].flatMap((v) => [
+    `-//Checkstyle//DTD SuppressionFilter Configuration ${v}//EN`,
+    `-//Puppy Crawl//DTD Suppressions ${v}//EN`,
+  ]),
+  ...["1.1", "1.2"].flatMap((v) => [
+    `-//Checkstyle//DTD SuppressionXpathFilter Configuration ${v}//EN`,
+    `-//Checkstyle//DTD SuppressionXpathFilter Experimental Configuration ${v}//EN`,
+    `-//Puppy Crawl//DTD Suppressions Xpath ${v}//EN`,
+    `-//Puppy Crawl//DTD Suppressions Xpath Experimental ${v}//EN`,
+  ]),
+  "-//Checkstyle//DTD Package Names Configuration 1.0//EN",
+  "-//Puppy Crawl//DTD Package Names 1.0//EN",
+]);
+const DOCTYPE =
+  /^<!DOCTYPE\s+[\w:.-]+\s+PUBLIC\s+(["'])([^"'<>]*)\1\s+(["'])https?:\/\/[^"'<>]*\3\s*>/;
+
+function isCheckstyleDoctype(text: string): boolean {
+  const id = DOCTYPE.exec(text)?.[2];
+  return id !== undefined && CHECKSTYLE_PUBLIC_IDS.has(id.replace(/\s+/g, " ").trim());
+}
 /** The XML declaration, the one processing instruction allowed, as it can only come first. */
 const XML_DECLARATION = /^\uFEFF?\s*<\?xml\s(?:"[^"]*"|'[^']*'|[^?<>"'])*\?>/;
 
@@ -395,7 +437,7 @@ function readableXml(xml: string): { text: string } | { refused: string } {
     return { refused: "it has processing instructions or CDATA, which Loxel doesn't read." };
   }
   const doctypes = [...body.matchAll(/<!/g)].map(({ index }) => body.slice(index));
-  if (doctypes.length > 1 || doctypes.some((rest) => !CHECKSTYLE_DOCTYPE.test(rest))) {
+  if (doctypes.length > 1 || doctypes.some((rest) => !isCheckstyleDoctype(rest))) {
     return { refused: "its DOCTYPE isn't one of Checkstyle's own, which Loxel needs." };
   }
   return { text };
