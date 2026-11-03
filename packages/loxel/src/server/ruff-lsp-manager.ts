@@ -7,16 +7,15 @@ import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 
 import { logger } from "./logger";
 import { getPythonEnv, getPythonEnvNow, isSamePythonEnv, subscribePythonEnv } from "./python-env";
-import { isRepoTrusted } from "./repo-trust";
+import { reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 import { isEnvShippedByRepo, isShippedByRepo } from "./shipped-by-repo";
 import { measureSpawn } from "./spawn-metrics";
 import {
-  type SpawnOptions,
-  StdioLspManager,
   type SuppressibleFeature,
   type WtLspContext,
   type WtLspSession,
+  WorktreeSessionLspManager,
 } from "./stdio-lsp-manager";
 
 const log = logger.child("ruff-lsp");
@@ -27,6 +26,19 @@ const DEV_PATH = path.resolve(import.meta.dir, "../../build", RUFF);
 /** First release whose `ruff server` is stable (older ones lack it or need `--preview`). */
 const MIN_SERVER_VERSION = "0.5.3";
 const VERSION_TIMEOUT_MS = 5_000;
+/** Exported for tests. */
+export const RUFF_REPO_TRUST_RESTRICTION = "Ruff lints with Loxel's own ruff, not the project's.";
+
+/**
+ * The ruff that ships with Loxel, next to the server binary or, in dev mode, where
+ * `build:language-servers` puts it; never one found on PATH, so it is what may run in an untrusted
+ * repository.
+ */
+export function bundledRuff(): string | null {
+  const sibling = path.join(path.dirname(process.execPath), RUFF);
+  if (Bun.file(sibling).size) return sibling;
+  return Bun.file(DEV_PATH).size ? DEV_PATH : null;
+}
 
 /**
  * Manages `ruff server` child processes, one per worktree: lint diagnostics, quick fixes, fix all
@@ -39,9 +51,10 @@ const VERSION_TIMEOUT_MS = 5_000;
  * The binary is picked again after every re-resolution of the worktree's Python environment
  * (`uv sync` creating `.venv`, ruff upgraded in it, another interpreter chosen); when the pick
  * differs, the socket is closed with {@link LSP_RESTART_CLOSE_CODE} so the client reconnects and
- * a new session starts with the new binary.
+ * a new session starts with the new binary. The environment's ruff is installed with the project's
+ * dependencies, so only a trusted repository runs it; an untrusted one runs {@link bundledRuff}.
  */
-export class RuffLspManager extends StdioLspManager<RuffLspSession, WtLspContext> {
+export class RuffLspManager extends WorktreeSessionLspManager<RuffLspSession> {
   /** Ruff watches its config files (`pyproject.toml`, `ruff.toml`) to reload settings. */
   protected override readonly forwardWatchedFiles = true;
   protected override readonly suppressedFeatures: readonly SuppressibleFeature[] = [
@@ -51,39 +64,27 @@ export class RuffLspManager extends StdioLspManager<RuffLspSession, WtLspContext
   /** The pick behind each worktree's spawn and the environment it was made for, from `resolveBinary` until its session is built. */
   private readonly spawnedRuff = new Map<string, { pick: RuffPick; env: PythonEnv | null }>();
 
+  protected override readonly repoTrustRestriction = RUFF_REPO_TRUST_RESTRICTION;
+  // Held back only when the environment has a ruff; see resolveBinary.
+  protected override readonly reportsRestrictionAtStart = false;
+
   constructor() {
     super("ruff-lsp");
   }
 
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath, repoTrusted: isRepoTrusted(wtPath) });
-  }
-
-  destroySession(ws: ServerWebSocket<unknown>): void {
-    this.detach(ws);
-  }
-
   protected async resolveBinary(context: WtLspContext): Promise<string | null> {
     const env = await getPythonEnv(context.wtPath);
-    const pick = await this.pick(context.wtPath, env);
+    const fromEnv = envRuff(env);
+    if (!context.repoTrusted && fromEnv && (await Bun.file(fromEnv).exists())) {
+      reportRepoRestriction(context.wtPath, RUFF_REPO_TRUST_RESTRICTION);
+    }
+    const pick = await this.pick(context.wtPath, env, context.repoTrusted);
     if (pick) this.spawnedRuff.set(context.wtPath, { pick, env });
     return pick?.path ?? null;
   }
 
   protected override spawnArgs(): readonly string[] {
     return ["server"];
-  }
-
-  protected override getSessionKey(context: WtLspContext): string {
-    return context.wtPath;
-  }
-
-  protected override spawnOptions(context: WtLspContext): SpawnOptions {
-    return { cwd: context.wtPath };
-  }
-
-  protected override getSessionWorkspace(session: WtLspSession): string {
-    return session.wtPath;
   }
 
   protected override getInitializationOptions(): Record<string, unknown> {
@@ -124,14 +125,19 @@ export class RuffLspManager extends StdioLspManager<RuffLspSession, WtLspContext
     session.unsubscribeEnv = null;
   }
 
-  private pick(wtPath: string, env: PythonEnv | null): Promise<RuffPick | null> {
+  private pick(
+    wtPath: string,
+    env: PythonEnv | null,
+    repoTrusted: boolean,
+  ): Promise<RuffPick | null> {
+    if (!repoTrusted) return pickRuffBinary(wtPath, null, bundledRuff());
     return pickRuffBinary(wtPath, env, this.resolveBundledBinary(RUFF, DEV_PATH));
   }
 
   /** Restart the session's ruff when the environment now calls for a different one. */
   private async repick(session: RuffLspSession, env: PythonEnv | null): Promise<void> {
     if (!this.isSessionLive(session)) return;
-    const next = await this.pick(session.wtPath, env);
+    const next = await this.pick(session.wtPath, env, session.repoTrusted);
     // Without any usable ruff now, the running one keeps serving.
     if (!next || !this.isSessionLive(session) || isSamePick(next, session.ruff)) return;
     // The environment's ruff still in place and trusted, whose version just could not be read (a

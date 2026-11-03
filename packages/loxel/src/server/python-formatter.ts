@@ -3,17 +3,37 @@ import { dirname, join, resolve } from "node:path";
 
 import { isRecord } from "@/lib/is-record";
 
-import { dirsUpToRoot, type LanguageFormatter, projectNodeBinDirs } from "./language-formatter";
+import {
+  dirsUpToRoot,
+  type FileFormatter,
+  type LanguageFormatter,
+  projectNodeBinDirs,
+} from "./language-formatter";
 import { envBinDir, getPythonEnvNow, VENV_DIR_NAMES } from "./python-env";
+import { isRepoTrusted, reportRepoRestriction } from "./repo-trust";
+import { bundledRuff } from "./ruff-lsp-manager";
 import { isEnvShippedByRepo } from "./shipped-by-repo";
 import { readToml, recordAt } from "./toml-file";
 
+/** Exported for tests. */
+export const BUNDLED_RUFF_FORMAT_RESTRICTION =
+  "Format on save runs Loxel's own ruff, not the project's.";
+/** Exported for tests. */
+export const BLACK_FORMAT_RESTRICTION = "Format on save doesn't run Black.";
+
 export const pythonFormatter: LanguageFormatter = {
   extensions: ["py", "pyi"],
-  detect: detectPythonFormatter,
+  detect: (dir, wtRoot) => {
+    const formatter = detectPythonFormatter(dir, wtRoot);
+    return formatter && { ...formatter, prepare: () => prepareForTrust(formatter, dir, wtRoot) };
+  },
   spawnOptions: async (command, dir, wtRoot) => {
-    // A command given as a path does not go through PATH.
-    const venvBin = command.includes("/") ? undefined : await findVenvBin(dir, wtRoot, command);
+    // A command given as a path does not go through PATH, and an environment's tools are installed
+    // with the project's dependencies, so only a trusted repository runs them.
+    const venvBin =
+      command.includes("/") || !isRepoTrusted(wtRoot)
+        ? undefined
+        : await findVenvBin(dir, wtRoot, command);
     return { binDirs: venvBin ? [venvBin] : projectNodeBinDirs(command, wtRoot) };
   },
 };
@@ -21,6 +41,30 @@ export const pythonFormatter: LanguageFormatter = {
 interface PythonFormatter {
   command: "ruff" | "black";
   args: string;
+}
+
+/**
+ * The detected formatter as it runs now: unchanged in a trusted repository. In an untrusted one,
+ * since a project's formatter is installed with its dependencies, ruff is Loxel's own, reported
+ * when the project's environment has its own, and black is skipped and reported: Loxel ships none,
+ * and the save goes out unformatted. Asked on every save, so a change of trust applies at once.
+ */
+async function prepareForTrust(
+  formatter: PythonFormatter,
+  dir: string,
+  wtRoot: string,
+): Promise<FileFormatter> {
+  if (isRepoTrusted(wtRoot)) return formatter;
+  const skip = { ...formatter, spawn: { skip: {} } };
+  if (formatter.command === "black") {
+    reportRepoRestriction(wtRoot, BLACK_FORMAT_RESTRICTION);
+    return skip;
+  }
+  if (await findVenvBin(dir, wtRoot, "ruff")) {
+    reportRepoRestriction(wtRoot, BUNDLED_RUFF_FORMAT_RESTRICTION);
+  }
+  const ruff = bundledRuff();
+  return ruff ? { command: ruff, args: formatter.args, spawn: { cwd: wtRoot, binDirs: [] } } : skip;
 }
 
 /** `--force-exclude` makes ruff honor its `exclude` settings for stdin input (it echoes excluded files unchanged). */
