@@ -1,7 +1,10 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
 
+import type { PythonEnv } from "@/api/python-env-model";
+
 import { logger } from "./logger";
+import { untrustedInterpreter } from "./python-env";
 import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 import { measureSpawn } from "./spawn-metrics";
@@ -22,10 +25,18 @@ const cache = new Map<string, Promise<string | null>>();
  * version before reading any configuration or importing `site`, so no project code runs.
  * A version-manager shim (pyenv, asdf) picks its Python by directory. In a trusted repository this
  * runs in the worktree, so a shim reports what the worktree selects. Otherwise it runs from the
- * filesystem root, so the worktree's files have no say, and a shim reports its global version.
+ * filesystem root, so the worktree's files have no say, and a shim reports its global version;
+ * and only an interpreter from outside the worktree and its environment runs
+ * ({@link untrustedInterpreter}), so an environment's own binary (conda, Pixi) has no version.
  */
-export async function pythonVersion(pythonPath: string, wtPath: string): Promise<string | null> {
-  const cwd = isRepoTrusted(wtPath) ? wtPath : path.parse(path.resolve(wtPath)).root;
+export async function pythonVersion(
+  env: Pick<PythonEnv, "pythonPath" | "envPath">,
+  wtPath: string,
+): Promise<string | null> {
+  const trusted = isRepoTrusted(wtPath);
+  const pythonPath = trusted ? env.pythonPath : await untrustedInterpreter(env, wtPath);
+  if (!pythonPath) return null;
+  const cwd = trusted ? wtPath : path.parse(path.resolve(wtPath)).root;
   let key: string;
   try {
     const info = await stat(pythonPath);

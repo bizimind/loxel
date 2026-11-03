@@ -11,7 +11,9 @@ process.env.LOXEL_STATE_DIR = join(root, "state");
 // The shared resolution reads the process's environment; keep the developer's out of it.
 for (const name of ["VIRTUAL_ENV", "CONDA_PREFIX", "UV_PROJECT_ENVIRONMENT"])
   delete process.env[name];
-const { pythonToolchainEnv } = await import("./python-toolchain-env");
+const { TERMINAL_PYTHON_ENV_RESTRICTION, pythonToolchainEnv } =
+  await import("./python-toolchain-env");
+const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 const { TerminalManager } = await import("./terminal-manager");
 
 afterAll(async () => {
@@ -25,7 +27,7 @@ describe("pythonToolchainEnv", () => {
     expect(pythonToolchainEnv.enabledInTerminal?.({})).toBe(true);
   });
 
-  test("a new shell gets the worktree's environment on PATH", async () => {
+  test("a new shell gets the worktree's environment on PATH once the repository is trusted", async () => {
     const originalShell = process.env.SHELL;
     process.env.SHELL = "/bin/sh";
     const worktree = join(root, "wt");
@@ -39,9 +41,10 @@ describe("pythonToolchainEnv", () => {
       onExit: () => {},
       toolchainEnvs: [pythonToolchainEnv],
     });
-    let output = "";
-    const decoder = new TextDecoder();
-    try {
+    /** Whether a new shell has the environment on PATH. */
+    const activated = async (): Promise<boolean> => {
+      let output = "";
+      const decoder = new TextDecoder();
       await manager.attach(
         crypto.randomUUID(),
         {
@@ -56,10 +59,17 @@ describe("pythonToolchainEnv", () => {
           rows: 24,
           cwd: worktree,
           // Only zsh keeps the entry first (macOS /etc/profile reorders PATH for sh), so check presence.
-          command: `case ":$PATH:" in *:${worktree}/.venv/bin:*) echo env-on-$((1+1));; esac`,
+          command: `case ":$PATH:" in *:${worktree}/.venv/bin:*) echo env-$((1+1))-on;; *) echo env-$((1+1))-off;; esac`,
         },
       );
-      await until(() => output.includes("env-on-2"));
+      await until(() => /env-2-(on|off)/.test(output));
+      return output.includes("env-2-on");
+    };
+    try {
+      expect(await activated()).toBe(false);
+      expect(getRepoTrustStatus(worktree).restrictions).toEqual([TERMINAL_PYTHON_ENV_RESTRICTION]);
+      setRepoTrusted(worktree, true);
+      expect(await activated()).toBe(true);
     } finally {
       manager.destroyAll();
       process.env.SHELL = originalShell;

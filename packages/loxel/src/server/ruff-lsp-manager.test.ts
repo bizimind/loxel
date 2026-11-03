@@ -13,7 +13,9 @@ import { LSP_RESTART_CLOSE_CODE } from "@/api/ws-protocol";
 const stateDir = await mkdtemp(join(tmpdir(), "ruff-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { refreshPythonEnv, subscribePythonEnv } = await import("./python-env");
-const { pickRuffBinary, RuffLspManager } = await import("./ruff-lsp-manager");
+const { pickRuffBinary, RUFF_REPO_TRUST_RESTRICTION, RuffLspManager } =
+  await import("./ruff-lsp-manager");
+const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 
 afterAll(async () => {
   await rm(stateDir, { recursive: true, force: true });
@@ -93,6 +95,25 @@ describe.skipIf(process.platform === "win32")("pickRuffBinary", () => {
 
 // Drives the bundled ruff (`pnpm run build:language-servers ruff`) through the manager the way the Monaco
 // client does.
+
+/** The manager's pick for a worktree, without starting a server. */
+class PickingRuffManager extends RuffLspManager {
+  pickFor(wtPath: string): Promise<string | null> {
+    return this.resolveBinary({ wtPath, repoTrusted: getRepoTrustStatus(wtPath).trusted });
+  }
+}
+
+describe.skipIf(process.platform === "win32")("RuffLspManager's pick", () => {
+  test("runs the environment's ruff only in a trusted repository, and says so", async () => {
+    const { wt, venvRuff } = await worktreeWithVenvRuff("0.9.0");
+    const picking = new PickingRuffManager();
+    manager = picking;
+    expect(await picking.pickFor(wt)).not.toBe(venvRuff);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([RUFF_REPO_TRUST_RESTRICTION]);
+    setRepoTrusted(wt, true);
+    expect(await picking.pickFor(wt)).toBe(venvRuff);
+  });
+});
 
 const BUNDLED_RUFF = resolve(import.meta.dir, "../../build/ruff");
 const TEST_TIMEOUT_MS = 30_000;
@@ -248,6 +269,7 @@ describe.skipIf(!(await Bun.file(BUNDLED_RUFF).exists()))("RuffLspManager with r
     "restarts through a client reconnect when the environment gets its own ruff",
     async () => {
       const wt = await makeDir("ruff-lsp-");
+      setRepoTrusted(wt, true);
       manager = new RuffLspManager();
       const client = new FakeClient(manager);
       // The server's subscription keeps the worktree's resolution shared and watched.
