@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import type { WorktreeEntry } from "@/api/git-models";
 import type { EnrichedProject } from "@/api/project-model";
+import { ToastContainer } from "@/components/ui/toast";
 import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -342,6 +343,25 @@ describe("Sidebar worktree nesting", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Move to top level" }));
 
     expect(setWorktreeParent).toHaveBeenCalledWith(project.path, child.path, null);
+  });
+
+  test("a failed worktree action shows its error in a toast that can be dismissed", async () => {
+    const setWorktreeParent = mock(() => Promise.reject(new Error("wt: worktree is locked")));
+    setNesting(true);
+    useWorktreeStore.setState({ setWorktreeParent });
+    render(
+      <>
+        <Sidebar />
+        <ToastContainer />
+      </>,
+    );
+
+    fireEvent.contextMenu(screen.getByText("Child task"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Move to top level" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("wt: worktree is locked");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   test("new child worktree works on a worktree with nothing nested below it yet", async () => {

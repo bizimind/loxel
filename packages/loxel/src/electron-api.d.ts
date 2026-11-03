@@ -26,6 +26,8 @@ interface Window {
     onOpenInNewBrowserTab?: (
       callback: (webContentsId: number, url: string, background: boolean) => void,
     ) => () => void;
+    /** macOS version (e.g. "15.2.0"); undefined on other platforms or older bundles. */
+    macOSVersion?: string;
     /** Current page zoom factor (Cmd+/Cmd-), read synchronously from `webFrame`. */
     getZoomFactor?: () => number;
     /** Whether this window is in macOS native fullscreen, read synchronously. Since v0.1.219. */

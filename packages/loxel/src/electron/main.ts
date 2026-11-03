@@ -709,6 +709,10 @@ function buildAppMenu(): void {
     },
     {
       label: "Window",
+      // The window role makes this the app's Windows menu (NSApp.windowsMenu), where macOS adds
+      // its window tiling items (Fill, Move & Resize) and their fn⌃ shortcuts. Without it the
+      // system shortcuts match no menu item and do nothing.
+      role: "window",
       submenu: [{ role: "minimize" }, ...(isMac ? [{ role: "zoom" as const }] : [])],
     },
   ];
