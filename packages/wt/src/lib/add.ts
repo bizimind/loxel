@@ -76,6 +76,11 @@ export interface AddParams {
    * that runs a repository's hooks only when its user allows it.
    */
   allowHook?: (worktreePath: string) => boolean;
+  /**
+   * False runs `git worktree add` without the repository's git hooks
+   * (`post-checkout`, `reference-transaction`). Default: true.
+   */
+  gitHooks?: boolean;
 }
 
 export interface AddResult {
@@ -230,14 +235,21 @@ async function createWorktree(
         `Branch '${params.branch}' is already checked out at ${conflict.worktreePath}`,
       );
     }
-    await addWorktree(sourceCwd, worktreePath, { branch: params.branch });
+    await addWorktree(sourceCwd, worktreePath, {
+      branch: params.branch,
+      gitHooks: params.gitHooks,
+    });
     return { branch: params.branch };
   }
 
   const conflict = ctx.branchConflict;
   if (!conflict) {
     const base = await resolveBase(root, sourceCwd, params.base);
-    await addWorktree(sourceCwd, worktreePath, { newBranch: name, startPoint: base.commit });
+    await addWorktree(sourceCwd, worktreePath, {
+      newBranch: name,
+      startPoint: base.commit,
+      gitHooks: params.gitHooks,
+    });
     return { branch: name, base: base.name };
   }
 
@@ -250,7 +262,7 @@ async function createWorktree(
     );
   }
   if (params.branchResolution === "use-existing") {
-    await addWorktree(sourceCwd, worktreePath, { branch: name });
+    await addWorktree(sourceCwd, worktreePath, { branch: name, gitHooks: params.gitHooks });
     return { branch: name };
   }
 
@@ -260,7 +272,11 @@ async function createWorktree(
   const base = await resolveBase(root, sourceCwd, params.base);
   progress.log(`Deleting existing branch '${name}'...`);
   await deleteBranch(root, name, true);
-  await addWorktree(sourceCwd, worktreePath, { newBranch: name, startPoint: base.commit });
+  await addWorktree(sourceCwd, worktreePath, {
+    newBranch: name,
+    startPoint: base.commit,
+    gitHooks: params.gitHooks,
+  });
   return { branch: name, base: base.name };
 }
 

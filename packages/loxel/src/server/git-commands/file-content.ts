@@ -24,7 +24,7 @@ export async function getFileContent(
   const refSpec = ref ? `${ref}:${filePath}` : filePath;
   const result = await runGit(["show", refSpec], {
     cwd: gitCwd,
-    env: readOnlyGitEnv(cwd),
+    env: readOnlyGitEnv(gitCwd),
     nothrow: true,
   });
 

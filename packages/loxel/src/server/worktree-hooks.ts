@@ -21,15 +21,22 @@ import { buildSpawnEnv } from "./shell-env";
 /** What an untrusted repository holds back, as the trust UI lists it. */
 export const WORKTREE_HOOKS_RESTRICTION = "Worktree hooks (init.wt.sh, clean.wt.sh) don't run.";
 
-type HookOptions = "hookEnv" | "allowHook";
+type HookOptions = "hookEnv" | "allowHook" | "gitHooks";
 
 /** Add a worktree, running `init.wt.sh` only if the repository is trusted. */
 export async function addWorktree(
   params: Omit<AddParams, HookOptions>,
   progress: ProgressHandler,
 ): Promise<AddResult> {
+  // Git's own hooks (`post-checkout`) run during the add, before the new worktree exists to ask
+  // about, so the repository it is added from answers for both.
   const result = await executeAdd(
-    { ...params, hookEnv: buildSpawnEnv(), allowHook: isRepoTrusted },
+    {
+      ...params,
+      hookEnv: buildSpawnEnv(),
+      allowHook: isRepoTrusted,
+      gitHooks: isRepoTrusted(params.repoPath),
+    },
     progress,
   );
   if (result.hookSkipped) reportRepoRestriction(result.path, WORKTREE_HOOKS_RESTRICTION);
