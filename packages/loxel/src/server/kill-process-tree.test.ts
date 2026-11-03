@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { killProcessTrees } from "./kill-process-tree";
+import { ProcessTreeRecord, killProcessTrees } from "./kill-process-tree";
 
 /** Neither gone, nor killed and only waiting to be collected. */
 function isRunning(pid: number): boolean {
@@ -57,5 +57,39 @@ describe("killProcessTrees", () => {
     expect(isRunning(bystander.pid)).toBe(true);
     bystander.kill("SIGKILL");
     await bystander.exited;
+  });
+});
+
+describe("ProcessTreeRecord", () => {
+  test("ends what a root that exited left running, in another process group too", async () => {
+    const root = spawn(
+      `/bin/sleep 1000 & echo $!; (set -m; /bin/sleep 1000 & echo $!; wait) & wait`,
+    );
+    const [child = 0, grouped = 0] = await pidsPrinted(root, 2);
+    const record = new ProcessTreeRecord(root.pid);
+    try {
+      await record.record();
+      root.kill("SIGKILL");
+      await root.exited;
+      // A look after the root has gone keeps what the last one found.
+      await record.record();
+      expect(isRunning(child) && isRunning(grouped)).toBe(true);
+      record.killSurvivors();
+      await Promise.all([untilGone(child), untilGone(grouped)]);
+    } finally {
+      record.dispose();
+      for (const pid of [child, grouped]) if (isRunning(pid)) process.kill(pid, "SIGKILL");
+    }
+  });
+
+  test("ends nothing when it never looked", async () => {
+    const root = spawn(`/bin/sleep 1000 & echo $!; wait`);
+    const [child = 0] = await pidsPrinted(root, 1);
+    const record = new ProcessTreeRecord(root.pid);
+    root.kill("SIGKILL");
+    await root.exited;
+    record.killSurvivors();
+    expect(isRunning(child)).toBe(true);
+    process.kill(child, "SIGKILL");
   });
 });

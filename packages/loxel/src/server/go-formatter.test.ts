@@ -120,6 +120,54 @@ describe("goFormatter selection", () => {
     expect((await save("a.go")).content).toStartWith("gofmt ");
   });
 
+  test.each([
+    [
+      "YAML",
+      ".golangci.yml",
+      'version: "2"\nformatters:\n  enable: [gofumpt]\n  settings:\n    custom:\n      x:\n        path: x.so\n',
+    ],
+    [
+      "a dotted, cased key",
+      ".golangci.json",
+      JSON.stringify({
+        version: "2",
+        formatters: { enable: ["gci"], "Settings.Custom": { x: {} } },
+      }),
+    ],
+    [
+      "YAML with a tag",
+      ".golangci.yml",
+      'version: "2"\nformatters:\n  enable: [gofumpt]\n  settings: !!map\n    gofumpt: {}\n',
+    ],
+  ])(
+    "custom formatters or an unreadable config in %s decline with a notice",
+    async (_, name, config) => {
+      await install(tools, "gofmt");
+      await install(tools, GOLANGCI);
+      await addFiles({ "go.mod": "module m\n", [name]: config, "a.go": "" });
+      const { content, notice } = await save("a.go");
+      expect(content).toBeNull();
+      expect(notice).toStartWith("Format on save skipped: ");
+      expect(notice).toContain("golangci-lint config");
+    },
+  );
+
+  test("a config with custom formatters still leaves an excluded file alone, quietly", async () => {
+    await install(tools, GOLANGCI);
+    const config = {
+      version: "2",
+      formatters: { enable: ["gci"], settings: { custom: {} }, exclusions: { paths: ["gen/"] } },
+    };
+    await addFiles({
+      "go.mod": "module m\n",
+      ".golangci.json": JSON.stringify(config),
+      "gen/a.go": "",
+    });
+    const { content, notice } = await save("gen/a.go");
+    expect(content).toBeNull();
+    expect(notice).toBeUndefined();
+  });
+
   test("the nearest config decides alone, in golangci-lint's name order", async () => {
     await install(tools, "gofmt");
     await install(tools, GOLANGCI);

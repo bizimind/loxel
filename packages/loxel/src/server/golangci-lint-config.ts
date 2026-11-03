@@ -34,15 +34,21 @@ const YAML_TAG = /(?:^|[\s[{,:-])!/;
 /** Output destinations that are not files. */
 const STANDARD_STREAMS: ReadonlySet<unknown> = new Set(["stdout", "stderr"]);
 
+/** Custom formatters' settings, in the form {@link configKeyParts} gives. */
+const CUSTOM_FORMATTER_KEY = ["formatters", "settings", "custom"] as const;
+
 /** Key paths whose settings Loxel does not run, in the form {@link configKeyParts} gives. */
 const CUSTOM_LINTER_KEYS = [
   ["linters", "settings", "custom"],
   ["linters-settings", "custom"],
-  ["formatters", "settings", "custom"],
+  CUSTOM_FORMATTER_KEY,
 ] as const;
 
 /** What a config means for running `golangci-lint run` on it. */
 export type GolangciConfigVerdict = "runnable" | "unreadable" | "custom" | "v1";
+
+/** What a config means for running `golangci-lint fmt` on it. */
+export type GolangciFormatVerdict = Exclude<GolangciConfigVerdict, "v1">;
 
 export function isFile(path: string): boolean {
   try {
@@ -101,16 +107,33 @@ function hasAmbiguousYaml(text: string): boolean {
  * reads (see {@link configKeyParts}).
  */
 export function judgeGolangciConfig(path: string): GolangciConfigVerdict {
-  const config = readGolangciConfig(path);
-  if (!config) return "unreadable";
-  if (!path.endsWith(".toml") && !path.endsWith(".json")) {
-    if (hasAmbiguousYaml(readConfigFile(path) ?? "")) return "unreadable";
-  }
-  const leaves = configLeaves(config);
+  const leaves = readConfigLeaves(path);
   if (!leaves) return "unreadable";
   if (leaves.some(isCustomLinterKey) || leaves.some(isOutputFile)) return "custom";
   const version = leaves.find(({ keys }) => keys.length === 1 && keys[0] === "version");
   return String(version?.value) === "2" ? "runnable" : "v1";
+}
+
+/**
+ * Whether the config at `path` can be formatted with, read as {@link judgeGolangciConfig} reads it.
+ * golangci-lint v2 has no custom formatters: `fmt` builds only its own and loads none of the custom
+ * linters that `run` does. A config with settings for them counts as `custom` anyway, as for the
+ * lint run, so that a release adding them cannot load code through format on save.
+ */
+export function judgeGolangciFormatConfig(path: string): GolangciFormatVerdict {
+  const leaves = readConfigLeaves(path);
+  if (!leaves) return "unreadable";
+  return leaves.some(({ keys }) => hasPrefix(keys, CUSTOM_FORMATTER_KEY)) ? "custom" : "runnable";
+}
+
+/** The config's leaves ({@link configLeaves}), or null when it cannot be read as golangci-lint would. */
+function readConfigLeaves(path: string): ConfigLeaf[] | null {
+  const config = readGolangciConfig(path);
+  if (!config) return null;
+  if (!path.endsWith(".toml") && !path.endsWith(".json")) {
+    if (hasAmbiguousYaml(readConfigFile(path) ?? "")) return null;
+  }
+  return configLeaves(config);
 }
 
 interface ConfigLeaf {
@@ -162,7 +185,11 @@ function configLeaves(config: Record<string, unknown>): ConfigLeaf[] | null {
 }
 
 function isCustomLinterKey({ keys }: ConfigLeaf): boolean {
-  return CUSTOM_LINTER_KEYS.some((prefix) => prefix.every((part, index) => keys[index] === part));
+  return CUSTOM_LINTER_KEYS.some((prefix) => hasPrefix(keys, prefix));
+}
+
+function hasPrefix(keys: readonly string[], prefix: readonly string[]): boolean {
+  return prefix.every((part, index) => keys[index] === part);
 }
 
 function isOutputFile({ keys, value }: ConfigLeaf): boolean {

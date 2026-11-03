@@ -437,6 +437,10 @@ describe.skipIf(process.platform === "win32")("StdioLspManager process trees", (
     protected override stopsProcessTree(): boolean {
       return true;
     }
+
+    override recordProcessTrees(): Promise<void> {
+      return super.recordProcessTrees();
+    }
   }
 
   /** A killed process lingers until its parent or init has collected it. */
@@ -536,6 +540,25 @@ describe.skipIf(process.platform === "win32")("StdioLspManager process trees", (
       while (isRunning(pid)) await Bun.sleep(20);
     } finally {
       // A failure must not leave it running.
+      if (isRunning(pid)) process.kill(pid, "SIGKILL");
+    }
+  });
+
+  test("a manager that opts in ends what its server started once the server exits on its own", async () => {
+    let treeManager: TreeStoppingManager | undefined;
+    const { client } = await setup(
+      "wt",
+      (script) => (treeManager = new TreeStoppingManager(script)),
+    );
+    client.send({ method: "test/startChild" });
+    const started = await client.serverReceived((f) => f.method === "test/startChild");
+    const { pid } = started.params as { pid: number };
+    try {
+      await treeManager?.recordProcessTrees();
+      client.send({ method: "test/kill" });
+      expect(await client.closed).toBe(LSP_EXITED_CLOSE_CODE);
+      while (isRunning(pid)) await Bun.sleep(20);
+    } finally {
       if (isRunning(pid)) process.kill(pid, "SIGKILL");
     }
   });

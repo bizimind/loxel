@@ -15,6 +15,7 @@ import { pathOutsideWorktree } from "./path-containment";
 import { getPythonEnv, subscribePythonEnv } from "./python-env";
 import { pythonEnvActivation, setPythonEnvVars } from "./python-env-activation";
 import type { ExternalTypeChecker } from "./python-lsp-manager";
+import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import type { WorktreeLspServer } from "./server-state";
 import { buildSpawnEnv } from "./shell-env";
 import { isEnvShippedByRepo, isShippedByRepo } from "./shipped-by-repo";
@@ -27,6 +28,10 @@ const CHECK_DELAY_MS = 200;
 /** A failure notice longer than this is cut; the log has all of it. */
 const MAX_NOTICE_LENGTH = 600;
 const PYTHON_FILE = /\.pyi?$/;
+
+/** Exported for tests. */
+export const MYPY_REPO_TRUST_RESTRICTION =
+  "mypy doesn't run, since it can load this project's plugins and code, so basedpyright checks types.";
 
 /** `window/showMessage` types. */
 const MESSAGE_TYPE = { error: 1, warning: 2 } as const;
@@ -65,6 +70,8 @@ interface MypySession {
   /** Files with diagnostics published, so a check that no longer reports one clears it. */
   published: Set<string>;
   unsubscribeEnv: (() => void) | null;
+  /** The last answer for this worktree, to tell a change of trust from another repository's. */
+  trusted: boolean;
 }
 
 /**
@@ -85,6 +92,11 @@ interface MypySession {
  * once each as `window/showMessage`. Where two roots report on the same file (a config whose
  * `files` reach into a nested project), the file gets both roots' diagnostics.
  *
+ * mypy imports the plugins a project's config names, and those can import the project's own code,
+ * so a daemon runs only in a trusted repository. Untrusted, a project with a usable mypy reports a
+ * repository restriction and basedpyright keeps checking types; a change of trust sets every
+ * project of that worktree up again.
+ *
  * While a root's daemon checks successfully, it is the project's type checker for the files it
  * checks and those it reported on: {@link ownsTypeChecking} tells basedpyright's manager to drop
  * basedpyright's own type-checking diagnostics for them.
@@ -94,6 +106,7 @@ export class MypyLspManager implements ExternalTypeChecker, WorktreeLspServer {
   private readonly sessions = new Map<ServerWebSocket<unknown>, MypySession>();
   private readonly sessionsByWorktree = new Map<string, MypySession>();
   private readonly typeCheckingListeners = new Set<(wtPath: string) => void>();
+  private unsubscribeTrust: (() => void) | null = null;
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
     this.destroySession(ws);
@@ -113,7 +126,9 @@ export class MypyLspManager implements ExternalTypeChecker, WorktreeLspServer {
       projects: new Map(),
       published: new Set(),
       unsubscribeEnv: null,
+      trusted: isRepoTrusted(wtPath),
     };
+    this.unsubscribeTrust ??= onRepoTrustChange(() => this.followTrust());
     session.unsubscribeEnv = subscribePythonEnv(wtPath, ({ first }) => {
       // The first resolution is the one each project's setup waits for.
       if (!first) this.restartProjects(session, () => true);
@@ -177,6 +192,8 @@ export class MypyLspManager implements ExternalTypeChecker, WorktreeLspServer {
 
   destroy(): void {
     for (const session of [...this.sessions.values()]) this.closeSession(session);
+    this.unsubscribeTrust?.();
+    this.unsubscribeTrust = null;
   }
 
   ownsTypeChecking(wtPath: string, filePath: string): boolean {
@@ -254,6 +271,25 @@ export class MypyLspManager implements ExternalTypeChecker, WorktreeLspServer {
     }
   }
 
+  /**
+   * Set up again every project of a worktree whose trust changed, stopping its daemons first. Trust
+   * taken back also gives type checking back to basedpyright at once, rather than once setup ends.
+   */
+  private followTrust(): void {
+    for (const session of this.sessions.values()) {
+      const trusted = isRepoTrusted(session.wtPath);
+      if (trusted === session.trusted) continue;
+      session.trusted = trusted;
+      if (!trusted) {
+        for (const project of session.projects.values()) {
+          this.setState(session, project, "unavailable");
+          this.publish(session, project, new Map());
+        }
+      }
+      this.restartProjects(session, () => true);
+    }
+  }
+
   /** Stop the daemons of the projects `which` selects and set them up again. */
   private restartProjects(session: MypySession, which: (project: MypyProject) => boolean): void {
     for (const project of session.projects.values()) {
@@ -269,6 +305,21 @@ export class MypyLspManager implements ExternalTypeChecker, WorktreeLspServer {
     const generation = ++project.generation;
     const env = await getPythonEnv(session.wtPath);
     const dmypy = await usableDmypy(session.wtPath, env);
+    if (project.generation !== generation || !this.isLive(session)) return;
+    // Asked again rather than read from the session: trust as of now decides what starts.
+    const trusted = isRepoTrusted(session.wtPath);
+    if (trusted !== session.trusted) {
+      // Changed with no store event (a replaced repository folder): the whole session follows it,
+      // which records the answer and sets this project up again.
+      this.followTrust();
+      return;
+    }
+    if (dmypy && !trusted) {
+      this.setState(session, project, "unavailable");
+      this.publish(session, project, new Map());
+      reportRepoRestriction(session.wtPath, MYPY_REPO_TRUST_RESTRICTION);
+      return;
+    }
     const spawnEnv = dmypy && env ? await activatedEnv(session.wtPath, env) : null;
     if (project.generation !== generation || !this.isLive(session)) return;
     if (!dmypy || !env || !spawnEnv) {
@@ -310,6 +361,8 @@ export class MypyLspManager implements ExternalTypeChecker, WorktreeLspServer {
       project.recheck = true;
       return;
     }
+    // Trust can end with no change event, such as when the repository's folder is replaced.
+    this.followTrust();
     const { daemon } = project;
     if (!daemon || !this.isLive(session)) return;
     project.checking = true;

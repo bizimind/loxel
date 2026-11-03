@@ -1,5 +1,15 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,7 +18,11 @@ import type { ServerWebSocket } from "bun";
 // Interpreter overrides live in the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "mypy-lsp-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
-const { MypyLspManager } = await import("./mypy-lsp-manager");
+const { MYPY_REPO_TRUST_RESTRICTION: RESTRICTION, MypyLspManager } =
+  await import("./mypy-lsp-manager");
+const { getRepoTrustStatus, onRepoTrustStatusChange, setRepoTrusted } =
+  await import("./repo-trust");
+const { setPythonOverride } = await import("./python-override-store");
 const { fileUri } = await import("./lsp-file-uri");
 
 // Drives the manager the way the Monaco client does, against a worktree whose `.venv` holds a
@@ -19,6 +33,7 @@ const python3 = Bun.which("python3");
 const canRun = python3 !== null && process.platform !== "win32";
 
 const FAKE_DMYPY = `#!/bin/sh
+echo "$*" >> "$PWD/.dmypy-calls"
 if [ "$1" = "--version" ]; then echo "dmypy 2.4.1"; exit 0; fi
 echo "$*" >> "$PWD/.dmypy-runs"
 cat "$PWD/.dmypy-output" 2>/dev/null
@@ -109,24 +124,51 @@ class FakeClient {
   }
 }
 
-/** A worktree with `files`, and a `.venv` holding the stand-in dmypy unless `withMypy` is false. */
-async function makeWorktree(files: Record<string, string>, withMypy = true): Promise<string> {
+/**
+ * A worktree with `files`, and a `.venv` holding the stand-in dmypy unless `withMypy` is false,
+ * trusted unless `trusted` is false.
+ */
+async function makeWorktree(
+  files: Record<string, string>,
+  withMypy = true,
+  trusted = true,
+): Promise<string> {
   root = await realpath(await mkdtemp(join(tmpdir(), "mypy-lsp-")));
   const wt = join(root, "wt");
   for (const [name, content] of Object.entries(files)) {
     await mkdir(join(wt, name, ".."), { recursive: true });
     await writeFile(join(wt, name), content);
   }
-  const bin = join(wt, ".venv", "bin");
+  await makeVenv(join(wt, ".venv"), withMypy);
+  if (trusted) setRepoTrusted(wt, true);
+  return wt;
+}
+
+/** A venv at `dir` whose `python` runs the real one, with the stand-in dmypy unless `withMypy` is false. */
+async function makeVenv(dir: string, withMypy = true): Promise<string> {
+  const bin = join(dir, "bin");
   await mkdir(bin, { recursive: true });
-  await writeFile(join(wt, ".venv", "pyvenv.cfg"), "home = /usr/bin\n");
+  await writeFile(join(dir, "pyvenv.cfg"), "home = /usr/bin\n");
   await writeFile(join(bin, "python"), `#!/bin/sh\nexec '${python3}' "$@"\n`);
   await chmod(join(bin, "python"), 0o755);
   if (withMypy) {
     await writeFile(join(bin, "dmypy"), FAKE_DMYPY);
     await chmod(join(bin, "dmypy"), 0o755);
   }
-  return wt;
+  return join(bin, "python");
+}
+
+/** Resolves once `wtPath`'s repository reports the mypy restriction. */
+function restricted(wtPath: string): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!getRepoTrustStatus(wtPath).restrictions.includes(RESTRICTION)) return;
+      unsubscribe();
+      resolve();
+    };
+    const unsubscribe = onRepoTrustStatusChange(check);
+    check();
+  });
 }
 
 function report(file: string, line: number, message: string): string {
@@ -295,6 +337,98 @@ describe.skipIf(!canRun)("MypyLspManager", () => {
     const cleared = await client.waitFor(client.diagnosticsFor(main), before);
     expect(cleared.params?.diagnostics).toEqual([]);
     expect(manager.ownsTypeChecking(wt, main)).toBe(false);
+  });
+
+  test("runs nothing in an untrusted repository, and starts once it is trusted", async () => {
+    const wt = await makeWorktree(
+      {
+        "pyproject.toml": "[tool.mypy]\nplugins = ['project.plugin']\n",
+        ".dmypy-output": `${report("main.py", 1, "Incompatible types")}\n`,
+      },
+      true,
+      false,
+    );
+    manager = new MypyLspManager();
+    const client = new FakeClient(manager);
+    await client.start(wt);
+    const main = join(wt, "main.py");
+    client.open(main);
+
+    await restricted(wt);
+    expect(await Bun.file(join(wt, ".dmypy-calls")).exists()).toBe(false);
+    expect(manager.ownsTypeChecking(wt, main)).toBe(false);
+
+    setRepoTrusted(wt, true);
+    await client.waitFor(
+      (m) => client.diagnosticsFor(main)(m) && m.params?.diagnostics?.length === 1,
+    );
+    expect(manager.ownsTypeChecking(wt, main)).toBe(true);
+  });
+
+  test("stops and clears what it reported when the repository stops being trusted", async () => {
+    const wt = await makeWorktree({
+      "pyproject.toml": "[tool.mypy]\n",
+      ".dmypy-output": `${report("main.py", 1, "Incompatible types")}\n`,
+    });
+    manager = new MypyLspManager();
+    const client = new FakeClient(manager);
+    await client.start(wt);
+    const main = join(wt, "main.py");
+    client.open(main);
+    await client.waitFor(
+      (m) => client.diagnosticsFor(main)(m) && m.params?.diagnostics?.length === 1,
+    );
+
+    const before = client.received.length;
+    setRepoTrusted(wt, false);
+    const cleared = await client.waitFor(client.diagnosticsFor(main), before);
+    expect(cleared.params?.diagnostics).toEqual([]);
+    await restricted(wt);
+    expect(manager.ownsTypeChecking(wt, main)).toBe(false);
+    expect(await runs(wt)).toHaveLength(1);
+  });
+
+  test("a repository folder replaced with no trust event stops every root", async () => {
+    const wt = await makeWorktree({
+      "a/mypy.ini": "[mypy]\n",
+      "a/.dmypy-output": `${report("main.py", 1, "In A")}\n`,
+      "b/mypy.ini": "[mypy]\n",
+    });
+    // The environment lives outside the folder being replaced, so replacing it changes nothing the
+    // environment's watch follows, and only the trust check can notice.
+    await rm(join(wt, ".venv"), { recursive: true });
+    setPythonOverride(wt, await makeVenv(join(root ?? wt, "env")));
+    manager = new MypyLspManager();
+    const client = new FakeClient(manager);
+    await client.start(wt);
+    const inA = join(wt, "a", "main.py");
+    client.open(inA);
+    await client.waitFor(
+      (m) => client.diagnosticsFor(inA)(m) && m.params?.diagnostics?.length === 1,
+    );
+
+    // A copy in its place is another folder to trust, and nothing announces that.
+    await rename(wt, `${wt}.old`);
+    await cp(`${wt}.old`, wt, { recursive: true });
+    const before = client.received.length;
+    client.open(join(wt, "b", "main.py"));
+    const cleared = await client.waitFor(client.diagnosticsFor(inA), before);
+    expect(cleared.params?.diagnostics).toEqual([]);
+    await restricted(wt);
+    expect(manager.ownsTypeChecking(wt, inA)).toBe(false);
+
+    manager.notifyWatchedFilesChanged(wt, [inA]);
+    expect(await runs(join(wt, "a"))).toHaveLength(1);
+  });
+
+  test("reports no restriction when mypy is not installed", async () => {
+    const wt = await makeWorktree({ "mypy.ini": "[mypy]\n" }, false, false);
+    manager = new MypyLspManager();
+    const client = new FakeClient(manager);
+    await client.start(wt);
+    client.open(join(wt, "main.py"));
+    await client.waitFor((m) => m.method === "window/showMessage");
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 
   test("ignores files without a mypy config", async () => {
