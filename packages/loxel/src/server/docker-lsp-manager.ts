@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { reportRepoRestriction } from "./repo-trust";
+import { buildSpawnEnv, pathWithoutCommand } from "./shell-env";
 import {
   type SpawnOptions,
   type SuppressibleFeature,
@@ -33,6 +35,12 @@ const DOCKER_LSP_SETTINGS = {
  * The server's `docker buildx` child inherits this, which only matters for a Docker daemon reached
  * over non-loopback TCP: its lint diagnostics stop. A local socket or `ssh://` is unaffected.
  */
+/** Exported for tests. */
+export const DOCKER_REPO_TRUST_RESTRICTION =
+  "Dockerfiles aren't linted with Docker's build checks.";
+
+const DOCKER = process.platform === "win32" ? "docker.exe" : "docker";
+
 const NO_OUTBOUND_HTTP_ENV = {
   HTTP_PROXY: "http://127.0.0.1:9",
   HTTPS_PROXY: "http://127.0.0.1:9",
@@ -50,7 +58,10 @@ const NO_OUTBOUND_HTTP_ENV = {
  * The server itself sends nothing off the machine: scripts/build-docker-lsp.ts builds the binary
  * without Docker's telemetry and BugSnag keys, the settings above turn Scout off, and inlay hints
  * are suppressed because the server fetches their tag dates from Docker Hub, with no setting to
- * stop it. Its Dockerfile lint runs the user's own `docker buildx`, whose network use is theirs.
+ * stop it. Its Dockerfile lint runs the user's own `docker buildx`, whose network use is theirs, in a
+ * trusted repository only: a Dockerfile's `syntax` directive names the frontend image that builds
+ * it, which BuildKit runs. Untrusted, the server's `PATH` holds no `docker`, and the server's own
+ * parsing still reports problems.
  *
  * Compose support is disabled at init time so our YAML LSP stays
  * authoritative for compose files. `removeOverlappingIssues` stays off: it
@@ -63,6 +74,9 @@ const NO_OUTBOUND_HTTP_ENV = {
  */
 export class DockerLspManager extends WorktreeLspManager {
   protected override readonly disableSemanticTokens = true;
+  protected override readonly repoTrustRestriction = DOCKER_REPO_TRUST_RESTRICTION;
+  // Reported from `resolveBinary`, which knows whether there is a `docker` to hold back.
+  protected override readonly reportsRestrictionAtStart = false;
   protected override readonly requiresFullTextSync = true;
   protected override readonly suppressedFeatures: readonly SuppressibleFeature[] = [
     "textDocument/inlayHint",
@@ -72,7 +86,10 @@ export class DockerLspManager extends WorktreeLspManager {
     super("docker-lsp");
   }
 
-  protected resolveBinary(): string | null {
+  protected resolveBinary({ repoTrusted, wtPath }: WtLspContext): string | null {
+    if (!repoTrusted && Bun.which(DOCKER, { PATH: buildSpawnEnv().PATH ?? "" })) {
+      reportRepoRestriction(wtPath, DOCKER_REPO_TRUST_RESTRICTION);
+    }
     const name =
       process.platform === "win32" ? "docker-language-server.exe" : "docker-language-server";
     return this.resolveBundledBinary(name, path.resolve(import.meta.dir, "../../build/", name));
@@ -83,7 +100,9 @@ export class DockerLspManager extends WorktreeLspManager {
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
-    return { ...super.spawnOptions(context), env: NO_OUTBOUND_HTTP_ENV };
+    const PATH = pathWithoutCommand(buildSpawnEnv().PATH ?? "", DOCKER);
+    const env = context.repoTrusted ? NO_OUTBOUND_HTTP_ENV : { ...NO_OUTBOUND_HTTP_ENV, PATH };
+    return { ...super.spawnOptions(context), env };
   }
 
   protected override handleServerFrame(session: WtLspSession, body: string): void {

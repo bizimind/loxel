@@ -22,8 +22,10 @@ Trust a repository only if you would be willing to run its code yourself. Langua
 
 In a repository you haven't trusted:
 
+- **Astro**: the Astro language server doesn't run, since it loads your project's own TypeScript and packages. It starts as soon as you trust the repository.
 - **C and C++**: on macOS, Loxel's own clangd runs instead of yours. clangd asks only compilers in system folders for include paths, and leaves out compile flags that write output files or pass options through to the compiler. A `.clangd` that names a compile database outside the worktree turns off the background index. See [C and C++](/docs/languages/c-cpp).
 - **C#**: projects don't load, so C# files get syntax highlighting only. Format on save doesn't run the CSharpier your project's tool manifest names, or a version manager's `dotnet`. See [C#](/docs/languages/csharp).
+- **Docker**: Dockerfiles aren't linted with Docker's build checks. The Dockerfile language server's own checks work as usual.
 - **Go**: golangci-lint doesn't run. gopls and format on save work as usual. See [Go](/docs/languages/go).
 - **Java**: Maven and Gradle projects aren't loaded, so each Java file is analyzed on its own. Checkstyle doesn't run. A JDK inside the worktree isn't used, and doesn't reach new terminals. See [Java](/docs/languages/java).
 - **JavaScript and TypeScript**: ESLint, oxlint and Biome's linter don't run. Format on save doesn't run Biome, Prettier or oxfmt, or formatters from the project's `node_modules`. The TypeScript language server works as usual. See [JavaScript](/docs/languages/javascript).

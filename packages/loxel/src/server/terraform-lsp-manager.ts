@@ -6,6 +6,16 @@ import { type SpawnOptions, WorktreeLspManager, type WtLspContext } from "./stdi
 
 const TERRAFORM = "terraform";
 
+/**
+ * A version manager's `terraform` shim installs the version a project pins when it is missing, by
+ * default for tfenv and mise; these turn that off, since Loxel never fetches a toolchain.
+ */
+const NO_AUTO_INSTALL_ENV = {
+  TFENV_AUTO_INSTALL: "false",
+  TENV_AUTO_INSTALL: "false",
+  MISE_NOT_FOUND_AUTO_INSTALL: "0",
+};
+
 const TRUST_RESTRICTION =
   "Terraform doesn't run, so provider schemas come from terraform-ls's built-in set.";
 
@@ -42,7 +52,7 @@ export class TerraformLspManager extends WorktreeLspManager {
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
     const options = super.spawnOptions(context);
-    if (context.repoTrusted) return options;
+    if (context.repoTrusted) return { ...options, env: NO_AUTO_INSTALL_ENV };
     return { ...options, env: { PATH: pathWithoutCommand(buildSpawnEnv().PATH ?? "", TERRAFORM) } };
   }
 

@@ -1,11 +1,18 @@
-import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { afterAll, afterEach, expect, test } from "bun:test";
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
-import { DockerLspManager } from "./docker-lsp-manager";
+// Before the imports that read it: trust is stored in the state directory.
+const stateDir = await mkdtemp(join(tmpdir(), "docker-lsp-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+const { DOCKER_REPO_TRUST_RESTRICTION, DockerLspManager } = await import("./docker-lsp-manager");
+const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+type WtLspContext = import("./stdio-lsp-manager").WtLspContext;
+
+const ORIGINAL_PATH = process.env.PATH;
 
 // A stand-in for docker-language-server: answers `initialize` with its capabilities, then reports
 // what it was started with and asks for its configuration, as the real one does on `didOpen`.
@@ -36,6 +43,7 @@ for await (const chunk of process.stdin) {
         params: {
           initializationOptions: msg.params.initializationOptions,
           env: { HTTP_PROXY, HTTPS_PROXY, NO_PROXY, no_proxy },
+          docker: Bun.which("docker"),
         },
       });
     } else if (msg.method === "textDocument/didOpen") {
@@ -63,7 +71,8 @@ class TestDockerLspManager extends DockerLspManager {
     super();
   }
 
-  protected override resolveBinary(): string {
+  protected override resolveBinary(context: WtLspContext): string {
+    super.resolveBinary(context);
     return process.execPath;
   }
 
@@ -73,14 +82,62 @@ class TestDockerLspManager extends DockerLspManager {
 }
 
 let wt: string | undefined;
-let manager: DockerLspManager | undefined;
+let manager: InstanceType<typeof DockerLspManager> | undefined;
 
 afterEach(async () => {
+  process.env.PATH = ORIGINAL_PATH;
   manager?.destroy();
   manager = undefined;
   if (wt) await rm(wt, { recursive: true, force: true });
   wt = undefined;
 });
+
+afterAll(async () => {
+  await rm(stateDir, { recursive: true, force: true });
+});
+
+/** The `docker` the server finds in a worktree with one on `PATH`, trusted or not. */
+async function dockerSeenByServer(trusted: boolean): Promise<unknown> {
+  wt = await realpath(await mkdtemp(join(tmpdir(), "docker-lsp-")));
+  const script = join(wt, "fake-server.mjs");
+  await writeFile(script, FAKE_SERVER);
+  const tools = join(wt, "tools");
+  await mkdir(tools);
+  await writeFile(join(tools, "docker"), "#!/bin/sh\n");
+  await chmod(join(tools, "docker"), 0o755);
+  process.env.PATH = `${tools}:/usr/bin:/bin`;
+  if (trusted) setRepoTrusted(wt, true);
+  manager = new TestDockerLspManager(script);
+  let resolveStarted: (frame: Frame) => void = () => {};
+  const started = new Promise<Frame>((resolve) => {
+    resolveStarted = resolve;
+  });
+  const ws = {
+    send: (data: string) => {
+      const frame = JSON.parse(data) as Frame;
+      if (frame.method === "test/started") resolveStarted(frame);
+      return data.length;
+    },
+    close: () => {},
+  } as unknown as ServerWebSocket<unknown>;
+  manager.createSession(ws, wt);
+  manager.handleMessage(
+    ws,
+    JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { capabilities: {} } }),
+  );
+  return (await started).params?.docker;
+}
+
+test.skipIf(process.platform === "win32")(
+  "runs Docker's build checks only in a trusted repository, and says so",
+  async () => {
+    expect(await dockerSeenByServer(false)).toBeNull();
+    expect(getRepoTrustStatus(wt!).restrictions).toEqual([DOCKER_REPO_TRUST_RESTRICTION]);
+    await manager?.destroy();
+    await rm(wt!, { recursive: true, force: true });
+    expect(await dockerSeenByServer(true)).toBe(join(wt!, "tools", "docker"));
+  },
+);
 
 test("keeps the server from reaching Docker's services", async () => {
   wt = await realpath(await mkdtemp(join(tmpdir(), "docker-lsp-")));
