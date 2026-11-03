@@ -313,6 +313,11 @@ describe("process options", () => {
     expect(options).toContain('-Djdk.net.hosts.file="/Application Support/hosts"');
     expect(options).toContain("-Dhttp.proxyHost=127.0.0.1");
     expect(options).toContain("-Dhttps.proxyHost=127.0.0.1");
+    // The JVM's default list would let loopback addresses past the proxy.
+    for (const scheme of ["http", "https", "ftp"]) {
+      expect(options.split(" ")).toContain(`-D${scheme}.nonProxyHosts=`);
+    }
+    expect(options.split(" ")).toContain("-DsocksNonProxyHosts=");
   });
 
   test("Gradle's client registers daemons apart, with an idle timeout", () => {

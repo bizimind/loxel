@@ -278,7 +278,7 @@ export function trustedImportSettings(
 /**
  * Options for every JVM under the server, Gradle's daemons included, which is why they travel in
  * the environment rather than on the server's command line: no host name resolves but localhost,
- * and HTTP has no way out.
+ * and HTTP has no way out, to loopback addresses included.
  */
 export function importJavaToolOptions(hostsFile: string): string {
   return [
@@ -287,6 +287,11 @@ export function importJavaToolOptions(hostsFile: string): string {
     "-Dhttp.proxyPort=9",
     "-Dhttps.proxyHost=127.0.0.1",
     "-Dhttps.proxyPort=9",
+    // Empty, since the JVM's default sends loopback addresses past the proxy, straight to them.
+    "-Dhttp.nonProxyHosts=",
+    "-Dhttps.nonProxyHosts=",
+    "-Dftp.nonProxyHosts=",
+    "-DsocksNonProxyHosts=",
   ].join(" ");
 }
 

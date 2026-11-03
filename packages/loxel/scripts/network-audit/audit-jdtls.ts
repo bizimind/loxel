@@ -361,6 +361,17 @@ if (values.m2) {
 }
 symlinkSync(auditedHome, path.join(auditHome, ".jdks", "audited"));
 
+// A listener on loopback, which the JVM's default list of hosts past the proxy would reach.
+let loopbackRequests = 0;
+const loopback = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch() {
+    loopbackRequests += 1;
+    return new Response("");
+  },
+});
+
 const markers = path.join(work, "markers");
 mkdirSync(markers);
 
@@ -1070,6 +1081,9 @@ async function exerciseTrusted(): Promise<void> {
   const canaryRoot = await trustedRepo(canary, {
     "settings.gradle": `pluginManagement { repositories { maven { url 'http://192.0.2.1/plugins'; allowInsecureProtocol = true } } }
 try { java.net.InetAddress.getByName("canary-daemon.example") } catch (Exception e) {}
+["http://127.0.0.1:${loopback.port}/settings", "http://localhost:${loopback.port}/settings"].each { u ->
+  try { new URL(u).openStream().close() } catch (Exception e) {}
+}
 new File("${path.join(work, "settings-ran")}").text = "ran"
 rootProject.name = "c"
 `,
@@ -1086,6 +1100,7 @@ dependencies { implementation 'canary:dep:1.0' }
   check(existsSync(path.join(work, "settings-ran")), `${canary}: its build ran`);
   check(canaryIssue !== null, `${canary}: reports the failed import`, canaryIssue);
   await stopClient(canaryClient);
+  check(loopbackRequests === 0, `${canary}: nothing reached a loopback listener`, loopbackRequests);
 
   // Taking trust back restarts the server restricted.
   const revoked = await startClient(gradleRoot);
@@ -1120,6 +1135,7 @@ try {
 } finally {
   server.kill();
   await server.exited;
+  void loopback.stop(true);
 }
 
 const all = readFileSync(logPath, { flag: "a+", encoding: "utf8" }).split("\n").filter(Boolean);
