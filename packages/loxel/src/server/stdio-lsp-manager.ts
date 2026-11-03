@@ -294,11 +294,12 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
 
   /**
    * Return true for a server whose own stop leaves the processes it started running (a build in a
-   * process group of its own, or a server with no signal handler to stop its children). Releasing the session then ends the server's whole process tree
-   * while the server is still there to find it from (see `kill-process-tree.ts`), after
-   * {@link onSessionClosed}, so it must not depend on state that hook clears. Asked once the
-   * session is built too: a server that exits on its own then has what it had running at the last
-   * look, a few seconds old at most, ended once it has gone.
+   * process group of its own, or a server with no signal handler to stop its children). Releasing
+   * the session then ends the server's whole process tree while the server is still there to find
+   * it from (see `kill-process-tree.ts`), after {@link onSessionClosed}, so it must not depend on
+   * state that hook clears. Asked once the session is built too: a server that exits on its own
+   * then has what it had running at the last look, a few seconds old at most, ended once it has
+   * gone.
    */
   protected stopsProcessTree(_session: TSession): boolean {
     return false;

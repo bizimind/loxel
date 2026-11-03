@@ -3,6 +3,9 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// d3's UMD build is imported by path: its exports map offers it only under a custom condition.
+import _d3Script from "../node_modules/d3/dist/d3.min.js" with { type: "text" };
+import _d3Notices from "../resources/d3/LICENSE" with { type: "text" };
 import _networkGraphHtml from "../resources/network-graph/index.html" with { type: "text" };
 import _treemapHtml from "../resources/treemap/index.html" with { type: "text" };
 import type { AnalysisPlugin, VizType } from "./plugin.ts";
@@ -11,6 +14,16 @@ const HTML: Record<VizType, string> = {
   treemap: _treemapHtml as unknown as string,
   "network-graph": _networkGraphHtml as unknown as string,
 };
+
+/** Path the pages load d3 from; must match the `<script src>` in each page. */
+export const D3_SCRIPT_PATH = "/d3.min.js";
+
+/**
+ * d3's UMD build, embedded in the binary and served locally so `--web` makes no request off the
+ * machine. Its licenses require their notices in every copy, so the notices of d3 and the modules
+ * its build bundles (resources/d3/LICENSE) head the served script.
+ */
+export const D3_SCRIPT = `/*!\n${_d3Notices}*/\n${_d3Script}`;
 
 // Injected before </body> — connects to the reload WebSocket and reloads on any message.
 const RELOAD_SCRIPT = `<script>
@@ -73,6 +86,11 @@ export async function serve(opts: ServeOptions): Promise<void> {
       if (pathname === "/" || pathname === "/index.html") {
         return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
       }
+      if (pathname === D3_SCRIPT_PATH) {
+        return new Response(D3_SCRIPT, {
+          headers: { "Content-Type": "text/javascript; charset=utf-8" },
+        });
+      }
       if (pathname === "/data.json") {
         return new Response(Bun.file(join(tmpDir, "data.json")), {
           headers: { "Content-Type": "application/json" },
@@ -130,7 +148,7 @@ export async function serve(opts: ServeOptions): Promise<void> {
   cleanup();
 }
 
-function buildHtml(vizType: VizType): string {
+export function buildHtml(vizType: VizType): string {
   return HTML[vizType].replace("</body>", `${RELOAD_SCRIPT}</body>`);
 }
 

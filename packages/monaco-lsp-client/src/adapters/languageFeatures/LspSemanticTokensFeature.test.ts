@@ -21,17 +21,29 @@ const STYLING: SemanticTokenStyling = {
 const cancellation = { isCancellationRequested: false } as monaco.CancellationToken;
 
 function setup(data: number[], styling?: SemanticTokenStyling) {
+  let version = 1;
   const model = {
     getPositionAt: () => ({ lineNumber: 1, column: 1 }),
-    getVersionId: () => 1,
+    getVersionId: () => version,
     isDisposed: () => false,
   } as unknown as monaco.editor.ITextModel;
+  const requests: unknown[] = [];
+  /** Called once, as the next request is answered, before the answer reaches the provider. */
+  let onRequest = () => {};
   const connection = {
     bridge: {
       isSyncedModel: () => true,
       translate: () => ({ textDocument: { uri: "file:///a.rs" } }),
     },
-    server: { textDocumentSemanticTokensFull: () => Promise.resolve({ data }) },
+    server: {
+      textDocumentSemanticTokensFull: (params: unknown) => {
+        requests.push(params);
+        const callback = onRequest;
+        onRequest = () => {};
+        callback();
+        return Promise.resolve({ data });
+      },
+    },
   } as unknown as LspConnection;
   const provider = new LspSemanticTokensProvider(
     connection,
@@ -41,7 +53,13 @@ function setup(data: number[], styling?: SemanticTokenStyling) {
     () => {},
     styling,
   );
-  return { provider, model };
+  const edit = () => {
+    version++;
+  };
+  const whenRequested = (callback: () => void) => {
+    onRequest = callback;
+  };
+  return { provider, model, requests, edit, whenRequested };
 }
 
 describe("LspSemanticTokensProvider", () => {
@@ -62,5 +80,15 @@ describe("LspSemanticTokensProvider", () => {
     expect(provider.getLegend()).toEqual(LEGEND);
     const tokens = await provider.provideDocumentSemanticTokens(model, null, cancellation);
     expect(tokens).toMatchObject({ data: new Uint32Array([0, 0, 1, 2, 0b011]) });
+  });
+
+  test("drops an answer the model moved past, without asking again itself", async () => {
+    // Which content the answer is for is not known (rust-analyzer can answer for newer content),
+    // so Monaco keeps its own shifted tokens and asks again.
+    const { provider, model, requests, edit, whenRequested } = setup([0, 0, 1, 2, 0]);
+    whenRequested(edit);
+    const answer = provider.provideDocumentSemanticTokens(model, null, cancellation);
+    await expect(answer).rejects.toMatchObject({ name: "Canceled", message: "Canceled" });
+    expect(requests).toHaveLength(1);
   });
 });
