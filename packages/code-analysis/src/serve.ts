@@ -8,6 +8,7 @@ import _d3Script from "../node_modules/d3/dist/d3.min.js" with { type: "text" };
 import _d3Notices from "../resources/d3/LICENSE" with { type: "text" };
 import _networkGraphHtml from "../resources/network-graph/index.html" with { type: "text" };
 import _treemapHtml from "../resources/treemap/index.html" with { type: "text" };
+import { isLocalRequest } from "./local-request.ts";
 import type { AnalysisPlugin, VizType } from "./plugin.ts";
 
 const HTML: Record<VizType, string> = {
@@ -77,6 +78,12 @@ export async function serve(opts: ServeOptions): Promise<void> {
     port,
     hostname: "127.0.0.1",
     fetch(req, srv) {
+      const servedPort = srv.port ?? port;
+      if (!isLocalRequest(req, servedPort)) {
+        return new Response(`Forbidden: open http://localhost:${servedPort}/ directly`, {
+          status: 403,
+        });
+      }
       const { pathname } = new URL(req.url);
 
       if (pathname === "/__reload") {
