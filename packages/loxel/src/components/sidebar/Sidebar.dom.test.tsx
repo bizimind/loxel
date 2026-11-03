@@ -11,7 +11,7 @@ import {
   SIDEBAR_MIN_WIDTH,
   useProjectStore,
 } from "@/store/projects";
-import { useWorktreeStore } from "@/store/worktrees";
+import { type CreateStarted, useWorktreeStore } from "@/store/worktrees";
 
 mock.module("../projects/AddProjectWizard", () => ({ AddProjectWizard: () => null }));
 
@@ -378,7 +378,7 @@ describe("Sidebar worktree nesting", () => {
     let finish = () => {};
     const createWorktree = mock(
       () =>
-        new Promise<void>((resolve) => {
+        new Promise<CreateStarted | null>((resolve) => {
           finish = () => {
             // What the store does when the branch already exists.
             useWorktreeStore.setState({
@@ -390,7 +390,7 @@ describe("Sidebar worktree nesting", () => {
                 branchConflict: { kind: "exists" },
               },
             });
-            resolve();
+            resolve(null);
           };
         }),
     );
@@ -407,8 +407,40 @@ describe("Sidebar worktree nesting", () => {
     expect(useWorktreeStore.getState().pendingAddPlan).toBeNull();
   });
 
+  test("the dialog closes once the create has started, without waiting for it to finish", async () => {
+    // The create (the repo's init hook, mostly) never finishes in this test.
+    const createWorktree = mock(() =>
+      Promise.resolve<CreateStarted>({ created: new Promise<boolean>(() => {}) }),
+    );
+    setNesting(true);
+    useWorktreeStore.setState({ createWorktree });
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Add worktree"));
+    fireEvent.change(screen.getByPlaceholderText("worktree-name"), { target: { value: "slow" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
+    });
+
+    expect(screen.queryByPlaceholderText("worktree-name")).toBeNull();
+  });
+
+  test("a create that cannot start keeps the dialog open with the reason", async () => {
+    const createWorktree = mock(() => Promise.reject(new Error("Invalid worktree name")));
+    setNesting(true);
+    useWorktreeStore.setState({ createWorktree });
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByText("Add worktree"));
+    fireEvent.change(screen.getByPlaceholderText("worktree-name"), { target: { value: "bad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
+
+    expect(await screen.findByText("Invalid worktree name")).toBeDefined();
+    expect(screen.getByPlaceholderText("worktree-name")).toBeDefined();
+  });
+
   test("new child worktree opens the dialog, whose name follows the title", async () => {
-    const createWorktree = mock(() => Promise.resolve());
+    const createWorktree = mock(() => Promise.resolve(null));
     setNesting(true);
     useWorktreeStore.setState({ createWorktree });
     render(<Sidebar />);

@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
+import type { AddWorktreePlan } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
 import type { WorktreeRemovePlan } from "@/api/worktree-removal-model";
 
 const PROJECT = "/repo";
 const WT_PATH = "/repo/.worktrees/feat-x";
+const NEW_PATH = "/repo/.worktrees/new-wt";
 
 let plan: WorktreeRemovePlan;
 let removeCalls: {
@@ -17,6 +19,11 @@ let listResult: { worktrees: WorktreeEntry[] } = { worktrees: [] };
 let listResponses: Array<Promise<{ worktrees: WorktreeEntry[] }>> = [];
 /** When set, the removal request does not resolve until this does. */
 let removeGate: Promise<void> | null = null;
+let addPlan: AddWorktreePlan;
+let createCalls: string[] = [];
+/** When set, the create request does not resolve until this does. */
+let createGate: Promise<void> | null = null;
+let toasts: string[] = [];
 
 const actualClient = await import("@/api/client");
 
@@ -43,6 +50,14 @@ mock.module("@/api/client", () => ({
     }));
   },
   getProjectWorktrees: () => listResponses.shift() ?? Promise.resolve(listResult),
+  planAddWorktree: () => Promise.resolve(addPlan),
+  createWorktree: (_projectPath: string, name: string) => {
+    createCalls.push(name);
+    return createGate ?? Promise.resolve();
+  },
+}));
+mock.module("@/components/ui/toast", () => ({
+  showToast: (message: string) => toasts.push(message),
 }));
 
 const { queryClient } = await import("@/query-client");
@@ -79,6 +94,10 @@ beforeEach(() => {
   listResult = { worktrees: [] };
   listResponses = [];
   removeGate = null;
+  createCalls = [];
+  createGate = null;
+  toasts = [];
+  addPlan = { name: "new-wt", worktreePath: NEW_PATH, branch: "new-wt" };
   plan = {
     name: "feat-x",
     worktreePath: WT_PATH,
@@ -562,6 +581,118 @@ describe("confirmRemoveWorktree", () => {
     ).rejects.toThrow("worktree was removed");
 
     expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([]);
+  });
+});
+
+describe("createWorktree", () => {
+  const created: WorktreeEntry = {
+    ...worktree,
+    path: NEW_PATH,
+    branch: "new-wt",
+    wtName: "new-wt",
+  };
+  const pendingOf = (path: string) =>
+    useWorktreeStore.getState().byProject[PROJECT]?.worktrees.find((wt) => wt.path === path)
+      ?.pending;
+
+  beforeEach(() => {
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "p1",
+          path: PROJECT,
+          name: "repo",
+          addedAt: "",
+          isBare: true,
+          worktreesDir: "/repo/.worktrees",
+          worktreeMetadata: false,
+          worktrees: [worktree],
+        },
+      ],
+    });
+  });
+
+  test("resolves once started and keeps the entry pending, across refreshes, until it finishes", async () => {
+    let finishCreate: () => void = () => {};
+    createGate = new Promise((resolve) => {
+      finishCreate = resolve;
+    });
+
+    const started = await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+    expect(started).not.toBeNull();
+    expect(pendingOf(NEW_PATH)).toBe("creating");
+
+    // Before git has registered it, then after (while the init hook still runs).
+    listResult = { worktrees: [worktree] };
+    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    expect(pendingOf(NEW_PATH)).toBe("creating");
+    listResult = { worktrees: [worktree, created] };
+    await useWorktreeStore.getState().refreshProjectWorktrees(PROJECT);
+    expect(pendingOf(NEW_PATH)).toBe("creating");
+
+    finishCreate();
+    expect(await started?.created).toBe(true);
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([worktree, created]);
+    expect(toasts).toEqual([]);
+  });
+
+  test("a second create of a worktree still being created does not start", async () => {
+    createGate = new Promise(() => {});
+    await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+
+    await expect(useWorktreeStore.getState().createWorktree(PROJECT, "new-wt")).rejects.toThrow(
+      "already being created",
+    );
+    expect(createCalls).toEqual(["new-wt"]);
+  });
+
+  test("reloading the projects mid-create keeps the entry pending", async () => {
+    createGate = new Promise(() => {});
+    await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+    const project = useProjectStore.getState().projects[0]!;
+
+    useWorktreeStore.getState().applyEnrichedProjects([{ ...project, worktrees: [worktree] }]);
+    expect(pendingOf(NEW_PATH)).toBe("creating");
+    useWorktreeStore
+      .getState()
+      .applyEnrichedProjects([{ ...project, worktrees: [worktree, created] }]);
+    expect(pendingOf(NEW_PATH)).toBe("creating");
+  });
+
+  test("a failed create drops the entry and reports the reason as a toast", async () => {
+    createGate = Promise.reject(new Error("Branch 'new-wt' is already checked out"));
+    listResult = { worktrees: [worktree] };
+
+    const started = await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+
+    expect(await started?.created).toBe(false);
+    expect(useWorktreeStore.getState().byProject[PROJECT]?.worktrees).toEqual([worktree]);
+    expect(toasts).toEqual([
+      "Could not create worktree 'new-wt': Branch 'new-wt' is already checked out",
+    ]);
+  });
+
+  test("a branch that exists parks the plan for the dialog and starts nothing", async () => {
+    addPlan = { ...addPlan, branchConflict: { kind: "exists" } };
+
+    expect(await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt")).toBeNull();
+
+    expect(useWorktreeStore.getState().pendingAddPlan?.name).toBe("new-wt");
+    expect(createCalls).toEqual([]);
+    expect(pendingOf(NEW_PATH)).toBeUndefined();
+  });
+
+  test("confirming a parked plan starts the create the same way", async () => {
+    addPlan = { ...addPlan, branchConflict: { kind: "exists" } };
+    await useWorktreeStore.getState().createWorktree(PROJECT, "new-wt");
+    listResult = { worktrees: [worktree, created] };
+
+    const started = await useWorktreeStore.getState().confirmCreateWorktree("use-existing");
+
+    expect(useWorktreeStore.getState().pendingAddPlan).toBeNull();
+    expect(await started?.created).toBe(true);
+    expect(createCalls).toEqual(["new-wt"]);
+    expect(pendingOf(NEW_PATH)).toBeUndefined();
   });
 });
 
