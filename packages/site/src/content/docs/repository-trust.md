@@ -22,6 +22,7 @@ Trust a repository only if you would be willing to run its code yourself. Langua
 
 In a repository you haven't trusted:
 
+- **Astro**: the Astro language server doesn't run, since it loads your project's own TypeScript and packages. It starts as soon as you trust the repository.
 - **C and C++**: on macOS, Loxel's own clangd runs instead of yours. clangd asks only compilers in system folders for include paths, and leaves out compile flags that write output files or pass options through to the compiler. A `.clangd` that names a compile database outside the worktree turns off the background index. See [C and C++](/docs/languages/c-cpp).
 - **C#**: projects don't load, so C# files get syntax highlighting only. Format on save doesn't run the CSharpier your project's tool manifest names, or a version manager's `dotnet`. See [C#](/docs/languages/csharp).
 - **Go**: golangci-lint doesn't run. gopls and format on save work as usual. See [Go](/docs/languages/go).

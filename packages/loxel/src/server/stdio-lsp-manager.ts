@@ -1117,25 +1117,60 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
    * back: it calls `reportRepoRestriction` itself, as a repository nothing is held back in stays quiet.
    */
   protected readonly reportsRestrictionAtStart: boolean = true;
+  /**
+   * Set, with {@link repoTrustRestriction}, by a server that has no restricted mode, such as one
+   * that loads the project's own packages to run: in an untrusted repository its connection is
+   * answered as a server with no features, and the server starts once the repository is trusted.
+   */
+  protected readonly runsOnlyWhenTrusted: boolean = false;
+  /** The worktree of each connection answered without a server, by socket. */
+  private readonly heldUntilTrusted = new Map<ServerWebSocket<unknown>, string>();
   private unsubscribeRepoTrust: (() => void) | null = null;
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
+    if (this.runsOnlyWhenTrusted && !this.repoTrustRestriction) {
+      throw new Error(`${this.name} sets runsOnlyWhenTrusted without a repoTrustRestriction`);
+    }
     const repoTrusted = isRepoTrusted(wtPath);
     if (this.repoTrustRestriction) {
-      this.unsubscribeRepoTrust ??= onRepoTrustChange(() => {
-        for (const session of [...this.sessions.values()]) this.restartIfTrustChanged(session);
-      });
+      this.unsubscribeRepoTrust ??= onRepoTrustChange(() => this.followRepoTrust());
       if (!repoTrusted && this.reportsRestrictionAtStart) {
         reportRepoRestriction(wtPath, this.repoTrustRestriction);
+      }
+      if (!repoTrusted && this.runsOnlyWhenTrusted) {
+        this.detach(ws);
+        this.heldUntilTrusted.set(ws, wtPath);
+        return;
       }
     }
     this.startSession(ws, { wtPath, repoTrusted });
   }
 
+  override handleMessage(ws: ServerWebSocket<unknown>, data: string): void {
+    if (this.heldUntilTrusted.has(ws)) answerWithoutServer(ws, data);
+    else super.handleMessage(ws, data);
+  }
+
+  override detach(ws: ServerWebSocket<unknown>): void {
+    this.heldUntilTrusted.delete(ws);
+    super.detach(ws);
+  }
+
   override async destroy(): Promise<void> {
     this.unsubscribeRepoTrust?.();
     this.unsubscribeRepoTrust = null;
+    this.heldUntilTrusted.clear();
     await super.destroy();
+  }
+
+  private followRepoTrust(): void {
+    for (const session of [...this.sessions.values()]) this.restartIfTrustChanged(session);
+    for (const [ws, wtPath] of [...this.heldUntilTrusted]) {
+      if (!isRepoTrusted(wtPath)) continue;
+      this.log.info("Starting for a change of repository trust", { wtPath });
+      this.detach(ws);
+      ws.close(LSP_RESTART_CLOSE_CODE, "Repository trust changed; reconnect");
+    }
   }
 
   // A server must not start on an answer the user has just taken back.
@@ -1182,6 +1217,32 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
   protected override getSessionWorkspace(session: WtLspSession): string {
     return session.wtPath;
   }
+}
+
+/** JSON-RPC's code for a request the server does not handle. */
+const METHOD_NOT_FOUND = -32601;
+
+/**
+ * Answer a client frame as a server with no features would: `initialize` with document sync only,
+ * `shutdown`, and any other request as not handled. Notifications need no answer.
+ */
+export function answerWithoutServer(ws: ServerWebSocket<unknown>, frame: string): void {
+  let message: unknown;
+  try {
+    message = JSON.parse(frame);
+  } catch {
+    return;
+  }
+  if (!isRecord(message) || typeof message.method !== "string") return;
+  const { id, method } = message;
+  if (typeof id !== "number" && typeof id !== "string") return;
+  const reply =
+    method === "initialize"
+      ? { result: { capabilities: { textDocumentSync: { openClose: true, change: 0 } } } }
+      : method === "shutdown"
+        ? { result: null }
+        : { error: { code: METHOD_NOT_FOUND, message: `Unhandled method ${method}` } };
+  ws.send(JSON.stringify({ jsonrpc: "2.0", id, ...reply }));
 }
 
 /**

@@ -8,6 +8,7 @@ import { isRecord } from "@/lib/is-record";
 import { getNodeEnv, subscribeNodeEnv } from "./node-env";
 import { onRepoTrustChange, reportRepoRestriction, isRepoTrusted } from "./repo-trust";
 import {
+  answerWithoutServer,
   type SpawnOptions,
   WorktreeLspManager,
   type WtLspContext,
@@ -23,8 +24,6 @@ import {
 
 /** LSP `MessageType.Warning`. */
 const MESSAGE_TYPE_WARNING = 2;
-/** JSON-RPC's `MethodNotFound`. */
-const METHOD_NOT_FOUND = -32601;
 
 /** How to run a linter: under which Node, or null for a native binary, plus what its manager needs. */
 export interface LinterLaunch {
@@ -201,15 +200,7 @@ export abstract class ProjectLinterLspManager<
     if (!isRecord(message) || typeof message.method !== "string") return;
     const { id, method } = message;
     if (typeof id === "number" || typeof id === "string") {
-      if (method === "initialize") {
-        const capabilities = { textDocumentSync: { openClose: true, change: 0 } };
-        send(held.ws, { id, result: { capabilities } });
-      } else if (method === "shutdown") {
-        send(held.ws, { id, result: null });
-      } else {
-        const error = { code: METHOD_NOT_FOUND, message: `Unhandled method ${method}` };
-        send(held.ws, { id, error });
-      }
+      answerWithoutServer(held.ws, frame);
       return;
     }
     if (method !== "textDocument/didOpen") return;
