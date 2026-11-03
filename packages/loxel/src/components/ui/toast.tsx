@@ -65,7 +65,8 @@ function ToastItem({ toast }: { toast: Toast }) {
     >
       <span
         className={cn(
-          "flex-1 text-xs",
+          // Messages can carry long unbroken paths and git commands.
+          "min-w-0 flex-1 text-xs wrap-anywhere",
           toast.variant === "error" ? "text-destructive" : "text-foreground",
         )}
       >

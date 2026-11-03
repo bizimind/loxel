@@ -18,7 +18,13 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import { ArchiveIcon, ArchiveRestoreIcon, ChevronUpIcon, GitBranchPlusIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  ChevronUpIcon,
+  GitBranchPlusIcon,
+  LoaderIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -714,6 +720,12 @@ function TreeRow({
         <div className="wt-row-icon" data-active-inside={activeInside || undefined}>
           <WorktreeIcon name={worktreeName(wt)} size="sm" active={isActive && !expanded} />
           {hasNotification && !isActive && <NotificationDot />}
+          {/* Also on the rail, which has no room for the "Creating..." subtitle. */}
+          {pending && (
+            <span className="bg-background absolute -right-1 -bottom-1 rounded-full p-px">
+              <LoaderIcon className="text-foreground size-2.5 animate-spin" />
+            </span>
+          )}
         </div>
         <div className="wt-row-label">
           {isEditingTitle ? (
