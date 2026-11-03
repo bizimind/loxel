@@ -18,6 +18,7 @@ const { FormatService } = await import("./format-service");
 const { BLACK_FORMAT_RESTRICTION, BUNDLED_RUFF_FORMAT_RESTRICTION, findVenvBin } =
   await import("./python-formatter");
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+const { bundledRuff } = await import("./ruff-lsp-manager");
 
 afterAll(async () => {
   await rm(stateDir, { recursive: true, force: true });
@@ -320,8 +321,10 @@ describe("FormatService Python detection", () => {
     expect(await service.format("x=1\n", blackFile, wt, AUTO_DETECT)).toEqual({ content: null });
     const overridden = await service.format("x=1\n", ruffFile, wt, override);
     expect(overridden.content ?? "").not.toStartWith("ruff ");
+    // Loxel's own ruff stands in for the project's only in a build that has it.
+    const held = bundledRuff() ? [BUNDLED_RUFF_FORMAT_RESTRICTION] : [];
     expect(getRepoTrustStatus(wt).restrictions.toSorted()).toEqual(
-      [BUNDLED_RUFF_FORMAT_RESTRICTION, BLACK_FORMAT_RESTRICTION].toSorted(),
+      [...held, BLACK_FORMAT_RESTRICTION].toSorted(),
     );
 
     setRepoTrusted(wt, true);

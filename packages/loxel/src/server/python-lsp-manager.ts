@@ -91,7 +91,8 @@ export async function pythonSettings(
 /**
  * Settings answered for the `basedpyright` section: {@link BASEDPYRIGHT_SETTINGS}, and in an
  * untrusted repository the environment's import paths as `extraPaths`, since its interpreter does
- * not run to report them. A project config's own `extraPaths` replaces them, as it does any setting.
+ * not run to report them. A project config file makes basedpyright ignore every `analysis` setting,
+ * these among them, so such a project resolves the environment's packages only through its own config.
  */
 export function basedpyrightSettings(env: PythonEnv | null, repoTrusted: boolean): object {
   if (repoTrusted || !env?.envPath) return BASEDPYRIGHT_SETTINGS;

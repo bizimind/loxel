@@ -866,12 +866,15 @@ function pthDirs(sitePackages: string, pthFile: string): string[] {
   try {
     const info = statSync(pthFile);
     if (!info.isFile() || info.size > MAX_PTH_FILE_BYTES) return [];
-    return readFileSync(pthFile, "utf8")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#") && !/^import[\s\t]/.test(line))
-      .map((line) => path.resolve(sitePackages, line))
-      .filter(isDirectory);
+    return (
+      readFileSync(pthFile, "utf8")
+        .split(/\r?\n/)
+        // CPython strips only the end of a line.
+        .map((line) => line.trimEnd())
+        .filter((line) => line && !line.startsWith("#") && !/^import[\s\t]/.test(line))
+        .map((line) => path.resolve(sitePackages, line))
+        .filter(isDirectory)
+    );
   } catch {
     return [];
   }

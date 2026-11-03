@@ -74,7 +74,8 @@ export class RuffLspManager extends WorktreeSessionLspManager<RuffLspSession> {
 
   protected async resolveBinary(context: WtLspContext): Promise<string | null> {
     const env = await getPythonEnv(context.wtPath);
-    const fromEnv = envRuff(env);
+    // Only an environment's ruff is the project's; one beside a system interpreter is the user's.
+    const fromEnv = env?.envPath ? envRuff(env) : null;
     if (!context.repoTrusted && fromEnv && (await Bun.file(fromEnv).exists())) {
       reportRepoRestriction(context.wtPath, RUFF_REPO_TRUST_RESTRICTION);
     }
