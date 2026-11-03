@@ -306,7 +306,10 @@ export class MypyLspManager implements ExternalTypeChecker, WorktreeLspServer {
     const dmypy = await usableDmypy(session.wtPath, env);
     if (project.generation !== generation || !this.isLive(session)) return;
     // Asked again rather than read from the session: trust as of now decides what starts.
-    if (dmypy && !isRepoTrusted(session.wtPath)) {
+    const trusted = isRepoTrusted(session.wtPath);
+    // Recorded, so `followTrust` does not mistake the next change for no change.
+    session.trusted = trusted;
+    if (dmypy && !trusted) {
       this.setState(session, project, "unavailable");
       this.publish(session, project, new Map());
       reportRepoRestriction(session.wtPath, MYPY_REPO_TRUST_RESTRICTION);
