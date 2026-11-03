@@ -30,4 +30,8 @@ export const config = {
   commentsDir: join(stateDir, "comments"),
   updatesDir: join(stateDir, "updates"),
   port,
+  /** How long a worktree removed outside the app keeps its terminals; tests shorten it. */
+  removedWorktreeTerminalDelayMs: Number(
+    process.env.LOXEL_REMOVED_WORKTREE_TERMINAL_DELAY_MS ?? 60_000,
+  ),
 } as const;

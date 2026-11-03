@@ -53,6 +53,8 @@ export interface WorkspaceEditApplierOptions {
   fileSystem?: WorkspaceFileSystem;
   /** Called with the reason whenever an edit is refused or fails part way, to tell the user. */
   onFailure?: (reason: string) => void;
+  /** Open models no edit may change, such as a read-only document of the server's own. */
+  isReadOnlyModel?: (model: monaco.editor.ITextModel) => boolean;
 }
 
 type Step = { change: number; label: string } & (
@@ -175,8 +177,10 @@ export class WorkspaceEditApplier extends Disposable {
 
     let steps: Step[];
     try {
-      steps = await new EditPlanner(this._options.fileSystem, (source, target, isFolder) =>
-        this._willRename(source, target, isFolder),
+      steps = await new EditPlanner(
+        this._options.fileSystem,
+        (source, target, isFolder) => this._willRename(source, target, isFolder),
+        this._options.isReadOnlyModel,
       ).plan(edit);
     } catch (error) {
       return { applied: false, failureReason: errorMessage(error) };
@@ -298,6 +302,7 @@ class EditPlanner {
       target: monaco.Uri,
       isFolder: boolean,
     ) => Promise<WorkspaceEdit | null>,
+    private readonly _isReadOnlyModel?: (model: monaco.editor.ITextModel) => boolean,
   ) {}
 
   async plan(edit: WorkspaceEdit): Promise<Step[]> {
@@ -492,6 +497,7 @@ class EditPlanner {
     if (known && (forTextEdit || !this._unchecked.has(k))) return known;
 
     const model = monaco.editor.getModel(uri) ?? undefined;
+    if (model && this._isReadOnlyModel?.(model)) throw new Error(`${describe(uri)} is read-only`);
     let entry: Entry;
     if (!this._fs) {
       if (!model) throw new Error(`${describe(uri)} is not open in the editor`);

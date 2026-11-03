@@ -166,9 +166,9 @@ function ktfmtSettings(script: string): string {
   );
 }
 
-/** The text inside each `{ ... }` block that `opening`, a global regex ending at `{`, opens. */
-export function blockBodies(script: string, opening: RegExp): string[] {
-  return [...script.matchAll(opening)].map((match) => {
+/** The text inside each of the first `limit` `{ ... }` blocks that `opening`, a global regex ending at `{`, opens. */
+export function blockBodies(script: string, opening: RegExp, limit = Infinity): string[] {
+  return [...script.matchAll(opening)].slice(0, limit).map((match) => {
     const start = match.index + match[0].length;
     let depth = 1;
     let end = start;

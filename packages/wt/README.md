@@ -344,7 +344,7 @@ Run `clean.wt.sh`, then remove the worktree. Keeps the branch unless asked to de
 
 A worktree is dirty, and needs `--force`, when `git status` reports anything in it, checked both before and after `clean.wt.sh` runs. Only what `git status` shows counts: submodule content it hides (through `ignore` settings) and submodule commits that exist on no remote are deleted without asking for `--force`.
 
-The command returns as soon as git has unregistered the worktree; its files are deleted in the background from `.wt-trash/` inside the worktrees directory. If that deletion is interrupted (a reboot, say), the leftover stays in `.wt-trash/` until you delete it. A worktree whose directory was already deleted outside wt can still be listed and removed.
+The command returns as soon as git has unregistered the worktree and its branch is handled; its files are deleted in the background from `.wt-trash/` inside the worktrees directory. Once it has started, closing the terminal does not stop `wt` itself, though a git command running at that moment can fail: the rest of the removal still happens, and the branch may be left behind. If that deletion is interrupted (a reboot, say), the leftover stays in `.wt-trash/` until you delete it. A worktree whose directory was already deleted outside wt can still be listed and removed.
 
 ```bash
 wt remove feature-auth                 # prompts about the branch when interactive

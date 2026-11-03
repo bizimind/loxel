@@ -8,13 +8,12 @@ import path from "node:path";
 
 import type { CheckstyleProject } from "./checkstyle-config";
 import { readConfigFile } from "./config-file-read";
-import { isVersionManagerShim as isInShimsDir } from "./csharp-env";
 import { killProcessGroup } from "./formatter-backends";
 import { isJdkInWorktree, listJavaRuntimes } from "./java-env";
+import { toolsOnPath } from "./java-formatter";
 import { importJavaToolOptions } from "./java-project-import";
 import { jdkToolEnv, NO_JAVA, trustedPath } from "./kotlin-formatter";
 import { logger } from "./logger";
-import { linksToVersionManager } from "./rust-tool-shim";
 import { buildSpawnEnv } from "./shell-env";
 
 const log = logger.child("checkstyle-lsp");
@@ -75,15 +74,9 @@ export async function findCheckstyle(
   wtPath: string,
 ): Promise<{ executable: string; path: string } | { sawShim: boolean }> {
   const root = path.resolve(wtPath);
-  const searchPath = await trustedPath(COMMAND, root);
-  let sawShim = false;
-  for (const dir of searchPath.split(path.delimiter)) {
-    const found = dir ? Bun.which(COMMAND, { PATH: dir }) : null;
-    if (!found) continue;
-    if ((await isInShimsDir(found)) || (await linksToVersionManager(found))) sawShim = true;
-    else return { executable: found, path: searchPath };
-  }
-  return { sawShim };
+  const { tools, sawShim } = await toolsOnPath(COMMAND, root);
+  const [executable] = tools;
+  return executable ? { executable, path: await trustedPath(COMMAND, root) } : { sawShim };
 }
 
 /**

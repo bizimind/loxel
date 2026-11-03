@@ -101,6 +101,8 @@ export const LOXEL_DEFAULT_TEMPLATE: BindingTemplate = buildTemplate({
   // on whether a browser panel has focus.
   "panel.rename": ["Cmd+Shift+R"],
   "browser.hardRefresh": ["Cmd+Shift+R"],
+  // Beside ⌃⇧+arrow, which moves between the groups this hides. ⇧⌘↩ is Monaco's Insert Line Above.
+  "panel.toggleMaximize": ["Ctrl+Shift+Enter"],
   ...SPLIT_CHORDS,
   "panel.next": ["Cmd+Shift+BracketRight", "Ctrl+Tab"],
   "panel.prev": ["Cmd+Shift+BracketLeft", "Ctrl+Shift+Tab"],

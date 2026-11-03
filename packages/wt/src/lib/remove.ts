@@ -2,6 +2,7 @@ import { dirname, join, resolve } from "node:path";
 
 import {
   deleteBranch,
+  deleteInBackground,
   detachWorktree,
   isMergedInto,
   isWorktreeDirty,
@@ -94,8 +95,9 @@ export function forceReason(name: string, dirty: boolean): string | null {
  * reject never tears down the environment; only a change made while the hook
  * runs can fail afterwards.
  *
- * Returns once the worktree is unregistered: its files are deleted in the
- * background (see `detachWorktree`).
+ * Returns once the worktree is unregistered and its branch handled. Its files
+ * are deleted in the background (see `detachWorktree`), started last, since the
+ * caller may be running inside them.
  */
 export async function executeRemove(
   params: RemoveParams,
@@ -134,18 +136,21 @@ export async function executeRemove(
   }
 
   progress.log(`Removing worktree '${name}'...`);
-  if (!(await detachWorktree(root, worktree.path, dir))) {
-    await removeWorktree(root, worktree.path, force);
+  const parked = await detachWorktree(root, worktree.path, dir);
+  if (!parked) await removeWorktree(root, worktree.path, force);
+  let branchDeleted: boolean;
+  try {
+    await pruneEmptyParents(dirname(worktree.path), dir);
+    branchDeleted = await tryDeleteBranch(
+      root,
+      worktree.branch,
+      params.deleteBranch,
+      params.forceBranch ?? false,
+      progress,
+    );
+  } finally {
+    if (parked) deleteInBackground(parked);
   }
-  await pruneEmptyParents(dirname(worktree.path), dir);
-
-  const branchDeleted = await tryDeleteBranch(
-    root,
-    worktree.branch,
-    params.deleteBranch,
-    params.forceBranch ?? false,
-    progress,
-  );
 
   return { name, path: worktree.path, removed: true, branchDeleted, hookRan };
 }

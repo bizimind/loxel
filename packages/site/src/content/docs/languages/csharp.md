@@ -39,12 +39,12 @@ Completion lists what is already imported. For a type from a namespace you haven
 
 - One solution at the repository's root is what loads.
 - With several solutions and no single one at the root, csharp-ls loads the first by path and a notice names it. Files outside it get syntax highlighting only. [Choose another](#choosing-a-solution) to load it instead.
-- With no solution, every project in the repository loads.
+- With no solution, csharp-ls loads exactly the projects Loxel discovered, and the projects those reference. Loxel discovers the repository's own projects, tracked or not, and not those in git-ignored directories, submodules or other repositories inside it. `$(SolutionDir)` in these projects points at a directory of Loxel's.
 - A project in what loads that isn't restored still loads, and a notice names it: references to its packages show as errors until you run `dotnet restore`.
 - A project csharp-ls can't load gets a notice naming it, and its files may have fewer features.
 - A project using an MSBuild SDK delivered through NuGet, such as `MSTest.Sdk` or `Aspire.AppHost.Sdk`, loads without that SDK, since loading it could download it. A notice names it, and its files show errors.
 
-After a `dotnet restore`, or when `obj` goes away, the server restarts to pick up the change. A large solution takes a little while to load again.
+After a `dotnet restore`, or when `obj` goes away, the server restarts to pick up the change. A large solution takes a little while to load again. Stopping csharp-ls also stops its child processes.
 
 A `.cs` file outside any loaded project, or in a repository with no project at all, gets syntax highlighting only.
 

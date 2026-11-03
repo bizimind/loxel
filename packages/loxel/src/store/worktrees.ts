@@ -18,7 +18,9 @@ import {
   type WorktreeNode,
   type WorktreeRow,
 } from "@/lib/worktree-hierarchy";
+import { queryClient } from "@/query-client";
 
+import { useFileSearchStore } from "./file-search";
 import { deriveProject, useProjectStore } from "./projects";
 import { serverWorktreesStorage } from "./server-storage";
 import { purgeWorktreeCache, transitionWorktreeState } from "./worktree-cache";
@@ -348,7 +350,8 @@ export const useWorktreeStore = create<WorktreeState>()(
           const allProjects = useProjectStore.getState().projects;
           const project = allProjects.find((p) => p.path === projectPath);
           if (!project) return;
-          const priorPaths = new Set(getProject(get(), projectPath).worktrees.map((wt) => wt.path));
+          const prior = getProject(get(), projectPath).worktrees;
+          const priorPaths = new Set(prior.map((wt) => wt.path));
 
           const data = await api.getProjectWorktrees(project.id);
           if (refreshRequestIds.get(projectPath) !== requestId) return;
@@ -369,6 +372,11 @@ export const useWorktreeStore = create<WorktreeState>()(
               }),
             };
           });
+
+          // Whether removed or moved, in this window or anywhere else, by the app or by `wt`.
+          for (const wt of prior) {
+            if (wt.pending !== "creating" && !validPaths.has(wt.path)) releaseWorktree(wt.path);
+          }
 
           const active = get().activeWorktreePath;
           const activeProject = deriveProject(active, allProjects);
@@ -624,10 +632,29 @@ useWorktreeStore.subscribe(
   },
 );
 
-/** Drop the client state of a removed worktree and stop listening to it. */
+/** Whether `path` is a worktree or a regular project's root checkout in this window's lists. */
+export function isListedWorktree(path: string): boolean {
+  const { byProject } = useWorktreeStore.getState();
+  return (
+    Object.values(byProject).some((ps) => ps.worktrees.some((wt) => wt.path === path)) ||
+    useProjectStore.getState().projects.some((p) => !p.isBare && p.path === path)
+  );
+}
+
+/**
+ * Drop the client state of a removed worktree and stop listening to it, so a worktree later created
+ * at the same path starts fresh.
+ */
 function releaseWorktree(path: string): void {
   purgeWorktreeStores(path);
   purgeWorktreeCache(path);
+  useFileSearchStore.getState().purgeWorktree(path);
+  queryClient.removeQueries({
+    predicate: ({ queryKey }) =>
+      queryKey.some(
+        (part) => typeof part === "string" && (part === path || part.startsWith(`${path}/`)),
+      ),
+  });
   wsClient.unsubscribeWorktree(path);
 }
 

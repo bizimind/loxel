@@ -33,6 +33,7 @@ const log = logger.child("format");
 
 const MAX_FORMAT_SIZE = 1_024 * 1_024; // 1 MB
 const FORMAT_TIMEOUT_MS = 5_000;
+const PREPARE_TIMEOUT_MS = 5_000;
 
 /**
  * Outcome of `FormatService.format()`. `content` is null when the file is saved unformatted;
@@ -61,6 +62,10 @@ interface DetectedFormatter {
   backendDir?: string;
   /** See {@link FileFormatter.backendToolDir}. */
   backendToolDir?: string;
+  /** See {@link FileFormatter.prepare}. */
+  prepare?: FileFormatter["prepare"];
+  /** See {@link FileFormatter.spawn}. */
+  spawn?: FileFormatter["spawn"];
 }
 
 interface DetectionCache {
@@ -102,7 +107,10 @@ export class FormatService {
   private running = new Set<{ worktreePath: string; pid: number; stopped: boolean }>();
   private readonly unsubscribeRepoTrust = onRepoTrustChange(() => this.stopUntrusted());
 
-  constructor(private readonly languages: readonly LanguageFormatter[] = languageFormatters) {}
+  constructor(
+    private readonly languages: readonly LanguageFormatter[] = languageFormatters,
+    private readonly prepareTimeoutMs = PREPARE_TIMEOUT_MS,
+  ) {}
 
   /**
    * Format file content using the resolved formatter.
@@ -148,10 +156,11 @@ export class FormatService {
     }
 
     // 2. Auto-detect from project config
-    const fmt =
+    const detected =
       settings.autoDetect && worktreePath
         ? this.findDetectedFormatter(ext, filePath, worktreePath)
         : undefined;
+    const fmt = detected && (await prepareDetected(detected, filePath, this.prepareTimeoutMs));
     if (!fmt || !worktreePath) {
       log.debug("No formatter found", { filePath, ext });
       return UNFORMATTED;
@@ -164,7 +173,7 @@ export class FormatService {
     if (fmt.backendMode !== "command") {
       return this.formatWithBackend(fmt, content, filePath, worktreePath);
     }
-    return this.runFormatter(fmt.command, fmt.args, content, filePath, worktreePath);
+    return this.runFormatter(fmt.command, fmt.args, content, filePath, worktreePath, fmt.spawn);
   }
 
   /**
@@ -370,11 +379,11 @@ export class FormatService {
     content: string,
     filePath: string,
     worktreePath: string | undefined,
+    spawn?: FormatterSpawnOptions,
   ): Promise<FormatResult> {
     const ext = extractExtension(filePath) ?? "";
-    const options = worktreePath
-      ? await this.spawnOptions(command, ext, filePath, worktreePath)
-      : {};
+    const options =
+      spawn ?? (worktreePath ? await this.spawnOptions(command, ext, filePath, worktreePath) : {});
     if (options.skip) {
       log.info("Language module skipped the formatter", { command, filePath });
       return { content: null, notice: options.skip.notice };
@@ -564,6 +573,37 @@ function detectFormatter(
   } catch (err) {
     log.warn("Formatter detection failed", { dir, error: errorMessage(err) });
     return null;
+  }
+}
+
+/**
+ * A detected formatter after its `prepare`; one that throws detects nothing, like `detect`. The whole
+ * of it is capped, as a save is waiting. What it leaves running can still finish and be remembered.
+ */
+async function prepareDetected(
+  detected: DetectedFormatter | FormatterDecline,
+  filePath: string,
+  timeoutMs: number,
+): Promise<DetectedFormatter | FormatterDecline | undefined> {
+  if ("notice" in detected || !detected.prepare) return detected;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<FormatterDecline>((done) => {
+    timer = setTimeout(
+      () =>
+        done({
+          notice: `Format on save skipped: checking "${detected.command}" took too long. The next save tries again.`,
+        }),
+      timeoutMs,
+    );
+  });
+  try {
+    const prepared = await Promise.race([detected.prepare(), timedOut]);
+    return "notice" in prepared ? prepared : { ...detected, ...prepared, prepare: undefined };
+  } catch (err) {
+    log.warn("Preparing a formatter failed", { filePath, error: errorMessage(err) });
+    return undefined;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

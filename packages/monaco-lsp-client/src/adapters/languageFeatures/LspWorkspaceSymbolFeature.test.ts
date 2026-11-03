@@ -296,3 +296,36 @@ describe("workspace symbols", () => {
     client.dispose();
   });
 });
+
+describe("custom requests", () => {
+  beforeEach(() => {
+    fakeMonaco.reset();
+  });
+
+  test("sends the method and params and resolves with the unverified result", async () => {
+    const { server, client } = await connect({}, (request) =>
+      request.method === "workspace/textDocumentContent"
+        ? { result: { text: "class A {}" } }
+        : { error: { code: -32601, message: "no such method" } },
+    );
+    const { token } = tokenSource();
+
+    await expect(
+      client.request("workspace/textDocumentContent", { uri: "jdt://a" }, token),
+    ).resolves.toEqual({ text: "class A {}" });
+    expect(server.requests.at(-1)?.params).toEqual({ uri: "jdt://a" });
+    await expect(client.request("csharp/metadata", {}, token)).rejects.toThrow("no such method");
+  });
+
+  test("cancelling sends $/cancelRequest and rejects", async () => {
+    const { server, client } = await connect({}, () => "never");
+    const { token, cancel } = tokenSource();
+
+    const answer = client.request("java/slow", {}, token);
+    await tick(5);
+    cancel();
+
+    await expect(answer).rejects.toThrow("Canceled");
+    expect(server.notifications.map((n) => n.method)).toContain("$/cancelRequest");
+  });
+});

@@ -48,9 +48,10 @@ function commandRows(
   enabled: ReadonlySet<ActionId>,
 ): PaletteRow[] {
   const visible = ACTIONS.filter((a) => !a.hidden && enabled.has(a.id));
+  const labelOf = (action: (typeof visible)[number]) => action.contextLabel?.() ?? action.label;
   const toRow = (action: (typeof visible)[number], indices: number[]): PaletteRow => ({
     key: action.id,
-    label: action.label,
+    label: labelOf(action),
     indices,
     bindings: getBindingsForAction(kbState, action.id),
   });
@@ -59,7 +60,7 @@ function commandRows(
 
   const results: Array<{ row: PaletteRow; score: number }> = [];
   for (const action of visible) {
-    const match = fuzzyMatch(q, action.label);
+    const match = fuzzyMatch(q, labelOf(action));
     if (match) results.push({ row: toRow(action, match.indices), score: match.score });
   }
   results.sort((a, b) => b.score - a.score);

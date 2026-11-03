@@ -90,6 +90,7 @@ async function resolveToolchainEnv(
 
 /** A shell waiting for its environment, and what reached it meanwhile. */
 interface PendingStart {
+  worktreePath: string;
   /** Resolves to null when the terminal was destroyed meanwhile. */
   session: Promise<TerminalSession | null>;
   /** The client to bind once spawned; cleared by a detach. */
@@ -150,11 +151,12 @@ export class TerminalManager {
       session: this.buildEnv(options).then((env) => {
         if (this.starting.get(id) !== pending) return null;
         this.starting.delete(id);
-        const session = this.spawn(id, options, env);
+        const session = this.spawn(id, { ...options, worktreePath: pending.worktreePath }, env);
         if (pending.size) session.resize(pending.size.cols, pending.size.rows);
         for (const data of pending.input) session.write(data);
         return session;
       }),
+      worktreePath: options.worktreePath ?? options.cwd,
       sink: null,
       size: null,
       input: [],
@@ -271,6 +273,40 @@ export class TerminalManager {
     if (!session) return;
     this.sessions.delete(id);
     session.destroy();
+  }
+
+  /**
+   * End every session of a removed worktree, `delayMs` from now, calling `onEnded` with each one
+   * that was still running. Only the sessions there now: a worktree created at the same path
+   * meanwhile keeps its own. A shell still waiting for its environment never starts.
+   */
+  endWorktreeSessions(worktreePath: string, delayMs: number, onEnded: (id: string) => void): void {
+    for (const [id, pending] of this.starting) {
+      if (pending.worktreePath !== worktreePath) continue;
+      this.destroy(id);
+      onEnded(id);
+    }
+    const sessions = [...this.sessions.values()].filter((s) => s.worktreePath === worktreePath);
+    const end = () => {
+      for (const session of sessions) {
+        // Exited or closed meanwhile, or already ended by the other removal path.
+        if (this.sessions.get(session.id) !== session) continue;
+        this.destroy(session.id);
+        onEnded(session.id);
+      }
+    };
+    if (delayMs === 0) end();
+    else if (sessions.length > 0) setTimeout(end, delayMs).unref();
+  }
+
+  /** A moved worktree keeps its sessions, so removing it later still ends them. */
+  retargetWorktree(from: string, to: string): void {
+    for (const pending of this.starting.values()) {
+      if (pending.worktreePath === from) pending.worktreePath = to;
+    }
+    for (const session of this.sessions.values()) {
+      if (session.worktreePath === from) session.worktreePath = to;
+    }
   }
 
   /** True if any session has no attached client. */

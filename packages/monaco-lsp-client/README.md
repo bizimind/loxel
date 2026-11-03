@@ -17,6 +17,8 @@ Forked from [`@vscode/monaco-lsp-client`](https://github.com/microsoft/monaco-ed
 - The `semanticTokenStyling` option names what the app's theme has rules for: tokens of other types keep their TextMate color, and other modifiers are dropped so they cannot stop a rule from matching
 - Additional features: inline completions and linked editing ranges
 - Workspace symbols: Monaco standalone has no workspace symbol provider, so `client.workspaceSymbols(query, token)` sends `workspace/symbol` and returns `WorkspaceSymbolItem`s (Monaco kinds and tags, 1-based range, or no range when the server defers it), and `client.resolveWorkspaceSymbol(item, token)` fills a missing range through `workspaceSymbol/resolve`. Cancelling the token sends `$/cancelRequest` for the request's id (`LspCancellableRequests`, which sends through the channel's request sender because `TypedChannel.request` does not expose ids) and rejects with a `Canceled` error
+- Custom requests: `client.request(method, params, token)` sends a request the typed `server` interface does not have, such as a server's own method or a newer LSP one, once the server has initialized, and resolves with the unverified result; cancelling the token sends `$/cancelRequest`
+- The `isReadOnlyModel` option names open models workspace edits may not change, such as a read-only document of the server's own; an edit touching one is refused whole
 - Document-filter glob patterns are matched with `picomatch`
 - `MonacoLspClient.dispose()` unregisters providers, closes synced documents, removes its diagnostics markers and drops the capability registry
 - Each client sets its diagnostics markers under an owner of its own, so several servers on one model (basedpyright and ruff for Python) do not overwrite each other's: the `markerOwner` option, or by default an owner unique to the client (`lsp-<n>`). A marker's code links to the diagnostic's `codeDescription`
@@ -44,6 +46,7 @@ const transport = await WebSocketTransport.connectTo({ address: "ws://localhost:
 const client = new MonacoLspClient(transport, {
   languageId: ["typescript", "javascript"],
   modelFilter: (model) => model.uri.scheme === "file",
+  isReadOnlyModel: (model) => model.uri.scheme === "jdt", // workspace edits refuse these
   workspaceFileSystem: myFileSystem, // stat/readFile/writeFile/createFile/rename/delete
   onWorkspaceEditFailure: (reason) => showError(reason),
   markerOwner: "ts-lsp", // diagnostics markers' owner; unique among live clients

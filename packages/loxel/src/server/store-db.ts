@@ -69,6 +69,12 @@ export function deleteStore(key: string): void {
   notifyStoreChange(key);
 }
 
+/** Every stored key. */
+export function listStoreKeys(): string[] {
+  const rows = getDb().prepare("SELECT key FROM stores").all() as Array<{ key: string }>;
+  return rows.map((row) => row.key);
+}
+
 /**
  * Promote all `layout:session:<windowId>:*` rows to `layout:canonical:*`, atomically.
  * Called when a window closes (orderly) — its session-scoped layout becomes the

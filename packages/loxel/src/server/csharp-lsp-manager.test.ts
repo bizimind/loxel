@@ -15,6 +15,7 @@ const { CSharpLspManager, CSHARP_LS_SETTINGS, MIN_CSHARP_LS_VERSION, withClientR
 const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 const { getCSharpLspState, subscribeCSharpStatus } = await import("./csharp-lsp-state");
 const { setCSharpSolution } = await import("./csharp-solution-store");
+const { projectsSolutionPath } = await import("./csharp-projects-solution");
 type WtLspContext = import("./stdio-lsp-manager").WtLspContext;
 type WtLspSession = import("./stdio-lsp-manager").WtLspSession;
 
@@ -163,7 +164,11 @@ process.stdin.on("data", (chunk) => {
     if (buffer.length < end + 4 + length) return;
     const msg = JSON.parse(buffer.slice(end + 4, end + 4 + length));
     buffer = buffer.slice(end + 4 + length);
-    if (msg.method === "initialize") {
+    if (msg.method === "test/startChild") {
+      // In a process group of its own, as a build's children can be.
+      const child = require("node:child_process").spawn("/bin/sleep", ["1000"], { detached: true, stdio: "ignore" });
+      send({ jsonrpc: "2.0", method: "test/childStarted", params: { pid: child.pid } });
+    } else if (msg.method === "initialize") {
       send({
         jsonrpc: "2.0",
         id: msg.id,
@@ -286,6 +291,14 @@ function connect(wt: string) {
 }
 
 const isHold = (result: Record<string, unknown>) => result.args === undefined;
+
+/** A killed process lingers until its parent or init has collected it, which is why this waits. */
+function isRunning(pid: number): boolean {
+  const state = Bun.spawnSync(["ps", "-o", "stat=", "-p", String(pid)], {
+    env: { PATH: "/bin:/usr/bin" },
+  }).stdout.toString();
+  return state.trim() !== "" && !state.startsWith("Z");
+}
 
 /** A repository that is trusted, with one project that `dotnet restore` has run for. */
 async function makeRestoredRepo(files: Record<string, string> = {}): Promise<string> {
@@ -498,7 +511,12 @@ describe.skipIf(process.platform === "win32")("CSharpLspManager", () => {
       const wt = await makeRestoredRepo();
       const socket = connect(wt);
       const result = await socket.untilInitialized();
-      expect(result.args).toEqual(["--loglevel", "information"]);
+      expect(result.args).toEqual([
+        "--loglevel",
+        "information",
+        "--solution",
+        projectsSolutionPath(wt),
+      ]);
       expect(result.cwd).toBe(wt);
       expect(result.dotnetRoot).toBe(bin);
       expect(result.nodeReuse).toBe("1");
@@ -553,6 +571,68 @@ describe.skipIf(process.platform === "win32")("CSharpLspManager", () => {
       await held.untilMessage("dotnet tool restore");
       await write(join(process.env.HOME ?? "", ".dotnet", "toolResolverCache", "1", "csharp-ls"));
       expect((await held.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    });
+
+    test("with no solution it loads the discovered projects, not what is on disk", async () => {
+      await installToolchain();
+      const wt = await makeRestoredRepo({
+        ".gitignore": "obj/\nbin/\nskipped/\n",
+        "lib/Lib.csproj": PROJECT,
+        "skipped/Skipped.csproj": PROJECT,
+      });
+      const nested = join(wt, "nested");
+      await write(join(nested, "Nested.csproj"), PROJECT);
+      await write(join(nested, "Nested.slnx"), "");
+      await git(nested, "init", "-q");
+      const result = await connect(wt).untilInitialized();
+      expect(result.args).toEqual([
+        "--loglevel",
+        "information",
+        "--solution",
+        projectsSolutionPath(wt),
+      ]);
+      const listed = await Bun.file(projectsSolutionPath(wt)).text();
+      expect(listed).toContain(join(wt, "App.csproj"));
+      expect(listed).toContain(join(wt, "lib", "Lib.csproj"));
+      expect(listed).not.toContain("Nested.csproj");
+      expect(listed).not.toContain("Skipped.csproj");
+    });
+
+    test("a project added beside a listed one restarts the server, restored or not", async () => {
+      await installToolchain();
+      const wt = await makeRestoredRepo();
+      const socket = connect(wt);
+      await socket.untilInitialized();
+      const added = join(wt, "lib", "Lib.csproj");
+      await write(added, PROJECT);
+      manager?.notifyWatchedFilesChanged(wt, [added]);
+      expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+      expect(await Bun.file(projectsSolutionPath(wt)).text()).not.toContain("Lib.csproj");
+      manager?.destroySession(socket.ws);
+      await connect(wt).untilInitialized();
+      expect(await Bun.file(projectsSolutionPath(wt)).text()).toContain("Lib.csproj");
+    });
+
+    test("a directory newly ignored restarts a server listing its project", async () => {
+      await installToolchain();
+      const wt = await makeRestoredRepo({ "lib/Lib.csproj": PROJECT });
+      const socket = connect(wt);
+      await socket.untilInitialized();
+      expect(await Bun.file(projectsSolutionPath(wt)).text()).toContain("Lib.csproj");
+      const ignore = await write(join(wt, ".gitignore"), "obj/\nbin/\nlib/\n");
+      manager?.notifyWatchedFilesChanged(wt, [ignore]);
+      expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    });
+
+    test("no list of projects means no server, until it can be written", async () => {
+      await installToolchain();
+      const wt = await makeRestoredRepo();
+      const blocker = dirname(projectsSolutionPath(wt));
+      await write(blocker);
+      const socket = connect(wt);
+      expect(isHold(await socket.untilInitialized())).toBe(true);
+      await rm(blocker);
+      expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
     });
 
     test("one solution at the root is what loads, with no word about others", async () => {
@@ -621,6 +701,26 @@ describe.skipIf(process.platform === "win32")("CSharpLspManager", () => {
       await socket.untilInitialized();
       manager?.notifyWatchedFilesChanged(wt, [join(wt, "obj", "project.assets.json")]);
       expect((await socket.untilClosed()).code).toBe(LSP_RESTART_CLOSE_CODE);
+    });
+
+    test("stopping the server ends what it started, in another process group too", async () => {
+      await installToolchain();
+      const socket = connect(await makeRestoredRepo());
+      await socket.untilInitialized();
+      manager?.handleMessage(
+        socket.ws,
+        JSON.stringify({ jsonrpc: "2.0", method: "test/startChild", params: {} }),
+      );
+      const started = await socket.untilFrame((frame) => frame.method === "test/childStarted");
+      const { pid } = started.params as { pid: number };
+      try {
+        expect(isRunning(pid)).toBe(true);
+        manager?.destroySession(socket.ws);
+        while (isRunning(pid)) await Bun.sleep(20);
+      } finally {
+        // A failure must not leave it running.
+        if (isRunning(pid)) process.kill(pid, "SIGKILL");
+      }
     });
 
     test("trust taken away restarts the server into a hold", async () => {
