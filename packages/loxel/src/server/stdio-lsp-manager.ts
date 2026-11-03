@@ -1128,6 +1128,9 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
   private unsubscribeRepoTrust: (() => void) | null = null;
 
   createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
+    if (this.runsOnlyWhenTrusted && !this.repoTrustRestriction) {
+      throw new Error(`${this.name} sets runsOnlyWhenTrusted without a repoTrustRestriction`);
+    }
     const repoTrusted = isRepoTrusted(wtPath);
     if (this.repoTrustRestriction) {
       this.unsubscribeRepoTrust ??= onRepoTrustChange(() => this.followRepoTrust());

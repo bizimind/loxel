@@ -7,13 +7,15 @@ import { type SpawnOptions, WorktreeLspManager, type WtLspContext } from "./stdi
 const TERRAFORM = "terraform";
 
 /**
- * A version manager's `terraform` shim installs the version a project pins when it is missing, by
- * default for tfenv and mise; these turn that off, since Loxel never fetches a toolchain.
+ * A version manager's `terraform` shim can install the version a project pins when it is missing
+ * (tfenv, tenv, mise and aqua); these turn that off, since Loxel never fetches a toolchain.
  */
 const NO_AUTO_INSTALL_ENV = {
   TFENV_AUTO_INSTALL: "false",
   TENV_AUTO_INSTALL: "false",
+  MISE_AUTO_INSTALL: "0",
   MISE_NOT_FOUND_AUTO_INSTALL: "0",
+  AQUA_DISABLE_LAZY_INSTALL: "true",
 };
 
 const TRUST_RESTRICTION =
