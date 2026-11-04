@@ -2,6 +2,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { type GitConfigEntry, parseGitConfig } from "./git-config-parse";
+
 /** Includes followed from a repository's config, as deep as git itself follows them. */
 const MAX_INCLUDE_DEPTH = 10;
 /**
@@ -15,11 +17,9 @@ const SCAN_BUDGET = { bytes: 8 * 1024 * 1024, files: 256 } as const;
  * header after another one or after a key on the same line: `[filter "name"]`, `[filter.base
  * "sub"]` (driver `base.sub`, the base lower-cased), and the deprecated `[filter.name]`, whose name
  * git lower-cases. Dotted segments may be empty, as git allows. One quantifier per part keeps the
- * match linear. Matching inside a value too only adds names.
+ * match linear. Matching inside a value too only adds names, to those {@link parseGitConfig} finds.
  */
 const FILTER_HEADER = /\[\s*filter(?:(\.[^\]\s"]*)?\s+"((?:[^"\\\n]|\\.)*)"|\.([^\]\s"]*))\s*\]/gi;
-/** `path` keys anywhere, taken as includes whatever their section: a spare file read adds names only. */
-const PATH_KEY = /(?:^|[\s\]])path\s*=([^\n]*)/gim;
 
 /**
  * The filter drivers (`[filter "<name>"]`) that the config files of the repository holding `cwd`
@@ -51,7 +51,8 @@ export function repoFilterDrivers(cwd: string): string[] | null {
 // Git reads config as bytes, so paths and text here are byte strings, one character per byte
 // (latin1), and go back to bytes for the filesystem: a name or include path that is not UTF-8 is
 // read as git reads it.
-const UTF8 = new TextDecoder("utf-8", { fatal: true });
+// `ignoreBOM` keeps a name's leading byte-order mark, which git keeps too.
+const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 function utf8ToBytes(text: string): string {
   return Buffer.from(text, "utf8").toString("latin1");
@@ -77,13 +78,15 @@ interface Scan {
  * could not be read in full or would exceed the budget.
  */
 function readRepoFile(file: string, budget: Budget): string | undefined | null {
+  // Charged before looking, so a missing candidate costs one too.
+  budget.files -= 1;
+  if (budget.files < 0) return null;
   try {
     const info = statSync(fsPath(file));
     // Git cannot read anything but a file either.
     if (!info.isFile()) return undefined;
-    budget.files -= 1;
     budget.bytes -= info.size;
-    if (budget.files < 0 || budget.bytes < 0) return null;
+    if (budget.bytes < 0) return null;
     return readFileSync(fsPath(file)).toString("latin1");
   } catch (err) {
     return isNotFound(err) ? undefined : null;
@@ -153,40 +156,41 @@ function collectFilterDrivers(file: string, scan: Scan, depth: number): boolean 
       names.add(`${prefix}${unescape(quoted)}`);
     }
   }
-  for (const [, value] of text.matchAll(PATH_KEY)) {
-    const target = includePath(value!, file);
-    if (target && !collectFilterDrivers(target, scan, depth + 1)) return false;
+  // Includes, and drivers by git's own reading too, from the entries as git parses them, since a
+  // `path` key outside an include section names a program, not config to read.
+  const entries = parseGitConfig(raw);
+  if (!entries) return false;
+  for (const entry of entries) {
+    const name = filterDriverOf(entry);
+    if (name !== null) names.add(name);
+    if (!isInclude(entry) || !entry.value) continue;
+    if (!collectFilterDrivers(includePath(entry.value, file), scan, depth + 1)) return false;
   }
   return true;
 }
 
+/** The filter driver an entry configures, if any: `[filter "x"]`, `[filter.a "x"]`, `[filter.x]`. */
+function filterDriverOf({ section, subsection }: GitConfigEntry): string | null {
+  if (section === "filter") return subsection ?? null;
+  if (!section.startsWith("filter.")) return null;
+  const base = section.slice("filter.".length);
+  return subsection === undefined ? base : `${base}.${subsection}`;
+}
+
+/** `include.path` and `includeIf.<condition>.path`, the only `path` keys git follows. */
+function isInclude({ section, subsection, key }: GitConfigEntry): boolean {
+  if (key !== "path") return false;
+  return section === "include"
+    ? subsection === undefined
+    : section === "includeif" && subsection !== undefined;
+}
+
 /** An include's `path` value, resolved as git does: `~/` from home, relative from the file's directory. */
-function includePath(raw: string, from: string): string | null {
-  const value = configValue(raw);
-  if (!value) return null;
+function includePath(value: string, from: string): string {
   if (value === "~" || value.startsWith("~/")) {
     return path.join(utf8ToBytes(homedir()), value.slice(1));
   }
   return path.resolve(path.dirname(from), value);
-}
-
-/** A config value without its comment and quotes. */
-function configValue(raw: string): string {
-  let value = "";
-  let quoted = false;
-  for (let i = 0; i < raw.length; i++) {
-    const char = raw[i]!;
-    if (char === "\\" && i + 1 < raw.length) {
-      value += raw[++i];
-    } else if (char === '"') {
-      quoted = !quoted;
-    } else if (!quoted && (char === "#" || char === ";")) {
-      break;
-    } else {
-      value += char;
-    }
-  }
-  return value.trim();
 }
 
 /** A subsection name as git reads it: a backslash keeps the character after it. */

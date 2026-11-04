@@ -33,8 +33,6 @@ test("reads every way a config names a filter, and stops at include loops", () =
       `[filter. "l"]`,
       `[filter.]`,
       `[filter]`,
-      `[filter "contin\\`,
-      `ued"]`,
       `[include] path = ../more ; a comment`,
       `[include]`,
       `\tpath = config`,
@@ -47,7 +45,6 @@ test("reads every way a config names a filter, and stops at include loops", () =
       ".l",
       "Mixed",
       "a.b.C",
-      "continued",
       'esc"aped',
       "g..h.i",
       "j..k",
@@ -121,6 +118,46 @@ test("stops at its budget however the includes multiply", () => {
   mkdirSync(join(dir, ".git"));
   const includes = Array.from({ length: 300 }, (_, i) => `[include] path = ../inc-${i}`);
   for (let i = 0; i < 300; i++) writeFileSync(join(dir, `inc-${i}`), "");
+  writeFileSync(join(dir, ".git", "config"), includes.join("\n"));
+  expect(repoFilterDrivers(dir)).toBeNull();
+});
+
+test("keeps a name's leading byte-order mark, as git does", () => {
+  const dir = makeRoot();
+  mkdirSync(join(dir, ".git"));
+  const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+  writeFileSync(
+    join(dir, ".git", "config"),
+    Buffer.concat([Buffer.from('[filter "'), bom, Buffer.from('a"]\n\tclean = x\n')]),
+  );
+  expect(repoFilterDrivers(dir)).toEqual(["\uFEFFa"]);
+});
+
+test("follows only include paths, the way git parses sections", () => {
+  const dir = makeRoot();
+  mkdirSync(join(dir, ".git"));
+  // A program's path is not config: reading it would only cost the budget.
+  writeFileSync(join(dir, "tool"), "");
+  truncateSync(join(dir, "tool"), 9 * 1024 * 1024);
+  writeFileSync(join(dir, "inc"), `[filter "followed"]\n\tclean = x\n`);
+  writeFileSync(
+    join(dir, ".git", "config"),
+    [
+      `[difftool "ext"]`,
+      `\tpath = ../tool`,
+      // Brackets in a value open no section, so this path is still an include.
+      `[include]`,
+      `\tdecoy = [core]`,
+      `\tpath = ../inc`,
+    ].join("\n"),
+  );
+  expect(repoFilterDrivers(dir)).toEqual(["followed"]);
+});
+
+test("counts include paths that name nothing against its budget", () => {
+  const dir = makeRoot();
+  mkdirSync(join(dir, ".git"));
+  const includes = Array.from({ length: 300 }, (_, i) => `[include] path = ../missing-${i}`);
   writeFileSync(join(dir, ".git", "config"), includes.join("\n"));
   expect(repoFilterDrivers(dir)).toBeNull();
 });
