@@ -51,7 +51,7 @@ describe("readOnlyGitEnv", () => {
       const config = join(dir, ".git", "config");
       writeFileSync(
         config,
-        Buffer.concat([readFileSync(config), Buffer.alloc(65 * 1024 * 1024, "#\n")]),
+        Buffer.concat([readFileSync(config), Buffer.alloc(9 * 1024 * 1024, "#\n")]),
       );
       const result = Bun.spawnSync(["git", "-C", dir, "status"], { env: readOnlyGitEnv(dir) });
       expect(result.exitCode).not.toBe(0);
