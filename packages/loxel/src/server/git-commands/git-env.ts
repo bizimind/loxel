@@ -75,11 +75,14 @@ export function readOnlyGitEnv(cwd?: string): Record<string, string> {
  * ({@link diffProgramArgs}), since git fails on an empty one.
  */
 function untrustedReadOverrides(cwd: string): string[] {
+  const drivers = repoFilterDrivers(cwd);
+  // Drivers that could not all be found cannot all be turned off, so git is made to refuse the read.
+  if (drivers === null) return [REFUSE_TO_READ];
   return [
     configParameter("log.showSignature", "false"),
     // A read that refreshes the index runs `post-index-change`, whatever GIT_OPTIONAL_LOCKS says.
     configParameter("core.hooksPath", "/dev/null"),
-    ...repoFilterDrivers(cwd).flatMap((name) => [
+    ...drivers.flatMap((name) => [
       configParameter(`filter.${name}.clean`, ""),
       configParameter(`filter.${name}.smudge`, ""),
       configParameter(`filter.${name}.process`, ""),
@@ -87,6 +90,9 @@ function untrustedReadOverrides(cwd: string): string[] {
     ]),
   ];
 }
+
+/** An unterminated entry: git stops with "bogus format in GIT_CONFIG_PARAMETERS" and runs nothing. */
+const REFUSE_TO_READ = "'";
 
 /**
  * One `GIT_CONFIG_PARAMETERS` entry. A key holding `=` (a driver name may) takes the

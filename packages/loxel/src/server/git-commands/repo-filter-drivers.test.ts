@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,6 +25,8 @@ test("reads every way a config names a filter, and stops at include loops", () =
     [
       `[core] [filter "same-line"]`,
       `[filter "esc\\"aped"]`,
+      `[filter.Sub "Name"]`,
+      `[FILTER.A.b "C"]`,
       `[filter "contin\\`,
       `ued"]`,
       `[include] path = ../more ; a comment`,
@@ -32,7 +34,16 @@ test("reads every way a config names a filter, and stops at include loops", () =
       `\tpath = config`,
     ].join("\n"),
   );
-  expect(repoFilterDrivers(root).toSorted()).toEqual(
-    ["Mixed", "continued", 'esc"aped', "legacy", "same-line"].toSorted(),
+  expect(repoFilterDrivers(root)?.toSorted()).toEqual(
+    ["Mixed", "a.b.C", "continued", 'esc"aped', "legacy", "same-line", "sub.Name"].toSorted(),
   );
+});
+
+test("does not know the drivers when a config file is too large to read", () => {
+  root = mkdtempSync(join(tmpdir(), "repo-filter-drivers-"));
+  mkdirSync(join(root, ".git"));
+  writeFileSync(join(root, ".git", "config"), `[include] path = ../big\n`);
+  writeFileSync(join(root, "big"), "");
+  truncateSync(join(root, "big"), 65 * 1024 * 1024);
+  expect(repoFilterDrivers(root)).toBeNull();
 });
