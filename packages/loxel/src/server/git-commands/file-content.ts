@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { logger } from "../logger";
-import { readOnlyGitEnv } from "./git-env";
+import { diffProgramArgs, readOnlyGitEnv } from "./git-env";
 import { runGit } from "./run-git";
 import { validatePath, validateRefName } from "./validation";
 import { validateWorktreePath } from "./worktree";
@@ -22,9 +22,9 @@ export async function getFileContent(
 
   const gitCwd = worktreePath ?? cwd;
   const refSpec = ref ? `${ref}:${filePath}` : filePath;
-  const result = await runGit(["show", refSpec], {
+  const result = await runGit(["show", ...diffProgramArgs(gitCwd), refSpec], {
     cwd: gitCwd,
-    env: readOnlyGitEnv(cwd),
+    env: readOnlyGitEnv(gitCwd),
     nothrow: true,
   });
 

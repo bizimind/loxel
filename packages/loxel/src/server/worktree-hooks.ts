@@ -3,6 +3,8 @@
  * in a trusted repository. Every add and remove Loxel makes goes through here; the `wt` command
  * line is the user's own act and runs them as it always does.
  */
+import path from "node:path";
+
 import {
   executeAdd,
   executeRemove,
@@ -15,21 +17,34 @@ import {
   type RemoveResult,
 } from "@bizimind/wt/lib";
 
-import { isRepoTrusted, reportRepoRestriction, setRepoTrusted } from "./repo-trust";
+import { readConfigFile } from "./config-file-read";
+import {
+  isBareRepoTrusted,
+  isRepoTrusted,
+  reportRepoRestriction,
+  setRepoTrusted,
+} from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 
 /** What an untrusted repository holds back, as the trust UI lists it. */
 export const WORKTREE_HOOKS_RESTRICTION = "Worktree hooks (init.wt.sh, clean.wt.sh) don't run.";
 
-type HookOptions = "hookEnv" | "allowHook";
+type HookOptions = "hookEnv" | "allowHook" | "gitHooks";
 
 /** Add a worktree, running `init.wt.sh` only if the repository is trusted. */
 export async function addWorktree(
   params: Omit<AddParams, HookOptions>,
   progress: ProgressHandler,
 ): Promise<AddResult> {
+  // Git's own hooks (`post-checkout`) run during the add, before the new worktree exists to ask
+  // about, so the repository it is added from answers for both.
   const result = await executeAdd(
-    { ...params, hookEnv: buildSpawnEnv(), allowHook: isRepoTrusted },
+    {
+      ...params,
+      hookEnv: buildSpawnEnv(),
+      allowHook: isRepoTrusted,
+      gitHooks: isRepoTrusted(params.repoPath) || isBareRepoTrusted(bareRepoOf(params.repoPath)),
+    },
     progress,
   );
   if (result.hookSkipped) reportRepoRestriction(result.path, WORKTREE_HOOKS_RESTRICTION);
@@ -94,4 +109,14 @@ export async function runHeldInitHook(
     },
     progress,
   );
+}
+
+/**
+ * The bare repository `repoPath` stands for: itself, or the directory its `.git` file names, as a
+ * root holding its repository in `.bare` does. Asked only whether that repository is trusted, and
+ * a `.git` file naming a trusted one makes git run that repository's own hooks.
+ */
+function bareRepoOf(repoPath: string): string {
+  const gitdir = /^gitdir: (.+)$/m.exec(readConfigFile(path.join(repoPath, ".git")) ?? "")?.[1];
+  return gitdir ? path.resolve(repoPath, gitdir.trim()) : repoPath;
 }

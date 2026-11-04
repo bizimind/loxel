@@ -6,6 +6,12 @@ export interface GitResult {
   stderr: string;
 }
 
+/** Global options that keep git from running the repository's hooks when `gitHooks` is false. */
+export function gitHooksArgs(gitHooks: boolean | undefined): string[] {
+  // An empty hooks directory: git runs none of the repository's hooks.
+  return gitHooks === false ? ["-c", "core.hooksPath=/dev/null"] : [];
+}
+
 /**
  * Run a git command without throwing, so callers can branch on the exit code
  * while keeping git's own stderr.

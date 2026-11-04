@@ -1,7 +1,7 @@
 import type { StatusInfo } from "@/api/git-models";
 
 import { parseStatusOutput } from "../parsers/status";
-import { SUBMODULE_GITLINK_ONLY, readOnlyGitEnv } from "./git-env";
+import { SUBMODULE_GITLINK_ONLY, readOnlyGitEnv, untrustedSubmoduleArgs } from "./git-env";
 import { gitText } from "./run-git";
 
 /**
@@ -10,7 +10,14 @@ import { gitText } from "./run-git";
  */
 export async function getStatus(cwd: string): Promise<StatusInfo> {
   const result = await gitText(
-    [...SUBMODULE_GITLINK_ONLY, "status", "--porcelain=v2", "--branch", "-z"],
+    [
+      ...SUBMODULE_GITLINK_ONLY,
+      "status",
+      ...untrustedSubmoduleArgs(cwd),
+      "--porcelain=v2",
+      "--branch",
+      "-z",
+    ],
     { cwd, env: readOnlyGitEnv(cwd) },
   );
   return parseStatusOutput(result);

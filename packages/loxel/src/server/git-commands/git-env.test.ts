@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,7 +26,9 @@ describe("readOnlyGitEnv", () => {
   test("leaves fsmonitor to the user's Git configuration only in a trusted repository", () => {
     const dir = mkdtempSync(join(tmpdir(), "git-env-"));
     try {
-      expect(readOnlyGitEnv(dir).GIT_CONFIG_PARAMETERS).toBe(OFF);
+      expect(readOnlyGitEnv(dir).GIT_CONFIG_PARAMETERS).toBe(
+        `${OFF} 'log.showSignature=false' 'core.hooksPath=/dev/null'`,
+      );
       setRepoTrusted(dir, true);
       expect(readOnlyGitEnv(dir).GIT_OPTIONAL_LOCKS).toBe("0");
       expect(readOnlyGitEnv(dir).GIT_CONFIG_PARAMETERS).toBeUndefined();
@@ -39,5 +41,23 @@ describe("readOnlyGitEnv", () => {
   test("keeps config parameters already in the environment", () => {
     process.env.GIT_CONFIG_PARAMETERS = "'user.name=someone'";
     expect(readOnlyGitEnv().GIT_CONFIG_PARAMETERS).toBe(`'user.name=someone' ${OFF}`);
+  });
+
+  test("makes git refuse a read whose repository's filter drivers could not all be found", () => {
+    const dir = mkdtempSync(join(tmpdir(), "git-env-"));
+    try {
+      Bun.spawnSync(["git", "init", "-q", dir]);
+      // A real config, past the size Loxel reads, made of comment lines.
+      const config = join(dir, ".git", "config");
+      writeFileSync(
+        config,
+        Buffer.concat([readFileSync(config), Buffer.alloc(9 * 1024 * 1024, "#\n")]),
+      );
+      const result = Bun.spawnSync(["git", "-C", dir, "status"], { env: readOnlyGitEnv(dir) });
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr.toString()).toContain("GIT_CONFIG_PARAMETERS");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
