@@ -18,7 +18,7 @@ const MAX_REPO_CONFIG_BYTES = 64 * 1024 * 1024;
  * git lower-cases. Matching inside a value too only adds names.
  */
 const FILTER_HEADER =
-  /\[\s*filter(?:((?:\.[^\]\s"]+)*)\s+"((?:[^"\\\n]|\\.)*)"|\.([^\]\s"]+))\s*\]/gi;
+  /\[\s*filter(?:((?:\.[^\]\s".]+)*)\s+"((?:[^"\\\n]|\\.)*)"|\.([^\]\s"]+))\s*\]/gi;
 /** `path` keys anywhere, taken as includes whatever their section: a spare file read adds names only. */
 const PATH_KEY = /(?:^|[\s\]])path\s*=([^\n]*)/gim;
 
