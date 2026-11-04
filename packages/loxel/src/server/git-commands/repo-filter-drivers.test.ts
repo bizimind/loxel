@@ -27,6 +27,12 @@ test("reads every way a config names a filter, and stops at include loops", () =
       `[filter "esc\\"aped"]`,
       `[filter.Sub "Name"]`,
       `[FILTER.A.b "C"]`,
+      `[filter..e "f"]`,
+      `[filter.g..h "i"]`,
+      `[filter.j. "k"]`,
+      `[filter. "l"]`,
+      `[filter.]`,
+      `[filter]`,
       `[filter "contin\\`,
       `ued"]`,
       `[include] path = ../more ; a comment`,
@@ -35,7 +41,20 @@ test("reads every way a config names a filter, and stops at include loops", () =
     ].join("\n"),
   );
   expect(repoFilterDrivers(root)?.toSorted()).toEqual(
-    ["Mixed", "a.b.C", "continued", 'esc"aped', "legacy", "same-line", "sub.Name"].toSorted(),
+    [
+      "",
+      ".e.f",
+      ".l",
+      "Mixed",
+      "a.b.C",
+      "continued",
+      'esc"aped',
+      "g..h.i",
+      "j..k",
+      "legacy",
+      "same-line",
+      "sub.Name",
+    ].toSorted(),
   );
 });
 

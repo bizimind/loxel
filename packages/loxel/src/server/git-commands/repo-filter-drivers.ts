@@ -15,10 +15,10 @@ const MAX_REPO_CONFIG_BYTES = 64 * 1024 * 1024;
  * Filter section headers, found anywhere in the text rather than at line starts, since git takes a
  * header after another one or after a key on the same line: `[filter "name"]`, `[filter.base
  * "sub"]` (driver `base.sub`, the base lower-cased), and the deprecated `[filter.name]`, whose name
- * git lower-cases. Matching inside a value too only adds names.
+ * git lower-cases. Dotted segments may be empty, as git allows. One quantifier per part keeps the
+ * match linear. Matching inside a value too only adds names.
  */
-const FILTER_HEADER =
-  /\[\s*filter(?:((?:\.[^\]\s".]+)*)\s+"((?:[^"\\\n]|\\.)*)"|\.([^\]\s"]+))\s*\]/gi;
+const FILTER_HEADER = /\[\s*filter(?:(\.[^\]\s"]*)?\s+"((?:[^"\\\n]|\\.)*)"|\.([^\]\s"]*))\s*\]/gi;
 /** `path` keys anywhere, taken as includes whatever their section: a spare file read adds names only. */
 const PATH_KEY = /(?:^|[\s\]])path\s*=([^\n]*)/gim;
 
