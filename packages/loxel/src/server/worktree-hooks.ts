@@ -3,6 +3,8 @@
  * in a trusted repository. Every add and remove Loxel makes goes through here; the `wt` command
  * line is the user's own act and runs them as it always does.
  */
+import path from "node:path";
+
 import {
   executeAdd,
   executeRemove,
@@ -15,6 +17,7 @@ import {
   type RemoveResult,
 } from "@bizimind/wt/lib";
 
+import { readConfigFile } from "./config-file-read";
 import {
   isBareRepoTrusted,
   isRepoTrusted,
@@ -40,7 +43,7 @@ export async function addWorktree(
       ...params,
       hookEnv: buildSpawnEnv(),
       allowHook: isRepoTrusted,
-      gitHooks: isRepoTrusted(params.repoPath) || isBareRepoTrusted(params.repoPath),
+      gitHooks: isRepoTrusted(params.repoPath) || isBareRepoTrusted(bareRepoOf(params.repoPath)),
     },
     progress,
   );
@@ -106,4 +109,14 @@ export async function runHeldInitHook(
     },
     progress,
   );
+}
+
+/**
+ * The bare repository `repoPath` stands for: itself, or the directory its `.git` file names, as a
+ * root holding its repository in `.bare` does. Asked only whether that repository is trusted, and
+ * a `.git` file naming a trusted one makes git run that repository's own hooks.
+ */
+function bareRepoOf(repoPath: string): string {
+  const gitdir = /^gitdir: (.+)$/m.exec(readConfigFile(path.join(repoPath, ".git")) ?? "")?.[1];
+  return gitdir ? path.resolve(repoPath, gitdir.trim()) : repoPath;
 }
