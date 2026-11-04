@@ -112,6 +112,29 @@ export function isRepoTrusted(wtPath: string): boolean {
   return isTrustedIdentity(repoIdentity(wtPath));
 }
 
+/**
+ * Whether `dir` is a bare repository (no `.git` of its own, but `HEAD` and `objects`) that Loxel may
+ * run code from. Its worktrees stand for it with its own path as their common directory, the
+ * identity its trust is stored under, while {@link isRepoTrusted} takes a folder without `.git`
+ * for itself.
+ */
+export function isBareRepoTrusted(dir: string): boolean {
+  const folder = realPathOrResolved(dir);
+  try {
+    lstatSync(path.join(folder, ".git"));
+    return false;
+  } catch {
+    // No `.git`: it may be a repository's git directory itself.
+  }
+  try {
+    if (!lstatSync(path.join(folder, "HEAD")).isFile()) return false;
+    if (!lstatSync(path.join(folder, "objects")).isDirectory()) return false;
+  } catch {
+    return false;
+  }
+  return isTrustedIdentity({ id: `git:${folder}`, dir: folder });
+}
+
 /** What was reported as restricted per untrusted repository, since Loxel started. */
 const restrictionsByRepo = new Map<string, Set<string>>();
 const restrictionListeners = new Set<() => void>();

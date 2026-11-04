@@ -26,7 +26,9 @@ describe("readOnlyGitEnv", () => {
   test("leaves fsmonitor to the user's Git configuration only in a trusted repository", () => {
     const dir = mkdtempSync(join(tmpdir(), "git-env-"));
     try {
-      expect(readOnlyGitEnv(dir).GIT_CONFIG_PARAMETERS).toBe(`${OFF} 'log.showSignature=false'`);
+      expect(readOnlyGitEnv(dir).GIT_CONFIG_PARAMETERS).toBe(
+        `${OFF} 'log.showSignature=false' 'core.hooksPath=/dev/null'`,
+      );
       setRepoTrusted(dir, true);
       expect(readOnlyGitEnv(dir).GIT_OPTIONAL_LOCKS).toBe("0");
       expect(readOnlyGitEnv(dir).GIT_CONFIG_PARAMETERS).toBeUndefined();

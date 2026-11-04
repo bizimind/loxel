@@ -1,4 +1,4 @@
-import { git, gitSucceeds, runGit } from "./run.ts";
+import { git, gitHooksArgs, gitSucceeds, runGit } from "./run.ts";
 
 /** Whether a local branch exists. */
 export function branchExists(cwd: string, branch: string): Promise<boolean> {
@@ -6,8 +6,13 @@ export function branchExists(cwd: string, branch: string): Promise<boolean> {
 }
 
 /** Delete a local branch. Throws with git's stderr on failure. */
-export async function deleteBranch(cwd: string, branch: string, force: boolean): Promise<void> {
-  await git(["branch", force ? "-D" : "-d", branch], cwd);
+export async function deleteBranch(
+  cwd: string,
+  branch: string,
+  force: boolean,
+  options: { gitHooks?: boolean } = {},
+): Promise<void> {
+  await git([...gitHooksArgs(options.gitHooks), "branch", force ? "-D" : "-d", branch], cwd);
 }
 
 /** Rename a local branch without overwriting an existing one. Throws with git's stderr on failure. */

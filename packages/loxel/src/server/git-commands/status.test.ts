@@ -232,12 +232,15 @@ describe("getStatus and submodules", () => {
     }
   });
 
-  test("respects a repository's own ignore=all for a submodule", async () => {
+  test("respects a trusted repository's own ignore=all for a submodule", async () => {
     const copy = await repo.copy();
     try {
       await commit(`${copy.path}/sub`, "move", { "s.txt": "moved\n" });
       await $`git -C ${copy.path} config submodule.sub.ignore all`.quiet();
 
+      // Untrusted, a submodule is compared by its commit whatever its own setting says.
+      expect((await getStatus(copy.path)).unstaged).toEqual([{ path: "sub", status: "M" }]);
+      setRepoTrusted(copy.path, true);
       const status = await getStatus(copy.path);
 
       expect(status.unstaged).toEqual([]);

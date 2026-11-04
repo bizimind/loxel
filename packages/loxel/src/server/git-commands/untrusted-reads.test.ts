@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -44,12 +46,12 @@ function repoWithDrivers(): { wt: string; ran: () => string[] } {
   git(wt, "add", "a.txt");
   git(wt, "commit", "-q", "-m", "a");
   writeFileSync(join(wt, "b.txt"), "b\n");
-  writeFileSync(join(wt, "c.md"), "c\n");
-  git(wt, "add", "b.txt", "c.md");
+  for (const file of ["c.md", "d.cfg", "e.ini"]) writeFileSync(join(wt, file), "c\n");
+  git(wt, "add", "b.txt", "c.md", "d.cfg", "e.ini");
   const mark = (name: string) => `touch '${join(ran, name)}'; cat`;
   writeFileSync(
     join(wt, ".git", "info", "attributes"),
-    "* filter=one diff=two\n*.txt filter=three\n*.md filter=we'ird=name\n",
+    "* filter=one diff=two\n*.txt filter=three\n*.md filter=we'ird=name\n*.cfg filter=four\n*.ini filter=five\n",
   );
   writeFileSync(
     join(root, "included"),
@@ -63,8 +65,18 @@ function repoWithDrivers(): { wt: string; ran: () => string[] } {
   git(wt, "config", "include.path", join(root, "included"));
   // A name git's older `-c` form would split at its `=`.
   git(wt, "config", "filter.we'ird=name.clean", mark("odd-clean"));
+  // Headers and includes git reads where a line-by-line reader would not.
+  writeFileSync(join(root, "five"), `[filter "five"]\n\tclean = ${mark("five-clean")}\n`);
+  appendFileSync(
+    join(wt, ".git", "config"),
+    `[core] [filter "four"]\n\tclean = ${mark("four-clean")}\n` +
+      `[include] path = ${join(root, "five")}\n`,
+  );
+  // A read that refreshes the index runs this hook.
+  writeFileSync(join(wt, ".git", "hooks", "post-index-change"), `#!/bin/sh\n${mark("hook")}\n`);
+  chmodSync(join(wt, ".git", "hooks", "post-index-change"), 0o755);
   writeFileSync(join(wt, "a.txt"), "a\nb\n");
-  writeFileSync(join(wt, "c.md"), "c\nd\n");
+  for (const file of ["c.md", "d.cfg", "e.ini"]) writeFileSync(join(wt, file), "c\nd\n");
   return { wt, ran: () => (existsSync(ran) ? readdirSync(ran).toSorted() : []) };
 }
 

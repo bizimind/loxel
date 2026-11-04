@@ -9,18 +9,27 @@ import { readConfigFile } from "../config-file-read";
 /** Includes followed from a repository's config, as deep as git itself follows them. */
 const MAX_INCLUDE_DEPTH = 10;
 
-const SECTION_HEADER = /^\s*\[\s*([A-Za-z0-9.-]+)(?:\s+"((?:[^"\\\n]|\\.)*)")?\s*\]/;
-const INCLUDE_PATH = /^\s*path\s*=\s*(.*)$/i;
+/**
+ * Filter section headers, found anywhere in the text rather than at line starts, since git takes a
+ * header after another one or after a key on the same line: `[filter "name"]`, and the deprecated
+ * `[filter.name]`, whose name git lower-cases. Matching inside a value too only adds names.
+ */
+const FILTER_HEADER = /\[\s*filter(?:\s+"((?:[^"\\\n]|\\.)*)"|\.([^\]\s]+))\s*\]/gi;
+/** `path` keys anywhere, taken as includes whatever their section: a spare file read adds names only. */
+const PATH_KEY = /(?:^|[\s\]])path\s*=([^\n]*)/gim;
 
 /**
  * The filter drivers (`[filter "<name>"]`) that the config files of the repository holding `cwd`
- * define, following their includes, conditional ones too: more names than apply only means more
- * overrides. Read as files, so asking runs nothing. The user's own global and system config are not
- * read, since what they define is the user's.
+ * define, following their includes, conditional ones too. It over-reads rather than parse as git
+ * does: more names than apply only means more overrides. Read as files, so asking runs nothing.
+ * The user's own global and system config are not read, since what they define is the user's.
  */
 export function repoFilterDrivers(cwd: string): string[] {
   const names = new Set<string>();
-  for (const file of repoConfigFiles(path.resolve(cwd))) collectFilterDrivers(file, names, 0);
+  const visited = new Set<string>();
+  for (const file of repoConfigFiles(path.resolve(cwd))) {
+    collectFilterDrivers(file, names, visited, 0);
+  }
   return [...names];
 }
 
@@ -46,26 +55,24 @@ function gitDirOf(cwd: string): string | null {
   return gitdir ? path.resolve(path.dirname(dotGit), gitdir) : null;
 }
 
-function collectFilterDrivers(file: string, names: Set<string>, depth: number): void {
-  const text = readConfigFile(file);
-  if (text === undefined || depth > MAX_INCLUDE_DEPTH) return;
-  let inInclude = false;
-  for (const line of text.split("\n")) {
-    const header = SECTION_HEADER.exec(line);
-    if (header) {
-      const section = header[1]!.toLowerCase();
-      const subsection = header[2];
-      inInclude = section === "include" || section === "includeif";
-      if (section === "filter" && subsection !== undefined) names.add(unescape(subsection));
-      // The deprecated `[filter.name]` form, whose name git lower-cases.
-      if (section.startsWith("filter.")) names.add(section.slice("filter.".length));
-      continue;
-    }
-    const include = inInclude ? INCLUDE_PATH.exec(line) : null;
-    if (include) {
-      const target = includePath(include[1]!, file);
-      if (target) collectFilterDrivers(target, names, depth + 1);
-    }
+function collectFilterDrivers(
+  file: string,
+  names: Set<string>,
+  visited: Set<string>,
+  depth: number,
+): void {
+  if (depth > MAX_INCLUDE_DEPTH || visited.has(file)) return;
+  visited.add(file);
+  const raw = readConfigFile(file);
+  if (raw === undefined) return;
+  // A backslash at the end of a line continues the line, inside a header's name too.
+  const text = raw.replace(/\\\r?\n/g, "");
+  for (const [, quoted, legacy] of text.matchAll(FILTER_HEADER)) {
+    names.add(quoted === undefined ? legacy!.toLowerCase() : unescape(quoted));
+  }
+  for (const [, value] of text.matchAll(PATH_KEY)) {
+    const target = includePath(value!, file);
+    if (target) collectFilterDrivers(target, names, visited, depth + 1);
   }
 }
 

@@ -271,7 +271,7 @@ async function createWorktree(
   // (`--base <name>~1`) must still resolve once that branch is gone.
   const base = await resolveBase(root, sourceCwd, params.base);
   progress.log(`Deleting existing branch '${name}'...`);
-  await deleteBranch(root, name, true);
+  await deleteBranch(root, name, true, { gitHooks: params.gitHooks });
   await addWorktree(sourceCwd, worktreePath, {
     newBranch: name,
     startPoint: base.commit,

@@ -15,7 +15,12 @@ import {
   type RemoveResult,
 } from "@bizimind/wt/lib";
 
-import { isRepoTrusted, reportRepoRestriction, setRepoTrusted } from "./repo-trust";
+import {
+  isBareRepoTrusted,
+  isRepoTrusted,
+  reportRepoRestriction,
+  setRepoTrusted,
+} from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 
 /** What an untrusted repository holds back, as the trust UI lists it. */
@@ -35,7 +40,7 @@ export async function addWorktree(
       ...params,
       hookEnv: buildSpawnEnv(),
       allowHook: isRepoTrusted,
-      gitHooks: isRepoTrusted(params.repoPath),
+      gitHooks: isRepoTrusted(params.repoPath) || isBareRepoTrusted(params.repoPath),
     },
     progress,
   );

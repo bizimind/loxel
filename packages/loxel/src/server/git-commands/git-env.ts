@@ -77,6 +77,8 @@ export function readOnlyGitEnv(cwd?: string): Record<string, string> {
 function untrustedReadOverrides(cwd: string): string[] {
   return [
     configParameter("log.showSignature", "false"),
+    // A read that refreshes the index runs `post-index-change`, whatever GIT_OPTIONAL_LOCKS says.
+    configParameter("core.hooksPath", "/dev/null"),
     ...repoFilterDrivers(cwd).flatMap((name) => [
       configParameter(`filter.${name}.clean`, ""),
       configParameter(`filter.${name}.smudge`, ""),
@@ -103,12 +105,23 @@ function shellQuote(text: string): string {
 
 /**
  * Flags for the reads that print a diff, so its output is git's own patch format, which Loxel
- * parses: never an external diff program (`diff.external`, a driver's `command`), and, in an
- * untrusted repository, no `textconv` program either. A trusted repository's textconv still
- * applies, as in the user's own `git diff`.
+ * parses: never an external diff program (`diff.external`, a driver's `command`), and in an
+ * untrusted repository no `textconv` program and {@link untrustedSubmoduleArgs}. A trusted
+ * repository's textconv still applies, as in the user's own `git diff`.
  */
 export function diffProgramArgs(cwd: string): string[] {
-  return isRepoTrusted(cwd) ? ["--no-ext-diff"] : ["--no-ext-diff", "--no-textconv"];
+  if (isRepoTrusted(cwd)) return ["--no-ext-diff"];
+  return ["--no-ext-diff", "--no-textconv", ...untrustedSubmoduleArgs(cwd)];
+}
+
+/**
+ * For the reads that compare the working tree in an untrusted repository: submodules compared by
+ * commit only, which a submodule's own `ignore` setting cannot undo as it can
+ * {@link SUBMODULE_GITLINK_ONLY}'s default, so git never reads a submodule's own config, which no
+ * override here covers.
+ */
+export function untrustedSubmoduleArgs(cwd: string): string[] {
+  return isRepoTrusted(cwd) ? [] : ["--ignore-submodules=dirty"];
 }
 
 /** The server's current environment, for commands with no special needs. */

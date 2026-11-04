@@ -1,5 +1,5 @@
 import { logger } from "../logger";
-import { SUBMODULE_GITLINK_ONLY, readOnlyGitEnv } from "./git-env";
+import { SUBMODULE_GITLINK_ONLY, readOnlyGitEnv, untrustedSubmoduleArgs } from "./git-env";
 import type { RunGitOptions } from "./run-git";
 import { runGit } from "./run-git";
 import { validatePath } from "./validation";
@@ -79,6 +79,7 @@ export async function revertToHead(cwd: string, files: string[]): Promise<void> 
     [
       ...SUBMODULE_GITLINK_ONLY,
       "status",
+      ...untrustedSubmoduleArgs(cwd),
       "--porcelain",
       "-z",
       "--untracked-files=all",
