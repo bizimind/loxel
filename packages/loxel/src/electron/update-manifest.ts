@@ -1,8 +1,9 @@
 import type { OutgoingHttpHeaders } from "node:http";
 
 import { Provider, type UpdateFileInfo, type UpdateInfo } from "electron-updater";
+import type { ResolvedUpdateFileInfo } from "electron-updater";
+// Not exported from the package root, and the root's custom-provider option types it as `any`.
 import type { ProviderRuntimeOptions } from "electron-updater/out/providers/Provider";
-import type { ResolvedUpdateFileInfo } from "electron-updater/out/types";
 import { z } from "zod";
 
 /**
@@ -75,9 +76,17 @@ export class ManifestProvider extends Provider<UpdateInfo> {
     super.setRequestHeaders(rest);
   }
 
+  /**
+   * One range per request when downloading only the changed blocks: the origin rejects multi-range
+   * requests, and Cloudflare answers them only for zips it has already cached.
+   */
+  override get isUseMultipleRangeRequest(): boolean {
+    return false;
+  }
+
   async getLatestVersion(): Promise<UpdateInfo> {
-    // no-cache: Chromium may otherwise answer from its HTTP cache, since the manifest is served
-    // with a Last-Modified date and no caching headers.
+    // no-cache: electron-updater's session keeps no HTTP cache, but a proxy on the way might, and
+    // the manifest is served with a Last-Modified date and no caching headers.
     const body = await this.httpRequest(new URL(MANIFEST_URL), { "cache-control": "no-cache" });
     if (body === null) throw new Error(`Empty response from ${MANIFEST_URL}`);
     const data: unknown = JSON.parse(body);

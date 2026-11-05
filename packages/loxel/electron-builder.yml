@@ -18,6 +18,9 @@ extraResources:
     to: .
   - from: dist-electron/renderer
     to: renderer
+  # electron-updater's cache folder; without it no update can download
+  - from: assets/app-update.yml
+    to: app-update.yml
 
 asar: true
 

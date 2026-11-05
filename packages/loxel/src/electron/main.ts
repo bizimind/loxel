@@ -15,6 +15,7 @@ import {
   type WebFrameMain,
   webContents,
 } from "electron";
+import { z } from "zod";
 
 import { loadOrCreateDek } from "./dek";
 import { IS_DEV } from "./env";
@@ -78,14 +79,25 @@ function openInBrowserTab(url: string): void {
   BrowserWindow.getFocusedWindow()?.webContents.send(OPEN_IN_BROWSER_TAB, url);
 }
 
-/** Check if a loxel server is already running on the well-known port. */
-async function isServerRunning(): Promise<boolean> {
+const VersionSchema = z.object({ appOwned: z.boolean().optional() });
+
+/**
+ * The Loxel server answering on the well-known port, or null when none does. `appOwned`: a desktop
+ * app started it, so it goes away with that app.
+ */
+async function probeServer(): Promise<{ appOwned: boolean } | null> {
   try {
     const res = await fetch(`${SERVER_URL}/api/version`, { signal: AbortSignal.timeout(1000) });
-    return res.ok;
+    if (!res.ok) return null;
+    const parsed = VersionSchema.safeParse(await res.json());
+    return { appOwned: parsed.success && parsed.data.appOwned === true };
   } catch {
-    return false;
+    return null;
   }
+}
+
+async function isServerRunning(): Promise<boolean> {
+  return (await probeServer()) !== null;
 }
 
 function startServer(): void {
@@ -562,13 +574,15 @@ app.on("web-contents-created", (_, contents) => {
 // --- App lifecycle ---
 
 /**
- * Start the app's server and wait until it answers. A server already answering on the port is one
- * a previous run of the app left shutting down, so launch waits for it to go. In dev, a dev server
- * started by hand (`pnpm run dev:server`) is used instead.
+ * Start the app's server and wait until it answers. A server already answering on the port that an
+ * app started is one a previous run left shutting down (in dev, also the one an Electron that just
+ * restarted on a main-process rebuild leaves behind), so launch waits for it to go. In dev, a dev
+ * server started by hand (`pnpm run dev:server`) is used instead.
  */
 async function startAppServer(): Promise<void> {
-  if (await isServerRunning()) {
-    if (IS_DEV) {
+  const running = await probeServer();
+  if (running) {
+    if (IS_DEV && !running.appOwned) {
       console.log(`[electron] Using the dev server already running on port ${SERVER_PORT}`);
       return;
     }
@@ -635,6 +649,18 @@ app.on("new-window-for-tab", () => {
   void createWindow();
 });
 
+/**
+ * Wait until the server answers. One restarting after a crash is waited for; in dev, a dev server
+ * started by hand that has since shut down (it does when idle) is replaced by one this app starts.
+ */
+async function serverReady(): Promise<void> {
+  if (serverProcess || serverRestartTimer || (await isServerRunning())) {
+    await waitForServer(SERVER_URL);
+    return;
+  }
+  await startAppServer();
+}
+
 let windowStarting: Promise<void> | null = null;
 
 /**
@@ -644,7 +670,7 @@ let windowStarting: Promise<void> | null = null;
 function ensureWindow(): Promise<void> {
   if (BrowserWindow.getAllWindows().length > 0) return Promise.resolve();
   windowStarting ??= (async () => {
-    await waitForServer(SERVER_URL);
+    await serverReady();
     await createWindow();
   })().finally(() => {
     windowStarting = null;
@@ -721,6 +747,8 @@ const isPrimaryInstance = app.requestSingleInstanceLock();
 if (!isPrimaryInstance) app.quit();
 
 app.on("second-instance", () => {
+  // Startup opens the first window; until it has, there is nothing to show.
+  if (launchPaths !== null) return;
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   if (!win) {
     ensureWindow().catch((err: unknown) => dialog.showErrorBox("Startup Error", String(err)));

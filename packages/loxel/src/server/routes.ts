@@ -2707,7 +2707,12 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
 
 // GET /api/version
 function handleGetVersion(): Response {
-  return json({ version: getCurrentVersion(), isDev: config.isDev });
+  // appOwned: started by the desktop app, so it exits with that app (see SHARED_SERVER.md).
+  return json({
+    version: getCurrentVersion(),
+    isDev: config.isDev,
+    appOwned: config.parentPid !== null,
+  });
 }
 
 // ---------------------------------------------------------------------------

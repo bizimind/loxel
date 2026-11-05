@@ -15,13 +15,13 @@ Running one server instead of one per window removes a whole class of cross-proc
 
 ## One app process
 
-`src/electron/main.ts` takes Electron's single-instance lock. A second launch of the same app, such as `open -n` or the binary run directly, focuses a window of the running one and exits. So exactly one Electron process owns the server, and no other process runs from the bundle when a full-app update replaces it (see [ELECTRON.md](ELECTRON.md#updates)). Dev and production builds have different app names and data directories, so each holds its own lock.
+`src/electron/main.ts` takes Electron's single-instance lock. A second launch of the same app, such as `open -n` or the binary run directly, focuses a window of the running one and exits. So exactly one Electron process owns the server, and no other process runs from the bundle when a full-app update replaces it (see [ELECTRON.md](ELECTRON.md#updates)). Dev and production builds have different app names and data directories, so each holds its own lock. Dev builds have the same name in every worktree, so one dev app runs at a time: `pnpm run dev:app` in a second worktree focuses the first worktree's dev app and exits.
 
 ## Starting and restarting the server
 
 `startAppServer()` in `src/electron/main.ts` runs on app start, before the first window opens. It spawns the server and waits until `GET /api/version` answers. In dev that is `bun run src/server/index.ts` with `LOXEL_DEV=1`. In production it is the bundled `loxel-server` binary, with `LOXEL_STATIC_DIR` set to the bundled renderer.
 
-- **A server already on the port.** In production, this is one that a previous run of the app left shutting down. Launch waits up to 15 seconds for it to go, then fails with a startup error naming the port. In dev, it is a dev server started by hand (`pnpm run dev:server`), and the app uses it without restarting or stopping it.
+- **A server already on the port.** `GET /api/version` reports `appOwned` for a server an app started. Such a server is one a previous run of the app left shutting down, including, in dev, the one an Electron restarted on a main-process rebuild leaves behind. Launch waits up to 15 seconds for it to go, then fails with a startup error naming the port. In dev, a server that is not app-owned was started by hand (`pnpm run dev:server`), and the app uses it without restarting or stopping it. When it later shuts down (a hand-started server does when idle), the next window the app opens starts the app's own server.
 - **Crashes.** Any exit the app did not ask for counts as a crash. The app restarts the server with linear backoff (1s, 2s, 3s), with a single restart in flight at a time. A server that stayed up for a minute gets a fresh retry budget. After three crashes in quick succession, the app reports the failure and quits.
 
 ## Server lifecycle
@@ -29,7 +29,7 @@ Running one server instead of one per window removes a whole class of cross-proc
 The server lives as long as the app:
 
 - **Quit.** On `will-quit`, after every window has closed, the app sends the server SIGTERM, and the server finishes shutting down on its own. A window's last layout promote that has not reached the server by then is recovered when the next server starts (see [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md)).
-- **An app that crashed or was killed.** The app passes its process ID in `LOXEL_PARENT_PID`. The server checks every 2 seconds that the process still exists and shuts down once it is gone (`src/server/server.ts`). It removes the variable from its environment at startup (`src/server/config.ts`), so a server started from a Loxel terminal does not take the app for its parent.
+- **An app that crashed or was killed.** The app passes its process ID in `LOXEL_PARENT_PID`. The server checks every 2 seconds that it is still that process's child, and shuts down once it has been reparented, which a reused process ID cannot fake (`src/server/server.ts`). It removes the variable from its environment at startup (`src/server/config.ts`), so a server started from a Loxel terminal does not take the app for its parent.
 - **No windows.** macOS keeps the app running with every window closed. When the last app client disconnects, detached terminal sessions get 5 minutes to be reattached, for example by a window opening again or the machine waking from sleep. Then they are destroyed. The server itself keeps running.
 
 A server started without `LOXEL_PARENT_PID`, such as `pnpm run dev` in a browser or a test server, shuts itself down instead. That happens 30 seconds after the last app client disconnects, or at the end of the 5-minute grace period when detached sessions are alive.

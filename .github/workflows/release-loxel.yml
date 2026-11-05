@@ -189,6 +189,10 @@ jobs:
       - name: Check binary architectures
         run: bun packages/loxel/scripts/check-binary-arch.ts darwin-${{ matrix.arch }} packages/loxel/release
 
+      # electron-updater reads its cache folder from this file on every download.
+      - name: Check the updater config is packaged
+        run: ls packages/loxel/release/mac*/Loxel.app/Contents/Resources/app-update.yml
+
       - name: Calculate checksums
         id: sha
         run: |

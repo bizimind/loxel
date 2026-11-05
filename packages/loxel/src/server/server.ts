@@ -1407,20 +1407,12 @@ process.on("SIGTERM", () => shutdown());
 
 const PARENT_CHECK_MS = 2000;
 
-/** Whether the process still exists. EPERM means it does, under another user. */
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return !(err instanceof Error && "code" in err && err.code === "ESRCH");
-  }
-}
-
+// The app spawns this process directly. When the app dies, the server is reparented (to launchd
+// on macOS), which a reused process ID cannot fake.
 if (config.parentPid !== null) {
   const parentPid = config.parentPid;
   setInterval(() => {
-    if (isProcessAlive(parentPid)) return;
+    if (process.ppid === parentPid) return;
     log.info("The desktop app that started this server is gone, shutting down");
     shutdown();
   }, PARENT_CHECK_MS).unref();

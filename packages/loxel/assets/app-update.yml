@@ -1,0 +1,4 @@
+# Read by electron-updater from the app's Resources when it downloads an update: the folder under
+# ~/Library/Caches it keeps the downloaded zip in. The feed is set in code (app-updater.ts), so
+# this file has no provider.
+updaterCacheDirName: loxel-updater
