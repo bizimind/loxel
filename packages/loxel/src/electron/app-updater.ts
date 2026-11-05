@@ -69,6 +69,11 @@ function installUpdate(): void {
   autoUpdater.quitAndInstall();
 }
 
+/** Whether Install & Restart is under way: Squirrel is quitting the app to replace it. */
+export function isInstallingUpdate(): boolean {
+  return status.state === "installing";
+}
+
 /** Set up the updater and the IPC the renderer drives it with. Call once, at startup. */
 export function installAppUpdater(): void {
   autoUpdater.logger = {

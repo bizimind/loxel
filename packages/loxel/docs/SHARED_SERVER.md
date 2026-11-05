@@ -15,7 +15,7 @@ Running one server instead of one per window removes a whole class of cross-proc
 
 ## One app process
 
-`src/electron/main.ts` takes Electron's single-instance lock. A second launch of the same app, such as `open -n` or the binary run directly, focuses a window of the running one and exits. So exactly one Electron process owns the server, and no other process runs from the bundle when a full-app update replaces it (see [ELECTRON.md](ELECTRON.md#updates)). Dev and production builds have different app names and data directories, so each holds its own lock. Dev builds have the same name in every worktree, so one dev app runs at a time: `pnpm run dev:app` in a second worktree focuses the first worktree's dev app and exits.
+A packaged app takes Electron's single-instance lock (`src/electron/main.ts`). A second launch of the same app, such as `open -n` or the binary run directly, focuses a window of the running one and exits. So exactly one Electron process owns the server, and no other process runs from the bundle when a full-app update replaces it (see [ELECTRON.md](ELECTRON.md#updates)). Dev builds take no lock: they have the installed app's name and data directory, so a lock would hand `pnpm run dev:app` to the installed Loxel, and vite-plugin-electron starts a rebuilt Electron before the old one has exited. A second dev app finds the first one's app-owned server on the dev port and fails to start once the 15-second wait runs out.
 
 ## Starting and restarting the server
 
@@ -29,9 +29,9 @@ Running one server instead of one per window removes a whole class of cross-proc
 
 The server lives as long as the app:
 
-- **Quit.** On `will-quit`, after every window has closed, the app sends the server SIGTERM, and the server finishes shutting down on its own. A window's last layout promote that has not reached the server by then is recovered when the next server starts (see [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md)).
+- **Quit.** On `will-quit`, after every window has closed, the app waits up to 2 seconds for the layout promotes the windows sent as they closed, then sends the server SIGTERM. The server keeps answering API requests until none has been in flight or started for 300 ms (5 seconds at most), so a save that is still formatting or a closing window's last store write lands, then tears down and exits on its own. During an update install the app does not wait for promotes, and one that did not land is recovered when the next server starts (see [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md)).
 - **An app that crashed or was killed.** The app passes its process ID in `LOXEL_PARENT_PID`. The server checks every 2 seconds that it is still that process's child, and shuts down once it has been reparented, which a reused process ID cannot fake (`src/server/server.ts`). It removes the variable from its environment at startup (`src/server/config.ts`), so a server started from a Loxel terminal does not take the app for its parent.
-- **No windows.** macOS keeps the app running with every window closed. When the last app client disconnects, detached terminal sessions get 5 minutes to be reattached, for example by a window opening again or the machine waking from sleep. Then they are destroyed. The server itself keeps running.
+- **No windows.** macOS keeps the app running with every window closed. When the last app client disconnects, detached terminal sessions get 5 minutes to be reattached, for example by a window opening again or the machine waking from sleep. Then they are destroyed, including a terminal that was still starting when the last window closed. The server itself keeps running.
 
 A server started without `LOXEL_PARENT_PID`, such as `pnpm run dev` in a browser or a test server, shuts itself down instead. That happens 30 seconds after the last app client disconnects, or at the end of the 5-minute grace period when detached sessions are alive.
 

@@ -53,7 +53,7 @@ let metaKeyHeld = false;
 
 import { requestOpen } from "../open-request";
 import { isHttpUrl } from "../url-utils";
-import { installAppUpdater, scheduleAutomaticUpdateCheck } from "./app-updater";
+import { installAppUpdater, isInstallingUpdate, scheduleAutomaticUpdateCheck } from "./app-updater";
 import { BROWSER_PARTITION } from "./browser-partition";
 import {
   GET_WINDOW_FULL_SCREEN,
@@ -770,9 +770,12 @@ async function promptForAccount(
   return response < labels.length ? response : null;
 }
 
-// One Electron process per app: it owns the server, and Squirrel can replace only a bundle no other
-// process runs from. A second launch (`open -n`, or the binary run directly) hands over and exits.
-const isPrimaryInstance = app.requestSingleInstanceLock();
+// One Electron process per installed app: it owns the server, and Squirrel can replace only a bundle
+// no other process runs from. A second launch (`open -n`, or the binary run directly) hands over and
+// exits. Packaged builds only: dev builds have the installed app's name and data directory, so a
+// lock would hand `pnpm run dev:app` to the installed Loxel, and vite-plugin-electron starts a
+// rebuilt Electron before the old one has exited.
+const isPrimaryInstance = !app.isPackaged || app.requestSingleInstanceLock();
 if (!isPrimaryInstance) app.quit();
 
 app.on("second-instance", () => {
@@ -835,8 +838,22 @@ app.on("window-all-closed", () => {
   }
 });
 
-// The server lives as long as the app. Windows are closed by now; a layout promote that did not
-// reach the server is recovered when the next server starts.
-app.on("will-quit", () => {
-  stopServer();
+/** How long quitting waits for the windows' layout promotes to reach the server. */
+const QUIT_PROMOTE_WAIT_MS = 2000;
+let promotesSettledForQuit = false;
+
+// The server lives as long as the app. Windows are closed by now, and each sent its layout promote
+// on close; quitting waits for those before stopping the server, which then finishes the API
+// requests it has received before exiting. Not while Squirrel quits to install an update: a promote
+// that did not land is recovered when the next server starts.
+app.on("will-quit", (event) => {
+  if (promotesSettledForQuit || pendingPromotes.size === 0 || isInstallingUpdate()) {
+    stopServer();
+    return;
+  }
+  event.preventDefault();
+  promotesSettledForQuit = true;
+  void Promise.race([Promise.allSettled(pendingPromotes), sleep(QUIT_PROMOTE_WAIT_MS)]).then(() =>
+    app.quit(),
+  );
 });

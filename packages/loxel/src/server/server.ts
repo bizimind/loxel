@@ -1218,7 +1218,7 @@ const server = Bun.serve<WsData>({
     }
 
     if (url.pathname.startsWith("/api")) {
-      return handleRequest(req, routeContext);
+      return trackApiRequest(() => handleRequest(req, routeContext));
     }
 
     // Serve static files from dist/ when available (production mode)
@@ -1340,10 +1340,11 @@ const SHUTDOWN_LSP_WAIT_MS = SERVER_STOP_GRACE_MS + 1000;
 function startIdleTimer(): void {
   const ownedByApp = config.parentPid !== null;
   const hasOrphans = terminalManager.hasOrphanSessions();
-  if (hasOrphans) {
+  // A server the app owns always arms the cleanup: a terminal still resolving its environment is
+  // not an orphan yet, but becomes one when it spawns with no client attached.
+  if (hasOrphans || ownedByApp) {
     log.info(
-      `No clients remaining, orphaned sessions waiting for reattach ` +
-        `(${ORPHAN_CLEANUP_MS / 1000}s timeout)`,
+      `No clients remaining, detached terminals have ${ORPHAN_CLEANUP_MS / 1000}s to be reattached`,
     );
     idleTimer = setTimeout(() => {
       idleTimer = null;
@@ -1355,7 +1356,6 @@ function startIdleTimer(): void {
     }, ORPHAN_CLEANUP_MS);
     return;
   }
-  if (ownedByApp) return;
   log.info(`No clients remaining, shutting down in ${IDLE_SHUTDOWN_MS / 1000}s`);
   idleTimer = setTimeout(() => {
     log.info("Idle timeout reached, shutting down");
@@ -1363,6 +1363,40 @@ function startIdleTimer(): void {
   }, IDLE_SHUTDOWN_MS);
 }
 
+// --- API requests in flight, drained before shutdown ---
+
+/** Shutdown waits this long without a new API request: a closing window's last writes may still be on their way. */
+const DRAIN_QUIET_MS = 300;
+/** The longest shutdown waits for API requests, such as a save that is formatting. */
+const DRAIN_MAX_MS = 5000;
+let apiRequestsInFlight = 0;
+let lastApiRequestAt = 0;
+
+async function trackApiRequest(run: () => Promise<Response>): Promise<Response> {
+  apiRequestsInFlight++;
+  lastApiRequestAt = Date.now();
+  try {
+    return await run();
+  } finally {
+    apiRequestsInFlight--;
+  }
+}
+
+/** Resolves once no API request is in flight or has started for DRAIN_QUIET_MS, or at DRAIN_MAX_MS. */
+async function drainApiRequests(): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < DRAIN_MAX_MS) {
+    const quietSince = Math.max(startedAt, lastApiRequestAt);
+    if (apiRequestsInFlight === 0 && Date.now() - quietSince >= DRAIN_QUIET_MS) return;
+    await Bun.sleep(50);
+  }
+  log.warn(`Shutting down with ${apiRequestsInFlight} API request(s) still in flight`);
+}
+
+/**
+ * Stop the server: let API requests finish first (saves, store writes, layout promotes), so a quit
+ * loses nothing the app already sent, then tear everything down and exit.
+ */
 function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -1371,7 +1405,10 @@ function shutdown(exitCode = 0) {
     idleTimer = null;
   }
   log.info("Server shutting down");
+  void drainApiRequests().finally(() => tearDown(exitCode));
+}
 
+function tearDown(exitCode: number) {
   // Teardown all worktree resources
   for (const [wtPath, resources] of wtResources) {
     teardownWorktreeResources(wtPath, resources);
