@@ -2,16 +2,34 @@
 import { Font } from "astro:assets";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
+import { SITE_NAME, THEME_COLOR, pagePath } from "../lib/site";
+import { type StructuredDataNode, siteNodes, toJsonLd } from "../lib/structured-data";
 import "../styles/global.css";
 
 interface Props {
   title: string;
   description?: string;
+  /** `article` for docs pages, `website` otherwise. */
+  ogType?: "website" | "article";
+  /** Keeps the page out of search results and omits its canonical URL (the 404 page). */
+  noindex?: boolean;
+  /** Page-specific schema.org nodes, added to the site-wide ones. */
+  structuredData?: StructuredDataNode[];
 }
 
-const { title, description = "Loxel — The IDE for the agentic coding era." } = Astro.props;
+const {
+  title,
+  description = "Loxel — The IDE for the agentic coding era.",
+  ogType = "website",
+  noindex = false,
+  structuredData = [],
+} = Astro.props;
 const pageTitle =
-  title === "Loxel" ? "Loxel — IDE for the agentic coding era" : `${title} — Loxel`;
+  title === SITE_NAME ? "Loxel — IDE for the agentic coding era" : `${title} — ${SITE_NAME}`;
+// Every deployment (including *.pages.dev) points search engines at the production URL.
+const canonicalUrl = new URL(pagePath(Astro.url), Astro.site).href;
+const socialImage = new URL("/social-banner.png", Astro.site).href;
+const socialImageAlt = "Loxel, the IDE for the agentic coding era";
 ---
 
 <!doctype html>
@@ -21,16 +39,28 @@ const pageTitle =
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{pageTitle}</title>
     <meta name="description" content={description} />
-    <meta property="og:title" content={title} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonicalUrl} />}
+    <meta name="theme-color" content={THEME_COLOR} />
+    <meta property="og:type" content={ogType} />
+    <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />
-    <meta property="og:site_name" content="Loxel" />
-    <meta property="og:image" content="https://bizimind.io/social-banner.png" />
+    {!noindex && <meta property="og:url" content={canonicalUrl} />}
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content={socialImage} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:alt" content={socialImageAlt} />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="https://bizimind.io/social-banner.png" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImage} />
+    <meta name="twitter:image:alt" content={socialImageAlt} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="sitemap" type="application/xml" href="/sitemap-index.xml" />
+    <script type="application/ld+json" set:html={toJsonLd([...siteNodes(), ...structuredData])} />
     <Font cssVariable="--font-inter" preload={[{ style: "normal" }]} />
     <Font cssVariable="--font-jetbrains-mono" />
   </head>

@@ -1,0 +1,42 @@
+---
+import { getCollection } from "astro:content";
+import { trackClick } from "../lib/analytics";
+
+interface Props {
+  /** Highlighted in the list, and the `from` of `docs_nav_clicked`. */
+  currentSlug: string;
+  class?: string;
+}
+
+const { currentSlug, class: className } = Astro.props;
+
+const docs = await getCollection("docs");
+const sorted = docs.toSorted(
+  (a, b) => a.data.order - b.data.order || a.data.title.localeCompare(b.data.title),
+);
+---
+
+<nav class={className}>
+  <p class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+    Documentation
+  </p>
+  <ul class="space-y-0.5">
+    {
+      sorted.map((doc) => (
+        <li>
+          <a
+            href={`/docs/${doc.id}`}
+            {...trackClick("docs_nav_clicked", { from: currentSlug, to: doc.id })}
+            class={`block text-sm px-3 py-1.5 rounded-md transition-colors ${
+              doc.id === currentSlug
+                ? "bg-primary/15 text-accent font-medium"
+                : "text-muted-foreground hover:text-foreground hover:bg-surface-0"
+            }`}
+          >
+            {doc.data.title}
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</nav>

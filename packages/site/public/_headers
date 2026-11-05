@@ -1,4 +1,11 @@
-# Cloudflare Pages response headers. Files under /_astro/ have content hashes in their names, so a
-# changed file gets a new URL and browsers can cache these forever.
+# Cloudflare Pages response headers. Only bizimind.io is indexed: the production *.pages.dev host and
+# per-branch preview hosts serve the same pages, so they tell crawlers not to index them.
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
+https://:version.:project.pages.dev/*
+  X-Robots-Tag: noindex
+
+# Files under /_astro/ have content hashes in their names, so a changed file gets a new URL and
+# browsers can cache these forever.
 /_astro/*
   Cache-Control: public, max-age=31536000, immutable
