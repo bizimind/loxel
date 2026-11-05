@@ -4,3 +4,7 @@ https://:project.pages.dev/*
   X-Robots-Tag: noindex
 https://:version.:project.pages.dev/*
   X-Robots-Tag: noindex
+
+# Build assets have content hashes in their names, so they never change under the same URL.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
