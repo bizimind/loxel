@@ -1,4 +1,5 @@
 ---
+import { Font } from "astro:assets";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
 import { SITE_NAME, THEME_COLOR, pagePath } from "../lib/site";
@@ -60,12 +61,8 @@ const socialImageAlt = "Loxel, the IDE for the agentic coding era";
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="sitemap" type="application/xml" href="/sitemap-index.xml" />
     <script type="application/ld+json" set:html={toJsonLd([...siteNodes(), ...structuredData])} />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap"
-      rel="stylesheet"
-    />
+    <Font cssVariable="--font-inter" preload={[{ style: "normal" }]} />
+    <Font cssVariable="--font-jetbrains-mono" />
   </head>
   <body class="bg-background text-foreground min-h-screen flex flex-col antialiased">
     <Nav />
