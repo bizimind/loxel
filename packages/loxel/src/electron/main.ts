@@ -447,7 +447,7 @@ function buildAppMenu(): void {
           label: "New Window",
           accelerator: "CmdOrCtrl+Shift+N",
           click: () => {
-            void createWindow();
+            openNewWindow();
           },
         },
       ],
@@ -611,7 +611,7 @@ if (process.platform === "darwin") {
       {
         label: "New Window",
         click: () => {
-          void createWindow();
+          openNewWindow();
         },
       },
     ]),
@@ -646,7 +646,7 @@ ipcMain.on(SET_DOCK_BADGE, (_event, count: unknown) => {
 
 // macOS: support native window tabbing (View > Merge All Windows / "+" tab button)
 app.on("new-window-for-tab", () => {
-  void createWindow();
+  openNewWindow();
 });
 
 /**
@@ -659,6 +659,13 @@ async function serverReady(): Promise<void> {
     return;
   }
   await startAppServer();
+}
+
+/** Open one more window (New Window, a native window tab) once the server answers. */
+function openNewWindow(): void {
+  serverReady()
+    .then(() => createWindow())
+    .catch((err: unknown) => dialog.showErrorBox("Cannot Open a Window", String(err)));
 }
 
 let windowStarting: Promise<void> | null = null;
