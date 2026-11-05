@@ -104,34 +104,35 @@ function startServer(): void {
   serverStartedAt = Date.now();
   // The server exits on its own if this process dies without stopping it.
   const env = { ...process.env, LOXEL_PARENT_PID: String(process.pid) };
-  if (IS_DEV) {
-    // In dev, spawn bun running the server source directly
-    serverProcess = spawn("bun", ["run", "src/server/index.ts"], {
-      cwd: path.resolve(import.meta.dirname, "../.."),
-      env: { ...env, LOXEL_DEV: "1" },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-  } else {
-    serverProcess = spawn(path.join(process.resourcesPath, "loxel-server"), [], {
-      env: { ...env, LOXEL_STATIC_DIR: path.join(process.resourcesPath, "renderer") },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-  }
+  const child = IS_DEV
+    ? // In dev, spawn bun running the server source directly
+      spawn("bun", ["run", "src/server/index.ts"], {
+        cwd: path.resolve(import.meta.dirname, "../.."),
+        env: { ...env, LOXEL_DEV: "1" },
+        stdio: ["pipe", "pipe", "pipe"],
+      })
+    : spawn(path.join(process.resourcesPath, "loxel-server"), [], {
+        env: { ...env, LOXEL_STATIC_DIR: path.join(process.resourcesPath, "renderer") },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+  serverProcess = child;
 
   const dekBase64 = loadOrCreateDek();
-  serverProcess.stdin!.on("error", () => {});
+  child.stdin.on("error", () => {});
   // Closing stdin without a key tells the server that secret storage is unavailable.
-  if (dekBase64) serverProcess.stdin!.write(dekBase64 + "\n");
-  serverProcess.stdin!.end();
+  if (dekBase64) child.stdin.write(dekBase64 + "\n");
+  child.stdin.end();
 
-  serverProcess.stdout?.on("data", (data: Buffer) => {
+  child.stdout.on("data", (data: Buffer) => {
     process.stdout.write(data);
   });
-  serverProcess.stderr?.on("data", (data: Buffer) => {
+  child.stderr.on("data", (data: Buffer) => {
     process.stderr.write(data);
   });
-  serverProcess.on("exit", (code, signal) => {
+  child.on("exit", (code, signal) => {
     console.log(`[electron] Server exited with code ${code}${signal ? ` (${signal})` : ""}`);
+    // Only the current server's exit counts: an earlier one's must not drop its replacement.
+    if (serverProcess !== child) return;
     serverProcess = null;
     if (!stoppingServer) scheduleServerRestart();
   });
@@ -573,23 +574,36 @@ app.on("web-contents-created", (_, contents) => {
 
 // --- App lifecycle ---
 
+/** The server start in flight, which every caller joins so the app never spawns two servers. */
+let serverStarting: Promise<void> | null = null;
+
 /**
- * Start the app's server and wait until it answers. A server already answering on the port that an
- * app started is one a previous run left shutting down (in dev, also the one an Electron that just
- * restarted on a main-process rebuild leaves behind), so launch waits for it to go. In dev, a dev
- * server started by hand (`pnpm run dev:server`) is used instead.
+ * Start the app's server and wait until it answers, or join the start already in flight. A server
+ * already answering on the port that an app started is one a previous run left shutting down (in
+ * dev, also the one an Electron that just restarted on a main-process rebuild leaves behind), so
+ * launch waits for it to go. Any other server on the port was not started by an app: in dev, a dev
+ * server started by hand (`pnpm run dev:server`), which the app uses instead; in production, one
+ * from an earlier version or started by hand, which can stay up for minutes, so launch fails.
  */
-async function startAppServer(): Promise<void> {
-  const running = await probeServer();
-  if (running) {
-    if (IS_DEV && !running.appOwned) {
-      console.log(`[electron] Using the dev server already running on port ${SERVER_PORT}`);
-      return;
+function startAppServer(): Promise<void> {
+  serverStarting ??= (async () => {
+    const running = await probeServer();
+    if (running && !running.appOwned) {
+      if (IS_DEV) {
+        console.log(`[electron] Using the dev server already running on port ${SERVER_PORT}`);
+        return;
+      }
+      throw new Error(
+        `A Loxel server this app did not start is running on port ${SERVER_PORT}: one from an earlier version, which shuts down within 5 minutes of its last window closing, or one started by hand. Open Loxel again once it has stopped.`,
+      );
     }
-    await waitForServerToStop();
-  }
-  startServer();
-  await waitForServer(SERVER_URL);
+    if (running) await waitForServerToStop();
+    startServer();
+    await waitForServer(SERVER_URL);
+  })().finally(() => {
+    serverStarting = null;
+  });
+  return serverStarting;
 }
 
 async function waitForServerToStop(): Promise<void> {
@@ -654,6 +668,10 @@ app.on("new-window-for-tab", () => {
  * started by hand that has since shut down (it does when idle) is replaced by one this app starts.
  */
 async function serverReady(): Promise<void> {
+  if (serverStarting) {
+    await serverStarting;
+    return;
+  }
   if (serverProcess || serverRestartTimer || (await isServerRunning())) {
     await waitForServer(SERVER_URL);
     return;
@@ -661,8 +679,12 @@ async function serverReady(): Promise<void> {
   await startAppServer();
 }
 
-/** Open one more window (New Window, a native window tab) once the server answers. */
+/**
+ * Open one more window (New Window, a native window tab) once the server answers. Before startup
+ * has opened the first window there is nothing to add to: startup opens it.
+ */
 function openNewWindow(): void {
+  if (launchPaths !== null) return;
   serverReady()
     .then(() => createWindow())
     .catch((err: unknown) => dialog.showErrorBox("Cannot Open a Window", String(err)));
