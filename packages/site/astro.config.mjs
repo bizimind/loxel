@@ -11,8 +11,11 @@ export default defineConfig({
   site: "https://bizimind.io",
   output: "static",
   prefetch: true,
-  // Renamed pages keep their old URLs working.
+  trailingSlash: "never",
+  build: { format: "file" },
+  // Renamed pages keep their old URLs working; /docs has no page of its own.
   redirects: {
+    "/docs": "/docs/getting-started",
     "/docs/typescript-intelligence": "/docs/language-intelligence",
     "/docs/coding-agent": "/docs/terminals#tui-agents",
   },

@@ -1,8 +1,8 @@
 import { PUBLIC_POSTHOG_KEY } from "astro:env/client";
 
 // The custom events the site sends, with their properties. Markup opts in through the
-// `trackClick`/`trackView`/`trackScrollDepth` attribute helpers below, so tracking never depends on
-// copy or CSS selectors.
+// `trackClick`/`trackView`/`trackScrollDepth`/`trackLoad` attribute helpers below, so tracking
+// never depends on copy or CSS selectors.
 interface ClickEvents {
   download_clicked: { platform: string; arch: string; version: string; location: string };
   github_link_clicked: { location: string };
@@ -15,6 +15,11 @@ interface ViewEvents {
 
 interface ScrollDepthEvents {
   docs_scroll_depth: { slug: string };
+}
+
+// PostHog adds the page's path and referrer to every event, which is what `page_not_found` is for.
+interface LoadEvents {
+  page_not_found: Record<string, never>;
 }
 
 const SCROLL_DEPTH_MILESTONES = [25, 50, 75, 100];
@@ -35,6 +40,11 @@ export function trackScrollDepth<E extends keyof ScrollDepthEvents>(
   props: ScrollDepthEvents[E],
 ) {
   return { "data-analytics-scroll-depth": event, "data-analytics-props": JSON.stringify(props) };
+}
+
+/** Captures `event` once when the page loads. */
+export function trackLoad<E extends keyof LoadEvents>(event: E, props: LoadEvents[E]) {
+  return { "data-analytics-load": event, "data-analytics-props": JSON.stringify(props) };
 }
 
 type Capture = (event: string, props: Record<string, unknown>) => void;
@@ -61,6 +71,7 @@ export function initAnalytics(): void {
   trackClicks(capture);
   trackViews(capture);
   trackScrollDepths(capture);
+  trackLoads(capture);
 }
 
 // Visitors who send Do Not Track or Global Privacy Control aren't tracked at all. PostHog's own
@@ -143,5 +154,13 @@ function trackScrollDepths(capture: Capture): void {
       if (pending.length === 0) window.removeEventListener("scroll", check);
     };
     window.addEventListener("scroll", check, { passive: true });
+  }
+}
+
+function trackLoads(capture: Capture): void {
+  for (const element of document.querySelectorAll<HTMLElement>("[data-analytics-load]")) {
+    const name = element.dataset.analyticsLoad;
+    if (!name) continue;
+    capture(name, readProps(element));
   }
 }

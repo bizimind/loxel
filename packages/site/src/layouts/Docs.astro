@@ -1,7 +1,9 @@
 ---
 import Base from "./Base.astro";
+import DocsNav from "../components/DocsNav.astro";
 import { getCollection } from "astro:content";
-import { trackClick, trackScrollDepth } from "../lib/analytics";
+import { trackScrollDepth } from "../lib/analytics";
+import { pagePath } from "../lib/site";
 
 interface Props {
   title: string;
@@ -10,46 +12,15 @@ interface Props {
 
 const { title, description } = Astro.props;
 
+const currentPath = pagePath(Astro.url);
 const allDocs = await getCollection("docs");
-const sorted = allDocs.sort(
-  (a, b) => a.data.order - b.data.order || a.data.title.localeCompare(b.data.title),
-);
-const currentPath = Astro.url.pathname;
-const isCurrent = (id: string) => currentPath === `/docs/${id}` || currentPath === `/docs/${id}/`;
-const currentSlug = sorted.find((doc) => isCurrent(doc.id))?.id ?? currentPath;
+const currentSlug = allDocs.find((doc) => currentPath === `/docs/${doc.id}`)?.id ?? currentPath;
 ---
 
-<Base title={title} description={description}>
+<Base title={title} description={description} ogType="article">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 flex gap-12">
     <aside class="hidden lg:block w-56 flex-shrink-0">
-      <nav class="sticky top-20">
-        <p class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Documentation
-        </p>
-        <ul class="space-y-0.5">
-          {
-            sorted.map((doc) => {
-              const href = `/docs/${doc.id}`;
-              const active = isCurrent(doc.id);
-              return (
-                <li>
-                  <a
-                    href={href}
-                    {...trackClick("docs_nav_clicked", { from: currentSlug, to: doc.id })}
-                    class={`block text-sm px-3 py-1.5 rounded-md transition-colors ${
-                      active
-                        ? "bg-primary/15 text-accent font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-surface-0"
-                    }`}
-                  >
-                    {doc.data.title}
-                  </a>
-                </li>
-              );
-            })
-          }
-        </ul>
-      </nav>
+      <DocsNav currentSlug={currentSlug} class="sticky top-20" />
     </aside>
     <article
       class="flex-1 min-w-0 prose max-w-3xl"
