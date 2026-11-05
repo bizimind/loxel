@@ -1,0 +1,6 @@
+# Cloudflare Pages response headers. Only bizimind.io is indexed: the production *.pages.dev host and
+# per-branch preview hosts serve the same pages, so they tell crawlers not to index them.
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
+https://:version.:project.pages.dev/*
+  X-Robots-Tag: noindex
