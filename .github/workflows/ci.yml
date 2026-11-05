@@ -16,7 +16,9 @@ permissions:
 jobs:
   discover:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    timeout-minutes: 1
+    # Checkout normally takes 3-26s, but the full-history fetch occasionally stalls
+    # for a minute or more; leave room for that instead of failing the whole run.
+    timeout-minutes: 5
     outputs:
       lint: ${{ steps.find.outputs.lint }}
       test: ${{ steps.find.outputs.test }}
@@ -25,12 +27,19 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      # Change detection needs every commit and tree (ancestry check and tree diff against the
+      # last green run), but only the checked-out commit's file contents, so skip historic blobs.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          filter: blob:none
       - name: Find affected packages
         id: find
         shell: bash
+        # Everything this step reads is local; a BASE_SHA missing from the clone fails fast (and
+        # runs all packages, like a full clone) instead of lazily fetching its history.
+        env:
+          GIT_NO_LAZY_FETCH: "1"
         run: |
           # Determine which packages need to run based on changes since last successful CI
           echo "::group::Change detection"
@@ -60,7 +69,9 @@ jobs:
             RUN_ALL_TEST=true; RUN_ALL_BUILD=true; RUN_ALL_TYPECHECK=true; RUN_ALL_LINT=true
           else
             echo "Comparing against last successful run: $BASE_SHA"
-            CHANGED_FILES=$(git diff --name-only "$BASE_SHA" HEAD)
+            # --no-renames lists both sides of a rename, so moving a file out of a package marks
+            # that package too, and the diff never has to lazily fetch blobs to detect renames.
+            CHANGED_FILES=$(git diff --name-only --no-renames "$BASE_SHA" HEAD)
             echo "Changed files:"
             echo "$CHANGED_FILES"
 
