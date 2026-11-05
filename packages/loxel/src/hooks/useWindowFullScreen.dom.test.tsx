@@ -2,14 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { act, cleanup, renderHook } from "@testing-library/react";
 
-import { useWindowFullScreen } from "./useWindowFullScreen";
+import { stubElectronAPI } from "@/test/electron-api-stub";
 
-const baseElectronAPI = {
-  onOpenInBrowserTab: () => () => {},
-  setDockBadge: () => {},
-  onWindowFocusChange: () => () => {},
-  openFolderDialog: async () => null,
-};
+import { useWindowFullScreen } from "./useWindowFullScreen";
 
 afterEach(() => {
   cleanup();
@@ -22,23 +17,15 @@ describe("useWindowFullScreen", () => {
     expect(result.current).toBe(false);
   });
 
-  // In-app updates replace the renderer but not the preload.
-  test("is false when the preload predates the fullscreen APIs", () => {
-    window.electronAPI = baseElectronAPI;
-    const { result } = renderHook(() => useWindowFullScreen());
-    expect(result.current).toBe(false);
-  });
-
   test("starts fullscreen when the window opens into a fullscreen space", () => {
-    window.electronAPI = { ...baseElectronAPI, isFullScreen: () => true };
+    window.electronAPI = stubElectronAPI({ isFullScreen: () => true });
     const { result } = renderHook(() => useWindowFullScreen());
     expect(result.current).toBe(true);
   });
 
   test("follows fullscreen changes and unsubscribes on unmount", () => {
     let listener: ((fullScreen: boolean) => void) | null = null;
-    window.electronAPI = {
-      ...baseElectronAPI,
+    window.electronAPI = stubElectronAPI({
       isFullScreen: () => false,
       onWindowFullScreenChange: (callback) => {
         listener = callback;
@@ -46,7 +33,7 @@ describe("useWindowFullScreen", () => {
           listener = null;
         };
       },
-    };
+    });
     const { result, unmount } = renderHook(() => useWindowFullScreen());
     expect(result.current).toBe(false);
 

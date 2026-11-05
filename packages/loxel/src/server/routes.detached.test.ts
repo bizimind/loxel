@@ -43,7 +43,6 @@ describe("detached file project destinations", () => {
       resolveFilePath: () => null,
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},
-      shutdown: () => {},
       resolveSchema: async () => ({}),
       updateYamlSchemas: () => {},
       updateTomlSchemas: () => {},

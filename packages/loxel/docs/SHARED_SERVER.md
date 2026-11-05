@@ -1,10 +1,10 @@
 # Shared server and multiple windows
 
-How every Loxel window shares one Bun server process, how that server is started, owned and shut down, and why this design was chosen over one server per window.
+How every Loxel window shares one Bun server process, how the app starts, restarts and stops that server, and why this design was chosen over one server per window.
 
 ## Model
 
-One server runs per mode, on a well-known port: `7433` in production and `7434` in dev (`src/server/config.ts`; `LOXEL_SERVE_PORT` overrides it for a standalone server, but Electron and the `loxel` CLI always use the well-known ports). Dev and production also use separate state directories (`~/.local/state/loxel/loxel-dev` and `.../loxel`), so they never share a server or its state. Every window, whether opened from the same Electron process ("New Window" in the Dock menu) or from another Electron process, connects to that one server over WebSocket and REST.
+One server runs per mode, on a well-known port: `7433` in production and `7434` in dev (`src/server/config.ts`; `LOXEL_SERVE_PORT` overrides it for a standalone server, but Electron and the `loxel` CLI always use the well-known ports). Dev and production also use separate state directories (`~/.local/state/loxel/loxel-dev` and `.../loxel`), so they never share a server or its state. The app is a single Electron process, and every window it opens ("New Window" in the File and Dock menus, or a native window tab) connects to that one server over WebSocket and REST.
 
 Running one server instead of one per window removes a whole class of cross-process problems for every feature that touches the filesystem or persistent state:
 
@@ -12,25 +12,27 @@ Running one server instead of one per window removes a whole class of cross-proc
 - **Watchers** — one set of watchers and one `git status` per event, whatever the window count (see [WATCHERS.md](WATCHERS.md)).
 - **Write nonces** — all clients share one nonce store, so the window that saved a file suppresses its own echo while every other window viewing the file receives `file_content_changed` as an external change.
 - **Caches** — directory caches and Git status snapshots are shared rather than duplicated.
-- **Updates** — one server checks for and downloads updates. It checks by itself once at startup unless the `autoCheckForUpdates` setting is off; the manual check in Settings always works.
 
-## Electron: discover or spawn
+## One app process
 
-`ensureServer()` in `src/electron/main.ts` runs on app start:
+`src/electron/main.ts` takes Electron's single-instance lock. A second launch of the same app, such as `open -n` or the binary run directly, focuses a window of the running one and exits. So exactly one Electron process owns the server, and no other process runs from the bundle when a full-app update replaces it (see [ELECTRON.md](ELECTRON.md#updates)). Dev and production builds have different app names and data directories, so each holds its own lock.
 
-1. Probe `GET /api/version` on the well-known port. If a server answers, connect to it.
-2. Otherwise apply any pending update left behind by a previous server (see below), spawn the server (`bun run src/server/index.ts` in dev, the bundled or newer external `loxel-server` binary in production) and wait for it to answer.
+## Starting and restarting the server
 
-The Electron process that spawned the server is its **owner**. When two Electron processes start at once and both spawn, the loser's server exits with `EADDRINUSE`; its Electron process sees the non-zero exit while the port is already being served, drops ownership, and uses the winner's server.
+`startAppServer()` in `src/electron/main.ts` runs on app start, before the first window opens. It spawns the server and waits until `GET /api/version` answers. In dev that is `bun run src/server/index.ts` with `LOXEL_DEV=1`. In production it is the bundled `loxel-server` binary, with `LOXEL_STATIC_DIR` set to the bundled renderer.
 
-Only the owner holds the server's child-process handle, so only the owner reacts to its exit. In production, exit code `42` means an update is ready: the owner installs it and relaunches. If the owner has already quit, the update stays in `updates/pending.json` and is applied by whichever Electron process spawns the next server. Any other non-zero exit with nobody serving the port is a crash: the owner respawns the server with linear backoff (1s, 2s, 3s), with a single restart in flight at a time, and after three crashes in quick succession it drops ownership and falls back to polling; a server that stayed up for a minute gets a fresh retry budget. Dropping ownership for any reason cancels a pending restart. A process that does not own the server, whether from launch or after losing ownership, polls the server every 5 seconds; when it is gone it runs `ensureServer()` again and reloads its windows.
+- **A server already on the port.** In production, this is one that a previous run of the app left shutting down. Launch waits up to 15 seconds for it to go, then fails with a startup error naming the port. In dev, it is a dev server started by hand (`pnpm run dev:server`), and the app uses it without restarting or stopping it.
+- **Crashes.** Any exit the app did not ask for counts as a crash. The app restarts the server with linear backoff (1s, 2s, 3s), with a single restart in flight at a time. A server that stayed up for a minute gets a fresh retry budget. After three crashes in quick succession, the app reports the failure and quits.
 
 ## Server lifecycle
 
-Electron never kills the server on quit (`before-quit` does nothing), because other windows may still be connected. The server shuts itself down instead (`src/server/server.ts`):
+The server lives as long as the app:
 
-- When the last app client disconnects, it shuts down after 30 seconds unless a client reconnects first.
-- If detached terminal sessions are still alive at that point, it waits 5 minutes instead, so clients can reattach (for example after the machine wakes from sleep), then destroys the orphaned terminals and shuts down.
+- **Quit.** On `will-quit`, after every window has closed, the app sends the server SIGTERM, and the server finishes shutting down on its own. A window's last layout promote that has not reached the server by then is recovered when the next server starts (see [STATE_AND_STORAGE.md](STATE_AND_STORAGE.md)).
+- **An app that crashed or was killed.** The app passes its process ID in `LOXEL_PARENT_PID`. The server checks every 2 seconds that the process still exists and shuts down once it is gone (`src/server/server.ts`). It removes the variable from its environment at startup (`src/server/config.ts`), so a server started from a Loxel terminal does not take the app for its parent.
+- **No windows.** macOS keeps the app running with every window closed. When the last app client disconnects, detached terminal sessions get 5 minutes to be reattached, for example by a window opening again or the machine waking from sleep. Then they are destroyed. The server itself keeps running.
+
+A server started without `LOXEL_PARENT_PID`, such as `pnpm run dev` in a browser or a test server, shuts itself down instead. That happens 30 seconds after the last app client disconnects, or at the end of the 5-minute grace period when detached sessions are alive.
 
 The renderer's WebSocket client reconnects on its own, so windows survive a server restart. On reconnect it compares the server version with the one it first saw and reloads the page when it changed.
 

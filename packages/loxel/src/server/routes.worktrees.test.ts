@@ -73,7 +73,6 @@ describe("worktree routes on a regular (non-bare) repo", () => {
       resolveFilePath: () => null,
       initializeProject: async () => ({ project, worktrees: [] }),
       teardownProject: () => {},
-      shutdown: () => {},
       resolveSchema: async () => ({}),
       updateYamlSchemas: () => {},
       updateTomlSchemas: () => {},

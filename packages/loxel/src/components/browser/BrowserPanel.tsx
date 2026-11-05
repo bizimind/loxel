@@ -39,14 +39,10 @@ const isElectron = navigator.userAgent.includes("Electron");
 
 /**
  * Let pages ask for new tabs and windows (⌘-click, middle-click, `target="_blank"`,
- * `window.open`), which the main process turns into browser tabs. Only with a preload that
- * delivers those requests: an older main process opens them in the system browser instead.
- * Passed as a string: React drops `true` for attributes it does not know, though @types/react
+ * `window.open`), which the main process turns into browser tabs. Passed as a string: React drops `true` for attributes it does not know, though @types/react
  * types this one as a boolean.
  */
-const popupAttributes: Record<string, string> = window.electronAPI?.onOpenInNewBrowserTab
-  ? { allowpopups: "" }
-  : {};
+const popupAttributes: Record<string, string> = window.electronAPI ? { allowpopups: "" } : {};
 
 /** Whether `url` is the empty page a new browser panel opens on. */
 function isBlankPage(url: string): boolean {
@@ -153,7 +149,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   // Links the page opens in a new tab or window (⌘-click, middle-click, target="_blank", window.open).
   useEffect(
     () =>
-      window.electronAPI?.onOpenInNewBrowserTab?.((webContentsId, url, background) => {
+      window.electronAPI?.onOpenInNewBrowserTab((webContentsId, url, background) => {
         const webview = webviewRef.current;
         if (!webview || !readyRef.current || webContentsId !== webview.getWebContentsId()) return;
         openBrowserTab(url, { sourcePanelId: panelApi.id, activate: !background });

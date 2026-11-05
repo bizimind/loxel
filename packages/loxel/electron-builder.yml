@@ -89,6 +89,8 @@ mac:
         LSItemContentTypes: [public.folder]
   # No arch lists: they would override --x64 or --arm64 and package the other architecture with
   # this machine's binaries.
+  # The dmg is the download; the zip, with its block map, is what installed apps update from
+  # (src/electron/app-updater.ts).
   target:
     - dmg
     - zip

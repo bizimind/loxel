@@ -50,7 +50,6 @@ describe("POST /api/open terminals and placement", () => {
       resolveFilePath: () => null,
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},
-      shutdown: () => {},
       resolveSchema: async () => ({}),
       updateYamlSchemas: () => {},
       updateTomlSchemas: () => {},

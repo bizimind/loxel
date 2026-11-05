@@ -831,12 +831,13 @@ function teardownProject(cwd: string): void {
   log.info(`Project torn down: ${cwd}`);
 }
 
-// --- Idle auto-shutdown ---
+// --- Idle cleanup and auto-shutdown ---
 
 const IDLE_SHUTDOWN_MS = 30_000;
-/** Grace period for orphaned terminals to be reattached before cleanup + shutdown. */
+/** Grace period for orphaned terminals to be reattached before they are destroyed. */
 const ORPHAN_CLEANUP_MS = 5 * 60_000;
-let idleShutdownTimer: ReturnType<typeof setTimeout> | null = null;
+/** Runs while no app client is connected; a connecting client cancels it. */
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let shuttingDown = false;
 
 // --- Stable infrastructure ---
@@ -1151,7 +1152,6 @@ const routeContext: RouteContext = {
   resolveFilePath,
   initializeProject,
   teardownProject,
-  shutdown,
   resolveSchema: (url, baseDir) => schemaService.resolve(url, baseDir),
   updateYamlSchemas: (schemaMap) => yamlLspManager.updateSchemas(schemaMap),
   updateTomlSchemas: (schemaMap) => tomlLspManager.updateSchemas(schemaMap),
@@ -1250,10 +1250,10 @@ const server = Bun.serve<WsData>({
         ws.close(1001, "Server shutting down");
         return;
       }
-      if (idleShutdownTimer) {
-        clearTimeout(idleShutdownTimer);
-        idleShutdownTimer = null;
-        log.info("Idle shutdown cancelled — client connected");
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+        log.info("Idle timer cancelled — client connected");
       }
       clients.set(ws, { terminals: new Set(), subscribedWorktrees: new Set() });
       sendTo(ws, { type: "notifications_sync", data: notificationStore.getAll() });
@@ -1277,29 +1277,7 @@ const server = Bun.serve<WsData>({
       if (lastFocusedClient === ws) lastFocusedClient = null;
       log.debug(`Client disconnected (${clients.size} remaining)`);
 
-      if (clients.size === 0 && !idleShutdownTimer && !shuttingDown) {
-        const hasOrphans = terminalManager.hasOrphanSessions();
-        if (hasOrphans) {
-          // Orphaned sessions exist — give clients time to reconnect (e.g. after hibernation wake)
-          // before destroying them and shutting down
-          log.info(
-            `No clients remaining, orphaned sessions waiting for reattach ` +
-              `(${ORPHAN_CLEANUP_MS / 1000}s timeout)`,
-          );
-          idleShutdownTimer = setTimeout(() => {
-            const destroyed = terminalManager.destroyOrphans();
-            if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
-            log.info("Idle timeout reached, shutting down");
-            shutdown();
-          }, ORPHAN_CLEANUP_MS);
-        } else {
-          log.info(`No clients remaining, shutting down in ${IDLE_SHUTDOWN_MS / 1000}s`);
-          idleShutdownTimer = setTimeout(() => {
-            log.info("Idle timeout reached, shutting down");
-            shutdown();
-          }, IDLE_SHUTDOWN_MS);
-        }
-      }
+      if (clients.size === 0 && !idleTimer && !shuttingDown) startIdleTimer();
     },
 
     message(ws, message) {
@@ -1354,12 +1332,43 @@ const perfMonitor = createServerPerfMonitor();
 
 const SHUTDOWN_LSP_WAIT_MS = SERVER_STOP_GRACE_MS + 1000;
 
+/**
+ * The last app client disconnected. Orphaned sessions get time to be reattached (a window
+ * reloading, or waking from sleep) before they are destroyed. A server the desktop app started
+ * stays up until the app quits; a standalone one shuts down.
+ */
+function startIdleTimer(): void {
+  const ownedByApp = config.parentPid !== null;
+  const hasOrphans = terminalManager.hasOrphanSessions();
+  if (hasOrphans) {
+    log.info(
+      `No clients remaining, orphaned sessions waiting for reattach ` +
+        `(${ORPHAN_CLEANUP_MS / 1000}s timeout)`,
+    );
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      const destroyed = terminalManager.destroyOrphans();
+      if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
+      if (ownedByApp) return;
+      log.info("Idle timeout reached, shutting down");
+      shutdown();
+    }, ORPHAN_CLEANUP_MS);
+    return;
+  }
+  if (ownedByApp) return;
+  log.info(`No clients remaining, shutting down in ${IDLE_SHUTDOWN_MS / 1000}s`);
+  idleTimer = setTimeout(() => {
+    log.info("Idle timeout reached, shutting down");
+    shutdown();
+  }, IDLE_SHUTDOWN_MS);
+}
+
 function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
-  if (idleShutdownTimer) {
-    clearTimeout(idleShutdownTimer);
-    idleShutdownTimer = null;
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
   }
   log.info("Server shutting down");
 
@@ -1393,6 +1402,30 @@ function shutdown(exitCode = 0) {
 process.on("SIGINT", () => shutdown());
 process.on("SIGTERM", () => shutdown());
 
+// --- Exit with the desktop app ---
+// The app stops its server when it quits. This covers an app that crashed or was killed.
+
+const PARENT_CHECK_MS = 2000;
+
+/** Whether the process still exists. EPERM means it does, under another user. */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return !(err instanceof Error && "code" in err && err.code === "ESRCH");
+  }
+}
+
+if (config.parentPid !== null) {
+  const parentPid = config.parentPid;
+  setInterval(() => {
+    if (isProcessAlive(parentPid)) return;
+    log.info("The desktop app that started this server is gone, shutting down");
+    shutdown();
+  }, PARENT_CHECK_MS).unref();
+}
+
 process.on("uncaughtException", (err) => {
   log.error("Uncaught exception, shutting down", { error: err });
   shutdown(1);
@@ -1404,11 +1437,3 @@ process.on("unhandledRejection", (reason) => {
     message: reason instanceof Error ? undefined : String(reason),
   });
 });
-
-// --- Background update check (production only) ---
-
-if (!config.isDev) {
-  const { cleanupStaleUpdates, runAutomaticUpdateCheck } = await import("./update");
-  cleanupStaleUpdates();
-  setTimeout(() => runAutomaticUpdateCheck(broadcastAll), 5_000);
-}
