@@ -1,0 +1,4 @@
+# Cloudflare Pages response headers. Files under /_astro/ have content hashes in their names, so a
+# changed file gets a new URL and browsers can cache these forever.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
