@@ -285,7 +285,8 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [lint, test, build, typecheck]
+    # discover must be listed: when it fails every check is skipped, which would otherwise pass.
+    needs: [discover, lint, test, build, typecheck]
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     steps:
       - name: Verify CI results
