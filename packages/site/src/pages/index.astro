@@ -10,9 +10,27 @@ import { softwareNodes } from "../lib/structured-data";
 
 const manifest = await fetchManifest();
 const { version, downloads: binaries } = manifest;
-// Same options as the hero <Image>, so this reuses its optimized file.
-const heroImage = await getImage({ src: appScreenshot });
-const structuredData = softwareNodes(manifest, new URL(heroImage.src, Astro.site).href);
+// The screenshot at full size, in the format the hero uses: the hero's largest srcset candidate
+// below, and the structured-data screenshot. The hero takes its width from here because reading
+// `appScreenshot.width` directly makes the build also publish the 2.2 MB original PNG.
+const fullScreenshot = await getImage({ src: appScreenshot });
+const structuredData = softwareNodes(manifest, new URL(fullScreenshot.src, Astro.site).href);
+const fullWidth = fullScreenshot.options.width;
+if (fullWidth === undefined) throw new Error("getImage() returned no width for the hero screenshot");
+
+// One srcset for all three hero copies below. Their `sizes` must match so the browser picks the
+// same file for the copies hidden at the current breakpoint, which still load (they're eager), and
+// downloads it once. The widths follow the hero markup: 200vw for the mobile crops, then the
+// desktop image at 100vw minus the section padding (sm:px-6) and its margins (sm:mx-8, lg:mx-16,
+// xl:mx-24).
+const heroImageProps = {
+  src: appScreenshot,
+  alt: "Loxel IDE screenshot",
+  priority: true,
+  widths: [640, 960, 1280, 1600, 1920, 2400, 3200, fullWidth],
+  sizes:
+    "(min-width: 1280px) calc(100vw - 15rem), (min-width: 1024px) calc(100vw - 11rem), (min-width: 640px) calc(100vw - 7rem), 200vw",
+};
 
 const features = [
   {
@@ -105,15 +123,15 @@ const features = [
 
     <!-- Hero screenshot: desktop single wide image -->
     <div class="relative mt-16 mx-4 sm:mx-8 lg:mx-16 xl:mx-24 hidden sm:block">
-      <Image src={appScreenshot} alt="Loxel IDE screenshot" priority class="w-full h-auto block" />
+      <Image {...heroImageProps} class="w-full h-auto block" />
     </div>
 
     <!-- Hero screenshot: mobile two overlapping crops -->
     <div class="mt-12 sm:hidden overflow-hidden -mx-4">
       <!-- Top image: pushed left so right 55% is visible -->
-      <Image src={appScreenshot} alt="Loxel IDE screenshot" priority class="block mr-[-100vw] min-w-[200vw]" />
+      <Image {...heroImageProps} class="block mr-[-100vw] min-w-[200vw]" />
       <!-- Bottom image: pushed right so left 55% is visible, overlapping top -->
-      <Image src={appScreenshot} alt="Loxel IDE screenshot" priority class="block ml-[-100vw] min-w-[200vw] mt-[-50vw]" />
+      <Image {...heroImageProps} class="block ml-[-100vw] min-w-[200vw] mt-[-50vw]" />
     </div>
   </section>
 
