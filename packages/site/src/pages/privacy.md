@@ -1,120 +1,98 @@
 ---
 layout: ../layouts/Page.astro
 title: Privacy policy
-description: What the Loxel app and this website collect and why, who receives it, and your rights.
+description: What the Loxel app and the bizimind.io website collect and why, who receives it, and your rights.
 ---
 
-_Effective October 30, 2026_
+_Effective November 6, 2026_
 
-The privacy of your data, and it is your data, not ours, is a big deal to us. This policy lays out what data we collect and why, how it is handled, and your rights. The Loxel app and this website work differently, so they are covered separately.
+This policy covers the Loxel desktop app and the bizimind.io website: what data is involved and why, how it is handled, and your rights.
 
 ## The short version
 
-For the Loxel app:
+For the Loxel app, we promise:
 
-- **Loxel never collects data about you without your consent.** We receive nothing from the app: it has no analytics, telemetry or crash reporting of its own, and your code and files stay on your machine unless you use a feature that sends them somewhere. One exception needs calling out: [a bundled Docker tool](#docker-language-server) sends data to Docker when you open a Dockerfile.
-- **Loxel does not require an account, subscription or login.**
-- **We do not train on or sell your data**, to AI labs or to any third party.
-- **If any of this ever changes, Loxel will show you the change clearly and ask you to confirm it first.**
+- **No data collected without your consent.**
+- **No selling your data, and no training on it.**
+- **No silent changes.** Any change to these promises will be shown clearly in Loxel and will require your confirmation.
 
-**This website is different.** It counts visits with PostHog analytics without asking first. That analytics uses no cookies, does not try to recognize you from one day to the next, and stays off if your browser sends Do Not Track or Global Privacy Control. [The details are below.](#this-website)
-
-## Who we are
-
-Loxel is made by Bizimind ("we"). Bizimind is the data controller for the website data described here and for requests to our update server. Contact us at [ori.100000@gmail.com](mailto:ori.100000@gmail.com). We have not appointed a data protection officer.
-
-Loxel is a desktop app that runs on your computer, so what it holds stays with you and we never receive it. The only thing that reaches us from the app is the update check described below. This policy does not cover other websites, or the services you connect Loxel to yourself.
+**On the bizimind.io website**, we use cookieless analytics to understand how the site is used. It stores nothing in your browser, isn't linked to your name or an account, doesn't follow you across days or other sites, and doesn't load if your browser sends Do Not Track or Global Privacy Control. We don't sell this data or share it with advertisers, and it's processed only by our hosting and analytics providers. [The details are below.](#the-bizimindio-website)
 
 ## The Loxel app
 
 ### What stays on your machine
 
-Your projects, settings, agent sessions and logs are stored locally. App logs are kept in `~/.local/state/loxel/loxel/logs` and are not uploaded. API keys you add for the coding agent are stored encrypted on your computer.
+Loxel runs on your computer. You don't need an account to use it, so we hold no profile of you. It doesn't track how you use it. Your code, files, projects, settings and logs are stored locally and stay on your machine unless you choose to send them somewhere.
 
-### Requests Loxel makes on its own
+### When Loxel connects to the internet
 
-Loxel makes two kinds of automatic requests. Neither sends your code, your file contents or how you use the app. Like any web request, they reveal your IP address and basic client details to the server that answers.
+Like most desktop software, Loxel uses the network for a few routine things, such as checking for updates and downloading public resources that editor features need. These requests don't include your code, your file contents or how you use the app. Like any web request, they reveal your IP address and basic client details to the server that answers. You can turn off much of this in Settings. Update checks keep Loxel current and secure, which is their only purpose and our legitimate interest under the GDPR. Our separate command-line tools contact the same update service only to check for or install updates.
 
-- **Update check.** By default, shortly after launch, Loxel asks `loxel.bizimind.io`, which is served by Cloudflare, for the latest version number. Updates are downloaded and installed only when you choose to in Settings > General. We rely on our legitimate interest in keeping the app up to date and secure, and we do not use these requests to track you. Cloudflare handles them as described under [Request data](#what-we-collect-and-why).
-- **Schemas.** To check configuration files such as `package.json` and `tsconfig.json`, Loxel downloads public schemas from `json.schemastore.org`, and from any schema address named in a file you open, so that address's server sees the request. You can turn off each built-in schema in Settings > Schemas, though the TOML tool may still fetch SchemaStore's catalog when it starts. Bundled language tools can also fetch metadata that a project refers to.
+### Services and tools you choose to use
 
-### Docker language server
+Some things you do in Loxel connect to other services directly from your computer, such as browsing the web, using Git remotes, running commands in a terminal, or opening content that loads resources from the web. Loxel can also run developer tools you have installed, and those tools may contact their own services. In a repository you choose to trust, Loxel also runs that repository's own build scripts, hooks and plugins, which do whatever their code does. Those connections don't go through us, and those services' own terms apply.
 
-Loxel bundles Docker's language server to support Dockerfiles. It starts when you first open a Dockerfile, `Containerfile` or Docker Bake file, and it currently contacts these services without asking. Loxel doesn't yet turn this off, and we don't receive any of this data.
+**Loxel itself doesn't send your code to any AI provider.** AI coding agents you run in Loxel are separate programs that Loxel does not control, and their providers' terms apply.
 
-- **Docker telemetry** (`api.docker.com`): the editor's name and version, crash details, hashes of the Git remote and path of files you change, and the file's language.
-- **Docker Scout** (`api.scout.docker.com`): the images named in your Dockerfile's `FROM` lines, to look up vulnerabilities.
-- **BugSnag** (`sessions.bugsnag.com`), Docker's error reporting service: session and crash information.
+### Third-party components
 
-Docker's [privacy policy](https://www.docker.com/legal/docker-privacy-policy/) applies. To avoid this, don't open those files in Loxel.
+Loxel bundles language tools and other components made by third parties, and some of them need the network to do their job, for example to download metadata that your files or settings refer to. We review these components before we ship them and configure them to keep to this policy. They are developed independently and change over time, so we can't guarantee how every version behaves in every situation.
 
-### Things that send data when you use them
+If you find a bundled component collecting or sending data in a way this policy doesn't describe, please [tell us](#changes-and-questions). We treat that as a bug, or as a security issue where it warrants, and we work to fix it promptly.
 
-- **The built-in coding agent** needs an [OpenRouter](https://openrouter.ai/) API key, from Settings > Models or the `OPENROUTER_API_KEY` environment variable. When you run it, your prompts, the code and files it reads, and the results of its tools go to OpenRouter and the model provider you chose, using your key. Its web tools also contact the sites and search services they use. We don't receive any of this. Those companies' terms apply, including whether a provider may train on your data, so check your [OpenRouter privacy settings](https://openrouter.ai/docs/guides/privacy/data-collection) and the provider you pick.
-- **External coding agents** you run in Loxel's terminals, such as Claude Code or Codex, are separate programs. Loxel does not control what they send, and their providers' own terms apply.
-- **The built-in browser** works like any browser: sites you visit see your requests, tabs you left open can reload when they're restored, and searches typed in its address bar go to Google. Its cookies and site data stay on your computer.
-- **Web images** in Markdown files or agent output can load from wherever they're hosted, and that server sees the request.
-- **Terminals and Git** connect wherever your commands and remotes point.
-
-Our separate `wt` command-line tool has no telemetry either. It contacts `loxel.bizimind.io` only when you ask it to check for or install an update, or when you turn on its optional auto-update.
-
-## This website
+## The bizimind.io website
 
 ### What we collect and why
 
-Our guiding principle is to collect only what we need. All of this comes directly from your browser or from what you send us. We rely on our legitimate interests (GDPR Article 6(1)(f)) for all of it: understanding whether the site works, delivering it securely, and answering you.
+We collect only what we need. All of this comes directly from your browser. We rely on our legitimate interests (GDPR Article 6(1)(f)): understanding whether the site works, and delivering our site and app securely.
 
-| Data                                                                                                                                                                                                                                                                                                                                                                                                                | Why                                                                               | Who receives it                                   | How long it is kept                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Analytics:** pages viewed and their titles and addresses (including any campaign or ad-click parameters in them), referring site, how long a page was open and how far it was scrolled, which download you chose, clicks on GitHub and docs navigation links, whether the download prompt came into view, browser name and version, operating system, device type, screen and window size, language and time zone | See which pages help people and whether the download path works                   | PostHog (EU cloud, Frankfurt), through Cloudflare | One year                                                                                                                                                           |
-| **Request data:** IP address, browser or client details, the address requested and the time                                                                                                                                                                                                                                                                                                                         | Serve the site, downloads and the app's update check, and protect them from abuse | Cloudflare (hosting and downloads)                | For as long as Cloudflare needs it to run and secure its network, under [its policy](https://www.cloudflare.com/privacypolicy/); we keep no server logs of our own |
-| **Email:** your address and whatever you write to us                                                                                                                                                                                                                                                                                                                                                                | Answer you and keep a history of the conversation                                 | Us and our email provider                         | As long as needed to handle your request, or until you ask us to delete it                                                                                         |
+| Data                                                                                                                                  | Why                                                             | Who receives it                                   | How long it is kept                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Analytics:** the page and device details described below                                                                            | See which pages help people and whether the download path works | PostHog (EU cloud, Frankfurt), through Cloudflare | One year                                                                                                                        |
+| **Request data** for the site, downloads and update checks: IP address, browser or client details, the address requested and the time | Serve them and protect them from abuse                          | Cloudflare                                        | For as long as Cloudflare needs it to run and secure its network, under [its policy](https://www.cloudflare.com/privacypolicy/) |
 
-You don't have to provide any of this. There is no account, form or contract, and the site works with analytics blocked. We don't make automated decisions about you or build profiles.
+You aren't required to provide any of this, and the site works with analytics blocked. We don't make automated decisions about you or build profiles.
 
 ### How the analytics works
 
-The site stores no cookies or other data in your browser. Analytics requests reach PostHog through this site's own address (`/ingest`), which passes along your IP address and browser details. PostHog combines them with a random value that changes daily to produce a visitor hash, so a visit can be followed across pages within one day but not across days. According to [PostHog's documentation](https://posthog.com/docs/privacy/cookieless-tracking), your IP address and full browser user-agent string are then removed. They aren't stored with events, and your IP address isn't used to work out your location. We keep the browser name and version, operating system and device type. We don't record sessions, link visits to a name or account, or use advertising networks.
+We record which pages are viewed, how visitors arrive and how far they read, which links and downloads they choose, and general browser, device, language and time zone details. Addresses can include campaign or ad-click parameters.
 
-**You have the right to object to this analytics at any time.** We honor Do Not Track and Global Privacy Control: if your browser sends either, the analytics script isn't loaded and nothing is sent. You can also block JavaScript or requests to `/ingest` on this site, or email us.
+The site stores no cookies or other data in your browser. Requests reach PostHog through the website's own address, which passes along your IP address and browser details. PostHog combines them with a random value that changes daily to produce a visitor hash, so a visit can be followed across pages within one day but not across days. As [PostHog describes](https://posthog.com/docs/privacy/cookieless-tracking), your IP address and full browser user-agent string are then removed. They aren't stored with events, and your IP address isn't used to work out your location. We don't record sessions, link visits to a name or account, or use advertising networks.
 
-## When we access or disclose your information
+**You have the right to object to this analytics at any time.** We honor Do Not Track and Global Privacy Control: if your browser sends either, the analytics script isn't loaded and nothing is sent. You can also block JavaScript or requests to `/ingest` on the website, or email us.
 
-We never sell your personal information or use it to train AI models. We share website data only with the providers named above, who handle it to provide their services. We disclose information to authorities only when the law requires it. If Bizimind is acquired or merges with another company, we'll say so on this page before your information becomes subject to a different policy.
+## If you contact us
 
-## Location of site and data
+If you email us, we use your address and message only to reply to you, and keep them only as long as needed to handle your request, or until you ask us to delete them. They're handled by us and our email provider.
 
-PostHog stores analytics in the EU. Cloudflare runs a global network, so your requests may be handled outside your country, including in the United States, and we may read email from outside the EU. Where data leaves the EEA or UK, it is protected by Standard Contractual Clauses or an adequacy decision such as the EU-U.S. Data Privacy Framework. Email us for a copy of the safeguards that apply.
+## Sharing and location of data
 
-## Your rights with respect to your information
+We don't sell your personal information or use it to train AI models. We share it only with the providers named above, who handle it to provide their services, and with authorities when the law requires it. If Bizimind is acquired or merges with another company, we'll say so in this policy before your information becomes subject to a different policy.
 
-We apply the same rights to everyone, regardless of where you live:
+PostHog stores analytics in the EU. Cloudflare runs a global network, so your requests may be handled outside your country, including in the United States, and email may also be handled outside the EU. Where data leaves the EEA or UK, transfers rely on safeguards such as Standard Contractual Clauses or an adequacy decision such as the EU-U.S. Data Privacy Framework. Email us for details of the safeguards that apply.
 
-- **Access** the personal information we hold about you.
-- **Correct** information that is wrong.
-- **Erase** your information.
-- **Restrict** how we use it.
-- **Object** to our use of it, including analytics.
-- **Port** it, by receiving a copy to give to someone else.
-- **Withdraw consent** whenever we have relied on it.
-- **Complain** to your data protection authority.
+## Your rights
 
-Email [ori.100000@gmail.com](mailto:ori.100000@gmail.com) to use these rights. It's free, and we will reply within one month. Because analytics isn't tied to your name and the daily hash can't be recalculated later, we usually can't find a particular person's analytics events. If so, we'll tell you. Data in the Loxel app is on your computer, so you control and can delete it directly.
+We apply the same rights to everyone, regardless of where you live. You can ask to access, correct, erase or receive a copy of the personal information we hold about you, restrict or object to how we use it, and withdraw consent whenever we have relied on it. You can also complain to your data protection authority.
+
+Email [privacy@bizimind.io](mailto:privacy@bizimind.io) to use these rights. It's free, and we reply within the time the law requires, normally one month. Because analytics isn't tied to your name and the daily hash can't be recalculated later, we usually can't find a particular person's analytics events. If so, we'll tell you. Data in the Loxel app is on your computer, so you control it directly.
 
 ## Children
 
-Loxel and this website are made for software developers and aren't directed at children under 16. We don't knowingly collect their data. If you believe a child has emailed us personal information, contact us and we will delete it.
+Loxel and the bizimind.io website are made for software developers and aren't directed at children under 16. We don't knowingly collect their data. If you believe a child has emailed us personal information, contact us and we will delete it.
 
-## How we secure your data
+## Security
 
-This site and our downloads are served over HTTPS, and app updates are checked against a published checksum before they are installed. Because Loxel runs locally, your code isn't held on our servers, and securing your computer protects it. No system is perfectly secure. To report a vulnerability, see our [security policy](https://github.com/bizimind/loxel/blob/main/SECURITY.md).
+The bizimind.io website and our downloads are served over HTTPS, and app updates are verified before they are installed. Your code isn't held on our servers. No system is perfectly secure. To report a vulnerability, see our [security policy](https://github.com/bizimind/loxel/blob/main/SECURITY.md).
+
+## Who we are
+
+Loxel is made by Bizimind ("we"). We decide how the personal data described in this policy is used, which makes us its "data controller" under privacy laws such as the GDPR.
 
 ## Changes and questions
 
-If we change anything in the Loxel app section of "The short version", the app will show you the change clearly and require your confirmation before it applies to you. For other changes, we'll update this page and its effective date. You can see every past version [on GitHub](https://github.com/bizimind/loxel/commits/main/packages/site/src/pages/privacy.md).
+If we change any of the promises in "The short version", Loxel will show you the change clearly and require your confirmation before it applies to you. For other changes, we'll update this policy and its effective date. You can see every past version [on GitHub](https://github.com/bizimind/loxel/commits/main/packages/site/src/pages/privacy.md).
 
-Any questions about this policy, your data or your rights? Email [ori.100000@gmail.com](mailto:ori.100000@gmail.com).
+This policy describes how we handle personal data. It doesn't change Loxel's [license](https://github.com/bizimind/loxel/blob/main/LICENSE), including its warranty disclaimer, and it doesn't limit any rights you have under data protection law.
 
----
-
-<small>This policy is adapted from the [37signals (Basecamp) open-source privacy policy](https://github.com/basecamp/policies/tree/master/privacy), used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). We rewrote and shortened it to describe a local desktop app and this website. 37signals does not endorse this policy.</small>
+For questions about this policy, requests, or anything involving your personal data, email [privacy@bizimind.io](mailto:privacy@bizimind.io) rather than posting publicly. For general questions about how Loxel works, use [GitHub issues](https://github.com/bizimind/loxel/issues).
