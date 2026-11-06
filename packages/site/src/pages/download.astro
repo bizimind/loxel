@@ -1,6 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import DownloadButton from "../components/DownloadButton.tsx";
+import DownloadButton from "../components/DownloadButton.astro";
 import { trackClick } from "../lib/analytics";
 import { fetchManifest } from "../lib/manifest";
 
@@ -13,7 +13,7 @@ const { version, downloads: binaries } = await fetchManifest();
     <p class="text-muted-foreground mb-12">Free · macOS · Open Beta</p>
 
     <div class="bg-card border border-border rounded-xl p-10 mb-10">
-      <DownloadButton client:load version={version} binaries={binaries} location="download_page" />
+      <DownloadButton version={version} binaries={binaries} location="download_page" />
     </div>
 
     <div class="text-left space-y-8">

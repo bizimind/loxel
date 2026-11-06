@@ -1,25 +1,40 @@
 import { satteri } from "@astrojs/markdown-satteri";
 import mdx from "@astrojs/mdx";
-import react from "@astrojs/react";
 import sitemap from "@astrojs/sitemap";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, envField, fontProviders } from "astro/config";
 
 import { satteriKbd } from "./src/lib/satteri-kbd.ts";
 
+// Runs analytics on every page from Astro's page-script bundle, which also holds the prefetch
+// script, so each page loads one script instead of two.
+/** @type {import("astro").AstroIntegration} */
+const siteScript = {
+  name: "site-script",
+  hooks: {
+    "astro:config:setup": ({ injectScript }) => {
+      injectScript(
+        "page",
+        'import { initAnalytics } from "/src/lib/analytics.ts"; initAnalytics();',
+      );
+    },
+  },
+};
+
 export default defineConfig({
   site: "https://bizimind.io",
   output: "static",
   prefetch: true,
   trailingSlash: "never",
-  build: { format: "file" },
+  // Inlined: the stylesheet is small, and a <link> to it would block the first render.
+  build: { format: "file", inlineStylesheets: "always" },
   // Renamed pages keep their old URLs working; /docs has no page of its own.
   redirects: {
     "/docs": "/docs/getting-started",
     "/docs/typescript-intelligence": "/docs/language-intelligence",
     "/docs/coding-agent": "/docs/terminals#tui-agents",
   },
-  integrations: [react(), mdx(), sitemap()],
+  integrations: [mdx(), sitemap(), siteScript],
   // Self-hosted from the Fontsource packages (pinned by the lockfile, no fetch at build time), so
   // pages never contact a font CDN. Latin only: Latin Extended has no glyph the site uses (arrows
   // such as → are in neither and fall back to a system font), and one file per style keeps Inter's
