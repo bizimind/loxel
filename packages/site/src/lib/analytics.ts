@@ -57,13 +57,17 @@ export function initAnalytics(): void {
   const key = PUBLIC_POSTHOG_KEY;
   if (import.meta.env.DEV || !key || prefersNoTracking()) return;
 
-  // Starts loading right away (asynchronously, without blocking rendering): events captured
-  // before the SDK is ready are lost if the visitor leaves the page in the meantime.
-  const posthog = loadPostHog(key).catch(() => undefined);
+  // The SDK (~100 KB gzipped) loads once the page has finished loading, so it stays off the
+  // critical path; visits that end before then send no pageview. A custom event fired earlier
+  // starts the load at once: events captured before the SDK is ready are lost if the visitor
+  // leaves in the meantime.
+  let posthog: Promise<PostHog | undefined> | undefined;
+  const load = () => (posthog ??= loadPostHog(key).catch(() => undefined));
+  afterPageLoad(load);
   // Custom events are sent right away rather than batched: they often fire just before the visitor
   // leaves the page (a docs link, a scroll then a click), which drops events still in the queue.
   const capture: Capture = (event, props) => {
-    void posthog.then((client) =>
+    void load().then((client) =>
       client?.capture(event, props, { send_instantly: true, transport: "sendBeacon" }),
     );
   };
@@ -80,6 +84,13 @@ export function initAnalytics(): void {
 function prefersNoTracking(): boolean {
   const gpc = "globalPrivacyControl" in navigator && navigator.globalPrivacyControl === true;
   return navigator.doNotTrack === "1" || gpc;
+}
+
+type PostHog = Awaited<ReturnType<typeof loadPostHog>>;
+
+function afterPageLoad(callback: () => void): void {
+  if (document.readyState === "complete") callback();
+  else window.addEventListener("load", callback, { once: true });
 }
 
 async function loadPostHog(key: string) {

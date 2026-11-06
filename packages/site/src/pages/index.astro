@@ -2,7 +2,7 @@
 import { Image, getImage } from "astro:assets";
 import appScreenshot from "../../public/screenshots/app-screenshot.png";
 import Base from "../layouts/Base.astro";
-import DownloadButton from "../components/DownloadButton.tsx";
+import DownloadButton from "../components/DownloadButton.astro";
 import { trackClick, trackView } from "../lib/analytics";
 import { fetchManifest } from "../lib/manifest";
 import { GITHUB_REPO_URL, SITE_DESCRIPTION } from "../lib/site";
@@ -67,7 +67,7 @@ const features = [
 
       <!-- Desktop: download buttons -->
       <div class="hidden sm:flex flex-row items-start justify-center gap-4">
-        <DownloadButton client:load version={version} binaries={binaries} location="hero" />
+        <DownloadButton version={version} binaries={binaries} location="hero" />
         <a
           href={GITHUB_REPO_URL}
           target="_blank"
@@ -204,7 +204,7 @@ const features = [
       <p class="text-muted-foreground mb-8 text-balance">
         Free download. No account required. Runs entirely on your machine.
       </p>
-      <DownloadButton client:load version={version} binaries={binaries} location="bottom_cta" />
+      <DownloadButton version={version} binaries={binaries} location="bottom_cta" />
     </div>
   </section>
 </Base>
