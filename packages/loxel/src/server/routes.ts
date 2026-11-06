@@ -163,6 +163,8 @@ export interface RouteContext {
   resolveFilePath: (absolutePath: string, preferredWtPath?: string) => ResolvedFilePath | null;
   initializeProject: (repoPath: string) => Promise<{ project: ProjectState; worktrees: unknown[] }>;
   teardownProject: (cwd: string) => void;
+  /** The server is shutting down: it still answers API requests while they drain, then exits. */
+  isShuttingDown: () => boolean;
   /** Resolve a schema URL or file path (with caching). */
   resolveSchema: (urlOrPath: string, baseDir?: string) => Promise<unknown>;
   /** Update YAML LSP schema mappings (schema URL → globs) on all active sessions. */
@@ -2706,12 +2708,14 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
 // ---------------------------------------------------------------------------
 
 // GET /api/version
-function handleGetVersion(): Response {
-  // appOwned: started by the desktop app, so it exits with that app (see SHARED_SERVER.md).
+function handleGetVersion(_req: Request, ctx: RouteContext): Response {
+  // appOwned: started by the desktop app, so it exits with that app. shuttingDown: about to exit,
+  // so clients wait for its replacement instead of using it (see SHARED_SERVER.md).
   return json({
     version: getCurrentVersion(),
     isDev: config.isDev,
     appOwned: config.parentPid !== null,
+    shuttingDown: ctx.isShuttingDown(),
   });
 }
 

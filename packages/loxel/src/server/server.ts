@@ -1152,6 +1152,7 @@ const routeContext: RouteContext = {
   resolveFilePath,
   initializeProject,
   teardownProject,
+  isShuttingDown: () => shuttingDown,
   resolveSchema: (url, baseDir) => schemaService.resolve(url, baseDir),
   updateYamlSchemas: (schemaMap) => yamlLspManager.updateSchemas(schemaMap),
   updateTomlSchemas: (schemaMap) => tomlLspManager.updateSchemas(schemaMap),
@@ -1217,6 +1218,9 @@ const server = Bun.serve<WsData>({
       return undefined;
     }
 
+    // The relaunching app and the CLI poll /api/version while this server shuts down; counting
+    // those polls as work to drain would keep the drain's quiet period from ever starting.
+    if (url.pathname === "/api/version") return handleRequest(req, routeContext);
     if (url.pathname.startsWith("/api")) {
       return trackApiRequest(() => handleRequest(req, routeContext));
     }
@@ -1390,7 +1394,11 @@ async function drainApiRequests(): Promise<void> {
     if (apiRequestsInFlight === 0 && Date.now() - quietSince >= DRAIN_QUIET_MS) return;
     await Bun.sleep(50);
   }
-  log.warn(`Shutting down with ${apiRequestsInFlight} API request(s) still in flight`);
+  if (apiRequestsInFlight > 0) {
+    log.warn(`Shutting down with ${apiRequestsInFlight} API request(s) still in flight`);
+  } else {
+    log.info(`API requests kept arriving for ${DRAIN_MAX_MS / 1000}s, shutting down`);
+  }
 }
 
 /**

@@ -79,18 +79,24 @@ function openInBrowserTab(url: string): void {
   BrowserWindow.getFocusedWindow()?.webContents.send(OPEN_IN_BROWSER_TAB, url);
 }
 
-const VersionSchema = z.object({ appOwned: z.boolean().optional() });
+const VersionSchema = z.object({
+  appOwned: z.boolean().optional(),
+  shuttingDown: z.boolean().optional(),
+});
 
 /**
  * The Loxel server answering on the well-known port, or null when none does. `appOwned`: a desktop
- * app started it, so it goes away with that app.
+ * app started it, so it goes away with that app. `shuttingDown`: it is about to exit.
  */
-async function probeServer(): Promise<{ appOwned: boolean } | null> {
+async function probeServer(): Promise<{ appOwned: boolean; shuttingDown: boolean } | null> {
   try {
     const res = await fetch(`${SERVER_URL}/api/version`, { signal: AbortSignal.timeout(1000) });
     if (!res.ok) return null;
     const parsed = VersionSchema.safeParse(await res.json());
-    return { appOwned: parsed.success && parsed.data.appOwned === true };
+    return {
+      appOwned: parsed.success && parsed.data.appOwned === true,
+      shuttingDown: parsed.success && parsed.data.shuttingDown === true,
+    };
   } catch {
     return null;
   }
@@ -588,7 +594,7 @@ let serverStarting: Promise<void> | null = null;
 function startAppServer(): Promise<void> {
   serverStarting ??= (async () => {
     const running = await probeServer();
-    if (running && !running.appOwned) {
+    if (running && !running.appOwned && !running.shuttingDown) {
       if (IS_DEV) {
         console.log(`[electron] Using the dev server already running on port ${SERVER_PORT}`);
         return;

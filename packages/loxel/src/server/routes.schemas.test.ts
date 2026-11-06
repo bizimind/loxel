@@ -23,6 +23,7 @@ describe("POST /api/schemas/sync", () => {
       resolveFilePath: () => null,
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},
+      isShuttingDown: () => false,
       resolveSchema: async (url) => {
         resolved.push(url);
         return { url };
