@@ -1,5 +1,6 @@
 ---
-import { Image, getImage } from "astro:assets";
+import { Picture, getImage } from "astro:assets";
+import type { ComponentProps } from "astro/types";
 import appScreenshot from "../../public/screenshots/app-screenshot.png";
 import Base from "../layouts/Base.astro";
 import DownloadButton from "../components/DownloadButton.tsx";
@@ -23,8 +24,13 @@ if (fullWidth === undefined) throw new Error("getImage() returned no width for t
 // downloads it once. The widths follow the hero markup: 200vw for the mobile crops, then the
 // desktop image at 100vw minus the section padding (sm:px-6) and its margins (sm:mx-8, lg:mx-16,
 // xl:mx-24).
-const heroImageProps = {
+const heroImageProps: ComponentProps<typeof Picture> = {
   src: appScreenshot,
+  // AVIF is about half the size of WebP; browsers without it take the WebP <img>.
+  formats: ["avif"],
+  fallbackFormat: "webp",
+  // <picture> is inline; `contents` keeps the <img> laid out as if it had no wrapper.
+  pictureAttributes: { class: "contents" },
   alt: "Loxel IDE screenshot",
   priority: true,
   widths: [640, 960, 1280, 1600, 1920, 2400, 3200, fullWidth],
@@ -123,15 +129,15 @@ const features = [
 
     <!-- Hero screenshot: desktop single wide image -->
     <div class="relative mt-16 mx-4 sm:mx-8 lg:mx-16 xl:mx-24 hidden sm:block">
-      <Image {...heroImageProps} class="w-full h-auto block" />
+      <Picture {...heroImageProps} class="w-full h-auto block" />
     </div>
 
     <!-- Hero screenshot: mobile two overlapping crops -->
     <div class="mt-12 sm:hidden overflow-hidden -mx-4">
       <!-- Top image: pushed left so right 55% is visible -->
-      <Image {...heroImageProps} class="block mr-[-100vw] min-w-[200vw]" />
+      <Picture {...heroImageProps} class="block mr-[-100vw] min-w-[200vw]" />
       <!-- Bottom image: pushed right so left 55% is visible, overlapping top -->
-      <Image {...heroImageProps} class="block ml-[-100vw] min-w-[200vw] mt-[-50vw]" />
+      <Picture {...heroImageProps} class="block ml-[-100vw] min-w-[200vw] mt-[-50vw]" />
     </div>
   </section>
 
