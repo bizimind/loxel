@@ -27,19 +27,14 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      # Change detection needs every commit and tree (ancestry check and tree diff against the
-      # last green run), but only the checked-out commit's file contents, so skip historic blobs.
+      # Not a blobless clone (filter: blob:none): the fetch shrinks, but checkout then lazily
+      # fetches every file of HEAD in a second request, which took 29s on its own when tried.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          filter: blob:none
       - name: Find affected packages
         id: find
         shell: bash
-        # Everything this step reads is local; a BASE_SHA missing from the clone fails fast (and
-        # runs all packages, like a full clone) instead of lazily fetching its history.
-        env:
-          GIT_NO_LAZY_FETCH: "1"
         run: |
           # Determine which packages need to run based on changes since last successful CI
           echo "::group::Change detection"
@@ -70,7 +65,7 @@ jobs:
           else
             echo "Comparing against last successful run: $BASE_SHA"
             # --no-renames lists both sides of a rename, so moving a file out of a package marks
-            # that package too, and the diff never has to lazily fetch blobs to detect renames.
+            # that package too (with renames on, --name-only lists only the new path).
             CHANGED_FILES=$(git diff --name-only --no-renames "$BASE_SHA" HEAD)
             echo "Changed files:"
             echo "$CHANGED_FILES"
