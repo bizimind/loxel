@@ -1,5 +1,6 @@
 ---
 import { trackClick } from "../lib/analytics";
+import { GITHUB_REPO_URL } from "../lib/site";
 
 const year = new Date().getFullYear();
 ---
@@ -16,7 +17,7 @@ const year = new Date().getFullYear();
     <nav class="flex items-center gap-5 text-sm text-muted-foreground">
       <a href="/docs/getting-started" class="hover:text-foreground transition-colors">Docs</a>
       <a
-        href="https://github.com/bizimind/loxel"
+        href={GITHUB_REPO_URL}
         target="_blank"
         rel="noopener noreferrer"
         {...trackClick("github_link_clicked", { location: "footer" })}
