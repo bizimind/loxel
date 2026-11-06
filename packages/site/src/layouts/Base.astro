@@ -1,5 +1,6 @@
 ---
-import { Font } from "astro:assets";
+import { Font, getImage } from "astro:assets";
+import socialBannerSource from "../assets/social-banner.png";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
 import { SITE_NAME, THEME_COLOR, pagePath } from "../lib/site";
@@ -28,7 +29,16 @@ const pageTitle =
   title === SITE_NAME ? "Loxel — IDE for the agentic coding era" : `${title} — ${SITE_NAME}`;
 // Every deployment (including *.pages.dev) points search engines at the production URL.
 const canonicalUrl = new URL(pagePath(Astro.url), Astro.site).href;
-const socialImage = new URL("/social-banner.png", Astro.site).href;
+// Link previews show it at 1200x630. JPEG, since a palette PNG bands the dark gradient and a
+// full-color PNG is four times the size.
+const SOCIAL_IMAGE_SIZE = { width: 1200, height: 630 };
+const socialBanner = await getImage({
+  src: socialBannerSource,
+  ...SOCIAL_IMAGE_SIZE,
+  format: "jpeg",
+  quality: 90,
+});
+const socialImage = new URL(socialBanner.src, Astro.site).href;
 const socialImageAlt = "Loxel, the IDE for the agentic coding era";
 ---
 
@@ -48,9 +58,9 @@ const socialImageAlt = "Loxel, the IDE for the agentic coding era";
     <meta property="og:site_name" content={SITE_NAME} />
     <meta property="og:locale" content="en_US" />
     <meta property="og:image" content={socialImage} />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content={String(SOCIAL_IMAGE_SIZE.width)} />
+    <meta property="og:image:height" content={String(SOCIAL_IMAGE_SIZE.height)} />
+    <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:alt" content={socialImageAlt} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={pageTitle} />
