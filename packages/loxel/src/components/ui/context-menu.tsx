@@ -20,7 +20,7 @@ function ContextMenu({ children, open, onOpenChange, position }: ContextMenuProp
 
   // A click inside a <webview> (a browser panel's page) is handled by the page's own document, so
   // Base UI never sees the outside press. Close when the page takes focus instead: the main process
-  // reports it, and as a fallback (older preloads) this window blurs with the webview left as the
+  // reports it, and as a fallback this window blurs with the webview left as the
   // active element a tick later. The IPC also covers clicking into a page from another app, when
   // this window has no focus left to lose.
   const close = React.useEffectEvent(() => onOpenChange(false));
@@ -34,7 +34,7 @@ function ContextMenu({ children, open, onOpenChange, position }: ContextMenuProp
       clearTimeout(timer);
       timer = setTimeout(closeIfWebviewFocused, 0);
     };
-    const offWebviewFocused = window.electronAPI?.onWebviewFocused?.(close);
+    const offWebviewFocused = window.electronAPI?.onWebviewFocused(close);
     window.addEventListener("blur", onWindowBlur);
     return () => {
       offWebviewFocused?.();

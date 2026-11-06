@@ -101,7 +101,7 @@ describe("Others folders routes", () => {
       },
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},
-      shutdown: () => {},
+      isShuttingDown: () => false,
       resolveSchema: async () => ({}),
       updateYamlSchemas: () => {},
       updateTomlSchemas: () => {},

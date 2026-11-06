@@ -1,4 +1,4 @@
-import { accessSync, chmodSync, constants, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
@@ -95,7 +95,6 @@ import { measureSpawn } from "./spawn-metrics";
 import * as storeDb from "./store-db";
 import { stress } from "./stress-detector";
 import { toolchainStatusModules } from "./toolchain-statuses";
-import { checkForUpdate, downloadUpdate, getUpdateStatus, prepareInstall } from "./update";
 import { getCurrentVersion } from "./version";
 import {
   addFirstWorktreeOfNewRepo,
@@ -164,7 +163,8 @@ export interface RouteContext {
   resolveFilePath: (absolutePath: string, preferredWtPath?: string) => ResolvedFilePath | null;
   initializeProject: (repoPath: string) => Promise<{ project: ProjectState; worktrees: unknown[] }>;
   teardownProject: (cwd: string) => void;
-  shutdown: (exitCode?: number) => void;
+  /** The server is shutting down: it still answers API requests while they drain, then exits. */
+  isShuttingDown: () => boolean;
   /** Resolve a schema URL or file path (with caching). */
   resolveSchema: (urlOrPath: string, baseDir?: string) => Promise<unknown>;
   /** Update YAML LSP schema mappings (schema URL → globs) on all active sessions. */
@@ -2704,58 +2704,19 @@ async function handleSchemaSync(req: Request, ctx: RouteContext): Promise<Respon
 }
 
 // ---------------------------------------------------------------------------
-// Update routes
+// Version route
 // ---------------------------------------------------------------------------
 
 // GET /api/version
-function handleGetVersion(): Response {
-  return json({ version: getCurrentVersion(), isDev: config.isDev });
-}
-
-// GET /api/update/status
-function handleGetUpdateStatus(): Response {
-  return json(getUpdateStatus());
-}
-
-// POST /api/update/check
-async function handleUpdateCheck(_req: Request, ctx: RouteContext): Promise<Response> {
-  await checkForUpdate(ctx.broadcastAll);
-  return json(getUpdateStatus());
-}
-
-// POST /api/update/download
-async function handleUpdateDownload(_req: Request, ctx: RouteContext): Promise<Response> {
-  await downloadUpdate(ctx.broadcastAll);
-  return json(getUpdateStatus());
-}
-
-// POST /api/update/install
-function handleUpdateInstall(_req: Request, ctx: RouteContext): Response {
-  if (config.isDev) return error("Updates are not available in development mode");
-
-  const status = getUpdateStatus();
-  if (status.state !== "ready") return error("No update is ready to install");
-
-  const resourcesDir = process.env.LOXEL_RESOURCES_DIR;
-  if (!resourcesDir) return error("Cannot determine resources directory");
-
-  // Check write access before committing to exit
-  try {
-    mkdirSync(resourcesDir, { recursive: true });
-    accessSync(resourcesDir, constants.W_OK);
-  } catch {
-    return error("Resources directory is not writable");
-  }
-
-  if (!prepareInstall()) return error("Failed to prepare update");
-
-  // Broadcast installing state before shutdown
-  ctx.broadcastAll({ type: "update_status_changed", data: { state: "installing" } });
-
-  // Schedule shutdown after response is sent
-  setTimeout(() => ctx.shutdown(42), 100);
-
-  return json({ success: true });
+function handleGetVersion(_req: Request, ctx: RouteContext): Response {
+  // appOwned: started by the desktop app, so it exits with that app. shuttingDown: about to exit,
+  // so clients wait for its replacement instead of using it (see SHARED_SERVER.md).
+  return json({
+    version: getCurrentVersion(),
+    isDev: config.isDev,
+    appOwned: config.parentPid !== null,
+    shuttingDown: ctx.isShuttingDown(),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3390,7 +3351,6 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/file-index": handleFileIndex,
     "/api/schemas/resolve": handleSchemaResolve,
     "/api/version": handleGetVersion,
-    "/api/update/status": handleGetUpdateStatus,
     "/api/detected-formatters": handleDetectedFormatters,
     ...toolchainGetRoutes,
     "/api/repo-trust": handleGetRepoTrust,
@@ -3442,9 +3402,6 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detached-file-rename": handleDetachedFileRename,
     "/api/detached-file-copy-to-project": handleDetachedFileCopyToProject,
     "/api/schemas/sync": handleSchemaSync,
-    "/api/update/check": handleUpdateCheck,
-    "/api/update/download": handleUpdateDownload,
-    "/api/update/install": handleUpdateInstall,
     "/api/open": handleOpen,
     "/api/external-folders/add": handleExternalFolderAdd,
     "/api/external-folders/remove": handleExternalFolderRemove,

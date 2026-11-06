@@ -35,8 +35,8 @@ export const COPY_WEBVIEW_IMAGE = "browser:copy-image-at";
  */
 export const JAVASCRIPT_DIALOG_RUN = "javascript-dialog:run";
 /**
- * Renderer → main: this document shows page dialogs. Pages of a window whose renderer never sent
- * it (one that predates dialogs) get no dialog instead of blocking on one that is never shown.
+ * Renderer → main: this document shows page dialogs. Pages of a window whose current document has
+ * not sent it get no dialog instead of blocking on one that is never shown.
  */
 export const JAVASCRIPT_DIALOG_LISTEN = "javascript-dialog:listen";
 /** Main → renderer: show a page's dialog in the browser panel hosting that webview. */
@@ -45,3 +45,13 @@ export const JAVASCRIPT_DIALOG_OPEN = "javascript-dialog:open";
 export const JAVASCRIPT_DIALOG_RESPOND = "javascript-dialog:respond";
 /** Main → renderer: a dialog was withdrawn because its page navigated or went away. */
 export const JAVASCRIPT_DIALOG_CLOSED = "javascript-dialog:closed";
+/** Renderer → main (invoke): the app update's current `UpdateState`. */
+export const UPDATE_GET_STATUS = "update:get-status";
+/** Renderer → main (invoke): check the release manifest for a newer version. */
+export const UPDATE_CHECK = "update:check";
+/** Renderer → main (invoke): download the available update. */
+export const UPDATE_DOWNLOAD = "update:download";
+/** Renderer → main: quit, install the downloaded update and relaunch. */
+export const UPDATE_INSTALL = "update:install";
+/** Main → renderer: the app update's `UpdateState` changed. */
+export const UPDATE_STATUS_CHANGED = "update:status-changed";

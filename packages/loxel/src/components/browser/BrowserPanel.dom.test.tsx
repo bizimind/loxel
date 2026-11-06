@@ -9,6 +9,7 @@ import type {
 } from "@/electron/javascript-dialog-protocol";
 import { getFocusedHardRefreshTarget } from "@/lib/hard-refresh-targets";
 import { focusRegisteredPanel } from "@/lib/panel-focus";
+import { stubElectronAPI } from "@/test/electron-api-stub";
 
 // BrowserPanel renders its webview only in Electron (read once, at import).
 Object.defineProperty(navigator, "userAgent", {
@@ -19,18 +20,14 @@ Object.defineProperty(navigator, "userAgent", {
 let openDialog: (request: unknown) => void = () => {};
 let closeDialog: (closed: unknown) => void = () => {};
 const respondToJavaScriptDialog = mock();
-window.electronAPI = {
-  onOpenInBrowserTab: () => () => {},
-  setDockBadge: () => {},
-  onWindowFocusChange: () => () => {},
-  openFolderDialog: async () => null,
+window.electronAPI = stubElectronAPI({
   onJavaScriptDialog: (onOpen, onClosed) => {
     openDialog = onOpen;
     closeDialog = onClosed;
     return () => {};
   },
   respondToJavaScriptDialog,
-};
+});
 
 const { BrowserPanel } = await import("./BrowserPanel");
 

@@ -60,7 +60,7 @@ interface PageDialogState {
 
 const pendingDialogs = new Map<number, PendingDialog>();
 const pageStates = new Map<number, PageDialogState>();
-/** Window renderers whose current document shows dialogs (renderers that predate them don't). */
+/** Window renderers whose current document has subscribed to page dialogs. */
 const listeningHosts = new Set<number>();
 let nextDialogId = 1;
 

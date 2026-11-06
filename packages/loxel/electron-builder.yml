@@ -18,6 +18,9 @@ extraResources:
     to: .
   - from: dist-electron/renderer
     to: renderer
+  # electron-updater's cache folder; without it no update can download
+  - from: assets/app-update.yml
+    to: app-update.yml
 
 asar: true
 
@@ -89,6 +92,8 @@ mac:
         LSItemContentTypes: [public.folder]
   # No arch lists: they would override --x64 or --arm64 and package the other architecture with
   # this machine's binaries.
+  # The dmg is the download; the zip, with its block map, is what installed apps update from
+  # (src/electron/app-updater.ts).
   target:
     - dmg
     - zip

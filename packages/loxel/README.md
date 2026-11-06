@@ -39,7 +39,7 @@ Three processes:
 
 - **Server** (Bun, `src/server/`, entry `src/server/index.ts`) — REST API and WebSocket (file watching, terminal I/O, log streaming, LSP proxies), git commands, PTY sessions, language server subprocesses, SQLite storage, and static serving of the built renderer. One server per mode (port 7433 prod, 7434 dev) is shared by every window.
 - **Renderer** (React 19, Vite, `src/`) — Zustand stores (`src/store/`) persisted to the server, TanStack Query for server data (`src/queries/`), shared request/response and WebSocket models (`src/api/`), Monaco, xterm.js, Dockview, Milkdown and Excalidraw components (`src/components/`).
-- **Electron shell** (`src/electron/`) — spawns or reuses the server, opens windows on its URL, and handles native integrations. See [docs/ELECTRON.md](docs/ELECTRON.md).
+- **Electron shell** (`src/electron/`) — runs the server for as long as the app runs, opens windows on its URL, handles native integrations and updates the app. See [docs/ELECTRON.md](docs/ELECTRON.md).
 
 The `loxel` CLI (`src/cli.ts`) talks to a running server to open files, folders, URLs and terminals.
 
@@ -79,11 +79,11 @@ Dev mode (`LOXEL_DEV=1`, set by the dev scripts) uses its own state directory an
 | `LOXEL_SERVE_PORT` | Override the server port (standalone server only; the app and CLI use 7433/7434) |
 | `LOXEL_STATIC_DIR` | Directory of the built renderer the server serves (from source: `dist/`)         |
 
-Shells opened in a Loxel terminal inherit the app's `LOXEL_STATIC_DIR`, which points at the installed renderer. When testing a local build from such a shell, set `LOXEL_STATIC_DIR=$PWD/dist`, and use `LOXEL_STATE_DIR` and `LOXEL_SERVE_PORT` to keep a throwaway instance away from your real state. Variables Loxel injects into its terminals (`LOXEL_PORT`, `LOXEL_WORKTREE`, `LOXEL_WINDOW_ID`) are documented on the site's [Environment Variables & Settings](../site/src/content/docs/reference-env-files-cli-settings.md) page.
+Shells opened in a Loxel terminal inherit the app's `LOXEL_STATIC_DIR`, which points at the renderer inside the installed app. When testing a local build from such a shell, set `LOXEL_STATIC_DIR=$PWD/dist`, and use `LOXEL_STATE_DIR` and `LOXEL_SERVE_PORT` to keep a throwaway instance away from your real state. Variables Loxel injects into its terminals (`LOXEL_PORT`, `LOXEL_WORKTREE`, `LOXEL_WINDOW_ID`) are documented on the site's [Environment Variables & Settings](../site/src/content/docs/reference-env-files-cli-settings.md) page.
 
 ### Releases
 
-`release-loxel.yml` bumps the patch version, builds, signs and publishes on every merge to main that touches `packages/loxel/**`. For changes outside the package that still affect the app (for example the root lockfile or dependency overrides), run it manually with `gh workflow run release-loxel.yml --ref main`. After publishing, it dispatches `release-site.yml` so the site's download page shows the new version. The installed app updates its server and renderer in place; see [docs/ELECTRON.md](docs/ELECTRON.md#what-ships-where) for what needs a new app download, and [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for signing and provisioning.
+`release-loxel.yml` bumps the patch version, builds, signs and publishes on every merge to main that touches `packages/loxel/**`. For changes outside the package that still affect the app (for example the root lockfile or dependency overrides), run it manually with `gh workflow run release-loxel.yml --ref main`. After publishing, it dispatches `release-site.yml` so the site's download page shows the new version. Each release publishes the dmg for downloads and a zip that installed apps update from, and the installed app replaces itself with the zip; see [docs/ELECTRON.md](docs/ELECTRON.md#updates) for the updater and [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) for signing and provisioning.
 
 ## Data storage
 
@@ -95,7 +95,6 @@ Server-side state lives under `~/.local/state/loxel/loxel/` (production) or `~/.
 - `detached/{project-hash}/{worktree-hash}/` — Drafts
 - `localdb/{project-hash}/localdb.db` — data behind `:::localdb` blocks in markdown files
 - `logs/server-{instanceId}.log` — server logs (NDJSON, rotated at 5 MB, stale files removed after 24 h)
-- `updates/` — downloaded in-app updates
 
 ## Internal docs
 
@@ -103,8 +102,8 @@ Architecture, conventions and design rationale for contributors. Start with [doc
 
 **Platform**
 
-- [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, what ships in the app bundle versus in-app updates, browser panels, macOS integration
-- [docs/SHARED_SERVER.md](docs/SHARED_SERVER.md) — how all windows share one Bun server: discover-or-spawn, ownership, idle shutdown, state scopes
+- [docs/ELECTRON.md](docs/ELECTRON.md) — Electron process model, full-app updates, browser panels, macOS integration
+- [docs/SHARED_SERVER.md](docs/SHARED_SERVER.md) — how all windows share one Bun server: one app process, starting, restarting and stopping the server, state scopes
 - [docs/STATE_AND_STORAGE.md](docs/STATE_AND_STORAGE.md) — zustand stores and their scopes, server-side persistence into SQLite, settings, secrets, the state directory
 - [docs/WATCHERS.md](docs/WATCHERS.md) — filesystem and git watchers, their ownership, the status refresh pipeline and the tests that lock it
 - [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md) — macOS code signing and the provisioning profile behind passkeys
