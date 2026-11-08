@@ -15,7 +15,7 @@ process.env.LOXEL_STATE_DIR = stateDir;
 const { refreshPythonEnv, subscribePythonEnv } = await import("./python-env");
 const { pickRuffBinary, RUFF_REPO_TRUST_RESTRICTION, RuffLspManager } =
   await import("./ruff-lsp-manager");
-const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+const { getRepoTrustStatus, isRepoTrusted, setRepoTrusted } = await import("./repo-trust");
 
 afterAll(async () => {
   await rm(stateDir, { recursive: true, force: true });
@@ -99,7 +99,7 @@ describe.skipIf(process.platform === "win32")("pickRuffBinary", () => {
 /** The manager's pick for a worktree, without starting a server. */
 class PickingRuffManager extends RuffLspManager {
   pickFor(wtPath: string): Promise<string | null> {
-    return this.resolveBinary({ wtPath, repoTrusted: getRepoTrustStatus(wtPath).trusted });
+    return this.resolveBinary({ wtPath, repoTrusted: isRepoTrusted(wtPath) });
   }
 }
 
