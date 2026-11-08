@@ -40,6 +40,8 @@ The Python server checks your code against the project's own Python environment,
 
 Loxel never uses an interpreter that is committed to the repository, since running it would run the repository's code.
 
+An environment holds the packages your project installed, so until you [trust the repository](/docs/repository-trust), Loxel runs nothing from it. The type checker still reads its installed packages, so imports resolve. Poetry and Pipenv aren't asked for their environments, Ruff and format on save use the Ruff that ships with Loxel, Black doesn't run on save, and new terminals don't activate the environment. The status bar shows no version for a conda or Pixi environment until then.
+
 Creating or syncing an environment while Loxel is open, for example with `uv sync`, is picked up automatically, as are packages installed into it later.
 
 ## Seeing and changing the interpreter
@@ -74,7 +76,7 @@ Python files also get [Ruff](https://docs.astral.sh/ruff/)'s linter, alongside t
 
 Ruff reads its settings from the `ruff.toml`, `.ruff.toml` or `pyproject.toml` closest to each file, so each project in a monorepo keeps its own rules, and edits to those files apply right away. Without any Ruff configuration, Ruff's default rules apply.
 
-If Ruff 0.5.3 or newer is installed in the project's Python environment (see above, including an interpreter you chose), Loxel uses that one, so the version pinned in your dev dependencies applies. Otherwise it uses the Ruff that ships with Loxel. When the environment changes, for example when `uv sync` installs the project's Ruff after a Python file was opened, or you upgrade Ruff or choose another interpreter, the linter restarts with the new Ruff. Syntax errors come from the type checker only, and formatting stays with [format on save](/docs/editor#formatter-auto-detection).
+If Ruff 0.5.3 or newer is installed in the project's Python environment (see above, including an interpreter you chose) and you trust the repository, Loxel uses that one, so the version pinned in your dev dependencies applies. Otherwise it uses the Ruff that ships with Loxel. When the environment changes, for example when `uv sync` installs the project's Ruff after a Python file was opened, or you upgrade Ruff or choose another interpreter, the linter restarts with the new Ruff. Syntax errors come from the type checker only, and formatting stays with [format on save](/docs/editor#formatter-auto-detection).
 
 ## mypy
 
@@ -97,5 +99,5 @@ If mypy is configured but not installed in the project's environment, Loxel says
 
 - [Language Intelligence](/docs/language-intelligence) — the features every language server provides, and how servers start and stop per worktree
 - [Editor](/docs/editor) — format on save
-- [Terminals](/docs/terminals) — new terminals start with the worktree's Python environment active
+- [Terminals](/docs/terminals) — new terminals start with the worktree's Python environment active, in a trusted repository
 - [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code
