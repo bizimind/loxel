@@ -115,7 +115,7 @@ A file is linted when both of these hold:
 
 Each package of a monorepo uses its own config, and a package without one uses the root's.
 
-Loxel never installs ESLint. If a project has a config and no ESLint, a notification says what to run, for example `npm install`. ESLint runs on the [Node version](#node-version) the worktree uses; without any Node, a notification says to install one. Until you trust a repository, ESLint doesn't run in it, and the status bar shows **Restricted** once you open a file in a project that uses it.
+Loxel never installs ESLint. If a project has a config and no ESLint, a notification says what to run, for example `npm install`. ESLint runs on the [Node version](#node-version) the worktree uses; without any Node, a notification says to install one. Until you trust a repository, ESLint doesn't run in it, and the status bar shows **Restricted** once you open a file in a project that uses it, unless you [declined](/docs/repository-trust#trusting-a-repository) the repository.
 
 Changes to a config file apply right away, and so does installing or upgrading packages. Formatting stays with [format on save](#format-on-save), even when ESLint has fixable formatting rules.
 
@@ -130,7 +130,7 @@ A file is linted when both of these hold:
 
 Other files stay clean, so a package without oxlint in a monorepo isn't linted with its defaults. Packages can have their own configs, as with oxlint in a terminal. One oxlint runs per worktree, the install closest to the root.
 
-Loxel never installs oxlint. If a project uses it with none installed, or with an older version, a notification says what to do. oxlint runs on the [Node version](#node-version) the worktree uses, which has to be one the installed oxlint supports. Until you trust a repository, oxlint doesn't run in it, and the status bar shows **Restricted** once you open a file in a project that uses it.
+Loxel never installs oxlint. If a project uses it with none installed, or with an older version, a notification says what to do. oxlint runs on the [Node version](#node-version) the worktree uses, which has to be one the installed oxlint supports. Until you trust a repository, oxlint doesn't run in it, and the status bar shows **Restricted** once you open a file in a project that uses it, unless you [declined](/docs/repository-trust#trusting-a-repository) the repository.
 
 A separate repository inside your worktree, such as a submodule or a clone that git doesn't ignore, has its own trust. If it has an oxlint config, oxlint waits until you trust that repository too or add it to `.gitignore`, and a notification says so. The same goes for a folder above the worktree that holds an oxlint config, or `oxlint-tsgolint` for type-aware rules, when the worktree has none of its own.
 
@@ -146,7 +146,7 @@ The config at the root is `biome.json`, `biome.jsonc`, `.biome.json` or `.biome.
 
 **Fix All** applies the safe fixes in the file and sorts its imports. If your config leaves Biome's formatter on, it formats the file too, like `biome check --write`. **Organize Imports** stays with the TypeScript server, so its order can differ from Biome's: use **Fix All** or **Source Action** for Biome's order. Formatting stays with [format on save](#format-on-save).
 
-Loxel never installs Biome. If a project has a config and no Biome installed, a notification says what to run. Until you trust a repository, Biome's linter doesn't run in it, and the status bar shows **Restricted** once you open a file in a project with a config.
+Loxel never installs Biome. If a project has a config and no Biome installed, a notification says what to run. Until you trust a repository, Biome's linter doesn't run in it, and the status bar shows **Restricted** once you open a file in a project with a config, unless you [declined](/docs/repository-trust#trusting-a-repository) the repository.
 
 A separate repository inside your worktree, such as a submodule or a clone, even one git ignores, has its own trust. If it has a Biome config, Biome waits until you trust that repository too, and a notification says so. The same goes for a folder above the worktree holding a config Biome would use, when your root config has `"root": false` or `"extends": "//"`.
 

@@ -275,7 +275,7 @@ try {
     const trust = await fetch(`${base}/api/repo-trust`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ worktreePath: repo, trusted: true }),
+      body: JSON.stringify({ worktreePath: repo, decision: "trusted" }),
     });
     check(trust.ok, "the repository is trusted", trust.status);
   }

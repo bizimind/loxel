@@ -259,7 +259,7 @@ async function post(route: string, body: unknown): Promise<void> {
 
 async function open(root: string): Promise<{ client: LspClient; uri: string }> {
   await post("/api/projects", { path: root });
-  await post("/api/repo-trust", { worktreePath: root, trusted: true });
+  await post("/api/repo-trust", { worktreePath: root, decision: "trusted" });
   const ws = new WebSocket(
     `ws://127.0.0.1:${port}/ws/checkstyle-lsp?wt=${encodeURIComponent(root)}`,
   );

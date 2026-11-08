@@ -167,7 +167,7 @@ try {
     await Bun.sleep(100);
   }
   await post("/api/projects", { path: project });
-  await post("/api/repo-trust", { worktreePath: project, trusted: true });
+  await post("/api/repo-trust", { worktreePath: project, decision: "trusted" });
 
   const ws = new WebSocket(
     `ws://127.0.0.1:${port}/ws/oxlint-lsp?wt=${encodeURIComponent(project)}`,

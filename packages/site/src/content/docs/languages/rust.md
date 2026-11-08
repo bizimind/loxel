@@ -12,7 +12,7 @@ Install rust-analyzer with `rustup component add rust-analyzer`, or any other wa
 
 Opening a `.rs` file starts the server for that worktree, which gives you hover, go to definition (including into the standard library and dependencies), references, rename across crates and of modules (from the definition; from a use in another crate, it adds a local alias instead), quick fixes, completion with auto-import, signature help, inlay hints, folding, symbols, and diagnostics as you type. To format Rust files, use [format on save](/docs/editor).
 
-What else you get depends on whether you [trust the repository](/docs/repository-trust). While it isn't trusted, the status bar shows **Restricted** once a project with a `Cargo.toml` loads. Click it to choose. Language servers restart by themselves when you do.
+What else you get depends on whether you [trust the repository](/docs/repository-trust). While it isn't trusted, the status bar shows **Restricted** once a project with a `Cargo.toml` loads, unless you [declined](/docs/repository-trust#trusting-a-repository) it. Click it, or use **Manage Repository Trust**, to choose. Language servers restart by themselves when you do.
 
 ### In a repository you trust
 

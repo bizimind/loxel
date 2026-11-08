@@ -21,7 +21,7 @@ function rowWorktree(key: string): string | null {
 }
 
 /**
- * A worktree recreated at the same path starts fresh. `repo-trust:` rows are keyed by repository,
+ * A worktree recreated at the same path starts fresh. Trust and declined rows are keyed by repository,
  * not by worktree, so they stay.
  */
 export function deleteWorktreeRows(wtPath: string): void {
