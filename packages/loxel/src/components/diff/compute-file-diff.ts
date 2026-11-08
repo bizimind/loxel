@@ -24,6 +24,15 @@ export function splitLines(text: string): string[] {
   return text.split(/\r\n|\r|\n/);
 }
 
+/**
+ * Split text into lines the way the server reads a file for git diffs and comment placement: on
+ * "\n" only, so a CRLF file's lines keep their "\r". A comment anchor built from these lines
+ * matches the server's when it relocates the comment.
+ */
+export function splitGitLines(text: string): string[] {
+  return text.split("\n");
+}
+
 interface LineChange {
   /** First changed line on each side, 1-based */
   oldStart: number;

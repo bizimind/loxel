@@ -6,7 +6,7 @@ import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
-import { computeFileDiff, splitLines } from "@/components/diff/compute-file-diff";
+import { computeFileDiff, splitGitLines } from "@/components/diff/compute-file-diff";
 import { EditableSideBanners } from "@/components/diff/EditableSideBanners";
 import { SideBySideDiffView } from "@/components/diff/SideBySideDiffView";
 import {
@@ -181,18 +181,14 @@ function WorkingTreeDiffView({
   const editorKey = workingTreeSideKey(absPath);
   const side = useEditableSide(absPath, editorKey);
 
-  const { lines: gitOldLines, isLoading: loadingOld } = useOldSideLines(file, oldRef, worktreePath);
-  // `git show` output split on "\n" only; split it again as Monaco and the new side split text,
-  // so a CRLF file does not differ on every line.
-  const oldLines = useMemo(
-    () => (gitOldLines.length === 0 ? EMPTY_LINES : splitLines(gitOldLines.join("\n"))),
-    [gitOldLines],
-  );
+  // Lines are split as the server splits them (CRLF lines keep their "\r"), so comment anchors
+  // made from them match the server's placement.
+  const { lines: oldLines, isLoading: loadingOld } = useOldSideLines(file, oldRef, worktreePath);
 
   const newText = useDebouncedValue(side.text, REDIFF_DELAY_MS);
   const diff = useMemo(() => {
     if (newText === null || loadingOld) return null;
-    const newLines = splitLines(newText);
+    const newLines = splitGitLines(newText);
     return { newLines, hunks: computeFileDiff(oldLines, newLines).hunks };
   }, [newText, oldLines, loadingOld]);
 

@@ -14,7 +14,7 @@ import { useUIStore } from "@/store/ui";
 import { useReviewStore } from "@/store/worktree-reviews";
 
 import { buildChangeRegions, buildScrollAlignment } from "./change-regions";
-import { splitLines } from "./compute-file-diff";
+import { splitGitLines } from "./compute-file-diff";
 import { DiffGutter } from "./DiffGutter";
 import type { ViewZoneDescriptor } from "./EditorPanel";
 import { EditorPanel } from "./EditorPanel";
@@ -149,10 +149,11 @@ export function SideBySideDiffView({
   );
 
   // Lines a new comment anchors to. An editable side's are read from its live text, as `lines` are
-  // recomputed only once typing pauses; only while a comment is being written there.
+  // recomputed only once typing pauses; only while a comment is being written there. Split as the
+  // server splits files for comment placement, so the anchor matches it.
   const newEditableContent = pendingAnchor?.side === "new" ? newSide.editable?.content : undefined;
   const newCommentLines = useMemo(
-    () => (newEditableContent === undefined ? newLines : splitLines(newEditableContent)),
+    () => (newEditableContent === undefined ? newLines : splitGitLines(newEditableContent)),
     [newEditableContent, newLines],
   );
 

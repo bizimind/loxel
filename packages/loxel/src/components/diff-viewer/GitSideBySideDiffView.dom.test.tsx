@@ -110,11 +110,13 @@ describe("GitSideBySideDiffView", () => {
     await waitFor(() => expect(diffLines()).toEqual([" one", " two", " three", "+four", " "]));
   });
 
-  test("diffs a CRLF file by its lines, not its line endings", async () => {
+  test("keeps a CRLF file's line endings in its lines, as comment placement reads them", async () => {
     headContent = "one\r\ntwo\r\n";
     diskContent = "one\r\n2\r\n";
     renderView();
-    await waitFor(() => expect(diffLines()).toEqual([" one", "-two", "+2", " "]));
+    await waitFor(() => expect(diffLines()).toEqual([" one\r", "-two\r", "+2\r", " "]));
+    expect(rendered?.oldSide.lines).toEqual(["one\r", "two\r", ""]);
+    expect(rendered?.newSide.lines).toEqual(["one\r", "2\r", ""]);
   });
 
   test("diffs an added file as all added lines", async () => {
