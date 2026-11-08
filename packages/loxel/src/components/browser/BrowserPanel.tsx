@@ -248,8 +248,9 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     };
 
     const onFailLoad = (event: DidFailLoadEvent) => {
-      // errorCode -3 is ERR_ABORTED (user stopped navigation) — not a real error
-      if (event.errorCode === -3) return;
+      // errorCode -3 is ERR_ABORTED (user stopped navigation) — not a real error. A subframe that
+      // fails (a dead or framing-blocked embed) leaves the page itself loaded.
+      if (event.errorCode === -3 || !event.isMainFrame) return;
       pageRef.current = { url: "", title: "" };
       setPageUrl("");
       setLoadError(

@@ -410,18 +410,31 @@ describe("bookmarks", () => {
     });
   });
 
-  test("a page that failed to load can't be bookmarked", () => {
-    const { webview } = renderPanel();
-    loadPage(webview, "https://example.com/", "Example");
+  function failLoad(webview: HTMLElement, isMainFrame: boolean) {
     act(() => {
       webview.dispatchEvent(
         Object.assign(new Event("did-fail-load"), {
           errorCode: -105,
           errorDescription: "ERR_NAME_NOT_RESOLVED",
           validatedURL: "https://nope.example/",
+          isMainFrame,
         }),
       );
     });
+  }
+
+  test("a page whose embed failed to load can still be bookmarked", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example");
+    failLoad(webview, false);
+    expect(star()).toBeEnabled();
+    expect(screen.queryByText(/Failed to load/)).toBeNull();
+  });
+
+  test("a page that failed to load can't be bookmarked", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example");
+    failLoad(webview, true);
     expect(star()).toBeDisabled();
     act(() => getFocusedBrowserPanel()?.toggleBookmark());
     expect(useBrowserBookmarksStore.getState().bookmarks).toEqual([]);
