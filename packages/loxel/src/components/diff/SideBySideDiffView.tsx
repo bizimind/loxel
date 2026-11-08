@@ -166,6 +166,8 @@ export function SideBySideDiffView({
     subscribeToScroll,
     flushScroll,
     scrollBy,
+    leftContainer,
+    rightContainer,
     leftContainerRef,
     rightContainerRef,
   } = useMonacoSyncScroll({ alignmentSections, lineHeight: LINE_HEIGHT });
@@ -340,7 +342,7 @@ export function SideBySideDiffView({
         ) : (
           <>
             {/* Left panel - OLD file + line numbers (shared container for wheel capture) */}
-            <div ref={leftContainerRef} className="relative flex flex-1 overflow-hidden">
+            <div ref={leftContainer} className="relative flex flex-1 overflow-hidden">
               <div className="flex-1 overflow-hidden">
                 <EditorPanel
                   content={oldSide.editable?.content ?? oldContent}
@@ -433,7 +435,7 @@ export function SideBySideDiffView({
             />
 
             {/* Right panel - NEW file with custom LineNumbersColumn */}
-            <div ref={rightContainerRef} className="relative flex flex-1 overflow-hidden">
+            <div ref={rightContainer} className="relative flex flex-1 overflow-hidden">
               <LineNumbersColumn
                 lineCount={newLines.length}
                 changeRegions={changeRegions.new}
