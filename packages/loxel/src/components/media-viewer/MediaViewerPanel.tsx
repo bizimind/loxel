@@ -500,10 +500,11 @@ export function MediaViewerPanel({ filePath, panelApi }: MediaViewerPanelProps) 
               src={iframeSrc}
               className="border-none"
               style={{
-                // The dockview theme sets `color-scheme: dark`, which this element would inherit,
-                // while the frame document keeps the default light scheme. Chromium paints an
-                // opaque (white) canvas behind a frame whose scheme differs from its <iframe>,
-                // hiding the checkerboard under transparent pixels, so pin the element to light.
+                // Must match the `color-scheme: light` the /api/media-frame document declares.
+                // Chromium paints an opaque (white) canvas behind a frame whose scheme differs
+                // from its <iframe>, hiding the checkerboard under transparent pixels, and this
+                // element would otherwise inherit `dark` from the dockview theme. The frame paints
+                // nothing scheme-dependent, so light in both app themes is correct.
                 colorScheme: "light",
                 width: "100%",
                 height: "100%",

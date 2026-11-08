@@ -753,6 +753,9 @@ async function handleMediaFrame(req: Request, ctx: RouteContext): Promise<Respon
 </script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* Must match the <iframe> element's color-scheme in MediaViewerPanel: Chromium paints an
+     opaque canvas behind a frame whose scheme differs, hiding the checkerboard. */
+  :root { color-scheme: light; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
   body { display: flex; align-items: center; justify-content: center; }
   img, video, svg { display: block; max-width: 100%; max-height: 100%; }
