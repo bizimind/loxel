@@ -256,7 +256,7 @@ try {
     await Bun.sleep(100);
   }
   await post("/api/projects", { path: project });
-  await post("/api/repo-trust", { worktreePath: project, trusted: true });
+  await post("/api/repo-trust", { worktreePath: project, decision: "trusted" });
   await session(
     { $schema: "https://example.com/schema.json", plugins: ["./rule.grit"] },
     "a plain config",
