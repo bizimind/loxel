@@ -24,6 +24,7 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 | Rename the active tab               | `Cmd+Shift+R`                                                |
 | Maximize / restore the active group | `Ctrl+Shift+Enter`                                           |
 | Hard refresh a browser tab          | `Cmd+Shift+R` while the browser tab has focus                |
+| Bookmark a browser page             | `Cmd+D` while the browser tab has focus                      |
 | Next / previous tab                 | `Cmd+Shift+]` / `Cmd+Shift+[`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Focus panel 1–9                     | `Cmd+1` – `Cmd+9`                                            |
 

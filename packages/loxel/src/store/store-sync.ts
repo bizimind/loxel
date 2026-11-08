@@ -10,6 +10,7 @@
 import type { LogLevel } from "@/api/log-entry-model";
 import { reconcile } from "@/lib/reconcile";
 
+import { parseBookmarks, useBrowserBookmarksStore } from "./browser-bookmarks";
 import { TEMPLATES } from "./keybindings/keybinding-schema";
 import {
   deriveKeybindingState,
@@ -130,6 +131,12 @@ const syncTargets: Record<string, SyncTarget> = {
       };
     },
     setState: (partial) => useProjectStore.setState(partial),
+  },
+
+  "browser-bookmarks": {
+    getState: () => ({ bookmarks: useBrowserBookmarksStore.getState().bookmarks }),
+    setState: (partial) => useBrowserBookmarksStore.setState(partial),
+    deserialize: (raw) => ({ bookmarks: parseBookmarks(raw) }),
   },
 };
 
