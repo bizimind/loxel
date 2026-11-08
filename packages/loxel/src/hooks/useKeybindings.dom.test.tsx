@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 
 import { cleanup, render } from "@testing-library/react";
 
-import { registerHardRefreshTarget } from "@/lib/hard-refresh-targets";
+import { registerBrowserPanelTarget } from "@/lib/browser-panel-targets";
 import { normalizeKeyBinding } from "@/store/keybindings/key-combo";
 import { useKeybindingStore } from "@/store/keybindings/keybinding-store";
 import { stubElectronAPI } from "@/test/electron-api-stub";
@@ -50,7 +50,10 @@ describe("webview keystroke interception", () => {
     root.append(webview);
     document.body.append(root);
     webview.focus();
-    const unregister = registerHardRefreshTarget(root, () => {});
+    const unregister = registerBrowserPanelTarget(root, {
+      hardRefresh: () => {},
+      toggleBookmark: () => {},
+    });
     expect(intercepted()).toBe(true);
 
     unregister();
