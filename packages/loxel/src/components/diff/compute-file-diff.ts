@@ -33,6 +33,15 @@ export function splitGitLines(text: string): string[] {
   return text.split("\n");
 }
 
+/**
+ * `splitGitLines` lines without the "\r" of CRLF endings, to diff by content: git can store a file
+ * with LF endings and check it out with CRLF (`eol=crlf`, `core.autocrlf`). Line counts, and so
+ * the line numbers of the hunks, stay those of the input.
+ */
+export function withoutCarriageReturns(lines: string[]): string[] {
+  return lines.map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+}
+
 interface LineChange {
   /** First changed line on each side, 1-based */
   oldStart: number;

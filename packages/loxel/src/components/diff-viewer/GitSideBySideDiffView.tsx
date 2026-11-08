@@ -6,7 +6,11 @@ import * as api from "@/api/client";
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 import type { FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
-import { computeFileDiff, splitGitLines } from "@/components/diff/compute-file-diff";
+import {
+  computeFileDiff,
+  splitGitLines,
+  withoutCarriageReturns,
+} from "@/components/diff/compute-file-diff";
 import { EditableSideBanners } from "@/components/diff/EditableSideBanners";
 import { SideBySideDiffView } from "@/components/diff/SideBySideDiffView";
 import {
@@ -182,15 +186,18 @@ function WorkingTreeDiffView({
   const side = useEditableSide(absPath, editorKey);
 
   // Lines are split as the server splits them (CRLF lines keep their "\r"), so comment anchors
-  // made from them match the server's placement.
+  // made from them match the server's placement. The diff ignores the "\r": `git show` does not
+  // convert line endings, so a file git checks out with CRLF has an LF old side.
   const { lines: oldLines, isLoading: loadingOld } = useOldSideLines(file, oldRef, worktreePath);
+  const oldDiffLines = useMemo(() => withoutCarriageReturns(oldLines), [oldLines]);
 
   const newText = useDebouncedValue(side.text, REDIFF_DELAY_MS);
   const diff = useMemo(() => {
     if (newText === null || loadingOld) return null;
     const newLines = splitGitLines(newText);
-    return { newLines, hunks: computeFileDiff(oldLines, newLines).hunks };
-  }, [newText, oldLines, loadingOld]);
+    const { hunks } = computeFileDiff(oldDiffLines, withoutCarriageReturns(newLines));
+    return { newLines, hunks };
+  }, [newText, oldDiffLines, loadingOld]);
 
   useKeepEditedFileSelected(worktreePath, filePath, editorKey);
 

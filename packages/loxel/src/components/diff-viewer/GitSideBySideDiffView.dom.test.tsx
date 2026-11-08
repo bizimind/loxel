@@ -114,9 +114,18 @@ describe("GitSideBySideDiffView", () => {
     headContent = "one\r\ntwo\r\n";
     diskContent = "one\r\n2\r\n";
     renderView();
-    await waitFor(() => expect(diffLines()).toEqual([" one\r", "-two\r", "+2\r", " "]));
+    await waitFor(() => expect(diffLines()).toEqual([" one", "-two", "+2", " "]));
     expect(rendered?.oldSide.lines).toEqual(["one\r", "two\r", ""]);
     expect(rendered?.newSide.lines).toEqual(["one\r", "2\r", ""]);
+  });
+
+  test("diffs a file git checks out with CRLF against its LF blob by content", async () => {
+    headContent = "one\ntwo\nthree\nfour\nfive\nsix\nseven\nlast\n";
+    diskContent = "one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\nLAST\r\n";
+    renderView();
+    await waitFor(() =>
+      expect(diffLines()).toEqual([" five", " six", " seven", "-last", "+LAST", " "]),
+    );
   });
 
   test("diffs an added file as all added lines", async () => {
