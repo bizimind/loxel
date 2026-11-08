@@ -37,7 +37,6 @@ import type {
   PlacedThread,
   Review,
 } from "./review-model";
-import type { UpdateState } from "./update-model";
 import type {
   NestedRemoval,
   WorktreeRemovePlan,
@@ -918,7 +917,7 @@ class WsClient {
       this.ws = ws;
 
       if (this.wasConnected) {
-        // Server came back — check if it was updated (version changed → full page reload)
+        // Server came back — check whether a different build is running (full page reload)
         this.checkVersionAndRecover();
       } else {
         // First connection: record server version and flush pending messages
@@ -991,8 +990,8 @@ class WsClient {
 
   /**
    * On reconnect, compare the server version to the one recorded at first connect.
-   * If the version changed (update installed), reload the page to pick up new renderer
-   * assets. Otherwise, fire reconnect listeners for normal recovery (terminal reattach, etc.).
+   * If the version changed (a different build of the server started), reload the page to pick
+   * up its renderer assets. Otherwise, fire reconnect listeners for normal recovery (terminal reattach, etc.).
    */
   private async checkVersionAndRecover(): Promise<void> {
     this.pendingMessages = [];
@@ -1077,24 +1076,8 @@ class WsClient {
 
 export const wsClient = new WsClient();
 
-// --- Update API ---
+// --- Version API ---
 
 export async function getVersion(): Promise<{ version: string; isDev: boolean }> {
   return fetchJson("/version");
-}
-
-export async function getUpdateStatus(): Promise<UpdateState> {
-  return fetchJson("/update/status");
-}
-
-export async function checkForUpdate(): Promise<UpdateState> {
-  return fetchJson("/update/check", { method: "POST" });
-}
-
-export async function downloadUpdate(): Promise<UpdateState> {
-  return fetchJson("/update/download", { method: "POST" });
-}
-
-export async function installUpdate(): Promise<void> {
-  await fetchJson("/update/install", { method: "POST" });
 }

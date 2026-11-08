@@ -7,6 +7,7 @@ import { useCallback } from "react";
 
 import type { PanelPlacement, SplitDirection } from "@/api/panel-placement-model";
 import { isToolchainSelectAction } from "@/api/toolchain-status-model";
+import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
 import { toggleActiveGroupMaximized } from "@/lib/center-maximize";
 import { runEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
@@ -16,7 +17,6 @@ import {
   toggleSidebarPanel,
   toggleWorktreeSidebar,
 } from "@/lib/focus-navigation";
-import { getFocusedHardRefreshTarget } from "@/lib/hard-refresh-targets";
 import { changeIndentation } from "@/lib/indentation-status";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { restartLanguageServers } from "@/lib/lsp-client";
@@ -174,7 +174,11 @@ export function useActionHandler(): (actionId: ActionId) => void {
         break;
 
       case "browser.hardRefresh":
-        getFocusedHardRefreshTarget()?.();
+        getFocusedBrowserPanel()?.hardRefresh();
+        break;
+
+      case "browser.toggleBookmark":
+        getFocusedBrowserPanel()?.toggleBookmark();
         break;
 
       // -- Panel navigation --

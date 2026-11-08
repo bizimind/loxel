@@ -6,7 +6,6 @@ import type { ServerNotification } from "./notification-model";
 import type { PanelOpenOptions } from "./panel-placement-model";
 import type { DirEntry } from "./project-files-model";
 import type { ToolchainChangedMessage } from "./toolchain-status-model";
-import type { UpdateState } from "./update-model";
 
 /**
  * Who moved a file: Loxel (a file operation in any window) or another process. Only moves from
@@ -53,7 +52,6 @@ export type WsMessage =
   | { type: "log_entries"; data: LogEntry[] }
   | { type: "log_error_count"; delta: number }
   | { type: "log_error_snapshot"; total: number }
-  | { type: "update_status_changed"; data: UpdateState }
   // Notifications (global)
   | { type: "notification_added"; data: ServerNotification }
   | { type: "notification_dismissed"; id: string }

@@ -451,6 +451,84 @@ describe.skipIf(process.platform === "win32")("StdioLspManager process trees", (
     return state.trim() !== "" && !state.startsWith("Z");
   }
 
+  /** A manager whose sessions each have `roots` beside the server, counting what it is asked. */
+  class ExtraRootsManager extends FakeLspManager {
+    asked = 0;
+    closes = 0;
+    readonly closedTwice = Promise.withResolvers<void>();
+
+    constructor(
+      script: string,
+      private readonly roots: readonly number[],
+    ) {
+      super(script);
+    }
+
+    protected override processTreeRoots(): readonly number[] {
+      this.asked++;
+      return this.roots;
+    }
+
+    protected override onSessionClosed(): void {
+      if (++this.closes === 2) this.closedTwice.resolve();
+    }
+  }
+
+  /** A shell whose child is in a process group of its own, and that child's pid. */
+  async function treeOutsideServer(): Promise<{
+    root: Subprocess<"ignore", "pipe">;
+    child: number;
+  }> {
+    const root = Bun.spawn(["/bin/sh", "-c", "(set -m; /bin/sleep 30 & echo $!; wait) & wait"], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    let text = "";
+    for await (const chunk of root.stdout) {
+      text += Buffer.from(chunk).toString();
+      if (text.includes("\n")) break;
+    }
+    return { root, child: Number(text.trim()) };
+  }
+
+  function killIfRunning(pid: number): void {
+    if (isRunning(pid)) process.kill(pid, "SIGKILL");
+  }
+
+  test("a manager that did not opt in leaves what its server started running", async () => {
+    const { client } = await setup("wt", (script) => new ExtraRootsManager(script, []));
+    client.send({ method: "test/startChild" });
+    const started = await client.serverReceived((f) => f.method === "test/startChild");
+    const { pid } = started.params as { pid: number };
+    try {
+      const closing = manager as ExtraRootsManager;
+      manager!.detach(client.ws);
+      await closing.closedTwice.promise;
+      expect(isRunning(pid)).toBe(true);
+      expect(closing.asked).toBe(1);
+    } finally {
+      killIfRunning(pid);
+    }
+  });
+
+  test("a crashed server's extra roots are still ended, with what is below them", async () => {
+    const extra = await treeOutsideServer();
+    try {
+      const { client } = await setup(
+        "wt",
+        (script) => new ExtraRootsManager(script, [extra.root.pid]),
+      );
+      client.send({ method: "test/kill" });
+      await extra.root.exited;
+      while (isRunning(extra.child)) await Bun.sleep(20);
+      expect(extra.root.signalCode).toBe("SIGKILL");
+    } finally {
+      killIfRunning(extra.root.pid);
+      killIfRunning(extra.child);
+    }
+  });
+
   test("a manager that opts in ends what its server started, in another process group too", async () => {
     const { client } = await setup("wt", (script) => new TreeStoppingManager(script));
     client.send({ method: "test/startChild" });

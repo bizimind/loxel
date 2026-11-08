@@ -38,7 +38,7 @@ Code review is built in. Start a named review session, add comments anchored to 
 
 ## Install and launch
 
-Download the latest release and run the installer. Launch Loxel from your Applications folder (macOS) or app launcher.
+Download the latest release, open the disk image and drag Loxel to your Applications folder. Launch it from there: Loxel installs its updates in place, and if you open it from the disk image it offers to move itself to Applications first.
 
 Once Loxel is running, use the `loxel` CLI inside any Loxel terminal to open files and URLs in it:
 

@@ -7,12 +7,20 @@ import { isHttpUrl } from "./url-utils";
 const PROD_PORT = 7433;
 const DEV_PORT = 7434;
 
+/** Whether a Loxel server is answering on `port`. One that is shutting down (its app is quitting or restarting to update) does not count: its replacement is the one to talk to. */
 async function isServerRunning(port: number): Promise<boolean> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/version`, {
       signal: AbortSignal.timeout(1000),
     });
-    return res.ok;
+    if (!res.ok) return false;
+    const body: unknown = await res.json().catch(() => null);
+    return !(
+      typeof body === "object" &&
+      body !== null &&
+      "shuttingDown" in body &&
+      body.shuttingDown === true
+    );
   } catch {
     return false;
   }

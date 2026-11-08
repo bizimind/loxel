@@ -124,7 +124,10 @@ function DiffContent({
       <div
         className={cn(
           "flex-1",
-          viewMode === "split" && commitHash ? "overflow-hidden" : "scrollbar-thin overflow-auto",
+          // The side-by-side view scrolls its own editors; match FileDiffView's choice of it.
+          viewMode === "split" && (commitHash || worktreePath)
+            ? "overflow-hidden"
+            : "scrollbar-thin overflow-auto",
         )}
       >
         {currentFile && (

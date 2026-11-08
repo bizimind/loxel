@@ -37,9 +37,9 @@ Panels opt in to `⌘F` / `⌘G` / `⇧⌘G` by registering their root element w
 
 ## Shortcuts inside browser panels
 
-Keys typed in a `<webview>` go to the guest page, never the window's document. The renderer tells the Electron main process which keystrokes to intercept (the first keystroke of every binding enabled where focus is, or every keystroke while a chord is in progress); the main process withholds those from the page and forwards them back, where they are resolved like document keys. See `src/electron/webview-keystrokes.ts` and the IPC constants in `src/electron/ipc-channels.ts`. The interception set must be re-sent whenever what is enabled can change (focus moves, a find or hard refresh target is registered or removed), or a context-disabled key would be taken from the page.
+Keys typed in a `<webview>` go to the guest page, never the window's document. The renderer tells the Electron main process which keystrokes to intercept (the first keystroke of every binding enabled where focus is, or every keystroke while a chord is in progress); the main process withholds those from the page and forwards them back, where they are resolved like document keys. See `src/electron/webview-keystrokes.ts` and the IPC constants in `src/electron/ipc-channels.ts`. The interception set must be re-sent whenever what is enabled can change (focus moves, a find or browser panel target is registered or removed), or a context-disabled key would be taken from the page.
 
-The browser panel's hard refresh (`src/lib/hard-refresh-targets.ts`) is registered by element like find targets and takes `⇧⌘R` from the page the same way, through the shared `src/lib/focus-target-registry.ts`. `canRenameActiveTab` is false wherever a browser panel holds focus, since browser tabs register no rename, so focus decides which of the two runs.
+The browser panel's actions, hard refresh and bookmark (`src/lib/browser-panel-targets.ts`), are registered by element like find targets and take `⇧⌘R` and `⌘D` from the page the same way, through the shared `src/lib/focus-target-registry.ts`. Elsewhere `⌘D` is unbound and reaches Monaco, whose Add Selection to Next Find Match it is. `canRenameActiveTab` is false wherever a browser panel holds focus, since browser tabs register no rename, so focus decides which of the two runs.
 
 ## Editor code actions
 

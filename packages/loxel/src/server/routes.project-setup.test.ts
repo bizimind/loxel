@@ -89,7 +89,7 @@ describe("project conversion preflight", () => {
       resolveFilePath: () => null,
       initializeProject: onInitialize,
       teardownProject: onTeardown,
-      shutdown: () => {},
+      isShuttingDown: () => false,
       resolveSchema: async () => ({}),
       updateYamlSchemas: () => {},
       updateTomlSchemas: () => {},

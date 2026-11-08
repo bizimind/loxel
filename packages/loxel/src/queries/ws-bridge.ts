@@ -182,13 +182,6 @@ export function useWsBridge(): void {
   useEffect(() => {
     wsClient.connect();
 
-    // On reconnect, invalidate update status so React Query refetches from the (new) server.
-    // This clears the stale "installing" state when the version didn't change (failed update
-    // fallback) — if the version DID change, the WsClient reloads the page instead.
-    const unsubReconnect = wsClient.onReconnect(() => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.updateStatus() });
-    });
-
     const getLogsIsActive = (): boolean => {
       const { activeLeftPanel, activeBottomPanel, activeRightPanel } =
         getCurrentWorktreeToolsBar().getState();
@@ -429,10 +422,6 @@ export function useWsBridge(): void {
           break;
         }
 
-        case "update_status_changed":
-          queryClient.setQueryData(queryKeys.updateStatus(), message.data);
-          break;
-
         // --- Notification events (global) ---
 
         case "notifications_sync":
@@ -477,7 +466,6 @@ export function useWsBridge(): void {
     });
 
     return () => {
-      unsubReconnect();
       unsubscribe();
       wsClient.disconnect();
     };
