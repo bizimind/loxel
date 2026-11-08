@@ -6,20 +6,21 @@ import { DiffToolbar } from "@/components/diff-viewer/DiffToolbar";
 import { FileDiffHeader } from "@/components/diff-viewer/FileDiffHeader";
 import { HunkBasedDiffView } from "@/components/diff-viewer/HunkBasedDiffView";
 import { computeFileDiff, splitLines } from "@/components/diff/compute-file-diff";
+import { EditableSideBanners } from "@/components/diff/EditableSideBanners";
 import { type DiffSide, SideBySideDiffView } from "@/components/diff/SideBySideDiffView";
+import {
+  type EditableSide,
+  REDIFF_DELAY_MS,
+  editableDiffSideProps,
+  editableSideKey,
+  useEditableSide,
+} from "@/components/diff/use-editable-side";
 import { usePanelWorktreePath } from "@/components/dockview/panel-context";
-import { ConflictBanner } from "@/components/editor/ConflictBanner";
-import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { relativeTo } from "@/lib/project-file-helpers";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/ui";
-
-import { type CompareSide, compareSideKey, useCompareSide } from "./use-compare-side";
-
-/** How long typing pauses before the diff is recomputed */
-const REDIFF_DELAY_MS = 100;
 
 interface CompareFilesPanelProps {
   /** Dockview panel id; keys this panel's editor-state entries and Monaco models */
@@ -38,8 +39,8 @@ interface CompareFilesPanelProps {
 export function CompareFilesPanel({ panelId, oldPath, newPath }: CompareFilesPanelProps) {
   const viewMode = useUIStore((s) => s.diffViewMode);
   const worktreePath = usePanelWorktreePath();
-  const oldSide = useCompareSide(oldPath, compareSideKey(panelId, "old"));
-  const newSide = useCompareSide(newPath, compareSideKey(panelId, "new"));
+  const oldSide = useEditableSide(oldPath, editableSideKey(panelId, "old"));
+  const newSide = useEditableSide(newPath, editableSideKey(panelId, "new"));
 
   const oldText = useDebouncedValue(oldSide.text, REDIFF_DELAY_MS);
   const newText = useDebouncedValue(newSide.text, REDIFF_DELAY_MS);
@@ -123,8 +124,8 @@ export function CompareFilesPanel({ panelId, oldPath, newPath }: CompareFilesPan
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
-      <SideBanners side={oldSide} />
-      <SideBanners side={newSide} />
+      <EditableSideBanners side={oldSide} />
+      <EditableSideBanners side={newSide} />
       <div className="bg-editor-surface flex flex-1 scrollbar-thin flex-col overflow-hidden font-mono text-xs">
         <DiffToolbar />
         <div
@@ -159,7 +160,7 @@ function displayPath(filePath: string, worktreePath: string | null): string {
 }
 
 function toDiffSide(
-  side: CompareSide,
+  side: EditableSide,
   lines: string[],
   modelUri: monaco.Uri,
   label: string,
@@ -174,27 +175,8 @@ function toDiffSide(
         {label}
       </span>
     ),
-    editable: { content: side.text ?? "", onContentChange: side.onContentChange },
-    onEditorMount: side.onEditorMount,
+    ...editableDiffSideProps(side),
   };
-}
-
-function SideBanners({ side }: { side: CompareSide }) {
-  const fileName = getDisplayFilename(side.filePath);
-  return (
-    <>
-      {side.isDeleted && !side.loadFailed && (
-        <DeletedFileBanner fileName={fileName} onRecreate={() => void side.recreateFile()} />
-      )}
-      {side.isDiverged && (
-        <ConflictBanner
-          fileName={fileName}
-          onAcceptDisk={side.acceptDisk}
-          onKeepMine={side.keepMine}
-        />
-      )}
-    </>
-  );
 }
 
 function Placeholder({ children }: { children: React.ReactNode }) {

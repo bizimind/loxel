@@ -42,17 +42,21 @@ interface LineChange {
  * before the change.
  */
 export function computeFileDiff(oldLines: string[], newLines: string[]): ComputedFileDiff {
-  const { changes } = computer.computeDiff(oldLines, newLines, {
-    ignoreTrimWhitespace: false,
-    maxComputationTimeMs: MAX_COMPUTATION_MS,
-    computeMoves: false,
-  });
-  const lineChanges: LineChange[] = changes.map((c) => ({
-    oldStart: c.original.startLineNumber,
-    oldEnd: c.original.endLineNumberExclusive,
-    newStart: c.modified.startLineNumber,
-    newEnd: c.modified.endLineNumberExclusive,
-  }));
+  const lineChanges =
+    oldLines.length === 0 || newLines.length === 0
+      ? wholeSideChanges(oldLines, newLines)
+      : computer
+          .computeDiff(oldLines, newLines, {
+            ignoreTrimWhitespace: false,
+            maxComputationTimeMs: MAX_COMPUTATION_MS,
+            computeMoves: false,
+          })
+          .changes.map((c) => ({
+            oldStart: c.original.startLineNumber,
+            oldEnd: c.original.endLineNumberExclusive,
+            newStart: c.modified.startLineNumber,
+            newEnd: c.modified.endLineNumberExclusive,
+          }));
 
   const hunks: DiffHunk[] = [];
   let additions = 0;
@@ -66,6 +70,19 @@ export function computeFileDiff(oldLines: string[], newLines: string[]): Compute
     hunks.push(hunk);
   }
   return { hunks, additions, deletions };
+}
+
+/**
+ * The change when one side has no lines at all (a file that does not exist there, as the old side
+ * of an added file), which Monaco's diff computer cannot take: every line of the other side, but
+ * the empty line after a final newline (all of an empty file), which git does not count either.
+ */
+function wholeSideChanges(oldLines: string[], newLines: string[]): LineChange[] {
+  const count = (lines: string[]) => (lines.at(-1) === "" ? lines.length - 1 : lines.length);
+  const oldCount = count(oldLines);
+  const newCount = count(newLines);
+  if (oldCount === 0 && newCount === 0) return [];
+  return [{ oldStart: 1, oldEnd: oldCount + 1, newStart: 1, newEnd: newCount + 1 }];
 }
 
 /** Changes whose context would touch or overlap share a hunk, as in git. */

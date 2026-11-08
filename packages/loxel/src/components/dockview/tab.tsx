@@ -76,6 +76,14 @@ export function usePanelTitle(api: DockviewPanelApi): string | undefined {
   return useSyncExternalStore(subscribe, () => api.title);
 }
 
+/** The dot before the icon of a tab whose file changed on disk in conflict with unsaved edits. */
+export function DivergedDot({ title }: { title: string }) {
+  return <span className="inline-block size-2 shrink-0 rounded-full bg-yellow-500" title={title} />;
+}
+
+/** Title classes of a tab whose file was deleted from disk. */
+export const DELETED_TAB_TITLE_CLASS = "line-through opacity-50";
+
 interface TabProps {
   api: DockviewPanelApi;
   icon: React.ReactNode;

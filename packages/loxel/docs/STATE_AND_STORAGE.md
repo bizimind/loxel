@@ -33,12 +33,12 @@ Some global stores are keyed internally by worktree or session rather than using
 
 Stores built on the factory, all in memory only:
 
-| Store                                                         | Holds                                                                                                         |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| [worktree-ui.ts](../src/store/worktree-ui.ts)                 | Graph search and filters, selected diff/project file, expanded folders, pending reveal and pending file opens |
-| [worktree-tools-bar.ts](../src/store/worktree-tools-bar.ts)   | Tool bar entries per zone, active sidebar panels, terminal instances, last sidebar sizes                      |
-| [worktree-repository.ts](../src/store/worktree-repository.ts) | Selected commits and diff source                                                                              |
-| [worktree-reviews.ts](../src/store/worktree-reviews.ts)       | Review list and selection for the review overlay (see [CODE_REVIEW.md](CODE_REVIEW.md))                       |
+| Store                                                         | Holds                                                                                                                                           |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| [worktree-ui.ts](../src/store/worktree-ui.ts)                 | Graph search and filters, selected diff/project file, diff file kept open while edited, expanded folders, pending reveal and pending file opens |
+| [worktree-tools-bar.ts](../src/store/worktree-tools-bar.ts)   | Tool bar entries per zone, active sidebar panels, terminal instances, last sidebar sizes                                                        |
+| [worktree-repository.ts](../src/store/worktree-repository.ts) | Selected commits and diff source                                                                                                                |
+| [worktree-reviews.ts](../src/store/worktree-reviews.ts)       | Review list and selection for the review overlay (see [CODE_REVIEW.md](CODE_REVIEW.md))                                                         |
 
 Related helpers that are not stores:
 

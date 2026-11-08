@@ -64,7 +64,8 @@ export function DiffToolbar({ fileNavigation }: { fileNavigation?: DiffFileNavig
       >
         <ArrowDownIcon className="size-3.5" />
       </Button>
-      {fileNavigation && (
+      {/* A file kept open after leaving the diff has no place in it. */}
+      {fileNavigation && fileNavigation.index >= 0 && (
         <span className="text-muted-foreground ml-2 text-[10px]">
           File {fileNavigation.index + 1} of {fileNavigation.count}
         </span>

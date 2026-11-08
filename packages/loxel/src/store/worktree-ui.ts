@@ -70,7 +70,14 @@ interface WorktreeUIState {
 
   // Selected diff file (shared between file tree and diff view)
   selectedDiffFile: string | null;
+  /** Select a diff file; selecting any other file than `editedDiffFile` releases it. */
   setSelectedDiffFile: (file: string | null) => void;
+  /**
+   * A file edited in the diff viewer, which stays selected and shown even after it leaves the
+   * diff (an edit can make it match its base), so the viewer does not jump to another file.
+   */
+  editedDiffFile: string | null;
+  setEditedDiffFile: (file: string | null) => void;
 
   // Graph column layout
   graphColumnSizing: Record<string, number>;
@@ -125,7 +132,13 @@ export const {
   setBranchFilterPreset: (preset) => set({ branchFilterPreset: preset }),
 
   selectedDiffFile: null,
-  setSelectedDiffFile: (file) => set({ selectedDiffFile: file }),
+  setSelectedDiffFile: (file) =>
+    set((s) => ({
+      selectedDiffFile: file,
+      editedDiffFile: file === s.editedDiffFile ? s.editedDiffFile : null,
+    })),
+  editedDiffFile: null,
+  setEditedDiffFile: (file) => set({ editedDiffFile: file }),
 
   graphColumnSizing: {},
   setGraphColumnSizing: (sizing) => set({ graphColumnSizing: sizing }),
