@@ -474,7 +474,7 @@ describe.each(["bare", "regular"] as const)("real server, %s repo", (layout) => 
         const trust = await fetch(`${baseUrl}/api/repo-trust`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ worktreePath: wtPath, trusted: true }),
+          body: JSON.stringify({ worktreePath: wtPath, decision: "trusted" }),
         });
         expect(trust.ok).toBe(true);
 

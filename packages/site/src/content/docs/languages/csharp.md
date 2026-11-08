@@ -25,7 +25,7 @@ Language features start for a repository when all of these are true:
 - Its projects are restored: you have run `dotnet restore`, so `project.assets.json` exists. If you accepted the [setup suggestion](/docs/worktrees-and-projects) when adding the project, each new worktree runs it; you can remove that from the setup script.
 - .NET and csharp-ls are installed, as above.
 
-A fresh clone therefore gets syntax highlighting only, and a notice tells you the next step: what to install or what to run, or the status bar's **Restricted** item asks about trust. You don't need to restart anything. Language features start by themselves after you trust the repository, install csharp-ls or run `dotnet restore`.
+A fresh clone therefore gets syntax highlighting only, and a notice tells you the next step: what to install or what to run, or the status bar's **Restricted** item asks about trust (unless you [declined](/docs/repository-trust#trusting-a-repository) the repository). You don't need to restart anything. Language features start by themselves after you trust the repository, install csharp-ls or run `dotnet restore`.
 
 Opening a C# file never restores packages, installs tools or downloads anything, including with a `nuget.config` that names a feed. Trusting a repository doesn't change that.
 

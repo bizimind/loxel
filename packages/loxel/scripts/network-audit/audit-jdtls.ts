@@ -834,7 +834,7 @@ public class App {
   await gitInit(root);
   if (trusted) {
     await post("/projects", { path: root });
-    await post("/repo-trust", { worktreePath: root, trusted: true });
+    await post("/repo-trust", { worktreePath: root, decision: "trusted" });
   }
 
   const client = await startClient(root);
@@ -964,7 +964,7 @@ async function trustedRepo(name: string, files: Record<string, string>): Promise
   });
   await gitInit(root);
   await post("/projects", { path: root });
-  await post("/repo-trust", { worktreePath: root, trusted: true });
+  await post("/repo-trust", { worktreePath: root, decision: "trusted" });
   return root;
 }
 
@@ -1108,7 +1108,7 @@ dependencies { implementation 'canary:dep:1.0' }
   const closed = new Promise((resolve) => {
     revoked.onClose(resolve);
   });
-  await post("/repo-trust", { worktreePath: gradleRoot, trusted: false });
+  await post("/repo-trust", { worktreePath: gradleRoot, decision: "undecided" });
   console.log(`     revoking closed the connection: ${await closed}`);
   const restricted = await startClient(gradleRoot);
   const { diagnostics } = await restricted.open(MAIN_FILE);

@@ -497,6 +497,7 @@ type SettingsSection =
   | "editor"
   | "schemas"
   | "fileAssociations"
+  | "security"
   | "worktrees";
 
 export interface SettingsState {

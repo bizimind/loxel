@@ -1,6 +1,6 @@
 ---
 title: Repository Trust
-description: How Loxel decides whether it may run a repository's code, and how to trust a repository or stop trusting it.
+description: How Loxel decides whether it may run a repository's code, how to trust a repository or stop trusting it, and how to manage every answer in Settings.
 order: 13.2
 ---
 
@@ -11,6 +11,8 @@ A project you create from scratch with **New Project** starts trusted, since eve
 ## Trusting a repository
 
 Loxel doesn't ask when you open a project. When a feature is restricted for lack of trust, a notice appears once and the status bar shows **Restricted**. Hover it to see what is held back, and click it to choose. **Manage Repository Trust** in the command palette opens the same choice at any time.
+
+Answering **Not Now**, or cancelling the question, declines the repository: it stays untrusted, and the status bar stops asking about it. Loxel still offers trust when a worktree hook waits on it, and **Manage Repository Trust** or Settings let you change your answer.
 
 Trust belongs to the repository, not to a worktree, so a new worktree of a trusted repository doesn't ask again. Moving or replacing the repository's folder means choosing again.
 
@@ -36,7 +38,13 @@ Kotlin, TOML and YAML features work the same in every repository, and so do gofm
 
 ## Stop trusting a repository
 
-A trusted repository shows a shield in the status bar. Click it, or run **Manage Repository Trust**, to stop trusting it. Language servers that depend on trust restart restricted. When a language server that runs builds (Rust, C#, Go) crashes, Loxel also stops the builds it had running, except one started in the few seconds before the crash. A process that the repository's code started and detached to run on its own can keep running after you stop trusting the repository.
+A trusted repository shows a shield in the status bar. Click it, run **Manage Repository Trust**, or use **Settings > Security** to stop trusting it, which also declines it. Language servers that depend on trust restart restricted. When a language server that runs builds (Rust, C#, Go) crashes, Loxel also stops the builds it had running, except one started in the few seconds before the crash. A process that the repository's code started and detached to run on its own can keep running after you stop trusting the repository.
+
+## Managing trust in Settings
+
+**Settings > Security** lists every repository Loxel knows: your projects' repositories, and any repository you answered for that no project uses any more. Each one shows whether you trusted it, declined it, or haven't decided, and what is restricted there. Filter the list by answer, or search it by folder.
+
+From the list you can trust a repository, stop trusting one, or forget your answer so Loxel asks again. Trusting shows the same explanation as the status bar, and every change applies to all windows at once. An answer marked **No longer applies** was given for a folder that has since been moved, deleted or replaced by another one: it has no effect, and you can forget it.
 
 ## What trust covers
 
@@ -44,4 +52,4 @@ Trust lets the repository's own code run. It doesn't let Loxel download or insta
 
 Trust is per repository, and a nested repository has its own. A trusted repository's own project files are still loaded as they are written, including the nested repositories they name, such as a solution that references a project in a submodule.
 
-Nothing in a repository can mark itself as trusted. Your answer is stored in Loxel's own state on your machine and is never sent anywhere.
+Nothing in a repository can mark itself as trusted, or as declined. Your answer is stored in Loxel's own state on your machine and is never sent anywhere.
