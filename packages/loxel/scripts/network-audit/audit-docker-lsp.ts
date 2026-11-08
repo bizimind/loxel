@@ -12,8 +12,8 @@
  * from leaving, and connect-log.c would block them if it did not. The dwell spans the periodic
  * flushes of the server's telemetry and session clients.
  *
- * The audit covers the server process. Its `docker buildx` child is the user's own Docker CLI, which
- * macOS does not let DYLD_INSERT_LIBRARIES reach, so it is out of scope here.
+ * The audit covers the server process, which is all there is: its `PATH` holds no `docker`, so the
+ * Dockerfile lint that would run `docker buildx` never starts a child to audit.
  */
 
 import { randomBytes } from "node:crypto";

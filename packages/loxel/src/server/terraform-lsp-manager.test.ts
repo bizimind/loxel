@@ -58,7 +58,7 @@ async function terraformSeenByServer(trusted: boolean): Promise<{ wt: string; se
   const server = join(root, "terraform-ls");
   await writeFile(
     server,
-    `#!/bin/sh\necho "found=$(command -v terraform)" > '${fifo}'\ncat > /dev/null\n`,
+    `#!/bin/sh\necho "found=$(command -v terraform) tfenv=$TFENV_AUTO_INSTALL" > '${fifo}'\ncat > /dev/null\n`,
   );
   await chmod(server, 0o755);
   process.env.PATH = `${tools}:/usr/bin:/bin`;
@@ -74,13 +74,13 @@ async function terraformSeenByServer(trusted: boolean): Promise<{ wt: string; se
 describe.skipIf(!canRun)("TerraformLspManager and repository trust", () => {
   test("an untrusted repository's server finds no terraform, and says so", async () => {
     const { wt, seen } = await terraformSeenByServer(false);
-    expect(seen).toBe("found=");
+    expect(seen).toStartWith("found= ");
     expect(getRepoTrustStatus(wt).restrictions).toEqual([RESTRICTION]);
   });
 
-  test("a trusted repository's server finds the user's terraform", async () => {
+  test("a trusted repository's server finds the user's terraform, which installs nothing", async () => {
     const { wt, seen } = await terraformSeenByServer(true);
-    expect(seen).toBe(`found=${join(root, "tools", "terraform")}`);
+    expect(seen).toBe(`found=${join(root, "tools", "terraform")} tfenv=false`);
     expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 });
