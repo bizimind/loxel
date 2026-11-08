@@ -7,8 +7,9 @@ import type {
   JavaScriptDialogClosed,
   JavaScriptDialogRequest,
 } from "@/electron/javascript-dialog-protocol";
-import { getFocusedHardRefreshTarget } from "@/lib/hard-refresh-targets";
+import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
 import { focusRegisteredPanel } from "@/lib/panel-focus";
+import { useBrowserBookmarksStore } from "@/store/browser-bookmarks";
 import { stubElectronAPI } from "@/test/electron-api-stub";
 
 // BrowserPanel renders its webview only in Electron (read once, at import).
@@ -237,36 +238,36 @@ describe("page dialogs in a browser panel", () => {
 describe("hard refresh", () => {
   test("bypasses the cache for the panel that holds focus, in its page or its toolbar", () => {
     const { webview, reload, reloadIgnoringCache } = renderPanel();
-    getFocusedHardRefreshTarget()?.();
+    getFocusedBrowserPanel()?.hardRefresh();
     expect(reloadIgnoringCache).toHaveBeenCalledTimes(1);
 
     screen.getByRole("textbox").focus();
-    getFocusedHardRefreshTarget()?.();
+    getFocusedBrowserPanel()?.hardRefresh();
     expect(reloadIgnoringCache).toHaveBeenCalledTimes(2);
     expect(reload).not.toHaveBeenCalled();
 
     screen.getByText("Elsewhere").focus();
     expect(document.activeElement).not.toBe(webview);
-    expect(getFocusedHardRefreshTarget()).toBeUndefined();
+    expect(getFocusedBrowserPanel()).toBeUndefined();
   });
 
   test("first dismisses the page's dialogs, which would block the navigation", () => {
     const { reloadIgnoringCache } = renderPanel();
     show({ type: "confirm" });
-    act(() => getFocusedHardRefreshTarget()?.());
+    act(() => getFocusedBrowserPanel()?.hardRefresh());
     expect(reloadIgnoringCache.mock.results).toEqual([{ type: "return", value: 1 }]);
   });
 
   test("does nothing until the webview is ready, and stops applying once unmounted", () => {
     const { reloadIgnoringCache, fireReady } = renderPanel({ ready: false });
-    getFocusedHardRefreshTarget()?.();
+    getFocusedBrowserPanel()?.hardRefresh();
     expect(reloadIgnoringCache).not.toHaveBeenCalled();
     fireReady();
-    getFocusedHardRefreshTarget()?.();
+    getFocusedBrowserPanel()?.hardRefresh();
     expect(reloadIgnoringCache).toHaveBeenCalledTimes(1);
 
     cleanup();
-    expect(getFocusedHardRefreshTarget()).toBeUndefined();
+    expect(getFocusedBrowserPanel()).toBeUndefined();
   });
 });
 
@@ -342,5 +343,118 @@ describe("focus when a browser panel is activated", () => {
     const { webview } = renderPanel();
     act(() => void focusRegisteredPanel(panelApi.id));
     expect(document.activeElement).toBe(webview);
+  });
+});
+
+describe("bookmarks", () => {
+  beforeEach(() => useBrowserBookmarksStore.setState({ bookmarks: [] }));
+
+  const star = () => screen.getByRole("button", { name: /bookmark/i, pressed: false });
+
+  function loadPage(webview: HTMLElement, url: string, title?: string, favicon?: string) {
+    Object.assign(webview, { getURL: () => url });
+    act(() => {
+      webview.dispatchEvent(new Event("did-navigate"));
+      if (title) webview.dispatchEvent(Object.assign(new Event("page-title-updated"), { title }));
+      if (favicon) {
+        webview.dispatchEvent(
+          Object.assign(new Event("page-favicon-updated"), { favicons: [favicon] }),
+        );
+      }
+    });
+  }
+
+  test("the star bookmarks the page with its title and favicon, and removes it again", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example", "https://example.com/favicon.ico");
+
+    fireEvent.click(star());
+    expect(useBrowserBookmarksStore.getState().bookmarks).toEqual([
+      {
+        url: "https://example.com/",
+        title: "Example",
+        faviconUrl: "https://example.com/favicon.ico",
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Bookmark", pressed: true }));
+    expect(useBrowserBookmarksStore.getState().bookmarks).toEqual([]);
+  });
+
+  test("the bookmark action toggles the focused panel's page", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example");
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(screen.getByRole("button", { name: "Remove Bookmark", pressed: true })).toBeVisible();
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(useBrowserBookmarksStore.getState().bookmarks).toEqual([]);
+  });
+
+  test("bookmarks the page shown, not the next one still loading or the last one's title", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example", "https://example.com/favicon.ico");
+    const address = screen.getByRole("textbox");
+    fireEvent.change(address, { target: { value: "other.example" } });
+    fireEvent.keyDown(address, { key: "Enter" });
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(useBrowserBookmarksStore.getState().bookmarks.map((b) => b.url)).toEqual([
+      "https://example.com/",
+    ]);
+
+    // Committed, but its title and favicon have not arrived yet.
+    loadPage(webview, "https://other.example/");
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(useBrowserBookmarksStore.getState().bookmarks.at(-1)).toEqual({
+      url: "https://other.example/",
+      title: "https://other.example/",
+    });
+  });
+
+  function failLoad(webview: HTMLElement, isMainFrame: boolean) {
+    act(() => {
+      webview.dispatchEvent(
+        Object.assign(new Event("did-fail-load"), {
+          errorCode: -105,
+          errorDescription: "ERR_NAME_NOT_RESOLVED",
+          validatedURL: "https://nope.example/",
+          isMainFrame,
+        }),
+      );
+    });
+  }
+
+  test("a page whose embed failed to load can still be bookmarked", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example");
+    failLoad(webview, false);
+    expect(star()).toBeEnabled();
+    expect(screen.queryByText(/Failed to load/)).toBeNull();
+  });
+
+  test("a page that failed to load can't be bookmarked", () => {
+    const { webview } = renderPanel();
+    loadPage(webview, "https://example.com/", "Example");
+    failLoad(webview, true);
+    expect(star()).toBeDisabled();
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(useBrowserBookmarksStore.getState().bookmarks).toEqual([]);
+  });
+
+  test("a blank page can't be bookmarked, and lists the bookmarks to open one", () => {
+    useBrowserBookmarksStore.setState({
+      bookmarks: [{ url: "https://example.com/docs", title: "Docs" }],
+    });
+    const { webview } = renderPanel();
+    const loadURL = mock(async () => {});
+    Object.assign(webview, { loadURL });
+    expect(star()).toBeDisabled();
+    act(() => getFocusedBrowserPanel()?.toggleBookmark());
+    expect(useBrowserBookmarksStore.getState().bookmarks).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Docs/ }));
+    expect(loadURL).toHaveBeenCalledWith("https://example.com/docs");
+    expect(screen.getByRole("textbox")).toHaveValue("https://example.com/docs");
+    // The start page goes once the panel shows a page.
+    expect(screen.queryByRole("heading", { name: "Bookmarks" })).toBeNull();
   });
 });

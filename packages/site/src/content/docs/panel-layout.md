@@ -81,6 +81,8 @@ The status bar runs across the bottom edge of the window and is always visible. 
 
 A browser panel (`Cmd+Shift+B`) is a full web view with back, forward, reload, an address bar, and DevTools. A new blank panel starts with the cursor in the address bar, so you can type a URL or a search right away. `Cmd+F` finds text in the page, and `Cmd+Shift+R` while the tab has focus does a hard refresh, reloading the page and bypassing the cache. Clicking the title of the active browser tab returns focus to its page.
 
+Bookmark a page with the star at the end of the address bar, or `Cmd+D` while the tab has focus; the star fills in on a bookmarked page, and clicking it again removes the bookmark. The bookmark button next to the address bar lists your bookmarks, and a new blank tab shows them in place of an empty page. Click one to open it in the current tab, or `Cmd`-click or middle-click it to open it in a background tab (`Cmd+Shift`-click switches to it). Hover a bookmark and click its **×**, or press `Delete` on it in the list, to remove it. Bookmarks are shared by all your projects and windows and kept across restarts.
+
 A plain click on a link opens it in the same tab. Links you open in a new tab or window become browser tabs right after the current one, in the same group:
 
 - **`Cmd`-click or middle-click** opens the link in a background tab and keeps you on the current page, so you can hold `Cmd` and click several links in a row. The new tabs keep the order you clicked them in.

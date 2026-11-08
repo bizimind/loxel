@@ -19,17 +19,29 @@ import {
   RefreshCwIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { FindBar } from "@/components/ui/find-bar";
 import { BROWSER_PARTITION } from "@/electron/browser-partition";
 import { isActivatedPanel, usePanelActivationFocus } from "@/hooks/usePanelActivationFocus";
 import { usePanelFind } from "@/hooks/usePanelFind";
-import { registerHardRefreshTarget } from "@/lib/hard-refresh-targets";
+import { registerBrowserPanelTarget } from "@/lib/browser-panel-targets";
 import { openBrowserTab } from "@/lib/panel-creators";
 import { cn } from "@/lib/utils";
+import {
+  type BrowserBookmark,
+  useBrowserBookmarksStore,
+  useIsBookmarked,
+} from "@/store/browser-bookmarks";
 import { reattachActiveContent } from "@/store/layout-actions";
+import { isHttpUrl } from "@/url-utils";
 
+import {
+  BookmarksMenu,
+  BookmarksStartPage,
+  BookmarkToggle,
+  type OpenBookmark,
+} from "./BrowserBookmarks";
 import { BrowserContextMenu, type BrowserContextMenuState } from "./BrowserContextMenu";
 import { JavaScriptDialog } from "./JavaScriptDialog";
 import { useJavaScriptDialogs } from "./useJavaScriptDialogs";
@@ -77,6 +89,12 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
   useEffect(() => {
     currentUrlRef.current = currentUrl;
   }, [currentUrl]);
+  // The page that committed, which a bookmark saves: the address bar and the panel title run ahead
+  // of it while the next page loads, and the title and favicon arrive after it commits. Its URL is
+  // empty while there is none, or after a load failed.
+  const pageRef = useRef<BrowserBookmark>({ url: "", title: "" });
+  const [pageUrl, setPageUrl] = useState("");
+  const isBookmarked = useIsBookmarked(pageUrl);
 
   // The page's alert() / confirm() / prompt(), shown over the page one at a time.
   // Navigating from the toolbar first dismisses them: the navigation would wait for the page.
@@ -204,24 +222,37 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       const url = webview.getURL();
       setCurrentUrl(url);
       setInputUrl(url);
-      panelApi.updateParameters({ url, faviconUrl: undefined });
+      setPageUrl(url);
+      if (event.type === "did-navigate") {
+        pageRef.current = { url, title: "" };
+        panelApi.updateParameters({ url, faviconUrl: undefined });
+      } else {
+        // The same document, which keeps its title and favicon (Chromium reports them per document).
+        pageRef.current = { ...pageRef.current, url };
+        panelApi.updateParameters({ url });
+      }
       updateNavState();
     };
 
     const onTitleUpdate = (event: PageTitleUpdatedEvent) => {
+      pageRef.current = { ...pageRef.current, title: event.title };
       panelApi.setTitle(event.title);
     };
 
     const onFaviconUpdate = (event: PageFaviconUpdatedEvent) => {
       const favicon = event.favicons[0];
       if (favicon) {
+        pageRef.current = { ...pageRef.current, faviconUrl: favicon };
         panelApi.updateParameters({ faviconUrl: favicon });
       }
     };
 
     const onFailLoad = (event: DidFailLoadEvent) => {
-      // errorCode -3 is ERR_ABORTED (user stopped navigation) — not a real error
-      if (event.errorCode === -3) return;
+      // errorCode -3 is ERR_ABORTED (user stopped navigation) — not a real error. A subframe that
+      // fails (a dead or framing-blocked embed) leaves the page itself loaded.
+      if (event.errorCode === -3 || !event.isMainFrame) return;
+      pageRef.current = { url: "", title: "" };
+      setPageUrl("");
       setLoadError(
         `Failed to load ${event.validatedURL}: ${event.errorDescription} (${event.errorCode})`,
       );
@@ -326,11 +357,23 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
     webviewRef.current?.reloadIgnoringCache();
   }, [dismissDialogs]);
 
+  // Pages of the web only: not the blank page, or Chromium's error and internal pages.
+  const canBookmark = isHttpUrl(pageUrl);
+  const toggleBookmark = useCallback(() => {
+    const page = pageRef.current;
+    if (!isHttpUrl(page.url)) return;
+    useBrowserBookmarksStore.getState().toggleBookmark({ ...page, title: page.title || page.url });
+  }, []);
+
+  const browserPanelTarget = useMemo(
+    () => ({ hardRefresh, toggleBookmark }),
+    [hardRefresh, toggleBookmark],
+  );
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    return registerHardRefreshTarget(root, hardRefresh);
-  }, [hardRefresh]);
+    return registerBrowserPanelTarget(root, browserPanelTarget);
+  }, [browserPanelTarget]);
 
   const stopLoading = useCallback(() => {
     if (readyRef.current) webviewRef.current?.stop();
@@ -345,6 +388,18 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
       wv.openDevTools();
     }
   }, []);
+
+  const openBookmark = useCallback<OpenBookmark>(
+    (url, inNewTab) => {
+      if (inNewTab) {
+        openBrowserTab(url, { sourcePanelId: panelApi.id, activate: inNewTab.activate });
+        return;
+      }
+      navigate(url);
+      webviewRef.current?.focus();
+    },
+    [navigate, panelApi],
+  );
 
   // A closed dialog returns focus to the page, as browsers do; the next queued one then takes it.
   const returnFocusToPage = useCallback(() => webviewRef.current?.focus(), []);
@@ -416,7 +471,14 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
             className="text-foreground min-w-0 flex-1 bg-transparent text-xs outline-none"
             spellCheck={false}
           />
+          <BookmarkToggle
+            bookmarked={isBookmarked}
+            disabled={!canBookmark}
+            onToggle={toggleBookmark}
+          />
         </div>
+
+        <BookmarksMenu onOpen={openBookmark} />
 
         <NavButton
           onClick={toggleDevTools}
@@ -444,6 +506,7 @@ export function BrowserPanel({ url: initialUrl, panelApi }: BrowserPanelProps) {
           className="flex-1"
           style={{ display: "flex" }}
         />
+        {isBlankPage(currentUrl) && <BookmarksStartPage onOpen={openBookmark} />}
         {findBarProps && <FindBar label="Find in page" {...findBarProps} />}
         {dialog && (
           <JavaScriptDialog

@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import type { DockviewApi } from "dockview-react";
 
+import { registerBrowserPanelTarget } from "@/lib/browser-panel-targets";
 import { registerFindTarget } from "@/lib/find-targets";
-import { registerHardRefreshTarget } from "@/lib/hard-refresh-targets";
 import { registerTabRename } from "@/lib/tab-rename";
 
 import { applyStoreUpdate } from "../store-sync";
@@ -181,7 +181,10 @@ describe("⇧⌘R, shared by Rename Tab and a browser panel's hard refresh", () 
     const panel = { id: "tab", group: { element: tabGroup } };
     setCenterApi({ activePanel: panel } as unknown as DockviewApi);
     const offRename = registerTabRename(panel.id, () => {});
-    const offHardRefresh = registerHardRefreshTarget(browserRoot, () => {});
+    const offHardRefresh = registerBrowserPanelTarget(browserRoot, {
+      hardRefresh: () => {},
+      toggleBookmark: () => {},
+    });
     return {
       browserInput: browserRoot.querySelector("input")!,
       tabInput: tabGroup.querySelector("input")!,
