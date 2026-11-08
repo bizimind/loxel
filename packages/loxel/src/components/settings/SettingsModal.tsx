@@ -6,6 +6,7 @@ import {
   KeyboardIcon,
   PanelsLeftBottomIcon,
   SettingsIcon,
+  ShieldIcon,
   TerminalSquareIcon,
   XIcon,
 } from "lucide-react";
@@ -24,6 +25,7 @@ import { GeneralSection } from "./GeneralSection";
 import { KeybindingsSection } from "./KeybindingsSection";
 import { LayoutSection } from "./LayoutSection";
 import { SchemasSection } from "./SchemasSection";
+import { SecuritySection } from "./SecuritySection";
 import { TerminalSection } from "./TerminalSection";
 
 interface SectionDef {
@@ -40,6 +42,7 @@ const SECTIONS: SectionDef[] = [
   { key: "editor", label: "Editor", icon: CodeIcon },
   { key: "schemas", label: "Schemas", icon: FileJson2Icon },
   { key: "fileAssociations", label: "File Associations", icon: FileTypeIcon },
+  { key: "security", label: "Security", icon: ShieldIcon },
 ];
 
 export function SettingsModal() {
@@ -103,7 +106,9 @@ export function SettingsModal() {
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleCancel();
+      // Escape in a dialog opened from Settings (such as the trust question) closes only it.
+      const inDialog = e.target instanceof Element && e.target.closest("dialog[open]") !== null;
+      if (e.key === "Escape" && !inDialog) handleCancel();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -190,6 +195,10 @@ export function SettingsModal() {
 
               <div id="settings-fileAssociations" className="border-border mt-8 border-t pt-8">
                 <FileAssociationsSection />
+              </div>
+
+              <div id="settings-security" className="border-border mt-8 border-t pt-8">
+                <SecuritySection />
               </div>
             </div>
           </div>

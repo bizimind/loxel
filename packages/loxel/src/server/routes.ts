@@ -44,6 +44,7 @@ import type {
   ScanSuggestionsResult,
   WorkspaceSetup,
 } from "@/api/project-model";
+import type { RepoTrustDecision, RepoTrustListResponse } from "@/api/repo-trust-model";
 import type { SearchMatch } from "@/api/search-model";
 import type {
   NestedRemoval,
@@ -84,7 +85,14 @@ import {
   type ProjectWorktree,
   type WorktreeMetaUpdate,
 } from "./project-worktrees";
-import { getRepoTrustStatus, isRepoTrustStoreKey, setRepoTrusted } from "./repo-trust";
+import {
+  forgetRepoTrust,
+  getRepoTrustStatus,
+  isRepoTrustStoreKey,
+  listRepoTrust,
+  setRepoTrustDecision,
+  setRepoTrusted,
+} from "./repo-trust";
 import { error, json } from "./response-helpers";
 import { handleReviewRequest } from "./review-routes";
 import type { ProjectState, ResolvedFilePath, WorktreeResources } from "./server-state";
@@ -1117,15 +1125,48 @@ async function handleGetRepoTrust(req: Request, ctx: RouteContext): Promise<Resp
   return wtPath instanceof Response ? wtPath : json(getRepoTrustStatus(wtPath));
 }
 
+const REPO_TRUST_DECISIONS: readonly RepoTrustDecision[] = ["trusted", "declined", "undecided"];
+
+function isRepoTrustDecision(value: unknown): value is RepoTrustDecision {
+  return REPO_TRUST_DECISIONS.some((decision) => decision === value);
+}
+
+/**
+ * Answer for a worktree's repository, or forget an answer by repository id: a repository no project
+ * uses has no worktree to name, and forgetting can only take trust away.
+ */
 async function handleSetRepoTrust(req: Request, ctx: RouteContext): Promise<Response> {
   const body = await parseBody(req);
-  if (typeof body.trusted !== "boolean") return error("Missing 'trusted' boolean in body", 400);
+  const { decision } = body;
+  if (!isRepoTrustDecision(decision)) return error("Missing 'decision' in body", 400);
+  if (typeof body.repositoryId === "string") {
+    if (decision !== "undecided") return error("Only forgetting takes a repository id", 400);
+    forgetRepoTrust(body.repositoryId);
+    return json({ success: true });
+  }
   const resolved = resolveProjectFromBody(body, ctx);
   if (resolved instanceof Response) return resolved;
   const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
   if (wtPath instanceof Response) return wtPath;
-  setRepoTrusted(wtPath, body.trusted);
+  setRepoTrustDecision(wtPath, decision);
   return json(getRepoTrustStatus(wtPath));
+}
+
+/** Every project's repository and every stored answer, for Settings > Security. */
+async function handleListRepoTrust(): Promise<Response> {
+  const { projects } = await projectStore.loadProjects();
+  const worktrees = await Promise.all(
+    projects.map(async (project) => {
+      try {
+        const listed = await listManagedWorktrees(project.path);
+        return listed.length > 0 ? listed.map((wt) => wt.path) : [project.path];
+      } catch {
+        return [project.path];
+      }
+    }),
+  );
+  const response: RepoTrustListResponse = { repositories: listRepoTrust(worktrees.flat()) };
+  return json(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -3354,6 +3395,7 @@ const routes: Record<string, Record<string, RouteHandler>> = {
     "/api/detected-formatters": handleDetectedFormatters,
     ...toolchainGetRoutes,
     "/api/repo-trust": handleGetRepoTrust,
+    "/api/repo-trust/list": handleListRepoTrust,
     "/api/editorconfig": handleEditorConfig,
   },
   POST: {

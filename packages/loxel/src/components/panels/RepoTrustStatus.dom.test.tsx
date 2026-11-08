@@ -34,14 +34,14 @@ afterEach(cleanup);
 
 describe("RepoTrustStatus", () => {
   test("stays quiet in an untrusted repository nothing is waiting on", () => {
-    renderStatus({ repository: "/quiet", trusted: false, restrictions: [] });
+    renderStatus({ repository: "/quiet", decision: "undecided", restrictions: [] });
     expect(screen.queryByRole("button")).toBeNull();
   });
 
   test("shows what is restricted and asks on click", () => {
     renderStatus({
       repository: "/restricted",
-      trusted: false,
+      decision: "undecided",
       restrictions: ["Build scripts don't run."],
     });
     const button = screen.getByRole("button", { name: "Restricted" });
@@ -50,8 +50,17 @@ describe("RepoTrustStatus", () => {
     expect(manageRepoTrust).toHaveBeenCalledWith(WT);
   });
 
+  test("a declined repository stays quiet, whatever is restricted", () => {
+    renderStatus({
+      repository: "/declined",
+      decision: "declined",
+      restrictions: ["Build scripts don't run."],
+    });
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
   test("a trusted repository offers revoking", () => {
-    renderStatus({ repository: "/trusted", trusted: true, restrictions: [] });
+    renderStatus({ repository: "/trusted", decision: "trusted", restrictions: [] });
     const button = screen.getByRole("button");
     expect(button.title).toContain("stop trusting");
     expect(button.textContent).toBe("");

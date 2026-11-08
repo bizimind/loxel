@@ -2,64 +2,102 @@ import type { ReactNode } from "react";
 
 import { runInitHook } from "@/api/client";
 import { getRepoTrust, setRepoTrust } from "@/api/repo-trust-client";
-import { requestConfirmation } from "@/components/ui/confirm-dialog-host";
+import type { RepoTrustStatus } from "@/api/repo-trust-model";
+import type { ConfirmationOptions } from "@/components/ui/confirm-dialog-host";
+import { requestAnswer } from "@/components/ui/confirm-dialog-host";
 import { showToast } from "@/components/ui/toast";
 
 /** What trusting a repository means, said the same way wherever Loxel asks. */
 function TrustExplanation({
   repository,
   restrictions,
-}: {
-  repository: string;
-  restrictions: string[];
-}): ReactNode {
+}: Pick<RepoTrustStatus, "repository" | "restrictions">): ReactNode {
   return (
     <>
-      Trusting <strong>{repository}</strong> lets features that depend on trust run code from it, in
-      all its worktrees, which a malicious repository could abuse. Trust it only if you would run
-      its code yourself.
+      <p>
+        Trusting <strong>{repository}</strong> lets features that depend on trust run code from it,
+        in all its worktrees, which a malicious repository could abuse. Trust it only if you would
+        run its code yourself.
+      </p>
       {restrictions.length > 0 && (
         <>
-          <br />
-          <br />
-          Restricted now: {restrictions.join(" ")}
+          <p className="mt-2">Restricted now:</p>
+          <ul className="list-disc pl-4">
+            {restrictions.map((restriction) => (
+              <li key={restriction}>{restriction}</li>
+            ))}
+          </ul>
         </>
       )}
-      <br />
-      <br />
-      Trust does not let Loxel download or install anything. Dependencies and toolchains stay yours
-      to install.
+      <p className="mt-2">
+        Trust does not let Loxel download or install anything. Dependencies and toolchains stay
+        yours to install.
+      </p>
     </>
   );
 }
 
+function trustQuestion(status: RepoTrustStatus): ConfirmationOptions {
+  return {
+    title: "Trust this repository?",
+    description: <TrustExplanation {...status} />,
+    confirmLabel: "Trust Repository",
+  };
+}
+
+function stopTrustingQuestion({ repository }: RepoTrustStatus): ConfirmationOptions {
+  return {
+    title: "Stop trusting this repository?",
+    description: (
+      <>
+        Features that depend on trust stop running code from <strong>{repository}</strong>, in all
+        its worktrees, and restart restricted.
+      </>
+    ),
+    confirmLabel: "Stop Trusting",
+    destructive: true,
+  };
+}
+
+/**
+ * Record a "no" to the trust question, so the status bar stops asking. A question another one
+ * replaced (`answer` null) was not answered, and one already declined needs no new row.
+ */
+async function recordAnswer(
+  wtPath: string,
+  status: RepoTrustStatus,
+  answer: boolean | null,
+): Promise<boolean> {
+  if (answer === true) {
+    await setRepoTrust({ worktreePath: wtPath, decision: "trusted" });
+    return true;
+  }
+  if (answer === false && status.decision === "undecided") {
+    await setRepoTrust({ worktreePath: wtPath, decision: "declined" });
+  }
+  return false;
+}
+
 /**
  * Asks whether to trust the worktree's repository, or to stop trusting it, and applies the answer.
- * The server tells every window, and restarts whatever depends on the answer.
+ * The server tells every window, and restarts whatever depends on the answer. Stopping trust, or
+ * answering "no" to trusting, records the repository as declined, so the status bar goes quiet;
+ * from Settings, where the user asked for the dialog themselves, cancelling records nothing.
  */
-export async function manageRepoTrust(wtPath: string): Promise<void> {
+export async function manageRepoTrust(
+  wtPath: string,
+  { declineOnCancel = true }: { declineOnCancel?: boolean } = {},
+): Promise<void> {
   try {
-    const { repository, trusted, restrictions } = await getRepoTrust(wtPath);
-    const confirmed = await requestConfirmation(
-      trusted
-        ? {
-            title: "Stop trusting this repository?",
-            description: (
-              <>
-                Features that depend on trust stop running code from <strong>{repository}</strong>,
-                in all its worktrees, and restart restricted.
-              </>
-            ),
-            confirmLabel: "Stop Trusting",
-            destructive: true,
-          }
-        : {
-            title: "Trust this repository?",
-            description: <TrustExplanation repository={repository} restrictions={restrictions} />,
-            confirmLabel: "Trust Repository",
-          },
-    );
-    if (confirmed) await setRepoTrust({ worktreePath: wtPath, trusted: !trusted });
+    const status = await getRepoTrust(wtPath);
+    if (status.decision === "trusted") {
+      const answer = await requestAnswer(stopTrustingQuestion(status));
+      if (answer) await setRepoTrust({ worktreePath: wtPath, decision: "declined" });
+      return;
+    }
+    const answer = await requestAnswer(trustQuestion(status));
+    // From Settings a cancel is backing out of a dialog the user opened, not an answer.
+    await recordAnswer(wtPath, status, answer === false && !declineOnCancel ? null : answer);
   } catch (err) {
     showToast(err instanceof Error ? err.message : "Could not change repository trust");
   }
@@ -67,29 +105,26 @@ export async function manageRepoTrust(wtPath: string): Promise<void> {
 
 /**
  * Asks to trust the worktree's repository, after `reason` says what is waiting on it. Resolves
- * true when the repository is trusted, already or by this answer.
+ * true when the repository is trusted, already or by this answer. "Not Now" records it declined.
  */
 export async function askToTrustRepo(
   wtPath: string,
   ask: { title: string; reason: ReactNode; confirmLabel: string },
 ): Promise<boolean> {
-  const { repository, trusted, restrictions } = await getRepoTrust(wtPath);
-  if (trusted) return true;
-  const confirmed = await requestConfirmation({
+  const status = await getRepoTrust(wtPath);
+  if (status.decision === "trusted") return true;
+  const answer = await requestAnswer({
     title: ask.title,
     description: (
       <>
-        {ask.reason}
-        <br />
-        <br />
-        <TrustExplanation repository={repository} restrictions={restrictions} />
+        <p className="mb-2">{ask.reason}</p>
+        <TrustExplanation {...status} />
       </>
     ),
     confirmLabel: ask.confirmLabel,
     cancelLabel: "Not Now",
   });
-  if (confirmed) await setRepoTrust({ worktreePath: wtPath, trusted: true });
-  return confirmed;
+  return recordAnswer(wtPath, status, answer);
 }
 
 /** The offers still to show, one at a time: a newer confirmation would cancel the one showing. */

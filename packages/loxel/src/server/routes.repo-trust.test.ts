@@ -7,9 +7,12 @@ import { join } from "node:path";
 const stateDir = await mkdtemp(join(tmpdir(), "routes-repo-trust-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { handleRequest } = await import("./routes");
-const { isRepoTrusted, repoTrustId } = await import("./repo-trust");
+const { getRepoTrustStatus, isRepoTrusted, repoTrustId, setRepoTrusted } =
+  await import("./repo-trust");
+const projectStore = await import("./project-store");
 type RouteContext = import("./routes").RouteContext;
 type ProjectState = import("./server-state").ProjectState;
+type RepoTrustListResponse = import("@/api/repo-trust-model").RepoTrustListResponse;
 
 const root = await realpath(await mkdtemp(join(tmpdir(), "routes-repo-trust-")));
 const wt = join(root, "wt");
@@ -53,32 +56,76 @@ describe("/api/repo-trust", () => {
       new Request(`http://x/api/repo-trust?wt=${encodeURIComponent(wt)}`),
       ctx,
     );
-    expect(await read.json()).toEqual({ repository: wt, trusted: false, restrictions: [] });
+    expect(await read.json()).toEqual({ repository: wt, decision: "undecided", restrictions: [] });
 
-    const trusted = await setTrust({ worktreePath: wt, trusted: true });
-    expect(await trusted.json()).toEqual({ repository: wt, trusted: true, restrictions: [] });
+    const trusted = await setTrust({ worktreePath: wt, decision: "trusted" });
+    expect(await trusted.json()).toEqual({ repository: wt, decision: "trusted", restrictions: [] });
     expect(isRepoTrusted(wt)).toBe(true);
 
-    await setTrust({ worktreePath: wt, trusted: false });
+    const declined = await setTrust({ worktreePath: wt, decision: "declined" });
+    expect(await declined.json()).toEqual({
+      repository: wt,
+      decision: "declined",
+      restrictions: [],
+    });
     expect(isRepoTrusted(wt)).toBe(false);
   });
 
   test("needs an explicit answer and a known worktree", async () => {
-    expect((await setTrust({ worktreePath: wt, trusted: "yes" })).status).toBe(400);
-    expect((await setTrust({ worktreePath: join(root, "other"), trusted: true })).status).toBe(404);
+    expect((await setTrust({ worktreePath: wt, decision: "yes" })).status).toBe(400);
+    expect((await setTrust({ worktreePath: wt, trusted: true })).status).toBe(400);
+    const unknown = await setTrust({ worktreePath: join(root, "other"), decision: "trusted" });
+    expect(unknown.status).toBe(404);
     expect(isRepoTrusted(wt)).toBe(false);
   });
 
-  test("the generic store route cannot write trust", async () => {
-    const key = encodeURIComponent(`repo-trust:${repoTrustId(wt)}`);
-    const response = await handleRequest(
-      new Request(`http://x/api/stores/${key}`, {
-        method: "PUT",
-        body: JSON.stringify({ value: JSON.stringify({ fingerprint: "forged" }) }),
-      }),
-      ctx,
-    );
-    expect(response.status).toBe(403);
-    expect(isRepoTrusted(wt)).toBe(false);
+  test("forgets by repository id, which can only clear an answer", async () => {
+    await setTrust({ worktreePath: wt, decision: "trusted" });
+    const repositoryId = repoTrustId(wt);
+    expect((await setTrust({ repositoryId, decision: "trusted" })).status).toBe(400);
+    expect((await setTrust({ repositoryId, decision: "declined" })).status).toBe(400);
+    expect(isRepoTrusted(wt)).toBe(true);
+
+    expect((await setTrust({ repositoryId, decision: "undecided" })).ok).toBe(true);
+    expect(getRepoTrustStatus(wt).decision).toBe("undecided");
+  });
+
+  test("lists every project's repository and every stored answer", async () => {
+    const elsewhere = join(root, "elsewhere");
+    await mkdir(elsewhere);
+    await Bun.$`git init -q ${elsewhere}`;
+    await setTrust({ worktreePath: wt, decision: "declined" });
+    // A project trusted once and removed since: its answer stays listed, with no worktree.
+    setRepoTrusted(elsewhere, true);
+    await projectStore.addProject(wt);
+
+    const response = await handleRequest(new Request("http://x/api/repo-trust/list"), ctx);
+    const { repositories } = (await response.json()) as RepoTrustListResponse;
+    expect(
+      repositories.map(({ repository, worktreePath, decision }) => ({
+        repository,
+        worktreePath,
+        decision,
+      })),
+    ).toEqual([
+      { repository: elsewhere, worktreePath: null, decision: "trusted" },
+      { repository: wt, worktreePath: wt, decision: "declined" },
+    ]);
+  });
+
+  test("the generic store route cannot write trust or a decline", async () => {
+    await setTrust({ worktreePath: wt, decision: "undecided" });
+    for (const prefix of ["repo-trust:", "repo-trust-declined:"]) {
+      const key = encodeURIComponent(`${prefix}${repoTrustId(wt)}`);
+      const response = await handleRequest(
+        new Request(`http://x/api/stores/${key}`, {
+          method: "PUT",
+          body: JSON.stringify({ value: JSON.stringify({ fingerprint: "forged" }) }),
+        }),
+        ctx,
+      );
+      expect(response.status).toBe(403);
+    }
+    expect(getRepoTrustStatus(wt).decision).toBe("undecided");
   });
 });
