@@ -13,19 +13,38 @@ import { resolveLanguage } from "@/lib/resolve-language";
 import { useEditorStateStore } from "@/store/editor-state";
 import { selectEffectiveFileAssociations, useSettingsStore } from "@/store/settings-store";
 
+import type { DiffSide } from "./SideBySideDiffView";
+
 type IStandaloneCodeEditor = monacoEditor.IStandaloneCodeEditor;
 
 const identity = (s: string) => s;
 
-/** Editor-state key of a compare panel side (see `useEditorStateStore`). */
-export function compareSideKey(panelId: string, side: "old" | "new"): string {
-  return `${panelId}:${side}`;
+/** How long typing pauses before a diff with an editable side is recomputed */
+export const REDIFF_DELAY_MS = 100;
+
+/**
+ * Editor-state key of an editable diff side (see `useEditorStateStore`): the view that owns the
+ * side (a compare panel's id, or the working-tree file of a git diff) and which side it is.
+ */
+export function editableSideKey(ownerId: string, side: "old" | "new"): string {
+  return `${ownerId}:${side}`;
 }
 
-export interface CompareSide {
+/** Editor-state key of the editable working-tree side of a git diff, by the file's absolute path. */
+export function workingTreeSideKey(absPath: string): string {
+  return editableSideKey(`working-tree:${absPath}`, "new");
+}
+
+export interface EditableSide {
+  /** Absolute path of the side's file */
   filePath: string;
   /** Live text of the side (edits included), or null until the file first loads */
   text: string | null;
+  /**
+   * The file's content as last read from or written to disk; changes only when the file on disk
+   * does (a save of this side landing included)
+   */
+  diskText: string | null;
   /** Monaco language id */
   language: string;
   /** The file is missing on disk */
@@ -42,15 +61,16 @@ export interface CompareSide {
 }
 
 /**
- * One editable side of a compare panel: a file loaded, autosaved and reconciled with disk like
- * an editor tab (`useDiskSyncedContent`), under its own editor-state key so it coexists with a tab
- * open on the same file.
+ * One editable side of a diff view (a compare panel side, or the working-tree side of a git diff):
+ * a file loaded, autosaved and reconciled with disk like an editor tab (`useDiskSyncedContent`),
+ * under its own editor-state key so it coexists with a tab open on the same file.
  *
- * The side's text lives here rather than in the editor, so the diff can follow it and edits
- * survive the editor unmounting (switching to the unified view). While an editor is mounted,
- * disk content and merges are applied to it and reach the text through its change events.
+ * The side's text lives here rather than in the editor, so the diff can follow it and, for an owner
+ * that stays mounted (a compare panel switching to its unified view), edits survive the editor
+ * unmounting. While an editor is mounted, disk content and merges are applied to it and reach the
+ * text through its change events.
  */
-export function useCompareSide(filePath: string, editorKey: string): CompareSide {
+export function useEditableSide(filePath: string, editorKey: string): EditableSide {
   const editorRef = useRef<IStandaloneCodeEditor | null>(null);
   const [text, setText] = useState<string | null>(null);
   const textRef = useRef<string | null>(null);
@@ -159,6 +179,7 @@ export function useCompareSide(filePath: string, editorKey: string): CompareSide
   return {
     filePath,
     text,
+    diskText: diskContent,
     language,
     isDeleted,
     isDiverged: editorFileState === "diverged",
@@ -168,5 +189,15 @@ export function useCompareSide(filePath: string, editorKey: string): CompareSide
     acceptDisk,
     keepMine: handleKeepMine,
     recreateFile,
+  };
+}
+
+/** The parts of a `DiffSide` that make it this editable side. */
+export function editableDiffSideProps(
+  side: EditableSide,
+): Pick<DiffSide, "editable" | "onEditorMount"> {
+  return {
+    editable: { content: side.text ?? "", onContentChange: side.onContentChange },
+    onEditorMount: side.onEditorMount,
   };
 }

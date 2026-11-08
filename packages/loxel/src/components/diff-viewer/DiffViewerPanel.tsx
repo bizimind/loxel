@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import * as api from "@/api/client";
 import type { DiffInfo, FileDiff } from "@/api/diff-model";
@@ -12,6 +12,7 @@ import { useCommentStore } from "@/store/comments";
 import { useUIStore } from "@/store/ui";
 import { useRepositoryStore } from "@/store/worktree-repository";
 import { useReviewStore } from "@/store/worktree-reviews";
+import { useWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { DiffToolbar } from "./DiffToolbar";
@@ -29,6 +30,10 @@ export function DiffViewerPanel() {
   const { data: diff, isLoading } = useDiffQuery(diffSource);
   const diffViewMode = useUIStore((s) => s.diffViewMode);
   const { commitHash, worktreePath } = useReviewContext();
+  // A file edited here stays open after its edits leave nothing to diff.
+  const keepsEditedFile = useWorktreeUI(
+    (s) => s.editedDiffFile !== null && s.editedDiffFile === s.selectedDiffFile,
+  );
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -36,7 +41,7 @@ export function DiffViewerPanel() {
         <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
           Loading diff...
         </div>
-      ) : !diff || diff.files.length === 0 ? (
+      ) : !diff || (diff.files.length === 0 && !keepsEditedFile) ? (
         <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
           No changes
         </div>
@@ -69,32 +74,53 @@ function DiffContent({
   baseRef?: string;
   worktreePath?: string;
 }) {
-  const { selectedFile, setSelectedFile, orderedFiles } = useDiffFileSelection(diff.files);
+  const { selectedFile, setSelectedFile, editedFile, orderedFiles } = useDiffFileSelection(
+    diff.files,
+  );
+
+  // The file edited here, once its edits made it match its base and it left the diff
+  const keptFile = useMemo<FileDiff | null>(
+    () =>
+      editedFile &&
+      editedFile === selectedFile &&
+      !diff.files.some((f) => fileDiffPath(f) === editedFile)
+        ? unchangedFileDiff(editedFile)
+        : null,
+    [editedFile, selectedFile, diff.files],
+  );
 
   const selectedReviewIds = useReviewStore((s) => s.selectedReviewIds);
   const fetchPlacedThreads = useCommentStore((s) => s.fetchPlacedThreads);
   const clearAll = useCommentStore((s) => s.clearAll);
 
   const diffFiles = useMemo<DiffFileContext[]>(() => {
-    return diff.files.map((f) => ({
+    const files = keptFile ? [...diff.files, keptFile] : diff.files;
+    return files.map((f) => ({
       oldPath: f.oldPath || f.newPath,
       newPath: f.newPath || f.oldPath,
       oldRef: baseRef ?? null,
       newRef: commitHash ?? null,
       worktreePath,
     }));
-  }, [diff.files, baseRef, commitHash, worktreePath]);
+  }, [diff.files, keptFile, baseRef, commitHash, worktreePath]);
 
-  useEffect(() => {
+  const placeThreads = useCallback(() => {
     if (selectedReviewIds.length > 0 && diffFiles.length > 0) {
-      fetchPlacedThreads(selectedReviewIds, diffFiles);
+      void fetchPlacedThreads(selectedReviewIds, diffFiles);
     } else {
       clearAll();
     }
   }, [selectedReviewIds, diffFiles, fetchPlacedThreads, clearAll]);
+  useEffect(placeThreads, [placeThreads]);
+
+  // The working-tree file edited in the view changed on disk: place its comments on the new lines.
+  const placeThreadsRef = useRef(placeThreads);
+  placeThreadsRef.current = placeThreads;
+  const onWorkingTreeFileChange = useCallback(() => placeThreadsRef.current(), []);
 
   // Previous/next and the "File N of M" counter follow the Changes tree's order.
-  const currentFile = orderedFiles.find((f) => fileDiffPath(f) === selectedFile) ?? orderedFiles[0];
+  const currentFile =
+    orderedFiles.find((f) => fileDiffPath(f) === selectedFile) ?? keptFile ?? orderedFiles[0];
   const currentFileIndex = orderedFiles.findIndex((f) => fileDiffPath(f) === selectedFile);
 
   const goToPrevFile = () => {
@@ -137,11 +163,25 @@ function DiffContent({
             commitHash={commitHash}
             baseRef={baseRef}
             worktreePath={worktreePath}
+            onWorkingTreeFileChange={onWorkingTreeFileChange}
           />
         )}
       </div>
     </div>
   );
+}
+
+/** A file of the working tree that matches its base: shown with no changes. */
+function unchangedFileDiff(path: string): FileDiff {
+  return {
+    oldPath: path,
+    newPath: path,
+    status: "modified",
+    hunks: [],
+    isBinary: false,
+    additions: 0,
+    deletions: 0,
+  };
 }
 
 function FileDiffView({
@@ -150,12 +190,14 @@ function FileDiffView({
   commitHash,
   baseRef,
   worktreePath,
+  onWorkingTreeFileChange,
 }: {
   file: FileDiff;
   viewMode: "split" | "unified";
   commitHash?: string;
   baseRef?: string;
   worktreePath?: string;
+  onWorkingTreeFileChange: () => void;
 }) {
   const useTrueSideBySide = viewMode === "split" && (commitHash || worktreePath);
   const filePath = fileDiffPath(file);
@@ -194,6 +236,7 @@ function FileDiffView({
             oldRef={baseRef}
             newRef={commitHash}
             worktreePath={worktreePath}
+            onWorkingTreeFileChange={onWorkingTreeFileChange}
           />
         </div>
       </div>

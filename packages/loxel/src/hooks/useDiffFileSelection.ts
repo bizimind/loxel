@@ -8,18 +8,21 @@ import { useWorktreeUI } from "@/store/worktree-ui";
 /**
  * The file the diff viewer shows, shared by the Changes panel and the diff viewer, and `files` in
  * Changes tree order. While no file or a file outside `files` is selected, the first file in that
- * order is selected.
+ * order is selected, unless the selection is the file being edited in the diff viewer
+ * (`editedDiffFile`), which stays selected when it leaves the diff.
  */
 export function useDiffFileSelection(files: FileDiff[]) {
   const selectedFile = useWorktreeUI((s) => s.selectedDiffFile);
   const setSelectedFile = useWorktreeUI((s) => s.setSelectedDiffFile);
+  const editedFile = useWorktreeUI((s) => s.editedDiffFile);
   const orderedFiles = useMemo(() => orderDiffFiles(files), [files]);
 
   useEffect(() => {
+    if (selectedFile && selectedFile === editedFile) return;
     if (selectedFile && orderedFiles.some((f) => fileDiffPath(f) === selectedFile)) return;
     const first = orderedFiles[0];
     setSelectedFile(first ? fileDiffPath(first) : null);
-  }, [orderedFiles, selectedFile, setSelectedFile]);
+  }, [orderedFiles, selectedFile, editedFile, setSelectedFile]);
 
-  return { selectedFile, setSelectedFile, orderedFiles };
+  return { selectedFile, setSelectedFile, editedFile, orderedFiles };
 }

@@ -26,6 +26,26 @@ describe("computeFileDiff", () => {
     expect(computeFileDiff(lines, [...lines])).toEqual({ hunks: [], additions: 0, deletions: 0 });
   });
 
+  it("adds every line of a file whose old side has none, as git diffs an added file", () => {
+    const { hunks, additions, deletions } = computeFileDiff([], ["a", "b", ""]);
+    expect({ additions, deletions }).toEqual({ additions: 2, deletions: 0 });
+    expect(hunks.map((h) => h.header)).toEqual(["@@ -0,0 +1,2 @@"]);
+    expect(hunks[0]?.lines).toEqual([
+      { type: "add", content: "a", newLineNumber: 1 },
+      { type: "add", content: "b", newLineNumber: 2 },
+    ]);
+  });
+
+  it("deletes every line of a file whose new side has none", () => {
+    const { hunks } = computeFileDiff(["a"], []);
+    expect(hunks.map((h) => h.header)).toEqual(["@@ -1,1 +0,0 @@"]);
+  });
+
+  it("returns no hunks for an empty file against no lines", () => {
+    expect(computeFileDiff([], [""]).hunks).toEqual([]);
+    expect(computeFileDiff([], []).hunks).toEqual([]);
+  });
+
   it("surrounds a modified line with three lines of context, like git", () => {
     const oldLines = numbered(20);
     const newLines = replaceAt(oldLines, 10, "changed");

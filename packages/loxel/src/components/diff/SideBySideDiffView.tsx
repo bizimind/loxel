@@ -14,6 +14,7 @@ import { useUIStore } from "@/store/ui";
 import { useReviewStore } from "@/store/worktree-reviews";
 
 import { buildChangeRegions, buildScrollAlignment } from "./change-regions";
+import { splitGitLines } from "./compute-file-diff";
 import { DiffGutter } from "./DiffGutter";
 import type { ViewZoneDescriptor } from "./EditorPanel";
 import { EditorPanel } from "./EditorPanel";
@@ -145,6 +146,15 @@ export function SideBySideDiffView({
           onClick: () => toggleRegion(r.index),
         })),
     [collapsibleRegions, expandedSet, toggleRegion],
+  );
+
+  // Lines a new comment anchors to. An editable side's are read from its live text, as `lines` are
+  // recomputed only once typing pauses; only while a comment is being written there. Split as the
+  // server splits files for comment placement, so the anchor matches it.
+  const newEditableContent = pendingAnchor?.side === "new" ? newSide.editable?.content : undefined;
+  const newCommentLines = useMemo(
+    () => (newEditableContent === undefined ? newLines : splitGitLines(newEditableContent)),
+    [newEditableContent, newLines],
   );
 
   // Join lines into content strings for Monaco
@@ -492,7 +502,7 @@ export function SideBySideDiffView({
                   scrollSide="right"
                   reviewId={activeReviewId}
                   filePath={filePath}
-                  fileLines={newLines}
+                  fileLines={newCommentLines}
                 />
               )}
             </div>
