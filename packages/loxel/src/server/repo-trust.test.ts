@@ -266,6 +266,20 @@ describe("declined", () => {
     expect(getRepoTrustStatus(repo).decision).toBe("undecided");
   });
 
+  test("a no to the trust question leaves trust given meanwhile alone", () => {
+    const repo = makeRepo("repo");
+    setRepoTrustDecision(repo, "declined", { unlessTrusted: true });
+    expect(getRepoTrustStatus(repo).decision).toBe("declined");
+
+    setRepoTrusted(repo, true);
+    setRepoTrustDecision(repo, "declined", { unlessTrusted: true });
+    expect(isRepoTrusted(repo)).toBe(true);
+
+    // Stopping trust is not a no to the question: it declines a trusted repository.
+    setRepoTrustDecision(repo, "declined");
+    expect(getRepoTrustStatus(repo).decision).toBe("declined");
+  });
+
   test("keeps the restrictions, which only trust clears", () => {
     const repo = makeRepo("repo");
     reportRepoRestriction(repo, "Build scripts don't run.");

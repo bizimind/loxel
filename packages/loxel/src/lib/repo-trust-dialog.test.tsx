@@ -5,7 +5,7 @@ import type { RepoTrustDecision, RepoTrustStatus } from "@/api/repo-trust-model"
 let decision: RepoTrustDecision = "undecided";
 const asked: string[] = [];
 const ran: string[] = [];
-const sent: RepoTrustDecision[] = [];
+const sent: string[] = [];
 let answer: (answer: boolean | null) => void = () => {};
 let shown: () => void = () => {};
 let nextShown = new Promise<void>((resolve) => {
@@ -18,8 +18,8 @@ function status(): RepoTrustStatus {
 
 mock.module("@/api/repo-trust-client", () => ({
   getRepoTrust: () => Promise.resolve(status()),
-  setRepoTrust: (request: { decision: RepoTrustDecision }) => {
-    sent.push(request.decision);
+  setRepoTrust: (request: { decision: RepoTrustDecision; unlessTrusted?: boolean }) => {
+    sent.push(request.unlessTrusted ? `${request.decision} unless trusted` : request.decision);
     decision = request.decision;
     return Promise.resolve(status());
   },
@@ -78,12 +78,13 @@ describe("declining", () => {
     const first = askToTrustRepo("/repo", ASK);
     await answerNext(false);
     expect(await first).toBe(false);
-    expect(sent).toEqual(["declined"]);
+    // Unless trusted: another window may have trusted it while the question was open.
+    expect(sent).toEqual(["declined unless trusted"]);
 
     const again = askToTrustRepo("/repo", ASK);
     await answerNext(false);
     await again;
-    expect(sent).toEqual(["declined"]);
+    expect(sent).toEqual(["declined unless trusted"]);
   });
 
   test("a question another one replaced records nothing", async () => {

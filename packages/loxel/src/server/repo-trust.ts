@@ -149,10 +149,17 @@ const restrictionListeners = new Set<() => void>();
 /**
  * Record the user's answer for the repository `wtPath` belongs to. Only the user's choice calls
  * this: their answer to the trust question, or creating a project from scratch, whose repository
- * starts trusted. Each answer replaces the other.
+ * starts trusted. Each answer replaces the other. `unlessTrusted` makes the answer a "no" to the
+ * trust question, which leaves a repository trusted meanwhile as it is.
  */
-export function setRepoTrustDecision(wtPath: string, decision: RepoTrustDecision): void {
+export function setRepoTrustDecision(
+  wtPath: string,
+  decision: RepoTrustDecision,
+  { unlessTrusted = false }: { unlessTrusted?: boolean } = {},
+): void {
   const identity = repoIdentity(wtPath);
+  // A "Not Now" from a question asked before the repository was trusted elsewhere is stale.
+  if (unlessTrusted && isTrustedIdentity(identity)) return;
   if (decision === "undecided") {
     forgetRepoTrust(identity.id);
     return;

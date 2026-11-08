@@ -1148,7 +1148,7 @@ async function handleSetRepoTrust(req: Request, ctx: RouteContext): Promise<Resp
   if (resolved instanceof Response) return resolved;
   const wtPath = await validatedWorktreePath(resolved.wtPath, resolved.cwd);
   if (wtPath instanceof Response) return wtPath;
-  setRepoTrustDecision(wtPath, decision);
+  setRepoTrustDecision(wtPath, decision, { unlessTrusted: body.unlessTrusted === true });
   return json(getRepoTrustStatus(wtPath));
 }
 
@@ -1157,11 +1157,14 @@ async function handleListRepoTrust(): Promise<Response> {
   const { projects } = await projectStore.loadProjects();
   const worktrees = await Promise.all(
     projects.map(async (project) => {
+      // A project whose folder is gone has nothing to answer through; its stored answer is still
+      // listed. A bare root's identity is not its worktrees', so it answers through those.
+      if (!existsSync(project.path)) return [];
+      if (!project.isBare) return [project.path];
       try {
-        const listed = await listManagedWorktrees(project.path);
-        return listed.length > 0 ? listed.map((wt) => wt.path) : [project.path];
+        return (await listManagedWorktrees(project.path)).map((wt) => wt.path);
       } catch {
-        return [project.path];
+        return [];
       }
     }),
   );

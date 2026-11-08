@@ -8,7 +8,13 @@ import { queryKeys } from "@/queries/query-keys";
 
 const originalClient = await import("@/api/repo-trust-client");
 const forgetRepoTrust = jest.fn(async (_id: string) => {});
-mock.module("@/api/repo-trust-client", () => ({ ...originalClient, forgetRepoTrust }));
+// The list asks again on every open; it answers with what the cache already holds.
+const listRepoTrust = jest.fn(async () => ({ repositories: REPOSITORIES }));
+mock.module("@/api/repo-trust-client", () => ({
+  ...originalClient,
+  forgetRepoTrust,
+  listRepoTrust,
+}));
 const originalDialog = await import("@/lib/repo-trust-dialog");
 const manageRepoTrust = jest.fn(async (_wtPath: string, _options?: object) => {});
 mock.module("@/lib/repo-trust-dialog", () => ({ ...originalDialog, manageRepoTrust }));
@@ -36,9 +42,8 @@ const REPOSITORIES: RepoTrustEntry[] = [
 
 function renderSection() {
   const client = new QueryClient();
-  // Served from the cache, so nothing waits on a fetch.
+  // Rendered from the cache, so no assertion waits on the fetch.
   client.setQueryData(queryKeys.repoTrustList(), { repositories: REPOSITORIES });
-  client.setQueryDefaults(queryKeys.repoTrustList(), { staleTime: Infinity });
   render(
     <QueryClientProvider client={client}>
       <SecuritySection />

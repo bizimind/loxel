@@ -71,6 +71,14 @@ describe("/api/repo-trust", () => {
     expect(isRepoTrusted(wt)).toBe(false);
   });
 
+  test("a stale Not Now does not take trust given meanwhile", async () => {
+    await setTrust({ worktreePath: wt, decision: "trusted" });
+    const stale = await setTrust({ worktreePath: wt, decision: "declined", unlessTrusted: true });
+    expect(((await stale.json()) as { decision: string }).decision).toBe("trusted");
+    expect(isRepoTrusted(wt)).toBe(true);
+    await setTrust({ worktreePath: wt, decision: "undecided" });
+  });
+
   test("needs an explicit answer and a known worktree", async () => {
     expect((await setTrust({ worktreePath: wt, decision: "yes" })).status).toBe(400);
     expect((await setTrust({ worktreePath: wt, trusted: true })).status).toBe(400);
@@ -98,6 +106,13 @@ describe("/api/repo-trust", () => {
     // A project trusted once and removed since: its answer stays listed, with no worktree.
     setRepoTrusted(elsewhere, true);
     await projectStore.addProject(wt);
+    // A bare project answers through its worktree, whose identity its root does not share.
+    const bare = join(root, "bare");
+    const bareWorktree = join(bare, ".worktrees", "main");
+    await Bun.$`git -C ${wt} -c user.name=t -c user.email=t@t commit -q --allow-empty -m init`;
+    await Bun.$`git clone -q --bare ${wt} ${bare}`;
+    await Bun.$`git -C ${bare} worktree add -q ${bareWorktree}`;
+    await projectStore.addProject(bare);
 
     const response = await handleRequest(new Request("http://x/api/repo-trust/list"), ctx);
     const { repositories } = (await response.json()) as RepoTrustListResponse;
@@ -108,6 +123,7 @@ describe("/api/repo-trust", () => {
         decision,
       })),
     ).toEqual([
+      { repository: bare, worktreePath: bareWorktree, decision: "undecided" },
       { repository: elsewhere, worktreePath: null, decision: "trusted" },
       { repository: wt, worktreePath: wt, decision: "declined" },
     ]);

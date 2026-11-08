@@ -73,7 +73,8 @@ async function recordAnswer(
     return true;
   }
   if (answer === false && status.decision === "undecided") {
-    await setRepoTrust({ worktreePath: wtPath, decision: "declined" });
+    // The server keeps trust given in another window while this question was open.
+    await setRepoTrust({ worktreePath: wtPath, decision: "declined", unlessTrusted: true });
   }
   return false;
 }
@@ -81,8 +82,9 @@ async function recordAnswer(
 /**
  * Asks whether to trust the worktree's repository, or to stop trusting it, and applies the answer.
  * The server tells every window, and restarts whatever depends on the answer. Stopping trust, or
- * answering "no" to trusting, records the repository as declined, so the status bar goes quiet;
- * from Settings, where the user asked for the dialog themselves, cancelling records nothing.
+ * answering "no" to trusting, records the repository as declined, so the status bar goes quiet.
+ * Settings, a view for managing every answer, passes `declineOnCancel: false`: backing out of its
+ * dialog leaves the answer listed as it was.
  */
 export async function manageRepoTrust(
   wtPath: string,

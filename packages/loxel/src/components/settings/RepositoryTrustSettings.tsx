@@ -77,7 +77,7 @@ function RepositoryRow({ entry }: { entry: RepoTrustEntry }) {
         )}
         {entry.worktreePath === null && !entry.stale && (
           <div className="text-muted-foreground mt-0.5 text-[10px]">
-            No project uses this folder.
+            Not the repository of any project.
           </div>
         )}
         {entry.restrictions.length > 0 && (
@@ -128,7 +128,12 @@ function RepositoryRow({ entry }: { entry: RepoTrustEntry }) {
  * trust dialog, so dependent servers restart and every window updates.
  */
 export function RepositoryTrustSettings() {
-  const { data, error } = useQuery({ queryKey: queryKeys.repoTrustList(), queryFn: listRepoTrust });
+  const { data, error } = useQuery({
+    queryKey: queryKeys.repoTrustList(),
+    queryFn: listRepoTrust,
+    // Only trust changes are pushed; projects and worktrees come and go too, so ask on each open.
+    refetchOnMount: "always",
+  });
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const repositories = useMemo(() => data?.repositories ?? [], [data]);
@@ -188,7 +193,7 @@ export function RepositoryTrustSettings() {
       </div>
 
       <div className="max-h-[320px] overflow-y-auto rounded-md bg-[var(--surface-2)]">
-        {error ? (
+        {error && !data ? (
           <div className="text-destructive px-3 py-2 text-xs">
             Could not list repositories: {error.message}
           </div>

@@ -32,7 +32,10 @@ export interface RepoTrustListResponse {
   repositories: RepoTrustEntry[];
 }
 
-/** Answer for a worktree's repository, or forget a stored answer by its repository id. */
+/**
+ * Answer for a worktree's repository, or forget a stored answer by its repository id.
+ * `unlessTrusted` marks a "no" to the trust question, which leaves trust given meanwhile alone.
+ */
 export type SetRepoTrustRequest =
-  | { worktreePath: string; decision: RepoTrustDecision }
+  | { worktreePath: string; decision: RepoTrustDecision; unlessTrusted?: boolean }
   | { repositoryId: string; decision: "undecided" };
