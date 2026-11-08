@@ -1119,8 +1119,12 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
  * Base for servers run one per worktree: started in the worktree, rooted at it (`rootUri`,
  * `workspaceFolders`, watched files), and replaced when a newer connection asks for the same
  * worktree. Subclasses supply what differs per server: the binary, its arguments and settings.
+ * {@link WorktreeLspManager} is this with the plain session; a server keeping more per session
+ * extends this with its own session type and builds it.
  */
-export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
+export abstract class WorktreeSessionLspManager<
+  TSession extends WtLspSession,
+> extends StdioLspManager<TSession, WtLspContext> {
   /**
    * Set by a server that behaves differently in a trusted repository: what it leaves out until
    * then, as one sentence for the user ("Build scripts don't run"). Its hooks read `repoTrusted`
@@ -1159,7 +1163,7 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
     return this.repoTrustRestriction !== null && isRepoTrusted(wtPath) !== repoTrusted;
   }
 
-  private restartIfTrustChanged(session: WtLspSession): void {
+  private restartIfTrustChanged(session: TSession): void {
     if (!this.isSessionLive(session)) return;
     if (isRepoTrusted(session.wtPath) === session.repoTrusted) return;
     const { ws } = session;
@@ -1176,6 +1180,17 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
     return { cwd: context.wtPath };
   }
 
+  protected override getSessionKey(context: WtLspContext): string {
+    return context.wtPath;
+  }
+
+  protected override getSessionWorkspace(session: TSession): string {
+    return session.wtPath;
+  }
+}
+
+/** {@link WorktreeSessionLspManager} for a server that keeps nothing more per session. */
+export abstract class WorktreeLspManager extends WorktreeSessionLspManager<WtLspSession> {
   protected buildSession(
     ws: ServerWebSocket<unknown>,
     proc: Subprocess,
@@ -1189,14 +1204,6 @@ export abstract class WorktreeLspManager extends StdioLspManager<WtLspSession, W
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
     };
-  }
-
-  protected override getSessionKey(context: WtLspContext): string {
-    return context.wtPath;
-  }
-
-  protected override getSessionWorkspace(session: WtLspSession): string {
-    return session.wtPath;
   }
 }
 
