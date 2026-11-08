@@ -831,12 +831,13 @@ function teardownProject(cwd: string): void {
   log.info(`Project torn down: ${cwd}`);
 }
 
-// --- Idle auto-shutdown ---
+// --- Idle cleanup and auto-shutdown ---
 
 const IDLE_SHUTDOWN_MS = 30_000;
-/** Grace period for orphaned terminals to be reattached before cleanup + shutdown. */
+/** Grace period for orphaned terminals to be reattached before they are destroyed. */
 const ORPHAN_CLEANUP_MS = 5 * 60_000;
-let idleShutdownTimer: ReturnType<typeof setTimeout> | null = null;
+/** Runs while no app client is connected; a connecting client cancels it. */
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let shuttingDown = false;
 
 // --- Stable infrastructure ---
@@ -1151,7 +1152,7 @@ const routeContext: RouteContext = {
   resolveFilePath,
   initializeProject,
   teardownProject,
-  shutdown,
+  isShuttingDown: () => shuttingDown,
   resolveSchema: (url, baseDir) => schemaService.resolve(url, baseDir),
   updateYamlSchemas: (schemaMap) => yamlLspManager.updateSchemas(schemaMap),
   updateTomlSchemas: (schemaMap) => tomlLspManager.updateSchemas(schemaMap),
@@ -1217,8 +1218,11 @@ const server = Bun.serve<WsData>({
       return undefined;
     }
 
+    // The relaunching app and the CLI poll /api/version while this server shuts down; counting
+    // those polls as work to drain would keep the drain's quiet period from ever starting.
+    if (url.pathname === "/api/version") return handleRequest(req, routeContext);
     if (url.pathname.startsWith("/api")) {
-      return handleRequest(req, routeContext);
+      return trackApiRequest(() => handleRequest(req, routeContext));
     }
 
     // Serve static files from dist/ when available (production mode)
@@ -1250,10 +1254,10 @@ const server = Bun.serve<WsData>({
         ws.close(1001, "Server shutting down");
         return;
       }
-      if (idleShutdownTimer) {
-        clearTimeout(idleShutdownTimer);
-        idleShutdownTimer = null;
-        log.info("Idle shutdown cancelled — client connected");
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+        log.info("Idle timer cancelled — client connected");
       }
       clients.set(ws, { terminals: new Set(), subscribedWorktrees: new Set() });
       sendTo(ws, { type: "notifications_sync", data: notificationStore.getAll() });
@@ -1277,29 +1281,7 @@ const server = Bun.serve<WsData>({
       if (lastFocusedClient === ws) lastFocusedClient = null;
       log.debug(`Client disconnected (${clients.size} remaining)`);
 
-      if (clients.size === 0 && !idleShutdownTimer && !shuttingDown) {
-        const hasOrphans = terminalManager.hasOrphanSessions();
-        if (hasOrphans) {
-          // Orphaned sessions exist — give clients time to reconnect (e.g. after hibernation wake)
-          // before destroying them and shutting down
-          log.info(
-            `No clients remaining, orphaned sessions waiting for reattach ` +
-              `(${ORPHAN_CLEANUP_MS / 1000}s timeout)`,
-          );
-          idleShutdownTimer = setTimeout(() => {
-            const destroyed = terminalManager.destroyOrphans();
-            if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
-            log.info("Idle timeout reached, shutting down");
-            shutdown();
-          }, ORPHAN_CLEANUP_MS);
-        } else {
-          log.info(`No clients remaining, shutting down in ${IDLE_SHUTDOWN_MS / 1000}s`);
-          idleShutdownTimer = setTimeout(() => {
-            log.info("Idle timeout reached, shutting down");
-            shutdown();
-          }, IDLE_SHUTDOWN_MS);
-        }
-      }
+      if (clients.size === 0 && !idleTimer && !shuttingDown) startIdleTimer();
     },
 
     message(ws, message) {
@@ -1354,15 +1336,87 @@ const perfMonitor = createServerPerfMonitor();
 
 const SHUTDOWN_LSP_WAIT_MS = SERVER_STOP_GRACE_MS + 1000;
 
+/**
+ * The last app client disconnected. Orphaned sessions get time to be reattached (a window
+ * reloading, or waking from sleep) before they are destroyed. A server the desktop app started
+ * stays up until the app quits; a standalone one shuts down.
+ */
+function startIdleTimer(): void {
+  const ownedByApp = config.parentPid !== null;
+  const hasOrphans = terminalManager.hasOrphanSessions();
+  // A server the app owns always arms the cleanup: a terminal still resolving its environment is
+  // not an orphan yet, but becomes one when it spawns with no client attached.
+  if (hasOrphans || ownedByApp) {
+    log.info(
+      `No clients remaining, detached terminals have ${ORPHAN_CLEANUP_MS / 1000}s to be reattached`,
+    );
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      const destroyed = terminalManager.destroyOrphans();
+      if (destroyed > 0) log.info(`Destroyed ${destroyed} orphaned terminal(s)`);
+      if (ownedByApp) return;
+      log.info("Idle timeout reached, shutting down");
+      shutdown();
+    }, ORPHAN_CLEANUP_MS);
+    return;
+  }
+  log.info(`No clients remaining, shutting down in ${IDLE_SHUTDOWN_MS / 1000}s`);
+  idleTimer = setTimeout(() => {
+    log.info("Idle timeout reached, shutting down");
+    shutdown();
+  }, IDLE_SHUTDOWN_MS);
+}
+
+// --- API requests in flight, drained before shutdown ---
+
+/** Shutdown waits this long without a new API request: a closing window's last writes may still be on their way. */
+const DRAIN_QUIET_MS = 300;
+/** The longest shutdown waits for API requests, such as a save that is formatting. */
+const DRAIN_MAX_MS = 5000;
+let apiRequestsInFlight = 0;
+let lastApiRequestAt = 0;
+
+async function trackApiRequest(run: () => Promise<Response>): Promise<Response> {
+  apiRequestsInFlight++;
+  lastApiRequestAt = Date.now();
+  try {
+    return await run();
+  } finally {
+    apiRequestsInFlight--;
+  }
+}
+
+/** Resolves once no API request is in flight or has started for DRAIN_QUIET_MS, or at DRAIN_MAX_MS. */
+async function drainApiRequests(): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < DRAIN_MAX_MS) {
+    const quietSince = Math.max(startedAt, lastApiRequestAt);
+    if (apiRequestsInFlight === 0 && Date.now() - quietSince >= DRAIN_QUIET_MS) return;
+    await Bun.sleep(50);
+  }
+  if (apiRequestsInFlight > 0) {
+    log.warn(`Shutting down with ${apiRequestsInFlight} API request(s) still in flight`);
+  } else {
+    log.info(`API requests kept arriving for ${DRAIN_MAX_MS / 1000}s, shutting down`);
+  }
+}
+
+/**
+ * Stop the server: let API requests finish first (saves, store writes, layout promotes), so a quit
+ * loses nothing the app already sent, then tear everything down and exit.
+ */
 function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
-  if (idleShutdownTimer) {
-    clearTimeout(idleShutdownTimer);
-    idleShutdownTimer = null;
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
   }
   log.info("Server shutting down");
+  void drainApiRequests().finally(() => tearDown(exitCode));
+}
 
+function tearDown(exitCode: number) {
   // Teardown all worktree resources
   for (const [wtPath, resources] of wtResources) {
     teardownWorktreeResources(wtPath, resources);
@@ -1393,6 +1447,22 @@ function shutdown(exitCode = 0) {
 process.on("SIGINT", () => shutdown());
 process.on("SIGTERM", () => shutdown());
 
+// --- Exit with the desktop app ---
+// The app stops its server when it quits. This covers an app that crashed or was killed.
+
+const PARENT_CHECK_MS = 2000;
+
+// The app spawns this process directly. When the app dies, the server is reparented (to launchd
+// on macOS), which a reused process ID cannot fake.
+if (config.parentPid !== null) {
+  const parentPid = config.parentPid;
+  setInterval(() => {
+    if (process.ppid === parentPid) return;
+    log.info("The desktop app that started this server is gone, shutting down");
+    shutdown();
+  }, PARENT_CHECK_MS).unref();
+}
+
 process.on("uncaughtException", (err) => {
   log.error("Uncaught exception, shutting down", { error: err });
   shutdown(1);
@@ -1404,11 +1474,3 @@ process.on("unhandledRejection", (reason) => {
     message: reason instanceof Error ? undefined : String(reason),
   });
 });
-
-// --- Background update check (production only) ---
-
-if (!config.isDev) {
-  const { cleanupStaleUpdates, runAutomaticUpdateCheck } = await import("./update");
-  cleanupStaleUpdates();
-  setTimeout(() => runAutomaticUpdateCheck(broadcastAll), 5_000);
-}

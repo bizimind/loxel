@@ -1,8 +1,8 @@
 import { PUBLIC_POSTHOG_KEY } from "astro:env/client";
 
 // The custom events the site sends, with their properties. Markup opts in through the
-// `trackClick`/`trackView`/`trackScrollDepth` attribute helpers below, so tracking never depends on
-// copy or CSS selectors.
+// `trackClick`/`trackView`/`trackScrollDepth`/`trackLoad` attribute helpers below, so tracking
+// never depends on copy or CSS selectors.
 interface ClickEvents {
   download_clicked: { platform: string; arch: string; version: string; location: string };
   github_link_clicked: { location: string };
@@ -15,6 +15,11 @@ interface ViewEvents {
 
 interface ScrollDepthEvents {
   docs_scroll_depth: { slug: string };
+}
+
+// PostHog adds the page's path and referrer to every event, which is what `page_not_found` is for.
+interface LoadEvents {
+  page_not_found: Record<string, never>;
 }
 
 const SCROLL_DEPTH_MILESTONES = [25, 50, 75, 100];
@@ -37,6 +42,11 @@ export function trackScrollDepth<E extends keyof ScrollDepthEvents>(
   return { "data-analytics-scroll-depth": event, "data-analytics-props": JSON.stringify(props) };
 }
 
+/** Captures `event` once when the page loads. */
+export function trackLoad<E extends keyof LoadEvents>(event: E, props: LoadEvents[E]) {
+  return { "data-analytics-load": event, "data-analytics-props": JSON.stringify(props) };
+}
+
 type Capture = (event: string, props: Record<string, unknown>) => void;
 
 /**
@@ -47,13 +57,17 @@ export function initAnalytics(): void {
   const key = PUBLIC_POSTHOG_KEY;
   if (import.meta.env.DEV || !key || prefersNoTracking()) return;
 
-  // Starts loading right away (asynchronously, without blocking rendering): events captured
-  // before the SDK is ready are lost if the visitor leaves the page in the meantime.
-  const posthog = loadPostHog(key).catch(() => undefined);
+  // The SDK (~100 KB gzipped) loads once the page has finished loading, so it stays off the
+  // critical path; visits that end before then send no pageview. A custom event fired earlier
+  // starts the load at once: events captured before the SDK is ready are lost if the visitor
+  // leaves in the meantime.
+  let posthog: Promise<PostHog | undefined> | undefined;
+  const load = () => (posthog ??= loadPostHog(key).catch(() => undefined));
+  afterPageLoad(load);
   // Custom events are sent right away rather than batched: they often fire just before the visitor
   // leaves the page (a docs link, a scroll then a click), which drops events still in the queue.
   const capture: Capture = (event, props) => {
-    void posthog.then((client) =>
+    void load().then((client) =>
       client?.capture(event, props, { send_instantly: true, transport: "sendBeacon" }),
     );
   };
@@ -61,6 +75,7 @@ export function initAnalytics(): void {
   trackClicks(capture);
   trackViews(capture);
   trackScrollDepths(capture);
+  trackLoads(capture);
 }
 
 // Visitors who send Do Not Track or Global Privacy Control aren't tracked at all. PostHog's own
@@ -69,6 +84,13 @@ export function initAnalytics(): void {
 function prefersNoTracking(): boolean {
   const gpc = "globalPrivacyControl" in navigator && navigator.globalPrivacyControl === true;
   return navigator.doNotTrack === "1" || gpc;
+}
+
+type PostHog = Awaited<ReturnType<typeof loadPostHog>>;
+
+function afterPageLoad(callback: () => void): void {
+  if (document.readyState === "complete") callback();
+  else window.addEventListener("load", callback, { once: true });
 }
 
 async function loadPostHog(key: string) {
@@ -143,5 +165,13 @@ function trackScrollDepths(capture: Capture): void {
       if (pending.length === 0) window.removeEventListener("scroll", check);
     };
     window.addEventListener("scroll", check, { passive: true });
+  }
+}
+
+function trackLoads(capture: Capture): void {
+  for (const element of document.querySelectorAll<HTMLElement>("[data-analytics-load]")) {
+    const name = element.dataset.analyticsLoad;
+    if (!name) continue;
+    capture(name, readProps(element));
   }
 }

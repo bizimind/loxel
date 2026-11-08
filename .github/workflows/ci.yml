@@ -16,7 +16,9 @@ permissions:
 jobs:
   discover:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    timeout-minutes: 1
+    # Checkout normally takes 3-26s, but the full-history fetch occasionally stalls
+    # for a minute or more; leave room for that instead of failing the whole run.
+    timeout-minutes: 5
     outputs:
       lint: ${{ steps.find.outputs.lint }}
       test: ${{ steps.find.outputs.test }}
@@ -25,6 +27,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      # Not a blobless clone (filter: blob:none): the fetch shrinks, but checkout then lazily
+      # fetches every file of HEAD in a second request, which took 29s on its own when tried.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -60,7 +64,9 @@ jobs:
             RUN_ALL_TEST=true; RUN_ALL_BUILD=true; RUN_ALL_TYPECHECK=true; RUN_ALL_LINT=true
           else
             echo "Comparing against last successful run: $BASE_SHA"
-            CHANGED_FILES=$(git diff --name-only "$BASE_SHA" HEAD)
+            # --no-renames lists both sides of a rename, so moving a file out of a package marks
+            # that package too (with renames on, --name-only lists only the new path).
+            CHANGED_FILES=$(git diff --name-only --no-renames "$BASE_SHA" HEAD)
             echo "Changed files:"
             echo "$CHANGED_FILES"
 
@@ -274,7 +280,8 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [lint, test, build, typecheck]
+    # discover must be listed: when it fails every check is skipped, which would otherwise pass.
+    needs: [discover, lint, test, build, typecheck]
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     steps:
       - name: Verify CI results

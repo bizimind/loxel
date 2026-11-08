@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { WebviewTag } from "electron";
 
+import { stubElectronAPI } from "@/test/electron-api-stub";
+
 import type { BrowserContextMenuState } from "./BrowserContextMenu";
 import { webSearchUrl } from "./web-search";
 
@@ -86,7 +88,7 @@ beforeEach(() => {
   writeText.mockClear();
   copyWebviewImage.mockClear();
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-  window.electronAPI = { copyWebviewImage } as unknown as Window["electronAPI"];
+  window.electronAPI = stubElectronAPI({ copyWebviewImage });
 });
 
 afterEach(() => {
@@ -188,8 +190,8 @@ describe("BrowserContextMenu", () => {
     expect(webview.downloadURL).toHaveBeenCalledWith("https://example.com/cat.png");
   });
 
-  test("hides Copy Image when the app's preload predates it", () => {
-    window.electronAPI = {} as Window["electronAPI"];
+  test("hides Copy Image outside Electron", () => {
+    Reflect.deleteProperty(window, "electronAPI");
     renderMenu({
       mediaType: "image",
       srcURL: "https://example.com/cat.png",

@@ -1,16 +1,45 @@
 ---
+import { Font, getImage } from "astro:assets";
+import socialBannerSource from "../assets/social-banner.png";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
+import { SITE_NAME, THEME_COLOR, pagePath } from "../lib/site";
+import { type StructuredDataNode, siteNodes, toJsonLd } from "../lib/structured-data";
 import "../styles/global.css";
 
 interface Props {
   title: string;
   description?: string;
+  /** `article` for docs pages, `website` otherwise. */
+  ogType?: "website" | "article";
+  /** Keeps the page out of search results and omits its canonical URL (the 404 page). */
+  noindex?: boolean;
+  /** Page-specific schema.org nodes, added to the site-wide ones. */
+  structuredData?: StructuredDataNode[];
 }
 
-const { title, description = "Loxel — The IDE for the agentic coding era." } = Astro.props;
+const {
+  title,
+  description = "Loxel — The IDE for the agentic coding era.",
+  ogType = "website",
+  noindex = false,
+  structuredData = [],
+} = Astro.props;
 const pageTitle =
-  title === "Loxel" ? "Loxel — IDE for the agentic coding era" : `${title} — Loxel`;
+  title === SITE_NAME ? "Loxel — IDE for the agentic coding era" : `${title} — ${SITE_NAME}`;
+// Every deployment (including *.pages.dev) points search engines at the production URL.
+const canonicalUrl = new URL(pagePath(Astro.url), Astro.site).href;
+// Link previews show it at 1200x630. JPEG, since a palette PNG bands the dark gradient and a
+// full-color PNG is four times the size.
+const SOCIAL_IMAGE_SIZE = { width: 1200, height: 630 };
+const socialBanner = await getImage({
+  src: socialBannerSource,
+  ...SOCIAL_IMAGE_SIZE,
+  format: "jpeg",
+  quality: 90,
+});
+const socialImage = new URL(socialBanner.src, Astro.site).href;
+const socialImageAlt = "Loxel, the IDE for the agentic coding era";
 ---
 
 <!doctype html>
@@ -20,22 +49,30 @@ const pageTitle =
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{pageTitle}</title>
     <meta name="description" content={description} />
-    <meta property="og:title" content={title} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonicalUrl} />}
+    <meta name="theme-color" content={THEME_COLOR} />
+    <meta property="og:type" content={ogType} />
+    <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />
-    <meta property="og:site_name" content="Loxel" />
-    <meta property="og:image" content="https://bizimind.io/social-banner.png" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta property="og:image:type" content="image/png" />
+    {!noindex && <meta property="og:url" content={canonicalUrl} />}
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content={socialImage} />
+    <meta property="og:image:width" content={String(SOCIAL_IMAGE_SIZE.width)} />
+    <meta property="og:image:height" content={String(SOCIAL_IMAGE_SIZE.height)} />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:alt" content={socialImageAlt} />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="https://bizimind.io/social-banner.png" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImage} />
+    <meta name="twitter:image:alt" content={socialImageAlt} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap"
-      rel="stylesheet"
-    />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="sitemap" type="application/xml" href="/sitemap-index.xml" />
+    <script type="application/ld+json" set:html={toJsonLd([...siteNodes(), ...structuredData])} />
+    <Font cssVariable="--font-inter" preload={[{ style: "normal" }]} />
+    <Font cssVariable="--font-jetbrains-mono" />
   </head>
   <body class="bg-background text-foreground min-h-screen flex flex-col antialiased">
     <Nav />
@@ -43,9 +80,5 @@ const pageTitle =
       <slot />
     </main>
     <Footer />
-    <script>
-      import { initAnalytics } from "../lib/analytics";
-      initAnalytics();
-    </script>
   </body>
 </html>

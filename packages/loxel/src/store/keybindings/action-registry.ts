@@ -7,12 +7,12 @@ import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
 import type { ToolchainSelectActionId } from "@/api/toolchain-status-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
+import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
 import { activeGroupMaximizeLabel, canToggleActiveGroupMaximized } from "@/lib/center-maximize";
 import type { EditorCodeActionId } from "@/lib/editor-code-actions";
 import { canRunEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import { isFocusInCenter } from "@/lib/focus-targets";
-import { getFocusedHardRefreshTarget } from "@/lib/hard-refresh-targets";
 import { getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { canRenameActiveTab } from "@/lib/tab-rename";
 import { useEditorIndentationStore } from "@/store/editor-indentation";
@@ -34,6 +34,7 @@ export type ActionId =
   | "panel.rename"
   | "panel.toggleMaximize"
   | "browser.hardRefresh"
+  | "browser.toggleBookmark"
   | `panel.split.${SplitDirection}`
   | `panel.split.${SplitPanelType}.${SplitDirection}`
   | "panel.next"
@@ -166,6 +167,10 @@ function hasActiveWorktree(): boolean {
   return useWorktreeStore.getState().activeWorktreePath !== null;
 }
 
+function isBrowserPanelFocused(): boolean {
+  return getFocusedBrowserPanel() !== undefined;
+}
+
 function isFindTargetFocused(): boolean {
   return getFocusedFindTarget() !== undefined;
 }
@@ -206,8 +211,16 @@ export const ACTIONS: readonly ActionDef[] = [
     id: "browser.hardRefresh",
     label: "Hard Refresh Browser Tab",
     category: "panel",
-    isEnabled: () => getFocusedHardRefreshTarget() !== undefined,
+    isEnabled: isBrowserPanelFocused,
     sharesKeyWith: "panel.rename",
+  },
+
+  // Bookmark the focused browser panel's page, or remove its bookmark.
+  {
+    id: "browser.toggleBookmark",
+    label: "Bookmark Browser Page",
+    category: "panel",
+    isEnabled: isBrowserPanelFocused,
   },
 
   // Split — new panel of the active panel's type, or of a specific type

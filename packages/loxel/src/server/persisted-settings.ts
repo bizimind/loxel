@@ -1,8 +1,10 @@
 /**
- * Server-side access to the settings the renderer persists in the `settings` store (zustand
- * persist JSON: `{ state: { ... }, version }`), for the few settings the server reads on its own.
+ * Access to the settings the renderer persists in the `settings` store (zustand persist JSON:
+ * `{ state: { ... }, version }`), for the few settings read outside the renderer: by the server,
+ * and by Electron main for the automatic update check.
  */
-import { isRecord } from "@/lib/is-record";
+// Relative, not `@/`: Electron main's build has no path aliases.
+import { isRecord } from "../lib/is-record";
 
 export const SETTINGS_STORE_KEY = "settings";
 
@@ -17,6 +19,17 @@ export function persistedSettingsState(raw: string | null): Record<string, unkno
   }
   if (!isRecord(parsed) || !isRecord(parsed.state)) return null;
   return parsed.state;
+}
+
+/**
+ * Whether the `autoCheckForUpdates` setting allows the automatic update check, given the persisted
+ * settings JSON string. On by default, but a row that cannot be parsed might hold the user's
+ * opt-out, so it counts as off.
+ */
+export function isAutoCheckEnabled(raw: string | null): boolean {
+  if (raw === null) return true;
+  const state = persistedSettingsState(raw);
+  return state !== null && state.autoCheckForUpdates !== false;
 }
 
 /**

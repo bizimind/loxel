@@ -1,6 +1,6 @@
 import type { editor } from "monaco-editor";
-import type { RefObject } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import type { RefCallback, RefObject } from "react";
+import { useCallback, useRef } from "react";
 
 import type { ScrollAlignmentSection, ScrollSide } from "@/components/diff/change-regions";
 import { translateScrollPosition } from "@/components/diff/change-regions";
@@ -27,7 +27,13 @@ interface UseMonacoSyncScrollResult {
    * under the pointer without re-dispatching DOM events.
    */
   scrollBy: ScrollBy;
+  /** Ref for the left panel container, whose wheel events scroll both editors */
+  leftContainer: RefCallback<HTMLDivElement>;
+  /** Ref for the right panel container, whose wheel events scroll both editors */
+  rightContainer: RefCallback<HTMLDivElement>;
+  /** The mounted left panel container, for reading its size */
   leftContainerRef: RefObject<HTMLDivElement | null>;
+  /** The mounted right panel container, for reading its size */
   rightContainerRef: RefObject<HTMLDivElement | null>;
 }
 
@@ -141,33 +147,39 @@ export function useMonacoSyncScroll(
     [alignTo],
   );
 
-  // Wheel event handler — intercepts wheel on container, drives both editors
-  const handleWheel = useCallback(
-    (e: WheelEvent, source: ScrollSide) => {
-      e.preventDefault();
-      e.stopPropagation();
-      scrollBy(source, e.deltaX, e.deltaY);
+  /**
+   * Attach `side`'s container: record it and intercept its wheel events. A callback ref rather
+   * than an effect because callers mount the containers later than the hook (only once file
+   * content has loaded); an effect keyed on stable callbacks would run once, find no container
+   * and never attach, leaving wheel scrolling dead until the view remounted.
+   */
+  const attachContainer = useCallback(
+    (side: ScrollSide, container: HTMLDivElement) => {
+      const containerRef = side === "left" ? leftContainerRef : rightContainerRef;
+      containerRef.current = container;
+      const handleWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        scrollBy(side, e.deltaX, e.deltaY);
+      };
+      container.addEventListener("wheel", handleWheel, { passive: false, capture: true });
+      return () => {
+        container.removeEventListener("wheel", handleWheel, { capture: true });
+        containerRef.current = null;
+      };
     },
     [scrollBy],
   );
 
-  // Set up wheel listeners on container divs
-  useEffect(() => {
-    const leftContainer = leftContainerRef.current;
-    const rightContainer = rightContainerRef.current;
-    if (!leftContainer || !rightContainer) return;
+  const leftContainer = useCallback<RefCallback<HTMLDivElement>>(
+    (container) => (container ? attachContainer("left", container) : undefined),
+    [attachContainer],
+  );
 
-    const leftHandler = (e: WheelEvent) => handleWheel(e, "left");
-    const rightHandler = (e: WheelEvent) => handleWheel(e, "right");
-
-    leftContainer.addEventListener("wheel", leftHandler, { passive: false, capture: true });
-    rightContainer.addEventListener("wheel", rightHandler, { passive: false, capture: true });
-
-    return () => {
-      leftContainer.removeEventListener("wheel", leftHandler, { capture: true });
-      rightContainer.removeEventListener("wheel", rightHandler, { capture: true });
-    };
-  }, [handleWheel]);
+  const rightContainer = useCallback<RefCallback<HTMLDivElement>>(
+    (container) => (container ? attachContainer("right", container) : undefined),
+    [attachContainer],
+  );
 
   const flushScroll = useCallback(() => {
     const leftScroll = leftEditorRef.current?.getScrollTop() ?? 0;
@@ -216,6 +228,8 @@ export function useMonacoSyncScroll(
     subscribeToScroll,
     flushScroll,
     scrollBy,
+    leftContainer,
+    rightContainer,
     leftContainerRef,
     rightContainerRef,
   };

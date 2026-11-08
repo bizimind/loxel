@@ -1,15 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon, SettingsIcon } from "lucide-react";
 
-import * as api from "@/api/client";
-import type { UpdateState } from "@/api/update-model";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useWindowFocused } from "@/hooks/useWindowFocused";
 import { useWindowFullScreen } from "@/hooks/useWindowFullScreen";
 import { useZoomFactor } from "@/hooks/useZoomFactor";
 import { toggleWorktreeSidebar } from "@/lib/focus-navigation";
 import { cn } from "@/lib/utils";
-import { queryKeys } from "@/queries/query-keys";
+import { useUpdateStatus } from "@/queries/use-update-status";
 import { deriveProject, useProjectStore } from "@/store/projects";
 import { useSettingsStore } from "@/store/settings-store";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -160,11 +157,7 @@ function SidebarToggle() {
 }
 
 function UpdateIndicator() {
-  const { data: status } = useQuery<UpdateState>({
-    queryKey: queryKeys.updateStatus(),
-    queryFn: api.getUpdateStatus,
-    enabled: false, // Only populated by WS bridge, no initial fetch needed
-  });
+  const status = useUpdateStatus();
 
   const hasUpdate =
     status?.state === "available" || status?.state === "ready" || status?.state === "downloading";

@@ -236,7 +236,7 @@ export function BrowserContextMenu({ menu, panelId, onOpenChange }: BrowserConte
 
   // `params.x`/`y` are window coordinates in device-independent pixels, not relative to the
   // webview; app zoom (Cmd+/Cmd-) scales CSS pixels, so divide by it to get client coordinates.
-  const zoom = window.electronAPI?.getZoomFactor?.() ?? 1;
+  const zoom = window.electronAPI?.getZoomFactor() ?? 1;
   const position = { x: params.x / zoom, y: params.y / zoom };
 
   return (

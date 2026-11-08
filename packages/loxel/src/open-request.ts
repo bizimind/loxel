@@ -46,31 +46,41 @@ interface RequestOpenOptions {
 /**
  * Ask the Loxel server at `serverUrl` to open a file, folder, URL or terminal. Files, folders and
  * terminals are sent to a window, so a 503 means none has connected yet — Loxel is still
- * launching — and the request is retried for a while instead of failing.
+ * launching — and the request is retried for a while instead of failing. So is a request no server
+ * answers, as between a server that is exiting (quit, update restart, crash) and its replacement.
  */
 export async function requestOpen(
   serverUrl: string,
   request: OpenRequest,
   { onWaiting, windowWaitMs = WINDOW_WAIT_MS }: RequestOpenOptions = {},
 ): Promise<OpenResult> {
-  const post = () =>
-    fetch(`${serverUrl}/api/open`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    });
+  let unreachable: unknown = null;
+  /** The response, or null when no server answered: one may be handing over to the next. */
+  const post = async (): Promise<Response | null> => {
+    try {
+      return await fetch(`${serverUrl}/api/open`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      });
+    } catch (err) {
+      unreachable = err;
+      return null;
+    }
+  };
 
   let res = await post();
-  if (res.status === 503) {
+  if (res === null || res.status === 503) {
     onWaiting?.();
     const start = Date.now();
-    while (res.status === 503 && Date.now() - start < windowWaitMs) {
+    while ((res === null || res.status === 503) && Date.now() - start < windowWaitMs) {
       await new Promise((resolve) => {
         setTimeout(resolve, RETRY_INTERVAL_MS);
       });
       res = await post();
     }
   }
+  if (res === null) throw new Error(`Cannot reach Loxel at ${serverUrl}`, { cause: unreachable });
   const data: unknown = await res.json().catch(() => null);
   if (res.ok) {
     const warning =
