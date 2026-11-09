@@ -5,6 +5,7 @@ import { $ } from "bun";
 
 import type { TypeScriptDiagnostic } from "@/api/diagnostics-model";
 
+import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
 import { measureSpawn } from "./spawn-metrics";
 import { stress } from "./stress-detector";
@@ -77,7 +78,9 @@ async function runDiagnosticsInWorktree(cwd: string, ref: string): Promise<TypeS
 
   try {
     // Create detached worktree at the ref
-    await $`git -C ${cwd} worktree add --detach ${tmpDir} ${ref}`.quiet();
+    // Loxel's own checkout, so in an untrusted repository it runs none of the repository's hooks
+    // or filters, as a read does.
+    await $`git -C ${cwd} worktree add --detach ${tmpDir} ${ref}`.env(readOnlyGitEnv(cwd)).quiet();
 
     // Symlink node_modules from main repo
     await symlinkNodeModules(cwd, tmpDir);

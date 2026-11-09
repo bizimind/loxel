@@ -16,7 +16,9 @@ Answering **Not Now**, or cancelling the question, declines the repository: it s
 
 Trust belongs to the repository, not to a worktree, so a new worktree of a trusted repository doesn't ask again. Moving or replacing the repository's folder means choosing again.
 
-Worktree hooks run in trusted repositories. When Loxel creates a worktree in a repository you haven't trusted, it doesn't run the repository's `init.wt.sh`: it says so and offers to trust the repository and run the hook in the new worktree. Removing a worktree there doesn't run `clean.wt.sh`, and the removal dialog offers to trust the repository first. Running `wt` in a terminal is your own command and runs the hooks as always.
+Worktree hooks run in trusted repositories. When Loxel creates a worktree in a repository you haven't trusted, it doesn't run the repository's `init.wt.sh`: it says so and offers to trust the repository and run the hook in the new worktree. Removing a worktree there doesn't run `clean.wt.sh`, and the removal dialog offers to trust the repository first. Git's own hooks that creating a worktree would run wait for trust the same way. Running `wt` in a terminal is your own command and runs the hooks as always.
+
+Git's views in Loxel (changes, diffs, history) never run programs that an untrusted repository's own Git settings name, such as content filters and diff converters, so a file those would transform shows as it is stored. Your own Git settings apply as usual.
 
 Trust a repository only if you would be willing to run its code yourself. Language servers that depend on trust restart as soon as you choose.
 

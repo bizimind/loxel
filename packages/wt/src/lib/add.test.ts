@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { realpath, symlink } from "node:fs/promises";
+import { chmod, realpath, symlink } from "node:fs/promises";
 import { join } from "node:path";
 
 import { git, gitSucceeds, pathExists, runGit } from "../git/index.ts";
@@ -460,6 +460,20 @@ describe("executeAdd", () => {
       await runInitHook({ name: "held", repoPath: repo.root, expectedPath: result.path }),
     ).toBe(true);
     expect(await pathExists(join(result.path, "hook.txt"))).toBe(true);
+  });
+
+  test("gitHooks false adds the worktree without the repository's git hooks", async () => {
+    repo = await createTestRepo();
+    const marker = join(repo.root, "..", "post-checkout-ran");
+    const hook = join(repo.root, ".git", "hooks", "post-checkout");
+    await Bun.write(hook, `#!/bin/sh\ntouch '${marker}'\n`);
+    await chmod(hook, 0o755);
+
+    await executeAdd({ name: "quiet", repoPath: repo.root, gitHooks: false });
+    expect(await pathExists(marker)).toBe(false);
+
+    await executeAdd({ name: "loud", repoPath: repo.root });
+    expect(await pathExists(marker)).toBe(true);
   });
 
   test("allowHook is not asked, and nothing is skipped, without an init.wt.sh", async () => {

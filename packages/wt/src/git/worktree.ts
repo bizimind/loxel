@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, realpath, rename, rmdir, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
-import { git, gitFailure, runGit } from "./run.ts";
+import { git, gitFailure, gitHooksArgs, runGit } from "./run.ts";
 
 /** Branch label used for a detached HEAD in human output and hook env. */
 export const DETACHED = "(detached)";
@@ -158,6 +158,8 @@ export function findWorktree(
 /**
  * Create a worktree, either on a new branch or checking out an existing one.
  *
+ * `gitHooks: false` runs it without the repository's git hooks.
+ *
  * A new branch starts at `startPoint` (default: the cwd's HEAD). `--no-track`
  * keeps a branch started from a remote-tracking ref such as `origin/main` from
  * adopting it as upstream, which would send `git pull` to main and make `git
@@ -166,19 +168,20 @@ export function findWorktree(
 export async function addWorktree(
   root: string,
   path: string,
-  options: { newBranch?: string; branch?: string; startPoint?: string },
+  options: { newBranch?: string; branch?: string; startPoint?: string; gitHooks?: boolean },
 ): Promise<void> {
+  const add = [...gitHooksArgs(options.gitHooks), "worktree", "add"];
   if (options.newBranch) {
     // `--` keeps a start point that begins with `-` from being read as an option.
     const start = options.startPoint ? ["--", options.startPoint] : [];
-    await git(["worktree", "add", "--no-track", "-b", options.newBranch, path, ...start], root);
+    await git([...add, "--no-track", "-b", options.newBranch, path, ...start], root);
     return;
   }
   if (options.branch) {
-    await git(["worktree", "add", path, options.branch], root);
+    await git([...add, path, options.branch], root);
     return;
   }
-  await git(["worktree", "add", "--detach", path], root);
+  await git([...add, "--detach", path], root);
 }
 
 /**

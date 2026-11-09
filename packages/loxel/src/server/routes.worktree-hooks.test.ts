@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { chmod, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,7 +9,7 @@ const stateDir = await mkdtemp(join(tmpdir(), "routes-worktree-hooks-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { handleRequest } = await import("./routes");
 const { getRepoTrustStatus, isRepoTrusted, setRepoTrusted } = await import("./repo-trust");
-const { WORKTREE_HOOKS_RESTRICTION } = await import("./worktree-hooks");
+const { WORKTREE_HOOKS_RESTRICTION, addWorktree } = await import("./worktree-hooks");
 type RouteContext = import("./routes").RouteContext;
 
 const roots: string[] = [];
@@ -54,6 +54,46 @@ let ctx: RouteContext;
 
 beforeEach(async () => {
   ({ repo, ctx } = await makeRepo());
+});
+
+/** A `post-checkout` hook in `gitDir` that leaves `marker` when git runs it. */
+async function writePostCheckout(gitDir: string, marker: string): Promise<void> {
+  const hook = join(gitDir, "hooks", "post-checkout");
+  await Bun.write(hook, `#!/bin/sh\ntouch '${marker}'\n`);
+  await chmod(hook, 0o755);
+}
+
+const silent = { log: () => {}, warn: () => {} };
+
+describe("git's own hooks on worktree add", () => {
+  test("run only when the repository is trusted", async () => {
+    const marker = join(repo, "..", `${repo.split("/").pop()}-post-checkout`);
+    roots.push(marker);
+    await writePostCheckout(join(repo, ".git"), marker);
+
+    await addWorktree({ name: "quiet", repoPath: repo }, silent);
+    expect(existsSync(marker)).toBe(false);
+
+    setRepoTrusted(repo, true);
+    await addWorktree({ name: "loud", repoPath: repo }, silent);
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  test("answer for a root holding its bare repository in .bare by that repository's trust", async () => {
+    const root = join(repo, "..", `${repo.split("/").pop()}-bare-root`);
+    roots.push(root);
+    await Bun.$`git clone -q --bare ${repo} ${join(root, ".bare")}`;
+    await Bun.write(join(root, ".git"), "gitdir: ./.bare\n");
+    const marker = join(root, "post-checkout-ran");
+    await writePostCheckout(join(root, ".bare"), marker);
+
+    const first = await addWorktree({ name: "first", repoPath: root }, silent);
+    expect(existsSync(marker)).toBe(false);
+
+    setRepoTrusted(first.path, true);
+    await addWorktree({ name: "second", repoPath: root }, silent);
+    expect(existsSync(marker)).toBe(true);
+  });
 });
 
 describe("worktree hooks in an untrusted repository", () => {
