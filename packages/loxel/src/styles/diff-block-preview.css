@@ -1,0 +1,32 @@
+/*
+ * Diff fences in the markdown editor (diff-block-preview.tsx). The static markup holds both
+ * layouts; the editor container's data-diff-view-mode attribute picks one and marks the active
+ * Unified/Split button. Unlayered, so these win over the Tailwind classes in the markup.
+ */
+
+.loxel-diff-block {
+  text-align: left;
+}
+
+.milkdown [data-diff-view="split"],
+[data-diff-view-mode="split"] .milkdown [data-diff-view="unified"] {
+  display: none;
+}
+
+[data-diff-view-mode="split"] .milkdown [data-diff-view="split"] {
+  display: block;
+}
+
+[data-diff-view-mode="unified"] .milkdown [data-diff-view-mode-option="unified"],
+[data-diff-view-mode="split"] .milkdown [data-diff-view-mode-option="split"] {
+  background-color: var(--background);
+  color: var(--foreground);
+  box-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.1),
+    0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+/* The file header is sticky in diff panels; a block in a document scrolls with the text. */
+.loxel-diff-block .sticky {
+  position: static;
+}

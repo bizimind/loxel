@@ -2,7 +2,7 @@ import { ArrowDownIcon, ArrowLeftIcon, ArrowRightIcon, ArrowUpIcon } from "lucid
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useUIStore } from "@/store/ui";
+import { type DiffViewMode, useUIStore } from "@/store/ui";
 
 /** Previous/next navigation over the files of a multi-file diff */
 export interface DiffFileNavigation {
@@ -73,31 +73,46 @@ export function DiffToolbar({ fileNavigation }: { fileNavigation?: DiffFileNavig
 
       <div className="flex-1" />
 
-      {/* View mode segmented toggle */}
-      <div className="bg-muted flex h-6 items-center rounded-md p-0.5 text-[10px]">
+      <DiffViewModeToggle viewMode={viewMode} onChange={setDiffViewMode} />
+    </div>
+  );
+}
+
+const VIEW_MODES = [
+  { mode: "unified", label: "Unified" },
+  { mode: "split", label: "Split" },
+] as const satisfies readonly { mode: DiffViewMode; label: string }[];
+
+/**
+ * The Unified/Split segmented control. Each button carries `data-diff-view-mode-option`, so markup
+ * rendered without `viewMode`/`onChange` (static markup, styled and wired by its host) still
+ * identifies its options.
+ */
+export function DiffViewModeToggle({
+  viewMode,
+  onChange,
+}: {
+  viewMode?: DiffViewMode;
+  onChange?: (mode: DiffViewMode) => void;
+}) {
+  return (
+    <div className="bg-muted flex h-6 items-center rounded-md p-0.5 text-[10px]">
+      {VIEW_MODES.map(({ mode, label }) => (
         <button
+          key={mode}
+          type="button"
+          data-diff-view-mode-option={mode}
           className={cn(
             "rounded px-2 py-0.5 transition-colors",
-            viewMode === "unified"
+            viewMode === mode
               ? "bg-background text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
           )}
-          onClick={() => setDiffViewMode("unified")}
+          onClick={onChange && (() => onChange(mode))}
         >
-          Unified
+          {label}
         </button>
-        <button
-          className={cn(
-            "rounded px-2 py-0.5 transition-colors",
-            viewMode === "split"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-          onClick={() => setDiffViewMode("split")}
-        >
-          Split
-        </button>
-      </div>
+      ))}
     </div>
   );
 }

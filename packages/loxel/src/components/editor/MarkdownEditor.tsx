@@ -25,8 +25,10 @@ import type { DockviewPanelApi } from "dockview-react";
 import { CheckIcon, ClipboardIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { renderCodeBlockPreview } from "@/components/editor/code-block-preview";
 import { ConflictBanner } from "@/components/editor/ConflictBanner";
 import { DeletedFileBanner } from "@/components/editor/DeletedFileBanner";
+import { handleDiffBlockClick } from "@/components/editor/diff-block-preview";
 import { FrontmatterEditor } from "@/components/editor/FrontmatterEditor";
 import { localDbBlockSchema, localDbDirectivePlugins } from "@/components/editor/localdb-directive";
 import { MovedFileBanner } from "@/components/editor/MovedFileBanner";
@@ -265,6 +267,7 @@ export function MarkdownEditor({
   panelApi,
 }: MarkdownEditorProps) {
   const darkMode = useUIStore((s) => s.darkMode);
+  const diffViewMode = useUIStore((s) => s.diffViewMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const crepeRef = useRef<Crepe | null>(null);
 
@@ -397,7 +400,10 @@ export function MarkdownEditor({
       features: { [Crepe.Feature.ImageBlock]: false, [Crepe.Feature.Latex]: false },
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: "Start writing...", mode: "doc" },
-        [Crepe.Feature.CodeMirror]: { theme: [codeTheme, syntaxHighlighting(codeHighlight)] },
+        [Crepe.Feature.CodeMirror]: {
+          theme: [codeTheme, syntaxHighlighting(codeHighlight)],
+          renderPreview: renderCodeBlockPreview,
+        },
         [Crepe.Feature.BlockEdit]: {
           buildMenu: (builder) => {
             const dataGroup = builder.addGroup("data", "Data");
@@ -900,7 +906,14 @@ export function MarkdownEditor({
         onChange={handleFrontmatterChange}
         isProgrammaticRef={isProgrammaticRef}
       />
-      <div ref={containerRef} key={crepeKey} className="flex-1 overflow-hidden" />
+      {/* Diff fence previews show the layout named by data-diff-view-mode (diff-block-preview). */}
+      <div
+        ref={containerRef}
+        key={crepeKey}
+        className="flex-1 overflow-hidden"
+        data-diff-view-mode={diffViewMode}
+        onClick={handleDiffBlockClick}
+      />
       <button
         onClick={handleCopy}
         title="Copy markdown"

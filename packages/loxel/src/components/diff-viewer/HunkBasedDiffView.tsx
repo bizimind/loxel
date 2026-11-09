@@ -6,6 +6,7 @@ import type { DiffHunk, FileDiff } from "@/api/diff-model";
 import { type HighlightedHunk, useSyntaxHighlight } from "@/hooks/useSyntaxHighlight";
 import { frontendLog } from "@/lib/frontend-logger";
 import { cn } from "@/lib/utils";
+import type { DiffViewMode } from "@/store/ui";
 
 import { FileDiffHeader } from "./FileDiffHeader";
 import {
@@ -183,24 +184,12 @@ export function HunkBasedDiffView({
 
       {hunksToRender.map((hunk, i) => (
         <div key={i}>
-          <div className="border-border border-b last:border-b-0">
-            <div className="bg-muted/30 text-muted-foreground px-2 py-1 text-[11px]">
-              {hunk.header}
-            </div>
-            {viewMode === "unified" ? (
-              <UnifiedHunkView
-                hunk={hunk}
-                highlighted={!!highlighted}
-                inlineSegments={inlineSegments[i]}
-              />
-            ) : (
-              <SplitHunkView
-                hunk={hunk}
-                highlighted={!!highlighted}
-                inlineSegments={inlineSegments[i]}
-              />
-            )}
-          </div>
+          <HunkSection
+            hunk={hunk}
+            viewMode={viewMode}
+            highlighted={!!highlighted}
+            inlineSegments={inlineSegments[i]}
+          />
 
           {gapsByAfterIndex.has(i) && (
             <ExpandableGap
@@ -214,6 +203,30 @@ export function HunkBasedDiffView({
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+interface HunkSectionProps {
+  hunk: HunkData | HighlightedHunk;
+  viewMode: DiffViewMode;
+  /** Whether the lines carry syntax-highlighted `html` */
+  highlighted: boolean;
+  inlineSegments: HunkInlineSegments | undefined;
+}
+
+/**
+ * One hunk: its `@@` header row (omitted when the hunk has none, as in a diff snippet without
+ * headers) and its lines, unified or split. Stateless, so it also renders to static markup.
+ */
+export function HunkSection({ hunk, viewMode, highlighted, inlineSegments }: HunkSectionProps) {
+  const HunkView = viewMode === "unified" ? UnifiedHunkView : SplitHunkView;
+  return (
+    <div className="border-border border-b last:border-b-0">
+      {hunk.header && (
+        <div className="bg-muted/30 text-muted-foreground px-2 py-1 text-[11px]">{hunk.header}</div>
+      )}
+      <HunkView hunk={hunk} highlighted={highlighted} inlineSegments={inlineSegments} />
     </div>
   );
 }
@@ -374,7 +387,8 @@ function UnifiedHunkView({
                 <MinusIcon className="inline size-3" />
               ) : null}
             </td>
-            <td className="px-2 whitespace-pre">
+            {/* h-[1lh]: a blank line (or a split view's filler row) keeps one line's height. */}
+            <td className="h-[1lh] px-2 whitespace-pre">
               <HunkLineContent
                 line={line}
                 highlighted={highlighted}
@@ -472,7 +486,7 @@ function SplitHunkView({
                 >
                   {item.lineNumber ?? ""}
                 </td>
-                <td className="px-2 whitespace-pre">{renderContent(item)}</td>
+                <td className="h-[1lh] px-2 whitespace-pre">{renderContent(item)}</td>
               </tr>
             ))}
           </tbody>
@@ -500,7 +514,7 @@ function SplitHunkView({
                 >
                   {item.lineNumber ?? ""}
                 </td>
-                <td className="px-2 whitespace-pre">{renderContent(item)}</td>
+                <td className="h-[1lh] px-2 whitespace-pre">{renderContent(item)}</td>
               </tr>
             ))}
           </tbody>
