@@ -1,7 +1,8 @@
 ---
 title: Repository Trust
 description: How Loxel decides whether it may run a repository's code, how to trust a repository or stop trusting it, and how to manage every answer in Settings.
-order: 13.2
+section: "Reference"
+order: 1
 ---
 
 Some features can do more by running code from the repository you opened: build scripts, project plugins, a linter's or formatter's config file, the repository's worktree hooks. A repository you just cloned could put anything there, so a feature that depends on trust works in a restricted form until you say you trust the repository.

@@ -20,7 +20,10 @@ const currentSlug = allDocs.find((doc) => currentPath === `/docs/${doc.id}`)?.id
 <Base title={title} description={description} ogType="article">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 flex gap-12">
     <aside class="hidden lg:block w-56 flex-shrink-0">
-      <DocsNav currentSlug={currentSlug} class="sticky top-20" />
+      <DocsNav
+        currentSlug={currentSlug}
+        class="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto pb-4"
+      />
     </aside>
     <article
       class="flex-1 min-w-0 prose max-w-3xl"

@@ -1,7 +1,6 @@
 ---
 title: Go
 description: Go language features from gopls, with navigation, rename, quick fixes, inlay hints, go.mod support, format on save and golangci-lint diagnostics with quick fixes.
-order: 13.5
 ---
 
 The Go server starts the first time you open a `.go`, `go.mod`, `go.sum` or `go.work` file, and stops when none remain open. Loxel uses your own [gopls](https://go.dev/gopls/) or bundles one, but Go itself must be installed and on your `PATH`, because gopls runs `go` to understand a project. If it is missing, the status bar shows gopls as stopped, and hovering it says why. Install Go, then click the Go item or the gopls item in the status bar.

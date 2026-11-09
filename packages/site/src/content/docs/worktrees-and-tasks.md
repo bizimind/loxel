@@ -1,10 +1,14 @@
 ---
-title: Worktrees & Projects
-description: How Loxel manages repositories, bare repos, and per-context layout persistence.
-order: 4
+title: Worktrees & Tasks
+description: How a task maps to a worktree, adding projects, bare repos, the worktree sidebar, and the layout each task keeps.
+section: "Tasks & context"
+order: 1
+# Sections that moved; old links to them keep working.
+movedAnchors:
+  per-context-layout-persistence: /docs/worktrees-and-tasks#per-task-layouts
 ---
 
-Loxel tracks your repositories as **projects** and surfaces each worktree as a distinct **context** — with its own layout, open files, and editor state. This page explains how to add projects, when to use bare repos, and how Loxel persists state per worktree.
+Loxel tracks your repositories as **projects**, and every task you work on is a **worktree** of one: its own checkout and branch on disk, plus its own layout, open files, terminals and browser tabs in Loxel. This page explains how to add projects, when to use bare repos, how to manage worktrees in the sidebar, and what each task keeps.
 
 ---
 
@@ -41,7 +45,7 @@ After detection, confirm to register the repo with Loxel. The project is added t
 
 Paste a remote URL and Loxel clones it for you. Before cloning, you choose the workspace mode:
 
-- **Single-workspace** — clones as a regular repo. One working tree, one branch checked out at a time. Good for solo projects or repos where you don't need parallel workstreams.
+- **Single-workspace** — clones as a regular repo. One working tree, one branch checked out at a time. Good for solo projects or repos where you don't need parallel tasks.
 - **Multi-workspace** — clones as a bare repo and creates the first worktree. The right choice if you plan to run multiple agents in parallel on the same codebase.
 
 ### Init
@@ -64,7 +68,7 @@ After conversion, you can create and manage worktrees for the repo in Loxel.
 
 ## Bare repos vs regular repos
 
-Use a bare repo when you plan to run multiple parallel workstreams on the same repository. A bare repo has no working tree of its own — it holds the git object store and lets multiple worktrees coexist cleanly alongside it. Switching between tasks means switching worktrees, not stashing and checking out.
+Use a bare repo when you plan to work on several tasks in parallel on the same repository. A bare repo has no working tree of its own — it holds the git object store and lets multiple worktrees coexist cleanly alongside it. Switching between tasks means switching worktrees, not stashing and checking out.
 
 Use a regular repo for solo work or when you only ever need one working tree checked out at a time.
 
@@ -106,11 +110,11 @@ Nesting and titles are stored with each worktree in the repository's git config,
 
 ---
 
-## Per-context layout persistence
+## Per-task layouts
 
-Every worktree has its own saved layout. When you switch worktrees, Loxel saves the current layout and restores the one belonging to the worktree you're switching to.
+Every task has its own saved layout. When you switch tasks, Loxel saves the current layout and restores the one belonging to the task you're switching to.
 
-**What's saved per context:**
+**What's saved per task:**
 
 - Full panel state: panels, groups, sizes, orientations, and which panel is active in each group
 - Search filters
@@ -134,7 +138,8 @@ The switch is immediate: Loxel saves the outgoing worktree's layout and restores
 
 ## See also
 
-- [Getting Started](/docs/getting-started) — first-time walkthrough for adding a project and creating your first worktree
+- [Getting Started](/docs/getting-started) — first-time walkthrough for adding a project and starting your first task
+- [Working on Parallel Tasks](/docs/parallel-tasks) — a task from creating its worktree to committing the result
 - [Panel Layout](/docs/panel-layout) — the layout zones, rearranging panels, and keyboard navigation
-- [Terminals](/docs/terminals#tui-agents) — running a coding agent in each worktree
+- [Running Coding Agents](/docs/coding-agents) — running a coding agent in each task
 - [Drafts](/docs/drafts) — draft files are also scoped per project + worktree

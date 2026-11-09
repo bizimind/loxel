@@ -1,7 +1,8 @@
 ---
 title: Editor
 description: Quick Open, Go to Symbol, Find in Files, autosave, formatter auto-detection, indentation, inlay hints, EditorConfig, Python and Go files, conflict handling, and deleted or moved files.
-order: 10
+section: "In the code"
+order: 1
 ---
 
 The editor is Monaco-based with a few Loxel-specific behaviors layered on top: fast file navigation, autosave with conflict detection, and formatter auto-detection that works across the languages and toolchains your project actually uses.
@@ -156,7 +157,11 @@ In the file tree, Gradle build and settings files, `gradle.properties`, `libs.ve
 
 ## Markdown files
 
-Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `Shift+Enter` starts a new line within a paragraph and saves it as a plain line break, and line breaks already in the file show as new lines; pressing it twice starts a new paragraph. GitHub and most markdown renderers display a plain line break as a space. A trailing `\` or two trailing spaces keep the break visible everywhere, and Loxel keeps such breaks (writing them as `\` when you edit their paragraph). An empty line inside a paragraph can only be written as a `\` line, so Loxel saves it that way. `:::localdb` blocks render as [database widgets](/docs/introduction#planning-and-visibility); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
+Markdown files open in a live-preview markdown editor. Saving rewrites only the blocks you changed: untouched paragraphs, lists, and tables keep their original formatting, so editing one section doesn't reformat the rest of the file. Tables size their columns to their content and scroll horizontally when wide. `Shift+Enter` starts a new line within a paragraph and saves it as a plain line break, and line breaks already in the file show as new lines; pressing it twice starts a new paragraph. GitHub and most markdown renderers display a plain line break as a space. A trailing `\` or two trailing spaces keep the break visible everywhere, and Loxel keeps such breaks (writing them as `\` when you edit their paragraph). An empty line inside a paragraph can only be written as a `\` line, so Loxel saves it that way. `:::localdb` blocks render as [database widgets](#data-widgets); any other `:::name` or `::name` directive stays plain text, and text like `10:30am` is never treated as a directive.
+
+### Data widgets
+
+A `:::localdb` block puts a database view inside the document: a Table, Kanban, Calendar, Gantt, Graph or Form, for task boards, decision logs or anything else you want to track next to your notes. Add one from the block menu: **Data > Database Widget**. Widget data is stored per project and updates live in every open editor that shows it.
 
 ---
 
@@ -225,7 +230,7 @@ Clicking an entry focuses it, so keyboard navigation continues from there.
 
 ### Other folders
 
-Folders outside every project can be opened in the **Others** section at the bottom of the file tree, next to files opened from outside the worktree. Open one with `loxel <folder>` (see [the `loxel` CLI](/docs/reference-env-files-cli-settings#loxel-cli)), or by `Cmd`-clicking a folder path in a terminal or a folder link in a markdown file. If the folder is inside a project's worktree instead, Loxel switches to that worktree and reveals the folder in its tree.
+Folders outside every project can be opened in the **Others** section at the bottom of the file tree, next to files opened from outside the worktree. Open one with `loxel <folder>` (see [Loxel CLI](/docs/cli)), or by `Cmd`-clicking a folder path in a terminal or a folder link in a markdown file. If the folder is inside a project's worktree instead, Loxel switches to that worktree and reveals the folder in its tree.
 
 A folder that contains one of your projects can't be opened this way, nor can the filesystem root or your home folder (they are too large to watch); open a folder inside them instead. Other folders belong to the worktree they were opened in and are remembered across restarts, until the worktree is removed. A folder opened in several worktrees stays in sync across all of them. They work like the project tree — open, edit and save files with conflict detection, create, rename, delete, cut/copy/paste and drag within the folder, undo with `Cmd+Z` — with these differences:
 

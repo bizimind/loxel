@@ -1,7 +1,6 @@
 ---
 title: Kotlin
 description: Editing Kotlin files in Loxel, with raw strings, backtick identifiers, and KDoc comments, plus format on save with ktfmt or ktlint and lint diagnostics from detekt and ktlint, on the worktree's JDK.
-order: 13.5
 ---
 
 Kotlin source (`.kt`) and script (`.kts`) files get highlighting and 4-space indentation.

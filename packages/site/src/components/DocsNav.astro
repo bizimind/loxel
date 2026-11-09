@@ -1,5 +1,6 @@
 ---
-import { getCollection } from "astro:content";
+import { getCollection, type CollectionEntry } from "astro:content";
+import { DOC_SECTIONS } from "../content.config";
 import { trackClick } from "../lib/analytics";
 
 interface Props {
@@ -10,33 +11,89 @@ interface Props {
 
 const { currentSlug, class: className } = Astro.props;
 
-const docs = await getCollection("docs");
-const sorted = docs.toSorted(
-  (a, b) => a.data.order - b.data.order || a.data.title.localeCompare(b.data.title),
-);
+type Doc = CollectionEntry<"docs">;
+
+// Pages in a folder are listed under a top-level page rather than in a section of their own.
+const NESTED_UNDER: Record<string, string> = { languages: "language-intelligence" };
+
+const byOrder = (a: Doc, b: Doc) =>
+  a.data.order - b.data.order || a.data.title.localeCompare(b.data.title);
+
+const docs = (await getCollection("docs")).toSorted(byOrder);
+const topLevel = docs.filter((doc) => !doc.id.includes("/"));
+
+function nestedPages(parent: Doc): Doc[] {
+  return docs.filter((doc) => {
+    const folder = doc.id.split("/", 1)[0];
+    return doc.id.includes("/") && NESTED_UNDER[folder] === parent.id;
+  });
+}
+
+for (const doc of docs) {
+  const folder = doc.id.split("/", 1)[0];
+  if (doc.id.includes("/") && !topLevel.some((parent) => parent.id === NESTED_UNDER[folder])) {
+    throw new Error(`Docs page "${doc.id}" is in a folder that DocsNav nests under no page`);
+  }
+  if (doc.id.includes("/") && doc.data.section) {
+    throw new Error(`Docs page "${doc.id}" is nested under its parent, so it can't set a \`section\``);
+  }
+  if (!doc.id.includes("/") && !doc.data.section) {
+    throw new Error(`Docs page "${doc.id}" needs a \`section\` in its frontmatter`);
+  }
+}
+
+const sections = DOC_SECTIONS.map((name) => ({
+  name,
+  pages: topLevel.filter((doc) => doc.data.section === name),
+})).filter((section) => section.pages.length > 0);
+
+const linkClass = (doc: Doc) =>
+  `block text-sm px-3 py-1.5 rounded-md transition-colors ${
+    doc.id === currentSlug
+      ? "bg-primary/15 text-accent font-medium"
+      : "text-muted-foreground hover:text-foreground hover:bg-surface-0"
+  }`;
 ---
 
-<nav class={className}>
-  <p class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-    Documentation
-  </p>
-  <ul class="space-y-0.5">
-    {
-      sorted.map((doc) => (
-        <li>
-          <a
-            href={`/docs/${doc.id}`}
-            {...trackClick("docs_nav_clicked", { from: currentSlug, to: doc.id })}
-            class={`block text-sm px-3 py-1.5 rounded-md transition-colors ${
-              doc.id === currentSlug
-                ? "bg-primary/15 text-accent font-medium"
-                : "text-muted-foreground hover:text-foreground hover:bg-surface-0"
-            }`}
-          >
-            {doc.data.title}
-          </a>
-        </li>
-      ))
-    }
-  </ul>
+<nav class={className} aria-label="Documentation">
+  {
+    sections.map((section) => (
+      <div class="mb-6 last:mb-0">
+        <p class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-3">
+          {section.name}
+        </p>
+        <ul class="space-y-0.5">
+          {section.pages.map((doc) => {
+            const children = nestedPages(doc);
+            return (
+              <li>
+                <a
+                  href={`/docs/${doc.id}`}
+                  {...trackClick("docs_nav_clicked", { from: currentSlug, to: doc.id })}
+                  class={linkClass(doc)}
+                >
+                  {doc.data.title}
+                </a>
+                {children.length > 0 && (
+                  <ul class="ml-3 pl-2 my-0.5 space-y-0.5 border-l border-surface-0">
+                    {children.map((child) => (
+                      <li>
+                        <a
+                          href={`/docs/${child.id}`}
+                          {...trackClick("docs_nav_clicked", { from: currentSlug, to: child.id })}
+                          class={linkClass(child)}
+                        >
+                          {child.data.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    ))
+  }
 </nav>

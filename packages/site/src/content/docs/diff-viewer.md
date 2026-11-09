@@ -1,7 +1,8 @@
 ---
 title: Diff Viewer
 description: Split and unified modes, synchronized scrolling, gutter connectors, intra-line highlights, editing your working tree in place, and comparing any two files.
-order: 9
+section: "In the code"
+order: 4
 ---
 
 The diff viewer is where you inspect changes — whether that's your working tree, a single commit, a range between two refs, or two files you pick. The standout behavior is synchronized scrolling that keeps context lines aligned across both panels even when the two sides have unequal line counts.

@@ -1,10 +1,15 @@
 ---
 title: Panel Layout
-description: The five fixed zones, panel rearrangement, keyboard navigation, and per-context persistence.
-order: 5
+description: The five fixed zones, panel rearrangement, keyboard navigation, and the layout each task keeps.
+section: "Tasks & context"
+order: 3
+# Sections that moved; old links to them keep working.
+movedAnchors:
+  browser-panels: /docs/browser
+  per-context-persistence: /docs/panel-layout#per-task-layouts
 ---
 
-Loxel's workspace is divided into five fixed zones. Within those zones, panels are free-form: you can move them between groups, split areas horizontally or vertically, and resize everything. The layout for each worktree is saved automatically and restored when you switch back.
+Loxel's workspace is divided into five fixed zones. Within those zones, panels are free-form: you can move them between groups, split areas horizontally or vertically, and resize everything. Each task keeps its own layout, saved as you go and restored when you switch back to it.
 
 ---
 
@@ -41,7 +46,7 @@ The center area is the main content area. Every editor and interactive view open
 - **Markdown editor** — live preview markdown editing for repo files and drafts
 - **Excalidraw** — whiteboard and diagram editor
 - **Terminals** — full-featured terminal tabs
-- **Browser** — web pages, see [Browser panels](#browser-panels)
+- **Browser** — web pages, with DevTools and bookmarks; see [Browser](/docs/browser)
 - **Media viewer** — images, SVGs, and videos
 
 Double-click a terminal or file tab's title, right-click the tab and choose **Rename**, or press `Cmd+Shift+R` (**Rename Tab** in the command palette) to rename the active tab; renaming a file tab renames the file. Press `Enter` to apply the new name or `Esc` to cancel, and focus returns to the panel you were working in. The tab menu also copies a file's name or path, closes other tabs, and on macOS offers **Reveal in Finder** and **Open In**.
@@ -74,36 +79,6 @@ The status bar runs across the bottom edge of the window and is always visible. 
 - **Rust toolchain** — while a Rust file is the active editor, the worktree's toolchain; click it to choose another (see [Rust toolchain](/docs/languages/rust#rust-toolchain))
 - **Chord progress** — the keys typed so far while a chord shortcut such as `Cmd+\` is waiting for its next key
 - **New panel buttons** — open a new markdown editor, drawing, browser, or terminal
-
----
-
-## Browser panels
-
-A browser panel (`Cmd+Shift+B`) is a full web view with back, forward, reload, an address bar, and DevTools. A new blank panel starts with the cursor in the address bar, so you can type a URL or a search right away. `Cmd+F` finds text in the page, and `Cmd+Shift+R` while the tab has focus does a hard refresh, reloading the page and bypassing the cache. Clicking the title of the active browser tab returns focus to its page.
-
-Bookmark a page with the star at the end of the address bar, or `Cmd+D` while the tab has focus; the star fills in on a bookmarked page, and clicking it again removes the bookmark. The bookmark button next to the address bar lists your bookmarks, and a new blank tab shows them in place of an empty page. Click one to open it in the current tab, or `Cmd`-click or middle-click it to open it in a background tab (`Cmd+Shift`-click switches to it). Hover a bookmark and click its **×**, or press `Delete` on it in the list, to remove it. Bookmarks are shared by all your projects and windows and kept across restarts.
-
-A plain click on a link opens it in the same tab. Links you open in a new tab or window become browser tabs right after the current one, in the same group:
-
-- **`Cmd`-click or middle-click** opens the link in a background tab and keeps you on the current page, so you can hold `Cmd` and click several links in a row. The new tabs keep the order you clicked them in.
-- **`Cmd+Shift`-click** opens the link in a new tab and switches to it.
-- **Links that open a new window** (`target="_blank"`, or a page opening a window when you click something) open in a new tab and switch to it.
-- **Popup windows** a page opens at a set size, such as a "Sign in with Google" window, open as a separate small window over Loxel, so the sign-in can finish and return to the page. The window's title shows the site it belongs to, and `Cmd+W` closes it.
-
-Windows a page tries to open without you clicking or typing are blocked, and each click opens at most one tab or popup.
-
-Right-click in a page for a context menu that matches what you clicked:
-
-- **Link** — open it in a new tab (next to the current one, in the background), open it in your default browser, or copy its address.
-- **Image** — open it in a new tab, save it, copy it, or copy its address.
-- **Selected text** — copy it or search the web for it. In a text field you can also cut, paste and select all.
-- **Page** — back, forward, reload, or view the page source in a new tab.
-
-Every menu ends with **Inspect Element**, which opens DevTools on the element you clicked.
-
-All browser panels share one persistent session, so cookies and logins carry across panels and restarts. In the signed macOS app, sites can create and use passkeys with Touch ID. Open a URL in a browser panel with `loxel <url>` from a terminal, or by `Cmd`-clicking a link in terminal output.
-
-When a page calls `alert()`, `confirm()`, or `prompt()`, the dialog opens over that page and names the site that asked. Only that browser panel waits for your answer; the rest of Loxel stays usable. `Enter` confirms and `Esc` cancels. Starting from a page's second dialog, you can check **Don't allow this page to show more dialogs** to silence it until it reloads or navigates. Reloading or navigating also dismisses any dialog that is open.
 
 ---
 
@@ -152,11 +127,11 @@ Move focus between panels without the mouse.
 
 ---
 
-## Per-context persistence
+## Per-task layouts
 
-Every aspect of the layout — panel positions, group splits, sizes, orientations, and the active panel in each group — is saved per worktree context. When you switch to a different worktree, Loxel saves the current layout and restores the layout from the last time you were in the destination worktree.
+Every aspect of the layout — panel positions, group splits, sizes, orientations, and the active panel in each group — is saved per task. When you switch to another task, Loxel saves the current layout and restores the one you left in the task you're switching to.
 
-Layouts are saved by Loxel, not by the window, so they survive closing windows and restarting the app. See [Worktrees & Projects](/docs/worktrees-and-projects#per-context-layout-persistence) for how layouts behave across multiple windows.
+Layouts are saved by Loxel, not by the window, so they survive closing windows and restarting the app. See [Worktrees & Tasks](/docs/worktrees-and-tasks#per-task-layouts) for how layouts behave across multiple windows.
 
 ---
 
