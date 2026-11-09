@@ -52,6 +52,10 @@ export const config = {
   isDev,
   stateDir,
   commentsDir: join(stateDir, "comments"),
+  /** Tombi's `TOMBI_CACHE_HOME`; see `SchemaDownloads`. */
+  tombiSchemaCacheDir: join(stateDir, "schema-cache", "tombi"),
+  /** LemMinX's `xml.server.workDir`; see `SchemaDownloads`. */
+  lemminxWorkDir: join(stateDir, "schema-cache", "lemminx"),
   port,
   /**
    * The desktop app's process ID when the app started this server (`LOXEL_PARENT_PID`). The

@@ -87,6 +87,7 @@ The route in [routes.ts](../src/server/routes.ts) reads or upserts the row throu
 | `compile-database:<worktreePath>`                                                       | Server, [compile-database-store.ts](../src/server/compile-database-store.ts); deleted when the worktree is removed         |
 | `repo-trust:<git or folder id>`                                                         | Server, [repo-trust.ts](../src/server/repo-trust.ts); the generic store route refuses it, and removing a worktree keeps it |
 | `repo-trust-declined:<git or folder id>`                                                | Server, [repo-trust.ts](../src/server/repo-trust.ts); same rules as `repo-trust:`, never both for one repository           |
+| `schema-consent`                                                                        | Server, [schema-consent.ts](../src/server/schema-consent.ts)                                                               |
 
 ### Multi-window propagation
 

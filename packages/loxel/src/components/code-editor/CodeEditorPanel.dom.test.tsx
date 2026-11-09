@@ -59,6 +59,8 @@ mock.module("monaco-editor", () => ({
   editor: {
     EditorOption: {},
     getModel: () => null,
+    // Opening an editor looks for the schemas its open files need.
+    getModels: () => [],
     createModel: (content: string) => {
       createdWith.push(content);
       return new FakeModel(content);
