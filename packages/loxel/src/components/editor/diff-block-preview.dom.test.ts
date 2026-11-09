@@ -37,11 +37,13 @@ const GIT_DIFF = [
   "   return port;",
 ].join("\n");
 
-/** Runs the preview hook and resolves with the value it applies asynchronously. */
-function renderPreview(language: string, content: string): Promise<PreviewValue> {
-  return new Promise((resolve) => {
-    expect(renderCodeBlockPreview(language, content, resolve)).toBeUndefined();
+/** Runs the preview hook, which renders synchronously. */
+function renderPreview(language: string, content: string): PreviewValue {
+  const result = renderCodeBlockPreview(language, content, () => {
+    throw new Error("diff previews render synchronously");
   });
+  if (result === undefined) throw new Error("expected a synchronous preview");
+  return result;
 }
 
 function parse(html: PreviewValue): HTMLElement {
@@ -68,17 +70,16 @@ function waitFor(root: HTMLElement, predicate: () => boolean): Promise<void> {
 }
 
 describe("renderDiffPreview", () => {
-  test("routes diff and patch fences, in any case, to the diff view", async () => {
+  test("routes diff and patch fences, in any case, to the diff view", () => {
     for (const language of ["diff", "patch", "Diff"]) {
-      // oxlint-disable-next-line no-await-in-loop -- each render is awaited on its own
-      const view = parse(await renderPreview(language, GIT_DIFF));
+      const view = parse(renderPreview(language, GIT_DIFF));
       expect(view.querySelector(".loxel-diff-block")).not.toBeNull();
     }
     expect(renderCodeBlockPreview("typescript", GIT_DIFF, () => {})).toBeNull();
   });
 
-  test("renders both layouts with file header, line numbers and change coloring", async () => {
-    const view = parse(await renderPreview("diff", GIT_DIFF));
+  test("renders both layouts with file header, line numbers and change coloring", () => {
+    const view = parse(renderPreview("diff", GIT_DIFF));
     expect(view.textContent).toContain("src/app.ts");
     expect(view.textContent).toContain("@@ -3,3 +3,3 @@ export function app() {");
 
@@ -101,21 +102,21 @@ describe("renderDiffPreview", () => {
     ]);
   });
 
-  test("renders a headerless snippet without file header or line numbers", async () => {
-    const view = parse(await renderPreview("diff", "-old line\n+new line\n"));
+  test("renders a headerless snippet without file header or line numbers", () => {
+    const view = parse(renderPreview("diff", "-old line\n+new line\n"));
     expect(view.querySelector("img")).toBeNull();
     const cells = [...view.querySelectorAll('[data-diff-view="unified"] tr td:first-child')];
     expect(cells.map((td) => td.textContent)).toEqual(["", ""]);
     expect(view.querySelector('[data-diff-view="unified"] tr.diff-line-add')).not.toBeNull();
   });
 
-  test("falls back to the plain code block when the text holds no diff", async () => {
-    expect(await renderPreview("diff", "")).toBeNull();
-    expect(await renderPreview("diff", "not a diff at all")).toBeNull();
+  test("falls back to the plain code block when the text holds no diff", () => {
+    expect(renderPreview("diff", "")).toBeNull();
+    expect(renderPreview("diff", "not a diff at all")).toBeNull();
   });
 
-  test("escapes diff content instead of parsing it as HTML", async () => {
-    const view = parse(await renderPreview("diff", '+<img src=x onerror="alert(1)">\n'));
+  test("escapes diff content instead of parsing it as HTML", () => {
+    const view = parse(renderPreview("diff", '+<img src=x onerror="alert(1)">\n'));
     expect(view.querySelector("img[onerror]")).toBeNull();
     expect(view.textContent).toContain('<img src=x onerror="alert(1)">');
   });

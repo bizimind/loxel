@@ -12,9 +12,7 @@
  * Unified/Split buttons set that setting. A per-block choice would be lost whenever the panel
  * re-renders the preview, which it does on every edit of the block.
  */
-import type { ReactNode } from "react";
-import { flushSync } from "react-dom";
-import { createRoot } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import type { DiffInfo, FileDiff } from "@/api/diff-model";
 import { fileDiffPath } from "@/api/diff-model";
@@ -32,26 +30,14 @@ import "@/styles/diff-block-preview.css";
 const VIEW_MODES = ["unified", "split"] as const satisfies readonly DiffViewMode[];
 
 /**
- * Crepe `renderPreview` for diff fences: a diff view, or no preview panel (the plain code block)
- * when the text holds no diff.
- *
- * Renders in a microtask rather than synchronously. Crepe can ask for a preview while React is
- * committing (a code block mounting during an effect, such as navigating into it), and React
- * cannot render synchronously from inside its own commit. The microtask still runs before the
- * next paint, so the panel's loading placeholder never shows. An empty result goes through the
- * same queue, so a preview rendered for an earlier edit cannot land after it.
+ * Crepe `renderPreview` for diff fences: a diff view, or `null` (no preview panel, the plain code
+ * block) when the text holds no diff or the view fails to render.
  */
-export const renderDiffPreview: RenderPreview = (_language, content, applyPreview) => {
-  queueMicrotask(() => applyPreview(renderDiffMarkup(content)));
-  return undefined;
-};
-
-function renderDiffMarkup(content: string): string | null {
+export const renderDiffPreview: RenderPreview = (_language, content) => {
   try {
     const diff = parseUnifiedDiff(content);
-    return diff && renderToMarkup(<DiffBlockView diff={diff} />);
+    return diff && renderToStaticMarkup(<DiffBlockView diff={diff} />);
   } catch (error) {
-    // The block stays a plain code block.
     frontendLog
       .child("ui")
       .error("Failed to render diff block preview", {
@@ -59,29 +45,7 @@ function renderDiffMarkup(content: string): string | null {
       });
     return null;
   }
-}
-
-/** Static markup of a stateless element tree; throws what the render threw. */
-function renderToMarkup(node: ReactNode): string {
-  const host = document.createElement("div");
-  // React 19 reports render errors to this callback instead of throwing from flushSync.
-  const failure: { error?: Error } = {};
-  const root = createRoot(host, {
-    onUncaughtError: (error) => {
-      failure.error =
-        error instanceof Error ? error : new Error("Diff block render failed", { cause: error });
-    },
-  });
-  let markup: string;
-  try {
-    flushSync(() => root.render(node));
-    markup = host.innerHTML;
-  } finally {
-    root.unmount();
-  }
-  if (failure.error) throw failure.error;
-  return markup;
-}
+};
 
 /**
  * Click handler for the markdown editor's container: a diff block's Unified/Split buttons set the
