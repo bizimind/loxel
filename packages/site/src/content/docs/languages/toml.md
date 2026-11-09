@@ -1,7 +1,6 @@
 ---
 title: TOML
 description: TOML language features from Tombi, with syntax and schema checks, completions and hover from JSON Schemas.
-order: 13.5
 ---
 
 The TOML server starts the first time you open a `.toml` file, `Pipfile`, `Cargo.lock`, `.cargo/config`, `poetry.lock` or `uv.lock`, and stops when none remain open.

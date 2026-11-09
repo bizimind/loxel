@@ -1,7 +1,8 @@
 ---
 title: Language Intelligence
 description: Per-worktree language servers, the features they provide, and how they start and stop.
-order: 13
+section: "In the code"
+order: 2
 # Sections that moved to a language's own page; old links to them keep working.
 movedAnchors:
   typescript-server: /docs/languages/typescript

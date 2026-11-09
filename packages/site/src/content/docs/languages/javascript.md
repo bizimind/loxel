@@ -1,7 +1,6 @@
 ---
 title: JavaScript
 description: JavaScript projects, jsconfig.json, type checking plain JavaScript, inlay hints, format on save, ESLint, oxlint, Biome, the Node version, and tool configuration files.
-order: 13.5
 ---
 
 <!-- "Tool configuration files" stays last. -->

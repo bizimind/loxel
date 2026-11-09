@@ -1,7 +1,8 @@
 ---
 title: Drafts
 description: Markdown and Excalidraw files outside your repo, and how to move them in.
-order: 11
+section: "Tasks & context"
+order: 4
 ---
 
 Drafts let you sketch a design doc or architecture diagram before deciding where it lives in your repo. They exist outside any git tree — no branch, no staging, no tracking — until you explicitly move them in.
@@ -76,5 +77,5 @@ The same works for architecture diagrams: `Cmd+Shift+D`, sketch the system, drag
 ## See also
 
 - [Editor](/docs/editor) — autosave behavior that applies equally to drafts; format on save
-- [Terminals](/docs/terminals#tui-agents) — running the agent you hand draft context documents to
-- [Worktrees & Projects](/docs/worktrees-and-projects) — drafts are scoped per project + worktree, just like layout state
+- [Running Coding Agents](/docs/coding-agents) — running the agent you hand your drafts to
+- [Worktrees & Tasks](/docs/worktrees-and-tasks) — drafts are scoped per project + worktree, just like the rest of a task's context

@@ -1,7 +1,6 @@
 ---
 title: Python
 description: Python language features from basedpyright, Ruff and mypy, Python environments and the interpreter picker.
-order: 13.5
 ---
 
 The Python servers start the first time you open a `.py`, `.pyi` or `.pyw` file and stop when none remain open.

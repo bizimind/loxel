@@ -1,7 +1,6 @@
 ---
 title: C#
 description: C# language features from your own csharp-ls, loaded once you trust the repository and restore its projects.
-order: 13.5
 ---
 
 Loxel highlights `.cs` and `.csx` files out of the box. Everything else comes from [csharp-ls](https://github.com/razzmatazz/csharp-language-server), which you install yourself and which runs on your own .NET. Loxel does not bundle or download either one.
@@ -22,7 +21,7 @@ A repository that lists csharp-ls in its `.config/dotnet-tools.json` manifest us
 Language features start for a repository when all of these are true:
 
 - You [trust the repository](/docs/repository-trust), because loading a C# project runs the repository's build files.
-- Its projects are restored: you have run `dotnet restore`, so `project.assets.json` exists. If you accepted the [setup suggestion](/docs/worktrees-and-projects) when adding the project, each new worktree runs it; you can remove that from the setup script.
+- Its projects are restored: you have run `dotnet restore`, so `project.assets.json` exists. If you accepted the [setup suggestion](/docs/worktrees-and-tasks#adding-a-project) when adding the project, each new worktree runs it; you can remove that from the setup script.
 - .NET and csharp-ls are installed, as above.
 
 A fresh clone therefore gets syntax highlighting only, and a notice tells you the next step: what to install or what to run, or the status bar's **Restricted** item asks about trust (unless you [declined](/docs/repository-trust#trusting-a-repository) the repository). You don't need to restart anything. Language features start by themselves after you trust the repository, install csharp-ls or run `dotnet restore`.

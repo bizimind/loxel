@@ -1,12 +1,13 @@
 ---
 title: Keyboard Shortcuts
 description: Complete keyboard shortcut reference for all panels, navigation, and worktree switching.
-order: 14
+section: "Reference"
+order: 2
 ---
 
 All shortcuts use the "Loxel Default" template and are fully customizable in Settings > Keybindings (`Cmd+,`). Shortcuts use macOS key names; `Cmd` is the Command key.
 
-For context on what each feature does, see [Terminals](/docs/terminals), [Drafts](/docs/drafts), [Editor](/docs/editor), [Worktrees & Projects](/docs/worktrees-and-projects), [Panel Layout](/docs/panel-layout), [Git](/docs/git), and [Diff Viewer](/docs/diff-viewer).
+For what each feature does, see [Terminals](/docs/terminals), [Drafts](/docs/drafts), [Editor](/docs/editor), [Worktrees & Tasks](/docs/worktrees-and-tasks), [Browser](/docs/browser), [Panel Layout](/docs/panel-layout), [Git](/docs/git), and [Diff Viewer](/docs/diff-viewer).
 
 ---
 

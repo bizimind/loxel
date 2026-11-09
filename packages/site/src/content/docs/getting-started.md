@@ -1,10 +1,11 @@
 ---
 title: Getting Started
-description: From a fresh install to your first change and worktree in a few minutes.
-order: 3
+description: From a fresh install to your first task with an agent working in it, in a few minutes.
+section: "Start here"
+order: 2
 ---
 
-This page gets you from a fresh install to your first change and worktree in a few minutes.
+This page gets you from a fresh install to your first task, with an agent working in it, in a few minutes.
 
 ---
 
@@ -18,7 +19,7 @@ Click **Add project** at the bottom of the worktree sidebar. The dialog has two 
 - **Init** — initialize git in an existing folder that isn't yet a repo. Same single/multi choice as Clone.
 - **Convert** — choose multi-workspace on a detected regular repo to turn it into a bare repo with worktrees. Requires a clean working tree, a checked-out branch, and no existing linked worktrees.
 
-For most cases, Detect + Add is the fastest path. If you're planning to run multiple parallel workstreams on the same repo, choose the multi-workspace option during Clone or Init — it sets up a bare repo from the start. See [Worktrees & Projects](/docs/worktrees-and-projects) for the full breakdown.
+For most cases, Detect + Add is the fastest path. If you're planning to work on several tasks in parallel on the same repo, choose the multi-workspace option during Clone or Init — it sets up a bare repo from the start. See [Worktrees & Tasks](/docs/worktrees-and-tasks) for the full breakdown.
 
 ---
 
@@ -56,13 +57,34 @@ Open the Changes panel (`Cmd+Shift+C`) to see every changed file; double-click o
 
 ## Create a worktree for a new task
 
-When you're ready to start a parallel task without touching your current working state, create a new worktree.
+Every task gets its own worktree: a separate checkout and branch, with its own editors, terminals and layout. When you're ready to start one without touching what you have open, create a worktree.
 
 - Click **Add worktree** under the project in the worktree sidebar.
 - Press `Ctrl+Alt+N` from anywhere in the app.
 
 Type a name for the worktree and press `Enter`. The new worktree appears in the sidebar; click it to switch to it — it has a clean working tree, its own editor layout, and its own terminals.
 
-Switch back to your previous worktree by clicking it in the sidebar, or use `Ctrl+Alt+[` / `Ctrl+Alt+]` to go back and forward through the worktrees you visited. Your layout and open files are restored exactly as you left them.
+Switch back to your previous task by clicking its worktree in the sidebar, or use `Ctrl+Alt+[` / `Ctrl+Alt+]` to go back and forward through the worktrees you visited. Your layout and open files are restored exactly as you left them.
 
-See [Worktrees & Projects](/docs/worktrees-and-projects) for bare repos, uncommitted changes across worktrees, and the worktree sidebar.
+See [Worktrees & Tasks](/docs/worktrees-and-tasks) for bare repos, uncommitted changes across worktrees, and the worktree sidebar.
+
+---
+
+## Start your agent
+
+Now give the task to an agent. Switch to the new worktree and press `Cmd+T`: the terminal opens in the task's worktree. Run Claude Code, Codex, or any other agent that works in a terminal, on your own subscription as usual:
+
+```bash
+claude
+```
+
+Tell it what to do, and go back to your other task while it works. Its terminal keeps running, and if your agent sends terminal notifications, a dot on the worktree in the sidebar tells you when it needs you.
+
+Then teach your agent about Loxel. The `loxel` skill shows it how to open files for you to review, show its dev server or PR in a browser panel, and start commands in terminals of their own. For Claude Code, install it with:
+
+```bash
+mkdir -p ~/.claude/skills/loxel
+curl -fsSL https://raw.githubusercontent.com/bizimind/loxel/main/skills/loxel/SKILL.md -o ~/.claude/skills/loxel/SKILL.md
+```
+
+See [Running Coding Agents](/docs/coding-agents) for other agents, notifications and multi-line prompts, and [Working on Parallel Tasks](/docs/parallel-tasks) for the rest of the loop: reviewing what the agent did and committing it.

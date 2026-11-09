@@ -1,7 +1,6 @@
 ---
 title: Rust
 description: Rust language features through your own rust-analyzer, the toolchain of each worktree, the status bar item, the toolchain picker and format on save.
-order: 13.5
 ---
 
 Loxel gives Rust files language features through your own rust-analyzer. It works out which Rust toolchain each worktree uses, shows it while you edit a Rust file, and lets you choose another installed one. Each worktree has its own.

@@ -1,7 +1,6 @@
 ---
 title: C and C++
 description: C, C++ and Objective-C language features from clangd, with compile_commands.json in any build folder, .clangd and .clang-tidy.
-order: 13.5
 ---
 
 The C and C++ server starts the first time you open a C, C++ or Objective-C file, such as `.c`, `.h`, `.cpp`, `.cc`, `.hpp`, `.m` or `.mm`, and stops when none remain open.

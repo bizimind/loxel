@@ -1,7 +1,8 @@
 ---
 title: Code Review
 description: Anchored comments, review sessions, threads, and export.
-order: 7
+section: "Review & Git"
+order: 1
 ---
 
 Loxel has a built-in code review system that lives in the Comments panel. Comments are anchored to the code they were left on — not to a line number — so they survive code changes, reformats, and repeated agent rewrites.
@@ -109,5 +110,5 @@ Review sessions live in a SQLite file at `~/.local/state/loxel/loxel/comments/{r
 ## See also
 
 - [Diff Viewer](/docs/diff-viewer) — the diff context where comments are anchored; covers split/unified modes and synchronized scrolling
-- [Terminals](/docs/terminals#tui-agents) — running the agents that produce the code you review; iterations feed back into the same review session
+- [Running Coding Agents](/docs/coding-agents) — running the agents that produce the code you review; iterations feed back into the same review session
 - [Guide: Reviewing Agent Code](/docs/guide-reviewing-agent-code) — end-to-end walkthrough of the review workflow

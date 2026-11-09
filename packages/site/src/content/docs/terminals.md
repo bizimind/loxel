@@ -1,10 +1,17 @@
 ---
 title: Terminals
-description: Full PTY sessions, persistence, Python environments, injected env vars, the loxel CLI, and TUI agents.
-order: 12
+description: Full PTY sessions that keep running across task switches, find, links, Python, Node and JDK environments, and the variables every terminal starts with.
+section: "In the code"
+order: 3
+# Sections that moved; old links to them keep working.
+movedAnchors:
+  notifications: /docs/coding-agents#notifications
+  the-loxel-cli-inside-a-terminal: /docs/cli
+  tui-agents: /docs/coding-agents
+  teach-your-agent-about-loxel: /docs/coding-agents#teach-your-agent-about-loxel
 ---
 
-Loxel's integrated terminals are full PTY sessions. Open as many as you need, run any CLI tool, and switch worktrees freely — your terminal sessions stay alive and exactly where you left them.
+Loxel's integrated terminals are full PTY sessions. Open as many as you need, run any CLI tool or coding agent, and switch tasks freely — your terminal sessions stay alive and exactly where you left them.
 
 ---
 
@@ -18,7 +25,7 @@ To rename a terminal, double-click its tab title, right-click the tab and choose
 
 ## Session persistence
 
-Terminal sessions survive context switches. When you switch to another worktree — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included. A terminal ends when you close it, when its [worktree is removed](/docs/worktrees-and-projects), or when you quit Loxel. With every window closed and Loxel still running, terminals keep running for 5 minutes, so they are back when you open a window again.
+Terminal sessions survive task switches. When you switch to another task — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included. A terminal ends when you close it, when its [worktree is removed](/docs/worktrees-and-tasks#the-worktree-sidebar), or when you quit Loxel. With every window closed and Loxel still running, terminals keep running for 5 minutes, so they are back when you open a window again.
 
 Scrollback defaults to **50,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines. Scrollback is kept by the Loxel server for every open terminal, visible or not, so with many long-running, chatty terminals a lower setting saves memory: a 200-column terminal that has filled all 50,000 lines can hold around 120 MB.
 
@@ -32,13 +39,7 @@ Press `Cmd+F` in a terminal to search its output and scrollback. Matches are hig
 
 ## Links
 
-`Cmd`-click a file path in terminal output to open it in the editor. Paths starting with `/`, `./`, `../` or `~/` are always clickable; bare names like `src/index.ts` are clickable when they match a file in the project. A `:line` or `:line:col` suffix jumps to that position. `Cmd`-click a URL to open it in a Loxel browser panel; a plain click opens it in your default browser.
-
----
-
-## Notifications
-
-Terminal programs can raise Loxel notifications with the OSC 9 (iTerm2), OSC 777 (rxvt-unicode) and OSC 99 (Kitty) escape sequences; choose which ones Loxel listens to in **Settings > Terminal**. Notifications appear under the bell in the top bar and as a dot on the worktree in the sidebar. Press `` Ctrl+` `` to jump to the panel that raised the most recent one.
+`Cmd`-click a file path in terminal output to open it in the editor. Paths starting with `/`, `./`, `../` or `~/` are always clickable; bare names like `src/index.ts` are clickable when they match a file in the project. A `:line` or `:line:col` suffix jumps to that position. `Cmd`-click a URL to open it in a Loxel [browser panel](/docs/browser); a plain click opens it in your default browser.
 
 ---
 
@@ -85,72 +86,25 @@ Every Loxel terminal starts with four environment variables already set:
 | `LOXEL_WORKTREE`  | Path of the worktree this terminal belongs to |
 | `LOXEL_WINDOW_ID` | ID of the Loxel window (desktop app only)     |
 
-`LOXEL=1` lets scripts detect they are running inside Loxel. `LOXEL_PORT` and `LOXEL_WORKTREE` are the more useful ones — they are consumed by the `loxel` CLI and by TUI agents that want worktree context.
+`LOXEL=1` lets scripts detect they are running inside Loxel. `LOXEL_PORT` and `LOXEL_WORKTREE` are the more useful ones — they are consumed by the `loxel` CLI and by agents that want to know which worktree they're in.
 
 ---
 
-## The `loxel` CLI inside a terminal
+## Coding agents
 
-From any Loxel terminal, run `loxel` with a file path to open that file in the window that terminal belongs to:
-
-```bash
-loxel src/app.ts
-```
-
-Pass a folder to reveal it in the file tree. A folder outside every project opens in the [Others section](/docs/editor#other-folders):
-
-```bash
-loxel ~/notes
-```
-
-It also accepts URLs:
-
-```bash
-loxel https://example.com
-```
-
-And it can open more terminals, optionally running a command in them. The new tab opens in the worktree that contains the directory, switching to it if needed (when you run it; see below for agents), and the command is typed into your shell as if you had entered it, so the shell stays open when it finishes:
-
-```bash
-loxel terminal                                   # a shell in the current directory
-loxel terminal --cwd ../other-worktree -- claude  # start an agent in another worktree
-loxel terminal --split right -- pnpm dev          # in a new split beside the active tab
-```
-
-The same `--split`, `--replace`, `--group` and `--worktree` flags work for files and URLs too. When a coding agent runs `loxel`, it opens things in the background instead: no worktree switch and no stolen cursor, unless the agent passes `--focus` (see [Focus](/docs/reference-env-files-cli-settings#loxel-cli)).
-
-Because the terminal already has `LOXEL_PORT` set, the CLI connects to the running Loxel immediately.
-
-> For the full `loxel` CLI reference, including behavior when no server is running, see [Environment Variables & Settings](/docs/reference-env-files-cli-settings).
+Claude Code, Codex and every other terminal agent run in Loxel terminals as they are. [Running Coding Agents](/docs/coding-agents) covers running one per task, notifications when an agent needs you, `Shift+Enter` for multi-line prompts, and the `loxel` skill.
 
 ---
 
-## TUI agents
+## The `loxel` CLI
 
-Any terminal-based coding agent runs normally in Loxel terminals. Claude Code, Codex, OpenCode, and Gemini CLI all work without special configuration. They inherit `LOXEL_WORKTREE`, which gives them the current worktree path as immediate context — no need to `cd` or pass a path manually. `Shift+Enter` and `Ctrl+Enter` send the modified-Enter sequences these agents use to insert a newline instead of submitting.
-
-### Teach your agent about Loxel
-
-The [`loxel` agent skill](https://github.com/bizimind/loxel/tree/main/skills/loxel) tells Claude Code, or any other agent that supports skills, that it is running inside Loxel and how to use the `loxel` CLI: opening the files it wants you to review, showing the dev server or PR it just started in a browser panel, and starting long-running commands or other agents in their own terminals. The agent needs the `loxel` CLI on its `PATH`. To install the skill for Claude Code (run it again to update):
-
-```bash
-mkdir -p ~/.claude/skills/loxel
-curl -fsSL https://raw.githubusercontent.com/bizimind/loxel/main/skills/loxel/SKILL.md -o ~/.claude/skills/loxel/SKILL.md
-```
-
-Or link it from a clone of the repository, so `git pull` there keeps it current:
-
-```bash
-git clone https://github.com/bizimind/loxel.git ~/src/loxel
-mkdir -p ~/.claude/skills && rm -rf ~/.claude/skills/loxel
-ln -s ~/src/loxel/skills/loxel ~/.claude/skills/loxel
-```
-
-For other agents, put the `skills/loxel` folder in their skills directory.
+Every Loxel terminal has the `loxel` CLI, already connected to its window: `loxel src/app.ts` opens a file, `loxel https://example.com` a page in a browser panel, and `loxel terminal -- pnpm dev` a new terminal running a command. See [Loxel CLI](/docs/cli) for every command and flag.
 
 ---
 
 ## See also
 
 - [Panel Layout](/docs/panel-layout) — docking, splitting, and moving terminal panels
-- [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — full `loxel` CLI reference and terminal scrollback configuration
+- [Running Coding Agents](/docs/coding-agents) — an agent in every task, and notifications when one needs you
+- [Loxel CLI](/docs/cli) — open files, pages and terminals from the command line
+- [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — environment variables and the Terminal settings

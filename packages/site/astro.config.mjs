@@ -32,7 +32,9 @@ export default defineConfig({
   redirects: {
     "/docs": "/docs/getting-started",
     "/docs/typescript-intelligence": "/docs/language-intelligence",
-    "/docs/coding-agent": "/docs/terminals#tui-agents",
+    "/docs/coding-agent": "/docs/coding-agents",
+    "/docs/worktrees-and-projects": "/docs/worktrees-and-tasks",
+    "/docs/guide-parallel-workstreams": "/docs/parallel-tasks",
   },
   integrations: [mdx(), sitemap(), siteScript],
   // Self-hosted from the Fontsource packages (pinned by the lockfile, no fetch at build time), so

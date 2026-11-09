@@ -1,7 +1,6 @@
 ---
 title: Java
 description: Java language features from Eclipse JDT LS, running on your JDK 25 or newer, Maven and Gradle projects in trusted repositories, format on save, Checkstyle diagnostics, and the JDK Loxel uses for each worktree.
-order: 13.5
 ---
 
 The Java server starts the first time you open a `.java` file, and stops when none remain open, along with any [library source tabs](#jdk-and-library-sources). Loxel bundles [Eclipse JDT LS](https://github.com/eclipse-jdtls/eclipse.jdt.ls), and it works from what is already on your machine: neither it nor Gradle downloads anything to load a project, even in a trusted repository.
