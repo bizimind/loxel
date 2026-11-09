@@ -56,7 +56,9 @@ export function isShortcut(text: string): boolean {
 
 // ── Display ────────────────────────────────────────────────────────────────
 
-const ARIA_LABELS: Record<string, string> = {
+// What a screen reader reads for each key. `aria-label` on a `kbd` is ignored, so the combo carries
+// it as visually hidden text and hides the key glyphs.
+const SPOKEN_LABELS: Record<string, string> = {
   Cmd: "Command",
   Ctrl: "Control",
   Alt: "Option",
@@ -119,11 +121,29 @@ function makeSvg(paths: string[]): Element {
   };
 }
 
-function makeKeyNode(token: string): Element {
-  const paths = ICON_PATHS[token];
-  const children: ElementContent[] = paths
-    ? [makeSvg(paths)]
-    : [{ type: "text", value: KEY_LABELS[token] ?? token }];
+/** One key of a shortcut: a Lucide icon for the modifiers, a text label for the rest. */
+export interface ShortcutKey {
+  label: string;
+  iconPaths?: string[];
+}
+
+/**
+ * Splits a shortcut such as `Ctrl+Alt+[` into its keys, with the spoken label for the whole combo.
+ * The docs' `kbd` plugin below and the pages that show shortcuts outside markdown both render it:
+ * the label as visually hidden text first in the combo, then the keys, hidden from screen readers.
+ */
+export function shortcutKeys(text: string): { spokenLabel: string; keys: ShortcutKey[] } {
+  const tokens = text.includes("+") ? text.split("+") : [text];
+  return {
+    spokenLabel: tokens.map((t) => SPOKEN_LABELS[t] ?? t).join("+"),
+    keys: tokens.map((t) => ({ label: KEY_LABELS[t] ?? t, iconPaths: ICON_PATHS[t] })),
+  };
+}
+
+function makeKeyNode({ label, iconPaths }: ShortcutKey): Element {
+  const children: ElementContent[] = iconPaths
+    ? [makeSvg(iconPaths)]
+    : [{ type: "text", value: label }];
 
   return {
     type: "element",
@@ -134,14 +154,20 @@ function makeKeyNode(token: string): Element {
 }
 
 function buildKbdNode(text: string): Element {
-  const tokens = text.includes("+") ? text.split("+") : [text];
-  const ariaLabel = tokens.map((t) => ARIA_LABELS[t] ?? t).join("+");
+  const { spokenLabel, keys } = shortcutKeys(text);
+  // First, so the last key stays `:last-child` for its border.
+  const spoken: Element = {
+    type: "element",
+    tagName: "span",
+    properties: { className: ["sr-only"] },
+    children: [{ type: "text", value: spokenLabel }],
+  };
 
   return {
     type: "element",
     tagName: "kbd",
-    properties: { className: ["kbd-combo"], ariaLabel },
-    children: tokens.map(makeKeyNode),
+    properties: { className: ["kbd-combo"] },
+    children: [spoken, ...keys.map(makeKeyNode)],
   };
 }
 

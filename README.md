@@ -1,6 +1,8 @@
 # loxel
 
-A monorepo (pnpm + Bun) built around [Loxel](packages/loxel), an IDE for the agentic coding era, together with the CLI tools, libraries, and services that support agent-driven development workflows.
+**Loxel** is the professional workspace for AI-powered development. Run Claude Code, Codex, or any terminal agent on as many parallel tasks as the work needs. Every task keeps its own worktree, terminals, browser tabs, editors, and layout; you orchestrate them from one window and open the code whenever you need to own what ships. [Download it and read the docs at bizimind.io](https://bizimind.io).
+
+This monorepo (pnpm + Bun) holds the app in [packages/loxel](packages/loxel), its site and docs, and the CLI tools, libraries, and services that support agent-driven development workflows.
 
 ## Packages
 
@@ -14,7 +16,7 @@ A monorepo (pnpm + Bun) built around [Loxel](packages/loxel), an IDE for the age
 | [excalidraw](packages/excalidraw)               | CLI for agents to create, edit, query, and render Excalidraw diagrams                                          |
 | [localdb-sdk](packages/localdb-sdk)             | SQLite-backed structured database SDK with typed columns, views, and formulas                                  |
 | [logger](packages/logger)                       | Structured Axiom logging with error serialization and sensitive-data redaction                                 |
-| [loxel](packages/loxel)                         | The IDE: Electron desktop app plus Bun server for agentic, multi-worktree development                          |
+| [loxel](packages/loxel)                         | The workspace: Electron desktop app plus Bun server for running parallel, task-scoped AI coding work           |
 | [monaco-lsp-client](packages/monaco-lsp-client) | Monaco editor LSP client (fork of `@vscode/monaco-lsp-client`)                                                 |
 | [sandbox](packages/sandbox)                     | Provider-agnostic container SDK for Apple Containers, Podman, and Docker, plus a reference agent sandbox image |
 | [site](packages/site)                           | Astro website and user docs for loxel (bizimind.io)                                                            |

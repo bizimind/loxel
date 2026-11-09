@@ -64,6 +64,15 @@ export default defineConfig({
   build: { format: "file", inlineStylesheets: "always" },
   redirects,
   integrations: [mdx(), sitemap(), siteScript, redirectFragments],
+  // The homepage's screenshots are encoded at 7 widths in two formats; sharp's default effort makes
+  // that minutes of CPU on a CI runner. Lower effort costs about a tenth more bytes and encodes
+  // several times faster.
+  image: {
+    service: {
+      entrypoint: "astro/assets/services/sharp",
+      config: { avif: { effort: 2 }, webp: { effort: 2 } },
+    },
+  },
   // Self-hosted from the Fontsource packages (pinned by the lockfile, no fetch at build time), so
   // pages never contact a font CDN. Latin only: Latin Extended has no glyph the site uses (arrows
   // such as → are in neither and fall back to a system font), and one file per style keeps Inter's

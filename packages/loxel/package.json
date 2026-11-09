@@ -1,7 +1,7 @@
 {
   "name": "@bizimind/loxel",
-  "version": "0.1.322",
-  "description": "IDE for the agentic coding era",
+  "version": "0.1.323",
+  "description": "The professional workspace for AI-powered development",
   "homepage": "https://github.com/bizimind/loxel",
   "author": {
     "name": "loxel",
@@ -27,7 +27,9 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "test": "bun test src scripts --isolate --preload ./src/test/dom-preload.ts --preload ./src/test/jest-dom-preload.ts",
-    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "demo": "bun scripts/demo/launch.ts",
+    "demo:shots": "bun scripts/demo/capture-shots.ts",
+    "e2e": "bun --bun node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts",
     "lint": "pnpm -w run lint",
     "lint:fix": "pnpm -w run lint:fix",
     "fmt": "pnpm -w run fmt",
