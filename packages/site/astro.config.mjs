@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises";
+
 import { satteri } from "@astrojs/markdown-satteri";
 import mdx from "@astrojs/mdx";
 import sitemap from "@astrojs/sitemap";
@@ -21,6 +23,38 @@ const siteScript = {
   },
 };
 
+// Renamed pages keep their old URLs working; /docs has no page of its own.
+const redirects = {
+  "/docs": "/docs/getting-started",
+  "/docs/typescript-intelligence": "/docs/language-intelligence",
+  "/docs/coding-agent": "/docs/coding-agents",
+  "/docs/worktrees-and-projects": "/docs/worktrees-and-tasks",
+  "/docs/guide-parallel-workstreams": "/docs/parallel-tasks",
+};
+
+// A static build writes each `redirects` entry as a meta-refresh page, which drops the URL's
+// #fragment, so `/docs/old-page#section` would land at the top of the new page. A script on the
+// redirect page carries the fragment over (the new page's `movedAnchors` then maps renamed ones);
+// the meta refresh stays as the fallback without JavaScript.
+/** @type {import("astro").AstroIntegration} */
+const redirectFragments = {
+  name: "redirect-fragments",
+  hooks: {
+    "astro:build:done": async ({ dir }) => {
+      for (const [from, to] of Object.entries(redirects)) {
+        const file = new URL(`.${from}.html`, dir);
+        const html = await readFile(file, "utf8");
+        const target = JSON.stringify(to);
+        const script = to.includes("#")
+          ? `<script>location.replace(${target})</script>`
+          : `<script>location.replace(${target} + location.hash)</script>`;
+        if (!html.includes("</title>")) throw new Error(`Unexpected redirect page for ${from}`);
+        await writeFile(file, html.replace("</title>", `</title>${script}`));
+      }
+    },
+  },
+};
+
 export default defineConfig({
   site: "https://bizimind.io",
   output: "static",
@@ -28,15 +62,8 @@ export default defineConfig({
   trailingSlash: "never",
   // Inlined: the stylesheet is small, and a <link> to it would block the first render.
   build: { format: "file", inlineStylesheets: "always" },
-  // Renamed pages keep their old URLs working; /docs has no page of its own.
-  redirects: {
-    "/docs": "/docs/getting-started",
-    "/docs/typescript-intelligence": "/docs/language-intelligence",
-    "/docs/coding-agent": "/docs/coding-agents",
-    "/docs/worktrees-and-projects": "/docs/worktrees-and-tasks",
-    "/docs/guide-parallel-workstreams": "/docs/parallel-tasks",
-  },
-  integrations: [mdx(), sitemap(), siteScript],
+  redirects,
+  integrations: [mdx(), sitemap(), siteScript, redirectFragments],
   // Self-hosted from the Fontsource packages (pinned by the lockfile, no fetch at build time), so
   // pages never contact a font CDN. Latin only: Latin Extended has no glyph the site uses (arrows
   // such as → are in neither and fall back to a system font), and one file per style keeps Inter's

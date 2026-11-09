@@ -3,6 +3,10 @@ title: Working on Parallel Tasks
 description: Hand a task to an agent in its own worktree, keep working on something else, then review and commit what it did.
 section: "Tasks & context"
 order: 2
+# Sections that moved; old links to them keep working.
+movedAnchors:
+  switch-back-to-your-previous-context: /docs/parallel-tasks#go-back-to-what-you-were-doing
+  return-when-the-agent-is-done: /docs/parallel-tasks#come-back-when-the-agent-is-done
 ---
 
 A feature request lands. You want an agent on it now, but you're in the middle of something and not about to drop it. Here's how that plays out in Loxel.
