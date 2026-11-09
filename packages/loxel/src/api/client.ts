@@ -290,9 +290,8 @@ export async function uploadFile(options: {
   nonce: string;
 }): Promise<{ path: string; src: string }> {
   const data = new Uint8Array(await options.file.arrayBuffer()).toBase64();
-  const response = await fetch(`${API_BASE}/file-upload`, {
+  return fetchJson<{ path: string; src: string }>("/file-upload", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       path: options.path,
       nonce: options.nonce,
@@ -300,15 +299,6 @@ export async function uploadFile(options: {
       data,
     }),
   });
-  if (!response.ok) {
-    const body: unknown = await response.json().catch(() => null);
-    const message =
-      typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
-        ? body.error
-        : "Upload failed";
-    throw new Error(message);
-  }
-  return response.json();
 }
 
 export interface DetectedFormatter {
