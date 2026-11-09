@@ -622,6 +622,20 @@ function stripPanelFromLayout(layout: unknown, panelId: string): void {
   }
 }
 
+/** The persisted slice of the settings store; cross-window sync applies the same slice. */
+export function persistedSettings(state: SettingsState) {
+  return {
+    layout: state.layout,
+    terminal: state.terminal,
+    editor: state.editor,
+    fonts: state.fonts,
+    schemas: state.schemas,
+    fileAssociations: state.fileAssociations,
+    autoRevealInExplorer: state.autoRevealInExplorer,
+    autoCheckForUpdates: state.autoCheckForUpdates,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -866,16 +880,7 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: `${STORAGE_PREFIX}-settings`,
       storage: createJSONStorage(() => serverSettingsStorage),
-      partialize: (state) => ({
-        layout: state.layout,
-        terminal: state.terminal,
-        editor: state.editor,
-        fonts: state.fonts,
-        schemas: state.schemas,
-        fileAssociations: state.fileAssociations,
-        autoRevealInExplorer: state.autoRevealInExplorer,
-        autoCheckForUpdates: state.autoCheckForUpdates,
-      }),
+      partialize: persistedSettings,
       version: 16,
       migrate: (persisted, version) => {
         if (typeof persisted !== "object" || persisted === null) return persisted as SettingsState;
