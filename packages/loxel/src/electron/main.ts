@@ -18,8 +18,8 @@ import {
 import { z } from "zod";
 
 import { loadOrCreateDek } from "./dek";
-import { IS_DEV } from "./env";
-const SERVER_PORT = IS_DEV ? 7434 : 7433;
+import { DEMO_INSTANCE, DEMO_WINDOW_SIZE, IS_DEMO, IS_DEMO_HIDDEN, IS_DEV } from "./env";
+const SERVER_PORT = IS_DEMO ? 7435 + DEMO_INSTANCE : IS_DEV ? 7434 : 7433;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
 /**
@@ -117,13 +117,21 @@ function startServer(): void {
         env: { ...env, LOXEL_DEV: "1" },
         stdio: ["pipe", "pipe", "pipe"],
       })
-    : spawn(path.join(process.resourcesPath, "loxel-server"), [], {
-        env: { ...env, LOXEL_STATIC_DIR: path.join(process.resourcesPath, "renderer") },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+    : IS_DEMO && !app.isPackaged
+      ? // A demo from the source tree: the server's source, serving the renderer built beside this file
+        spawn("bun", ["run", "src/server/index.ts"], {
+          cwd: path.resolve(import.meta.dirname, "../.."),
+          env: { ...env, LOXEL_STATIC_DIR: path.resolve(import.meta.dirname, "../renderer") },
+          stdio: ["pipe", "pipe", "pipe"],
+        })
+      : spawn(path.join(process.resourcesPath, "loxel-server"), [], {
+          env: { ...env, LOXEL_STATIC_DIR: path.join(process.resourcesPath, "renderer") },
+          stdio: ["pipe", "pipe", "pipe"],
+        });
   serverProcess = child;
 
-  const dekBase64 = loadOrCreateDek();
+  // The demo server uses a fixed key (it holds no real secrets), so no keychain prompt.
+  const dekBase64 = IS_DEMO ? null : loadOrCreateDek();
   child.stdin.on("error", () => {});
   // Closing stdin without a key tells the server that secret storage is unavailable.
   if (dekBase64) child.stdin.write(dekBase64 + "\n");
@@ -253,8 +261,12 @@ async function createWindow(): Promise<BrowserWindow> {
   const isFirstWindow = BrowserWindow.getAllWindows().length === 0;
 
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    // A demo window has the size of the site's screenshots.
+    // Larger than a laptop's screen is fine: a demo window is captured, not looked at.
+    ...(IS_DEMO
+      ? { ...DEMO_WINDOW_SIZE, enableLargerThanScreen: true }
+      : { width: 1400, height: 900 }),
+    ...(IS_DEMO_HIDDEN ? { show: false, opacity: 0 } : {}),
     title: "Loxel",
     titleBarStyle: "hiddenInset",
     tabbingIdentifier: "loxel",
@@ -273,6 +285,11 @@ async function createWindow(): Promise<BrowserWindow> {
       ],
     },
   });
+
+  if (IS_DEMO_HIDDEN) {
+    win.setIgnoreMouseEvents(true);
+    win.showInactive();
+  }
 
   // When the BrowserWindow is gone, ask the server to promote this window's
   // session-scoped layout to canonical so the next solo window restores it.
@@ -781,15 +798,38 @@ async function promptForAccount(
 // exits. Packaged builds only: dev builds have the installed app's name and data directory, so a
 // lock would hand `pnpm run dev:app` to the installed Loxel, and vite-plugin-electron starts a
 // rebuilt Electron before the old one has exited.
+// A demo keeps its data directory apart, so its lock, cookies and settings don't meet the app's.
+if (IS_DEMO)
+  app.setPath(
+    "userData",
+    `${app.getPath("userData")} Demo${DEMO_INSTANCE ? ` ${DEMO_INSTANCE}` : ""}`,
+  );
+// A hidden demo is a background app: no Dock icon, no menu bar, never activated.
+if (IS_DEMO_HIDDEN) app.setActivationPolicy("accessory");
 const isPrimaryInstance = !app.isPackaged || app.requestSingleInstanceLock();
 if (!isPrimaryInstance) app.quit();
+
+/**
+ * Tell the user that Loxel could not start or open its window. A hidden demo has no one to read a
+ * dialog, and a modal one would wait forever for a click its driver can't send: it logs the error
+ * and exits instead, which its driver sees.
+ */
+function showStartupError(err: unknown): void {
+  if (!IS_DEMO_HIDDEN) {
+    dialog.showErrorBox("Startup Error", String(err));
+    return;
+  }
+  console.error("[electron] Startup error:", err);
+  stopServer();
+  app.exit(1);
+}
 
 app.on("second-instance", () => {
   // Startup opens the first window; until it has, there is nothing to show.
   if (launchPaths !== null) return;
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   if (!win) {
-    ensureWindow().catch((err: unknown) => dialog.showErrorBox("Startup Error", String(err)));
+    ensureWindow().catch(showStartupError);
     return;
   }
   if (win.isMinimized()) win.restore();
@@ -823,16 +863,14 @@ app.whenReady().then(async () => {
     launchPaths = null;
     for (const filePath of pathsOpenedAtLaunch ?? []) openPathFromOS(filePath);
     startMainProcessMonitor(SERVER_URL);
-    scheduleAutomaticUpdateCheck(SERVER_URL);
+    if (!IS_DEMO) scheduleAutomaticUpdateCheck(SERVER_URL);
 
     // On macOS, clicking the dock icon after all windows are closed re-activates.
     app.on("activate", () => {
-      ensureWindow().catch((err: unknown) => {
-        dialog.showErrorBox("Startup Error", String(err));
-      });
+      ensureWindow().catch(showStartupError);
     });
   } catch (err) {
-    dialog.showErrorBox("Startup Error", String(err));
+    showStartupError(err);
     stopServer();
     app.quit();
   }

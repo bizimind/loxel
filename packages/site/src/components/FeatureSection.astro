@@ -1,0 +1,131 @@
+---
+import { Picture } from "astro:assets";
+import type { ImageMetadata } from "astro";
+import type { ComponentProps } from "astro/types";
+import { screenshotPicture } from "../lib/screenshot";
+import ShotCallout from "./ShotCallout.astro";
+import TaskOrbit from "./TaskOrbit.astro";
+
+interface Shot {
+  src: ImageMetadata;
+  alt: string;
+}
+
+interface Props {
+  kicker: string;
+  title: string;
+  /** The paragraph under the title. Any `FeaturePoint`s go in the slot, listed below it. */
+  body: string;
+  /** One window capture, or two shown as a pair: the first behind, the second in front. */
+  shots: [Shot] | [Shot, Shot];
+  /** From `lg`, puts the screenshot on the left, bleeding off the left edge, and the text on the right. */
+  reverse?: boolean;
+  /** One or two chips floating over the screenshot, each pointing at something in it. */
+  callouts?: ComponentProps<typeof ShotCallout>[];
+  /** Task tiles or agent marks peeking from behind the screenshot, positioned like the callouts. */
+  tiles?: ComponentProps<typeof TaskOrbit>["tiles"];
+}
+
+const { kicker, title, body, shots, reverse = false, callouts = [], tiles = [] } = Astro.props;
+
+// The screenshot is wider than its column and bleeds off that side of the page: 140vw below the
+// `lg` breakpoint. From it, a section's screenshot takes 64vw, and a reversed one its 7fr column
+// ((vw - 112px) * 7 / 11, the container's 1.5rem padding and the 4rem gap taken out) less 1rem, plus
+// half of what the viewport has beyond the container's 80rem. Either stops at 82.5rem (1320px),
+// reached at a 2063px or a 2466px viewport: on wider screens the window shows whole, corners and
+// all, rather than growing. In a pair each image takes 84% of that.
+const widths: [query: string, width: string][] = reverse
+  ? [
+      ["(min-width: 2466px)", "1320px"],
+      ["(min-width: 1280px)", "calc(50vw + 87px)"],
+      ["(min-width: 1024px)", "calc(63.6vw - 87px)"],
+      ["", "140vw"],
+    ]
+  : [
+      ["(min-width: 2063px)", "1320px"],
+      ["(min-width: 1024px)", "64vw"],
+      ["", "140vw"],
+    ];
+const sizes = widths
+  .map(([query, width]) =>
+    [query, shots.length === 1 ? width : `calc(${width} * 0.84)`].filter(Boolean).join(" "),
+  )
+  .join(", ");
+const [back, front] = await Promise.all(
+  shots.map(async ({ src, alt }) => (await screenshotPicture(src, { alt, sizes })).props),
+);
+---
+
+<!-- `overflow-x-clip`, not `overflow-hidden`: a hidden overflow is a scroll container, and the
+scroll-driven motion in global.css would follow it instead of the page. Only the x axis is clipped,
+so the glow behind the screenshot fades out over the neighboring sections instead of stopping at
+this one's edge. -->
+<section class="overflow-x-clip py-12 lg:py-16">
+  <div
+    class:list={[
+      "mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-4 sm:px-6 lg:gap-16",
+      reverse
+        ? "lg:grid-cols-[minmax(0,7fr)_minmax(0,4fr)]"
+        : "lg:grid-cols-[minmax(0,4fr)_minmax(0,7fr)]",
+    ]}
+  >
+    <div class:list={["stagger-rise max-w-xl", { "lg:order-2": reverse }]}>
+      <p class="mb-3 text-xs font-semibold tracking-widest text-accent uppercase">{kicker}</p>
+      <h2 class="mb-4 text-3xl font-bold tracking-tight text-balance text-foreground sm:text-4xl">
+        {title}
+      </h2>
+      <p class="text-[17px] leading-relaxed text-muted-foreground">{body}</p>
+      {
+        Astro.slots.has("default") && (
+          <ul class="mt-6 grid gap-3 text-[15px] text-muted-foreground">
+            <slot />
+          </ul>
+        )
+      }
+    </div>
+
+    <!-- On phones every screenshot shows its left part, window controls and sidebar included. From
+    `lg`, a reversed section's screenshot grows left from its column only to 2.5rem short of the
+    page edge (80rem is the container's max width, 1.5rem its padding): its left side holds the
+    window controls and the colorful task sidebar, the part that must never be cut off. -->
+    <div class:list={["relative flex min-w-0 justify-start", { "lg:justify-end": reverse }]}>
+      <div
+        class:list={[
+          "shot-glow pointer-events-none absolute -inset-y-[30%]",
+          reverse ? "-right-[10%] -left-[30%]" : "-right-[30%] -left-[10%]",
+        ]}
+        data-from={reverse ? "left" : "right"}
+        aria-hidden="true"
+      >
+      </div>
+      <div
+        class:list={[
+          "feature-stage relative w-[140vw] max-w-none shrink-0",
+          reverse
+            ? "lg:w-[min(calc(100%+max(0px,(100vw-80rem)/2)+1.5rem-2.5rem),82.5rem)]"
+            : "lg:w-[min(64vw,82.5rem)]",
+        ]}
+        data-from={reverse ? "left" : "right"}
+      >
+        {tiles.length > 0 && <TaskOrbit motion="shot" tiles={tiles} />}
+        <div class="feature-shot relative" data-from={reverse ? "left" : "right"}>
+          {
+            front ? (
+              <div class="grid">
+                <div class="feature-shot-back col-start-1 row-start-1 w-[84%] justify-self-end">
+                  <Picture {...back} class="block h-auto w-full" />
+                </div>
+                <div class="feature-shot-front col-start-1 row-start-1 mt-[22%] w-[84%] justify-self-start">
+                  <Picture {...front} class="block h-auto w-full" />
+                </div>
+              </div>
+            ) : (
+              <Picture {...back} class="block h-auto w-full" />
+            )
+          }
+        </div>
+        {callouts.map((callout) => <ShotCallout {...callout} />)}
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,234 +1,317 @@
 ---
-import { Picture, getImage } from "astro:assets";
-import type { ComponentProps } from "astro/types";
-import appScreenshot from "../../public/screenshots/app-screenshot.png";
+import { Picture } from "astro:assets";
+import agentsShot from "../assets/screenshots/agents.png";
+import browserShot from "../assets/screenshots/browser.png";
+import editorShot from "../assets/screenshots/editor.png";
+import gitShot from "../assets/screenshots/git.png";
+import markdownShot from "../assets/screenshots/markdown.png";
+import worktreesAgentsShot from "../assets/screenshots/worktrees-agents.png";
+import worktreesReviewShot from "../assets/screenshots/worktrees-review.png";
 import Base from "../layouts/Base.astro";
 import DownloadButton from "../components/DownloadButton.astro";
+import FeaturePoint from "../components/FeaturePoint.astro";
+import FeatureSection from "../components/FeatureSection.astro";
+import GitHubButton from "../components/GitHubButton.astro";
+import Kbd from "../components/Kbd.astro";
+import TaskOrbit from "../components/TaskOrbit.astro";
 import { trackClick, trackView } from "../lib/analytics";
+import { BUTTON_BASE, BUTTON_SIZES, BUTTON_VARIANTS } from "../lib/button-styles";
 import { fetchManifest } from "../lib/manifest";
-import { GITHUB_REPO_URL, SITE_DESCRIPTION } from "../lib/site";
+import { screenshotPicture } from "../lib/screenshot";
+import { SITE_DESCRIPTION } from "../lib/site";
 import { softwareNodes } from "../lib/structured-data";
 
 const manifest = await fetchManifest();
 const { version, downloads: binaries } = manifest;
-// The screenshot at full size, in the format the hero uses: the hero's largest srcset candidate
-// below, and the structured-data screenshot. The hero takes its width from here because reading
-// `appScreenshot.width` directly makes the build also publish the 2.2 MB original PNG.
-const fullScreenshot = await getImage({ src: appScreenshot });
-const structuredData = softwareNodes(manifest, new URL(fullScreenshot.src, Astro.site).href);
-const fullWidth = fullScreenshot.options.width;
-if (fullWidth === undefined) throw new Error("getImage() returned no width for the hero screenshot");
 
-// One srcset for all three hero copies below. Their `sizes` must match so the browser picks the
-// same file for the copies hidden at the current breakpoint, which still load (they're eager), and
-// downloads it once. The widths follow the hero markup: 200vw for the mobile crops, then the
-// desktop image at 100vw minus the section padding (sm:px-6) and its margins (sm:mx-8, lg:mx-16,
-// xl:mx-24).
-const heroImageProps: ComponentProps<typeof Picture> = {
-  src: appScreenshot,
-  // AVIF is about half the size of WebP; browsers without it take the WebP <img>.
-  formats: ["avif"],
-  fallbackFormat: "webp",
-  // <picture> is inline; `contents` keeps the <img> laid out as if it had no wrapper.
-  pictureAttributes: { class: "contents" },
-  alt: "Loxel IDE screenshot",
+// The widths follow the hero markup: 180vw on phones, cropped to the sidebar and the first agent,
+// then 100vw minus the section padding (sm:px-6) and the image's margins (sm:mx-8, lg:mx-16,
+// xl:mx-24), up to 110rem (1760px) from a 2000px viewport, where the window shows whole.
+const hero = await screenshotPicture(worktreesAgentsShot, {
+  alt: "Loxel with a task's nested subtasks in the sidebar, Claude Code and Codex in terminals beside the code, and the task's tests below",
   priority: true,
-  widths: [640, 960, 1280, 1600, 1920, 2400, 3200, fullWidth],
   sizes:
-    "(min-width: 1280px) calc(100vw - 15rem), (min-width: 1024px) calc(100vw - 11rem), (min-width: 640px) calc(100vw - 7rem), 200vw",
-};
-
-const features = [
-  {
-    tab: "worktrees.md",
-    title: "Multi-worktree context switching",
-    description:
-      "Manage multiple repos and branches from a single window. Every context remembers its own layout, open files, and terminal sessions.",
-  },
-  {
-    tab: "review.md",
-    title: "Code review for agent output",
-    description:
-      "Review agent-written code with threaded comments anchored to specific lines. See diffs, leave notes, and merge with confidence.",
-  },
-  {
-    tab: "agent.md",
-    title: "Agent timeline UI",
-    description:
-      "Watch agents work in real time. Replay sessions, inspect every tool call, and step in at any point to redirect or correct.",
-  },
-  {
-    tab: "plan.md",
-    title: "Planning & whiteboarding",
-    description:
-      "Markdown editor and Excalidraw diagrams, saved as plain files alongside your code. Plan before the agent writes a line.",
-  },
-];
+    "(min-width: 2000px) 1760px, (min-width: 1280px) calc(100vw - 15rem), (min-width: 1024px) calc(100vw - 11rem), (min-width: 640px) calc(100vw - 7rem), 180vw",
+});
+const structuredData = softwareNodes(manifest, new URL(hero.fullSizeSrc, Astro.site).href);
 ---
 
-<Base
-  title="Loxel"
-  description={SITE_DESCRIPTION}
-  structuredData={structuredData}
->
+<Base title="Loxel" structuredData={structuredData}>
   <!-- Hero -->
-  <section class="relative pt-24 pb-20 px-4 sm:px-6 text-center overflow-hidden">
+  <!-- `overflow-clip`, not `overflow-hidden`, so the screenshot's scroll-driven motion follows the
+  page (see FeatureSection). -->
+  <section class="relative overflow-clip px-4 pt-24 pb-20 text-center sm:px-6">
     <div
-      class="absolute inset-0 pointer-events-none"
+      class="pointer-events-none absolute inset-0"
       style="background: radial-gradient(ellipse 80% 50% at 50% -5%, color-mix(in srgb, var(--accent) 10%, transparent), transparent);"
     >
     </div>
 
-    <div class="relative max-w-3xl mx-auto">
-      <h1 class="text-6xl sm:text-7xl font-bold leading-tight tracking-tight mb-5 text-balance">
-        <span style="background: linear-gradient(180deg, #ffffff 0%, #8a9ab0 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">The IDE for the</span><br />
-        <span style="background: linear-gradient(180deg, #6faaf5 0%, #2d6fd4 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Agentic Coding Era</span>
+    <div class="relative mx-auto max-w-4xl">
+      <TaskOrbit
+        motion="load"
+        from="xl"
+        tiles={[
+          { color: "green", glyph: "tee", x: -13, y: 14, size: 46, tilt: -7 },
+          { color: "pink", glyph: "smile", x: -4, y: 64, size: 26, tilt: 6, depth: "far" },
+          { color: "blue", glyph: "gate", x: 106, y: 4, size: 28, tilt: 8, depth: "far" },
+          { color: "orange", glyph: "frame", x: 114, y: 46, size: 52, tilt: -5 },
+          { color: "teal", glyph: "dice", x: 104, y: 94, size: 32, tilt: -9, depth: "mid" },
+        ]}
+      />
+      <h1 class="mb-6 text-5xl leading-tight font-bold tracking-tight text-balance sm:text-6xl lg:text-7xl">
+        <span class="text-gradient-light">Built for agentic coding.</span><br />
+        <span class="text-gradient-accent">Made for developers.</span>
       </h1>
 
-      <p class="text-lg text-muted-foreground max-w-xl mx-auto mb-10 text-balance">
-        Design, plan, review, and steer AI agents across parallel workstreams — all from one IDE.
+      <p class="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-balance text-muted-foreground">
+        {SITE_DESCRIPTION}
       </p>
 
       <!-- Desktop: download buttons -->
-      <div class="hidden sm:flex flex-row items-start justify-center gap-4">
+      <div class="hidden flex-row items-start justify-center gap-4 sm:flex">
         <DownloadButton version={version} binaries={binaries} location="hero" />
-        <a
-          href={GITHUB_REPO_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          {...trackClick("github_link_clicked", { location: "hero" })}
-          class="inline-flex items-center gap-2 border border-border text-foreground hover:border-muted-foreground font-medium px-5 py-2.5 rounded-md transition-colors text-sm"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path
-              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-            ></path>
-          </svg>
-          View on GitHub
-        </a>
+        <GitHubButton location="hero" />
       </div>
 
       <!-- Mobile: GitHub link only -->
-      <div class="flex sm:hidden justify-center">
-        <a
-          href={GITHUB_REPO_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          {...trackClick("github_link_clicked", { location: "hero_mobile" })}
-          class="inline-flex items-center gap-2 border border-border text-foreground hover:border-muted-foreground font-medium px-5 py-2.5 rounded-md transition-colors text-sm"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path
-              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-            ></path>
-          </svg>
-          View on GitHub
-        </a>
+      <div class="flex justify-center sm:hidden">
+        <GitHubButton location="hero_mobile" />
       </div>
     </div>
 
-    <!-- Hero screenshot: desktop single wide image -->
-    <div class="relative mt-16 mx-4 sm:mx-8 lg:mx-16 xl:mx-24 hidden sm:block">
-      <Picture {...heroImageProps} class="w-full h-auto block" />
-    </div>
-
-    <!-- Hero screenshot: mobile two overlapping crops -->
-    <div class="mt-12 sm:hidden overflow-hidden -mx-4">
-      <!-- Top image: pushed left so right 55% is visible -->
-      <Picture {...heroImageProps} class="block mr-[-100vw] min-w-[200vw]" />
-      <!-- Bottom image: pushed right so left 55% is visible, overlapping top -->
-      <Picture {...heroImageProps} class="block ml-[-100vw] min-w-[200vw] mt-[-50vw]" />
-    </div>
-  </section>
-
-  <!-- Features -->
-  <section id="features" class="py-24 px-4 sm:px-6">
-    <div class="max-w-6xl mx-auto">
-      <h2 class="text-4xl font-bold text-center text-foreground mb-3 text-balance">
-        Built for how you actually work
-      </h2>
-      <p class="text-center text-muted-foreground mb-16 max-w-xl mx-auto text-balance">
-        Not a plugin. Not an extension. An IDE designed from scratch around agent workflows.
-      </p>
-
-      <div class="border border-border rounded-xl overflow-hidden shadow-2xl shadow-black/40">
-        <!-- Mobile: 1 col, 4 rows -->
-        <div class="flex flex-col sm:hidden">
-          <div class="flex flex-col bg-surface-2 border-b border-border">
-            <div class="flex items-center bg-surface-1 border-b border-border select-none h-8">
-              <div class="flex items-center gap-1.5 h-full p-3 pt-2.5 text-foreground text-[12px]" style="box-shadow: inset 0 -2px 0 #467ff2;">
-                <img src="/markdown-dark.svg" width="14" height="14" alt="" aria-hidden="true" />
-                how-it-works.md
-              </div>
-            </div>
-            <div class="p-6 flex flex-col gap-2">
-              {
-                features.map((f) => (<>
-                  <h3 class="text-lg font-bold text-foreground text-balance">{f.title}</h3>
-                  <p class="text-muted-foreground leading-relaxed text-sm mb-2">{f.description}</p>
-                  </>
-                ))
-              }
-            </div>
-          </div>
-        </div>
-
-        <!-- Desktop: 2 col, 2 rows with uneven widths -->
-        <div class="hidden sm:block">
-          {/* Row 1 — left wider */}
-          <div class="grid border-b border-border" style="grid-template-columns: 3fr 2fr">
-            {
-              features.slice(0, 2).map((f, i) => (
-                <div class={["flex flex-col bg-surface-2", i === 0 ? "border-r border-border" : ""].join(" ")}>
-                  <div class="flex items-center bg-surface-1 border-b border-border select-none" style="height:36px">
-                    <div class="flex items-center gap-1.5 h-full px-3 text-foreground" style="font-size:12px; box-shadow: inset 0 -2px 0 #467ff2;">
-                      <img src="/markdown-dark.svg" width="14" height="14" alt="" aria-hidden="true" />
-                      {f.tab}
-                    </div>
-                  </div>
-                  <div class="p-8 flex flex-col gap-3">
-                    <h3 class="text-xl font-bold text-foreground text-balance">{f.title}</h3>
-                    <p class="text-muted-foreground leading-relaxed">{f.description}</p>
-                  </div>
-                </div>
-              ))
-            }
-          </div>
-          {/* Row 2 — right wider */}
-          <div class="grid" style="grid-template-columns: 2fr 3fr">
-            {
-              features.slice(2).map((f, i) => (
-                <div class={["flex flex-col bg-surface-2", i === 0 ? "border-r border-border" : ""].join(" ")}>
-                  <div class="flex items-center bg-surface-1 border-b border-border select-none" style="height:36px">
-                    <div class="flex items-center gap-1.5 h-full px-3 text-foreground" style="font-size:12px; box-shadow: inset 0 -2px 0 #467ff2;">
-                      <img src="/markdown-dark.svg" width="14" height="14" alt="" aria-hidden="true" />
-                      {f.tab}
-                    </div>
-                  </div>
-                  <div class="p-8 flex flex-col gap-3">
-                    <h3 class="text-xl font-bold text-foreground text-balance">{f.title}</h3>
-                    <p class="text-muted-foreground leading-relaxed">{f.description}</p>
-                  </div>
-                </div>
-              ))
-            }
-          </div>
-        </div>
+    <!-- Hero screenshot: the whole window from `sm`, the sidebar and the first agent on phones -->
+    <div
+      class="relative mt-14 sm:mx-8 sm:mt-16 lg:mx-16 xl:mx-24"
+    >
+      <div class="hero-glow pointer-events-none absolute -inset-x-[8%] -top-[18%] h-[90%]" aria-hidden="true">
+      </div>
+      <TaskOrbit
+        motion="load"
+        tiles={[
+          { color: "purple", glyph: "arch", x: 3, y: 3, size: 44, tilt: -6 },
+          { color: "emerald", glyph: "cross", x: 98.5, y: 30, size: 36, tilt: 7, depth: "mid" },
+        ]}
+      />
+      <div class="hero-shot relative mx-auto max-w-[110rem]">
+        <Picture {...hero.props} class="block h-auto w-[180vw] max-w-none sm:w-full" />
       </div>
     </div>
   </section>
 
-  <!-- CTA — desktop only -->
-  <section
-    class="hidden sm:block py-20 px-4 sm:px-6 text-center border-t border-border"
-    {...trackView("cta_viewed", { location: "bottom_cta" })}
+  <FeatureSection
+    kicker="Worktrees"
+    title="Every task keeps its own layout"
+    body="Each worktree remembers its panels, tabs, splits, and terminals. Jump from a task where agents are coding to one where you're reviewing, and the whole window rearranges itself."
+    callouts={[
+      { icon: "bell", dot: true, text: "Window tiling keys needs you", x: 20.5, y: 12.9, align: "end" },
+      { icon: "nest", text: "2 subtasks", x: 5.5, y: 47, delay: 6 },
+    ]}
+    tiles={[{ color: "purple", glyph: "gate", x: 40, y: 1, size: 38, tilt: -8 }]}
+    shots={[
+      {
+        src: worktreesAgentsShot,
+        alt: "A task with two agents at work: Claude Code and Codex in terminals, the code they're discussing, and the test run",
+      },
+      {
+        src: worktreesReviewShot,
+        alt: "The same window switched to a review task: the branch's changes, a split diff, and review comments",
+      },
+    ]}
   >
-    <div class="max-w-xl mx-auto">
-      <h2 class="text-3xl font-bold text-foreground mb-4 text-balance">Ready to try it?</h2>
-      <p class="text-muted-foreground mb-8 text-balance">
-        Free download. No account required. Runs entirely on your machine.
-      </p>
-      <DownloadButton version={version} binaries={binaries} location="bottom_cta" />
+    <FeaturePoint icon="nest">Agents nest subtasks under the task that started them</FeaturePoint>
+    <FeaturePoint icon="bell">A dot on the task when its agent pings you</FeaturePoint>
+    <FeaturePoint icon="keyboard">
+      <Kbd combo="Ctrl+Alt+[" /> to go back, <Kbd combo="Ctrl+Alt+1" />–<Kbd combo="9" /> to jump
+    </FeaturePoint>
+  </FeatureSection>
+
+  <FeatureSection
+    kicker="Agents"
+    title="Your agents, in real terminals"
+    body="Claude Code, Codex, OpenCode, or whatever you run, exactly as it is. Run as many as the work needs, side by side or one per task, and they keep going while you're somewhere else."
+    tiles={[
+      { agent: "claude", x: 30, y: -3, size: 56, tilt: -6 },
+      { agent: "openai", x: 72, y: -2, size: 48, tilt: 7 },
+      { agent: "antigravity", x: 80, y: 102.5, size: 50, tilt: -4 },
+    ]}
+    reverse
+    shots={[
+      {
+        src: agentsShot,
+        alt: "Claude Code and Codex side by side in one task, with the site's dev server running below",
+      },
+    ]}
+  >
+    <FeaturePoint icon="agents">Any terminal agent, on your own subscription</FeaturePoint>
+    <FeaturePoint icon="terminal">
+      The <code class="font-mono text-[0.9em] text-foreground">loxel</code> CLI lets them open files,
+      pages, and more agents
+    </FeaturePoint>
+  </FeatureSection>
+
+  <FeatureSection
+    kicker="Browser"
+    title="The PR and the app, right in the task"
+    body="Browser tabs live in the task they belong to: the pull request under review, the app on localhost, the docs you were reading. DevTools included, logins kept."
+    callouts={[{ icon: "pullRequest", text: "PR #11006 · open", x: 50, y: 20 }]}
+    tiles={[{ color: "orange", glyph: "frame", x: 3.5, y: 93, size: 40, tilt: 6 }]}
+    shots={[
+      {
+        src: browserShot,
+        alt: "A pull request on GitHub in a browser tab, next to the diagram it changes",
+      },
+    ]}
+  />
+
+  <FeatureSection
+    kicker="Git"
+    title="See what's landing"
+    body="One commit graph for every branch, with each worktree's uncommitted work right on it. Split diffs for what's in flight, and review comments that follow the code through the agent's next rewrite."
+    callouts={[
+      { icon: "commits", text: "3 commits on worktree-toast", x: 99, y: 61, align: "end" },
+    ]}
+    tiles={[{ color: "olive", glyph: "dice", x: 96, y: 2, size: 36, tilt: 7 }]}
+    reverse
+    shots={[
+      {
+        src: gitShot,
+        alt: "The Changes panel with a split diff above a commit graph of every branch",
+      },
+    ]}
+  />
+
+  <FeatureSection
+    kicker="Editor"
+    title="A glance at the code beats asking"
+    body="Jump to a definition, find references, open the file the agent just touched. Language servers for TypeScript, Python, Go, Rust, Java, and more, with their own set for each worktree."
+    callouts={[{ icon: "definition", text: "Go to definition", x: 67.5, y: 29.5 }]}
+    shots={[
+      {
+        src: editorShot,
+        alt: "The file explorer and a TypeScript file in the editor, with a function's signature and docs on hover",
+      },
+    ]}
+  />
+
+  <FeatureSection
+    kicker="Markdown"
+    title="Plans and notes next to the code"
+    body="Read the plan the agent wrote, sketch the next one, keep drafts with the task until they're worth committing. Markdown with live preview, and Excalidraw for the diagrams."
+    callouts={[{ icon: "checkbox", text: "Take a screenshot of this plan", x: 22, y: 86 }]}
+    reverse
+    shots={[
+      {
+        src: markdownShot,
+        alt: "A markdown plan in the live-preview editor, next to Claude Code reading it",
+      },
+    ]}
+  />
+
+  <!-- CTA, the page's finale. Downloads only from `sm` up, like the hero's: Loxel runs on macOS, so
+  phones get the repo and the docs instead. Each
+  variant reports its own view, so the desktop numbers stay comparable with earlier ones.
+  `overflow-x-clip` keeps the glow from widening the page without making the section a scroll
+  container (see FeatureSection). -->
+  <section class="relative overflow-x-clip px-4 py-20 sm:px-6 sm:py-28 lg:py-40">
+    <div class="cta-glow pointer-events-none absolute inset-0" aria-hidden="true"></div>
+
+    <div class="cta-stage relative mx-auto max-w-5xl rounded-3xl p-px">
+      <div
+        class="cta-surface relative overflow-clip rounded-[calc(1.5rem-1px)] px-6 py-14 text-center sm:px-8 sm:py-20 lg:py-28"
+      >
+        <TaskOrbit
+          motion="cta"
+          tiles={[
+            { color: "olive", glyph: "bars", x: 8, y: 22, size: 56, tilt: -8 },
+            { color: "purple", glyph: "arch", x: 16, y: 62, size: 42, tilt: 7 },
+            { color: "orange", glyph: "frame", x: 6, y: 84, size: 34, tilt: -4 },
+            { color: "emerald", glyph: "cross", x: 25, y: 10, size: 30, tilt: 5 },
+            { color: "pink", glyph: "smile", x: 91, y: 18, size: 46, tilt: 9 },
+            { color: "teal", glyph: "dice", x: 85, y: 58, size: 58, tilt: -6 },
+            { color: "green", glyph: "tee", x: 94, y: 84, size: 36, tilt: 6 },
+          ]}
+        />
+        <div class="stagger-rise relative mx-auto max-w-3xl">
+          <h2
+            class="mb-6 text-[clamp(1.5rem,7.4vw,2.25rem)] leading-tight font-bold tracking-tight text-balance sm:text-5xl lg:text-6xl"
+          >
+            <span class="text-gradient-light">More agents. Less chaos.</span><br />
+            <!-- Kept on one line: on phones the heading scales with the width so it fits. -->
+            <span class="text-gradient-accent whitespace-nowrap">Ship with confidence.</span>
+          </h2>
+          <div class="hidden sm:block" {...trackView("cta_viewed", { location: "bottom_cta" })}>
+            <p class="mb-10 text-lg text-balance text-muted-foreground">
+              Free for macOS. No account required. Runs entirely on your machine.
+            </p>
+            <div class="flex flex-row items-start justify-center gap-4">
+              <DownloadButton version={version} binaries={binaries} location="bottom_cta" size="lg" />
+              <GitHubButton location="bottom_cta" size="lg" />
+            </div>
+          </div>
+          <div class="sm:hidden" {...trackView("cta_viewed", { location: "bottom_cta_mobile" })}>
+            <p class="mb-8 text-base text-balance text-muted-foreground">
+              Loxel runs on macOS. Grab it from your Mac: free, no account, runs entirely on your
+              machine.
+            </p>
+            <!-- Side by side where both fit on one line each, as on 375px and wider phones; one per line
+            on narrower ones. -->
+            <div class="flex flex-wrap gap-3">
+              <GitHubButton
+                location="bottom_cta_mobile"
+                variant="primary"
+                size="touch"
+                label="Star on GitHub"
+                class="min-w-max grow basis-0 justify-center"
+              />
+              <a
+                href="/docs/getting-started"
+                {...trackClick("docs_link_clicked", { location: "bottom_cta_mobile" })}
+                class:list={[
+                  BUTTON_BASE,
+                  BUTTON_VARIANTS.outline,
+                  BUTTON_SIZES.touch,
+                  "min-w-max grow basis-0 justify-center",
+                ]}
+              >
+                Read the docs
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 </Base>
+
+<script>
+  // Fetch the tour's lazy screenshots once the page has loaded and the browser is idle, at low
+  // priority: none competes with what's on screen first, and none is still loading when the reader
+  // scrolls to it. Skipped when the visitor asked to save data or is on a slow connection, where
+  // the images load as the reader reaches them instead. `navigator.connection` is Chromium-only.
+  const SLOW_CONNECTIONS = new Set(["slow-2g", "2g", "3g"]);
+  const prefersLessData = (): boolean => {
+    if (!("connection" in navigator)) return false;
+    const { connection } = navigator;
+    if (typeof connection !== "object" || connection === null) return false;
+    if ("saveData" in connection && connection.saveData === true) return true;
+    return (
+      "effectiveType" in connection &&
+      typeof connection.effectiveType === "string" &&
+      SLOW_CONNECTIONS.has(connection.effectiveType)
+    );
+  };
+
+  if (!prefersLessData()) {
+    window.addEventListener("load", () => {
+      const fetchAll = () => {
+        for (const img of document.querySelectorAll<HTMLImageElement>("img[loading='lazy']")) {
+          img.fetchPriority = "low";
+          img.loading = "eager";
+        }
+      };
+      if ("requestIdleCallback" in window) requestIdleCallback(fetchAll, { timeout: 3000 });
+      else setTimeout(fetchAll, 1000);
+    });
+  }
+</script>

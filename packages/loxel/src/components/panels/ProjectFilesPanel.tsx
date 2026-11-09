@@ -23,6 +23,7 @@ import { useProjectFileDrag } from "@/hooks/useProjectFileDrag";
 import { getTreeActionForEvent, useTreeKeyboardNav } from "@/hooks/useTreeKeyboardNav";
 import { copyToClipboard } from "@/lib/clipboard";
 import { getDisplayFilename, toAbsoluteDir } from "@/lib/detached-path";
+import { abbreviateHomePath } from "@/lib/home-path";
 import { dispatchLoxelEvent, onLoxelEvent } from "@/lib/loxel-events";
 import { dispatchOpenFile, filePanelType } from "@/lib/open-file";
 import { registerPanelFocus } from "@/lib/panel-focus";
@@ -43,6 +44,7 @@ import { useDiscardChangesMutation } from "@/queries/use-git-mutations";
 import { useDetachedFilesQuery, useExternalFilesQuery } from "@/queries/use-repo-queries";
 import { getQueryScope } from "@/queries/use-scope";
 import { openEditorPaths, useEditorStateStore } from "@/store/editor-state";
+import { useProjectStore } from "@/store/projects";
 import { useSettingsStore } from "@/store/settings-store";
 import { getCurrentWorktreeUI, useWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
@@ -57,6 +59,7 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
 
   const activeWorktreePath = useWorktreeStore((s) => s.activeWorktreePath);
   const displayPath = activeWorktreePath;
+  const homeDir = useProjectStore((s) => s.homeDir);
   const rootName = displayPath ? displayPath.split("/").pop() || displayPath : "Project";
   const expandedProjectFolders = useWorktreeUI((s) => s.expandedProjectFolders);
   const setExpandedProjectFolders = useWorktreeUI((s) => s.setExpandedProjectFolders);
@@ -670,8 +673,9 @@ export function ProjectFilesPanel({ panelApi }: { panelApi?: DockviewPanelApi })
         </div>
         {displayPath && (
           <div className="mt-1 flex items-center gap-1">
+            {/* rtl truncates from the start; <bdi> keeps the path itself in reading order. */}
             <span className="text-muted-foreground min-w-0 truncate text-[11px]" dir="rtl">
-              {displayPath}
+              <bdi>{abbreviateHomePath(displayPath, homeDir)}</bdi>
             </span>
             <button
               onClick={handleCopy}

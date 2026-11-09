@@ -19,6 +19,9 @@
   --primary-foreground: #ffffff;
 
   --accent: #467ff2;
+  /* A lighter accent for icons on accent-tinted tiles, and the violet that tints the glows. */
+  --accent-soft: #8fb6ff;
+  --accent-violet: #8b6cf6;
 
   --secondary: #1d1e22;
   --secondary-foreground: #dfe1e5;
@@ -66,6 +69,7 @@
   --color-primary-foreground: var(--primary-foreground);
 
   --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
 
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -149,4 +153,404 @@ kbd.kbd-key svg {
   --tw-prose-pre-bg: var(--surface-2);
   --tw-prose-th-borders: var(--border);
   --tw-prose-td-borders: var(--border);
+}
+
+/* ─── Homepage motion ─────────────────────────────────────────────────────── */
+
+/* Glows behind the screenshots. Static by default; the motion below only drifts them. */
+.shot-glow,
+.hero-glow {
+  background:
+    radial-gradient(
+      closest-side at 42% 50%,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent
+    ),
+    radial-gradient(
+      closest-side at 70% 62%,
+      color-mix(in srgb, var(--accent-violet) 14%, transparent),
+      transparent
+    );
+}
+
+/* Two-tone headings: light for the claim, accent blue for the payoff. */
+.text-gradient-light,
+.text-gradient-accent {
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-gradient-light {
+  background-image: linear-gradient(180deg, #ffffff 0%, #8a9ab0 100%);
+}
+
+.text-gradient-accent {
+  background-image: linear-gradient(180deg, #6faaf5 0%, #2d6fd4 100%);
+}
+
+/* The bottom call to action: a strong glow behind a panel with an accent edge fading downward. */
+.cta-glow {
+  background:
+    radial-gradient(
+      ellipse 42% 46% at 50% 50%,
+      color-mix(in srgb, var(--accent) 32%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 26% 30% at 64% 62%,
+      color-mix(in srgb, var(--accent-violet) 20%, transparent),
+      transparent 72%
+    );
+}
+
+.cta-stage {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 75%, transparent),
+    color-mix(in srgb, var(--accent) 15%, transparent) 45%,
+    rgb(255 255 255 / 0.06)
+  );
+  box-shadow: 0 50px 140px -50px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.cta-surface {
+  background:
+    radial-gradient(
+      ellipse 70% 60% at 50% 0%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(180deg, #1a1c22, #131417);
+}
+
+/* Scroll-driven entrances: each screenshot swings in from its own side and settles flat by the
+   middle of the viewport, its copy rises in after it, and the callouts float in last. Pages that
+   can't run them, or readers who prefer less motion, get the same page at rest. Only `transform`,
+   `translate` and `opacity` animate, so scrolling stays on the compositor. */
+/* At rest each tour window turns a few degrees to face its text (the side nearest the copy
+   recedes, the outer side comes forward) and turns flat under the pointer for a closer read. Kept small: the windows are full of
+   real text. The hero stays flat. */
+@media (width >= 64rem) {
+  .feature-stage {
+    --lean: -1;
+    transform: perspective(2400px) rotateY(calc(var(--lean) * 3deg)) rotateX(1.5deg);
+  }
+
+  .feature-stage[data-from="left"] {
+    --lean: 1;
+  }
+
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .feature-stage {
+      transition: transform 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
+    }
+
+    .feature-stage:hover {
+      transform: perspective(2400px);
+    }
+  }
+}
+
+/* Scroll-driven rules set the animation longhands only, never the `animation` shorthand beside an
+   `animation-timeline`: the minifier (lightningcss, through Tailwind) folds that pair into one
+   shorthand with the timeline inside it (`animation: linear both foo view()`), which browsers
+   reject, so the motion silently disappears from production builds only. When adding one, build
+   and check that no `animation:` in the built CSS contains `view()` or a `--` timeline. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .hero-shot {
+      transform-origin: 50% 100%;
+      animation-name: hero-shot;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: view();
+      animation-range: cover 0% cover 100%;
+    }
+
+    .hero-glow {
+      animation-name: hero-glow;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: view();
+      animation-range: cover 0% cover 100%;
+    }
+
+    /* `--from` is the side a screenshot comes in from: 1 for the right, -1 for the left. Below `lg`
+       every screenshot sits on the right. */
+    [data-from] {
+      --from: 1;
+    }
+
+    .feature-shot {
+      transform-origin: 0% 50%;
+      animation-name: shot-settle;
+      animation-timing-function: cubic-bezier(0.25, 0.45, 0.3, 1);
+      animation-fill-mode: both;
+      animation-timeline: view();
+      animation-range: entry 20% cover 50%;
+    }
+
+    @media (width >= 64rem) {
+      [data-from="left"] {
+        --from: -1;
+      }
+
+      .feature-shot[data-from="left"] {
+        transform-origin: 100% 50%;
+      }
+    }
+
+    /* The box holding a section's screenshot and its callouts. The callouts, and the two windows
+       of a pair, run on its timeline so they keep their order. */
+    .feature-stage {
+      view-timeline: --shot block;
+    }
+
+    /* In a pair, the task in the back drifts up into place and the one in front slides over it, as
+       when switching tasks. */
+
+    .feature-shot-back {
+      animation-name: pair-back;
+      animation-timing-function: cubic-bezier(0.25, 0.45, 0.3, 1);
+      animation-fill-mode: both;
+      animation-timeline: --shot;
+      animation-range: entry 15% cover 45%;
+    }
+
+    .feature-shot-front {
+      animation-name: pair-front;
+      animation-timing-function: cubic-bezier(0.25, 0.45, 0.3, 1);
+      animation-fill-mode: both;
+      animation-timeline: --shot;
+      animation-range: cover 25% cover 52%;
+    }
+
+    .stagger-rise {
+      view-timeline: --copy block;
+    }
+
+    .stagger-rise > * {
+      --i: 3;
+      animation-name: copy-rise;
+      animation-timing-function: cubic-bezier(0.25, 0.45, 0.3, 1);
+      animation-fill-mode: both;
+      animation-timeline: --copy;
+      animation-range: cover calc(4% + var(--i) * 4%) cover calc(26% + var(--i) * 4%);
+    }
+
+    .stagger-rise > :nth-child(1) {
+      --i: 0;
+    }
+
+    .stagger-rise > :nth-child(2) {
+      --i: 1;
+    }
+
+    .stagger-rise > :nth-child(3) {
+      --i: 2;
+    }
+
+    .shot-glow {
+      animation-name: glow-drift;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: view();
+      animation-range: cover 0% cover 100%;
+    }
+
+    /* The callout's entrance animates `transform`, its parallax the separate `translate`, so the
+       two compose instead of overriding each other. */
+    .shot-callout {
+      --callout-delay: 0%;
+      animation-name: callout-in, callout-float;
+      animation-timing-function: cubic-bezier(0.25, 0.45, 0.3, 1), linear;
+      animation-fill-mode: both;
+      animation-timeline: --shot;
+      animation-range:
+        cover calc(36% + var(--callout-delay)) cover calc(50% + var(--callout-delay)),
+        cover 0% cover 100%;
+    }
+
+    /* The finale: its glow swells, the panel rises, and the task tiles float in toward the heading,
+       then keep drifting gently, each on its own cycle. */
+    .cta-glow {
+      animation-name: cta-glow;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 50%;
+    }
+
+    .cta-stage {
+      view-timeline: --cta block;
+      animation-name: cta-stage;
+      animation-timing-function: cubic-bezier(0.25, 0.45, 0.3, 1);
+      animation-fill-mode: both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 40%;
+    }
+
+    /* Task tiles (TaskOrbit) come in by their orbit's motion, then drift at rest. The page-load
+       orbit runs on time alone, so it can use the shorthand. */
+    [data-orbit="load"] .task-tile {
+      animation:
+        task-tile-in 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) var(--tile-delay-s) both,
+        task-tile-drift var(--tile-drift) ease-in-out var(--tile-phase) infinite alternate;
+    }
+
+    /* Elsewhere the entrance follows the scroll and the drift (the `auto` timeline) runs on time. */
+    [data-orbit="shot"] .task-tile,
+    [data-orbit="cta"] .task-tile {
+      animation-name: task-tile-in, task-tile-drift;
+      animation-duration: auto, var(--tile-drift);
+      animation-timing-function: linear, ease-in-out;
+      animation-delay: 0s, var(--tile-phase);
+      animation-iteration-count: 1, infinite;
+      animation-direction: normal, alternate;
+      animation-fill-mode: both, none;
+    }
+
+    [data-orbit="shot"] .task-tile {
+      animation-timeline: --shot, auto;
+      animation-range:
+        cover calc(28% + var(--tile-delay)) cover calc(46% + var(--tile-delay)),
+        normal;
+    }
+
+    [data-orbit="cta"] .task-tile {
+      animation-timeline: --cta, auto;
+      animation-range:
+        cover calc(10% + var(--tile-delay)) cover calc(32% + var(--tile-delay)),
+        normal;
+    }
+
+    /* Outside the call to action, tiles also drift against the scroll, nearer ones more. */
+    [data-orbit="load"] .task-tile-slot,
+    [data-orbit="shot"] .task-tile-slot {
+      animation-name: task-tile-parallax;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: view();
+      animation-range: cover 0% cover 100%;
+    }
+  }
+}
+
+@keyframes hero-shot {
+  0% {
+    transform: perspective(2400px) rotateX(14deg) scale(0.95);
+  }
+  45% {
+    transform: none;
+  }
+  100% {
+    transform: translateY(6%);
+  }
+}
+
+@keyframes hero-glow {
+  from {
+    transform: translateY(-6%) scale(0.92);
+  }
+  to {
+    transform: translateY(14%) scale(1.08);
+  }
+}
+
+@keyframes shot-settle {
+  from {
+    opacity: 0.25;
+    transform: perspective(2000px) translateX(calc(var(--from) * 9%))
+      rotateY(calc(var(--from) * -8deg)) scale(0.96);
+  }
+}
+
+@keyframes pair-back {
+  from {
+    translate: 0 9%;
+  }
+}
+
+@keyframes pair-front {
+  from {
+    opacity: 0;
+    translate: 7% -5%;
+  }
+}
+
+@keyframes copy-rise {
+  from {
+    opacity: 0;
+    transform: translateY(1.5rem);
+  }
+}
+
+@keyframes glow-drift {
+  from {
+    opacity: 0.5;
+    transform: translate(calc(var(--from) * 8%), 14%) scale(0.9);
+  }
+  50% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.6;
+    transform: translate(calc(var(--from) * -6%), -14%) scale(1.06);
+  }
+}
+
+@keyframes callout-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem) scale(0.94);
+  }
+}
+
+@keyframes callout-float {
+  from {
+    translate: 0 1.25rem;
+  }
+  to {
+    translate: 0 -1.25rem;
+  }
+}
+
+@keyframes cta-glow {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes cta-stage {
+  from {
+    opacity: 0;
+    transform: translateY(3rem) scale(0.96);
+  }
+}
+
+@keyframes task-tile-in {
+  from {
+    opacity: 0;
+    transform: translate(var(--tile-dx), var(--tile-dy)) scale(0.6);
+  }
+}
+
+@keyframes task-tile-drift {
+  from {
+    translate: 2px -6px;
+  }
+  to {
+    translate: -2px 6px;
+  }
+}
+
+@keyframes task-tile-parallax {
+  from {
+    translate: 0 var(--tile-parallax);
+  }
+  to {
+    translate: 0 calc(var(--tile-parallax) * -1);
+  }
 }

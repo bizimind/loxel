@@ -1,14 +1,17 @@
 ---
 import { trackClick } from "../lib/analytics";
+import { BUTTON_BASE, BUTTON_SIZES, BUTTON_VARIANTS } from "../lib/button-styles";
 
 interface Props {
   version: string;
   binaries: Record<string, string>;
   /** Where the button sits on the site, reported with the `download_clicked` event. */
   location: string;
+  size?: "md" | "lg";
 }
 
-const { version, binaries, location } = Astro.props;
+const { version, binaries, location, size = "md" } = Astro.props;
+const iconSize = size === "lg" ? 18 : 16;
 
 // Every variant is rendered; the script below shows the one for the visitor's platform. Without
 // JavaScript the Apple Silicon one stays visible.
@@ -28,9 +31,24 @@ const fallbackLinkClass =
           <a
             href={url}
             {...trackClick("download_clicked", { platform: "darwin", arch, version, location })}
-            class="bg-primary text-primary-foreground hover:bg-accent inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold transition-colors"
+            class:list={[
+              BUTTON_BASE,
+              BUTTON_VARIANTS.primary,
+              BUTTON_SIZES[size],
+              {
+                "shadow-[0_6px_20px_-10px_color-mix(in_srgb,var(--accent)_55%,transparent)]":
+                  size === "lg",
+              },
+            ]}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <svg
+              class="shrink-0"
+              width={iconSize}
+              height={iconSize}
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              aria-hidden="true"
+            >
               <path d="M8 12L3 7h3V1h4v6h3L8 12z" />
               <path d="M2 14h12v1.5H2z" />
             </svg>

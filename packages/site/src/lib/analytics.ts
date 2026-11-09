@@ -7,6 +7,7 @@ interface ClickEvents {
   download_clicked: { platform: string; arch: string; version: string; location: string };
   github_link_clicked: { location: string };
   docs_nav_clicked: { from: string; to: string };
+  docs_link_clicked: { location: string };
 }
 
 interface ViewEvents {

@@ -126,6 +126,7 @@ export function TopBar() {
         <UpdateIndicator />
         <NotificationBell />
         <button
+          aria-label="Settings"
           className="text-muted-foreground hover:text-foreground rounded p-1"
           onClick={() => useSettingsStore.getState().openSettings()}
           style={isElectron ? { WebkitAppRegion: "no-drag" } : undefined}

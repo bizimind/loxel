@@ -3,7 +3,9 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
-  outputDir: "../../site/public/screenshots",
+  // Failure artifacts only. Screenshots are written by the specs (helpers/screenshot.ts); pointing this
+  // at the site's screenshots folder would let Playwright empty it at the start of every run.
+  outputDir: "test-results",
   timeout: 30_000,
   retries: 0,
   // Tests share a single server instance — run sequentially to avoid state interference.
