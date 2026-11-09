@@ -51,6 +51,9 @@ jobs:
 
       - name: Deploy to Cloudflare Pages
         id: deploy
+        # Dependabot's runs get Dependabot's secrets, not ours, so they build the site as a check but
+        # never deploy: the Pages token stays out of reach of freshly bumped dependencies.
+        if: ${{ !startsWith(github.ref_name, 'dependabot/') }}
         # wrangler bundles Pages Functions from ./functions, so it must run from the site package.
         working-directory: packages/site
         run: |

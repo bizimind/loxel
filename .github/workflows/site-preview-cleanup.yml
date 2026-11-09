@@ -11,9 +11,12 @@ permissions:
 jobs:
   cleanup:
     # Fork PRs get no repository secrets on pull_request, so the Cloudflare cleanup would fail with an empty token.
+    # Dependabot's runs get none either, and its branches never deploy a preview (release-site.yml).
     if: >-
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'delete' && github.event.ref_type == 'branch')
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
+        !startsWith(github.event.pull_request.head.ref, 'dependabot/')) ||
+      (github.event_name == 'delete' && github.event.ref_type == 'branch' &&
+        !startsWith(github.event.ref, 'dependabot/'))
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 2
     steps:

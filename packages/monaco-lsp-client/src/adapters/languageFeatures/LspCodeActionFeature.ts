@@ -200,7 +200,9 @@ class LspCodeActionProvider implements monaco.languages.CodeActionProvider {
       range: this._client.bridge.translateRange(model, range),
       context: {
         diagnostics: this._diagnostics.diagnosticsForMarkers(model, context.markers),
-        // Monaco's code action kinds are LSP's.
+        // Monaco's code action kinds are LSP's, an open set of strings the enum names only some of
+        // (a server's "source.fixAll.ruff" among the rest).
+        // oxlint-disable-next-line typescript/no-unsafe-enum-assignment
         only: context.only === undefined ? undefined : [context.only as CodeActionKind],
         triggerKind: toLspCodeActionTriggerKind(context.trigger),
       },
