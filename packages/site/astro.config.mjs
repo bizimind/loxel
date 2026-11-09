@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 
 import { satteri } from "@astrojs/markdown-satteri";
 import mdx from "@astrojs/mdx";
@@ -33,24 +33,17 @@ const redirects = {
 };
 
 // A static build writes each `redirects` entry as a meta-refresh page, which drops the URL's
-// #fragment, so `/docs/old-page#section` would land at the top of the new page. A script on the
-// redirect page carries the fragment over (the new page's `movedAnchors` then maps renamed ones);
-// the meta refresh stays as the fallback without JavaScript.
+// #fragment, so `/docs/old-page#section` would land at the top of the new page. Cloudflare Pages
+// serves the same entries from `_redirects` as real 301s instead (applied before any asset, so the
+// meta-refresh pages don't shadow them), and browsers carry the fragment across a redirect; the new
+// page's `movedAnchors` then maps renamed ones. The meta-refresh pages stay for `astro dev`.
 /** @type {import("astro").AstroIntegration} */
-const redirectFragments = {
-  name: "redirect-fragments",
+const cloudflareRedirects = {
+  name: "cloudflare-redirects",
   hooks: {
     "astro:build:done": async ({ dir }) => {
-      for (const [from, to] of Object.entries(redirects)) {
-        const file = new URL(`.${from}.html`, dir);
-        const html = await readFile(file, "utf8");
-        const target = JSON.stringify(to);
-        const script = to.includes("#")
-          ? `<script>location.replace(${target})</script>`
-          : `<script>location.replace(${target} + location.hash)</script>`;
-        if (!html.includes("</title>")) throw new Error(`Unexpected redirect page for ${from}`);
-        await writeFile(file, html.replace("</title>", `</title>${script}`));
-      }
+      const rules = Object.entries(redirects).map(([from, to]) => `${from} ${to} 301`);
+      await writeFile(new URL("_redirects", dir), `${rules.join("\n")}\n`);
     },
   },
 };
@@ -63,7 +56,7 @@ export default defineConfig({
   // Inlined: the stylesheet is small, and a <link> to it would block the first render.
   build: { format: "file", inlineStylesheets: "always" },
   redirects,
-  integrations: [mdx(), sitemap(), siteScript, redirectFragments],
+  integrations: [mdx(), sitemap(), siteScript, cloudflareRedirects],
   // The homepage's screenshots are encoded at 7 widths in two formats; sharp's default effort makes
   // that minutes of CPU on a CI runner. Lower effort costs about a tenth more bytes and encodes
   // several times faster.
