@@ -828,6 +828,14 @@ export abstract class StdioLspManager<TSession extends BaseLspSession, TContext 
     });
   }
 
+  /** Have every client reconnect to a fresh server, one that reads its schemas again. */
+  restartSessions(reason: string): void {
+    for (const { ws } of [...this.sessions.values()]) {
+      this.detach(ws);
+      ws.close(LSP_RESTART_CLOSE_CODE, reason);
+    }
+  }
+
   /** End a running session that cannot go on, the way a server that cannot start ends. */
   private failStart(session: TSession, err: unknown): void {
     this.log.error(`${this.name} failed to start`, { error: err });
