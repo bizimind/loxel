@@ -157,7 +157,7 @@ The status bar lives outside the panels, so each code editor tab publishes its r
 
 ### Byte-identical untouched blocks
 
-Serialization is canonical (`*` bullets become `-`, setext headings become ATX, blank-line runs collapse), so a naive save would rewrite every block of the file on any edit and produce noisy diffs. [markdown-source-preservation.ts](../src/lib/markdown-source-preservation.ts) prevents that:
+Serialization is canonical in the configured markers (by default `*` bullets become `-` and setext headings become ATX; blank-line runs always collapse), so a naive save would rewrite every block of the file on any edit and produce noisy diffs. [markdown-source-preservation.ts](../src/lib/markdown-source-preservation.ts) prevents that:
 
 - On load, `createSourceBaseline` records the source text, its top-level block ranges (from remark positions), and the canonical form of each block. Preservation is disabled for a source whose canonical form splits into a different number of blocks.
 - On save, `preserveSource` splits the canonical output into blocks and aligns them with the baseline's canonical blocks by LCS (`alignBlocks`). Unchanged blocks are emitted as their original source bytes; changed or new blocks use serializer output. Separators (blank lines, link reference definitions) between blocks that were adjacent in the source are kept verbatim, including around a block edited in place.

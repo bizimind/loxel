@@ -10,6 +10,9 @@ import { editorViewCtx, parserCtx, remarkStringifyOptionsCtx } from "@milkdown/k
 import { DOMParser } from "@milkdown/kit/prose/model";
 import { TextSelection } from "@milkdown/kit/prose/state";
 
+import { DEFAULT_MARKDOWN_OUTPUT_SETTINGS } from "@/lib/formatting-model";
+
+import { buildRemarkStringifyOptions } from "./markdown-stringify-options";
 import { serializeBody, setSourceBaseline } from "./MarkdownEditor";
 import { installSoftLineBreaks } from "./soft-line-break";
 
@@ -29,11 +32,13 @@ async function mount(source: string): Promise<Crepe> {
   const crepe = new Crepe({ root, defaultValue: source });
   installSoftLineBreaks(crepe.editor);
   crepe.editor.config((ctx) => {
-    ctx.set(remarkStringifyOptionsCtx, {
-      ...ctx.get(remarkStringifyOptionsCtx),
-      bullet: "-",
-      rule: "-",
-    });
+    ctx.set(
+      remarkStringifyOptionsCtx,
+      buildRemarkStringifyOptions(
+        ctx.get(remarkStringifyOptionsCtx),
+        DEFAULT_MARKDOWN_OUTPUT_SETTINGS,
+      ),
+    );
   });
   await crepe.create();
   setSourceBaseline(crepe, source);
