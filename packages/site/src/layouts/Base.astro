@@ -3,7 +3,7 @@ import { Font, getImage } from "astro:assets";
 import socialBannerSource from "../assets/social-banner.png";
 import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
-import { SITE_NAME, THEME_COLOR, pagePath } from "../lib/site";
+import { HOME_TITLE, SITE_DESCRIPTION, SITE_NAME, THEME_COLOR, pagePath } from "../lib/site";
 import { type StructuredDataNode, siteNodes, toJsonLd } from "../lib/structured-data";
 import "../styles/global.css";
 
@@ -20,13 +20,12 @@ interface Props {
 
 const {
   title,
-  description = "Loxel — The IDE for the agentic coding era.",
+  description = SITE_DESCRIPTION,
   ogType = "website",
   noindex = false,
   structuredData = [],
 } = Astro.props;
-const pageTitle =
-  title === SITE_NAME ? "Loxel — IDE for the agentic coding era" : `${title} — ${SITE_NAME}`;
+const pageTitle = title === SITE_NAME ? HOME_TITLE : `${title} — ${SITE_NAME}`;
 // Every deployment (including *.pages.dev) points search engines at the production URL.
 const canonicalUrl = new URL(pagePath(Astro.url), Astro.site).href;
 // Link previews show it at 1200x630. JPEG, since a palette PNG bands the dark gradient and a

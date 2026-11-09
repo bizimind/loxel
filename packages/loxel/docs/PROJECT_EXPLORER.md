@@ -6,7 +6,7 @@ Behavior contract of the Project Explorer (the "Project Files" panel, `ProjectFi
 
 From top to bottom the panel shows:
 
-- a header with the worktree path (with a copy button) and a button that reveals the active editor's file;
+- a header with the worktree path, shortened to `~/…` under the home folder (its copy button copies the full path), and a button that reveals the active editor's file;
 - a **Drafts** section listing detached draft files (`DetachedFileNode`), when there are any;
 - one `FilesTree` (see [FILES_TREE.md](FILES_TREE.md)) whose roots are the active worktree, then each folder in the **Others** section, then each individually opened Others file. The Others heading is rendered with `renderRootHeader` above the first root after the worktree.
 

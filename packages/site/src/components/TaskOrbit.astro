@@ -1,0 +1,81 @@
+---
+// A few tiles placed around something on the homepage, like tasks in orbit around it: task avatars
+// (TaskTile), or coding agents' marks (AgentTile) when a tile names an `agent`. Decorative and
+// absolutely positioned over its parent; an orbit shows either on wide screens or below them, so a
+// spot gets its own set of tiles for each. The motion lives in global.css under "Homepage motion";
+// without it the tiles simply rest in place.
+import type { ComponentProps } from "astro/types";
+import AgentTile from "./AgentTile.astro";
+import TaskTile from "./TaskTile.astro";
+
+type Depth = "near" | "mid" | "far";
+
+interface Placement {
+  /** Center of the tile, in % of the parent. Values past 0–100 sit outside it. */
+  x: number;
+  y: number;
+  /** Far tiles are smaller in effect: blurred, dimmer, and slower in parallax. */
+  depth?: Depth;
+}
+
+type PlacedTile = Placement & (ComponentProps<typeof TaskTile> | ComponentProps<typeof AgentTile>);
+
+interface Props {
+  tiles: PlacedTile[];
+  /**
+   * How the tiles come in: `load` floats them in when the page opens, `shot` with the feature
+   * section screenshot they sit behind, `cta` with the bottom call to action's panel. All of them
+   * drift at rest.
+   */
+  motion: "load" | "shot" | "cta";
+  /**
+   * Where the tiles show: from the `lg` or the `xl` breakpoint, or only below `lg`, where the copy
+   * takes the whole width and the tiles must keep to its margins. Those move less, so they stay there
+   * through their motion.
+   */
+  screens?: "lg" | "xl" | "narrow";
+}
+
+const { tiles, motion, screens = "lg" } = Astro.props;
+const narrow = screens === "narrow";
+// How far a tile floats in from, per % of its distance from the parent's center, and how far its
+// parallax carries it, in px.
+const spread = narrow ? 0.4 : 1.2;
+const parallaxScale = narrow ? 0.4 : 1;
+
+const DEPTH = {
+  near: { parallax: 36, style: "" },
+  mid: { parallax: 22, style: "opacity: 0.8;" },
+  far: { parallax: 12, style: "opacity: 0.5; filter: blur(1.5px);" },
+} satisfies Record<Depth, { parallax: number; style: string }>;
+---
+
+<div
+  class:list={[
+    "pointer-events-none absolute inset-0",
+    { "lg:hidden": narrow, "hidden lg:block": screens === "lg", "hidden xl:block": screens === "xl" },
+  ]}
+  data-orbit={motion}
+  aria-hidden="true"
+>
+  {
+    tiles.map(({ x, y, depth = "near", ...tile }, index) => (
+      <div
+        class="task-tile-slot absolute"
+        style={[
+          `left: ${x}%; top: ${y}%; margin: ${-tile.size / 2}px 0 0 ${-tile.size / 2}px;`,
+          // Tiles float in toward the center of their parent, each a beat after the last, and
+          // drift on cycles of different lengths so they never move in step.
+          `--tile-dx: ${(x - 50) * spread}px; --tile-dy: ${(y - 50) * spread}px;`,
+          `--tile-delay: ${index * 2}%; --tile-delay-s: ${0.15 + index * 0.12}s;`,
+          `--tile-drift: ${7 + ((index * 1.7) % 3)}s; --tile-phase: ${-index * 1.3}s;`,
+          `--tile-parallax: ${DEPTH[depth].parallax * parallaxScale}px; ${DEPTH[depth].style}`,
+        ].join(" ")}
+      >
+        <div class="task-tile">
+          {"agent" in tile ? <AgentTile {...tile} /> : <TaskTile {...tile} />}
+        </div>
+      </div>
+    ))
+  }
+</div>

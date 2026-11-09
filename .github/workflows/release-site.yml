@@ -21,8 +21,10 @@ concurrency:
 jobs:
   deploy:
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    # Healthy runs take 67-87s; slow installs and the pnpm cache save after a lockfile change need headroom.
-    timeout-minutes: 4
+    # Healthy runs took 67-87s before the homepage's screenshots, which add their image encoding (about
+    # 15s on a laptop, a few times that on this runner); slow installs and the pnpm cache save after a
+    # lockfile change need headroom.
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v7
 
