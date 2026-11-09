@@ -2,33 +2,22 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { demoPort, demoStateName, parseDemoInstance } from "../demo-instance";
+
 const isDev = process.env.LOXEL_DEV === "1";
 // Demo mode (`LOXEL_DEMO=1`): its own state and port, so a demo runs beside the app untouched.
 // `LOXEL_DEMO_INSTANCE=<n>` runs several demos side by side, each with its own port and state.
 const isDemo = process.env.LOXEL_DEMO === "1";
 
-/**
- * `LOXEL_DEMO_INSTANCE` as a non-negative integer (default 0). The Electron main process parses
- * it too (src/electron/env.ts); both refuse a bad value, which would otherwise fall back to
- * instance 0 and share another demo's port and state.
- */
-function parseDemoInstance(value: string | undefined): number {
-  if (!isDemo || value === undefined || value === "") return 0;
-  if (!/^\d+$/.test(value)) {
-    throw new Error(`LOXEL_DEMO_INSTANCE must be a non-negative integer, not "${value}"`);
-  }
-  return Number(value);
-}
-const demoInstance = parseDemoInstance(process.env.LOXEL_DEMO_INSTANCE);
+const demoInstance = isDemo ? parseDemoInstance(process.env.LOXEL_DEMO_INSTANCE) : 0;
 const stateBase = join(homedir(), ".local", "state", "loxel");
-const demoStateName = demoInstance ? `loxel-demo-${demoInstance}` : "loxel-demo";
 const stateDir =
   process.env.LOXEL_STATE_DIR ??
-  join(stateBase, isDemo ? demoStateName : isDev ? "loxel-dev" : "loxel");
+  join(stateBase, isDemo ? demoStateName(demoInstance) : isDev ? "loxel-dev" : "loxel");
 const port = process.env.LOXEL_SERVE_PORT
   ? parseInt(process.env.LOXEL_SERVE_PORT, 10)
   : isDemo
-    ? 7435 + demoInstance
+    ? demoPort(demoInstance)
     : isDev
       ? 7434
       : 7433;

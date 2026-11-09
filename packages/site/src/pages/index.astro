@@ -33,7 +33,7 @@ const hero = await screenshotPicture(worktreesAgentsShot, {
   sizes:
     "(min-width: 2000px) 1760px, (min-width: 1280px) calc(100vw - 15rem), (min-width: 1024px) calc(100vw - 11rem), (min-width: 640px) calc(100vw - 7rem), 180vw",
 });
-const structuredData = softwareNodes(manifest, new URL(hero.fullSizeSrc, Astro.site).href);
+const structuredData = softwareNodes(manifest, new URL(hero.linkSrc, Astro.site).href);
 ---
 
 <Base title="Loxel" structuredData={structuredData}>

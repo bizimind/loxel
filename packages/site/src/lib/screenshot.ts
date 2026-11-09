@@ -4,7 +4,8 @@ import { type Picture, getImage } from "astro:assets";
 
 type PictureProps = ComponentProps<typeof Picture>;
 
-// Candidate widths below each screenshot's own; its full width is always added as the largest.
+// Candidate widths, up to 3200: the full 4064px capture (its shadow margin included) would only
+// serve the hero above a 2560px screen at 2x, and is by far the slowest to encode.
 const WIDTHS = [640, 960, 1280, 1600, 1920, 2400, 3200];
 
 interface ScreenshotOptions {
@@ -17,20 +18,16 @@ interface ScreenshotOptions {
 
 /**
  * Props for a `<Picture>` of an app screenshot: AVIF in a responsive srcset, WebP for browsers
- * without it. Also returns the screenshot at full size as WebP, which is the srcset's largest
- * fallback candidate. The full width comes from `getImage()` because reading `src.width` directly
- * makes the build also publish the original PNG.
+ * without it (Astro leaves out widths above the screenshot's own). Also returns the 1920px WebP,
+ * one of the srcset's own files, for a link to the image such as structured data.
  */
 export async function screenshotPicture(
   src: ImageMetadata,
   { alt, sizes, priority = false }: ScreenshotOptions,
-): Promise<{ props: PictureProps; fullSizeSrc: string }> {
-  const full = await getImage({ src });
-  const fullWidth = full.options.width;
-  if (fullWidth === undefined) throw new Error(`getImage() returned no width for ${alt}`);
-
+): Promise<{ props: PictureProps; linkSrc: string }> {
+  const link = await getImage({ src, width: 1920, format: "webp" });
   return {
-    fullSizeSrc: full.src,
+    linkSrc: link.src,
     props: {
       src,
       // AVIF is about half the size of WebP; browsers without it take the WebP <img>.
@@ -40,7 +37,7 @@ export async function screenshotPicture(
       pictureAttributes: { class: "contents" },
       alt,
       priority,
-      widths: [...WIDTHS.filter((width) => width < fullWidth), fullWidth],
+      widths: WIDTHS,
       sizes,
     },
   };

@@ -17,9 +17,17 @@ import {
 } from "electron";
 import { z } from "zod";
 
+import { demoPort } from "../demo-instance";
 import { loadOrCreateDek } from "./dek";
-import { DEMO_INSTANCE, DEMO_WINDOW_SIZE, IS_DEMO, IS_DEMO_HIDDEN, IS_DEV } from "./env";
-const SERVER_PORT = IS_DEMO ? 7435 + DEMO_INSTANCE : IS_DEV ? 7434 : 7433;
+import {
+  DEMO_INSTANCE,
+  DEMO_WINDOW_SIZE,
+  DEV_RENDERER_URL,
+  IS_DEMO,
+  IS_DEMO_HIDDEN,
+  IS_DEV,
+} from "./env";
+const SERVER_PORT = IS_DEMO ? demoPort(DEMO_INSTANCE) : IS_DEV ? 7434 : 7433;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
 /**
@@ -210,7 +218,7 @@ function waitForServer(url: string, timeoutMs = 10_000): Promise<void> {
   });
 }
 
-const APP_ORIGIN = new URL(process.env.VITE_DEV_SERVER_URL ?? SERVER_URL).origin;
+const APP_ORIGIN = new URL(DEV_RENDERER_URL ?? SERVER_URL).origin;
 
 function isLocal(url: string): boolean {
   try {
@@ -313,7 +321,7 @@ async function createWindow(): Promise<BrowserWindow> {
     win.webContents.send(WINDOW_FULL_SCREEN_CHANGE, false);
   });
 
-  const loadUrl = process.env.VITE_DEV_SERVER_URL ?? SERVER_URL;
+  const loadUrl = DEV_RENDERER_URL ?? SERVER_URL;
   win.loadURL(loadUrl);
 
   // Intercept external link clicks at the document level. Chromium 134+ blocks

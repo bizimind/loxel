@@ -10,6 +10,7 @@ import { $ } from "bun";
 
 import type { RepoTrustDecision } from "../../src/api/repo-trust-model";
 import { withoutAgentEnv } from "../../src/coding-agent-env";
+import { demoPort, demoStateName } from "../../src/demo-instance";
 import { DEMO_PROJECTS, DEMO_ROOT, demoWorktree } from "./demo-projects";
 
 export const LOXEL_ROOT = resolve(import.meta.dirname, "../..");
@@ -24,12 +25,12 @@ export async function buildDemoApp(): Promise<void> {
     .quiet();
 }
 
-/** A demo instance's server (`LOXEL_DEMO_INSTANCE`): demo mode's port plus the instance number. */
-export const demoServer = (instance = 0) => `http://127.0.0.1:${7435 + instance}`;
+/** A demo instance's server (`LOXEL_DEMO_INSTANCE`). */
+export const demoServer = (instance = 0) => `http://127.0.0.1:${demoPort(instance)}`;
 
 /** A demo instance's state directory (src/server/config.ts). */
 export const demoStateDir = (instance = 0) =>
-  resolve(homedir(), ".local/state/loxel", instance ? `loxel-demo-${instance}` : "loxel-demo");
+  resolve(homedir(), ".local/state/loxel", demoStateName(instance));
 
 /** Where `launch.ts` keeps the visible demo app's process ID, to stop it on the next launch. */
 export const DEMO_PID_FILE = resolve(demoStateDir(0), "demo-app.pid");
