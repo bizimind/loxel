@@ -134,7 +134,7 @@ Notes:
 
 - Every review ends with one short summary comment. Keep it short: the inline comments carry the details, so never repeat them in the summary.
 
-  If no issues are found, use this format:
+  If no issues are found, use this format, with this exact wording even on a later round of the same PR (tooling matches it):
 
 ---
 

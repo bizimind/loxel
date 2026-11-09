@@ -3,32 +3,44 @@
  */
 
 import type { ActionId } from "./action-registry";
+import { canShareBinding, getActionDef } from "./action-registry";
 import type { KeyBinding } from "./key-combo";
 import { getBindingSteps, toKeyBinding } from "./key-combo";
 import type { BindingTemplate } from "./keybinding-schema";
 
 /**
- * Build a reverse lookup map (KeyBinding -> ActionId) from a template + user overrides.
+ * Build a reverse lookup map from a template + user overrides. A binding holds one action, or two
+ * that may share a key (`ActionDef.sharesKeyWith`), the declaring one first.
  * For overridden actions, template bindings are replaced entirely.
  */
 export function buildReverseLookup(
   template: BindingTemplate,
   overrides: Partial<Record<ActionId, readonly KeyBinding[]>>,
-): Map<KeyBinding, ActionId> {
-  const lookup = new Map<KeyBinding, ActionId>();
+): Map<KeyBinding, readonly ActionId[]> {
+  const lookup = new Map<KeyBinding, readonly ActionId[]>();
+
+  function add(binding: KeyBinding, actionId: ActionId): void {
+    const sharer = lookup.get(binding)?.find((other) => canShareBinding(actionId, other));
+    if (!sharer) {
+      lookup.set(binding, [actionId]);
+      return;
+    }
+    const declaresSharing = getActionDef(actionId)?.sharesKeyWith === sharer;
+    lookup.set(binding, declaresSharing ? [actionId, sharer] : [sharer, actionId]);
+  }
 
   for (const [actionId, bindings] of Object.entries(template)) {
     // Skip actions that have user overrides — they'll be applied below
     if (actionId in overrides) continue;
     for (const binding of bindings) {
-      lookup.set(binding, actionId as ActionId);
+      add(binding, actionId as ActionId);
     }
   }
 
   for (const [actionId, bindings] of Object.entries(overrides)) {
     if (!bindings) continue;
     for (const binding of bindings) {
-      lookup.set(binding, actionId as ActionId);
+      add(binding, actionId as ActionId);
     }
   }
 
@@ -39,7 +51,9 @@ export function buildReverseLookup(
  * Every strict chord prefix of the bound chords ("Cmd+Backslash", "Cmd+Backslash T" for
  * "Cmd+Backslash T ArrowRight"). A keystroke sequence in this set waits for the next key.
  */
-export function buildChordPrefixes(lookup: ReadonlyMap<KeyBinding, ActionId>): Set<KeyBinding> {
+export function buildChordPrefixes(
+  lookup: ReadonlyMap<KeyBinding, readonly ActionId[]>,
+): Set<KeyBinding> {
   const prefixes = new Set<KeyBinding>();
   for (const binding of lookup.keys()) {
     const steps = getBindingSteps(binding);

@@ -19,7 +19,6 @@ import type { Project } from "@/api/project-model";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { getTreeActionForEvent } from "@/hooks/useTreeKeyboardNav";
-import { FileTypeIcon } from "@/lib/file-icons";
 import { focusSidebarEntryForPath, handleSidebarEntryKeyDown } from "@/lib/focus-navigation";
 import { focusAreaProps, SIDEBAR_ENTRY_ATTR, sidebarEntryProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
@@ -32,37 +31,18 @@ import { AddProjectWizard } from "../projects/AddProjectWizard";
 import { ProjectIcon } from "../projects/ProjectIcon";
 import { EnableNestingDialog } from "./EnableNestingDialog";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
-import { RAIL_PADDING, railDepth, railWidth } from "./worktree-geometry";
+import { ICON_PX, iconLeft, iconLeftExpanded, railDepth, railWidth } from "./worktree-geometry";
 import { WorktreeTree } from "./WorktreeTree";
 
-// ── Project icon with folder badge ──────────────────────────────────────
-
-/** ProjectIcon wrapped with a small folder badge in the bottom-right corner. */
-function ProjectIconWithBadge({
-  id,
-  name,
-  size,
-  active,
-}: {
-  id: string;
-  name: string;
-  size: "xs" | "sm" | "md";
-  active?: boolean;
-}) {
-  return (
-    <div className="relative shrink-0">
-      <ProjectIcon id={id} name={name} size={size} active={active} />
-      <FileTypeIcon
-        filename="folder"
-        isFolder
-        className="absolute -right-1 -bottom-1 size-3 drop-shadow-[0_0_1px_var(--card)]"
-      />
-    </div>
-  );
-}
-
-/** Collapsed-rail tiles (32px) line up with the top-level worktree icons (24px). */
-const RAIL_TILE_LEFT = RAIL_PADDING - 4;
+/** Expanded project rows: the row's left padding, before the fold chevron. */
+const ROW_LEFT = 8;
+/** The fold chevron's width (`size-3.5`). */
+const CHEVRON_PX = 14;
+/** Puts the expanded project icon in the column of the top-level worktree icons below it. */
+const ICON_MARGIN_LEFT = iconLeftExpanded(0) - ROW_LEFT - CHEVRON_PX;
+/** The rail's Add project button (`size-8`), centered on the worktree icons' column. */
+const RAIL_ADD_PX = 32;
+const RAIL_ADD_LEFT = iconLeft(0) - (RAIL_ADD_PX - ICON_PX) / 2;
 /** Keyboard cursor ring for the collapsed rail's icon buttons. */
 const ENTRY_FOCUS_RING =
   "focus-visible:ring-ring focus-visible:ring-offset-card outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
@@ -296,17 +276,17 @@ export function Sidebar() {
           return (
             <div
               key={project.id}
-              // A full-width line between projects
-              className={cn(index > 0 && "border-border mt-1 border-t pt-1")}
+              // Space, not a line, between projects: lines on the rail are the worktree tree's brackets
+              className={cn(index > 0 && "mt-2")}
               data-sidebar-project
             >
               {sidebarExpanded ? (
                 <div
                   className={cn(
-                    "hover:bg-primary/50 group focus-visible:ring-ring relative flex cursor-pointer items-center gap-2 px-2.5 py-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
+                    "hover:bg-primary/50 group focus-visible:ring-ring relative flex cursor-pointer items-center px-2.5 py-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
                     isRootActive && "bg-primary",
                   )}
-                  style={{ paddingLeft: "8px" }}
+                  style={{ paddingLeft: `${ROW_LEFT}px` }}
                   tabIndex={-1}
                   {...sidebarEntryProps(project.path)}
                   onClick={() => !isRenaming && handleProjectClick(project)}
@@ -328,7 +308,9 @@ export function Sidebar() {
                     )}
                   </button>
 
-                  <ProjectIconWithBadge id={project.id} name={project.name} size="sm" />
+                  <div className="mr-2.5 shrink-0" style={{ marginLeft: `${ICON_MARGIN_LEFT}px` }}>
+                    <ProjectIcon id={project.id} name={project.name} size="sm" />
+                  </div>
 
                   <div className="min-w-0 flex-1 overflow-hidden">
                     {isRenaming ? (
@@ -361,19 +343,20 @@ export function Sidebar() {
                   </div>
                 </div>
               ) : (
-                <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_TILE_LEFT}px` }}>
+                <div className="flex py-1.5" style={{ paddingLeft: `${iconLeft(0)}px` }}>
                   <button
-                    className={cn("cursor-pointer rounded-md", ENTRY_FOCUS_RING)}
+                    // Rounded like the keyboard ring on a worktree icon
+                    className={cn("cursor-pointer rounded-[30%]", ENTRY_FOCUS_RING)}
                     onClick={() => handleProjectClick(project)}
                     {...sidebarEntryProps(project.path)}
                     onContextMenu={(e) => handleProjectContextMenu(e, project)}
                     onKeyDown={onProjectKeyDown}
                     title={`${project.name}\n${project.path}`}
                   >
-                    <ProjectIconWithBadge
+                    <ProjectIcon
                       id={project.id}
                       name={project.name}
-                      size="md"
+                      size="sm"
                       active={isRootActive}
                     />
                   </button>
@@ -385,7 +368,7 @@ export function Sidebar() {
         })}
 
         {/* Add project button, set off from the projects like they are from each other */}
-        <div className={cn(projects.length > 0 && "border-border mt-1 border-t pt-1")}>
+        <div className={cn(projects.length > 0 && "mt-2")}>
           {sidebarExpanded ? (
             <div
               className="text-muted-foreground hover:text-foreground hover:bg-primary/50 flex cursor-pointer items-center gap-2.5 px-2.5 py-2 transition-colors"
@@ -398,7 +381,7 @@ export function Sidebar() {
               <span className="text-xs">Add project</span>
             </div>
           ) : (
-            <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_TILE_LEFT}px` }}>
+            <div className="flex py-1.5" style={{ paddingLeft: `${RAIL_ADD_LEFT}px` }}>
               <button
                 className="text-muted-foreground hover:text-foreground flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors"
                 onClick={handleAddProject}

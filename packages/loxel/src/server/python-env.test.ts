@@ -7,17 +7,18 @@ import { dirname, join } from "node:path";
 const stateDir = await mkdtemp(join(tmpdir(), "python-env-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const {
+  ENV_TOOL_REPO_TRUST_RESTRICTION,
   getPythonEnv,
   refreshAllPythonEnvs,
   listPythonEnvs,
   normalizePythonOverride,
-  pathOutsideWorktree,
   resolvePythonEnv,
   subscribePythonEnv,
   watchPythonEnv,
 } = await import("./python-env");
 const { getPythonOverride, onPythonOverrideChange, setPythonOverride } =
   await import("./python-override-store");
+const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
 
 let root: string | undefined;
 
@@ -284,20 +285,26 @@ describe("resolvePythonEnv", () => {
     });
   });
 
-  test("asks Poetry for its environment only when poetry.lock exists", async () => {
+  test("asks Poetry for its environment only when poetry.lock exists, in a trusted repository", async () => {
     const { wt, outside, bin } = await makeRoot();
     const poetryVenv = join(outside, "poetry-venv");
     const python = await makeVenv(poetryVenv);
-    await writeExecutable(join(bin, "poetry"), `#!/bin/sh\necho "${poetryVenv}"\n`);
+    const runs = join(outside, "runs");
+    await writeExecutable(
+      join(bin, "poetry"),
+      `#!/bin/sh\necho x >> "${runs}"\necho "${poetryVenv}"\n`,
+    );
     const system = await writeExecutable(join(bin, "python3"));
+    const systemEnv = { source: "system" as const, pythonPath: system, envPath: null };
 
-    expect(await resolvePythonEnv(wt, { env: { PATH: bin } })).toEqual({
-      source: "system",
-      pythonPath: system,
-      envPath: null,
-    });
+    expect(await resolvePythonEnv(wt, { env: { PATH: bin } })).toEqual(systemEnv);
 
     await writeFile(join(wt, "poetry.lock"), "");
+    expect(await resolvePythonEnv(wt, { env: { PATH: bin } })).toEqual(systemEnv);
+    expect(await Bun.file(runs).exists()).toBe(false);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([ENV_TOOL_REPO_TRUST_RESTRICTION]);
+
+    setRepoTrusted(wt, true);
     expect(await resolvePythonEnv(wt, { env: { PATH: bin } })).toEqual({
       source: "poetry",
       pythonPath: python,
@@ -316,6 +323,7 @@ describe("resolvePythonEnv", () => {
     );
     await writeFile(join(wt, "poetry.lock"), "");
     const system = await writeExecutable(join(bin, "python3"));
+    setRepoTrusted(wt, true);
 
     const env = await resolvePythonEnv(wt, { env: { PATH: bin, VIRTUAL_ENV: active } });
     expect(env?.pythonPath).toBe(system);
@@ -419,6 +427,7 @@ describe("resolvePythonEnv discovery", () => {
     const pipenvVenv = join(outside, "virtualenvs", "wt-abc123");
     const python = await makeVenv(pipenvVenv);
     await writeExecutable(join(bin, "pipenv"), `#!/bin/sh\necho "${pipenvVenv}"\n`);
+    setRepoTrusted(wt, true);
 
     expect(await resolvePythonEnv(wt, { env: { PATH: bin } })).toBeNull();
     await writeFile(join(wt, "Pipfile.lock"), "{}");
@@ -481,6 +490,29 @@ describe("shared resolution", () => {
     }
   });
 
+  test("re-resolves when the repository's trust changes, which decides what it may ask", async () => {
+    const { wt } = await makeRoot();
+    await makeVenv(join(wt, ".venv"));
+    let resolutions = 0;
+    let notify = () => {};
+    const unsubscribe = subscribePythonEnv(wt, () => {
+      resolutions++;
+      notify();
+    });
+    try {
+      await getPythonEnv(wt);
+      const updated = new Promise<void>((resolve) => {
+        notify = resolve;
+      });
+      expect(resolutions).toBe(1);
+      setRepoTrusted(wt, true);
+      await updated;
+      expect(resolutions).toBe(2);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   test("re-resolves subscribed worktrees when a relevant login-shell variable changed", async () => {
     const { wt } = await makeRoot();
     let resolutions = 0;
@@ -520,14 +552,6 @@ describe("shared resolution", () => {
       setPythonOverride(wt, null);
       unsubscribe();
     }
-  });
-});
-
-describe("pathOutsideWorktree", () => {
-  test("drops the worktree's own directories and keeps the rest in order", () => {
-    expect(pathOutsideWorktree("/wt/bin:/usr/bin:/wt:/wt-other/bin:bin:/opt/bin", "/wt")).toBe(
-      "/usr/bin:/wt-other/bin:/opt/bin",
-    );
   });
 });
 
@@ -647,6 +671,7 @@ describe("listPythonEnvs", () => {
       `#!/bin/sh\necho x >> "${runs}"\necho "${poetryVenv}"\n`,
     );
     await writeFile(join(wt, "poetry.lock"), "");
+    setRepoTrusted(wt, true);
 
     const { automatic } = await listPythonEnvs(wt, { env: { PATH: bin } });
     expect(automatic?.source).toBe("poetry");

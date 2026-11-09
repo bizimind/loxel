@@ -2,7 +2,6 @@
 export type NotificationSource = { kind: "terminal"; panelId: string; worktreePath: string };
 // Future additions:
 // | { kind: "ci"; pipelineId: string; worktreePath?: string }
-// | { kind: "agent"; agentId: string; worktreePath: string }
 
 export interface ServerNotification {
   id: string;

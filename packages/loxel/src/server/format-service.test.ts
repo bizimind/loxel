@@ -1,4 +1,5 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,14 +8,17 @@ import { $ } from "bun";
 
 import { DEFAULT_FORMATTING_SETTINGS, type FormattingSettings } from "@/lib/formatting-model";
 
-import type { LanguageFormatter } from "./language-formatter";
+import type { FormatterFailure, LanguageFormatter } from "./language-formatter";
 
 // Python files reach the shared environment resolution, which reads interpreter overrides from
 // the store database; keep the tests' state out of the real one.
 const stateDir = await mkdtemp(join(tmpdir(), "format-service-state-"));
 process.env.LOXEL_STATE_DIR = stateDir;
 const { FormatService } = await import("./format-service");
-const { findVenvBin } = await import("./python-formatter");
+const { BLACK_FORMAT_RESTRICTION, BUNDLED_RUFF_FORMAT_RESTRICTION, findVenvBin } =
+  await import("./python-formatter");
+const { getRepoTrustStatus, setRepoTrusted } = await import("./repo-trust");
+const { bundledRuff } = await import("./ruff-lsp-manager");
 
 afterAll(async () => {
   await rm(stateDir, { recursive: true, force: true });
@@ -57,60 +61,7 @@ async function makeFakeVenv(
 
 const AUTO_DETECT: FormattingSettings = DEFAULT_FORMATTING_SETTINGS;
 
-function findFormatter(service: InstanceType<typeof FormatService>, wt: string, command: string) {
-  return service.getDetectedFormatters(wt).find((f) => f.command === command);
-}
-
 describe("FormatService auto-detection", () => {
-  test("detects oxfmt from a devDependency and claims md (and other oxfmt-supported extensions)", async () => {
-    const wt = await makeWorktree({
-      "package.json": JSON.stringify({ devDependencies: { oxfmt: "0.68.0" } }),
-    });
-    const service = new FormatService();
-    const detected = service.getDetectedFormatters(wt);
-    expect(detected.map((f) => f.command)).toEqual(["oxfmt"]);
-
-    const oxfmt = findFormatter(service, wt, "oxfmt");
-    expect(oxfmt).toBeDefined();
-    for (const ext of ["ts", "md", "json", "yaml", "toml", "html", "vue", "scss", "graphql"]) {
-      expect(oxfmt!.extensions).toContain(ext);
-    }
-    // Not formatted by default in oxfmt 0.68 — must not be claimed.
-    expect(oxfmt!.extensions).not.toContain("svelte");
-    expect(oxfmt!.extensions).not.toContain("astro");
-  });
-
-  test("detects oxfmt from .oxfmtrc.jsonc without a package.json", async () => {
-    const wt = await makeWorktree({ ".oxfmtrc.jsonc": "{}" });
-    const service = new FormatService();
-    expect(findFormatter(service, wt, "oxfmt")?.extensions).toContain("md");
-  });
-
-  test("lists prettier before oxfmt when both are detected (prettier wins for md)", async () => {
-    // `format()` walks detected formatters in order and uses the first one whose extension set
-    // contains the file's extension. Detection rules are ordered prettier → oxfmt, so a project
-    // with both formatters keeps using prettier for shared extensions such as md/json.
-    const wt = await makeWorktree({
-      ".prettierrc": "{}",
-      "package.json": JSON.stringify({ devDependencies: { oxfmt: "0.68.0", prettier: "3.0.0" } }),
-    });
-    const service = new FormatService();
-    const detected = service.getDetectedFormatters(wt);
-    expect(detected.map((f) => f.command)).toEqual(["prettier", "oxfmt"]);
-
-    // Every extension oxfmt claims that prettier can also format must route to prettier, so
-    // alias spellings (yml, mjs, scss, mdx, ...) do not silently diverge from the canonical ones.
-    const oxfmt = findFormatter(service, wt, "oxfmt")!;
-    const prettier = findFormatter(service, wt, "prettier")!;
-    for (const ext of oxfmt.extensions) {
-      const first = detected.find((f) => f.extensions.includes(ext));
-      expect(first?.command, `first formatter for .${ext}`).toBe(
-        ext === "toml" ? "oxfmt" : "prettier",
-      );
-    }
-    expect(prettier.extensions).toContain("md");
-  });
-
   test("detects nothing in an empty worktree", async () => {
     const wt = await makeWorktree({});
     const service = new FormatService();
@@ -194,6 +145,7 @@ describe("FormatService Python detection", () => {
 
   test("formats .py and .pyi with ruff from the project venv, honoring ruff excludes", async () => {
     const wt = await makeWorktree({ "pyproject.toml": "[tool.ruff]" });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, ".venv"), "ruff");
     const service = new FormatService();
     for (const file of ["app.py", "stubs/app.pyi"]) {
@@ -205,6 +157,7 @@ describe("FormatService Python detection", () => {
 
   test("formats with black from the nearest venv when black is configured", async () => {
     const wt = await makeWorktree({ "pyproject.toml": "[tool.black]" });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, "venv"), "black");
     const path = join(wt, "app.py");
     const result = await new FormatService().format("x=1\n", path, wt, AUTO_DETECT);
@@ -218,6 +171,7 @@ describe("FormatService Python detection", () => {
       "services/api/pyproject.toml": "[tool.ruff]",
       "services/web/pyproject.toml": "[project]\nname = 'web'",
     });
+    setRepoTrusted(wt, true);
     // The root venv's ruff prints a marker, so the echoed args below prove the subproject's own
     // venv won over the root one.
     await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\necho root-venv\n");
@@ -243,6 +197,7 @@ describe("FormatService Python detection", () => {
       "lib/sub/pyproject.toml": "[dependency-groups]\ndev = ['ruff']\n[tool.ruff.lint]",
       "..hidden/pyproject.toml": "[tool.black]",
     });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, ".venv"), "ruff");
     await makeFakeVenv(join(wt, ".venv"), "black");
     const service = new FormatService();
@@ -348,8 +303,43 @@ describe("FormatService Python detection", () => {
     expect(await findVenvBin(join(wt, "sub"), wt, "ruff")).toBeUndefined();
   });
 
+  test("runs nothing from the project's environment until the repository is trusted", async () => {
+    const wt = await makeWorktree({ "ruff.toml": "", "legacy/pyproject.toml": "[tool.black]" });
+    await makeFakeVenv(join(wt, ".venv"), "ruff");
+    await makeFakeVenv(join(wt, ".venv"), "black");
+    const service = new FormatService();
+    const ruffFile = join(wt, "app.py");
+    const blackFile = join(wt, "legacy/app.py");
+    const override: FormattingSettings = {
+      ...AUTO_DETECT,
+      overrides: [{ id: "o1", extensions: "py", command: "ruff", args: "format -" }],
+    };
+
+    // Ruff is Loxel's own, when it is built here, and black does not run; the save goes out.
+    const ruff = await service.format("x=1\n", ruffFile, wt, AUTO_DETECT);
+    expect(ruff.content ?? "").not.toStartWith("ruff ");
+    expect(await service.format("x=1\n", blackFile, wt, AUTO_DETECT)).toEqual({ content: null });
+    const overridden = await service.format("x=1\n", ruffFile, wt, override);
+    expect(overridden.content ?? "").not.toStartWith("ruff ");
+    // Loxel's own ruff stands in for the project's only in a build that has it.
+    const held = bundledRuff() ? [BUNDLED_RUFF_FORMAT_RESTRICTION] : [];
+    expect(getRepoTrustStatus(wt).restrictions.toSorted()).toEqual(
+      [...held, BLACK_FORMAT_RESTRICTION].toSorted(),
+    );
+
+    setRepoTrusted(wt, true);
+    expect((await service.format("x=1\n", ruffFile, wt, AUTO_DETECT)).content).toStartWith(
+      "ruff format",
+    );
+    expect((await service.format("x=1\n", blackFile, wt, AUTO_DETECT)).content).toStartWith(
+      "black",
+    );
+    expect((await service.format("x=1\n", ruffFile, wt, override)).content).toBe("ruff format -\n");
+  });
+
   test("accepts worktree-relative file paths", async () => {
     const wt = await makeWorktree({ "pkg/ruff.toml": "" });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, "pkg/.venv"), "ruff");
     const result = await new FormatService().format("x=1\n", "pkg/app.py", wt, AUTO_DETECT);
     expect(result.content).toBe("ruff format --force-exclude --stdin-filename pkg/app.py\n");
@@ -375,6 +365,7 @@ describe("FormatService language modules", () => {
   test("detect receives the file's directory, and spawning defaults to the worktree", async () => {
     const wt = await realpath(await makeWorktree({ "sub/dir/a.fake": "" }));
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    setRepoTrusted(wt, true);
     const dirs: string[] = [];
     const language = fakeLanguage({
       detect: (dir) => {
@@ -397,6 +388,7 @@ describe("FormatService language modules", () => {
   test("applies the module's cwd, env and bin dirs, with {file} absolute", async () => {
     const wt = await realpath(await makeWorktree({ "mod/a.fake": "" }));
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    setRepoTrusted(wt, true);
     await installFormatter(join(wt, "tools"), "tools");
     const language = fakeLanguage({
       spawnOptions: (_command, dir) => ({
@@ -411,9 +403,32 @@ describe("FormatService language modules", () => {
     );
   });
 
+  test("an untrusted repository keeps node_modules/.bin off PATH and reports it", async () => {
+    const wt = await realpath(await makeWorktree({ "a.fake": "" }));
+    await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    const result = await new FormatService([fakeLanguage({})]).format(
+      "x",
+      "a.fake",
+      wt,
+      AUTO_DETECT,
+    );
+    expect(result.content).toBeNull();
+    expect(result.notice).toContain("is not installed");
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([
+      "Format on save doesn't run fake-fmt from node_modules.",
+    ]);
+  });
+
+  test("an untrusted repository reports nothing when node_modules/.bin lacks the formatter", async () => {
+    const wt = await realpath(await makeWorktree({ "a.fake": "" }));
+    await new FormatService([fakeLanguage({})]).format("x", "a.fake", wt, AUTO_DETECT);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+  });
+
   test("empty bin dirs keep node_modules/.bin off PATH", async () => {
     const wt = await makeWorktree({});
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    setRepoTrusted(wt, true);
     const language = fakeLanguage({ spawnOptions: () => ({ binDirs: [] }) });
     const result = await new FormatService([language]).format(
       "x",
@@ -425,6 +440,26 @@ describe("FormatService language modules", () => {
       content: null,
       notice: 'Format on save skipped: "fake-fmt" is not installed.',
     });
+  });
+
+  test("skip does not spawn, and shows its notice if it has one", async () => {
+    const wt = await makeWorktree({});
+    const ran = join(wt, "ran");
+    setRepoTrusted(wt, true);
+    await mkdir(join(wt, "node_modules/.bin"), { recursive: true });
+    await writeFile(join(wt, "node_modules/.bin/fake-fmt"), `#!/bin/sh\n: > "${ran}"\n`, {
+      mode: 0o755,
+    });
+    const format = (skip: { notice?: string }) =>
+      new FormatService([fakeLanguage({ spawnOptions: () => ({ skip }) })]).format(
+        "x",
+        join(wt, "a.fake"),
+        wt,
+        AUTO_DETECT,
+      );
+    expect(await format({})).toEqual({ content: null });
+    expect(await format({ notice: "why" })).toEqual({ content: null, notice: "why" });
+    expect(existsSync(ran)).toBe(false);
   });
 
   test("spawn options apply to a manual override too", async () => {
@@ -448,21 +483,22 @@ describe("FormatService language modules", () => {
   });
 
   test("a module that detects nothing leaves the file to the next one, then the root rules", async () => {
-    const wt = await makeWorktree({ "rustfmt.toml": "" });
-    const none = fakeLanguage({ extensions: ["rs"], detect: () => null });
-    const next = fakeLanguage({ extensions: ["rs"], detect: () => FAKE_FORMATTER });
+    const wt = await makeWorktree({ "deno.json": "{}" });
+    const none = fakeLanguage({ extensions: ["ts"], detect: () => null });
+    const next = fakeLanguage({ extensions: ["ts"], detect: () => FAKE_FORMATTER });
     const service = new FormatService([none, next]);
     expect(service.getDetectedFormatters(wt)).toEqual([
-      { command: "rustfmt", extensions: ["rs"] },
-      { command: "fake-fmt", extensions: ["rs"] },
+      { command: "deno", extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"] },
+      { command: "fake-fmt", extensions: ["ts"] },
     ]);
     await installFormatter(join(wt, "node_modules/.bin"), "next");
-    const path = join(wt, "a.rs");
+    setRepoTrusted(wt, true);
+    const path = join(wt, "a.ts");
     const result = await service.format("x", path, wt, AUTO_DETECT);
     expect(result.content).toStartWith("next ");
 
-    // The root rule's rustfmt, here from node_modules/.bin so the test needs no real one.
-    await writeFile(join(wt, "node_modules/.bin/rustfmt"), REPORT_SCRIPT("root-rule"), {
+    // The root rule's deno, here from node_modules/.bin so the test needs no real one.
+    await writeFile(join(wt, "node_modules/.bin/deno"), REPORT_SCRIPT("root-rule"), {
       mode: 0o755,
     });
     const rootRule = await new FormatService([none]).format("x", path, wt, AUTO_DETECT);
@@ -471,6 +507,7 @@ describe("FormatService language modules", () => {
 
   test("a relative override command survives the module's cwd", async () => {
     const wt = await makeWorktree({ "mod/a.fake": "" });
+    setRepoTrusted(wt, true);
     await installFormatter(join(wt, "tools"), "tools");
     const language = fakeLanguage({ spawnOptions: (_command, dir) => ({ cwd: dir }) });
     const settings: FormattingSettings = {
@@ -485,6 +522,7 @@ describe("FormatService language modules", () => {
   test("options a module leaves undefined keep their defaults", async () => {
     const wt = await realpath(await makeWorktree({}));
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    setRepoTrusted(wt, true);
     const language = fakeLanguage({ spawnOptions: () => ({ cwd: undefined, binDirs: undefined }) });
     const path = join(wt, "a.fake");
     const result = await new FormatService([language]).format("x", path, wt, AUTO_DETECT);
@@ -494,6 +532,7 @@ describe("FormatService language modules", () => {
   test("a module that throws does not fail the format", async () => {
     const wt = await makeWorktree({});
     await installFormatter(join(wt, "node_modules/.bin"), "node-modules");
+    setRepoTrusted(wt, true);
     const throwing = () => {
       throw new Error("bad config");
     };
@@ -520,6 +559,7 @@ describe("FormatService language modules", () => {
 
   test("a Python override still prefers the project venv", async () => {
     const wt = await makeWorktree({});
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, ".venv"), "ruff");
     const settings: FormattingSettings = {
       ...AUTO_DETECT,
@@ -527,6 +567,124 @@ describe("FormatService language modules", () => {
     };
     const result = await new FormatService().format("x=1\n", join(wt, "a.py"), wt, settings);
     expect(result.content).toBe("ruff format -\n");
+  });
+});
+
+describe("FormatService language failure notices", () => {
+  const MISSING = { command: "loxel-missing-formatter", args: "" };
+  const failing = (script: string) => async (wt: string) => {
+    await writeFile(join(wt, "bad-fmt"), script, { mode: 0o755 });
+    return { command: "./bad-fmt", args: "" };
+  };
+  const exitsOne = failing('#!/bin/sh\necho "the reason" >&2\nexit 1\n');
+
+  function languageWith(
+    formatter: { command: string; args: string },
+    overrides: Partial<LanguageFormatter> = {},
+  ): LanguageFormatter {
+    return { extensions: ["fake"], detect: () => formatter, ...overrides };
+  }
+
+  const format = (language: LanguageFormatter, wt: string, settings = AUTO_DETECT) =>
+    new FormatService([language]).format("x", join(wt, "a.fake"), wt, settings);
+
+  test("a module without the hook keeps the defaults", async () => {
+    const wt = await makeWorktree({});
+    expect(await format(languageWith(MISSING), wt)).toEqual({
+      content: null,
+      notice: 'Format on save skipped: "loxel-missing-formatter" is not installed.',
+    });
+    expect(await format(languageWith(await exitsOne(wt)), wt)).toEqual({ content: null });
+  });
+
+  test("a hook returning undefined keeps the defaults", async () => {
+    const wt = await makeWorktree({});
+    const silent = { failureNotice: () => undefined };
+    expect((await format(languageWith(MISSING, silent), wt)).notice).toBe(
+      'Format on save skipped: "loxel-missing-formatter" is not installed.',
+    );
+    expect(await format(languageWith(await exitsOne(wt), silent), wt)).toEqual({ content: null });
+  });
+
+  test("the hook explains a missing formatter and a non-zero exit, with its stderr", async () => {
+    const wt = await makeWorktree({});
+    const failures: FormatterFailure[] = [];
+    const failureNotice = (failure: FormatterFailure) => {
+      failures.push(failure);
+      return `explained ${failure.kind}`;
+    };
+    const fails = await exitsOne(wt);
+    expect(await format(languageWith(MISSING, { failureNotice }), wt)).toEqual({
+      content: null,
+      notice: "explained not-installed",
+    });
+    expect(await format(languageWith(fails, { failureNotice }), wt)).toEqual({
+      content: null,
+      notice: "explained exited",
+    });
+    expect(failures).toEqual([
+      { kind: "not-installed", command: MISSING.command },
+      { kind: "exited", command: fails.command, exitCode: 1, stderr: "the reason\n" },
+    ]);
+  });
+
+  test("the hook also covers a manual override for its extensions", async () => {
+    const wt = await makeWorktree({});
+    const language = languageWith(MISSING, { failureNotice: () => "explained" });
+    const result = await format(language, wt, {
+      ...AUTO_DETECT,
+      overrides: [{ id: "o", extensions: "fake", command: "loxel-other-missing", args: "" }],
+    });
+    expect(result.notice).toBe("explained");
+  });
+
+  test("a hook that throws does not lose the save", async () => {
+    const wt = await makeWorktree({});
+    const failureNotice = () => {
+      throw new Error("boom");
+    };
+    expect((await format(languageWith(MISSING, { failureNotice }), wt)).notice).toBe(
+      'Format on save skipped: "loxel-missing-formatter" is not installed.',
+    );
+    const fails = await exitsOne(wt);
+    expect(await format(languageWith(fails, { failureNotice }), wt)).toEqual({ content: null });
+  });
+
+  test("a decline shows its notice and asks no later module or rule", async () => {
+    const wt = await makeWorktree({ "deno.json": "{}" });
+    const later = mock(() => MISSING);
+    const decline: LanguageFormatter = {
+      extensions: ["ts"],
+      detect: () => ({ notice: "declined, because" }),
+    };
+    const service = new FormatService([decline, { extensions: ["ts"], detect: later }]);
+    const result = await service.format("x", join(wt, "a.ts"), wt, AUTO_DETECT);
+    expect(result).toEqual({ content: null, notice: "declined, because" });
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  test("a decline is not listed as a detected formatter", async () => {
+    const wt = await makeWorktree({});
+    const decline: LanguageFormatter = {
+      extensions: ["fake"],
+      detect: () => ({ notice: "declined" }),
+    };
+    expect(new FormatService([decline]).getDetectedFormatters(wt)).toEqual([]);
+  });
+
+  test("a manual override still runs where the module declines", async () => {
+    const wt = await makeWorktree({});
+    await writeFile(join(wt, "fmt"), "#!/bin/sh\necho overridden\n", { mode: 0o755 });
+    setRepoTrusted(wt, true);
+    const decline: LanguageFormatter = {
+      extensions: ["fake"],
+      detect: () => ({ notice: "declined" }),
+    };
+    const result = await format(decline, wt, {
+      ...AUTO_DETECT,
+      overrides: [{ id: "o", extensions: "fake", command: "./fmt", args: "" }],
+    });
+    expect(result).toEqual({ content: "overridden\n" });
   });
 });
 
@@ -546,6 +704,7 @@ describe("FormatService failure notices", () => {
 
   test("reports a formatter that is found but cannot start", async () => {
     const wt = await makeWorktree({ "ruff.toml": "" });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/nonexistent/python3\n");
     const result = await new FormatService().format("x=1\n", join(wt, "a.py"), wt, AUTO_DETECT);
     expect(result).toEqual({
@@ -557,6 +716,7 @@ describe("FormatService failure notices", () => {
 
   test("reports a formatter that is not a runnable file", async () => {
     const wt = await makeWorktree({ "ruff.toml": "" });
+    setRepoTrusted(wt, true);
     // No shebang and no binary header: the kernel refuses to run it (ENOEXEC).
     await makeFakeVenv(join(wt, ".venv"), "ruff", "not a program\n");
     const result = await new FormatService().format("x=1\n", join(wt, "a.py"), wt, AUTO_DETECT);
@@ -584,6 +744,7 @@ describe("FormatService failure notices", () => {
   for (const [name, stdin] of Object.entries(closedStdinCases)) {
     test(`a formatter gone before reading stdin is judged by its output (${name})`, async () => {
       const wt = await makeWorktree({ "ruff.toml": "" });
+      setRepoTrusted(wt, true);
       await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\necho formatted\n");
       // Whether the real pipe is closed yet is a race, so the failure itself is simulated.
       const spawn = Bun.spawn;
@@ -604,8 +765,111 @@ describe("FormatService failure notices", () => {
 
   test("does not report a formatter that exits non-zero (e.g. a syntax error)", async () => {
     const wt = await makeWorktree({ "ruff.toml": "" });
+    setRepoTrusted(wt, true);
     await makeFakeVenv(join(wt, ".venv"), "ruff", "#!/bin/sh\nexit 2\n");
     const result = await new FormatService().format("def (", join(wt, "a.py"), wt, AUTO_DETECT);
     expect(result).toEqual({ content: null });
+  });
+});
+
+describe("a persistent backend's failure in an untrusted repository", () => {
+  test("stays quiet when the project holds the formatter", async () => {
+    const wt = await realpath(await makeWorktree({ ".prettierrc": "{}", "a.ts": "" }));
+    await mkdir(join(wt, "node_modules/.bin"), { recursive: true });
+    await writeFile(join(wt, "node_modules/.bin/prettier"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const result = await new FormatService([]).format("x", "a.ts", wt, AUTO_DETECT);
+    expect(result).toEqual({ content: null });
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+  });
+});
+
+describe("a manual override in an untrusted repository", () => {
+  const overrideFor = (command: string): FormattingSettings => ({
+    ...DEFAULT_FORMATTING_SETTINGS,
+    enabled: true,
+    overrides: [{ id: "1", extensions: "fake", command, args: "" }],
+  });
+
+  async function worktreeWithScript(): Promise<string> {
+    const wt = await realpath(await makeWorktree({ "a.fake": "" }));
+    await mkdir(join(wt, "scripts"));
+    await writeFile(join(wt, "scripts/fmt"), "#!/bin/sh\necho ran\n", { mode: 0o755 });
+    return wt;
+  }
+
+  test("holds back a relative path and reports it", async () => {
+    const wt = await worktreeWithScript();
+    const result = await new FormatService([]).format(
+      "x",
+      "a.fake",
+      wt,
+      overrideFor("scripts/fmt"),
+    );
+    expect(result).toEqual({ content: null });
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([
+      "Format on save doesn't run scripts/fmt from this repository.",
+    ]);
+  });
+
+  test.each([
+    ["sh", "scripts/fmt {file}"],
+    ["sh", "./scripts/fmt"],
+    ["sh", "a.fake"],
+    ["some-tool", "--config=conf/fmt.toml {file}"],
+  ])("holds back %s %s, which names a path in the repository", async (command, args) => {
+    const wt = await worktreeWithScript();
+    const settings = overrideFor(command);
+    settings.overrides[0]!.args = args;
+    const result = await new FormatService([]).format("x", "a.fake", wt, settings);
+    expect(result).toEqual({ content: null });
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([
+      `Format on save doesn't run ${command} ${args} from this repository.`,
+    ]);
+  });
+
+  test("runs a command by name whose arguments name no path in the repository", async () => {
+    const wt = await worktreeWithScript();
+    const settings = overrideFor("sh");
+    settings.overrides[0]!.args = "-c true --stdin-filepath={file}";
+    const result = await new FormatService([]).format("x", "a.fake", wt, settings);
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+    expect(result.content).toBeNull();
+    expect(result.notice).toBeUndefined();
+  });
+
+  test.each(["--config /bin/sh {file}", "--config=/bin/sh {file}"])(
+    "runs a command by name with an absolute path outside the repository: %s",
+    async (args) => {
+      const wt = await worktreeWithScript();
+      const settings = overrideFor("loxel-missing-formatter");
+      settings.overrides[0]!.args = args;
+      const result = await new FormatService([]).format("x", "a.fake", wt, settings);
+      expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
+      expect(result.notice).toContain("is not installed");
+    },
+  );
+
+  test("runs a relative path once the repository is trusted", async () => {
+    const wt = await worktreeWithScript();
+    setRepoTrusted(wt, true);
+    const result = await new FormatService([]).format(
+      "x",
+      "a.fake",
+      wt,
+      overrideFor("scripts/fmt"),
+    );
+    expect(result.content).toBe("ran\n");
+  });
+
+  test("runs an absolute path", async () => {
+    const wt = await worktreeWithScript();
+    const result = await new FormatService([]).format(
+      "x",
+      "a.fake",
+      wt,
+      overrideFor(join(wt, "scripts/fmt")),
+    );
+    expect(result.content).toBe("ran\n");
+    expect(getRepoTrustStatus(wt).restrictions).toEqual([]);
   });
 });

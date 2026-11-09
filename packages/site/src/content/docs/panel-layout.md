@@ -26,7 +26,6 @@ Every tool panel has an icon in the tool bars at the window's left and right edg
 | Git              | `Ctrl+Shift+G` |
 | Comments         | `Ctrl+Shift+R` |
 | Logs             | `Ctrl+Shift+L` |
-| Fork Tree        | `Ctrl+Shift+K` |
 | Worktree sidebar | `Ctrl+Alt+B`   |
 
 The **worktree sidebar** to the far left lists your projects and their worktrees. Collapse or expand it with the sidebar button at the left of the top bar, or `Ctrl+Alt+B`. Collapsed, it is a narrow rail of worktree icons; expanded, drag its right edge to resize it (double-click the edge to reset the width).
@@ -41,16 +40,19 @@ The center area is the main content area. Every editor and interactive view open
 - **Code editor** — Monaco-based editor with language server features, format on save, and autosave
 - **Markdown editor** — live preview markdown editing for repo files and drafts
 - **Excalidraw** — whiteboard and diagram editor
-- **Coding agent** — the built-in agent's timeline UI
 - **Terminals** — full-featured terminal tabs
 - **Browser** — web pages, see [Browser panels](#browser-panels)
 - **Media viewer** — images, SVGs, and videos
 
 Double-click a terminal or file tab's title, right-click the tab and choose **Rename**, or press `Cmd+Shift+R` (**Rename Tab** in the command palette) to rename the active tab; renaming a file tab renames the file. Press `Enter` to apply the new name or `Esc` to cancel, and focus returns to the panel you were working in. The tab menu also copies a file's name or path, closes other tabs, and on macOS offers **Reveal in Finder** and **Open In**.
 
+Press `Cmd+Shift+T` (**Reopen Closed Tab** in the command palette) to bring back the tab you last closed in this worktree; keep pressing to go further back. It returns to its place among its group's tabs, or to the active group if its group is gone. Editors and browsers come back on the same file or page, a code editor with its cursor where you left it. A browser's back and forward history doesn't come back, and a terminal's session ended when you closed it, so you get a new terminal with the same title. Closed tabs are remembered until you close the window.
+
+Press `Ctrl+Shift+Enter` (**Maximize Group** in the command palette), or right-click a tab and choose **Maximize Group**, to let a group fill the center area. The other groups stay open behind it, and terminals in them keep running at their size. The tool panels and sidebars stay where they are. Next and previous tab stay inside the group, and `Ctrl+Shift+Arrow` skips the hidden groups. To get them back, press the shortcut again, choose **Restore Group Size**, or click the icon at the right of the group's tabs. Going to a tab in another group, opening a new split, or reloading the window also restores them, and switching to another worktree and back does too.
+
 ### Right sidebar
 
-The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads) and the **Fork Tree** of coding agent sessions.
+The right sidebar accepts any tool panel. By default it holds **Comments** (code review sessions and comment threads).
 
 ### Bottom
 
@@ -68,20 +70,27 @@ The status bar runs across the bottom edge of the window and is always visible. 
 - **Working tree counts** — staged, modified, untracked, and conflicted file counts
 - **Indentation and line endings** — while a code file is the active editor, its indentation and where it came from, and `LF` or `CRLF`; click the indentation to change it (see [Indentation](/docs/editor#indentation))
 - **Python interpreter** — while a Python file is the active editor, the worktree's interpreter; click it to choose another (see [Python environment](/docs/languages/python#python-environment))
+- **JDK** — while a Java or Kotlin file is the active editor, the worktree's JDK; click it to choose another (see [JDK detection](/docs/languages/java#jdk-detection))
+- **Rust toolchain** — while a Rust file is the active editor, the worktree's toolchain; click it to choose another (see [Rust toolchain](/docs/languages/rust#rust-toolchain))
 - **Chord progress** — the keys typed so far while a chord shortcut such as `Cmd+\` is waiting for its next key
-- **New panel buttons** — open a new agent, markdown editor, drawing, browser, or terminal
+- **New panel buttons** — open a new markdown editor, drawing, browser, or terminal
 
 ---
 
 ## Browser panels
 
-A browser panel (`Cmd+Shift+B`) is a full web view with back, forward, reload, an address bar, and DevTools. A new blank panel starts with the cursor in the address bar, so you can type a URL or a search right away. `Cmd+F` finds text in the page.
+A browser panel (`Cmd+Shift+B`) is a full web view with back, forward, reload, an address bar, and DevTools. A new blank panel starts with the cursor in the address bar, so you can type a URL or a search right away. `Cmd+F` finds text in the page, and `Cmd+Shift+R` while the tab has focus does a hard refresh, reloading the page and bypassing the cache. Clicking the title of the active browser tab returns focus to its page.
+
+Bookmark a page with the star at the end of the address bar, or `Cmd+D` while the tab has focus; the star fills in on a bookmarked page, and clicking it again removes the bookmark. The bookmark button next to the address bar lists your bookmarks, and a new blank tab shows them in place of an empty page. Click one to open it in the current tab, or `Cmd`-click or middle-click it to open it in a background tab (`Cmd+Shift`-click switches to it). Hover a bookmark and click its **×**, or press `Delete` on it in the list, to remove it. Bookmarks are shared by all your projects and windows and kept across restarts.
 
 A plain click on a link opens it in the same tab. Links you open in a new tab or window become browser tabs right after the current one, in the same group:
 
 - **`Cmd`-click or middle-click** opens the link in a background tab and keeps you on the current page, so you can hold `Cmd` and click several links in a row. The new tabs keep the order you clicked them in.
 - **`Cmd+Shift`-click** opens the link in a new tab and switches to it.
-- **Links that open a new window** (`target="_blank"`, or a page opening a window when you click something) open in a new tab and switch to it. Windows a page tries to open without you clicking or typing are blocked, and each click opens at most one tab.
+- **Links that open a new window** (`target="_blank"`, or a page opening a window when you click something) open in a new tab and switch to it.
+- **Popup windows** a page opens at a set size, such as a "Sign in with Google" window, open as a separate small window over Loxel, so the sign-in can finish and return to the page. The window's title shows the site it belongs to, and `Cmd+W` closes it.
+
+Windows a page tries to open without you clicking or typing are blocked, and each click opens at most one tab or popup.
 
 Right-click in a page for a context menu that matches what you clicked:
 
@@ -111,7 +120,7 @@ You can also split the current panel from the keyboard:
 | Action                    | Shortcut                                                          |
 | ------------------------- | ----------------------------------------------------------------- |
 | Split (same panel type)   | `Cmd+\` then an arrow                                             |
-| Split as a new panel type | `Cmd+\` then `T` / `A` / `M` / `D` / `B`, then an arrow           |
+| Split as a new panel type | `Cmd+\` then `T` / `M` / `D` / `B`, then an arrow                 |
 | New tab in the group      | `Cmd+\` then `Enter` (same type), or the type letter then `Enter` |
 
 ---

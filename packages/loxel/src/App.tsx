@@ -32,6 +32,7 @@ import { useLoxelEventListeners } from "./hooks/useLoxelEventListeners";
 import { useThemeSync } from "./hooks/useThemeSync";
 import { useWindowPresence } from "./hooks/useWindowPresence";
 import { useWsSubscription } from "./hooks/useWsSubscription";
+import { useUpdateStatusBridge } from "./queries/use-update-status";
 import { useWsBridge } from "./queries/ws-bridge";
 import { useProjectStore } from "./store/projects";
 import { useWorktreeToolsBar } from "./store/worktree-tools-bar";
@@ -42,6 +43,7 @@ import { useWorktreeStore } from "./store/worktrees";
 
 export default function App() {
   useWsBridge();
+  useUpdateStatusBridge();
   useDiffSource();
   useKeybindings();
   useLoxelEventListeners();

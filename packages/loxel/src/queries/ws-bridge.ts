@@ -7,7 +7,7 @@ import { toolchainStatuses } from "@/api/toolchain-statuses";
 import type { WsMessage } from "@/api/ws-protocol";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
-import { openFile, openFolder, openTerminal } from "@/lib/open-path";
+import { openFile, openFolder, openTerminal, openUrl } from "@/lib/open-path";
 import { handleFileMoved } from "@/lib/panel-creators";
 import { consumeSavedContent } from "@/lib/save-editor-content";
 import { queryClient } from "@/query-client";
@@ -183,13 +183,6 @@ export function useWsBridge(): void {
   useEffect(() => {
     wsClient.connect();
 
-    // On reconnect, invalidate update status so React Query refetches from the (new) server.
-    // This clears the stale "installing" state when the version didn't change (failed update
-    // fallback) — if the version DID change, the WsClient reloads the page instead.
-    const unsubReconnect = wsClient.onReconnect(() => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.updateStatus() });
-    });
-
     const getLogsIsActive = (): boolean => {
       const { activeLeftPanel, activeBottomPanel, activeRightPanel } =
         getCurrentWorktreeToolsBar().getState();
@@ -343,10 +336,7 @@ export function useWsBridge(): void {
         }
 
         case "open_file":
-          void openFile(message.data.filePath, {
-            placement: message.data.placement,
-            focus: message.data.focus,
-          });
+          void openFile(message.data);
           break;
 
         case "open_folder":
@@ -358,7 +348,7 @@ export function useWsBridge(): void {
           break;
 
         case "open_url":
-          dispatchLoxelEvent("loxel-create-browser", message.data);
+          void openUrl(message.wtPath, message.data);
           break;
 
         // --- Project-scoped events (carry projectPath) ---
@@ -433,10 +423,6 @@ export function useWsBridge(): void {
           break;
         }
 
-        case "update_status_changed":
-          queryClient.setQueryData(queryKeys.updateStatus(), message.data);
-          break;
-
         // --- Notification events (global) ---
 
         case "schema_consent_changed":
@@ -459,6 +445,12 @@ export function useWsBridge(): void {
           usePanelNotificationStore.getState().clearFromServer();
           break;
 
+        case "repo_trust_changed":
+          void queryClient.invalidateQueries({ queryKey: queryKeys.repoTrustAll() });
+          // What a toolchain reports can depend on trust, such as a shim's version.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.toolchainStatusAll() });
+          break;
+
         case "store_updated":
           if (message.nonce && consumeNonce(message.nonce)) break;
           applyStoreUpdate(message.key, message.state);
@@ -467,11 +459,6 @@ export function useWsBridge(): void {
         case "terminal_exit":
         case "terminal_state":
         case "error":
-        case "agent_event":
-        case "agent_exit":
-        case "agent_sessions":
-        case "agent_replay_done":
-        case "agent_error":
           break;
 
         default: {
@@ -484,7 +471,6 @@ export function useWsBridge(): void {
     });
 
     return () => {
-      unsubReconnect();
       unsubscribe();
       wsClient.disconnect();
     };

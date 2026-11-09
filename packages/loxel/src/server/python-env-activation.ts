@@ -1,7 +1,6 @@
 /**
  * Activating a worktree's resolved Python environment in a spawn environment through variables
- * only, what a venv's `activate` script exports. Shared by terminal shells and the built-in coding
- * agent's tool subprocesses.
+ * only, what a venv's `activate` script exports.
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -10,6 +9,7 @@ import type { PythonEnv } from "@/api/python-env-model";
 
 import { logger } from "./logger";
 import { isShippedByRepo } from "./shipped-by-repo";
+import { putFirstOnPath } from "./toolchain-env-contributor";
 
 const log = logger.child("server");
 
@@ -52,8 +52,7 @@ export function setPythonEnvVars(
   options: { virtualEnv: boolean },
 ): void {
   const { binDir, venvPath } = activation;
-  const rest = (env.PATH ?? "").split(path.delimiter).filter((dir) => dir && dir !== binDir);
-  env.PATH = [binDir, ...rest].join(path.delimiter);
+  putFirstOnPath(env, binDir);
   delete env.PYTHONHOME;
   // An environment inherited from wherever Loxel was launched no longer applies.
   delete env.VIRTUAL_ENV_PROMPT;

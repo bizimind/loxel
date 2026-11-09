@@ -18,6 +18,12 @@ const TS_EXTENSIONS = new RegExp(
 );
 
 /**
+ * Monaco's script languages, which TypeScript takes by language id whatever the file is called:
+ * extensionless scripts named by their shebang, and files a file association gives one of these.
+ */
+const SCRIPT_LANGUAGE_IDS = new Set(["typescript", "javascript", "tsx", "jsx"]);
+
+/**
  * JSON paths: their live editor models use `file://` URIs (`fileSchemeLanguages`),
  * unlike TS/JS models, which use `loxel://HEAD/`.
  */
@@ -54,6 +60,13 @@ const PREFERENCES = {
   includeCompletionsForImportStatements: true,
   includeAutomaticOptionalChainCompletions: true,
   importModuleSpecifierPreference: "shortest",
+  // Whether they show is the editor's inlay hints setting. Names on literal arguments only, where
+  // the call doesn't say what the value means: `all` is about 3 to 4 times as many on real JavaScript.
+  includeInlayParameterNameHints: "literals",
+  includeInlayVariableTypeHints: true,
+  includeInlayFunctionLikeReturnTypeHints: true,
+  // Loxel never fetches dependencies by itself: TypeScript would otherwise run `npm` for `@types`.
+  automaticTypeAcquisitionEnabled: false,
 } as const;
 
 /**
@@ -98,6 +111,8 @@ interface SessionIndentation {
 export class TsLspManager extends WorktreeLspManager {
   protected override readonly forwardWatchedFiles = true;
   private readonly indentation = new WeakMap<WtLspSession, SessionIndentation>();
+  /** Open documents whose URI has no TS/JS extension, by the URI their `didOpen` carried. */
+  private readonly openScripts = new WeakMap<WtLspSession, Set<string>>();
 
   constructor() {
     super("ts-lsp");
@@ -123,7 +138,8 @@ export class TsLspManager extends WorktreeLspManager {
             this.setDocumentIndentation(session, msg.params);
             return;
           }
-          if (this.shouldDropForNonTsUri(msg.method, msg.params)) return;
+          if (msg.method === "textDocument/didOpen") this.rememberScript(session, msg.params);
+          if (this.shouldDropForNonTsUri(session, msg.method, msg.params)) return;
 
           // Inject rootUri/workspaceFolders so TypeScript knows which project to load.
           if (msg.method === "initialize") {
@@ -131,7 +147,9 @@ export class TsLspManager extends WorktreeLspManager {
           } else if (msg.method === "textDocument/didOpen" && setReactLanguageId(msg.params)) {
             outgoing = JSON.stringify(parsed);
           } else if (msg.method === "textDocument/didClose") {
-            const path = documentPath(textDocumentUri(msg.params));
+            const uri = textDocumentUri(msg.params);
+            if (uri) this.openScripts.get(session)?.delete(uri);
+            const path = documentPath(uri);
             if (path) this.sessionIndentation(session).documents.delete(path);
           } else if (INDENTED_EDIT_REQUESTS.has(msg.method)) {
             this.indentLike(session, requestDocumentPath(msg.method, msg.params));
@@ -199,16 +217,31 @@ export class TsLspManager extends WorktreeLspManager {
     return JSON.stringify(msg);
   }
 
+  /** A script language's `didOpen` for a URI without an extension lets the document through. */
+  private rememberScript(session: WtLspSession, params: unknown): void {
+    const textDocument = isRecord(params) ? params.textDocument : undefined;
+    if (!isRecord(textDocument) || typeof textDocument.uri !== "string") return;
+    if (typeof textDocument.languageId !== "string") return;
+    if (TS_EXTENSIONS.test(textDocument.uri)) return;
+    if (!SCRIPT_LANGUAGE_IDS.has(textDocument.languageId)) return;
+    let scripts = this.openScripts.get(session);
+    if (!scripts) {
+      scripts = new Set();
+      this.openScripts.set(session, scripts);
+    }
+    scripts.add(textDocument.uri);
+  }
+
   /**
-   * Drop textDocument/* notifications/requests whose URI targets a file TypeScript
-   * doesn't understand (e.g. `.astro`, `.vue`). The TS LSP client has no
-   * languageId filter, so Monaco sends every open model to us.
+   * Drop textDocument/* notifications/requests whose URI targets a file TypeScript doesn't
+   * understand: one with neither a TS/JS/JSON extension nor a script language at `didOpen` (JSON
+   * language models with other names, such as `.babelrc`). Only `didOpen` carries a language.
    */
-  private shouldDropForNonTsUri(method: string, params: unknown): boolean {
+  private shouldDropForNonTsUri(session: WtLspSession, method: string, params: unknown): boolean {
     if (!method.startsWith("textDocument/")) return false;
     const uri = textDocumentUri(params);
     if (uri === undefined) return false;
-    return !TS_EXTENSIONS.test(uri);
+    return !TS_EXTENSIONS.test(uri) && !this.openScripts.get(session)?.has(uri);
   }
 
   /**
@@ -241,8 +274,7 @@ export class TsLspManager extends WorktreeLspManager {
     // client/(un)registerCapability: DO NOT swallow. TypeScript announces the
     // semantic-tokens capability dynamically via client/registerCapability,
     // and if we ack it locally the real Monaco client never sees the
-    // registration — so no semantic-token provider is registered and our
-    // JSX augmentation has no provider legend to sit on.
+    // registration, so no semantic-token provider is registered.
     if (m.method === "client/registerCapability" || m.method === "client/unregisterCapability") {
       return false;
     }
@@ -262,7 +294,7 @@ function sameIndentation(a: DocumentIndentation, b: DocumentIndentation | undefi
   );
 }
 
-function textDocumentUri(params: unknown): string | undefined {
+export function textDocumentUri(params: unknown): string | undefined {
   const textDocument = isRecord(params) ? params.textDocument : undefined;
   return isRecord(textDocument) && typeof textDocument.uri === "string"
     ? textDocument.uri
@@ -280,7 +312,7 @@ function requestDocumentPath(method: string, params: unknown): string | null {
 }
 
 /** The file path of a client or server document URI, or null for any other URI. */
-function documentPath(uri: string | undefined): string | null {
+export function documentPath(uri: string | undefined): string | null {
   if (uri === undefined) return null;
   const serverUri = toServerUris(uri);
   if (!serverUri.startsWith("file:")) return null;
@@ -291,20 +323,21 @@ function documentPath(uri: string | undefined): string | null {
   }
 }
 
-const REACT_LANGUAGE_IDS: Record<string, string> = {
-  tsx: "typescriptreact",
-  jsx: "javascriptreact",
-};
+const REACT_LANGUAGE_IDS = new Map([
+  ["tsx", "typescriptreact"],
+  ["jsx", "javascriptreact"],
+]);
 
 /**
- * Monaco reports `tsx`/`jsx` for .tsx/.jsx files, but TypeScript needs `typescriptreact` /
- * `javascriptreact` in a `textDocument/didOpen` to enable JSX mode. True when it changed `params`.
+ * Monaco reports `tsx`/`jsx` for these files, but TypeScript needs `typescriptreact` /
+ * `javascriptreact` in a `textDocument/didOpen` to enable JSX mode. The extension decides, or the
+ * language id for a file a file association names. True when it changed `params`.
  */
 export function setReactLanguageId(params: unknown): boolean {
   const textDocument = isRecord(params) ? params.textDocument : undefined;
   if (!isRecord(textDocument) || typeof textDocument.uri !== "string") return false;
   const extension = /\.([jt]sx)$/i.exec(textDocument.uri)?.[1]?.toLowerCase();
-  const languageId = extension ? REACT_LANGUAGE_IDS[extension] : undefined;
+  const languageId = REACT_LANGUAGE_IDS.get(extension ?? String(textDocument.languageId));
   if (!languageId || textDocument.languageId === languageId) return false;
   textDocument.languageId = languageId;
   return true;

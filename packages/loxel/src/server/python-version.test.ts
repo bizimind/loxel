@@ -1,11 +1,30 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { pythonVersion } from "./python-version";
+const stateDir = await mkdtemp(join(tmpdir(), "python-version-state-"));
+process.env.LOXEL_STATE_DIR = stateDir;
+const { pythonVersion } = await import("./python-version");
+const { setRepoTrusted } = await import("./repo-trust");
+
+afterAll(async () => {
+  await rm(stateDir, { recursive: true, force: true });
+});
 
 let root: string | undefined;
+
+/** A worktree beside the fake interpreter, which an untrusted repository's version check needs. */
+async function worktree(): Promise<string> {
+  const wt = join(root!, "wt");
+  await mkdir(wt, { recursive: true });
+  return wt;
+}
+
+/** The interpreter as the resolver hands it out: outside any environment. */
+function bare(pythonPath: string) {
+  return { pythonPath, envPath: null };
+}
 
 afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true });
@@ -29,14 +48,14 @@ async function fakePython(body: string): Promise<{ python: string; runs: () => P
 describe("pythonVersion", () => {
   test("reads the version once per interpreter file", async () => {
     const { python, runs } = await fakePython(`echo "Python 3.12.13"`);
-    expect(await pythonVersion(python, root!)).toBe("3.12.13");
-    expect(await pythonVersion(python, root!)).toBe("3.12.13");
+    expect(await pythonVersion(bare(python), await worktree())).toBe("3.12.13");
+    expect(await pythonVersion(bare(python), await worktree())).toBe("3.12.13");
     expect(await runs()).toBe(1);
   });
 
   test("reads Python 2's version from stderr", async () => {
     const { python } = await fakePython(`echo "Python 2.7.18" >&2`);
-    expect(await pythonVersion(python, root!)).toBe("2.7.18");
+    expect(await pythonVersion(bare(python), await worktree())).toBe("2.7.18");
   });
 
   test("does not cache a failed read", async () => {
@@ -44,21 +63,47 @@ describe("pythonVersion", () => {
     const { python, runs } = await fakePython(
       `[ "$(wc -l < "$0.runs")" -gt 1 ] && echo "Python 3.13.1"`,
     );
-    expect(await pythonVersion(python, root!)).toBeNull();
-    expect(await pythonVersion(python, root!)).toBe("3.13.1");
+    expect(await pythonVersion(bare(python), await worktree())).toBeNull();
+    expect(await pythonVersion(bare(python), await worktree())).toBe("3.13.1");
     expect(await runs()).toBe(2);
   });
 
-  test("asks from the worktree, so a version-manager shim reads its .python-version", async () => {
-    // Like a pyenv shim: the version comes from `.python-version` in the working directory.
-    const { python } = await fakePython(`echo "Python $(cat .python-version)"`);
-    const wt = join(root!, "wt");
-    await mkdir(wt);
+  /** Like a pyenv shim: the version comes from `.python-version` in the working directory. */
+  async function shimAndWorktree(): Promise<{ python: string; wt: string }> {
+    const { python } = await fakePython(
+      `if [ -f .python-version ]; then echo "Python $(cat .python-version)"; else echo "Python 3.9.0"; fi`,
+    );
+    const wt = await worktree();
     await writeFile(join(wt, ".python-version"), "3.11.9\n");
-    expect(await pythonVersion(python, wt)).toBe("3.11.9");
+    return { python, wt };
+  }
+
+  test("asks from the worktree of a trusted repository, so a shim reads its .python-version", async () => {
+    const { python, wt } = await shimAndWorktree();
+    setRepoTrusted(wt, true);
+    expect(await pythonVersion(bare(python), wt)).toBe("3.11.9");
+  });
+
+  test("asks from the filesystem root otherwise, and again from the worktree once trusted", async () => {
+    const { python, wt } = await shimAndWorktree();
+    expect(await pythonVersion(bare(python), wt)).toBe("3.9.0");
+    setRepoTrusted(wt, true);
+    expect(await pythonVersion(bare(python), wt)).toBe("3.11.9");
+  });
+
+  test("runs no interpreter inside an untrusted worktree or its environment, and does once trusted", async () => {
+    const { python, runs } = await fakePython(`echo "Python 3.12.13"`);
+    // The fake interpreter's directory as the worktree, then as its environment.
+    expect(await pythonVersion(bare(python), root!)).toBeNull();
+    expect(
+      await pythonVersion({ pythonPath: python, envPath: root! }, await worktree()),
+    ).toBeNull();
+    expect(await runs()).toBe(0);
+    setRepoTrusted(root!, true);
+    expect(await pythonVersion(bare(python), root!)).toBe("3.12.13");
   });
 
   test("returns null for a missing file", async () => {
-    expect(await pythonVersion("/nonexistent/python", tmpdir())).toBeNull();
+    expect(await pythonVersion(bare("/nonexistent/python"), tmpdir())).toBeNull();
   });
 });

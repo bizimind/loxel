@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
 import { lstat, realpath, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 import type {
@@ -11,22 +11,26 @@ import type {
   GlobalJsonInfo,
   GlobalJsonSdkPath,
 } from "@/api/csharp-env-model";
-import { isDirectory } from "@/fs-utils";
+import { findFileAbove, isDirectory } from "@/fs-utils";
 
 import { mapWithConcurrency } from "./git-commands";
 import { logger } from "./logger";
-import { pathOutsideWorktree } from "./python-env";
+import { isInside, pathOutsideWorktree } from "./path-containment";
+import { isRepoTrusted } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
-import { isInside, isShippedByRepo, runGit } from "./shipped-by-repo";
+import { canGitReadRepo, isShippedByRepo, runGit } from "./shipped-by-repo";
 
 const log = logger.child("server");
 
+const DOTNET = "dotnet";
 const GLOBAL_JSON = "global.json";
 const HOST_SDK_PATH = "$host$";
 const DOTNET_TIMEOUT_MS = 15_000;
 const SDK_VERSION_RE = /^\d+\.\d+\.\d+\S*$/;
 const NETCORE_RUNTIME_RE = /^Microsoft\.NETCore\.App (\S+) \[(.+)\]$/gm;
-const MIN_RUNTIME_MAJOR = 10;
+const SDK_LIST_RE = /^(\S+) \[.+\]$/gm;
+/** What csharp-ls targets from 0.23 on, whatever the projects it loads target. */
+export const MIN_RUNTIME_MAJOR = 10;
 /** Quiet period after the last filesystem event before re-reading (restores write in bursts). */
 const WATCH_DEBOUNCE_MS = 1000;
 /** Far above any real `global.json` or props file; a read of anything larger is refused. */
@@ -43,6 +47,16 @@ type SpawnEnv = Record<string, string | undefined>;
 export interface DotnetOptions {
   /** Environment for `PATH` and `DOTNET_ROOT`. Defaults to the login-shell spawn environment. */
   env?: SpawnEnv;
+}
+
+/** Where a `dotnet` will run, for the SDK check. */
+export interface DotnetRunOptions extends DotnetOptions {
+  cwd?: string;
+  /**
+   * Check only the `global.json` applying to `cwd`, for a run that starts nothing elsewhere in the
+   * worktree. It skips listing them all through git, which a run on every save should not pay for.
+   */
+  applyingOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,31 +76,81 @@ export async function resolveDotnet(
   const env = options.env ?? buildSpawnEnv();
   const wtPath = path.resolve(worktreePath);
   try {
-    for (const dir of pathOutsideWorktree(env.PATH ?? "", wtPath).split(path.delimiter)) {
-      const found = await usableDotnetIn(wtPath, dir);
-      if (found) return found;
-    }
-    return await dotnetRootDotnet(wtPath, env);
+    return (await findOnWorktreePath(wtPath, DOTNET, env)) ?? (await dotnetRootDotnet(wtPath, env));
   } catch (err) {
     log.warn("Looking for dotnet failed", { wtPath, error: err });
     return null;
   }
 }
 
-async function usableDotnetIn(wtPath: string, dir: string): Promise<string | null> {
+/** The first `tool` on `env`'s `PATH` that is not the worktree's. */
+async function findOnWorktreePath(
+  wtPath: string,
+  tool: string,
+  env: SpawnEnv,
+): Promise<string | null> {
+  for (const dir of pathOutsideWorktree(env.PATH ?? "", wtPath).split(path.delimiter)) {
+    const found = await usableToolIn(wtPath, tool, dir);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function usableToolIn(wtPath: string, tool: string, dir: string): Promise<string | null> {
   // A relative entry would depend on the server's directory.
   if (!path.isAbsolute(dir)) return null;
-  const dotnet = Bun.which("dotnet", { PATH: dir });
-  if (!dotnet) return null;
+  const found = Bun.which(tool, { PATH: dir });
+  if (!found) return null;
   // `realpath` so a symlink on PATH that leads back into the worktree does not count either.
-  const [realDotnet, realWtPath] = await Promise.all([realpath(dotnet), realpath(wtPath)]);
-  if (isInside(realDotnet, realWtPath) || isInside(dotnet, wtPath)) return null;
-  return (await isShippedByRepo(wtPath, dotnet)) ? null : dotnet;
+  const [realTool, realWtPath] = await Promise.all([realpath(found), realpath(wtPath)]);
+  if (isInside(realTool, realWtPath) || isInside(found, wtPath)) return null;
+  return (await isShippedByRepo(wtPath, found)) ? null : found;
 }
 
 async function dotnetRootDotnet(wtPath: string, env: SpawnEnv): Promise<string | null> {
   const root = env[`DOTNET_ROOT_${process.arch.toUpperCase()}`] || env.DOTNET_ROOT;
-  return root ? usableDotnetIn(wtPath, root) : null;
+  return root ? usableToolIn(wtPath, DOTNET, root) : null;
+}
+
+/**
+ * Where `dotnet tool install --global` puts a tool (`~/.dotnet/tools`), which is not always on the
+ * login-shell `PATH`, or `DOTNET_CLI_HOME`'s when that moves the tools.
+ */
+export function dotnetGlobalToolsDir(env: SpawnEnv): string {
+  return path.join(env.DOTNET_CLI_HOME || env.HOME || homedir(), ".dotnet", "tools");
+}
+
+/**
+ * Find a global .NET tool for a worktree without running it: on the login-shell `PATH`, else in the
+ * global tools directory. The worktree's own directories and anything git tracks do not count.
+ * Never throws.
+ */
+export async function resolveGlobalDotnetTool(
+  worktreePath: string,
+  tool: string,
+  options: DotnetOptions = {},
+): Promise<string | null> {
+  const env = options.env ?? buildSpawnEnv();
+  const wtPath = path.resolve(worktreePath);
+  try {
+    return (
+      (await findOnWorktreePath(wtPath, tool, env)) ??
+      (await usableToolIn(wtPath, tool, dotnetGlobalToolsDir(env)))
+    );
+  } catch (err) {
+    log.warn("Looking for a .NET tool failed", { wtPath, tool, error: err });
+    return null;
+  }
+}
+
+/**
+ * Whether this `dotnet` is a version manager's shim: asdf and mise name their directory of shims
+ * this, and a shim picks its version from a config file found from its working directory up, so
+ * run in a project it follows what that project says.
+ */
+export async function isVersionManagerShim(dotnetPath: string): Promise<boolean> {
+  const real = await realpath(dotnetPath).catch(() => dotnetPath);
+  return [dotnetPath, real].some((file) => path.basename(path.dirname(file)) === "shims");
 }
 
 /** A `dotnet` with its spawn environment, for a worktree that passed {@link isDotnetSafeToRun}. */
@@ -98,23 +162,34 @@ export interface PreparedDotnet {
 }
 
 /**
- * The way to get a `dotnet` to run for a worktree: the SDK check runs first, and a null here means
- * nothing may be run, either because no `dotnet` exists or because the check did not pass. Pass
- * `cwd` when `dotnet` will run somewhere below the worktree root. Prepare again before each run.
+ * The way to get a `dotnet` to run for a worktree, and a null here means nothing may be run. In a
+ * trusted repository that only means no `dotnet` exists: trust covers the SDK its `global.json`
+ * selects and the version a shim reads from it, as in the user's terminal. In any other, the SDK
+ * check must pass and a shim does not run. Pass `cwd` when `dotnet` will run somewhere below the
+ * worktree root. Prepare again before each run.
  */
 export async function prepareDotnet(
   worktreePath: string,
-  options: DotnetOptions & { cwd?: string } = {},
+  options: DotnetRunOptions = {},
 ): Promise<PreparedDotnet | null> {
   const env = options.env ?? buildSpawnEnv();
-  if (!(await isDotnetSafeToRun(worktreePath, options))) return null;
+  const trusted = isRepoTrusted(worktreePath);
+  if (!trusted && !(await isDotnetSafeToRun(worktreePath, options))) return null;
   const dotnetPath = await resolveDotnet(worktreePath, { env });
   if (!dotnetPath) return null;
+  if (!trusted && (await isVersionManagerShim(dotnetPath))) {
+    log.info("Not running a version manager's dotnet shim in an untrusted repository", {
+      worktreePath,
+      dotnetPath,
+    });
+    return null;
+  }
   const cwd = options.cwd ?? path.resolve(worktreePath);
   return { dotnetPath, env: dotnetSpawnEnv(worktreePath, env), cwd };
 }
 
-function dotnetSpawnEnv(wtPath: string, env: SpawnEnv): SpawnEnv {
+/** `env` for running `dotnet`, or a tool that runs it: without the worktree's `PATH` entries. */
+export function dotnetSpawnEnv(wtPath: string, env: SpawnEnv): SpawnEnv {
   return {
     ...env,
     PATH: pathOutsideWorktree(env.PATH ?? "", path.resolve(wtPath)),
@@ -127,7 +202,7 @@ function dotnetSpawnEnv(wtPath: string, env: SpawnEnv): SpawnEnv {
 // global.json, by parsing the file only
 
 /**
- * Whether `dotnet` may run in a worktree. `dotnet` commands that need an SDK load the one
+ * Whether `dotnet` may run in an untrusted worktree. `dotnet` commands that need an SDK load the one
  * `global.json` selects, so this reads the `global.json` that applies to the worktree root (or to
  * `cwd`, when given) and every one git lists below it, and refuses when any `sdk.paths` entry holds
  * something git tracks, or when a file cannot be read unambiguously. Runs nothing but git. Never
@@ -135,11 +210,17 @@ function dotnetSpawnEnv(wtPath: string, env: SpawnEnv): SpawnEnv {
  */
 export async function isDotnetSafeToRun(
   worktreePath: string,
-  options: DotnetOptions & { cwd?: string } = {},
+  options: DotnetRunOptions = {},
 ): Promise<boolean> {
   const wtPath = path.resolve(worktreePath);
   try {
     const applying = await findGlobalJson(options.cwd ?? wtPath);
+    if (options.applyingOnly) {
+      if (!applying) return true;
+      const info = await readGlobalJson(wtPath, applying, options);
+      if (!isGlobalJsonSafe(info)) return false;
+      return !info.sdkPaths?.length || (await canGitReadRepo(wtPath));
+    }
     // Later callers run dotnet from project directories, whose global.json can differ.
     // `icase`: on a case-insensitive disk the host opens any casing of the name.
     const listed = await gitListFiles(wtPath, [`:(glob,icase)**/${GLOBAL_JSON}`]);
@@ -349,6 +430,61 @@ function pathPrefixes(raw: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Local tools
+
+const TOOL_MANIFESTS = ["dotnet-tools.json", path.join(".config", "dotnet-tools.json")];
+
+/**
+ * The tool manifests in `dir` that can be read, as dotnet's reader does: comments and trailing
+ * commas allowed. Skips anything but a regular file of a readable size.
+ */
+export function readDotnetToolManifests(dir: string): Record<string, unknown>[] {
+  return TOOL_MANIFESTS.flatMap((name) => {
+    const file = path.join(dir, name);
+    try {
+      const info = statSync(file, { throwIfNoEntry: false });
+      if (!info?.isFile() || info.size > MAX_READ_BYTES) return [];
+      const manifest: unknown = Bun.JSONC.parse(readFileSync(file, "utf-8"));
+      return isRecord(manifest) ? [manifest] : [];
+    } catch (err) {
+      log.debug("Could not read a dotnet tool manifest", { file, error: err });
+      return [];
+    }
+  });
+}
+
+/** Whether a manifest's tool entry gives `dotnet tool run` this command. */
+export function toolClaimsCommand(tool: unknown, command: string): boolean {
+  if (!isRecord(tool) || !Array.isArray(tool.commands)) return false;
+  // dotnet matches a manifest's command names without regard to case.
+  const wanted = command.toLowerCase();
+  return tool.commands.some((name) => typeof name === "string" && name.toLowerCase() === wanted);
+}
+
+/**
+ * Whether these `dotnet` arguments run what a manifest in `dirs` names rather than what they say:
+ * `tool run x`, or `x` alone, since `dotnet x` falls back to a local tool for any `x` or `dotnet-x`
+ * that isn't one of its own commands. Not `dotnet`, or arguments naming neither, run as written.
+ */
+export function dotnetArgsRunProjectTool(
+  command: string,
+  args: string,
+  dirs: readonly string[],
+): boolean {
+  if (path.basename(command).toLowerCase() !== "dotnet") return false;
+  const [first, second] = args.split(/\s+/).filter(Boolean);
+  if (first === "tool" && second === "run") return true;
+  if (!first || first.startsWith("-")) return false;
+  return dirs.some((dir) =>
+    readDotnetToolManifests(dir).some(({ tools }) =>
+      Object.values(isRecord(tools) ? tools : {}).some(
+        (tool) => toolClaimsCommand(tool, first) || toolClaimsCommand(tool, `dotnet-${first}`),
+      ),
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SDK and runtime versions
 
 /** Stamps by the command's inputs; a failed read is not cached, so it is retried next time. */
@@ -457,6 +593,23 @@ async function listRuntimes(
   });
 }
 
+/**
+ * The SDK versions the `dotnet` on `PATH` has, from `dotnet --list-sdks`, run from outside the
+ * worktree so `global.json` plays no part. Null when there is no `dotnet`.
+ */
+export async function dotnetSdks(
+  worktreePath: string,
+  options: DotnetOptions = {},
+): Promise<string[] | null> {
+  const wtPath = path.resolve(worktreePath);
+  const env = options.env ?? buildSpawnEnv();
+  const dotnet = await resolveDotnet(wtPath, { env });
+  if (!dotnet) return null;
+  const output = await runDotnet(dotnet, ["--list-sdks"], tmpdir(), dotnetSpawnEnv(wtPath, env));
+  if (output === null) return null;
+  return [...output.matchAll(SDK_LIST_RE)].map(([, version]) => version!);
+}
+
 function majorOf(version: string): number {
   return Number.parseInt(version, 10);
 }
@@ -477,8 +630,11 @@ function cachedRead<T>(
   return value;
 }
 
-/** The output of a `dotnet` command that exited with 0, else null. Callers made sure it may run. */
-async function runDotnet(
+/**
+ * The output of a `dotnet` command, or a tool's, that exited with 0, else null. Callers made sure it
+ * may run. Its timeout reaches only this process, so a caller who must answer has its own deadline.
+ */
+export async function runDotnet(
   dotnetPath: string,
   args: string[],
   cwd: string,
@@ -533,6 +689,26 @@ export async function discoverCSharpProjects(worktreePath: string): Promise<CSha
   return { solutions, solutionFilters, projects, defaultTarget };
 }
 
+/** What can be chosen to load: csharp-ls's `--solution` takes these, and no `.csproj`. */
+export function csharpSelectableSolutions({
+  solutions,
+  solutionFilters,
+}: CSharpProjects): string[] {
+  return [...solutions, ...solutionFilters].toSorted();
+}
+
+/**
+ * What csharp-ls loads when nothing was chosen, which it would pick itself: the one solution at the
+ * root, else the first solution, the same one every time. Null with no solution: it then loads the
+ * projects.
+ */
+export function automaticCSharpSolution({
+  solutions,
+  defaultTarget,
+}: CSharpProjects): string | null {
+  return defaultTarget?.kind === "solution" ? defaultTarget.path : (solutions[0] ?? null);
+}
+
 function rootEntries(wtPath: string): string[] {
   try {
     return readdirSync(wtPath)
@@ -563,7 +739,7 @@ async function gitListFiles(wtPath: string, patterns: string[]): Promise<string[
 
 const PROPS_FILE = "Directory.Build.props";
 const OBJ_DIR = "obj";
-const ASSETS_FILE = "project.assets.json";
+export const ASSETS_FILE = "project.assets.json";
 const MAX_IMPORT_DEPTH = 8;
 /** Properties that move restore's output in a way this module does not follow. */
 const UNFOLLOWED_LAYOUT_PROPS = new Set([
@@ -738,17 +914,6 @@ function resolveImport(project: string, file: string): string | null | undefined
   const expanded = project.trim().replace(THIS_FILE_DIR, `${fileDir}/`).replaceAll("\\", "/");
   if (expanded.includes("$(") || expanded.includes("*")) return null;
   return path.resolve(fileDir, expanded);
-}
-
-function findFileAbove(name: string, startDir: string): string | null {
-  let current = startDir;
-  for (;;) {
-    const candidate = path.join(current, name);
-    if (existsSync(candidate)) return candidate;
-    const parent = path.dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
 }
 
 /** `Sdk` imports, and imports under a condition or a `Choose`, which this module does not follow. */
@@ -1107,7 +1272,7 @@ async function readSmallFile(file: string): Promise<Uint8Array> {
   return Bun.file(file).bytes();
 }
 
-async function readSmallText(file: string): Promise<string> {
+export async function readSmallText(file: string): Promise<string> {
   return new TextDecoder().decode(await readSmallFile(file));
 }
 
@@ -1126,7 +1291,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Identity of a file or directory, or null when it is missing. */
-async function fileStamp(file: string): Promise<string | null> {
+export async function fileStamp(file: string): Promise<string | null> {
   try {
     const info = await stat(file);
     return `${info.dev}:${info.ino}:${info.mtimeMs}:${info.size}`;

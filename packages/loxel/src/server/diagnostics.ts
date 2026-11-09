@@ -1,5 +1,5 @@
 import { existsSync, rmSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 
 import { $ } from "bun";
 
@@ -14,7 +14,8 @@ import { INTERNAL_WORKTREE_PREFIX, REF_PATTERN, symlinkNodeModules } from "./wor
 const log = logger.child("ts-lsp");
 
 const TSC_TIMEOUT_MS = 30_000;
-const TSCONFIG_FILE = "tsconfig.json";
+// The root configs that make a project to check. A tsconfig wins, as it does for a bare `tsc`.
+const PROJECT_CONFIG_FILES = ["tsconfig.json", "jsconfig.json"];
 
 // In-memory cache keyed by commit hash (immutable — never needs invalidation)
 const cache = new Map<string, TypeScriptDiagnostic[]>();
@@ -30,12 +31,14 @@ export async function getDiagnostics(
   ref: string | undefined,
 ): Promise<TypeScriptDiagnostic[]> {
   stress.track("diagnostics", ref ?? "__working_tree__");
-  // Only a root tsconfig makes a project to check. Without one `tsc` prints its help text (or
-  // falls back to a tsconfig in some ancestor directory, which is not this worktree's project).
+  // Only a root config makes a project to check. `tsc` gets it with `-p`, because a bare `tsc`
+  // doesn't read a jsconfig: it prints its help text, or falls back to a tsconfig in some ancestor
+  // directory, which is not this worktree's project.
   // Working tree: run directly, no cache
   if (!ref) {
-    if (!existsSync(join(cwd, TSCONFIG_FILE))) return [];
-    return runTypeScriptInDir(cwd, cwd);
+    const config = PROJECT_CONFIG_FILES.find((file) => existsSync(join(cwd, file)));
+    if (!config) return [];
+    return runTypeScriptInDir(cwd, cwd, config);
   }
 
   if (!REF_PATTERN.test(ref)) {
@@ -61,9 +64,10 @@ export async function getDiagnostics(
 async function runDiagnosticsInWorktree(cwd: string, ref: string): Promise<TypeScriptDiagnostic[]> {
   // Check the ref's tree before paying for a temp worktree checkout. `ls-tree` prints nothing
   // for a missing path and throws for an unknown ref, so a ref that isn't fetched yet isn't cached.
-  const tsconfig =
-    await $`git -C ${cwd} ls-tree --full-tree --name-only ${ref} -- ${TSCONFIG_FILE}`.text();
-  if (!tsconfig.trim()) {
+  const tree =
+    await $`git -C ${cwd} ls-tree --full-tree --name-only ${ref} -- ${PROJECT_CONFIG_FILES}`.text();
+  const config = PROJECT_CONFIG_FILES.find((file) => tree.split("\n").includes(file));
+  if (!config) {
     cache.set(ref, []);
     return [];
   }
@@ -78,7 +82,7 @@ async function runDiagnosticsInWorktree(cwd: string, ref: string): Promise<TypeS
     // Symlink node_modules from main repo
     await symlinkNodeModules(cwd, tmpDir);
 
-    const diagnostics = await runTypeScriptInDir(tmpDir, tmpDir);
+    const diagnostics = await runTypeScriptInDir(tmpDir, tmpDir, config);
     cache.set(ref, diagnostics);
     return diagnostics;
   } finally {
@@ -97,11 +101,12 @@ async function runDiagnosticsInWorktree(cwd: string, ref: string): Promise<TypeS
 }
 
 /**
- * Run TypeScript with --noEmit in a directory and parse the output.
+ * Run TypeScript with --noEmit on a project config in a directory and parse the output.
  */
 async function runTypeScriptInDir(
   dir: string,
   stripPrefix: string,
+  config: string,
 ): Promise<TypeScriptDiagnostic[]> {
   const tsc = resolveTypeScriptBinary();
   if (!tsc) {
@@ -110,7 +115,7 @@ async function runTypeScriptInDir(
   }
   try {
     const proc = measureSpawn("tsc", () =>
-      Bun.spawn([tsc, "--noEmit", "--pretty", "false"], {
+      Bun.spawn([tsc, "--noEmit", "--pretty", "false", "-p", config], {
         cwd: dir,
         env: { ...process.env, NO_COLOR: "1" },
         stdout: "pipe",
@@ -166,8 +171,9 @@ export function parseTypeScriptDiagnostics(
     const message = match[6]!;
     const relPath = relative(stripPrefix, resolve(stripPrefix, filePath));
 
-    // Skip diagnostics from node_modules
-    if (relPath.startsWith("node_modules")) continue;
+    // Skip diagnostics from node_modules. A jsconfig's `maxNodeModuleJsDepth` makes `tsc` check JS
+    // dependencies, and in a temp worktree their real paths lead out through the symlink.
+    if (relPath.split(sep).includes("node_modules")) continue;
 
     diagnostics.push({
       file: relPath,

@@ -7,6 +7,7 @@ import {
 } from "@/api/python-env-model";
 
 import {
+  envPrefixOf,
   getPythonEnv,
   listPythonEnvs,
   normalizePythonOverride,
@@ -21,11 +22,12 @@ import {
   setPythonOverride,
 } from "./python-override-store";
 import { pythonVersion } from "./python-version";
+import { isRepoTrusted } from "./repo-trust";
 import { error, json } from "./response-helpers";
 import type { ToolchainStatusModule } from "./toolchain-status-module";
 
 async function withVersion(env: PythonEnv, wtPath: string): Promise<PythonInterpreter> {
-  return { ...env, version: await pythonVersion(env.pythonPath, wtPath) };
+  return { ...env, version: await pythonVersion(env, wtPath) };
 }
 
 async function pythonEnvResponse(wtPath: string): Promise<PythonEnvResponse> {
@@ -66,8 +68,16 @@ async function handlePythonOverride(
       return error(err instanceof Error ? err.message : "Invalid Python interpreter", 400);
     }
     // Language servers and terminals will run it, so take only what answers like a Python.
-    if (!(await pythonVersion(chosen, wtPath))) {
-      return error(`${chosen} did not report a Python version; is it a Python interpreter?`, 400);
+    if (
+      !(await pythonVersion({ pythonPath: chosen, envPath: await envPrefixOf(chosen) }, wtPath))
+    ) {
+      const shimHint = isRepoTrusted(wtPath)
+        ? ""
+        : " A version manager's shim, or an environment's own interpreter, may need the repository to be trusted first.";
+      return error(
+        `${chosen} did not report a Python version; is it a Python interpreter?${shimHint}`,
+        400,
+      );
     }
   }
   setPythonOverride(wtPath, chosen);

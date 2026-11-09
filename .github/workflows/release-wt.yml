@@ -89,7 +89,7 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 2
+    timeout-minutes: 10
     outputs:
       sha256_darwin-arm64: ${{ steps.sha.outputs.sha256_darwin-arm64 }}
       sha256_darwin-x64: ${{ steps.sha.outputs.sha256_darwin-x64 }}

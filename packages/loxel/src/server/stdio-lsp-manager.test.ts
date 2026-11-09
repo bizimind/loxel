@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,12 +9,18 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import { LSP_EXITED_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
 
 import { FileChangeType } from "./lsp-watched-files";
-import { StdioLspManager, type WtLspContext, type WtLspSession } from "./stdio-lsp-manager";
+import {
+  SERVER_STOP_GRACE_MS,
+  StdioLspManager,
+  type WtLspContext,
+  type WtLspSession,
+} from "./stdio-lsp-manager";
 
 // A stand-in language server: echoes every frame it reads back as a `test/received`
 // notification, writes whatever a `test/emit` notification carries as its own frame, exits with
-// the code a `test/exit` notification carries, kills itself on `test/kill`, and fills a `test/argv`
-// notification with its arguments.
+// the code a `test/exit` notification carries, kills itself on `test/kill`, fills a `test/argv`
+// notification with its arguments, and a `test/startChild` one with the pid of a child it starts in
+// a process group of its own.
 const FAKE_SERVER = `
 let buf = Buffer.alloc(0);
 const write = (msg) => {
@@ -34,6 +40,10 @@ for await (const chunk of process.stdin) {
     if (msg.method === "test/exit") process.exit(msg.params.code);
     if (msg.method === "test/kill") process.kill(process.pid, "SIGKILL");
     if (msg.method === "test/argv") msg.params = { argv: process.argv };
+    if (msg.method === "test/startChild") {
+      const child = require("node:child_process").spawn("/bin/sleep", ["1000"], { detached: true, stdio: "ignore" });
+      msg.params = { pid: child.pid };
+    }
     if (msg.method === "test/emit") write(msg.params);
     else write({ jsonrpc: "2.0", method: "test/received", params: msg });
   }
@@ -55,10 +65,10 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
   }
 
   start(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
+    this.startSession(ws, { wtPath, repoTrusted: false });
   }
 
-  protected resolveBinary(): string | null {
+  protected resolveBinary(): string | null | Promise<string | null> {
     return process.execPath;
   }
 
@@ -75,6 +85,7 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
       ws,
       proc,
       wtPath: context.wtPath,
+      repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
     };
@@ -88,7 +99,6 @@ class FakeLspManager extends StdioLspManager<WtLspSession, WtLspContext> {
 class OptInLspManager extends FakeLspManager {
   protected override readonly watchedFileGlobs = ["**/.eslintrc*"];
   protected override readonly watchedIgnoredGlobs = ["build/compile_commands.json"];
-  protected override readonly didSaveOnFileChange = true;
 
   protected override workspaceConfiguration(
     _session: WtLspSession,
@@ -159,7 +169,8 @@ let dir: string | undefined;
 let manager: FakeLspManager | undefined;
 
 afterEach(async () => {
-  manager?.destroy();
+  jest.useRealTimers();
+  await manager?.destroy();
   manager = undefined;
   if (dir) await rm(dir, { recursive: true, force: true });
   dir = undefined;
@@ -345,15 +356,7 @@ describe("StdioLspManager watched files", () => {
 });
 
 describe("StdioLspManager opt-in hooks", () => {
-  const DID_SAVE = "textDocument/didSave";
   const setupOptIn = () => setup("wt", (script) => new OptInLspManager(script));
-  let marks = 0;
-  /** Everything sent before now has been read once the server echoes this. */
-  async function drained(client: FakeClient): Promise<void> {
-    const mark = `test/mark-${++marks}`;
-    client.send({ method: mark });
-    await client.serverReceived((f) => f.method === mark);
-  }
 
   test("workspaceConfiguration receives the request's scopeUri", async () => {
     const { client } = await setupOptIn();
@@ -400,12 +403,11 @@ describe("StdioLspManager opt-in hooks", () => {
     );
   });
 
-  test("a manager that did not opt in drops ignored paths and sends no didSave", async () => {
+  test("a manager that did not opt in drops ignored paths", async () => {
     const { client, root } = await setup();
     await mkdir(root);
     await writeFile(join(root, "a.c"), "");
     const uri = pathToFileURL(join(root, "a.c")).href;
-    client.send({ method: "textDocument/didOpen", params: { textDocument: { uri, text: "" } } });
     client.emit({
       id: 7,
       method: "client/registerCapability",
@@ -427,30 +429,138 @@ describe("StdioLspManager opt-in hooks", () => {
     expect(changed.params?.changes).toEqual(
       [FileChangeType.Changed, FileChangeType.Created].map((type) => ({ uri, type })),
     );
-    expect(client.toServer.some((f) => f.method === DID_SAVE)).toBe(false);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("StdioLspManager process trees", () => {
+  class TreeStoppingManager extends FakeLspManager {
+    protected override stopsProcessTree(): boolean {
+      return true;
+    }
+
+    override recordProcessTrees(): Promise<void> {
+      return super.recordProcessTrees();
+    }
+  }
+
+  /** A killed process lingers until its parent or init has collected it. */
+  function isRunning(pid: number): boolean {
+    const state = Bun.spawnSync(["ps", "-o", "stat=", "-p", String(pid)], {
+      env: { PATH: "/bin:/usr/bin" },
+    }).stdout.toString();
+    return state.trim() !== "" && !state.startsWith("Z");
+  }
+
+  /** A manager whose sessions each have `roots` beside the server, counting what it is asked. */
+  class ExtraRootsManager extends FakeLspManager {
+    asked = 0;
+    closes = 0;
+    readonly closedTwice = Promise.withResolvers<void>();
+
+    constructor(
+      script: string,
+      private readonly roots: readonly number[],
+    ) {
+      super(script);
+    }
+
+    protected override processTreeRoots(): readonly number[] {
+      this.asked++;
+      return this.roots;
+    }
+
+    protected override onSessionClosed(): void {
+      if (++this.closes === 2) this.closedTwice.resolve();
+    }
+  }
+
+  /** A shell whose child is in a process group of its own, and that child's pid. */
+  async function treeOutsideServer(): Promise<{
+    root: Subprocess<"ignore", "pipe">;
+    child: number;
+  }> {
+    const root = Bun.spawn(["/bin/sh", "-c", "(set -m; /bin/sleep 30 & echo $!; wait) & wait"], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    let text = "";
+    for await (const chunk of root.stdout) {
+      text += Buffer.from(chunk).toString();
+      if (text.includes("\n")) break;
+    }
+    return { root, child: Number(text.trim()) };
+  }
+
+  function killIfRunning(pid: number): void {
+    if (isRunning(pid)) process.kill(pid, "SIGKILL");
+  }
+
+  test("a manager that did not opt in leaves what its server started running", async () => {
+    const { client } = await setup("wt", (script) => new ExtraRootsManager(script, []));
+    client.send({ method: "test/startChild" });
+    const started = await client.serverReceived((f) => f.method === "test/startChild");
+    const { pid } = started.params as { pid: number };
+    try {
+      const closing = manager as ExtraRootsManager;
+      manager!.detach(client.ws);
+      await closing.closedTwice.promise;
+      expect(isRunning(pid)).toBe(true);
+      expect(closing.asked).toBe(1);
+    } finally {
+      killIfRunning(pid);
+    }
   });
 
-  test("didSave goes out for changed open documents, until they close", async () => {
-    const { client, root } = await setupOptIn();
-    const open = pathToFileURL(join(root, "a b.c")).href;
-    client.send({
-      method: "textDocument/didOpen",
-      params: { textDocument: { uri: open, text: "" } },
-    });
-    await drained(client);
+  test("a crashed server's extra roots are still ended, with what is below them", async () => {
+    const extra = await treeOutsideServer();
+    try {
+      const { client } = await setup(
+        "wt",
+        (script) => new ExtraRootsManager(script, [extra.root.pid]),
+      );
+      client.send({ method: "test/kill" });
+      await extra.root.exited;
+      while (isRunning(extra.child)) await Bun.sleep(20);
+      expect(extra.root.signalCode).toBe("SIGKILL");
+    } finally {
+      killIfRunning(extra.root.pid);
+      killIfRunning(extra.child);
+    }
+  });
 
-    manager!.notifyWatchedFilesChanged(join(dir!, "other"), [join(root, "a b.c")]);
-    manager!.notifyWatchedFilesChanged(root, [join(root, "closed.c"), join(root, "a b.c")]);
-    const saved = await client.serverReceived((f) => f.method === DID_SAVE);
-    expect(saved.params).toEqual({ textDocument: { uri: open } });
-    await drained(client);
-    expect(client.toServer.filter((f) => f.method === DID_SAVE)).toHaveLength(1);
+  test("a manager that opts in ends what its server started, in another process group too", async () => {
+    const { client } = await setup("wt", (script) => new TreeStoppingManager(script));
+    client.send({ method: "test/startChild" });
+    const started = await client.serverReceived((f) => f.method === "test/startChild");
+    const { pid } = started.params as { pid: number };
+    try {
+      expect(isRunning(pid)).toBe(true);
+      manager!.detach(client.ws);
+      while (isRunning(pid)) await Bun.sleep(20);
+    } finally {
+      // A failure must not leave it running.
+      if (isRunning(pid)) process.kill(pid, "SIGKILL");
+    }
+  });
 
-    client.send({ method: "textDocument/didClose", params: { textDocument: { uri: open } } });
-    await drained(client);
-    manager!.notifyWatchedFilesChanged(root, [join(root, "a b.c")]);
-    await drained(client);
-    expect(client.toServer.filter((f) => f.method === DID_SAVE)).toHaveLength(1);
+  test("a manager that opts in ends what its server started once the server exits on its own", async () => {
+    let treeManager: TreeStoppingManager | undefined;
+    const { client } = await setup(
+      "wt",
+      (script) => (treeManager = new TreeStoppingManager(script)),
+    );
+    client.send({ method: "test/startChild" });
+    const started = await client.serverReceived((f) => f.method === "test/startChild");
+    const { pid } = started.params as { pid: number };
+    try {
+      await treeManager?.recordProcessTrees();
+      client.send({ method: "test/kill" });
+      expect(await client.closed).toBe(LSP_EXITED_CLOSE_CODE);
+      while (isRunning(pid)) await Bun.sleep(20);
+    } finally {
+      if (isRunning(pid)) process.kill(pid, "SIGKILL");
+    }
   });
 });
 
@@ -548,6 +658,147 @@ describe("StdioLspManager spawn failures", () => {
     // The next connection for the worktree finds no session left to replace.
     manager.start(new FakeClient(manager).ws, dir);
     expect(first.closes).toHaveLength(1);
+  });
+});
+
+describe("StdioLspManager initialization options", () => {
+  class ThrowingOptionsManager extends FakeLspManager {
+    readonly written: string[] = [];
+
+    protected override writeToStdin(session: WtLspSession, json: string): void {
+      this.written.push(json);
+      super.writeToStdin(session, json);
+    }
+
+    protected override getSessionKey(context: WtLspContext): string {
+      return context.wtPath;
+    }
+
+    protected override getInitializationOptions(): Record<string, unknown> {
+      throw new Error("no settings");
+    }
+  }
+
+  /** Resolves its binary only when told to, so frames queue up before the session exists. */
+  class SlowThrowingOptionsManager extends ThrowingOptionsManager {
+    framesHandled = 0;
+    private readonly binary = Promise.withResolvers<string>();
+
+    protected override resolveBinary(): Promise<string> {
+      return this.binary.promise;
+    }
+
+    protected override handleClientData(session: WtLspSession, data: string): void {
+      this.framesHandled += 1;
+      super.handleClientData(session, data);
+    }
+
+    resolve(): void {
+      this.binary.resolve(process.execPath);
+    }
+  }
+
+  test("a hook that throws closes the session as a start failure, without initialize", async () => {
+    let throwing: ThrowingOptionsManager | undefined;
+    const { client, root } = await setup("wt", (script) => {
+      throwing = new ThrowingOptionsManager(script);
+      return throwing;
+    });
+
+    client.send({ id: 1, method: "initialize", params: { capabilities: {} } });
+
+    expect(client.closes).toEqual([[LSP_START_FAILED_CLOSE_CODE, "python-lsp failed to start"]]);
+    expect(throwing!.written).toEqual([]);
+
+    // The next connection for the worktree finds no session left to replace.
+    manager!.start(new FakeClient(manager!).ws, root);
+    expect(client.closes).toHaveLength(1);
+  });
+
+  test("frames queued behind the initialize that failed are dropped", async () => {
+    let slow: SlowThrowingOptionsManager | undefined;
+    const { client } = await setup("wt", (script) => {
+      slow = new SlowThrowingOptionsManager(script);
+      return slow;
+    });
+    client.send({ id: 1, method: "initialize", params: { capabilities: {} } });
+    client.send({ method: "initialized" });
+
+    slow!.resolve();
+
+    expect(await client.closed).toBe(LSP_START_FAILED_CLOSE_CODE);
+    expect(slow!.framesHandled).toBe(1);
+  });
+});
+
+describe("StdioLspManager stopping a server", () => {
+  class ProcLspManager extends FakeLspManager {
+    proc: Subprocess | undefined;
+    ws: ServerWebSocket<unknown> | undefined;
+
+    protected override buildSession(
+      ws: ServerWebSocket<unknown>,
+      proc: Subprocess,
+      context: WtLspContext,
+    ): WtLspSession {
+      this.proc = proc;
+      this.ws = ws;
+      return super.buildSession(ws, proc, context);
+    }
+  }
+
+  /** A running server; the frame it answers shows it has passed `preamble`. */
+  async function startServer(preamble: string): Promise<ProcLspManager & { proc: Subprocess }> {
+    dir = await realpath(await mkdtemp(join(tmpdir(), "stdio-lsp-manager-")));
+    const script = join(dir, "fake-server.mjs");
+    await writeFile(script, preamble + FAKE_SERVER);
+    const procManager = new ProcLspManager(script);
+    manager = procManager;
+    const client = new FakeClient(procManager);
+    procManager.start(client.ws, dir);
+    client.send({ method: "test/ready" });
+    await client.serverReceived((f) => f.method === "test/ready");
+    return procManager as ProcLspManager & { proc: Subprocess };
+  }
+
+  test("a server that ignores SIGTERM gets SIGKILL after the grace period", async () => {
+    const stubborn = await startServer('process.on("SIGTERM", () => {});\n');
+    const kill = spyOn(stubborn.proc, "kill");
+    jest.useFakeTimers();
+
+    const destroyed = stubborn.destroy();
+    expect(kill.mock.calls).toEqual([["SIGTERM"]]);
+    jest.advanceTimersByTime(SERVER_STOP_GRACE_MS - 1);
+    expect(kill.mock.calls).toEqual([["SIGTERM"]]);
+    jest.advanceTimersByTime(1);
+    expect(kill.mock.calls).toEqual([["SIGTERM"], ["SIGKILL"]]);
+
+    await destroyed;
+    expect(stubborn.proc.signalCode).toBe("SIGKILL");
+  });
+
+  test("a server that exits on SIGTERM gets nothing more", async () => {
+    const polite = await startServer("");
+    const kill = spyOn(polite.proc, "kill");
+    jest.useFakeTimers();
+
+    await polite.destroy();
+    jest.advanceTimersByTime(SERVER_STOP_GRACE_MS);
+
+    expect(polite.proc.signalCode).toBe("SIGTERM");
+    expect(kill.mock.calls).toEqual([["SIGTERM"]]);
+  });
+
+  test("a detached server is forced too, and destroy waits for it", async () => {
+    const stubborn = await startServer('process.on("SIGTERM", () => {});\n');
+    jest.useFakeTimers();
+
+    stubborn.detach(stubborn.ws!);
+    const destroyed = stubborn.destroy();
+    jest.advanceTimersByTime(SERVER_STOP_GRACE_MS);
+
+    await destroyed;
+    expect(stubborn.proc.signalCode).toBe("SIGKILL");
   });
 });
 

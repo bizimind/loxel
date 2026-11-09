@@ -70,6 +70,29 @@ describe("Python project icons", () => {
   );
 });
 
+describe("Gradle, Maven and Groovy icons", () => {
+  test.each([
+    ["build.gradle", "gradle.svg"],
+    ["settings.gradle", "gradle.svg"],
+    ["build.gradle.kts", "gradle.svg"],
+    ["settings.gradle.kts", "gradle.svg"],
+    ["gradle.properties", "gradle.svg"],
+    ["gradlew", "gradle.svg"],
+    ["gradlew.bat", "gradle.svg"],
+    ["libs.versions.toml", "gradle.svg"],
+    ["pom.xml", "maven_dark.svg"],
+    ["mvnw", "maven_dark.svg"],
+    ["mvnw.cmd", "maven_dark.svg"],
+    ["Util.groovy", "groovy.svg"],
+    ["Jenkinsfile", "groovy.svg"],
+    ["script.kts", "kotlinScript_dark.svg"],
+    ["other.properties", "properties_dark.svg"],
+    ["other.xml", "xml_dark.svg"],
+  ])("%s → %s", (filename, icon) => {
+    expect(getFileIconPath(filename)).toBe(`./icons/${icon}`);
+  });
+});
+
 describe("JavaScript project icons", () => {
   test.each([
     ["app.js", "javaScript_dark.svg"],

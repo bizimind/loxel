@@ -5,7 +5,7 @@
 #   review-cost.sh --stats   print stats from the cache only (fast, no log downloads)
 #
 # Review logs expire after a few days, so each run's "review-metrics" line (its cost and its first
-# and last rate-limit snapshot) is cached once in $cache. A run's own snapshots also count every review running alongside it, so runs whose
+# and last weekly rate-limit snapshot) is cached once in $cache. A run's own snapshots also count every review running alongside it, so runs whose
 # time spans overlap are grouped and each group's usage is split across its runs. Local sessions on
 # the same subscription still move the windows, so the result is an upper bound.
 set -euo pipefail
@@ -20,18 +20,17 @@ stats() {
     def summary: {median: pct(0.5), p95: pct(0.95)};
     def share(w): if all(w != null) and (map(w.reset) | unique | length) == 1
       then ((map(w.end) | max) - (map(w.start) | min)) / length * 10 | round / 10 else null end;
-    (map(select(.v == 2 and (.skip | not) and .costUsd != null and .h5 != null))
+    (map(select(.v == 2 and (.skip | not) and .costUsd != null and .d7 != null))
      | sort_by(.createdAt) | .[-40:]) as $runs
     | (reduce $runs[] as $r ([];
-        if length > 0 and $r.createdAt < .[-1].end and $r.h5.reset == .[-1].runs[0].h5.reset
+        if length > 0 and $r.createdAt < .[-1].end and $r.d7.reset == .[-1].runs[0].d7.reset
         then .[-1].runs += [$r] | .[-1].end = ([.[-1].end, $r.updatedAt] | max)
         else . + [{runs: [$r], end: $r.updatedAt}] end)) as $groups
     # One entry per run, holding its share of its group.
-    | [$groups[] | .runs | {h5: share(.h5), d7: share(.d7)} as $s | range(length) | $s] as $shares
+    | [$groups[] | .runs | {d7: share(.d7)} as $s | range(length) | $s] as $shares
     | {
         runs: ($runs | length),
         groups: ($groups | length),
-        fiveHour: ($shares | map(.h5 | select(. != null)) | summary),
         sevenDay: ($shares | map(.d7 | select(. != null)) | summary),
         costUsd: ($runs | map(.costUsd) | summary),
         minutes: ($runs | map(.minutes | select(. != null)) | summary)
@@ -67,14 +66,14 @@ for id in $(jq -r --argjson n "$count" \
   fi
   # Each review run prints one "review-metrics <json>" line with its cost and window usage.
   metrics="$(sed -E 's/^.?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z ?//' "$cache.log" | grep -m1 '^review-metrics ' | cut -d' ' -f2- || true)"
-  if [[ -z "$metrics" || "$(jq -r '.h5 // empty' <<<"$metrics")" == "" ]]; then
+  if [[ -z "$metrics" || "$(jq -r '.d7 // empty' <<<"$metrics")" == "" ]]; then
     skip
     continue
   fi
   jq -c --argjson id "$id" --argjson runs "$runs_json" '
     ($runs | map(select(.databaseId == $id)) | first) as $run
     | {run: $id, v: 2, createdAt: $run.createdAt, updatedAt: $run.updatedAt,
-       h5, d7, costUsd, minutes}' <<<"$metrics" >>"$cache"
+       d7, costUsd, minutes}' <<<"$metrics" >>"$cache"
 done
 
 stats

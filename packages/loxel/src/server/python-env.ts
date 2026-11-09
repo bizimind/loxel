@@ -1,5 +1,5 @@
-import { readdirSync, statSync, watch, type FSWatcher } from "node:fs";
-import { access, constants } from "node:fs/promises";
+import { readdirSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
+import { access, constants, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -7,9 +7,11 @@ import type { PythonEnv, PythonEnvSource } from "@/api/python-env-model";
 import { isDirectory } from "@/fs-utils";
 
 import { logger } from "./logger";
+import { isInside } from "./path-containment";
 import { getPythonOverride } from "./python-override-store";
+import { isRepoTrusted, onRepoTrustChange, reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
-import { isEnvShippedByRepo, isInside, isShippedByRepo, runGit } from "./shipped-by-repo";
+import { isEnvShippedByRepo, isShippedByRepo, runGit } from "./shipped-by-repo";
 import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");
@@ -51,6 +53,9 @@ const PIPENV = {
 } as const;
 const ENV_TOOLS = [POETRY, PIPENV] as const;
 type EnvTool = (typeof ENV_TOOLS)[number];
+/** Exported for tests. */
+export const ENV_TOOL_REPO_TRUST_RESTRICTION =
+  "Poetry and Pipenv aren't asked where this project's Python environment is.";
 const ENV_TOOL_TIMEOUT_MS = 10_000;
 /** Quiet period after the last filesystem event before re-resolving (installers write in bursts). */
 const WATCH_DEBOUNCE_MS = 1000;
@@ -102,10 +107,20 @@ interface WorktreePythonEnv {
   withdrawn: boolean;
   /** The override the latest resolution started with. */
   overridePath: string | null;
+  /** The repository trust the latest resolution started with, which decides what it may run. */
+  trusted: boolean;
   watch: PythonEnvWatch | null;
 }
 
 const worktreeEnvs = new Map<string, WorktreePythonEnv>();
+let unsubscribeRepoTrust: (() => void) | null = null;
+
+/** Re-resolve each worktree whose repository's trust changed since its latest resolution. */
+function followRepoTrust(): void {
+  for (const [wtPath, entry] of worktreeEnvs) {
+    if (entry.resolution && isRepoTrusted(wtPath) !== entry.trusted) startResolution(wtPath, entry);
+  }
+}
 
 /**
  * Keep the worktree's resolution memoized and watched while subscribed, and call `listener` after
@@ -129,9 +144,11 @@ export function subscribePythonEnv(
       pending: false,
       withdrawn: false,
       overridePath: null,
+      trusted: false,
       watch: null,
     };
     worktreeEnvs.set(wtPath, entry);
+    unsubscribeRepoTrust ??= onRepoTrustChange(followRepoTrust);
   }
   const subscribed = entry;
   subscribed.listeners.add(listener);
@@ -140,6 +157,9 @@ export function subscribePythonEnv(
     if (subscribed.listeners.size > 0 || worktreeEnvs.get(wtPath) !== subscribed) return;
     subscribed.watch?.close();
     worktreeEnvs.delete(wtPath);
+    if (worktreeEnvs.size > 0) return;
+    unsubscribeRepoTrust?.();
+    unsubscribeRepoTrust = null;
   };
 }
 
@@ -205,7 +225,7 @@ export function refreshAllPythonEnvs(changedNames?: Iterable<string>): void {
  */
 async function revalidate(wtPath: string, entry: WorktreePythonEnv): Promise<void> {
   if (!entry.resolution || worktreeEnvs.get(wtPath) !== entry) return;
-  if (getPythonOverride(wtPath) !== entry.overridePath) {
+  if (getPythonOverride(wtPath) !== entry.overridePath || isRepoTrusted(wtPath) !== entry.trusted) {
     startResolution(wtPath, entry);
     return;
   }
@@ -230,6 +250,7 @@ function startResolution(wtPath: string, entry: WorktreePythonEnv): Promise<Pyth
   const resolution = detailed.then(({ env: resolved }) => resolved);
   entry.resolution = resolution;
   entry.overridePath = overridePath;
+  entry.trusted = isRepoTrusted(wtPath);
   entry.pending = true;
   void detailed.then(({ env: resolved, projectDirs }) => {
     if (worktreeEnvs.get(wtPath) !== entry || entry.resolution !== resolution) return;
@@ -670,12 +691,18 @@ async function systemPython(wtPath: string, env: SpawnEnv): Promise<PythonEnv | 
 
 /**
  * The environment a project tool (Poetry, Pipenv) keeps for the worktree, asked only when the
- * tool's lock file exists at the root and the tool is on PATH, since it is a process spawn.
+ * tool's lock file exists at the root and the tool is on PATH, since it is a process spawn, and
+ * only in a trusted repository: run in the worktree, the tool reads the project's own settings,
+ * which can name code for it to load.
  */
 async function toolEnv(wtPath: string, env: SpawnEnv, tool: EnvTool): Promise<PythonEnv | null> {
   if (!(await Bun.file(path.join(wtPath, tool.lockFile)).exists())) return null;
   const executable = Bun.which(tool.command, { PATH: env.PATH ?? "" });
   if (!executable) return null;
+  if (!isRepoTrusted(wtPath)) {
+    reportRepoRestriction(wtPath, ENV_TOOL_REPO_TRUST_RESTRICTION);
+    return null;
+  }
 
   // Both report an activated environment as the project's own, so hide the one Loxel was
   // launched with.
@@ -765,8 +792,29 @@ async function isInterpreterShippedByRepo(wtPath: string, pythonPath: string): P
 // ---------------------------------------------------------------------------
 // Layout helpers
 
+/**
+ * What of the environment `env` may run in an untrusted repository: the interpreter file
+ * `env.pythonPath` resolves to, when it lies outside both the worktree and the environment, so it
+ * is the Python the environment was created from rather than anything installed into it. It runs
+ * by its real path, which no environment's `pyvenv.cfg` sits next to, so the environment's
+ * packages and their startup hooks stay out of it. Null when it lies inside either.
+ */
+export async function untrustedInterpreter(
+  env: Pick<PythonEnv, "pythonPath" | "envPath">,
+  wtPath: string,
+): Promise<string | null> {
+  const real = await realpath(env.pythonPath).catch(() => null);
+  if (!real) return null;
+  const realOf = (dir: string) => realpath(dir).catch(() => path.resolve(dir));
+  const containers = [wtPath, ...(env.envPath ? [env.envPath] : [])];
+  for (const dir of containers) {
+    if (isInside(real, dir) || isInside(real, await realOf(dir))) return null;
+  }
+  return real;
+}
+
 /** The environment directory an interpreter belongs to, if it is a venv or conda environment. */
-async function envPrefixOf(pythonPath: string): Promise<string | null> {
+export async function envPrefixOf(pythonPath: string): Promise<string | null> {
   const binDir = path.dirname(pythonPath);
   for (const prefix of [path.dirname(binDir), binDir]) {
     if (await Bun.file(path.join(prefix, "pyvenv.cfg")).exists()) return prefix;
@@ -786,6 +834,50 @@ function interpreterRelativePaths(): string[] {
 
 function interpreterDirNames(): string[] {
   return IS_WINDOWS ? ["Scripts", "python.exe"] : ["bin"];
+}
+
+/** `.pth` files past this size are not read, as basedpyright does. */
+const MAX_PTH_FILE_BYTES = 64 * 1024;
+
+/**
+ * Where the environment at `envPath` has packages to import from, read as files rather than by
+ * running it: its `site-packages` directories and the existing directories their `.pth` files
+ * list (editable installs). A `.pth` line starting with `import` is code, which is never run.
+ */
+export function environmentImportPaths(envPath: string): string[] {
+  const paths: string[] = [];
+  for (const sitePackages of sitePackagesDirs(envPath)) {
+    paths.push(sitePackages);
+    let names: string[] = [];
+    try {
+      names = readdirSync(sitePackages).filter((name) => name.endsWith(".pth"));
+    } catch {
+      continue;
+    }
+    for (const name of names.toSorted()) {
+      paths.push(...pthDirs(sitePackages, path.join(sitePackages, name)));
+    }
+  }
+  return [...new Set(paths)];
+}
+
+/** The directories a `.pth` file lists, relative ones from `sitePackages`, that exist. */
+function pthDirs(sitePackages: string, pthFile: string): string[] {
+  try {
+    const info = statSync(pthFile);
+    if (!info.isFile() || info.size > MAX_PTH_FILE_BYTES) return [];
+    return (
+      readFileSync(pthFile, "utf8")
+        .split(/\r?\n/)
+        // CPython strips only the end of a line.
+        .map((line) => line.trimEnd())
+        .filter((line) => line && !line.startsWith("#") && !/^import[\s\t]/.test(line))
+        .map((line) => path.resolve(sitePackages, line))
+        .filter(isDirectory)
+    );
+  } catch {
+    return [];
+  }
 }
 
 function sitePackagesDirs(envPath: string): string[] {
@@ -809,15 +901,4 @@ async function isExecutable(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * `PATH` without the worktree's own directories, for processes that look up `python` themselves
- * (basedpyright, when no interpreter was resolved), so they cannot pick up one the repository ships.
- */
-export function pathOutsideWorktree(PATH: string, wtPath: string): string {
-  const root = path.resolve(wtPath);
-  return PATH.split(path.delimiter)
-    .filter((dir) => dir && !isInside(path.resolve(root, dir), root))
-    .join(path.delimiter);
 }

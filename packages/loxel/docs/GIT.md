@@ -45,7 +45,7 @@ Not every Git call lives here. Project setup (`init`, `clone`) is in `routes.ts`
 
 All read paths run with `readOnlyGitEnv()`: a copy of `process.env` (a spawn's `env` replaces rather than merges the environment, so `PATH`/`HOME` must be copied) plus `GIT_OPTIONAL_LOCKS=0`. Without it, `git status` refreshes the index and writes `index.lock` on every call, which the Git-directory watcher reports as a status change, which runs another status: a feedback loop. Mutating commands in `operations.ts` and `staging.ts` deliberately do not use it. The working-tree diff's untracked half goes further and writes its intent-to-add entries to a throwaway index and object directory in a temp dir; see [WATCHERS.md](WATCHERS.md#git-directory-events) for why nothing a read path runs may touch `objects/`.
 
-Loxel never passes `-c core.fsmonitor=true`. Because `GIT_OPTIONAL_LOCKS=0` prevents Git from saving the fsmonitor token, forcing it gains nothing and leaves a daemon per Git directory (submodules included). Whether fsmonitor runs is the user's Git configuration; the full rationale is in [WATCHERS.md](WATCHERS.md#external-processes).
+`readOnlyGitEnv(cwd)` also sets `core.fsmonitor=false` unless the repository is trusted, where it is the user's Git configuration; Loxel never passes `core.fsmonitor=true`. See [WATCHERS.md](WATCHERS.md#external-processes).
 
 ### Parsers
 
@@ -110,7 +110,7 @@ Every `DiffInfo` carries `baseRef`: the old side as a full SHA, or null (root co
 
 The Changes panel ([FileTreePanel.tsx](../src/components/panels/FileTreePanel.tsx)) renders `useDiffQuery(diffSource)`. Its default "against HEAD" tree is therefore the working-tree diff of the active worktree against its own `HEAD`: staged, unstaged and untracked changes merged into one list, built client-side into a compacted tree from each `FileDiff` path by `buildDiffFileTree` in [diff-file-tree.ts](../src/lib/diff-file-tree.ts). Discard is offered only for this case (`uncommitted` with no `base`) and calls `revertToHead`, which classifies each requested path by Git's own status and then runs `git restore --source=HEAD --staged --worktree` for tracked paths and `git clean` for untracked ones, with literal pathspecs. Both sides of a rename are reverted.
 
-The file the diff viewer shows is `selectedDiffFile` in [worktree-ui.ts](../src/store/worktree-ui.ts), shared by the Changes panel and the diff viewer through [useDiffFileSelection](../src/hooks/useDiffFileSelection.ts). Both read the files in Changes tree order (`orderDiffFiles`, a depth-first walk of `buildDiffFileTree`) rather than Git's order, which lists untracked files last. The diff viewer's previous/next file and its "File N of M" counter follow that order, and when the selection is empty or no longer in the diff, the first file in that order is selected. In the Changes panel only a click on a file row (`FilesTree`'s `onFileClick`) and `onOpen` (Enter, double-click, the context menu's Open Diff) change the selection; moving keyboard focus does not. `revealActivePath` makes the tree expand and scroll to a selection made from the diff viewer (see [FILES_TREE.md](FILES_TREE.md#focus-selection-and-active-rows)).
+The file the diff viewer shows is `selectedDiffFile` in [worktree-ui.ts](../src/store/worktree-ui.ts), shared by the Changes panel and the diff viewer through [useDiffFileSelection](../src/hooks/useDiffFileSelection.ts). Both read the files in Changes tree order (`orderDiffFiles`, a depth-first walk of `buildDiffFileTree`) rather than Git's order, which lists untracked files last. The diff viewer's previous/next file and its "File N of M" counter follow that order, and when the selection is empty or no longer in the diff, the first file in that order is selected, unless it is the file being edited in the diff viewer (`editedDiffFile`, see [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md#components-and-data-sources)). In the Changes panel only a click on a file row (`FilesTree`'s `onFileClick`) and `onOpen` (Enter, double-click, the context menu's Open Diff) change the selection; moving keyboard focus does not. `revealActivePath` makes the tree expand and scroll to a selection made from the diff viewer (see [FILES_TREE.md](FILES_TREE.md#focus-selection-and-active-rows)).
 
 ### Highlighting
 
@@ -118,7 +118,7 @@ The file the diff viewer shows is `selectedDiffFile` in [worktree-ui.ts](../src/
 
 ### Collapsed regions
 
-[useCollapsedRegions](../src/hooks/useCollapsedRegions.ts) holds the expanded set of unchanged regions for one file in the side-by-side view, computed by `buildCollapsibleRegions`/`computeHiddenRanges` in [unchanged-regions.ts](../src/components/diff/unchanged-regions.ts), and resets it when the hunks array changes identity (compare panels keep expanded regions instead). Rendering and scroll alignment are in [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md).
+[useCollapsedRegions](../src/hooks/useCollapsedRegions.ts) holds the expanded set of unchanged regions for one file in the side-by-side view, computed by `buildCollapsibleRegions`/`computeHiddenRanges` in [unchanged-regions.ts](../src/components/diff/unchanged-regions.ts), and resets it when the hunks array changes identity (views with an editable side, compare panels and the working-tree side of an uncommitted diff, keep expanded regions instead). Rendering and scroll alignment are in [DIFF_VIEW_SPEC.md](DIFF_VIEW_SPEC.md).
 
 ## Commit graph
 
@@ -147,7 +147,7 @@ There is no staging or commit UI.
 
 ## Invariants
 
-- **Read paths never write under the Git directory.** Use `readOnlyGitEnv()` for every read-only command and never add `-c core.fsmonitor`; see the checklist in [WATCHERS.md](WATCHERS.md#review-checklist).
+- **Read paths never write under the Git directory.** Use `readOnlyGitEnv(cwd)` for every read-only command; see the checklist in [WATCHERS.md](WATCHERS.md#review-checklist).
 - **Do not run Git in a worktree being removed.** The remove route suspends the worktree's watchers first; while suspended, `requestStatusRefresh`, `publishWorktreeStatus` and `liveWorktreeStatus` in [server.ts](../src/server/server.ts) skip it, so no status pass runs there. Tracker sweeps skip it as well. Removal itself is covered in [WATCHERS.md](WATCHERS.md#worktree-lifecycle) and [PROJECTS_AND_WORKTREES.md](PROJECTS_AND_WORKTREES.md).
 - **`index.lock`.** One server runs every Git command, so windows do not contend with each other ([SHARED_SERVER.md](SHARED_SERVER.md)). Reads take no optional locks. A mutation racing another Git process (a terminal or an agent) can fail on `index.lock`; the route returns the error as a 500.
 - **Error messages.** A failed Git command's error includes Git's stderr, so the client can show why it failed.

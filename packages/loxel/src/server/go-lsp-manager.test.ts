@@ -1,20 +1,22 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
-import { LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
+import { LSP_RESTART_CLOSE_CODE, LSP_START_FAILED_CLOSE_CODE } from "@/api/ws-protocol";
+import { repeatUntil } from "@/test/repeat-until";
 
+import { GO_ENV, refreshGoEnv, subscribeGoEnv } from "./go-env";
 import {
   GO_NOT_FOUND_REASON,
   GoLspManager,
   GOPLS_SETTINGS,
-  GO_ENV,
   goSetupProblem,
   withoutHiddenActions,
 } from "./go-lsp-manager";
+import { setGoChoice } from "./go-toolchain-store";
 
 const roots: string[] = [];
 let manager: GoLspManager | undefined;
@@ -62,6 +64,7 @@ process.stdin.on("data", (chunk) => {
         id: msg.id,
         result: {
           args: process.argv.slice(2),
+          self: process.argv[1],
           path: process.env.PATH,
           goEnv: [process.env.GOPROXY, process.env.GOTOOLCHAIN, process.env.GOSUMDB, process.env.GONOPROXY],
           clientConfiguration: msg.params.capabilities.workspace.configuration,
@@ -97,10 +100,17 @@ process.stdin.on("data", (chunk) => {
 });
 `;
 
-/** Limit the PATH the manager sees to `dirs`: the spawn PATH adds `~/.local/bin` under `HOME`. */
-async function usePath(...dirs: string[]): Promise<void> {
+const GIT = Bun.which("git");
+
+/**
+ * Limit the PATH the manager sees to `dirs`, and `git`, which the trust check runs, alone in a
+ * directory so no `go` comes with it. The spawn PATH adds `~/.local/bin` under `HOME`.
+ */
+async function restrictPath(...dirs: string[]): Promise<void> {
   process.env.HOME = await makeDir("go-home-");
-  process.env.PATH = dirs.join(delimiter);
+  const gitDir = await makeDir("go-git-");
+  await symlink(GIT ?? "git", join(gitDir, "git"));
+  process.env.PATH = [...dirs, gitDir].join(delimiter);
 }
 
 /** Runs a gopls stand-in instead of the bundled binary. */
@@ -110,6 +120,9 @@ class TestGoLspManager extends GoLspManager {
   }
   protected override resolveBundledBinary(): string {
     return this.gopls;
+  }
+  override stopsProcessTree(): boolean {
+    return super.stopsProcessTree();
   }
 }
 
@@ -144,6 +157,7 @@ function fakeSocket() {
   return {
     ws,
     frames,
+    closedWith: () => close,
     untilClosed: () => until(() => close),
     untilFrame: (match: (frame: Record<string, unknown>) => boolean) =>
       until(() => frames.find(match)),
@@ -163,7 +177,7 @@ describe("GoLspManager", () => {
     const bin = await makeDir("go-bin-");
     const gopls = join(await makeDir("gopls-"), "gopls");
     await writeExecutable(gopls, FAKE_GOPLS);
-    await usePath(bin);
+    await restrictPath(bin);
     manager = new TestGoLspManager(gopls);
 
     if (Bun.which("go", { PATH: process.env.PATH }))
@@ -184,6 +198,11 @@ describe("GoLspManager", () => {
     await found.untilFrame((frame) => frame.id === 1);
   });
 
+  test("ends what gopls has running when it stops", () => {
+    // The base ends a server's process tree for a manager that opts in; this shows Go does.
+    expect(new TestGoLspManager("gopls").stopsProcessTree()).toBe(true);
+  });
+
   test("does not count a go inside the worktree, and keeps the worktree off gopls's PATH", async () => {
     const wt = await makeDir("go-wt-");
     const wtBin = join(wt, "bin");
@@ -192,7 +211,7 @@ describe("GoLspManager", () => {
     const bin = await makeDir("go-bin-");
     const gopls = join(await makeDir("gopls-"), "gopls");
     await writeExecutable(gopls, FAKE_GOPLS);
-    await usePath(wtBin, bin);
+    await restrictPath(wtBin, bin);
     manager = new TestGoLspManager(gopls);
 
     const missing = fakeSocket();
@@ -219,13 +238,30 @@ describe("GoLspManager", () => {
     expect(result.path.split(delimiter)).not.toContain(wtBin);
   });
 
+  test("does not run a gopls in the worktree when nothing is bundled", async () => {
+    const wt = await makeDir("go-wt-");
+    const wtBin = join(wt, "bin");
+    await mkdir(wtBin);
+    const gopls = join(wtBin, "gopls");
+    await writeExecutable(gopls, FAKE_GOPLS);
+    const bin = await makeDir("go-bin-");
+    await writeExecutable(join(bin, "go"), "#!/bin/sh\n");
+    await restrictPath(wtBin, bin);
+    // What resolveBundledBinary falls back to: the first on the plain PATH.
+    manager = new TestGoLspManager(gopls);
+
+    const client = fakeSocket();
+    manager.createSession(client.ws, wt);
+    expect((await client.untilClosed()).code).toBe(LSP_START_FAILED_CLOSE_CODE);
+  });
+
   test("answers the gopls section with its settings and any other with an empty object", async () => {
     const wt = await makeDir("go-wt-");
     const bin = await makeDir("go-bin-");
     await writeExecutable(join(bin, "go"), "#!/bin/sh\n");
     const gopls = join(await makeDir("gopls-"), "gopls");
     await writeExecutable(gopls, FAKE_GOPLS);
-    await usePath(bin);
+    await restrictPath(bin);
     manager = new TestGoLspManager(gopls);
 
     const client = fakeSocket();
@@ -249,7 +285,7 @@ test("tells the client about a setup problem once per session", async () => {
   await writeExecutable(join(bin, "go"), "#!/bin/sh\n");
   const gopls = join(await makeDir("gopls-"), "gopls");
   await writeExecutable(gopls, FAKE_GOPLS);
-  await usePath(bin);
+  await restrictPath(bin);
   manager = new TestGoLspManager(gopls);
 
   const client = fakeSocket();
@@ -263,6 +299,176 @@ test("tells the client about a setup problem once per session", async () => {
   // The stand-in repeats the diagnostics after the first warning: only that one reaches the client.
   await client.untilFrame((frame) => frame.method === "test/repeated");
   expect(client.frames.filter((frame) => frame.method === "window/showMessage")).toHaveLength(1);
+});
+
+/** Stands in for `go`, reporting `version`. */
+const fakeGo = (version: string) => `#!/bin/sh
+echo '{"GOVERSION":"go${version}"}'
+`;
+
+describe("following the toolchain", () => {
+  const TIMEOUT_MS = 30_000;
+
+  async function startSession() {
+    const wt = await makeDir("go-wt-");
+    const bin = await makeDir("go-bin-");
+    await writeExecutable(join(bin, "go"), fakeGo("1.27.3"));
+    const gopls = join(await makeDir("gopls-"), "gopls");
+    await writeExecutable(gopls, FAKE_GOPLS);
+    await restrictPath(bin);
+    manager = new TestGoLspManager(gopls);
+    const client = fakeSocket();
+    manager.createSession(client.ws, wt);
+    manager.handleMessage(client.ws, INITIALIZE);
+    await client.untilFrame((frame) => frame.id === 1);
+    return { wt, bin, client };
+  }
+
+  test(
+    "restarts gopls when the version of go changes",
+    async () => {
+      const { bin, client } = await startSession();
+      const { code } = await repeatUntil(client.untilClosed(), () =>
+        writeExecutable(join(bin, "go"), fakeGo("1.28.1")),
+      );
+      expect(code).toBe(LSP_RESTART_CLOSE_CODE);
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "restarts gopls when a Go is chosen for the worktree, and runs it first on PATH",
+    async () => {
+      const { wt, client } = await startSession();
+      const root = await makeDir("go-chosen-");
+      await mkdir(join(root, "bin"));
+      await writeExecutable(join(root, "bin", "go"), fakeGo("1.28.1"));
+      setGoChoice(wt, join(root, "bin", "go"));
+      refreshGoEnv(wt);
+      const { code } = await client.untilClosed();
+      expect(code).toBe(LSP_RESTART_CLOSE_CODE);
+      manager?.destroySession(client.ws);
+
+      const next = fakeSocket();
+      manager?.createSession(next.ws, wt);
+      manager?.handleMessage(next.ws, INITIALIZE);
+      const frame = await next.untilFrame((candidate) => candidate.id === 1);
+      expect(JSON.stringify(frame)).toContain(join(root, "bin"));
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "restarts gopls when the user's own appears on the PATH, or is reinstalled",
+    async () => {
+      const { wt, bin, client } = await startSession();
+      await writeExecutable(join(bin, "gopls"), FAKE_GOPLS);
+      const { code } = await repeatUntil(client.untilClosed(), () =>
+        writeExecutable(join(bin, "gopls"), FAKE_GOPLS),
+      );
+      expect(code).toBe(LSP_RESTART_CLOSE_CODE);
+      manager?.destroySession(client.ws);
+
+      const next = fakeSocket();
+      manager?.createSession(next.ws, wt);
+      manager?.handleMessage(next.ws, INITIALIZE);
+      await next.untilFrame((frame) => frame.id === 1);
+      const { code: reinstalled } = await repeatUntil(next.untilClosed(), async () => {
+        await rm(join(bin, "gopls"));
+        await writeExecutable(join(bin, "gopls"), FAKE_GOPLS);
+      });
+      expect(reinstalled).toBe(LSP_RESTART_CLOSE_CODE);
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "restarts gopls when its go is refused, since gopls would find that one",
+    async () => {
+      const { wt, bin, client } = await startSession();
+      await writeExecutable(join(wt, "go"), fakeGo("1.28.1"));
+      const { code } = await repeatUntil(client.untilClosed(), async () => {
+        await rm(join(bin, "go"), { force: true });
+        await symlink(join(wt, "go"), join(bin, "go"));
+      });
+      expect(code).toBe(LSP_RESTART_CLOSE_CODE);
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "keeps gopls running while go is gone, and restarts it for the go that comes back",
+    async () => {
+      const { wt, bin, client } = await startSession();
+      const gone = new Promise<void>((resolve) => {
+        const unsubscribe = subscribeGoEnv(wt, ({ env }) => {
+          if (env) return;
+          unsubscribe();
+          resolve();
+        });
+      });
+      await repeatUntil(gone, () => rm(join(bin, "go"), { force: true }));
+      expect(client.closedWith()).toBeUndefined();
+      const { code } = await repeatUntil(client.untilClosed(), () =>
+        writeExecutable(join(bin, "go"), fakeGo("1.28.1")),
+      );
+      expect(code).toBe(LSP_RESTART_CLOSE_CODE);
+    },
+    TIMEOUT_MS,
+  );
+});
+
+describe("which gopls runs", () => {
+  async function runningGopls(prepare: (wt: string, bin: string) => Promise<void>) {
+    const wt = await makeDir("go-wt-");
+    const bin = await makeDir("go-bin-");
+    await writeExecutable(join(bin, "go"), fakeGo("1.27.3"));
+    const bundled = join(await makeDir("bundled-"), "gopls");
+    await writeExecutable(bundled, FAKE_GOPLS);
+    await restrictPath(bin);
+    await prepare(wt, bin);
+    manager = new TestGoLspManager(bundled);
+    const client = fakeSocket();
+    manager.createSession(client.ws, wt);
+    manager.handleMessage(client.ws, INITIALIZE);
+    const { result } = (await client.untilFrame((frame) => frame.id === 1)) as {
+      result: { self: string };
+    };
+    return { self: result.self, bin, bundled };
+  }
+
+  test("the bundled one when the user has none", async () => {
+    const { self, bundled } = await runningGopls(async () => {});
+    expect(self).toBe(bundled);
+  });
+
+  test("the user's, without asking its version", async () => {
+    const { self, bin } = await runningGopls(async (_wt, dir) => {
+      await writeExecutable(join(dir, "gopls"), FAKE_GOPLS);
+    });
+    expect(self).toBe(join(bin, "gopls"));
+  });
+
+  test("the bundled one over a gopls in the worktree, however it is reached", async () => {
+    const { self, bundled } = await runningGopls(async (wt, dir) => {
+      await writeExecutable(join(wt, "gopls"), FAKE_GOPLS);
+      await symlink(join(wt, "gopls"), join(dir, "gopls"));
+    });
+    expect(self).toBe(bundled);
+  });
+
+  test("the bundled one over a version manager's shim, which does not run", async () => {
+    const log = join(await makeDir("gopls-log-"), "runs");
+    await writeFile(log, "");
+    const { self, bundled } = await runningGopls(async (_wt, dir) => {
+      const shims = join(dir, "shims");
+      await mkdir(shims);
+      await writeExecutable(join(shims, "gopls"), `#!/bin/sh\necho run >> "${log}"\n`);
+      await restrictPath(shims, dir);
+    });
+    expect(self).toBe(bundled);
+    expect(await Bun.file(log).text()).toBe("");
+  });
 });
 
 describe("goSetupProblem", () => {
@@ -286,7 +492,7 @@ describe("goSetupProblem", () => {
     ]) {
       const problem = goSetupProblem(frame);
       expect(problem?.kind).toBe("newer-go");
-      expect(problem?.message).toContain("needs Go 1.27.3, and the Go on your PATH is 1.26.10");
+      expect(problem?.message).toContain("needs Go 1.27.3, and the Go in use is 1.26.10");
     }
   });
 

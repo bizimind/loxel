@@ -18,7 +18,7 @@ To rename a terminal, double-click its tab title, right-click the tab and choose
 
 ## Session persistence
 
-Terminal sessions survive context switches. When you switch to another worktree — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included.
+Terminal sessions survive context switches. When you switch to another worktree — or navigate away to a different panel — the shell and the programs in it keep running. Come back and the session is exactly where you left it, scrollback included. A terminal ends when you close it, when its [worktree is removed](/docs/worktrees-and-projects), or when you quit Loxel. With every window closed and Loxel still running, terminals keep running for 5 minutes, so they are back when you open a window again.
 
 Scrollback defaults to **50,000 lines**. Adjust it in **Settings > Terminal** — the valid range is 1,000 to 100,000 lines. Scrollback is kept by the Loxel server for every open terminal, visible or not, so with many long-running, chatty terminals a lower setting saves memory: a 200-column terminal that has filled all 50,000 lines can hold around 120 MB.
 
@@ -44,11 +44,27 @@ Terminal programs can raise Loxel notifications with the OSC 9 (iTerm2), OSC 777
 
 ## Python environments
 
-When a worktree has a Python environment, new terminals in it start with that environment active, much like after `source .venv/bin/activate`: its `python`, `pip` and installed tools come first on `PATH`, and in zsh `VIRTUAL_ENV` is set (your prompt and the `deactivate` command are not changed). Loxel finds the environment the same way as for the [Python language server](/docs/languages/python#python-environment), for example a `.venv` that `uv sync` created or the interpreter you chose for the worktree, and never activates an environment that is committed to the repository; a `venv` setting in `pyrightconfig.json` applies to the type checker only. Terminals opened before the environment existed keep running without it; open a new terminal to get it.
+When a worktree has a Python environment and you [trust the repository](/docs/repository-trust), new terminals in it start with that environment active, much like after `source .venv/bin/activate`: its `python`, `pip` and installed tools come first on `PATH`, and in zsh `VIRTUAL_ENV` is set (your prompt and the `deactivate` command are not changed). Loxel finds the environment the same way as for the [Python language server](/docs/languages/python#python-environment), for example a `.venv` that `uv sync` created or the interpreter you chose for the worktree, and never activates an environment that is committed to the repository; a `venv` setting in `pyrightconfig.json` applies to the type checker only. Terminals opened before the environment existed keep running without it; open a new terminal to get it.
 
 If your shell setup activates a virtual environment itself (direnv, mise, or your own startup files), that one wins. In zsh, the macOS default, the environment stays first on `PATH` even after your startup files rearrange `PATH`. In other shells it is still on `PATH`, but startup files that rebuild `PATH`, as macOS does for login shells, can put system directories ahead of it, so Loxel does not set `VIRTUAL_ENV` there; run the environment's `activate` script (for example `source .venv/bin/activate.fish`) to activate it fully.
 
 To start terminals without it, turn off **Activate Python Environment** in **Settings > Terminal**.
+
+---
+
+## Node version
+
+When a worktree pins a [Node version](/docs/languages/javascript#node-version), or you chose an installed one for it, new terminals in it start with that version's `node`, `npm` and `npx` first on `PATH`. If Loxel is using the `node` on your `PATH`, found or chosen, nothing changes. Loxel never adds `node_modules/.bin`, and never uses a version committed to the repository. Terminals already open keep what they started with; open a new terminal after changing the pin or your choice.
+
+Your shell's startup runs after that, so it can still change which `node` you get. A version manager's hook in your startup files (nvm, fnm) switches `node` as it normally would, and startup files that rebuild `PATH`, as macOS does for login shells, can put system directories ahead of the worktree's version, including Homebrew's. If `node --version` differs from the status bar, run `which node` to see which one won, and `nvm use` or your version manager's equivalent to switch.
+
+---
+
+## Java JDK
+
+When you [choose a JDK](/docs/languages/java#seeing-and-changing-the-jdk) for a worktree, new terminals in it start with `JAVA_HOME` set to that JDK and its `bin` first on `PATH`. Without a choice nothing changes, even when Loxel's Java features detected a JDK: your terminal keeps your own `JAVA_HOME` and `java`. A JDK inside the worktree reaches terminals only once you [trust the repository](/docs/repository-trust), and one committed to it never does. Terminals already open keep what they started with; open a new terminal after changing your choice.
+
+Your shell's startup runs after that, so it can still change what you get. A `JAVA_HOME` exported in your startup files, for example `~/.zshenv`, or set by a version manager, replaces the chosen one. If `echo $JAVA_HOME` differs from the status bar, look there first. On macOS, a login shell's startup also moves system directories ahead of the JDK's `bin`, so `which java` prints `/usr/bin/java`. That launcher follows `JAVA_HOME`, so `java` still runs the chosen JDK, as long as `JAVA_HOME` holds.
 
 ---
 
@@ -101,7 +117,7 @@ loxel terminal --cwd ../other-worktree -- claude  # start an agent in another wo
 loxel terminal --split right -- pnpm dev          # in a new split beside the active tab
 ```
 
-The same `--split`, `--replace` and `--group` layout flags work for files and URLs too. When a coding agent runs `loxel`, it opens things in the background instead: no worktree switch and no stolen cursor, unless the agent passes `--focus` (see [Focus](/docs/reference-env-files-cli-settings#loxel-cli)).
+The same `--split`, `--replace`, `--group` and `--worktree` flags work for files and URLs too. When a coding agent runs `loxel`, it opens things in the background instead: no worktree switch and no stolen cursor, unless the agent passes `--focus` (see [Focus](/docs/reference-env-files-cli-settings#loxel-cli)).
 
 Because the terminal already has `LOXEL_PORT` set, the CLI connects to the running Loxel immediately.
 
@@ -112,8 +128,6 @@ Because the terminal already has `LOXEL_PORT` set, the CLI connects to the runni
 ## TUI agents
 
 Any terminal-based coding agent runs normally in Loxel terminals. Claude Code, Codex, OpenCode, and Gemini CLI all work without special configuration. They inherit `LOXEL_WORKTREE`, which gives them the current worktree path as immediate context — no need to `cd` or pass a path manually. `Shift+Enter` and `Ctrl+Enter` send the modified-Enter sequences these agents use to insert a newline instead of submitting.
-
-These are distinct from Loxel's built-in coding agent, which has a dedicated timeline UI and runs outside the terminal. If you want the timeline, human interaction overlays, and structured tool calls integrated into your layout, see [Coding Agent](/docs/coding-agent). If you have an existing TUI agent workflow or want full CLI control, run it in a terminal here.
 
 ### Teach your agent about Loxel
 
@@ -138,6 +152,5 @@ For other agents, put the `skills/loxel` folder in their skills directory.
 
 ## See also
 
-- [Coding Agent](/docs/coding-agent) — the built-in agent alternative with a dedicated timeline UI and human interaction overlays
 - [Panel Layout](/docs/panel-layout) — docking, splitting, and moving terminal panels
 - [Environment Variables & Settings](/docs/reference-env-files-cli-settings) — full `loxel` CLI reference and terminal scrollback configuration

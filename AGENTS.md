@@ -24,7 +24,7 @@ The `.env` file is copied to the worktree root by the repo-root `init.wt.sh` hoo
 pnpm install                                   # Install all dependencies
 
 # Build a package (root `build` is intentionally disabled; packages with a build script:
-# cc-git-editor, code-analysis, coding-agent, excalidraw, loxel, site, whisper-cpp, wt)
+# cc-git-editor, code-analysis, excalidraw, loxel, site, whisper-cpp, wt)
 pnpm -C packages/<package> run build
 
 # Lint and format (root-level, or from any package via aliases)
@@ -74,13 +74,11 @@ Each package README is the authoritative doc for that package; this list only or
 
 - **code-analysis**: Code analysis CLI with built-in plugins (loc, languages, git-churn, lint/type issues, import graph) that prints results or serves a live treemap or graph visualization. See `packages/code-analysis/README.md`.
 
-- **coding-agent**: Programmatic coding agent runtime used by loxel's agent panel (in-process `Session` SDK, or a stdio JSON protocol CLI). See `packages/coding-agent/README.md`.
-
 #### Libraries
 
 - **channel**: WebSocket client library for peer-to-peer messaging through the channel-worker relay; owns the shared wire protocol. See `packages/channel/README.md`.
 
-- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, logging, self-update) used by wt, excalidraw, coding-agent, and code-analysis. See `packages/cli-common/README.md`.
+- **cli-common**: Shared CLI plumbing (`CommandResult`/`runAction` output modes, formatters, logging, self-update) used by wt, excalidraw, and code-analysis. See `packages/cli-common/README.md`.
 
 - **logger**: Axiom-backed structured logger with error-cause serialization and sensitive-data redaction. See `packages/logger/README.md` and the `logs` skill.
 
@@ -104,7 +102,7 @@ Each package README is the authoritative doc for that package; this list only or
 
 **Agent Detection**: Check `CLAUDECODE=1` environment variable to branch between agent (non-blocking) and human (standard) behavior.
 
-**Privacy and Licensing**: Loxel never collects data about users without consent and never requires an account. Load the `legal` skill before adding a network request, telemetry, a login, or a third-party dependency, binary or asset, or before any privacy, licensing or legal decision.
+**Privacy and Licensing**: Loxel never collects data about users without consent and does not require an account today. Load the `legal` skill before adding a network request, telemetry, a login, or a third-party dependency, binary or asset, or before any privacy, licensing or legal decision.
 
 **Standalone Binaries**: Packages compile to standalone executables via `bun build --compile`. Production binaries are built and signed in CI and placed in `~/.local/bin/`. If specifically requested to use a locally built binary, copy it to `~/.local/bin/` and ad-hoc sign with `codesign -s -` (required on macOS or the binary gets SIGKILL'd).
 
@@ -243,7 +241,7 @@ These are repository-wide standards. Existing violations are technical debt and 
 
 **Formatter**: oxfmt with 100-char print width, 2-space indentation, trailing commas, Tailwind CSS class sorting (via `cn` function), and auto-sorted imports.
 
-**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`). Configured via `"prepare": "git config core.hooksPath .githooks"` in root package.json.
+**Pre-commit hook**: The `.githooks/pre-commit` hook runs automatically on commit — it formats code (`pnpm run fmt`), re-stages formatted files, runs lint (`pnpm run lint`), and runs typecheck (`pnpm run typecheck`); any failing step stops the commit. Configured via `"prepare": "git config core.hooksPath .githooks"` in root package.json.
 
 ## Type Checking
 

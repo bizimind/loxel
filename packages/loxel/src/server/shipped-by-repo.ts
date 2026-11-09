@@ -2,16 +2,23 @@ import { existsSync, readdirSync } from "node:fs";
 import { lstat, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { isDirectory } from "@/fs-utils";
+import { findFileAbove, isDirectory } from "@/fs-utils";
 
 import { readOnlyGitEnv } from "./git-commands";
 import { logger } from "./logger";
+import { isInside } from "./path-containment";
 import { measureSpawn } from "./spawn-metrics";
 
 const log = logger.child("server");
 
-/** `runGit` exit code when git could not be started (missing binary, unusable directory). */
-const GIT_SPAWN_FAILED = -1;
+/**
+ * `runGit` exit code when git could not be started (missing binary, unusable directory), and what
+ * a repository lookup returns then or when git refuses a repository that is there.
+ */
+const GIT_FAILED = -1;
+const GIT_TIMEOUT_MS = 10_000;
+/** Git's exit code for a fatal error, such as no repository. Any other failure is no answer. */
+const GIT_FATAL_EXIT = 128;
 
 // The trust rule for what Loxel runs out of a worktree: a project-provided binary or environment
 // must not be something the repository itself ships, or opening a file would run repository code.
@@ -64,8 +71,8 @@ async function envTargets(wtPath: string, envPath: string): Promise<string[]> {
 /**
  * Whether `target` (a file or directory, or what its symlinks resolve to) is, or for a directory
  * contains, something git tracks in the worktree, including in a submodule or nested repository.
- * A path that cannot be checked (removed meanwhile, or git failing) counts as tracked, so the
- * caller moves on to its next candidate.
+ * A path that cannot be checked (removed meanwhile, git failing for the worktree or for a path
+ * inside it) counts as tracked, so the caller moves on to its next candidate.
  */
 export async function isShippedByRepo(wtPath: string, target: string): Promise<boolean> {
   try {
@@ -93,7 +100,7 @@ interface WorktreeRepo extends RepoInfo {
 }
 
 /** The worktree's own repository by worktree path, looked up once while its git dir exists. */
-const worktreeRepos = new Map<string, Promise<WorktreeRepo | null | typeof GIT_SPAWN_FAILED>>();
+const worktreeRepos = new Map<string, Promise<WorktreeRepo | null | typeof GIT_FAILED>>();
 
 /** A cached {@link isTrackedByGit} answer, valid while the indexes it read are unchanged. */
 interface TrackedAnswer {
@@ -116,8 +123,8 @@ const trackedQuestions = new Map<string, Promise<boolean>>();
  * tracked file inside counts. Git is asked about the physical path (parent directory resolved,
  * the entry itself kept, so a committed symlink still counts) wherever it is: a committed symlink
  * can reach another checkout of the same repository. Inside a git worktree, any answer other than
- * a clear "untracked" counts as tracked (fail closed); outside it, a path in no repository is
- * untracked.
+ * a clear "untracked" counts as tracked (fail closed); outside it, a path in no repository, or in
+ * one git cannot answer for, is untracked.
  *
  * Clear answers are cached per physical path until the index file of the worktree's or the
  * innermost repository changes: every commit, checkout, pull, `git add` or submodule update
@@ -125,11 +132,14 @@ const trackedQuestions = new Map<string, Promise<boolean>>();
  */
 async function isTrackedByGit(wtPath: string, filePath: string): Promise<boolean> {
   const worktreeRepo = await worktreeRepoOf(wtPath);
-  if (worktreeRepo === GIT_SPAWN_FAILED) return true;
   // Not a repository at all, so nothing in it can be committed.
   if (!worktreeRepo) return false;
 
   const physical = path.join(await realpath(path.dirname(filePath)), path.basename(filePath));
+  // A path outside the worktree needs no answer from git to say the worktree doesn't ship it.
+  if (worktreeRepo === GIT_FAILED) {
+    return isInside(physical, await realpath(wtPath).catch(() => wtPath));
+  }
   const key = `${wtPath}\0${physical}`;
   const known = trackedAnswers.get(key);
   if (known && (await stampsMatch(known.indexStamps))) return known.tracked;
@@ -154,7 +164,7 @@ async function askGit(
 ): Promise<boolean> {
   const lookupDir = (await isRealDirectory(physical)) ? physical : path.dirname(physical);
   const innermost = await repoAt(lookupDir);
-  if (innermost === GIT_SPAWN_FAILED || !innermost) {
+  if (innermost === GIT_FAILED || !innermost) {
     const tracked = isInside(physical, worktreeRepo.realWtPath);
     // Inside the worktree this is git failing (fail closed), not an answer worth keeping.
     if (!tracked) trackedAnswers.set(key, { tracked, indexStamps: worktreeStamp });
@@ -169,13 +179,11 @@ async function askGit(
   return tracked;
 }
 
-async function worktreeRepoOf(
-  wtPath: string,
-): Promise<WorktreeRepo | null | typeof GIT_SPAWN_FAILED> {
+async function worktreeRepoOf(wtPath: string): Promise<WorktreeRepo | null | typeof GIT_FAILED> {
   const cached = worktreeRepos.get(wtPath);
   if (cached) {
     const repo = await cached;
-    if (repo && repo !== GIT_SPAWN_FAILED && isDirectory(path.dirname(repo.indexFile))) return repo;
+    if (repo && repo !== GIT_FAILED && isDirectory(path.dirname(repo.indexFile))) return repo;
     // A failed or outdated lookup; the first caller to notice replaces it.
     if (worktreeRepos.get(wtPath) === cached) worktreeRepos.delete(wtPath);
   }
@@ -189,20 +197,37 @@ async function worktreeRepoOf(
 
 async function lookUpWorktreeRepo(
   wtPath: string,
-): Promise<WorktreeRepo | null | typeof GIT_SPAWN_FAILED> {
+): Promise<WorktreeRepo | null | typeof GIT_FAILED> {
   const realWtPath = await realpath(wtPath).catch(() => null);
-  if (!realWtPath) return GIT_SPAWN_FAILED;
+  if (!realWtPath) return GIT_FAILED;
   const repo = await repoAt(realWtPath);
-  return repo === GIT_SPAWN_FAILED || !repo ? repo : { ...repo, realWtPath };
+  return repo === GIT_FAILED || !repo ? repo : { ...repo, realWtPath };
 }
 
-/** The repository containing `dir`, or null when it is in none. */
-async function repoAt(dir: string): Promise<RepoInfo | null | typeof GIT_SPAWN_FAILED> {
+/**
+ * Whether git can answer for `dir`, the lookup tracked checks rely on: true in a repository it can
+ * read and outside any repository, false when it fails or refuses the repository there.
+ */
+export async function canGitReadRepo(dir: string): Promise<boolean> {
+  return (await repoAt(dir)) !== GIT_FAILED;
+}
+
+/**
+ * The repository containing `dir`, null when it is in none, or {@link GIT_FAILED}. Git exits 128
+ * both outside any repository and for one it cannot answer for (another owner, a missing `HEAD`, a
+ * pruned linked worktree, no work tree), so a `.git` on the way up tells them apart. Git killed by
+ * the timeout, or exiting any other way, has not said there is no repository.
+ */
+async function repoAt(dir: string): Promise<RepoInfo | null | typeof GIT_FAILED> {
   const result = await runGit(dir, ["rev-parse", "--show-toplevel", "--absolute-git-dir"]);
-  if (result.exitCode === GIT_SPAWN_FAILED) return GIT_SPAWN_FAILED;
+  if (result.exitCode === GIT_FAILED) return GIT_FAILED;
   const [toplevel, gitDir] = result.stdout.split("\n");
-  if (result.exitCode !== 0 || !toplevel || !gitDir) return null;
-  return { toplevel, indexFile: path.join(gitDir, "index") };
+  if (result.exitCode === 0 && toplevel && gitDir) {
+    return { toplevel, indexFile: path.join(gitDir, "index") };
+  }
+  if (result.exitCode === GIT_FATAL_EXIT && !findFileAbove(".git", dir)) return null;
+  log.debug("Git could not read the repository here", { dir });
+  return GIT_FAILED;
 }
 
 async function stampIndexes(files: string[]): Promise<Array<readonly [string, string]>> {
@@ -244,16 +269,14 @@ export async function runGit(
         stdin: "ignore",
         stdout: "pipe",
         stderr: "ignore",
+        // A stalled git would otherwise hold up its caller, a save among them. A killed one exits
+        // non-zero, which callers take as no answer.
+        timeout: GIT_TIMEOUT_MS,
       }),
     );
     const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     return { exitCode, stdout };
   } catch {
-    return { exitCode: GIT_SPAWN_FAILED, stdout: "" };
+    return { exitCode: GIT_FAILED, stdout: "" };
   }
-}
-
-export function isInside(child: string, parent: string): boolean {
-  const relative = path.relative(parent, child);
-  return !path.isAbsolute(relative) && relative.split(path.sep)[0] !== "..";
 }

@@ -3,17 +3,18 @@
  *
  * The outer dockview manages sidebar zones (left/bottom/right) and the center host.
  * This component renders a second PersistedLayoutComponent for center panels
- * (editors, terminals, agents, etc.) with their own persistence and tab management.
+ * (editors, terminals, etc.) with their own persistence and tab management.
  */
 import type { DockviewApi, IDockviewPanelProps } from "dockview-react";
 import { useCallback, useEffect, useRef } from "react";
 
 import { wsClient } from "@/api/client";
 import { withDrawingCachePreserved } from "@/components/excalidraw-editor/ExcalidrawEditor";
+import { restoreLayoutWhenAnotherGroupActivates } from "@/lib/center-maximize";
 import { focusAreaProps } from "@/lib/focus-targets";
 import { frontendLog } from "@/lib/frontend-logger";
 import { dispatchPendingOpen } from "@/lib/open-path";
-import { useAgentDevToolsStore } from "@/store/agent-devtools";
+import { forgetClosedTabGroup } from "@/store/closed-tabs";
 import { reattachActiveContent } from "@/store/layout-actions";
 import { getCenterPanelDef } from "@/store/panel-config";
 import { usePanelNotificationStore } from "@/store/panel-notifications";
@@ -23,6 +24,7 @@ import { getWorktreeUI } from "@/store/worktree-ui";
 import { useWorktreeStore } from "@/store/worktrees";
 
 import { syncTerminalsFromLayout } from "./default-layout";
+import { MaximizedGroupActions } from "./maximized-group-actions";
 import { CenterWatermark, centerComponents, centerTabComponents } from "./panels";
 import { PersistedLayoutComponent, isOuterSwapping } from "./PersistedLayout";
 
@@ -48,12 +50,22 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
     // Populate terminal instances from restored layout
     syncTerminalsFromLayout(api);
 
+    restoreLayoutWhenAnotherGroupActivates(api);
+
     // Background `renderer: "always"` tabs (browser panels) blank their group when re-added by a
     // move. The move event fires once the move has settled; add events are suppressed during moves
     // and fire before the active panel switches, so they can't be used here.
     api.onDidMovePanel(({ from, to }) => {
       reattachActiveContent(from);
       reattachActiveContent(to);
+    });
+
+    // A swap's groups come back with their ids when the layout is restored; these are gone for good.
+    api.onDidRemoveGroup((group) => {
+      const worktreePath = worktreePathRef.current;
+      if (worktreePath && !swappingRef.current && !isOuterSwapping()) {
+        forgetClosedTabGroup(worktreePath, group.id);
+      }
     });
 
     api.onDidRemovePanel((event) => {
@@ -73,28 +85,6 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
           usePanelNotificationStore.getState().unregisterPanel(terminalId);
         }
         getCurrentWorktreeToolsBar().getState().removeTerminal(event.id);
-      }
-
-      if (removedDef?.type === "agentDevTools") {
-        const params = event.params;
-        const sessionId =
-          typeof params === "object" && params !== null && "sessionId" in params
-            ? String((params as Record<string, unknown>).sessionId)
-            : undefined;
-        if (sessionId) {
-          useAgentDevToolsStore.getState().removeSession(sessionId);
-        }
-      }
-
-      if (removedDef?.type === "agent") {
-        const params = event.params;
-        const sessionId =
-          typeof params === "object" && params !== null && "sessionId" in params
-            ? String((params as Record<string, unknown>).sessionId)
-            : undefined;
-        if (sessionId) {
-          wsClient.send({ type: "agent_detach", id: sessionId });
-        }
       }
 
       // Notify server when the last panel showing an external file closes, so its watcher can
@@ -148,6 +138,7 @@ export function CenterHostComponent(_props: IDockviewPanelProps) {
         components={centerComponents}
         tabComponents={centerTabComponents}
         watermarkComponent={CenterWatermark}
+        rightHeaderActionsComponent={MaximizedGroupActions}
         scrollbars="native"
         apiRef={centerApiRef}
         swappingRef={swappingRef}

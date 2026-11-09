@@ -6,19 +6,12 @@ import {
   GlobeIcon,
   NotepadTextIcon,
   PenLineIcon,
-  SparklesIcon,
   TerminalSquareIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { KeyBindingDisplay } from "@/components/ui/key-binding-display";
-import {
-  createAgent,
-  createBrowser,
-  createDrawing,
-  createEditor,
-  createTerminal,
-} from "@/lib/panel-creators";
+import { createBrowser, createDrawing, createEditor, createTerminal } from "@/lib/panel-creators";
 import { toolchainStatusItems } from "@/lib/toolchain-status-items";
 import { useStatusQuery } from "@/queries/use-repo-queries";
 import { toKeyBinding } from "@/store/keybindings/key-combo";
@@ -26,6 +19,7 @@ import { usePendingChordStore } from "@/store/keybindings/pending-chord";
 
 import { IndentationStatus } from "./IndentationStatus";
 import { LanguageServerStatus } from "./LanguageServerStatus";
+import { RepoTrustStatus } from "./RepoTrustStatus";
 
 /** Shows the keystrokes of a chord in progress, like "⌘\ … waiting for the next key". */
 function PendingChordIndicator() {
@@ -117,6 +111,8 @@ export function StatusBar() {
 
       <LanguageServerStatus />
 
+      <RepoTrustStatus />
+
       <PendingChordIndicator />
 
       {/* Loading indicator */}
@@ -126,15 +122,6 @@ export function StatusBar() {
           Loading...
         </div>
       )}
-
-      {/* New agent button */}
-      <button
-        onClick={() => createAgent()}
-        title="New Agent"
-        className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1 transition-colors"
-      >
-        <SparklesIcon className="size-3.5" />
-      </button>
 
       {/* New editor button */}
       <button

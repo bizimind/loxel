@@ -1,5 +1,3 @@
-import type { SessionConfig } from "@bizimind/coding-agent";
-
 import type { OpenTerminalRequest } from "@/open-request";
 
 import type { RefInfo, StatusInfo, WorktreeStatusInfo } from "./git-models";
@@ -9,51 +7,6 @@ import type { PanelOpenOptions } from "./panel-placement-model";
 import type { DirEntry } from "./project-files-model";
 import type { SchemaConsentState } from "./schema-consent-model";
 import type { ToolchainChangedMessage } from "./toolchain-status-model";
-import type { UpdateState } from "./update-model";
-
-export type AgentStatus = "starting" | "ready" | "running" | "waiting" | "exited";
-
-/** Options for creating a new coding-agent session, derived from SessionConfig. */
-export type AgentSessionOptions = Pick<
-  SessionConfig,
-  "models" | "mode" | "profile" | "declaredTools"
->;
-
-/** Derive agent session status from a protocol event type. Returns undefined if no status change. */
-export function deriveAgentStatus(eventType: string): AgentStatus | undefined {
-  switch (eventType) {
-    case "session.started":
-    case "session.resumed":
-    case "session.rewound":
-    case "run.completed":
-    case "run.failed":
-    case "run.cancelled":
-    case "plan.mode.entered":
-    case "plan.mode.exited":
-      return "ready";
-    case "run.started":
-    case "human.input.response":
-    case "approval.granted":
-    case "approval.denied":
-      return "running";
-    case "human.input.requested":
-    case "approval.requested":
-      return "waiting";
-    default:
-      return undefined;
-  }
-}
-
-/** Minimal protocol event shape forwarded from the coding-agent subprocess. */
-export interface AgentEventPayload {
-  type: string;
-  session_id: string;
-  run_id?: string;
-  request_id?: string;
-  timestamp: string;
-  payload: Record<string, unknown>;
-  [key: string]: unknown;
-}
 
 /**
  * Who moved a file: Loxel (a file operation in any window) or another process. Only moves from
@@ -77,9 +30,10 @@ export type WsMessage =
   | { type: "external_files_changed"; wtPath: string; data: { entries: DirEntry[] } }
   | { type: "worktree_files_resynced"; wtPath: string; projectPath: string }
   | ToolchainChangedMessage
+  // Worktree-scoped, or for the window in use when no window shows the worktree.
   | { type: "open_url"; wtPath: string; data: { url: string } & PanelOpenOptions }
   // Window-scoped (sent to the window the user is working in)
-  | { type: "open_file"; data: { filePath: string } & PanelOpenOptions }
+  | { type: "open_file"; data: OpenFilePanel }
   | { type: "open_folder"; data: { path: string } }
   | { type: "open_terminal"; data: OpenTerminalPanel }
   // Project-scoped (sent to all subscribers under project)
@@ -96,19 +50,9 @@ export type WsMessage =
   | { type: "error"; message: string }
   | { type: "terminal_exit"; id: string; exitCode: number }
   | ({ type: "terminal_state" } & TerminalState)
-  | { type: "agent_event"; id: string; seq: number; event: AgentEventPayload }
-  | { type: "agent_exit"; id: string; exitCode: number }
-  | {
-      type: "agent_sessions";
-      scopeKey: string;
-      sessions: Array<{ id: string; status: string; codingAgentSessionId: string | null }>;
-    }
-  | { type: "agent_replay_done"; id: string }
-  | { type: "agent_error"; id: string; message: string }
   | { type: "log_entries"; data: LogEntry[] }
   | { type: "log_error_count"; delta: number }
   | { type: "log_error_snapshot"; total: number }
-  | { type: "update_status_changed"; data: UpdateState }
   // Notifications (global)
   | { type: "notification_added"; data: ServerNotification }
   | { type: "notification_dismissed"; id: string }
@@ -116,7 +60,9 @@ export type WsMessage =
   | { type: "notifications_cleared" }
   | { type: "notifications_sync"; data: readonly ServerNotification[] }
   | { type: "store_updated"; key: string; state: Record<string, unknown>; nonce?: string }
-  | { type: "schema_consent_changed"; data: SchemaConsentState };
+  | { type: "schema_consent_changed"; data: SchemaConsentState }
+  // Some repository's trust or restrictions changed (global, like the worktrees sharing it)
+  | { type: "repo_trust_changed" };
 
 /** Terminal notification sequences Loxel understands; see docs/TERMINALS.md#notifications. */
 export const NOTIFICATION_SEQUENCES = ["osc9", "osc777", "osc99"] as const;
@@ -188,6 +134,12 @@ export interface TerminalState {
 }
 
 /**
+ * A file the server asks a window to open (`loxel <file>`, Finder). It opens in `worktreePath` if
+ * the command named one, else in the worktree holding it, else in the window's active worktree.
+ */
+export type OpenFilePanel = { filePath: string; worktreePath?: string } & PanelOpenOptions;
+
+/**
  * A terminal panel the server asks a window to create (`loxel terminal`). The server has already
  * minted `terminalId` and started its shell in `cwd`, with the command typed in, so the renderer
  * only places the panel in `worktreePath`, the worktree the session belongs to.
@@ -240,21 +192,6 @@ export type WsClientMessage =
    * `terminal_state` carried `syncOffset`; acks for an older sync are ignored.
    */
   | { type: "terminal_ack"; id: string; syncOffset: number; bytes: number }
-  | {
-      type: "agent_create";
-      id: string;
-      scopeKey: string;
-      workspaceRoot: string;
-      sessionOptions?: AgentSessionOptions;
-      /** If set, resume this existing forked coding-agent session instead of starting a new one. */
-      forkedSessionId?: string;
-      /** If set with forkedSessionId, rewind to this message (the fork point). */
-      forkPointMessageId?: string;
-    }
-  | { type: "agent_request"; id: string; request: Record<string, unknown> }
-  | { type: "agent_destroy"; id: string }
-  | { type: "agent_detach"; id: string }
-  | { type: "agent_list"; scopeKey: string }
   // External files
   | { type: "close_external_file"; worktreePath: string; filePath: string }
   | { type: "register_external_files"; worktreePath: string; filePaths: string[] }

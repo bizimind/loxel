@@ -45,6 +45,8 @@ describe("registerLoxelLanguages", () => {
       "go.mod",
       "go.sum",
       "go.work",
+      "groovy",
+      "java-properties",
       "jsx",
       "just",
       "make",
@@ -116,6 +118,8 @@ describe("editing Loxel's languages in Monaco", () => {
     ["terraform", 'name = "a"', '# name = "a"'],
     ["make", "all: build", "# all: build"],
     ["just", "build:", "# build:"],
+    ["groovy", "id 'java'", "// id 'java'"],
+    ["java-properties", "org.gradle.caching=true", "# org.gradle.caching=true"],
     ["cmake", "project(fmt)", "# project(fmt)"],
     ["objective-cpp", "int a = 1;", "// int a = 1;"],
     ["go.mod", "require a.b/c v1.0.0", "// require a.b/c v1.0.0"],
@@ -136,10 +140,19 @@ describe("editing Loxel's languages in Monaco", () => {
     "objective-cpp",
     "go.mod",
     "go.work",
+    "groovy",
+    "java-properties",
   ])("auto-closes brackets in %s", (lang) => {
     const model = open(lang, "x = ");
     type("(");
     expect(model.getValue()).toBe("x = ()");
+  });
+
+  test.each(['"""', "'''"])("auto-closes %s in Groovy", (quotes) => {
+    const model = open("groovy", "def a = ");
+    type(quotes);
+    expect(model.getValue()).toBe(`def a = ${quotes}${quotes}`);
+    expect(editor.getPosition()?.column).toBe("def a = ".length + quotes.length + 1);
   });
 
   test("toggles a CMake bracket comment", () => {

@@ -17,6 +17,11 @@ const JAVASCRIPT_DIALOG_LISTEN = "javascript-dialog:listen";
 const JAVASCRIPT_DIALOG_OPEN = "javascript-dialog:open";
 const JAVASCRIPT_DIALOG_RESPOND = "javascript-dialog:respond";
 const JAVASCRIPT_DIALOG_CLOSED = "javascript-dialog:closed";
+const UPDATE_GET_STATUS = "update:get-status";
+const UPDATE_CHECK = "update:check";
+const UPDATE_DOWNLOAD = "update:download";
+const UPDATE_INSTALL = "update:install";
+const UPDATE_STATUS_CHANGED = "update:status-changed";
 
 // Per-window identity assigned by main when this BrowserWindow was created.
 // Stable across renderer reloads (Cmd+R) — different per BrowserWindow.
@@ -41,6 +46,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(OPEN_IN_NEW_BROWSER_TAB, handler);
     return () => ipcRenderer.removeListener(OPEN_IN_NEW_BROWSER_TAB, handler);
   },
+  macOSVersion: process.platform === "darwin" ? process.getSystemVersion() : undefined,
   setDockBadge: (count) => ipcRenderer.send(SET_DOCK_BADGE, count),
   onWindowFocusChange: (callback) => {
     const handler = (_event, focused) => callback(focused);
@@ -81,4 +87,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     };
   },
   respondToJavaScriptDialog: (response) => ipcRenderer.send(JAVASCRIPT_DIALOG_RESPOND, response),
+  getUpdateStatus: () => ipcRenderer.invoke(UPDATE_GET_STATUS),
+  checkForUpdates: () => ipcRenderer.invoke(UPDATE_CHECK),
+  downloadUpdate: () => ipcRenderer.invoke(UPDATE_DOWNLOAD),
+  installUpdate: () => ipcRenderer.send(UPDATE_INSTALL),
+  onUpdateStatusChange: (callback) => {
+    const handler = (_event, status) => callback(status);
+    ipcRenderer.on(UPDATE_STATUS_CHANGED, handler);
+    return () => ipcRenderer.removeListener(UPDATE_STATUS_CHANGED, handler);
+  },
 });

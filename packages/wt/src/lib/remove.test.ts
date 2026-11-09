@@ -36,7 +36,16 @@ describe("planRemove", () => {
       dirty: false,
       isMain: false,
       locked: false,
+      hasHook: false,
     });
+  });
+
+  test("says when the repository has a clean.wt.sh", async () => {
+    repo = await createTestRepo({ bare: true });
+    await writeHook(repo.root, "clean.wt.sh", "true");
+    await executeAdd({ name: "hooked", repoPath: repo.root });
+
+    expect((await planRemove({ name: "hooked", repoPath: repo.root })).hasHook).toBe(true);
   });
 
   test("is dirty for a modified file", async () => {
@@ -200,6 +209,28 @@ describe("executeRemove", () => {
     expect((await Bun.file(join(repo.root, "cleaned.txt")).text()).trim()).toBe(
       `hooked at ${added.path}`,
     );
+  });
+
+  test("allowHook false removes without running clean.wt.sh", async () => {
+    repo = await createTestRepo({ bare: true });
+    await writeHook(repo.root, "clean.wt.sh", 'touch "$WT_ROOT/torn-down"');
+    const added = await executeAdd({ name: "held", repoPath: repo.root });
+    const asked: string[] = [];
+
+    const result = await executeRemove({
+      name: "held",
+      repoPath: repo.root,
+      deleteBranch: false,
+      force: false,
+      allowHook: (worktreePath) => {
+        asked.push(worktreePath);
+        return false;
+      },
+    });
+
+    expect(asked).toEqual([added.path]);
+    expect(result).toMatchObject({ removed: true, hookRan: false, hookSkipped: true });
+    expect(await pathExists(join(repo.root, "torn-down"))).toBe(false);
   });
 
   test("a failing clean.wt.sh warns but still removes", async () => {
@@ -418,6 +449,29 @@ describe("executeRemove detaching the checkout", () => {
     ).rejects.toThrow(/locked/i);
     expect(await Bun.file(join(added.path, "README.md")).exists()).toBe(true);
     expect(await git(["worktree", "list", "--porcelain"], repo.root)).toContain(added.path);
+  });
+
+  test("deletes the branch even when run from inside the worktree it removes", async () => {
+    repo = await createTestRepo({ bare: true });
+    const added = await executeAdd({ name: "from-inside", repoPath: repo.root });
+    const script = join(repo.root, "remove-from-inside.ts");
+    await Bun.write(
+      script,
+      `import { executeRemove } from ${JSON.stringify(join(import.meta.dir, "remove.ts"))};
+const result = await executeRemove({
+  name: "from-inside", repoPath: process.cwd(), deleteBranch: true, forceBranch: true, force: true,
+});
+console.log(result.branchDeleted);`,
+    );
+
+    const child = Bun.spawn(["bun", script], {
+      cwd: added.path,
+      stdout: "pipe",
+      stderr: "inherit",
+    });
+
+    expect((await new Response(child.stdout).text()).trim()).toBe("true");
+    expect(await child.exited).toBe(0);
   });
 
   test("deletes only its own checkout from the trash", async () => {

@@ -1,15 +1,14 @@
-import { existsSync, readFileSync } from "node:fs";
-
 import { isRecord } from "@/lib/is-record";
 
-/** The top-level table of the TOML file at `path`, or undefined when it is missing or unparsable. */
+import { readConfigFile } from "./config-file-read";
+
+/**
+ * The top-level table of the TOML file at `path`, or undefined when `readConfigFile` gives nothing
+ * for it or it is unparsable.
+ */
 export function readToml(path: string): Record<string, unknown> | undefined {
-  if (!existsSync(path)) return undefined;
-  try {
-    return parseToml(readFileSync(path, "utf-8"));
-  } catch {
-    return undefined;
-  }
+  const text = readConfigFile(path);
+  return text === undefined ? undefined : parseToml(text);
 }
 
 /** The top-level table of TOML `text`, or undefined when it is unparsable. */

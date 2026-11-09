@@ -9,10 +9,7 @@ import path from "node:path";
 import type { PythonEnv } from "@/api/python-env-model";
 
 import { config } from "./config";
-import { logger } from "./logger";
 import { pythonEnvActivation, setPythonEnvVars } from "./python-env-activation";
-
-const log = logger.child("terminal");
 
 /**
  * Login shells reorder PATH after spawn (macOS `path_helper` in /etc/zprofile puts the system
@@ -66,15 +63,6 @@ unset LOXEL_USER_ZDOTDIR LOXEL_PYTHON_ENV_BIN _loxel_zdotdir
 const SHIM_HEADER =
   "# Written by Loxel for terminals that activate a Python environment; do not edit.\n";
 
-/**
- * /etc/profile and /etc/zprofile `eval` the output of macOS `path_helper`, which prints PATH in
- * double quotes, so these characters in a PATH entry would be interpreted by the shell. Branch
- * names (and so worktree directories) may contain them. Not checked on Windows, whose paths are
- * full of backslashes and whose shells run no such startup.
- */
-const SHELL_EVAL_CHARS = /["$`\\]/;
-const IS_WINDOWS = process.platform === "win32";
-
 let zshShimWritten = false;
 
 /**
@@ -99,7 +87,7 @@ function ensureZshShim(): string {
  * Activate `pythonEnv` in a terminal's spawn environment the way its `activate` script would:
  * its `bin` first on PATH, `VIRTUAL_ENV` for a venv, and no `PYTHONHOME` (see
  * {@link setPythonEnvVars}). An interpreter outside any environment changes nothing, and so does
- * a `bin` the shell could misread or that holds files git tracks in `worktreePath`. For zsh, routes
+ * a `bin` that holds files git tracks in `worktreePath`. For zsh, routes
  * startup through the shim that keeps the entry first after the user's startup files; other shells
  * get the PATH entry without `VIRTUAL_ENV`, since their startup may move the entry back.
  */
@@ -111,12 +99,6 @@ export async function activatePythonEnv(
 ): Promise<void> {
   if (!pythonEnv.envPath) return;
   const binDir = path.dirname(pythonEnv.pythonPath);
-  if (!IS_WINDOWS && SHELL_EVAL_CHARS.test(binDir)) {
-    log.warn("Not activating a Python environment whose path the shell would interpret", {
-      binDir,
-    });
-    return;
-  }
   const activation = await pythonEnvActivation(pythonEnv, worktreePath);
   if (!activation) return;
   // Before any change, so a failed write leaves the environment untouched.

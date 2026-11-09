@@ -68,20 +68,6 @@ describe("activatePythonEnv", () => {
     expect(env).toEqual({ PATH: "/usr/bin" });
   });
 
-  test("refuses a directory the login shell's PATH eval would interpret", async () => {
-    // macOS path_helper output is eval'd, and a branch (so a worktree directory) can be named so.
-    const hostile = join(root, "wt-$(touch pwned)", ".venv");
-    await mkdir(join(hostile, "bin"), { recursive: true });
-    const env = { PATH: "/usr/bin" };
-    await activatePythonEnv(
-      env,
-      { source: "venv", pythonPath: join(hostile, "bin", "python"), envPath: hostile },
-      "/bin/zsh",
-      wt,
-    );
-    expect(env).toEqual({ PATH: "/usr/bin" });
-  });
-
   test("refuses a bin holding files the repository tracks", async () => {
     const repo = join(root, "tracked");
     const bin = join(repo, ".venv", "bin");

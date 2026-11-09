@@ -6,24 +6,29 @@ order: 14
 
 All shortcuts use the "Loxel Default" template and are fully customizable in Settings > Keybindings (`Cmd+,`). Shortcuts use macOS key names; `Cmd` is the Command key.
 
-For context on what each feature does, see [Terminals](/docs/terminals), [Drafts](/docs/drafts), [Coding Agent](/docs/coding-agent), [Editor](/docs/editor), [Worktrees & Projects](/docs/worktrees-and-projects), [Panel Layout](/docs/panel-layout), [Git](/docs/git), and [Diff Viewer](/docs/diff-viewer).
+For context on what each feature does, see [Terminals](/docs/terminals), [Drafts](/docs/drafts), [Editor](/docs/editor), [Worktrees & Projects](/docs/worktrees-and-projects), [Panel Layout](/docs/panel-layout), [Git](/docs/git), and [Diff Viewer](/docs/diff-viewer).
 
 ---
 
 ## Panel management
 
-| Action                             | Shortcut                                                     |
-| ---------------------------------- | ------------------------------------------------------------ |
-| New terminal                       | `Cmd+T` or `` Ctrl+Shift+` ``                                |
-| New markdown draft                 | `Cmd+Shift+M` or `Cmd+N`                                     |
-| New drawing                        | `Cmd+Shift+D`                                                |
-| New agent                          | `Cmd+Shift+A`                                                |
-| New browser                        | `Cmd+Shift+B`                                                |
-| New tab of the active panel's type | `Cmd+\` then `Enter`                                         |
-| Close panel                        | `Cmd+W`                                                      |
-| Rename the active tab              | `Cmd+Shift+R`                                                |
-| Next / previous tab                | `Cmd+Shift+]` / `Cmd+Shift+[`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
-| Focus panel 1–9                    | `Cmd+1` – `Cmd+9`                                            |
+| Action                              | Shortcut                                                     |
+| ----------------------------------- | ------------------------------------------------------------ |
+| New terminal                        | `Cmd+T` or `` Ctrl+Shift+` ``                                |
+| New markdown draft                  | `Cmd+Shift+M` or `Cmd+N`                                     |
+| New drawing                         | `Cmd+Shift+D`                                                |
+| New browser                         | `Cmd+Shift+B`                                                |
+| New tab of the active panel's type  | `Cmd+\` then `Enter`                                         |
+| Close panel                         | `Cmd+W`                                                      |
+| Reopen closed tab                   | `Cmd+Shift+T`                                                |
+| Rename the active tab               | `Cmd+Shift+R`                                                |
+| Maximize / restore the active group | `Ctrl+Shift+Enter`                                           |
+| Hard refresh a browser tab          | `Cmd+Shift+R` while the browser tab has focus                |
+| Bookmark a browser page             | `Cmd+D` while the browser tab has focus                      |
+| Next / previous tab                 | `Cmd+Shift+]` / `Cmd+Shift+[`, `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Focus panel 1–9                     | `Cmd+1` – `Cmd+9`                                            |
+
+`Cmd+Shift+R` depends on focus: in a browser tab, its page or its toolbar, it reloads the page and bypasses the cache; anywhere else it renames the active tab. Settings > Keybindings lists them as **Hard Refresh Browser Tab** and **Rename Tab**, and remapping one leaves the other on `Cmd+Shift+R`.
 
 ---
 
@@ -31,12 +36,12 @@ For context on what each feature does, see [Terminals](/docs/terminals), [Drafts
 
 Splits are chords: press `Cmd+\`, release, then press the next key. The status bar shows the keys typed so far; `Esc` cancels.
 
-| Action                                  | Shortcut                                                                                        |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Split the active panel (same type)      | `Cmd+\` then an arrow                                                                           |
-| Split as a new panel type               | `Cmd+\` then `T` terminal / `A` agent / `M` markdown / `D` drawing / `B` browser, then an arrow |
-| Open a panel type as a tab in the group | `Cmd+\` then the type letter, then `Enter`                                                      |
-| Move the active tab into a new split    | `Cmd+\` then `Shift+Arrow`                                                                      |
+| Action                                  | Shortcut                                                                            |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| Split the active panel (same type)      | `Cmd+\` then an arrow                                                               |
+| Split as a new panel type               | `Cmd+\` then `T` terminal / `M` markdown / `D` drawing / `B` browser, then an arrow |
+| Open a panel type as a tab in the group | `Cmd+\` then the type letter, then `Enter`                                          |
+| Move the active tab into a new split    | `Cmd+\` then `Shift+Arrow`                                                          |
 
 ---
 
@@ -65,6 +70,8 @@ Splits are chords: press `Cmd+\`, release, then press the next key. The status b
 
 In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G` / `Cmd+Shift+G` (or `Enter` / `Shift+Enter` in the bar) step through the matches and `Esc` closes it. In a code editor, `Cmd+F` opens the editor's own find widget.
 
+macOS window tiling shortcuts (macOS 15 and later) work in the editor, terminals and the rest of Loxel (in a browser tab, the page gets them first): `Fn+Ctrl+Arrow` moves the window to a half of the screen, `Fn+Ctrl+Shift+Arrow` arranges it with the window behind it, and `Fn+Ctrl+F` fills the screen. They are also listed under Window > Move & Resize in the menu bar. On Mac keyboards `Fn+Arrow` is `Home`, `End`, `Page Up` or `Page Down`, so binding one of those with `Ctrl` in Settings > Keybindings takes it from macOS.
+
 ---
 
 ## Tool panel toggles
@@ -76,7 +83,6 @@ In a browser panel or terminal, `Cmd+F` opens a find bar for that panel; `Cmd+G`
 | Git              | `Ctrl+Shift+G` |
 | Comments         | `Ctrl+Shift+R` |
 | Logs             | `Ctrl+Shift+L` |
-| Fork Tree        | `Ctrl+Shift+K` |
 | Worktree sidebar | `Ctrl+Alt+B`   |
 
 ---
@@ -104,15 +110,22 @@ Back/forward work like a browser's history, across all projects. Worktree number
 
 ## Languages
 
-| Action                     | Shortcut                                |
-| -------------------------- | --------------------------------------- |
-| Quick Fix…                 | `Cmd+.`                                 |
-| Fix All                    | `Ctrl+Shift+.`                          |
-| Organize Imports           | `Shift+Alt+O`                           |
-| Source Action…             | `Ctrl+Alt+S`                            |
-| Refactor…                  | `Ctrl+Alt+R`                            |
-| Python: Select Interpreter | unbound — command palette or status bar |
-| Restart Language Servers   | unbound — command palette               |
+| Action                         | Shortcut                                |
+| ------------------------------ | --------------------------------------- |
+| Quick Fix…                     | `Cmd+.`                                 |
+| Fix All                        | `Ctrl+Shift+.`                          |
+| Organize Imports               | `Shift+Alt+O`                           |
+| Source Action…                 | `Ctrl+Alt+S`                            |
+| Refactor…                      | `Ctrl+Alt+R`                            |
+| C#: Select Solution            | unbound — command palette or status bar |
+| C/C++: Select Compile Database | unbound — command palette or status bar |
+| Go: Select Toolchain           | unbound — command palette or status bar |
+| Node: Select Version           | unbound — command palette or status bar |
+| Python: Select Interpreter     | unbound — command palette or status bar |
+| Java: Select JDK               | unbound — command palette or status bar |
+| Rust: Select Toolchain         | unbound — command palette or status bar |
+| Restart Language Servers       | unbound — command palette               |
+| Manage Repository Trust        | unbound — command palette or status bar |
 
 The code action shortcuts work in a code editor whose language server offers that kind of action, and the command palette lists them only then. When several servers offer one (Ruff and the type checker for Python), Fix All and Organize Imports apply the only fix offered or let you pick, and the others list every server's actions.
 

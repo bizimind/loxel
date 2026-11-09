@@ -30,13 +30,7 @@ function contributor(
   resolveForTerminal: ToolchainEnvContributor["resolveForTerminal"],
   overrides: Partial<ToolchainEnvContributor> = {},
 ): ToolchainEnvContributor {
-  return {
-    name: "Test",
-    resolveForTerminal,
-    resolveForAgent: async () => null,
-    subscribeForAgent: () => () => {},
-    ...overrides,
-  };
+  return { name: "Test", resolveForTerminal, ...overrides };
 }
 
 function createManager(toolchainEnvs: readonly ToolchainEnvContributor[] = []): TerminalManager {
@@ -203,6 +197,22 @@ describe("TerminalManager toolchain environments", () => {
     expect(asked).toEqual([]);
   });
 
+  test("starts without a toolchain whose PATH entry the shell would interpret", async () => {
+    process.env.SHELL = "/bin/sh";
+    const manager = createManager([
+      contributor(async () => (env) => {
+        env.PATH = `/wt-$name/bin:${env.PATH}`;
+        env.LOXEL_TEST_TOOLCHAIN = "applied";
+      }),
+    ]);
+    const { sink, outputText } = createRecordingSink();
+    await manager.attach(crypto.randomUUID(), sink, {
+      ...attachOptions,
+      command: 'echo "toolchain-[$LOXEL_TEST_TOOLCHAIN]"',
+    });
+    await until(() => outputText().includes("toolchain-[]"));
+  });
+
   test("concurrent starts share one shell, and one closed while starting never runs", async () => {
     process.env.SHELL = "/bin/sh";
     let release = () => {};
@@ -276,5 +286,105 @@ describe("TerminalManager toolchain environments", () => {
       sink.outputText().indexOf("second-4"),
     );
     expect(manager.get(id)?.cols).toBe(100);
+  });
+});
+
+describe("ending a removed worktree's sessions", () => {
+  const originalShell = process.env.SHELL;
+  afterEach(() => {
+    process.env.SHELL = originalShell;
+  });
+
+  const inWorktree = (worktreePath: string) => ({ cols: 80, rows: 24, cwd: "/tmp", worktreePath });
+
+  const end = (manager: TerminalManager, worktreePath: string, delayMs = 0) => {
+    const ended: string[] = [];
+    manager.endWorktreeSessions(worktreePath, delayMs, (id) => ended.push(id));
+    return ended;
+  };
+
+  test("ends the worktree's sessions and no other's", async () => {
+    process.env.SHELL = "/bin/sh";
+    const manager = createManager();
+    const [a, b, other] = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    await manager.ensureSpawned(a, inWorktree("/wt/a"));
+    await manager.ensureSpawned(b, inWorktree("/wt/a"));
+    await manager.ensureSpawned(other, inWorktree("/wt/a-other"));
+
+    expect(end(manager, "/wt/a").toSorted()).toEqual([a, b].toSorted());
+
+    expect(manager.get(a)).toBeUndefined();
+    expect(manager.get(b)).toBeUndefined();
+    expect(manager.get(other)).toBeDefined();
+    expect(end(manager, "/wt/a")).toEqual([]);
+  });
+
+  test("with a delay, ends them later, and leaves a new session at the same path", async () => {
+    process.env.SHELL = "/bin/sh";
+    const manager = createManager();
+    const [old, closed, recreated] = [
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+      crypto.randomUUID(),
+    ];
+    await manager.ensureSpawned(old, inWorktree("/wt/a"));
+    await manager.ensureSpawned(closed, inWorktree("/wt/a"));
+
+    const ended = end(manager, "/wt/a", 50);
+    expect(ended).toEqual([]);
+    expect(manager.get(old)).toBeDefined();
+
+    manager.destroy(closed);
+    await manager.ensureSpawned(recreated, inWorktree("/wt/a"));
+    await until(() => manager.get(old) === undefined);
+
+    expect(ended).toEqual([old]);
+    expect(manager.get(recreated)).toBeDefined();
+  });
+
+  test("a shell still waiting for its environment never starts", async () => {
+    process.env.SHELL = "/bin/sh";
+    let release = (): void => {};
+    const blocked = new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    });
+    const manager = createManager([{ name: "blocked", resolveForTerminal: () => blocked }]);
+    const id = crypto.randomUUID();
+    const started = manager.ensureSpawned(id, inWorktree("/wt/a"));
+
+    expect(end(manager, "/wt/a", 60_000)).toEqual([id]);
+    release();
+    await started;
+
+    expect(manager.get(id)).toBeUndefined();
+  });
+
+  test("a shell still starting when its worktree moves belongs to the new path", async () => {
+    process.env.SHELL = "/bin/sh";
+    let release = (): void => {};
+    const blocked = new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    });
+    const manager = createManager([{ name: "blocked", resolveForTerminal: () => blocked }]);
+    const id = crypto.randomUUID();
+    const started = manager.ensureSpawned(id, inWorktree("/wt/before"));
+
+    manager.retargetWorktree("/wt/before", "/wt/after");
+    release();
+    await started;
+
+    expect(manager.get(id)?.worktreePath).toBe("/wt/after");
+  });
+
+  test("a moved worktree's sessions are found at the new path", async () => {
+    process.env.SHELL = "/bin/sh";
+    const manager = createManager();
+    const id = crypto.randomUUID();
+    await manager.ensureSpawned(id, inWorktree("/wt/before"));
+
+    manager.retargetWorktree("/wt/before", "/wt/after");
+
+    expect(end(manager, "/wt/before")).toEqual([]);
+    expect(end(manager, "/wt/after")).toEqual([id]);
   });
 });

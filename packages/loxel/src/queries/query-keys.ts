@@ -42,6 +42,12 @@ export const queryKeys = {
     ["toolchainStatus", projectPath, wtPath, toolchainId] as const,
   /** Prefix key for every worktree's status of every language toolchain. */
   toolchainStatusAll: () => ["toolchainStatus"] as const,
+  repoTrust: (projectPath: string | null, wtPath: string | null) =>
+    ["repoTrust", projectPath, wtPath] as const,
+  /** Every repository's answer, for Settings > Security; under {@link repoTrustAll}. */
+  repoTrustList: () => ["repoTrust", "list"] as const,
+  /** Prefix key for every worktree's repository trust, and the list of every repository's. */
+  repoTrustAll: () => ["repoTrust"] as const,
   updateStatus: () => ["updateStatus"] as const,
   version: () => ["version"] as const,
   openInApps: (path: string) => ["openInApps", path] as const,

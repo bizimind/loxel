@@ -7,6 +7,8 @@ import { useCallback } from "react";
 
 import type { PanelPlacement, SplitDirection } from "@/api/panel-placement-model";
 import { isToolchainSelectAction } from "@/api/toolchain-status-model";
+import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
+import { toggleActiveGroupMaximized } from "@/lib/center-maximize";
 import { runEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
 import {
@@ -19,9 +21,13 @@ import { changeIndentation } from "@/lib/indentation-status";
 import { dispatchLoxelEvent } from "@/lib/loxel-events";
 import { restartLanguageServers } from "@/lib/lsp-client";
 import { navigateToNotification } from "@/lib/notification-navigation";
+import { reopenClosedTab } from "@/lib/panel-creators";
+import { manageRepoTrust } from "@/lib/repo-trust-dialog";
 import { getActiveEditorFile, getActiveEditorFilePath } from "@/lib/reveal-in-explorer";
 import { renameActiveTab } from "@/lib/tab-rename";
 import { toolchainStatusItems } from "@/lib/toolchain-status-items";
+import { getActiveWt } from "@/store/active-worktree";
+import { closeCenterTab } from "@/store/closed-tabs";
 import { useCommandPaletteStore } from "@/store/command-palette";
 import { useFileSearchStore } from "@/store/file-search";
 import type { ActionId, SplitPanelType } from "@/store/keybindings/action-registry";
@@ -151,12 +157,28 @@ export function useActionHandler(): (actionId: ActionId) => void {
       // -- Panel close --
       case "panel.close": {
         const active = getCenterApi()?.activePanel;
-        if (active) active.api.close();
+        if (active) closeCenterTab(active.api);
         break;
       }
 
+      case "panel.reopenClosed":
+        reopenClosedTab();
+        break;
+
       case "panel.rename":
         renameActiveTab();
+        break;
+
+      case "panel.toggleMaximize":
+        toggleActiveGroupMaximized();
+        break;
+
+      case "browser.hardRefresh":
+        getFocusedBrowserPanel()?.hardRefresh();
+        break;
+
+      case "browser.toggleBookmark":
+        getFocusedBrowserPanel()?.toggleBookmark();
         break;
 
       // -- Panel navigation --
@@ -164,7 +186,8 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "panel.prev": {
         const api = getCenterApi();
         if (!api) break;
-        const allPanels = api.panels;
+        // Stay in a maximized group: leaving it for another group's tab would restore the layout.
+        const allPanels = api.hasMaximizedGroup() ? (api.activeGroup?.panels ?? []) : api.panels;
         if (allPanels.length === 0) break;
         const activeIdx = allPanels.findIndex((p) => p.api.isActive);
         const dir = actionId === "panel.next" ? 1 : -1;
@@ -212,6 +235,9 @@ export function useActionHandler(): (actionId: ActionId) => void {
         const posMap = { right: "right", left: "left", up: "top", down: "bottom" } as const;
         const position = posMap[direction];
 
+        // Moving changes the grid, which restores the layout anyway; do it first so the hidden groups
+        // are there to move to.
+        if (api.hasMaximizedGroup()) api.exitMaximizedGroup();
         const adjacent = findAdjacentCenterGroup(api, active.group, direction);
         if (adjacent) {
           active.api.moveTo({ group: adjacent, position: "center" });
@@ -266,9 +292,6 @@ export function useActionHandler(): (actionId: ActionId) => void {
         break;
       case "toggle.logs":
         toggleSidebarPanel("logs");
-        break;
-      case "toggle.forkTree":
-        toggleSidebarPanel("forkTree");
         break;
 
       // -- Worktree sidebar expand/collapse --
@@ -411,6 +434,9 @@ export function useActionHandler(): (actionId: ActionId) => void {
       case "language.restartServers":
         restartLanguageServers();
         break;
+      case "worktree.manageRepoTrust":
+        void manageRepoTrust(getActiveWt());
+        break;
 
       // -- App --
       case "app.settings":
@@ -418,7 +444,6 @@ export function useActionHandler(): (actionId: ActionId) => void {
         break;
 
       // -- Panel creation (handled above via getCreateEventForAction early return) --
-      case "panel.new.agent":
       case "panel.new.browser":
       case "panel.new.drawing":
       case "panel.new.markdown":

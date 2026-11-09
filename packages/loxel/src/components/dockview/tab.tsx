@@ -4,11 +4,18 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { OpenInMenuItems, isOpenInSupported } from "@/components/menus/OpenInMenuItems";
 import { InlineRenameInput } from "@/components/tree";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu";
+import {
+  canTogglePanelMaximized,
+  maximizeGroupLabel,
+  togglePanelMaximized,
+} from "@/lib/center-maximize";
 import { copyToClipboard } from "@/lib/clipboard";
 import { focusActiveCenterPanel } from "@/lib/focus-navigation";
 import { relativeTo } from "@/lib/project-file-helpers";
 import { registerTabRename } from "@/lib/tab-rename";
 import { cn } from "@/lib/utils";
+import { closeCenterTab } from "@/store/closed-tabs";
+import { getCenterApi } from "@/store/tools-bar";
 
 import { TabCloseButton } from "./tab-close-button";
 
@@ -44,6 +51,19 @@ export function FileContextMenuItems({
   );
 }
 
+/** Maximize or restore the tab's group, and bring the tab to the front when maximizing. */
+function MaximizeMenuItem({ api }: { api: DockviewPanelApi }) {
+  const panel = getCenterApi()?.getPanel(api.id);
+  return (
+    <ContextMenuItem
+      disabled={!panel || !canTogglePanelMaximized(panel)}
+      onClick={() => panel && togglePanelMaximized(panel)}
+    >
+      {maximizeGroupLabel(api.isMaximized())}
+    </ContextMenuItem>
+  );
+}
+
 /** The panel's title, re-rendering when it changes (`api.setTitle`). */
 export function usePanelTitle(api: DockviewPanelApi): string | undefined {
   const subscribe = useCallback(
@@ -55,6 +75,14 @@ export function usePanelTitle(api: DockviewPanelApi): string | undefined {
   );
   return useSyncExternalStore(subscribe, () => api.title);
 }
+
+/** The dot before the icon of a tab whose file changed on disk in conflict with unsaved edits. */
+export function DivergedDot({ title }: { title: string }) {
+  return <span className="inline-block size-2 shrink-0 rounded-full bg-yellow-500" title={title} />;
+}
+
+/** Title classes of a tab whose file was deleted from disk. */
+export const DELETED_TAB_TITLE_CLASS = "line-through opacity-50";
 
 interface TabProps {
   api: DockviewPanelApi;
@@ -72,6 +100,7 @@ interface TabProps {
    * name. Enter or Escape returns focus to the active panel.
    */
   onRename?: (newName: string) => void;
+  onClick?: () => void;
   /** When renaming, initially select only the part before the extension (file names). */
   selectBaseName?: boolean;
   /** Extra classes for the title text (e.g. a deleted-file strikethrough). */
@@ -92,6 +121,7 @@ export function Tab({
   trailing,
   contextMenuItems,
   onRename,
+  onClick,
   selectBaseName,
   titleClassName,
   titleTooltip,
@@ -147,23 +177,28 @@ export function Tab({
     setCtxOpen(true);
   }, []);
 
-  const handleClose = useCallback(() => api.close(), [api]);
+  const handleClose = useCallback(() => closeCenterTab(api), [api]);
 
   const handleCloseOthers = useCallback(() => {
     for (const panel of Array.from(api.group.panels)) {
-      if (panel.id !== api.id) panel.api.close();
+      if (panel.id !== api.id) closeCenterTab(panel.api);
     }
   }, [api]);
 
   const handleCloseAll = useCallback(() => {
     for (const panel of Array.from(api.group.panels)) {
-      panel.api.close();
+      closeCenterTab(panel.api);
     }
   }, [api]);
 
   return (
     <>
-      <div ref={tabRef} className="dv-default-tab" onContextMenu={handleContextMenu}>
+      <div
+        ref={tabRef}
+        className="dv-default-tab"
+        onClick={onClick}
+        onContextMenu={handleContextMenu}
+      >
         <div className="dv-default-tab-content flex items-center gap-1.5">
           {leading}
           {icon}
@@ -200,6 +235,8 @@ export function Tab({
         )}
         {contextMenuItems}
         {contextMenuItems && <ContextMenuSeparator />}
+        <MaximizeMenuItem api={api} />
+        <ContextMenuSeparator />
         <ContextMenuItem onClick={handleClose}>Close</ContextMenuItem>
         <ContextMenuItem disabled={api.group.panels.length <= 1} onClick={handleCloseOthers}>
           Close Others

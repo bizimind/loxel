@@ -23,6 +23,7 @@ import type {
   DetectPathResult,
   InitProjectRequest,
   Project,
+  ProjectSetupResult,
   ProjectsResponse,
   ProjectWorktreesResponse,
   ScanSuggestionsResult,
@@ -37,7 +38,6 @@ import type {
   Review,
 } from "./review-model";
 import type { SchemaConsentDecision } from "./schema-consent-model";
-import type { UpdateState } from "./update-model";
 import type {
   NestedRemoval,
   WorktreeRemovePlan,
@@ -600,11 +600,17 @@ export async function createProject(req: CreateProjectRequest) {
 }
 
 export async function cloneProject(req: CloneProjectRequest) {
-  return fetchJson<Project>("/projects/clone", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/clone", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 export async function initProject(req: InitProjectRequest) {
-  return fetchJson<Project>("/projects/init", { method: "POST", body: JSON.stringify(req) });
+  return fetchJson<ProjectSetupResult>("/projects/init", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 export async function convertProject(req: ConvertProjectRequest) {
@@ -681,6 +687,14 @@ export async function createWorktree(
   return fetchJson<import("@bizimind/wt/lib").AddResult>("/worktree/create", {
     method: "POST",
     body: JSON.stringify({ projectPath, name, ...options }),
+  });
+}
+
+/** Run the `init.wt.sh` a worktree's creation held back, once its repository is trusted. */
+export async function runInitHook(projectPath: string, wtPath: string) {
+  return fetchJson<{ hookRan: boolean }>("/worktree/run-init-hook", {
+    method: "POST",
+    body: JSON.stringify({ projectPath, path: wtPath }),
   });
 }
 
@@ -909,7 +923,7 @@ class WsClient {
       this.ws = ws;
 
       if (this.wasConnected) {
-        // Server came back — check if it was updated (version changed → full page reload)
+        // Server came back — check whether a different build is running (full page reload)
         this.checkVersionAndRecover();
       } else {
         // First connection: record server version and flush pending messages
@@ -982,8 +996,8 @@ class WsClient {
 
   /**
    * On reconnect, compare the server version to the one recorded at first connect.
-   * If the version changed (update installed), reload the page to pick up new renderer
-   * assets. Otherwise, fire reconnect listeners for normal recovery (terminal reattach, etc.).
+   * If the version changed (a different build of the server started), reload the page to pick
+   * up its renderer assets. Otherwise, fire reconnect listeners for normal recovery (terminal reattach, etc.).
    */
   private async checkVersionAndRecover(): Promise<void> {
     this.pendingMessages = [];
@@ -1068,24 +1082,8 @@ class WsClient {
 
 export const wsClient = new WsClient();
 
-// --- Update API ---
+// --- Version API ---
 
 export async function getVersion(): Promise<{ version: string; isDev: boolean }> {
   return fetchJson("/version");
-}
-
-export async function getUpdateStatus(): Promise<UpdateState> {
-  return fetchJson("/update/status");
-}
-
-export async function checkForUpdate(): Promise<UpdateState> {
-  return fetchJson("/update/check", { method: "POST" });
-}
-
-export async function downloadUpdate(): Promise<UpdateState> {
-  return fetchJson("/update/download", { method: "POST" });
-}
-
-export async function installUpdate(): Promise<void> {
-  await fetchJson("/update/install", { method: "POST" });
 }

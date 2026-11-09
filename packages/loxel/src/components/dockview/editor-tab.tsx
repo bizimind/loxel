@@ -4,7 +4,7 @@ import { useFileTabRename } from "@/hooks/useFileTabRename";
 import { getDisplayFilename } from "@/lib/detached-path";
 import { useEditorStateStore } from "@/store/editor-state";
 
-import { FileContextMenuItems, Tab } from "./tab";
+import { DELETED_TAB_TITLE_CLASS, DivergedDot, FileContextMenuItems, Tab } from "./tab";
 
 interface EditorTabProps {
   props: IDockviewPanelHeaderProps<{ filePath: string; worktreePath?: string }>;
@@ -22,12 +22,7 @@ export function EditorTab({ props, icon }: EditorTabProps) {
   const isDiverged = useEditorStateStore((s) => s.files.get(filePath)?.state === "diverged");
   const isDeleted = useEditorStateStore((s) => s.files.get(filePath)?.deleted ?? false);
 
-  const leading = isDiverged ? (
-    <span
-      className="inline-block size-2 shrink-0 rounded-full bg-yellow-500"
-      title="File changed on disk"
-    />
-  ) : null;
+  const leading = isDiverged ? <DivergedDot title="File changed on disk" /> : null;
 
   return (
     <Tab
@@ -37,7 +32,7 @@ export function EditorTab({ props, icon }: EditorTabProps) {
       onRename={handleRename}
       selectBaseName
       leading={leading}
-      titleClassName={isDeleted ? "line-through opacity-50" : undefined}
+      titleClassName={isDeleted ? DELETED_TAB_TITLE_CLASS : undefined}
       titleTooltip={isDeleted ? "File deleted from disk" : undefined}
       contextMenuItems={
         <FileContextMenuItems

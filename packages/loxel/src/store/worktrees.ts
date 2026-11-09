@@ -7,8 +7,11 @@ import { wsClient } from "@/api/client";
 import type { WorktreeEntry } from "@/api/git-models";
 import type { EnrichedProject } from "@/api/project-model";
 import type { NestedRemoval, WorktreeRemovePlan } from "@/api/worktree-removal-model";
+import { showToast } from "@/components/ui/toast";
 import { STORAGE_PREFIX } from "@/lib/env";
+import { frontendLog } from "@/lib/frontend-logger";
 import { findTreeRoot } from "@/lib/project-file-helpers";
+import { offerToRunInitHook } from "@/lib/repo-trust-dialog";
 import { toggleSet } from "@/lib/set-utils";
 import {
   archivedSet,
@@ -18,16 +21,25 @@ import {
   type WorktreeNode,
   type WorktreeRow,
 } from "@/lib/worktree-hierarchy";
+import { queryClient } from "@/query-client";
 
+import { useFileSearchStore } from "./file-search";
 import { deriveProject, useProjectStore } from "./projects";
 import { serverWorktreesStorage } from "./server-storage";
 import { purgeWorktreeCache, transitionWorktreeState } from "./worktree-cache";
-import { purgeWorktreeStores, setActiveWorktreeKey } from "./worktree-store";
+import { purgeWorktreeStores } from "./worktree-store";
+
+const log = frontendLog.child("worktrees");
 
 const ACTIVE_WT_SESSION_KEY = `${STORAGE_PREFIX}-activeWorktreePath`;
 const refreshRequestIds = new Map<string, number>();
 /** Worktrees with a removal request in flight; shown as pending across list refreshes. */
 const removingPaths = new Set<string>();
+/**
+ * Worktrees with a create request in flight; shown as pending across list refreshes. Git registers
+ * the worktree before its init hook runs, so the list can include it well before it is ready.
+ */
+const creatingPaths = new Set<string>();
 let nextRefreshRequestId = 0;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -183,6 +195,15 @@ export function deriveOwningWorktree(
 
 // ── Worktree store ──────────────────────────────────────────────────────
 
+/**
+ * A worktree create that has started. It runs in the background (the repo's init hook can take a
+ * while) and reports a failure as an error toast, since whoever started it has moved on.
+ */
+export interface CreateStarted {
+  /** Settles when the create has finished: whether it succeeded. Never rejects. */
+  created: Promise<boolean>;
+}
+
 export interface WorktreeState {
   /** All per-project state keyed by project path. */
   byProject: Record<string, ProjectState>;
@@ -215,13 +236,15 @@ export interface WorktreeState {
 
   /**
    * Create a worktree; with `parentPath`, a child branched from that worktree's commit, and with
-   * `title`, shown by that title.
+   * `title`, shown by that title. Resolves once the create has started, as a pending sidebar entry
+   * (null when a branch conflict was parked in `pendingAddPlan` instead); rejects only when the
+   * create cannot start. See {@link CreateStarted} for the rest.
    */
   createWorktree: (
     projectPath: string,
     name: string,
     options?: Pick<CreateWorktreeOptions, "branch" | "parentPath" | "title">,
-  ) => Promise<void>;
+  ) => Promise<CreateStarted | null>;
   requestRemoveWorktree: (projectPath: string, wt: WorktreeEntry) => Promise<void>;
   confirmRemoveWorktree: (options: {
     deleteBranch: boolean;
@@ -239,7 +262,10 @@ export interface WorktreeState {
   /** Turn on worktree metadata for the project, so its worktrees can nest. */
   enableWorktreeMetadata: (projectPath: string) => Promise<void>;
   dismissPendingPlan: () => void;
-  confirmCreateWorktree: (branchResolution: "use-existing" | "delete-and-create") => Promise<void>;
+  /** Create the worktree of the parked `pendingAddPlan`, the way `createWorktree` does. */
+  confirmCreateWorktree: (
+    branchResolution: "use-existing" | "delete-and-create",
+  ) => Promise<CreateStarted | null>;
 
   requestCreateWorktree: () => void;
   clearCreateWorktreeRequest: () => void;
@@ -309,7 +335,7 @@ export const useWorktreeStore = create<WorktreeState>()(
                 p.worktrees.length > 0 ? p.worktrees : (existing?.worktrees ?? []);
               const validPaths = new Set(effectiveWorktrees.map((wt) => wt.path));
               byProject[p.path] = {
-                worktrees: effectiveWorktrees,
+                worktrees: withRequestsInFlight(effectiveWorktrees, existing?.worktrees ?? []),
                 worktreesDir: p.worktreesDir,
                 worktreeMetadata: p.worktreeMetadata,
                 ...prunePersisted(existing, validPaths),
@@ -334,12 +360,8 @@ export const useWorktreeStore = create<WorktreeState>()(
                   : first.path
                 : null;
               set({ activeWorktreePath: fallback });
-              if (fallback) setActiveWorktreeKey(fallback);
-              return;
             }
           }
-
-          if (activeWorktreePath) setActiveWorktreeKey(activeWorktreePath);
         },
 
         refreshProjectWorktrees: async (projectPath) => {
@@ -348,7 +370,8 @@ export const useWorktreeStore = create<WorktreeState>()(
           const allProjects = useProjectStore.getState().projects;
           const project = allProjects.find((p) => p.path === projectPath);
           if (!project) return;
-          const priorPaths = new Set(getProject(get(), projectPath).worktrees.map((wt) => wt.path));
+          const prior = getProject(get(), projectPath).worktrees;
+          const priorPaths = new Set(prior.map((wt) => wt.path));
 
           const data = await api.getProjectWorktrees(project.id);
           if (refreshRequestIds.get(projectPath) !== requestId) return;
@@ -361,14 +384,17 @@ export const useWorktreeStore = create<WorktreeState>()(
             const existing = getProject(s, projectPath);
             return {
               byProject: patchProject(s, projectPath, {
-                worktrees: data.worktrees.map((wt) =>
-                  removingPaths.has(wt.path) ? { ...wt, pending: "removing" as const } : wt,
-                ),
+                worktrees: withRequestsInFlight(data.worktrees, existing.worktrees),
                 worktreeMetadata: data.worktreeMetadata,
                 ...prunePersisted(existing, validPaths),
               }),
             };
           });
+
+          // Whether removed or moved, in this window or anywhere else, by the app or by `wt`.
+          for (const wt of prior) {
+            if (wt.pending !== "creating" && !validPaths.has(wt.path)) releaseWorktree(wt.path);
+          }
 
           const active = get().activeWorktreePath;
           const activeProject = deriveProject(active, allProjects);
@@ -382,18 +408,17 @@ export const useWorktreeStore = create<WorktreeState>()(
 
           const fallback = project.isBare ? (data.worktrees[0]?.path ?? null) : project.path;
           set({ activeWorktreePath: fallback });
-          if (fallback) transitionWorktreeState(active, fallback);
-          else setActiveWorktreeKey("");
+          if (fallback) transitionWorktreeState();
         },
 
         switchWorktree: async (path) => {
           // 1. Set activeWorktreePath OPTIMISTICALLY (before API calls)
           set({ activeWorktreePath: path });
 
-          // 2. Transition worktree state (sets activeWorktreeKey, clears comments)
-          transitionWorktreeState(null, path);
+          // 2. Transition worktree state (clears comments)
+          transitionWorktreeState();
 
-          // 4. No server API call needed — server supports concurrent projects.
+          // 3. No server API call needed — server supports concurrent projects.
           // WebSocket subscription is handled by the subscription lifecycle in App.tsx.
         },
 
@@ -409,42 +434,28 @@ export const useWorktreeStore = create<WorktreeState>()(
               );
             }
             set({ pendingAddPlan: { ...plan, projectPath, parentPath, title } });
-            return;
+            return null;
           }
 
-          addOptimisticEntry(set, projectPath, plan.worktreePath, name, { parentPath, title });
-
-          try {
-            await api.createWorktree(projectPath, name, {
-              branch: options?.branch,
-              parentPath,
-              title,
-            });
-          } catch (err) {
-            removeOptimisticEntry(set, projectPath, plan.worktreePath);
-            throw err;
-          }
-
-          await get().refreshProjectWorktrees(projectPath);
+          return startCreate(set, get, projectPath, plan.worktreePath, name, {
+            branch: options?.branch,
+            parentPath,
+            title,
+          });
         },
 
         confirmCreateWorktree: async (branchResolution) => {
           const { pendingAddPlan } = get();
-          if (!pendingAddPlan) return;
+          if (!pendingAddPlan) return null;
 
           const { name, worktreePath, projectPath, parentPath, title } = pendingAddPlan;
           set({ pendingAddPlan: null });
 
-          addOptimisticEntry(set, projectPath, worktreePath, name, { parentPath, title });
-
-          try {
-            await api.createWorktree(projectPath, name, { branchResolution, parentPath, title });
-          } catch (err) {
-            removeOptimisticEntry(set, projectPath, worktreePath);
-            throw err;
-          }
-
-          await get().refreshProjectWorktrees(projectPath);
+          return startCreate(set, get, projectPath, worktreePath, name, {
+            branchResolution,
+            parentPath,
+            title,
+          });
         },
 
         requestRemoveWorktree: async (projectPath, wt) => {
@@ -585,6 +596,7 @@ export const useWorktreeStore = create<WorktreeState>()(
         reset: () => {
           refreshRequestIds.clear();
           removingPaths.clear();
+          creatingPaths.clear();
           set({
             byProject: {},
             activeWorktreePath: null,
@@ -624,10 +636,29 @@ useWorktreeStore.subscribe(
   },
 );
 
-/** Drop the client state of a removed worktree and stop listening to it. */
+/** Whether `path` is a worktree or a regular project's root checkout in this window's lists. */
+export function isListedWorktree(path: string): boolean {
+  const { byProject } = useWorktreeStore.getState();
+  return (
+    Object.values(byProject).some((ps) => ps.worktrees.some((wt) => wt.path === path)) ||
+    useProjectStore.getState().projects.some((p) => !p.isBare && p.path === path)
+  );
+}
+
+/**
+ * Drop the client state of a removed worktree and stop listening to it, so a worktree later created
+ * at the same path starts fresh.
+ */
 function releaseWorktree(path: string): void {
   purgeWorktreeStores(path);
   purgeWorktreeCache(path);
+  useFileSearchStore.getState().purgeWorktree(path);
+  queryClient.removeQueries({
+    predicate: ({ queryKey }) =>
+      queryKey.some(
+        (part) => typeof part === "string" && (part === path || part.startsWith(`${path}/`)),
+      ),
+  });
   wsClient.unsubscribeWorktree(path);
 }
 
@@ -659,6 +690,82 @@ export function toggleArchivedPaths(
 type SetFn = (
   fn: WorktreeState | Partial<WorktreeState> | ((state: WorktreeState) => Partial<WorktreeState>),
 ) => void;
+
+/**
+ * A worktree list from the server with the requests in flight applied over it: listed worktrees
+ * get their pending marker, and the `current` entries of worktrees being created that the list
+ * does not have yet (git had not registered them when it was read) are kept.
+ */
+function withRequestsInFlight(
+  listed: readonly WorktreeEntry[],
+  current: readonly WorktreeEntry[],
+): WorktreeEntry[] {
+  const listedPaths = new Set(listed.map((wt) => wt.path));
+  const stillCreating = current.filter(
+    (wt) => creatingPaths.has(wt.path) && !listedPaths.has(wt.path),
+  );
+  return [...listed.map(withPendingMarker), ...stillCreating];
+}
+
+/** A listed worktree with the marker of the request in flight for it, if any. */
+function withPendingMarker(wt: WorktreeEntry): WorktreeEntry {
+  if (removingPaths.has(wt.path)) return { ...wt, pending: "removing" };
+  if (creatingPaths.has(wt.path)) return { ...wt, pending: "creating" };
+  return wt;
+}
+
+/** Show the pending entry and create the worktree in the background. */
+function startCreate(
+  set: SetFn,
+  get: () => WorktreeState,
+  projectPath: string,
+  worktreePath: string,
+  name: string,
+  options: CreateWorktreeOptions,
+): CreateStarted {
+  // The dialog closes once a create starts, so the same name can be submitted again meanwhile.
+  if (creatingPaths.has(worktreePath)) {
+    throw new Error(`Worktree '${name}' is already being created`);
+  }
+  creatingPaths.add(worktreePath);
+  addOptimisticEntry(set, projectPath, worktreePath, name, options);
+  return { created: finishCreate(set, get, projectPath, worktreePath, name, options) };
+}
+
+async function finishCreate(
+  set: SetFn,
+  get: () => WorktreeState,
+  projectPath: string,
+  worktreePath: string,
+  name: string,
+  options: CreateWorktreeOptions,
+): Promise<boolean> {
+  let created = true;
+  try {
+    const result = await api.createWorktree(projectPath, name, options);
+    if (result.hookSkipped) void offerToRunInitHook(projectPath, result.path);
+  } catch (err) {
+    created = false;
+    const reason = err instanceof Error ? err.message : String(err);
+    log.warn(`Failed to create worktree '${name}'`, { projectPath, error: err });
+    showToast(`Could not create worktree '${name}': ${reason}`);
+  } finally {
+    creatingPaths.delete(worktreePath);
+  }
+  // Gone at once on failure; the refresh brings it back if the create got as far as git.
+  if (!created) removeOptimisticEntry(set, projectPath, worktreePath);
+  try {
+    await get().refreshProjectWorktrees(projectPath);
+  } catch (err) {
+    log.warn("Could not refresh the worktree list after creating a worktree", {
+      projectPath,
+      error: err,
+    });
+    // Ready all the same; the next refresh fills in what the optimistic entry lacks.
+    if (created) patchEntry(set, projectPath, worktreePath, { pending: undefined });
+  }
+  return created;
+}
 
 function addOptimisticEntry(
   set: SetFn,

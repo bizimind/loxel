@@ -1,6 +1,6 @@
 ---
 title: Diff Viewer
-description: Split and unified modes, synchronized scrolling, gutter connectors, intra-line highlights, and comparing any two files.
+description: Split and unified modes, synchronized scrolling, gutter connectors, intra-line highlights, editing your working tree in place, and comparing any two files.
 order: 9
 ---
 
@@ -61,6 +61,20 @@ The diff viewer can compare:
 - Any two files (see [Comparing two files](#comparing-two-files))
 
 To open a diff, select one or more commits in the commit graph, then double-click a file in the Changes panel (or right-click it and choose **Open Diff**). See [Git](/docs/git) for how the commit graph and Changes panel work.
+
+---
+
+## Editing the working tree
+
+When the right side of a diff is your working tree, as in your uncommitted changes against HEAD or against an older commit, you can edit it right there in split view. The left side is a past version and stays read-only, as does a file that was already deleted when you opened it.
+
+- **Live coloring.** The highlights, connectors and collapsed regions update as you type, without waiting for the file to save. Expanded unchanged regions stay expanded while you edit. The unified view, the added and removed line counts and the Changes panel catch up once the file is saved, and can group a change slightly differently than split view does while you type.
+- **Saving.** Edits save automatically like in an editor tab, and **Cmd+S** saves right away. If the file is also open in an editor tab, edits in one show up in the other once saved.
+- **Conflicts and deleted files.** If the file changes on disk while you have unsaved edits, for example when an agent edits it, a banner lets you accept the disk version or keep yours, and the diff viewer's tab shows a yellow dot. If the file is deleted while you edit it, your text stays, a banner offers to re-create the file, and the tab's title is struck through.
+- **Undoing all changes.** If your edits make the file match the version on the left, it drops out of the Changes panel, but the diff viewer keeps showing it with no changes until you pick another file, discard it, or switch to the unified view.
+- **Review comments.** Comment markers keep their position while you type, and follow the code to where it moved after each save.
+
+The unified view is read-only, and so are the uncommitted changes of a worktree other than the current one.
 
 ---
 

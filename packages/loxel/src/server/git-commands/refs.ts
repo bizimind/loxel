@@ -22,9 +22,9 @@ export async function getRefs(cwd: string): Promise<RefInfo[]> {
   const [result, head] = await Promise.all([
     gitText(["for-each-ref", `--format=${format}`, "refs/heads", "refs/remotes", "refs/tags"], {
       cwd,
-      env: readOnlyGitEnv(),
+      env: readOnlyGitEnv(cwd),
     }),
-    gitText(["rev-parse", "HEAD"], { cwd, env: readOnlyGitEnv(), nothrow: true }),
+    gitText(["rev-parse", "HEAD"], { cwd, env: readOnlyGitEnv(cwd), nothrow: true }),
   ]);
   const refs = parseRefsOutput(result, head.trim());
   refsCache = { data: refs, expiry: now + 2000, cwd };
@@ -51,7 +51,7 @@ async function readBranchReflogTimes(cwd: string): Promise<Map<string, number>> 
       "--branches",
       `--format=${format}`,
     ],
-    { cwd, env: readOnlyGitEnv(), nothrow: true },
+    { cwd, env: readOnlyGitEnv(cwd), nothrow: true },
   );
   if (result.exitCode !== 0) {
     log.warn("reflog walk failed, reading branches one by one", {
@@ -80,7 +80,7 @@ async function readBranchReflogTimesOneByOne(cwd: string): Promise<Map<string, n
   const listFormat = "%(refname:lstrip=2)";
   const list = await gitText(["for-each-ref", `--format=${listFormat}`, "refs/heads"], {
     cwd,
-    env: readOnlyGitEnv(),
+    env: readOnlyGitEnv(cwd),
     nothrow: true,
   });
   const branches = list.trim().split("\n").filter(Boolean);
@@ -89,7 +89,7 @@ async function readBranchReflogTimesOneByOne(cwd: string): Promise<Map<string, n
   await mapWithConcurrency(branches, REFLOG_FALLBACK_CONCURRENCY, async (branch) => {
     const output = await gitText(["reflog", "show", branch, "--format=%at", "-n", "1"], {
       cwd,
-      env: readOnlyGitEnv(),
+      env: readOnlyGitEnv(cwd),
       nothrow: true,
     });
     const timestamp = parseInt(output.trim(), 10);
@@ -101,8 +101,11 @@ async function readBranchReflogTimesOneByOne(cwd: string): Promise<Map<string, n
 export async function getBranches(cwd: string): Promise<BranchInfo[]> {
   const format = "%(objectname) %(refname) %(upstream) %(upstream:track)";
   const [result, headResult, reflogTimes] = await Promise.all([
-    gitText(["for-each-ref", `--format=${format}`, "refs/heads"], { cwd, env: readOnlyGitEnv() }),
-    gitText(["symbolic-ref", "--short", "HEAD"], { cwd, env: readOnlyGitEnv(), nothrow: true }),
+    gitText(["for-each-ref", `--format=${format}`, "refs/heads"], {
+      cwd,
+      env: readOnlyGitEnv(cwd),
+    }),
+    gitText(["symbolic-ref", "--short", "HEAD"], { cwd, env: readOnlyGitEnv(cwd), nothrow: true }),
     readBranchReflogTimes(cwd),
   ]);
   const headBranch = headResult.trim() || null;
@@ -125,13 +128,13 @@ export async function getRecentBranchNames(cwd: string, days: number): Promise<s
   const [localResult, reflogTimes, remoteResult] = await Promise.all([
     gitText(["for-each-ref", `--format=${localFormat}`, "refs/heads"], {
       cwd,
-      env: readOnlyGitEnv(),
+      env: readOnlyGitEnv(cwd),
       nothrow: true,
     }),
     readBranchReflogTimes(cwd),
     gitText(["for-each-ref", `--format=${remoteFormat}`, "refs/remotes"], {
       cwd,
-      env: readOnlyGitEnv(),
+      env: readOnlyGitEnv(cwd),
       nothrow: true,
     }),
   ]);
@@ -162,6 +165,6 @@ export async function getRecentBranchNames(cwd: string, days: number): Promise<s
 }
 
 export async function getStashes(cwd: string): Promise<StashInfo[]> {
-  const result = await gitText(["stash", "list"], { cwd, env: readOnlyGitEnv(), nothrow: true });
+  const result = await gitText(["stash", "list"], { cwd, env: readOnlyGitEnv(cwd), nothrow: true });
   return parseStashOutput(result);
 }

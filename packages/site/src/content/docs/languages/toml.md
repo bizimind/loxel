@@ -4,7 +4,7 @@ description: TOML language features from Tombi, with syntax and schema checks, c
 order: 13.5
 ---
 
-The TOML server starts the first time you open a `.toml` file, `Pipfile`, `Cargo.lock`, `poetry.lock` or `uv.lock`, and stops when none remain open.
+The TOML server starts the first time you open a `.toml` file, `Pipfile`, `Cargo.lock`, `.cargo/config`, `poetry.lock` or `uv.lock`, and stops when none remain open.
 
 TOML files are checked by [Tombi](https://tombi-toml.github.io/tombi/). It underlines syntax errors and values that do not match the file's JSON Schema, and the schema also drives completions and hover documentation for keys and values. You also get the document outline, folding, go-to-definition and quick fixes.
 
@@ -12,6 +12,7 @@ Schemas come from **Settings > Schemas**, the same mappings JSON and YAML files 
 
 - `pyproject.toml`, including tool tables such as `[tool.ruff]` and `[tool.uv]`
 - `Cargo.toml` and `.cargo/config.toml`
+- `rust-toolchain.toml`
 - `ruff.toml` and `.ruff.toml`
 - `uv.toml`
 - `rustfmt.toml` and `.rustfmt.toml`
@@ -32,3 +33,4 @@ Projects that configure Tombi themselves, with a `tombi.toml` or `.tombi.toml` f
 ## See also
 
 - [Language Intelligence](/docs/language-intelligence) — the features every language server provides, and how servers start and stop per worktree
+- [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code

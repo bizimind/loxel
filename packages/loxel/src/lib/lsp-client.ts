@@ -5,7 +5,7 @@ import { showToast } from "@/components/ui/toast";
 import { useLspStatusStore } from "@/store/lsp-status";
 
 import { frontendLog } from "./frontend-logger";
-import { isLiveEditorModel } from "./live-editor-model";
+import { isLiveEditorModel, isPreviewModel } from "./live-editor-model";
 import {
   createLspConnection,
   createStopToastFilter,
@@ -16,6 +16,11 @@ import {
 } from "./lsp-connection";
 import { createLspWorkspaceFiles } from "./lsp-workspace-files";
 import { SEMANTIC_TOKEN_STYLING } from "./monaco-theme";
+import {
+  isVirtualDocumentUri,
+  registerVirtualDocumentScheme,
+  type VirtualDocumentOptions,
+} from "./virtual-documents";
 
 const log = frontendLog.child("ui");
 
@@ -66,9 +71,17 @@ export interface LspClientOptions {
   /**
    * Show the errors and warnings the server sends with `window/showMessage` as toasts, each
    * distinct message once while Loxel runs, for a server whose messages are meant for the user
-   * (mypy's setup problems).
+   * (mypy's setup problems, a Kotlin lint tool that is missing or failed).
    */
   showMessages?: boolean;
+  /** The server's read-only documents: tabs and peek widgets show them, read through this client. */
+  virtualDocuments?: VirtualDocumentOptions;
+  /**
+   * Leave these languages' editor models on `loxel://HEAD/` URIs instead of `file://` (see
+   * `fileSchemeLanguages`), for a server sharing languages with one that needs them. Its manager
+   * translates the URIs.
+   */
+  keepsEditorUris?: boolean;
 }
 
 /**
@@ -79,7 +92,8 @@ export interface LspClientOptions {
  * YAML). Connecting to a different path disposes the old client and socket (killing the
  * server-side subprocess) and opens a new connection. Both the worktree switch and `disconnect()`
  * dispose the client (unregistering providers and closing synced documents) before the socket.
- * Only editor tabs' live models are synced to the server (see `isLiveEditorModel`). Workspace edits
+ * Only editor tabs' live models are synced to the server (see `isLiveEditorModel`), plus the tabs of
+ * its own read-only documents. Workspace edits
  * (rename, code actions) also change the worktree's files that are not open (see
  * `createLspWorkspaceFiles`), and a toast says why when one fails.
  *
@@ -94,9 +108,17 @@ export function createLspClient({
   languageId,
   onConnected,
   showMessages,
+  virtualDocuments,
+  keepsEditorUris = false,
 }: LspClientOptions) {
   const markerOwner = route.replace(/^ws\//, "");
   const showMessage = showMessages ? createServerMessageToasts(name) : undefined;
+  const languageIds = typeof languageId === "string" ? [languageId] : languageId;
+  const virtualDocumentScheme = virtualDocuments
+    ? registerVirtualDocumentScheme(virtualDocuments, languageIds[0] ?? "plaintext")
+    : undefined;
+  const ownsVirtualDocument = (model: Parameters<typeof isLiveEditorModel>[0]): boolean =>
+    model.uri.scheme === virtualDocuments?.scheme && !isPreviewModel(model);
 
   async function open(wtPath: string | null, signal: AbortSignal): Promise<LspLink> {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -110,7 +132,9 @@ export function createLspClient({
     try {
       client = new MonacoLspClient(transport, {
         languageId,
-        modelFilter: isLiveEditorModel,
+        modelFilter: (model) => isLiveEditorModel(model) || ownsVirtualDocument(model),
+        // Any server's. Their tabs are read-only, which stops typing but not a server's edit.
+        isReadOnlyModel: (model) => isVirtualDocumentUri(model.uri.toString()),
         // One client per route at a time: each takes over the markers' owner of the one before.
         markerOwner,
         workspaceFileSystem: wtPath === null ? undefined : createLspWorkspaceFiles(wtPath),
@@ -123,6 +147,7 @@ export function createLspClient({
       throw err;
     }
     connectedClients.set(client, wtPath);
+    const endVirtualDocuments = virtualDocumentScheme?.connected(client);
     const extension = onConnected?.(transport);
     return {
       closed,
@@ -130,6 +155,7 @@ export function createLspClient({
       // socket.
       dispose() {
         connectedClients.delete(client);
+        endVirtualDocuments?.();
         extension?.dispose();
         try {
           client.dispose();
@@ -164,7 +190,9 @@ export function createLspClient({
   return {
     connect: connection.connect,
     disconnect: connection.disconnect,
-    languageIds: typeof languageId === "string" ? [languageId] : languageId,
+    languageIds,
+    ownsVirtualDocument,
+    keepsEditorUris,
     logCategory: markerOwner,
   };
 }

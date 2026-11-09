@@ -94,3 +94,4 @@ export const serverToolsBarStorage = createServerStorage("tools-bar");
 export const serverSearchStorage = createServerStorage("search");
 export const serverWorktreesStorage = createServerStorage("worktrees");
 export const serverProjectsStorage = createServerStorage("projects");
+export const serverBrowserBookmarksStorage = createServerStorage("browser-bookmarks");

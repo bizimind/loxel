@@ -2,17 +2,16 @@
  * Builds and stages what ships next to `loxel-server` for language servers. Each binary is one
  * manifest in scripts/language-servers/, so a new one edits no shared file:
  *
- *   { "script": "download-x.ts", "resources": ["x"], "sign"?: ["dir/executable"] }
+ *   { "script": "download-x.ts", "resources": ["x"], "platforms"?: ["darwin"] }
  *
  * `script` (in scripts/) writes `resources` (paths under build/). Each resource is staged by its
- * base name in build/language-servers/, which electron-builder.yml `extraResources` and the release
- * workflow's update archive copy as a whole.
+ * base name in build/language-servers/, which electron-builder.yml `extraResources` copies as a
+ * whole. A manifest with `platforms` does not exist elsewhere.
  *
  *   build [manifest...]  run the scripts; with no names, also stage everything
- *   sign                 ad-hoc sign the stage: every file resource, plus each manifest's `sign`
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { $ } from "bun";
@@ -26,7 +25,7 @@ interface Manifest {
   name: string;
   script: string;
   resources: string[];
-  sign: string[];
+  platforms?: string[];
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -36,17 +35,22 @@ function isStringArray(value: unknown): value is string[] {
 async function readManifest(file: string): Promise<Manifest> {
   const raw: unknown = await Bun.file(path.join(MANIFEST_DIR, file)).json();
   if (typeof raw !== "object" || raw === null) throw new Error(`${file}: not an object`);
-  const { script, resources, sign = [] } = raw as Record<string, unknown>;
-  if (typeof script !== "string" || !isStringArray(resources) || !isStringArray(sign)) {
-    throw new Error(`${file}: expected script, resources and optionally sign`);
+  const { script, resources, platforms } = raw as Record<string, unknown>;
+  if (
+    typeof script !== "string" ||
+    !isStringArray(resources) ||
+    (platforms !== undefined && !isStringArray(platforms))
+  ) {
+    throw new Error(`${file}: expected script, resources and optionally platforms`);
   }
-  return { name: path.basename(file, ".json"), script, resources, sign };
+  return { name: path.basename(file, ".json"), script, resources, platforms };
 }
 
-/** The manifests, in name order so the build is the same everywhere. */
+/** This platform's manifests, in name order so the build is the same everywhere. */
 async function readManifests(): Promise<Manifest[]> {
   const files = readdirSync(MANIFEST_DIR).filter((file) => file.endsWith(".json"));
-  return Promise.all(files.toSorted().map(readManifest));
+  const manifests = await Promise.all(files.toSorted().map(readManifest));
+  return manifests.filter((m) => !m.platforms || m.platforms.includes(process.platform));
 }
 
 /** A resource's built path; download scripts add `.exe` on Windows. */
@@ -79,17 +83,6 @@ async function build(names: string[]): Promise<void> {
   if (names.length === 0) stage(manifests);
 }
 
-async function sign(): Promise<void> {
-  const targets = (await readManifests()).flatMap((manifest) => [
-    ...manifest.resources.map((resource) => path.join(STAGE_DIR, path.basename(resource))),
-    ...manifest.sign.map((file) => path.join(STAGE_DIR, file)),
-  ]);
-  for (const target of targets) {
-    if (statSync(target).isFile()) await $`codesign -s - -f ${target}`;
-  }
-}
-
 const [command, ...args] = Bun.argv.slice(2);
 if (command === "build") await build(args);
-else if (command === "sign") await sign();
-else throw new Error(`Usage: language-server-binaries.ts build [manifest...] | sign`);
+else throw new Error(`Usage: language-server-binaries.ts build [manifest...]`);

@@ -14,13 +14,15 @@ movedAnchors:
   toml: /docs/languages/toml
 ---
 
-Loxel runs language servers for TypeScript, Python, TOML and other languages and connects them to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per worktree, with no cross-worktree interference.
+Loxel runs language servers for TypeScript, JavaScript, Python, Go, Rust, C and C++, Java, C#, TOML and other languages and connects them to the editor. You get hover docs, go-to-definition, completions, rename, and more — isolated per worktree, with no cross-worktree interference.
 
 ---
 
 ## Per-worktree language servers
 
 The active worktree gets its own language server processes; only the YAML server is shared. Switching worktrees stops them and starts fresh ones for the worktree you switch to, so expect a short warm-up after a switch. There is no shared server state between worktrees — if one worktree is using an older TypeScript config, a different Python environment or a different version of your packages, it does not affect any other worktree's language servers.
+
+A language feature that depends on running a repository's own code waits until you [trust the repository](/docs/repository-trust).
 
 ### When a language server stops
 
@@ -63,7 +65,7 @@ Files open in a tab can always be edited this way, wherever they are, as typing 
 
 ## Navigation
 
-`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. When a symbol has several definitions, a peek lists them instead.
+`Cmd`-click any symbol — or press `F12` — to jump to its definition. The target opens in an editor tab, reusing the file's tab if it is already open. This works in every language with a language server, including definitions outside the project such as the Python standard library. Some servers hold these sources themselves, such as Java's for JDK classes, and they open read-only. When a symbol has several definitions, a peek lists them instead.
 
 Press `Shift+F12` to find a symbol's references. A peek opens below the line, listing every usage grouped by file, with a preview of the selected one. `Alt+F12` peeks at a definition and `Cmd+Shift+F12` at implementations without leaving the file. Press `Enter` or double-click a usage to open it in a tab, which closes the peek; `Escape` closes it. Files that aren't open, including ones outside the project, are read-only in the preview; open the file to edit it. Files open in a tab can be edited right in the peek.
 
@@ -77,7 +79,7 @@ Symbols flagged as unused by the language server are dimmed in the editor, and d
 
 ## Other languages
 
-Each language server is independent of the others. A language with more to say has its own page in the docs navigation, such as [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python) and [TOML](/docs/languages/toml). These have none:
+Each language server is independent of the others. A language with more to say has its own page in the docs navigation: [TypeScript](/docs/languages/typescript), [JavaScript](/docs/languages/javascript), [Python](/docs/languages/python), [Go](/docs/languages/go), [Rust](/docs/languages/rust), [C and C++](/docs/languages/c-cpp), [Java](/docs/languages/java), [Kotlin](/docs/languages/kotlin), [C#](/docs/languages/csharp) and [TOML](/docs/languages/toml). These have none:
 
 | Language  | When it starts             | File types                                                       |
 | --------- | -------------------------- | ---------------------------------------------------------------- |
@@ -89,7 +91,9 @@ Each language server is independent of the others. A language with more to say h
 
 YAML starts with Loxel and stays running. The others start the first time you open a matching file and stop automatically when no matching files remain open. You do not need to configure anything to get them; they are available whenever you open a supported file type.
 
-The Docker language server itself sends nothing to Docker's services: no telemetry, crash reports, vulnerability scans or image lookups. Bake files get hover, completion and diagnostics. Dockerfile lint warnings come from `docker buildx` when the Docker CLI is installed; it runs with your own Docker setup, which can contact the registry of a base image (Docker Hub for most images), as `docker build` does. If your active builder is remote, the Dockerfile and build context go to that builder, also as with any `docker build`. Lint warnings are not available with a Docker daemon reached over TCP on another machine.
+The Docker language server itself sends nothing to Docker's services: no telemetry, crash reports, vulnerability scans or image lookups. Bake files get hover, completion and diagnostics. Dockerfile checks are local only: Loxel doesn't run Docker's build checks (`docker build --check`), since they contact registries, so Dockerfiles keep the language server's other features but get no lint warnings. Run `docker build --check` in a terminal for those.
+
+Astro files get the Astro language server once you [trust the repository](/docs/repository-trust), since it loads your project's own TypeScript. Terraform files use the `terraform` on your `PATH` in a trusted repository; Loxel turns off the automatic installs of tfenv, tenv, mise and aqua, so they use only versions already installed.
 
 ---
 

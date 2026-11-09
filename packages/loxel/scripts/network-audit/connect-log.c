@@ -56,6 +56,8 @@ static int describe(const struct sockaddr *a, char *what, size_t len) {
     const struct sockaddr_in6 *v6 = (const struct sockaddr_in6 *)a;
     inet_ntop(AF_INET6, &v6->sin6_addr, ip, sizeof ip);
     snprintf(what, len, "[%s]:%d", ip, ntohs(v6->sin6_port));
+    // Java's dual-stack sockets reach loopback as ::ffff:127.x.y.z, as Gradle's client does its daemon.
+    if (IN6_IS_ADDR_V4MAPPED(&v6->sin6_addr)) return v6->sin6_addr.s6_addr[12] != 127;
     return !IN6_IS_ADDR_LOOPBACK(&v6->sin6_addr);
   }
   if (a->sa_family == AF_UNIX) {
@@ -78,6 +80,34 @@ static int my_connect(int fd, const struct sockaddr *a, socklen_t l) {
 }
 DYLD_INTERPOSE(my_connect, connect)
 
+// .NET's sockets call these variants, which interposing `connect` does not reach.
+extern int connect_nocancel(int, const struct sockaddr *, socklen_t) __asm("_connect$NOCANCEL");
+static int my_connect_nocancel(int fd, const struct sockaddr *a, socklen_t l) {
+  char what[256];
+  if (describe(a, what, sizeof what)) {
+    logline("connect", what, "BLOCKED");
+    errno = ECONNREFUSED;
+    return -1;
+  }
+  logline("connect", what, "local");
+  return connect_nocancel(fd, a, l);
+}
+DYLD_INTERPOSE(my_connect_nocancel, connect_nocancel)
+
+static int my_connectx(int fd, const sa_endpoints_t *e, sae_associd_t assoc, unsigned int flags,
+                       const struct iovec *iov, unsigned int iovcnt, size_t *len,
+                       sae_connid_t *conn) {
+  char what[256];
+  if (describe(e ? e->sae_dstaddr : NULL, what, sizeof what)) {
+    logline("connectx", what, "BLOCKED");
+    errno = ECONNREFUSED;
+    return -1;
+  }
+  logline("connectx", what, "local");
+  return connectx(fd, e, assoc, flags, iov, iovcnt, len, conn);
+}
+DYLD_INTERPOSE(my_connectx, connectx)
+
 static ssize_t my_sendto(int fd, const void *b, size_t n, int f, const struct sockaddr *a,
                          socklen_t l) {
   char what[256];
@@ -89,6 +119,69 @@ static ssize_t my_sendto(int fd, const void *b, size_t n, int f, const struct so
   return sendto(fd, b, n, f, a, l);
 }
 DYLD_INTERPOSE(my_sendto, sendto)
+
+extern ssize_t sendmsg_nocancel(int, const struct msghdr *, int) __asm("_sendmsg$NOCANCEL");
+static ssize_t my_sendmsg_nocancel(int fd, const struct msghdr *m, int f) {
+  char what[256];
+  if (m && m->msg_name && describe((const struct sockaddr *)m->msg_name, what, sizeof what)) {
+    logline("sendmsg", what, "BLOCKED");
+    errno = ECONNREFUSED;
+    return -1;
+  }
+  return sendmsg_nocancel(fd, m, f);
+}
+DYLD_INTERPOSE(my_sendmsg_nocancel, sendmsg_nocancel)
+
+// JDK libnio and native images import plain `sendmsg`.
+static ssize_t my_sendmsg(int fd, const struct msghdr *m, int f) {
+  char what[256];
+  if (m && m->msg_name && describe((const struct sockaddr *)m->msg_name, what, sizeof what)) {
+    logline("sendmsg", what, "BLOCKED");
+    errno = ENETUNREACH;
+    return -1;
+  }
+  return sendmsg(fd, m, f);
+}
+DYLD_INTERPOSE(my_sendmsg, sendmsg)
+
+extern ssize_t sendto_nocancel(int, const void *, size_t, int, const struct sockaddr *, socklen_t)
+    __asm("_sendto$NOCANCEL");
+static ssize_t my_sendto_nocancel(int fd, const void *b, size_t n, int f, const struct sockaddr *a,
+                                  socklen_t l) {
+  char what[256];
+  if (a && describe(a, what, sizeof what)) {
+    logline("sendto", what, "BLOCKED");
+    errno = ENETUNREACH;
+    return -1;
+  }
+  return sendto_nocancel(fd, b, n, f, a, l);
+}
+DYLD_INTERPOSE(my_sendto_nocancel, sendto_nocancel)
+
+// The batch form, private to the SDK; `msg_name` leads the same way as in `struct msghdr`.
+struct msghdr_x {
+  void *msg_name;
+  socklen_t msg_namelen;
+  struct iovec *msg_iov;
+  int msg_iovlen;
+  void *msg_control;
+  socklen_t msg_controllen;
+  int msg_flags;
+  size_t msg_datalen;
+};
+extern ssize_t sendmsg_x(int, const struct msghdr_x *, unsigned int, int);
+static ssize_t my_sendmsg_x(int fd, const struct msghdr_x *m, unsigned int count, int f) {
+  char what[256];
+  for (unsigned int i = 0; m && i < count; i++) {
+    if (m[i].msg_name && describe((const struct sockaddr *)m[i].msg_name, what, sizeof what)) {
+      logline("sendmsg_x", what, "BLOCKED");
+      errno = ENETUNREACH;
+      return -1;
+    }
+  }
+  return sendmsg_x(fd, m, count, f);
+}
+DYLD_INTERPOSE(my_sendmsg_x, sendmsg_x)
 
 static int my_getaddrinfo(const char *h, const char *s, const struct addrinfo *hints,
                           struct addrinfo **res) {

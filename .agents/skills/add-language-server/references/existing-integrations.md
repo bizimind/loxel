@@ -4,19 +4,26 @@ Quick reference for the quirks of the servers that existed before `docs/language
 
 ## Integration Matrix
 
-| LSP                   | Binary Source | Scope    | Connection | Semantic Tokens | Full-text Sync | Spawn Args      | Init Options                  |
-| --------------------- | ------------- | -------- | ---------- | --------------- | -------------- | --------------- | ----------------------------- |
-| TypeScript (tsc)      | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences                   |
-| YAML                  | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (pulled)           |
-| Docker                | source-built  | worktree | lazy       | disabled        | yes            | `start --stdio` | compose, telemetry, Scout off |
-| Terraform             | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
-| Python (basedpyright) | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
-| Python (ruff)         | downloaded    | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
-| Python (mypy)         | project env   | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
-| Astro                 | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
-| XML (LemMinX)         | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | downloads off (init options)  |
-| TOML (Tombi)          | downloaded    | worktree | lazy       | disabled        | no             | `lsp --offline` | schema map (post-init)        |
-| Go (gopls)            | built from Go | worktree | lazy       | enabled         | no             | `serve`         | settings (pulled)             |
+| LSP                     | Binary Source | Scope    | Connection | Semantic Tokens | Full-text Sync | Spawn Args      | Init Options                  |
+| ----------------------- | ------------- | -------- | ---------- | --------------- | -------------- | --------------- | ----------------------------- |
+| TypeScript (tsc)        | copy script   | worktree | eager      | enabled         | no             | `--lsp -stdio`  | preferences                   |
+| YAML                    | Bun-built     | global   | always     | enabled         | no             | `--stdio`       | schema map (pulled)           |
+| Docker                  | source-built  | worktree | lazy       | disabled        | yes            | `start --stdio` | compose, telemetry, Scout off |
+| Terraform               | downloaded    | worktree | lazy       | disabled        | no             | `serve`         | indexing ignore dirs          |
+| Python (basedpyright)   | Bun-built     | worktree | lazy       | enabled         | no             | `--stdio`       | interpreter, ruleset (pulled) |
+| Python (ruff)           | downloaded    | worktree | lazy       | n/a             | no             | `server`        | `showSyntaxErrors` off        |
+| Python (mypy)           | project env   | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
+| Kotlin (detekt, ktlint) | machine PATH  | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
+| Astro                   | Bun-built     | worktree | lazy       | disabled        | no             | `--stdio`       | TypeScript SDK path           |
+| XML (LemMinX)           | downloaded    | worktree | lazy       | enabled         | no             | `--stdio`       | downloads off (init options)  |
+| TOML (Tombi)            | downloaded    | worktree | lazy       | disabled        | no             | `lsp --offline` | schema map (post-init)        |
+| Go (gopls)              | built from Go | worktree | lazy       | enabled         | no             | `serve`         | settings (pulled)             |
+| Go (golangci-lint)      | machine PATH  | worktree | lazy       | n/a             | n/a            | in-process      | none                          |
+| Rust (rust-analyzer)    | user's binary | worktree | lazy       | enabled         | no             | none            | restricted mode, project list |
+| Java (jdtls)            | bundled jar   | worktree | lazy       | enabled         | no             | JVM flags       | import once trusted (pushed)  |
+| ESLint                  | bundled JS    | worktree | lazy       | n/a             | no             | `--stdio`       | settings per file (pulled)    |
+| oxlint                  | project's own | worktree | lazy       | n/a             | no             | `--lsp`         | none                          |
+| Biome                   | project's own | worktree | lazy       | n/a             | no             | `lsp-proxy`     | settings (pulled)             |
 
 ## TypeScript — Do Not Use as Template
 
@@ -44,13 +51,13 @@ Also: serves two language IDs via array, overrides `resolveBinary()` for Windows
 
 ## Terraform
 
-Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexing.ignoreDirectoryNames` via init options.
+Downloaded Go binary. Uses `["serve"]` spawn arg (not `--stdio`). Passes `indexing.ignoreDirectoryNames` via init options. In an untrusted repository its `PATH` holds no `terraform` (`pathWithoutCommand` from `shell-env.ts`), since reading provider schemas through `terraform` starts the providers under `.terraform`; the restriction is reported only when a `terraform` would have been found.
 
 ## Python (basedpyright)
 
 The npm package ships one pre-bundled file; the build script compiles it through a wrapper entry that sets `__rootDirectory` and replaces `v8.getHeapStatistics` (a full heap walk under Bun that made completions and code actions take seconds), and copies the `typeshed-fallback` directory (also listed in electron-builder.yml extraResources and the release archive).
 
-basedpyright reads only `disablePullDiagnostics` from `initializationOptions`; its settings come from `workspace/configuration`. The manager implements `workspaceConfiguration` to answer `python.pythonPath` from the shared Python environment resolution (`python-env.ts`) and the `basedpyright` section (`standard` ruleset), and re-announces config after each re-resolution it subscribes to (`subscribePythonEnv`: environment changes on disk, a new chosen interpreter). Its semantic tokens include `selfParameter`, `clsParameter` and `decorator`, which have rules in `monaco-theme.ts`. See LANGUAGE_SERVERS.md "Python environment".
+basedpyright reads only `disablePullDiagnostics` from `initializationOptions`; its settings come from `workspace/configuration`. The manager implements `workspaceConfiguration` to answer `python.pythonPath` from the shared Python environment resolution (`python-env.ts`) and the `basedpyright` section (`standard` ruleset; in an untrusted repository the environment's packages as `extraPaths`, so its interpreter doesn't run), and re-announces config after each re-resolution it subscribes to (`subscribePythonEnv`: environment changes on disk, a new chosen interpreter). Its semantic tokens include `selfParameter`, `clsParameter` and `decorator`, which have rules in `monaco-theme.ts`. See LANGUAGE_SERVERS.md "Python environment".
 
 ## Ruff — Second Server for a Language
 
@@ -58,7 +65,7 @@ The pattern for a second server and for project-provided binaries is in `server-
 
 ## mypy — A Tool Without a Language Server
 
-`mypy-lsp-manager.ts` is not a `StdioLspManager`: it speaks LSP over the WebSocket itself (handshake, open/close, `publishDiagnostics`, `window/showMessage`) and runs the project's `dmypy` per config root, so a CLI checker's results still go through the regular client pipeline. It mirrors the stdio managers' public surface (`createSession`, `destroySession`, `handleMessage`, `notifyWatchedFilesChanged`, `destroy`) so `server.ts` wires it like the others. It is basedpyright's `ExternalTypeChecker`: where it type-checks a file, `PythonLspManager` drops basedpyright's type errors. See LANGUAGE_SERVERS.md "basedpyright, ruff and mypy".
+`mypy-lsp-manager.ts` is not a `StdioLspManager`: it speaks LSP over the WebSocket itself (handshake, open/close, `publishDiagnostics`, `window/showMessage`) and runs the project's `dmypy` per config root, only in a trusted repository, so a CLI checker's results still go through the regular client pipeline. It mirrors the stdio managers' public surface (`createSession`, `destroySession`, `handleMessage`, `notifyWatchedFilesChanged`, `destroy`) so `server.ts` wires it like the others. It is basedpyright's `ExternalTypeChecker`: where it type-checks a file, `PythonLspManager` drops basedpyright's type errors. See LANGUAGE_SERVERS.md "basedpyright, ruff and mypy".
 
 ## Astro — Use as Template
 

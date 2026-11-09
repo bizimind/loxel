@@ -1,7 +1,5 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  BotIcon,
-  BrainCircuitIcon,
   CodeIcon,
   FileJson2Icon,
   FileTypeIcon,
@@ -21,13 +19,11 @@ import { syncSchemas } from "@/lib/schema-sync";
 import type { SettingsState } from "@/store/settings-store";
 import { useSettingsStore } from "@/store/settings-store";
 
-import { CodingAgentSection } from "./CodingAgentSection";
 import { EditorSection } from "./EditorSection";
 import { FileAssociationsSection } from "./FileAssociationsSection";
 import { GeneralSection } from "./GeneralSection";
 import { KeybindingsSection } from "./KeybindingsSection";
 import { LayoutSection } from "./LayoutSection";
-import { ModelsSection } from "./ModelsSection";
 import { SchemasSection } from "./SchemasSection";
 import { SecuritySection } from "./SecuritySection";
 import { TerminalSection } from "./TerminalSection";
@@ -40,8 +36,6 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { key: "general", label: "General", icon: SettingsIcon },
-  { key: "models", label: "Models", icon: BrainCircuitIcon },
-  { key: "codingAgent", label: "Coding Agent", icon: BotIcon },
   { key: "keybindings", label: "Keybindings", icon: KeyboardIcon },
   { key: "layout", label: "Layout", icon: PanelsLeftBottomIcon },
   { key: "terminal", label: "Terminal", icon: TerminalSquareIcon },
@@ -57,8 +51,6 @@ export function SettingsModal() {
   const closeSettings = useSettingsStore((s) => s.closeSettings);
 
   // Live state for dirty tracking
-  const models = useSettingsStore((s) => s.models);
-  const codingAgent = useSettingsStore((s) => s.codingAgent);
   const layout = useSettingsStore((s) => s.layout);
   const terminal = useSettingsStore((s) => s.terminal);
   const editor = useSettingsStore((s) => s.editor);
@@ -70,17 +62,8 @@ export function SettingsModal() {
 
   useEffect(() => {
     if (isOpen) {
-      const { models, codingAgent, layout, terminal, editor, schemas, fileAssociations } =
-        useSettingsStore.getState();
-      snapshotRef.current = JSON.stringify({
-        models,
-        codingAgent,
-        layout,
-        terminal,
-        editor,
-        schemas,
-        fileAssociations,
-      });
+      const { layout, terminal, editor, schemas, fileAssociations } = useSettingsStore.getState();
+      snapshotRef.current = JSON.stringify({ layout, terminal, editor, schemas, fileAssociations });
     } else {
       snapshotRef.current = null;
     }
@@ -89,17 +72,10 @@ export function SettingsModal() {
   const isSettingsDirty = useMemo(() => {
     if (!snapshotRef.current) return false;
     return (
-      JSON.stringify({
-        models,
-        codingAgent,
-        layout,
-        terminal,
-        editor,
-        schemas,
-        fileAssociations,
-      }) !== snapshotRef.current
+      JSON.stringify({ layout, terminal, editor, schemas, fileAssociations }) !==
+      snapshotRef.current
     );
-  }, [models, codingAgent, layout, terminal, editor, schemas, fileAssociations]);
+  }, [layout, terminal, editor, schemas, fileAssociations]);
 
   const saveDisabled = !isSettingsDirty;
 
@@ -114,17 +90,11 @@ export function SettingsModal() {
     // Restore settings snapshot
     if (snapshotRef.current) {
       const parsed: unknown = JSON.parse(snapshotRef.current);
-      if (typeof parsed === "object" && parsed !== null && "models" in parsed) {
+      if (typeof parsed === "object" && parsed !== null && "layout" in parsed) {
         useSettingsStore.setState(
           parsed as Pick<
             SettingsState,
-            | "models"
-            | "codingAgent"
-            | "layout"
-            | "terminal"
-            | "editor"
-            | "schemas"
-            | "fileAssociations"
+            "layout" | "terminal" | "editor" | "schemas" | "fileAssociations"
           >,
         );
       }
@@ -136,7 +106,9 @@ export function SettingsModal() {
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleCancel();
+      // Escape in a dialog opened from Settings (such as the trust question) closes only it.
+      const inDialog = e.target instanceof Element && e.target.closest("dialog[open]") !== null;
+      if (e.key === "Escape" && !inDialog) handleCancel();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -199,14 +171,6 @@ export function SettingsModal() {
             <div className="flex-1 overflow-y-auto scroll-smooth p-5">
               <div id="settings-general">
                 <GeneralSection />
-              </div>
-
-              <div id="settings-models" className="border-border mt-8 border-t pt-8">
-                <ModelsSection />
-              </div>
-
-              <div id="settings-codingAgent" className="border-border mt-8 border-t pt-8">
-                <CodingAgentSection />
               </div>
 
               <div id="settings-keybindings" className="border-border mt-8 border-t pt-8">

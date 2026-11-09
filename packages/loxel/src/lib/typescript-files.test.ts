@@ -15,6 +15,8 @@ describe("hasTypeScriptDiagnostics", () => {
     "cjs.cjs",
     "tsconfig.json",
     "packages/app/tsconfig.build.json",
+    "jsconfig.json",
+    "packages/app/jsconfig.build.json",
   ])("%s → true", (path) => {
     expect(hasTypeScriptDiagnostics(path)).toBe(true);
   });
@@ -24,6 +26,7 @@ describe("hasTypeScriptDiagnostics", () => {
     "stubs/mod.pyi",
     "package.json",
     "my-tsconfig.json",
+    "my-jsconfig.json",
     "tsconfig.json/readme.md",
     "Cargo.toml",
     "README.md",

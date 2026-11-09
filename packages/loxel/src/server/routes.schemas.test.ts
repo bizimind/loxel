@@ -144,7 +144,7 @@ describe("POST /api/schemas/sync", () => {
       broadcastToProject: () => {},
       broadcastAll: () => {},
       sendToActiveWindow: () => false,
-      sendToWorktreeWindows: () => {},
+      sendToWorktreeWindows: () => false,
       externalFolderConflict: () => null,
       getProject: () => undefined,
       findProjectForPath: () => undefined,
@@ -154,7 +154,7 @@ describe("POST /api/schemas/sync", () => {
       resolveFilePath: () => null,
       initializeProject: async () => ({ project: {} as never, worktrees: [] }),
       teardownProject: () => {},
-      shutdown: () => {},
+      isShuttingDown: () => false,
       resolveSchema: async (url) => {
         resolved.push(url);
         return { url };

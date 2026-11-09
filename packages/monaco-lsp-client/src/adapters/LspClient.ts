@@ -1,5 +1,5 @@
 import type { IMessageTransport, IRequestSender } from "@hediet/json-rpc";
-import { Channel, StreamBasedChannel, TypedChannel } from "@hediet/json-rpc";
+import { Channel, StreamBasedChannel, TypedChannel, unverifiedRequest } from "@hediet/json-rpc";
 import type * as monaco from "monaco-editor";
 
 import type { ClientCapabilities, ShowMessageParams } from "../types";
@@ -34,7 +34,7 @@ import { LspSignatureHelpFeature } from "./languageFeatures/LspSignatureHelpFeat
 import { LspTypeDefinitionFeature } from "./languageFeatures/LspTypeDefinitionFeature";
 import type { WorkspaceSymbolItem } from "./languageFeatures/LspWorkspaceSymbolFeature";
 import { LspWorkspaceSymbolFeature } from "./languageFeatures/LspWorkspaceSymbolFeature";
-import { LspCancellableRequests } from "./LspCancellableRequests";
+import { LspCancellableRequests, rejectingServerCancellations } from "./LspCancellableRequests";
 import type { OptionsOf, RegistrableCapability } from "./LspCapabilitiesRegistry";
 import { LspCapabilitiesRegistry } from "./LspCapabilitiesRegistry";
 import { LspConnection } from "./LspConnection";
@@ -53,6 +53,11 @@ export interface MonacoLspClientOptions {
    * server.
    */
   modelFilter?: (textModel: monaco.editor.ITextModel) => boolean;
+  /**
+   * Open models workspace edits may not change, such as a read-only document of the server's own:
+   * an edit touching one is refused whole.
+   */
+  isReadOnlyModel?: (textModel: monaco.editor.ITextModel) => boolean;
   /**
    * Disk access for workspace edits (rename, code actions, `workspace/applyEdit`). With it they
    * can edit files that have no model and create, rename or delete files; without it they are
@@ -90,11 +95,15 @@ export class MonacoLspClient {
 
   constructor(transport: IMessageTransport, options?: MonacoLspClientOptions) {
     // `TypedChannel.fromTransport`, keeping the request sender it connects (in `startListen`)
-    // for requests that must know their JSON-RPC id to be cancelled.
+    // for requests that must know their JSON-RPC id to be cancelled. Requests the server cancels
+    // reject as cancelled, for every caller.
     const streamChannel = StreamBasedChannel.createChannel(transport, undefined);
     let requestSender: IRequestSender | undefined;
     const c = new TypedChannel(
-      new Channel((listener) => (requestSender = streamChannel.connect(listener))),
+      new Channel(
+        (listener) =>
+          (requestSender = rejectingServerCancellations(streamChannel.connect(listener))),
+      ),
     );
     const s = api.getServer(c, {});
     c.startListen();
@@ -116,6 +125,7 @@ export class MonacoLspClient {
     this._edits = new WorkspaceEditApplier(s.server, this._capabilitiesRegistry, {
       fileSystem: options?.workspaceFileSystem,
       onFailure: options?.onWorkspaceEditFailure,
+      isReadOnlyModel: options?.isReadOnlyModel,
     });
 
     this._connection = new LspConnection(
@@ -215,6 +225,20 @@ export class MonacoLspClient {
     options?: { declared?: boolean },
   ): boolean {
     return this._codeActions.supportsKind(model, kind, options);
+  }
+
+  /**
+   * Sends a request the typed `server` interface does not have (a server's own method, a newer LSP
+   * one) once the server has initialized, and resolves with its unverified result. Cancelling
+   * `token` sends `$/cancelRequest` and rejects with a `Canceled` error.
+   */
+  async request(method: string, params: object, token: monaco.CancellationToken): Promise<unknown> {
+    await this._initPromise;
+    return this._connection.cancellableRequests.request(
+      unverifiedRequest<object, unknown>({ method }),
+      params,
+      token,
+    );
   }
 
   /** Typed LSP server interface. Call any LSP method directly. */

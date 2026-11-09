@@ -18,7 +18,7 @@ await mock.module("@/api/client", () => ({
 
 const { useSchemaConsentStore } = await import("@/store/schema-consent");
 const { SchemaConsentPrompt } = await import("./SchemaConsentPrompt");
-const { SecuritySection } = await import("./SecuritySection");
+const { SchemaDownloadSettings } = await import("./SchemaDownloadSettings");
 
 const URL_A = "https://schemas.example.com/a.json";
 const URL_B = "http://10.0.0.1/b.xsd";
@@ -61,10 +61,10 @@ describe("SchemaConsentPrompt", () => {
   });
 });
 
-describe("SecuritySection", () => {
+describe("SchemaDownloadSettings", () => {
   test("lists decisions, each removable", () => {
     useSchemaConsentStore.setState({ trusted: [URL_A], denied: [URL_B] });
-    render(<SecuritySection />);
+    render(<SchemaDownloadSettings />);
     expect(screen.getByText("Trusted")).toBeTruthy();
     expect(screen.getByText("Denied")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: `Forget ${URL_B}` }));
@@ -72,7 +72,7 @@ describe("SecuritySection", () => {
   });
 
   test("has the never-fetch switch", () => {
-    render(<SecuritySection />);
+    render(<SchemaDownloadSettings />);
     fireEvent.click(screen.getByRole("switch", { name: "Never fetch schemas named by files" }));
     expect(switches).toEqual([true]);
   });

@@ -47,7 +47,7 @@ Never sleep or poll in the foreground:
 
 ## Budget
 
-Agents and CI reviews share one subscription. Each push starts a review that costs about 6% of the 5-hour window (so roughly 15 reviews fit in one) and fails unrecoverably at the limit. Run `review-cost.sh` once, then run `budget.sh` before starting agents or releasing pushes, and follow its `mode` and `advice`. Low budget means fewer agents at once, down to one task with one review at a time, never a full stop: unused budget is lost at the reset. Pause only when a window is exhausted, and after its reset nudge the agents that stopped one at a time, most important first, never all at once.
+Agents and CI reviews share one subscription, limited only by its weekly window. Each push starts a review that costs about 0.5–1% of the week and fails unrecoverably at the limit. Run `review-cost.sh` once, then run `budget.sh` before starting agents or releasing pushes, and follow its `mode` and `advice`. Low budget means fewer agents at once, down to one task with one review at a time, never a full stop: unused budget is lost at the weekly reset. Pause only when the weekly window is exhausted, and after its reset nudge the agents that stopped one at a time, most important first, never all at once.
 
 ## Reporting
 

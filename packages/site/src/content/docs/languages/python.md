@@ -40,6 +40,8 @@ The Python server checks your code against the project's own Python environment,
 
 Loxel never uses an interpreter that is committed to the repository, since running it would run the repository's code.
 
+An environment holds the packages your project installed, so until you [trust the repository](/docs/repository-trust), Loxel runs nothing from it. The type checker still reads its installed packages, so imports resolve. Poetry and Pipenv aren't asked for their environments, Ruff and format on save use the Ruff that ships with Loxel, Black doesn't run on save, and new terminals don't activate the environment. The status bar shows no version for a conda or Pixi environment until then.
+
 Creating or syncing an environment while Loxel is open, for example with `uv sync`, is picked up automatically, as are packages installed into it later.
 
 ## Seeing and changing the interpreter
@@ -52,7 +54,7 @@ Click it, or run **Python: Select Interpreter** from the command palette (`Cmd+S
 - **Use automatic detection** goes back to the order above.
 - The rest of the list is every environment Loxel found: the ones above, plus `.venv`, `venv` and `env` environments and Pixi environments in project folders below the worktree root (folders with a `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `Pipfile` or `pixi.toml`), which is how you pick a sub-project's environment in a monorepo.
 
-The choice is saved for that worktree and survives restarts. The language servers and the [coding agent](/docs/coding-agent#commands-the-agent-runs)'s next commands switch to it right away, without a restart, and new terminals start with it. If the chosen interpreter is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
+The choice is saved for that worktree and survives restarts. The language servers switch to it right away, without a restart, and new terminals start with it. If the chosen interpreter is later deleted, Loxel goes back to automatic detection and shows the status bar item in the warning color until you choose again.
 
 A `venvPath` and `venv` setting in `pyrightconfig.json`, or in the `[tool.basedpyright]` (or `[tool.pyright]`) table of `pyproject.toml`, takes precedence over the interpreter Loxel passes to the type checker, whether detected or chosen:
 
@@ -74,13 +76,13 @@ Python files also get [Ruff](https://docs.astral.sh/ruff/)'s linter, alongside t
 
 Ruff reads its settings from the `ruff.toml`, `.ruff.toml` or `pyproject.toml` closest to each file, so each project in a monorepo keeps its own rules, and edits to those files apply right away. Without any Ruff configuration, Ruff's default rules apply.
 
-If Ruff 0.5.3 or newer is installed in the project's Python environment (see above, including an interpreter you chose), Loxel uses that one, so the version pinned in your dev dependencies applies. Otherwise it uses the Ruff that ships with Loxel. When the environment changes, for example when `uv sync` installs the project's Ruff after a Python file was opened, or you upgrade Ruff or choose another interpreter, the linter restarts with the new Ruff. Syntax errors come from the type checker only, and formatting stays with [format on save](/docs/editor#formatter-auto-detection).
+If Ruff 0.5.3 or newer is installed in the project's Python environment (see above, including an interpreter you chose) and you trust the repository, Loxel uses that one, so the version pinned in your dev dependencies applies. Otherwise it uses the Ruff that ships with Loxel. When the environment changes, for example when `uv sync` installs the project's Ruff after a Python file was opened, or you upgrade Ruff or choose another interpreter, the linter restarts with the new Ruff. Syntax errors come from the type checker only, and formatting stays with [format on save](/docs/editor#formatter-auto-detection).
 
 ## mypy
 
 Projects that type-check with [mypy](https://mypy.readthedocs.io) get mypy's errors in the editor instead of basedpyright's. Loxel recognizes a project as using mypy by its configuration: a `mypy.ini` or `.mypy.ini`, a `[tool.mypy]` table in `pyproject.toml`, or a `[mypy]` section in `setup.cfg`. The configuration closest to each file applies, so each project in a monorepo keeps its own.
 
-Loxel runs the mypy installed in the project's Python environment (see above, including an interpreter you chose), so your pinned version, settings and plugins (Django, pydantic, SQLAlchemy and others) apply, exactly as when you run mypy yourself:
+Loxel runs the mypy installed in the project's Python environment (see above, including an interpreter you chose), so your pinned version, settings and plugins (Django, pydantic, SQLAlchemy and others) apply, exactly as when you run mypy yourself. Plugins can load your project's code, so mypy runs once you [trust the repository](/docs/repository-trust); until then basedpyright checks types and the status bar shows **Restricted**, unless you [declined](/docs/repository-trust#trusting-a-repository) it. Once mypy runs:
 
 - mypy's errors are underlined, marked `mypy`, and their error code links to its explanation in the mypy docs.
 - Files are checked when you open them and whenever a Python file is saved or changes on disk, for example after `git checkout` or an agent's edits. mypy reads files from disk, so unsaved changes are checked once saved. Loxel keeps a mypy daemon running per project, so re-checks after the first are quick.
@@ -97,5 +99,5 @@ If mypy is configured but not installed in the project's environment, Loxel says
 
 - [Language Intelligence](/docs/language-intelligence) — the features every language server provides, and how servers start and stop per worktree
 - [Editor](/docs/editor) — format on save
-- [Terminals](/docs/terminals) — new terminals start with the worktree's Python environment active
-- [Coding Agent](/docs/coding-agent#commands-the-agent-runs) — the built-in agent's commands run with the worktree's Python environment active
+- [Terminals](/docs/terminals) — new terminals start with the worktree's Python environment active, in a trusted repository
+- [Repository Trust](/docs/repository-trust) — how a language feature asks before running a repository's code

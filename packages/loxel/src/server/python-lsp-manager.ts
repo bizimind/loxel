@@ -7,19 +7,22 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import type { PythonEnv } from "@/api/python-env-model";
 import { isRecord } from "@/lib/is-record";
 
+import { pathOutsideWorktree } from "./path-containment";
 import {
+  environmentImportPaths,
   getPythonEnv,
   getPythonEnvNow,
   isSamePythonEnv,
-  pathOutsideWorktree,
   subscribePythonEnv,
+  untrustedInterpreter,
 } from "./python-env";
+import { reportRepoRestriction } from "./repo-trust";
 import { buildSpawnEnv } from "./shell-env";
 import {
   type SpawnOptions,
-  StdioLspManager,
   type WtLspContext,
   type WtLspSession,
+  WorktreeSessionLspManager,
 } from "./stdio-lsp-manager";
 import { readToml, recordAt } from "./toml-file";
 
@@ -60,14 +63,41 @@ interface PythonLspSession extends WtLspSession {
  */
 const BASEDPYRIGHT_SETTINGS = { analysis: { typeCheckingMode: "standard", autoSearchPaths: true } };
 
+/** Exported for tests. */
+export const PYTHON_REPO_TRUST_RESTRICTION =
+  "basedpyright reads the Python environment's packages without running the environment.";
+
 /**
  * Settings answered for the `python` section: the resolved interpreter. Without one,
  * basedpyright would run a root `.venv/bin/python` it finds itself, even one the repository
  * commits, which the resolver refuses. A `venvPath` with no `venv` turns that detection off
  * without selecting an environment, so it falls back to `python3` on its (worktree-free) PATH.
+ *
+ * basedpyright runs `pythonPath` to ask it for its search paths, which starts the environment and
+ * so its packages' startup hooks. In an untrusted repository `pythonPath` is only the interpreter
+ * the environment was created from ({@link untrustedInterpreter}), for the Python version, and the
+ * environment's packages reach basedpyright as files ({@link basedpyrightSettings}).
  */
-export function pythonSettings(env: PythonEnv | null, wtPath: string): Record<string, string> {
-  return env ? { pythonPath: env.pythonPath } : { venvPath: wtPath };
+export async function pythonSettings(
+  env: PythonEnv | null,
+  wtPath: string,
+  repoTrusted: boolean,
+): Promise<Record<string, string>> {
+  if (env && repoTrusted) return { pythonPath: env.pythonPath };
+  const pythonPath = env && (await untrustedInterpreter(env, wtPath));
+  return pythonPath ? { pythonPath } : { venvPath: wtPath };
+}
+
+/**
+ * Settings answered for the `basedpyright` section: {@link BASEDPYRIGHT_SETTINGS}, and in an
+ * untrusted repository the environment's import paths as `extraPaths`, since its interpreter does
+ * not run to report them. A project config file makes basedpyright ignore every `analysis` setting,
+ * these among them, so such a project resolves the environment's packages only through its own config.
+ */
+export function basedpyrightSettings(env: PythonEnv | null, repoTrusted: boolean): object {
+  if (repoTrusted || !env?.envPath) return BASEDPYRIGHT_SETTINGS;
+  const extraPaths = environmentImportPaths(env.envPath);
+  return { analysis: { ...BASEDPYRIGHT_SETTINGS.analysis, extraPaths } };
 }
 
 /**
@@ -89,8 +119,11 @@ export function pythonSettings(env: PythonEnv | null, wtPath: string): Record<st
  * only one reporting type errors while basedpyright still serves completion, hover, navigation and
  * refactors. A project that configures basedpyright or pyright itself keeps both.
  */
-export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspContext> {
+export class PythonLspManager extends WorktreeSessionLspManager<PythonLspSession> {
   protected override readonly forwardWatchedFiles = true;
+  protected override readonly repoTrustRestriction = PYTHON_REPO_TRUST_RESTRICTION;
+  // Held back only once an environment resolved; see workspaceConfiguration.
+  protected override readonly reportsRestrictionAtStart = false;
   // basedpyright's snippets are method overrides, at most a selected `pass` as a tab stop, and hold
   // default values unescaped: inserted as snippets, `x="$HOME"` would become `x=""`.
   protected override readonly disableCompletionSnippets = true;
@@ -101,20 +134,8 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
     typeChecker?.onTypeCheckingChange((wtPath) => this.refreshDiagnostics(wtPath));
   }
 
-  createSession(ws: ServerWebSocket<unknown>, wtPath: string): void {
-    this.startSession(ws, { wtPath });
-  }
-
-  destroySession(ws: ServerWebSocket<unknown>): void {
-    this.detach(ws);
-  }
-
   protected resolveBinary(): string | null {
     return this.resolveBundledBinary("basedpyright-langserver");
-  }
-
-  protected override getSessionKey(context: WtLspContext): string {
-    return context.wtPath;
   }
 
   protected override spawnOptions(context: WtLspContext): SpawnOptions {
@@ -133,6 +154,7 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
       ws,
       proc,
       wtPath: context.wtPath,
+      repoTrusted: context.repoTrusted,
       stdoutBuf: Buffer.alloc(0),
       documentContents: new Map(),
       unsubscribeEnv: null,
@@ -157,10 +179,6 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
     // Resolve while basedpyright starts, rather than when it first asks.
     void getPythonEnv(session.wtPath);
     return session;
-  }
-
-  protected override getSessionWorkspace(session: PythonLspSession): string | null {
-    return session.wtPath;
   }
 
   protected override onClientInitialized(session: PythonLspSession): void {
@@ -297,13 +315,16 @@ export class PythonLspManager extends StdioLspManager<PythonLspSession, WtLspCon
     session: PythonLspSession,
     section: string | undefined,
   ): Promise<unknown> {
-    if (section === "basedpyright") return BASEDPYRIGHT_SETTINGS;
-    if (section !== "python") return null;
+    if (section !== "python" && section !== "basedpyright") return null;
     // The last resolution, even while a newer one runs: basedpyright is told to ask again when
     // that one lands (see the subscription in `buildSession`), instead of analyzing nothing until then.
     const env = await getPythonEnvNow(session.wtPath);
+    if (section === "basedpyright") return basedpyrightSettings(env, session.repoTrusted);
     session.answeredEnv = env;
-    return pythonSettings(env, session.wtPath);
+    if (env?.envPath && !session.repoTrusted) {
+      reportRepoRestriction(session.wtPath, PYTHON_REPO_TRUST_RESTRICTION);
+    }
+    return pythonSettings(env, session.wtPath, session.repoTrusted);
   }
 }
 

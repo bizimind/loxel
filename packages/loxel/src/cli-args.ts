@@ -1,7 +1,7 @@
 /**
- * Arguments of the `loxel` CLI: `loxel <target>` and `loxel terminal`, both with the open flags:
- * the layout flags that place the new panel, and whether it takes focus. Shared by the CLI and its
- * tests; the requests themselves are in open-request.ts.
+ * Arguments of the `loxel` CLI: `loxel <target>...` and `loxel terminal`, both with the open flags:
+ * the layout flags that place the new panel, the worktree it goes to, and whether it takes focus.
+ * Shared by the CLI and its tests; the requests themselves are in open-request.ts.
  */
 import { resolve } from "node:path";
 
@@ -9,7 +9,8 @@ import { shellQuote } from "@bizimind/wt/lib";
 
 import type { PanelOpenOptions, PanelPlacement } from "./api/panel-placement-model";
 import { SPLIT_DIRECTIONS, isSplitDirection } from "./api/panel-placement-model";
-import type { OpenTerminalRequest } from "./open-request";
+import type { OpenRequest, OpenTerminalRequest } from "./open-request";
+import { isHttpUrl } from "./url-utils";
 
 /**
  * Arguments made only of these characters need no quoting: no whitespace, no quotes, and none of
@@ -21,11 +22,11 @@ const SAFE_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
 const quoteArg = (arg: string): string => (SAFE_WORD.test(arg) ? arg : shellQuote(arg));
 
 const OPEN_FLAGS =
-  "[--split left|right|up|down | --replace] [--group <tab>] [--focus | --no-focus]";
+  "[--split left|right|up|down | --replace] [--group <tab>] [--worktree <path>] [--focus | --no-focus]";
 
 const TERMINAL_SYNOPSIS = `loxel terminal [--cwd <dir>] [--title <name>] ${OPEN_FLAGS} [--] [command...]`;
 
-export const OPEN_USAGE = `usage: loxel ${OPEN_FLAGS} <file | folder | url>\n       ${TERMINAL_SYNOPSIS}`;
+export const OPEN_USAGE = `usage: loxel ${OPEN_FLAGS} <file | folder | url>...\n       ${TERMINAL_SYNOPSIS}`;
 
 export const TERMINAL_USAGE = `usage: ${TERMINAL_SYNOPSIS}`;
 
@@ -84,6 +85,12 @@ function scanArgs(
   return positional;
 }
 
+/** The open flags given. */
+interface OpenFlags extends PanelOpenOptions {
+  /** `--worktree`, resolved against the base directory: a directory in the worktree to open in. */
+  worktree?: string;
+}
+
 /**
  * Collects the open flags. `--group` keeps the name as typed (a tab title) and also resolves it
  * against `baseDir` (the path of a file open in a tab); the server drops the path if nothing
@@ -92,6 +99,7 @@ function scanArgs(
 function openFlags(baseDir: string, usage: string) {
   const placement: PanelPlacement = {};
   const focus = new Set<boolean>();
+  let worktree: string | undefined;
   return {
     read(flag: Flag): boolean {
       switch (flag.name) {
@@ -118,12 +126,18 @@ function openFlags(baseDir: string, usage: string) {
           placement.group = { name, path: resolve(baseDir, name) };
           return true;
         }
+        case "--worktree": {
+          const path = flag.value();
+          if (path === "") throw usageError("--worktree needs a path", usage);
+          worktree = resolve(baseDir, path);
+          return true;
+        }
         default:
           return false;
       }
     },
-    /** The flags given: a placement if any layout flag was, and focus if a focus flag was. */
-    result(): PanelOpenOptions {
+    /** The flags given: a placement if any layout flag was, and so on for the others. */
+    result(): OpenFlags {
       if (placement.split && placement.replace) {
         throw usageError("--split and --replace cannot be combined", usage);
       }
@@ -132,36 +146,35 @@ function openFlags(baseDir: string, usage: string) {
       return {
         ...(Object.keys(placement).length > 0 ? { placement } : {}),
         ...(focused === undefined ? {} : { focus: focused }),
+        ...(worktree ? { worktree } : {}),
       };
     },
   };
 }
 
-/** What `loxel <target>` opens: a file, folder or URL as typed, and how. */
-export interface OpenArgs extends PanelOpenOptions {
-  target: string;
+/** What `loxel <target>...` opens: files, folders and URLs as typed, and how. */
+export interface OpenArgs extends OpenFlags {
+  targets: string[];
 }
 
 /**
- * Parse the arguments of `loxel <target>`: exactly one file, folder or URL, with open flags
- * before or after it. A target that starts with a dash goes after `--`.
+ * Parse the arguments of `loxel <target>...`: one or more files, folders or URLs, with open flags
+ * before, between or after them. A target that starts with a dash goes after `--`. `--replace`
+ * takes a single target: each would close the tab the one before it just opened.
  */
 export function parseOpenArgs(args: string[], baseDir: string): OpenArgs {
   const flags = openFlags(baseDir, OPEN_USAGE);
   const positional = scanArgs(args, OPEN_USAGE, false, (flag) => flags.read(flag));
-  if (positional.length !== 1) {
-    throw usageError(
-      positional.length === 0
-        ? "missing file, folder or URL"
-        : `expected one file, folder or URL, got ${positional.length}`,
-      OPEN_USAGE,
-    );
+  if (positional.length === 0) throw usageError("missing file, folder or URL", OPEN_USAGE);
+  const result = flags.result();
+  if (result.placement?.replace && positional.length > 1) {
+    throw usageError(`--replace takes one target, got ${positional.length}`, OPEN_USAGE);
   }
-  return { target: positional[0]!, ...flags.result() };
+  return { targets: positional, ...result };
 }
 
 /** What `loxel terminal` opens, and how. */
-export interface TerminalArgs extends PanelOpenOptions {
+export interface TerminalArgs extends OpenFlags {
   terminal: OpenTerminalRequest;
 }
 
@@ -171,10 +184,11 @@ export interface TerminalArgs extends PanelOpenOptions {
  * used verbatim (like tmux and ssh), so `loxel terminal 'cd src && make'` works. Several arguments
  * are quoted where needed and joined, so `loxel terminal -- claude "Fix the tests"` passes the
  * prompt to claude as one argument while the command word stays bare for alias expansion. Relative
- * `--cwd` and `--group` values resolve against `baseDir`.
+ * `--cwd`, `--group` and `--worktree` values resolve against `baseDir`. The shell starts in `--cwd`,
+ * else in the `--worktree` directory, else in `baseDir`.
  */
 export function parseTerminalArgs(args: string[], baseDir: string): TerminalArgs {
-  let cwd = baseDir;
+  let cwd: string | undefined;
   let title: string | undefined;
   const flags = openFlags(baseDir, TERMINAL_USAGE);
 
@@ -198,8 +212,64 @@ export function parseTerminalArgs(args: string[], baseDir: string): TerminalArgs
         ? commandArgs[0]
         : commandArgs.map(quoteArg).join(" ");
 
+  const result = flags.result();
   return {
-    terminal: { cwd, ...(command ? { command } : {}), ...(title ? { title } : {}) },
-    ...flags.result(),
+    terminal: {
+      cwd: cwd ?? result.worktree ?? baseDir,
+      ...(command ? { command } : {}),
+      ...(title ? { title } : {}),
+    },
+    ...result,
   };
+}
+
+/** One request of a command, with the prefix naming its target in messages when there are several. */
+export interface PlannedOpen {
+  label: string;
+  /** Absent for a URL with no worktree to open in, which fails by itself. */
+  request?: OpenRequest;
+}
+
+/**
+ * The requests of `loxel <target>...`, in order. A command with a worktree opens every target
+ * there: `pinnedWorktree` (`--worktree`) must be a project's, while `commandWorktree` (the one a URL
+ * needs) is the CWD's, so a file ignores it if it is not. Several targets with `--split` share one
+ * split, through a `batch` on their placement.
+ */
+export function planOpens(
+  { targets, placement }: Pick<OpenArgs, "targets" | "placement">,
+  {
+    baseDir,
+    pinnedWorktree,
+    commandWorktree,
+    options,
+  }: {
+    baseDir: string;
+    pinnedWorktree: string | null;
+    commandWorktree: string | null;
+    options: Pick<OpenRequest, "focus" | "windowId">;
+  },
+): PlannedOpen[] {
+  const opened = {
+    ...(targets.length > 1 && placement?.split
+      ? { placement: { ...placement, batch: crypto.randomUUID() } }
+      : placement
+        ? { placement }
+        : {}),
+    ...options,
+  };
+  const worktree = pinnedWorktree
+    ? { pinWtPath: pinnedWorktree }
+    : commandWorktree
+      ? { commandWtPath: commandWorktree }
+      : {};
+  return targets.map((target) => {
+    const label = targets.length > 1 ? `${target}: ` : "";
+    if (!isHttpUrl(target)) {
+      return { label, request: { filePath: resolve(baseDir, target), ...worktree, ...opened } };
+    }
+    return commandWorktree
+      ? { label, request: { url: target, wtPath: commandWorktree, ...opened } }
+      : { label };
+  });
 }

@@ -7,6 +7,8 @@ import { SPLIT_DIRECTIONS } from "@/api/panel-placement-model";
 import type { SplitDirection } from "@/api/panel-placement-model";
 import type { ToolchainSelectActionId } from "@/api/toolchain-status-model";
 import { toolchainStatuses } from "@/api/toolchain-statuses";
+import { getFocusedBrowserPanel } from "@/lib/browser-panel-targets";
+import { activeGroupMaximizeLabel, canToggleActiveGroupMaximized } from "@/lib/center-maximize";
 import type { EditorCodeActionId } from "@/lib/editor-code-actions";
 import { canRunEditorCodeAction } from "@/lib/editor-code-actions";
 import { getFocusedFindTarget } from "@/lib/find-targets";
@@ -24,12 +26,15 @@ export type ActionId =
   | "panel.new.terminal"
   | "panel.new.markdown"
   | "panel.new.drawing"
-  | "panel.new.agent"
   | "panel.new.browser"
   | "panel.open.localdb"
   | "panel.close"
+  | "panel.reopenClosed"
   | "panel.newTab"
   | "panel.rename"
+  | "panel.toggleMaximize"
+  | "browser.hardRefresh"
+  | "browser.toggleBookmark"
   | `panel.split.${SplitDirection}`
   | `panel.split.${SplitPanelType}.${SplitDirection}`
   | "panel.next"
@@ -60,7 +65,6 @@ export type ActionId =
   | "toggle.git"
   | "toggle.comments"
   | "toggle.logs"
-  | "toggle.forkTree"
   | "nav.project"
   | "nav.worktree"
   | "nav.commandPalette"
@@ -101,6 +105,7 @@ export type ActionId =
   | ToolchainSelectActionId
   | EditorCodeActionId
   | "language.restartServers"
+  | "worktree.manageRepoTrust"
   | "app.settings";
 
 /**
@@ -109,7 +114,6 @@ export type ActionId =
  */
 export const SPLIT_PANEL_TYPES = [
   { type: "terminal", label: "Terminal" },
-  { type: "agent", label: "Agent" },
   { type: "editor", label: "Markdown" },
   { type: "excalidraw", label: "Drawing" },
   { type: "browser", label: "Browser" },
@@ -137,6 +141,8 @@ export type ActionCategory =
 export interface ActionDef {
   id: ActionId;
   label: string;
+  /** What the command palette calls the action now, when that depends on the state it would change. */
+  contextLabel?: () => string;
   category: ActionCategory;
   hidden?: boolean;
   /**
@@ -144,6 +150,11 @@ export interface ActionDef {
    * key resolves as unbound and reaches the focused widget (terminal, editor, …).
    */
   isEnabled?: () => boolean;
+  /**
+   * An action this one may hold the same key as, which then runs whichever of the two is enabled
+   * where focus is (this one, if both are). For a key that means different things by focus.
+   */
+  sharesKeyWith?: ActionId;
 }
 
 /** Whether the active center panel is a code editor tab (one that publishes its indentation). */
@@ -154,6 +165,10 @@ function isCodeEditorActive(): boolean {
 
 function hasActiveWorktree(): boolean {
   return useWorktreeStore.getState().activeWorktreePath !== null;
+}
+
+function isBrowserPanelFocused(): boolean {
+  return getFocusedBrowserPanel() !== undefined;
 }
 
 function isFindTargetFocused(): boolean {
@@ -169,19 +184,44 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "panel.new.terminal", label: "New Terminal", category: "panel" },
   { id: "panel.new.markdown", label: "New Markdown Editor", category: "panel" },
   { id: "panel.new.drawing", label: "New Drawing", category: "panel" },
-  { id: "panel.new.agent", label: "New Agent", category: "panel" },
   { id: "panel.new.browser", label: "New Browser", category: "panel" },
   { id: "panel.open.localdb", label: "Open Database", category: "panel" },
 
   // Panel management
   { id: "panel.close", label: "Close Panel", category: "panel" },
+  { id: "panel.reopenClosed", label: "Reopen Closed Tab", category: "panel" },
 
   // New tab of the active panel's type, in its group
   { id: "panel.newTab", label: "New Tab (Same Type)", category: "panel" },
 
-  // Inline rename of the active center tab; when that tab isn't renameable the key reaches the
-  // focused widget.
+  // Inline rename of the active center tab; when that tab isn't renameable the key is left to
+  // what focus holds: a browser panel's hard refresh, or the focused widget.
   { id: "panel.rename", label: "Rename Tab", category: "panel", isEnabled: canRenameActiveTab },
+
+  {
+    id: "panel.toggleMaximize",
+    label: "Maximize / Restore Group",
+    contextLabel: activeGroupMaximizeLabel,
+    category: "panel",
+    isEnabled: canToggleActiveGroupMaximized,
+  },
+
+  // Reload the focused browser panel's page, bypassing the cache.
+  {
+    id: "browser.hardRefresh",
+    label: "Hard Refresh Browser Tab",
+    category: "panel",
+    isEnabled: isBrowserPanelFocused,
+    sharesKeyWith: "panel.rename",
+  },
+
+  // Bookmark the focused browser panel's page, or remove its bookmark.
+  {
+    id: "browser.toggleBookmark",
+    label: "Bookmark Browser Page",
+    category: "panel",
+    isEnabled: isBrowserPanelFocused,
+  },
 
   // Split — new panel of the active panel's type, or of a specific type
   ...SPLIT_DIRECTIONS.map((dir): ActionDef => ({
@@ -233,7 +273,6 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: "toggle.git", label: "Toggle Git", category: "toggle" },
   { id: "toggle.comments", label: "Toggle Comments", category: "toggle" },
   { id: "toggle.logs", label: "Toggle Logs", category: "toggle" },
-  { id: "toggle.forkTree", label: "Toggle Fork Tree", category: "toggle" },
 
   // Navigation
   { id: "nav.project", label: "Switch Project", category: "nav" },
@@ -345,6 +384,12 @@ export const ACTIONS: readonly ActionDef[] = [
     category: "language",
     isEnabled: hasActiveWorktree,
   },
+  {
+    id: "worktree.manageRepoTrust",
+    label: "Manage Repository Trust",
+    category: "worktree",
+    isEnabled: hasActiveWorktree,
+  },
 
   // App
   { id: "app.settings", label: "Open Settings", category: "app" },
@@ -356,6 +401,11 @@ const actionDefMap = new Map<ActionId, ActionDef>(ACTIONS.map((a) => [a.id, a]))
 
 export function getActionDef(id: ActionId): ActionDef | undefined {
   return actionDefMap.get(id);
+}
+
+/** Whether one of the two actions declares that they may hold the same key. */
+export function canShareBinding(a: ActionId, b: ActionId): boolean {
+  return getActionDef(a)?.sharesKeyWith === b || getActionDef(b)?.sharesKeyWith === a;
 }
 
 export function getActionsByCategory(category: ActionCategory): ActionDef[] {

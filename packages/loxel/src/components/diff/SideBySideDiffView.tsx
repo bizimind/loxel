@@ -14,6 +14,7 @@ import { useUIStore } from "@/store/ui";
 import { useReviewStore } from "@/store/worktree-reviews";
 
 import { buildChangeRegions, buildScrollAlignment } from "./change-regions";
+import { splitGitLines } from "./compute-file-diff";
 import { DiffGutter } from "./DiffGutter";
 import type { ViewZoneDescriptor } from "./EditorPanel";
 import { EditorPanel } from "./EditorPanel";
@@ -147,6 +148,15 @@ export function SideBySideDiffView({
     [collapsibleRegions, expandedSet, toggleRegion],
   );
 
+  // Lines a new comment anchors to. An editable side's are read from its live text, as `lines` are
+  // recomputed only once typing pauses; only while a comment is being written there. Split as the
+  // server splits files for comment placement, so the anchor matches it.
+  const newEditableContent = pendingAnchor?.side === "new" ? newSide.editable?.content : undefined;
+  const newCommentLines = useMemo(
+    () => (newEditableContent === undefined ? newLines : splitGitLines(newEditableContent)),
+    [newEditableContent, newLines],
+  );
+
   // Join lines into content strings for Monaco
   const oldContent = useMemo(() => oldLines.join("\n"), [oldLines]);
   const newContent = useMemo(() => newLines.join("\n"), [newLines]);
@@ -166,6 +176,8 @@ export function SideBySideDiffView({
     subscribeToScroll,
     flushScroll,
     scrollBy,
+    leftContainer,
+    rightContainer,
     leftContainerRef,
     rightContainerRef,
   } = useMonacoSyncScroll({ alignmentSections, lineHeight: LINE_HEIGHT });
@@ -340,7 +352,7 @@ export function SideBySideDiffView({
         ) : (
           <>
             {/* Left panel - OLD file + line numbers (shared container for wheel capture) */}
-            <div ref={leftContainerRef} className="relative flex flex-1 overflow-hidden">
+            <div ref={leftContainer} className="relative flex flex-1 overflow-hidden">
               <div className="flex-1 overflow-hidden">
                 <EditorPanel
                   content={oldSide.editable?.content ?? oldContent}
@@ -433,7 +445,7 @@ export function SideBySideDiffView({
             />
 
             {/* Right panel - NEW file with custom LineNumbersColumn */}
-            <div ref={rightContainerRef} className="relative flex flex-1 overflow-hidden">
+            <div ref={rightContainer} className="relative flex flex-1 overflow-hidden">
               <LineNumbersColumn
                 lineCount={newLines.length}
                 changeRegions={changeRegions.new}
@@ -490,7 +502,7 @@ export function SideBySideDiffView({
                   scrollSide="right"
                   reviewId={activeReviewId}
                   filePath={filePath}
-                  fileLines={newLines}
+                  fileLines={newCommentLines}
                 />
               )}
             </div>
