@@ -26,7 +26,10 @@ jobs:
     # lockfile change need headroom.
     timeout-minutes: 6
     steps:
+      # Nothing here pushes, and the build runs the branch's dependencies: keep the token off disk.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v7
         with:

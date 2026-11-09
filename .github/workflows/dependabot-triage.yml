@@ -1,0 +1,256 @@
+name: Dependabot triage
+
+# When CI fails on a grouped Dependabot npm PR, an agent finds which updates break it and a script
+# takes those out of the PR, so the rest can merge while the excluded ones wait for Dependabot's
+# next run. The agent never gets GitHub access: it runs every command as an unprivileged user,
+# away from its own Claude token, and only answers with the dependencies to leave out.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions: {}
+
+env:
+  # A plain npm package name: the only shape an excluded dependency may take.
+  PACKAGE_NAME: "^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$"
+
+jobs:
+  triage:
+    # Only on Dependabot's own commit: once the exclusion commit (or a person's) is on top, a
+    # failure there is for a person to look at, which also keeps this from triggering itself.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/npm_and_yarn/') &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.head_commit.author.name == 'dependabot[bot]'
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 75
+    # Only the triage: a newer CI run makes it moot, but an apply already pushing should finish.
+    concurrency:
+      group: dependabot-triage-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      exclude: ${{ steps.agent.outputs.exclude }}
+      result: ${{ steps.agent.outputs.result }}
+    env:
+      # Bump by hand: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md
+      CLAUDE_CODE_VERSION: 2.1.310
+      SCRIPTS: ${{ github.workspace }}/trusted/.github/scripts/dependabot-triage
+    steps:
+      - name: Check out the PR
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: pr
+
+      - name: Check out the triage scripts from main
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          path: trusted
+          sparse-checkout: .github/scripts/dependabot-triage
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: pr/.bun-version
+
+      # The PR's dependencies only ever run as `sandbox`, which cannot read the runner user's
+      # processes (so not the Claude token in their environment) or enter its home.
+      - name: Set up the sandbox
+        run: |
+          sudo chmod 700 "$HOME"
+          sudo useradd --create-home --shell /bin/bash sandbox
+          sudo install -m 0755 "$(command -v bun)" /usr/local/bin/bun
+          sudo install -m 0755 "$(readlink -f "$(command -v node)")" /usr/local/bin/node
+          sudo "$(command -v npm)" install --global --prefix /usr/local pnpm@10
+          sudo install -m 0755 "$SCRIPTS/sbx.sh" /usr/local/bin/sbx
+          sudo mkdir -p /srv/triage
+          sudo install -m 0644 "$SCRIPTS/exclude-deps.ts" /srv/triage/exclude-deps.ts
+          sudo cp -a pr /srv/triage/repo
+          sudo chown -R sandbox:sandbox /srv/triage/repo
+
+      - name: Collect the CI failures
+        id: failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          echo "base=$(git -C pr merge-base origin/main HEAD)" >>"$GITHUB_OUTPUT"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[] | select(.conclusion == "failure" and .name != "ci") | "\(.id)\t\(.name)"' |
+            while IFS=$'\t' read -r id name; do
+              echo "=== $name"
+              # Without bun's line per passing test, which would push the failures out of the tail.
+              gh run view --repo "$GITHUB_REPOSITORY" --job "$id" --log-failed | cut -f3- |
+                grep -vE '^[^ ]+ \(pass\) ' | tail -n 3000
+            done | sudo tee /srv/triage/ci-failures.log >/dev/null
+          echo "jobs=$(sed -n 's/^=== //p' /srv/triage/ci-failures.log | paste -sd, -)" >>"$GITHUB_OUTPUT"
+
+      - name: Install Claude Code
+        run: curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"
+
+      # Claude's home, temp files and working directory are the runner user's alone, so nothing
+      # the sandbox writes is loaded as settings, hooks or instructions. Its only tool is Bash, and
+      # the hook lets that run nothing but `sbx '<command>'`.
+      - name: Find the updates that break CI
+        id: agent
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          BASE: ${{ steps.failures.outputs.base }}
+          FAILED_JOBS: ${{ steps.failures.outputs.jobs }}
+          BASH_DEFAULT_TIMEOUT_MS: "600000"
+          BASH_MAX_TIMEOUT_MS: "1800000"
+        run: |
+          claude="$HOME/.local/bin/claude"
+          agent=$(mktemp -d -p "$RUNNER_TEMP")
+          mkdir -m 700 "$agent/home" "$agent/tmp" "$agent/work"
+          settings=$(jq -nc --arg hook "$SCRIPTS/sandbox-only.sh" \
+            '{hooks: {PreToolUse: [{matcher: "*", hooks: [{type: "command", command: $hook}]}]}}')
+          prompt="$(cat "$SCRIPTS/prompt.md")
+
+          ## This run
+
+          - BASE is \`$BASE\`.
+          - Failed CI jobs: $FAILED_JOBS."
+
+          cd "$agent/work"
+          HOME="$agent/home" TMPDIR="$agent/tmp" CLAUDE_CODE_TMPDIR="$agent/tmp" "$claude" -p "$prompt" --model opus \
+            --tools Bash --allowedTools 'Bash(sbx:*)' --permission-mode default \
+            --setting-sources user --strict-mcp-config --settings "$settings" \
+            --json-schema "$(cat "$SCRIPTS/result-schema.json")" \
+            --output-format json >"$agent/result.json" 2>"$agent/stderr.log"
+
+          jq -e '.is_error == false and .structured_output != null' "$agent/result.json" >/dev/null
+          # Names go into commands, a commit message and a comment: only plain npm package names.
+          jq -e --arg re "$PACKAGE_NAME" '.structured_output.exclude | all(.dependency | test($re))' \
+            "$agent/result.json" >/dev/null
+          result=$(jq -c '.structured_output' "$agent/result.json")
+          echo "result=$result" >>"$GITHUB_OUTPUT"
+          echo "exclude=$(jq -r 'if .verified then .exclude | map(.dependency) | join(" ") else "" end' <<<"$result")" >>"$GITHUB_OUTPUT"
+          jq -r '"### Dependabot triage\n\n\(.structured_output.summary)\n\nLeave out: \(.structured_output.exclude | map(.dependency) | join(", ")) (verified: \(.structured_output.verified))\n\nCost: $\(.total_cost_usd), \(.duration_ms / 60000 | floor) min, \(.num_turns) turns"' \
+            "$agent/result.json" >>"$GITHUB_STEP_SUMMARY"
+
+  apply:
+    needs: triage
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      BRANCH: ${{ github.event.workflow_run.head_branch }}
+      PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+      EXCLUDE: ${{ needs.triage.outputs.exclude }}
+      RESULT: ${{ needs.triage.outputs.result }}
+    steps:
+      - name: Check out the triage scripts from main
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          path: trusted
+          sparse-checkout: .github/scripts/dependabot-triage
+
+      - name: Check out the PR
+        if: env.EXCLUDE != ''
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: pr
+
+      - uses: pnpm/action-setup@v6
+        if: env.EXCLUDE != ''
+        with:
+          version: 10
+
+      - uses: oven-sh/setup-bun@v2
+        if: env.EXCLUDE != ''
+        with:
+          bun-version-file: pr/.bun-version
+
+      # Only resolves the lockfile (no install, no package scripts), so no PR code runs here.
+      - name: Leave out the updates that break CI
+        id: exclude
+        if: env.EXCLUDE != ''
+        working-directory: pr
+        run: |
+          if [[ "$EXCLUDE" == *$'\n'* ]]; then
+            echo "::error::The exclusion list spans several lines"
+            exit 1
+          fi
+          read -ra names <<<"$EXCLUDE"
+          for name in "${names[@]}"; do
+            if [[ ! "$name" =~ $PACKAGE_NAME ]]; then
+              echo "::error::Not a package name: $name"
+              exit 1
+            fi
+          done
+          script=../trusted/.github/scripts/dependabot-triage/exclude-deps.ts
+          base=$(git merge-base origin/main HEAD)
+          # Leaving out every update would empty the PR rather than let anything merge.
+          kept=$(bun "$script" --base "$base" --list | grep -vxF -f <(printf '%s\n' "${names[@]}") || true)
+          if [[ -z "$kept" ]]; then
+            echo "outcome=all" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bun "$script" --base "$base" "${names[@]}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "chore(deps): leave ${names[*]} out of this update" \
+            -m "They break CI; see the Dependabot triage comment on the PR."
+          echo "outcome=excluded" >>"$GITHUB_OUTPUT"
+
+      # The PAT pushes so that CI runs on the commit (a GITHUB_TOKEN push would not). It is only
+      # given to this step, after pnpm and bun have run, and the push never forces: if the branch
+      # moved since the triage, it is rejected.
+      - name: Push the exclusion commit
+        id: push
+        if: steps.exclude.outputs.outcome == 'excluded'
+        working-directory: pr
+        env:
+          PAT: ${{ secrets.GH_PAT_CONTENT_WRITE }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$PAT" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push origin "HEAD:refs/heads/$BRANCH"
+          echo "sha=$(git rev-parse --short HEAD)" >>"$GITHUB_OUTPUT"
+
+      - name: Explain on the PR
+        if: env.PR != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.push.outputs.sha }}
+          OUTCOME: ${{ steps.exclude.outputs.outcome }}
+        run: |
+          # The agent's text is untrusted: no mentions or cross-references, one line per reason.
+          # Its dependency names were checked against PACKAGE_NAME in the triage job.
+          jq -r --arg sha "$SHA" --arg outcome "$OUTCOME" '
+            def defuse: gsub("(?<c>[@#])"; "\(.c)\u200b");
+            def reasons: (.exclude | map("- `\(.dependency)`: \(.reason | defuse | gsub("[\r\n]+"; " "))") | join("\n")) + "\n\n";
+            "### Dependabot triage\n\n" +
+            (if $sha != "" then
+              "CI failed on this update. These updates cause it, so \($sha) leaves them out and the rest can merge once CI passes. Dependabot offers them again in its next run.\n\n" + reasons
+            elif $outcome == "all" then
+              "CI failed on this update, and every update in it is among the causes, so the PR is left as it is for a person to fix.\n\n" + reasons
+            elif (.exclude | length) > 0 then
+              "CI failed on this update. The triage suspects these updates but could not confirm that leaving them out fixes CI, so the PR is left as it is.\n\n" + reasons
+            else
+              "CI failed on this update, and the triage found no updates to leave out.\n\n"
+            end) +
+            "<details><summary>Findings</summary>\n\n\(.summary | defuse)\n\n</details>"
+          ' <<<"$RESULT" >"$RUNNER_TEMP/comment.md"
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"

@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "exclude": {
+      "type": "array",
+      "description": "Dependencies to leave out of the PR, as named in its updated-dependencies list",
+      "items": {
+        "type": "object",
+        "properties": { "dependency": { "type": "string" }, "reason": { "type": "string" } },
+        "required": ["dependency", "reason"],
+        "additionalProperties": false
+      }
+    },
+    "verified": {
+      "type": "boolean",
+      "description": "The failing checks passed with exactly these exclusions applied"
+    },
+    "summary": { "type": "string" }
+  },
+  "required": ["exclude", "verified", "summary"],
+  "additionalProperties": false
+}
