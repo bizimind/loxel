@@ -134,6 +134,17 @@ describe("FontsSection", () => {
     expect(useSettingsStore.getState().fonts.terminal.size).toBeNull();
   });
 
+  test("a terminal font that isn't installed falls back to the bundled one", () => {
+    useSettingsStore.getState().updateFont("code", { family: "Menlo" });
+    useSettingsStore.getState().updateFont("terminal", { family: "Berkeley Mono" });
+    render(<FontsSection />);
+    expect(
+      screen.getByText(
+        /Berkeley Mono isn't installed on this computer\. Loxel shows JetBrains Mono NL instead\./,
+      ),
+    ).toBeInTheDocument();
+  });
+
   test("resetting a font goes back to the default", () => {
     useSettingsStore.getState().updateFont("prose", { family: "Georgia" });
     render(<FontsSection />);

@@ -54,7 +54,6 @@ function FontRow({
 }) {
   const family = useSettingsStore((s) => s.fonts[kind].family);
   const size = useSettingsStore((s) => s.fonts[kind].size);
-  const codeFamily = useSettingsStore((s) => s.fonts.code.family);
   const codeSize = useSettingsStore((s) => s.fonts.code.size);
   const updateFont = useSettingsStore((s) => s.updateFont);
 
@@ -65,7 +64,6 @@ function FontRow({
   const follows = kind === "terminal";
   const defaultLabel = follows ? "Same as code font" : `${BUNDLED_FONT_FAMILY[kind]} (bundled)`;
   const installed = useMemo(() => family === null || isFontFamilyAvailable(family), [family]);
-  const fallbackName = follows && codeFamily ? codeFamily : BUNDLED_FONT_FAMILY[kind];
 
   const openPicker = useCallback(() => {
     setPickerOpen(true);
@@ -115,7 +113,8 @@ function FontRow({
       </div>
       {!installed && (
         <p className="text-warning text-[10px]">
-          {family} isn&apos;t installed on this computer. Loxel shows {fallbackName} instead.
+          {family} isn&apos;t installed on this computer. Loxel shows {BUNDLED_FONT_FAMILY[kind]}{" "}
+          instead.
         </p>
       )}
       <FontPicker
