@@ -192,6 +192,13 @@
   fill: var(--crepe-color-on-surface-variant);
 }
 
+/* The vendor's marker box, scaled with the prose size so markers stay on the first line. */
+.milkdown .milkdown-list-item-block li .label-wrapper,
+.milkdown .milkdown-list-item-block li .label-wrapper .label {
+  height: calc(var(--loxel-font-prose-size) * 32 / 15);
+  width: calc(var(--loxel-font-prose-size) * 24 / 15);
+}
+
 .milkdown .milkdown-list-item-block li .label-wrapper .label {
   font-size: var(--loxel-font-prose-size);
   font-family: var(--crepe-font-default);
@@ -218,7 +225,7 @@
 .milkdown .label.bullet::before {
   content: "●";
   font-size: 7px;
-  line-height: 24px;
+  line-height: calc(var(--loxel-font-prose-size) * 24 / 15);
 }
 
 /* Cycle: filled ● → hollow ○, repeating via increasing specificity */

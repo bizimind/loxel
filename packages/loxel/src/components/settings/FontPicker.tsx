@@ -64,10 +64,17 @@ export function FontPicker({
     const rows: FontPickerItem[] = matches
       .slice(0, MAX_ROWS)
       .map((family) => ({ type: "family", family }));
-    if (!trimmed) return [{ type: "default", label: defaultLabel }, ...rows];
+    if (!trimmed) {
+      // The current choice comes first, so Enter right after opening keeps it.
+      const defaultRow: FontPickerItem = { type: "default", label: defaultLabel };
+      if (value === null) return [defaultRow, ...rows];
+      const current: FontPickerItem = { type: "family", family: value };
+      const others = rows.filter((row) => row.type !== "family" || row.family !== value);
+      return [current, defaultRow, ...others];
+    }
     const exact = matches.some((family) => family.toLowerCase() === trimmed.toLowerCase());
     return exact ? rows : [...rows, { type: "typed", family: trimmed }];
-  }, [matches, trimmed, defaultLabel]);
+  }, [matches, trimmed, defaultLabel, value]);
 
   const close = () => {
     setQuery("");
@@ -115,7 +122,12 @@ export function FontPicker({
         );
       }}
       footer={
-        <div className="border-border text-muted-foreground flex items-center gap-3 border-t px-3 py-2 text-[11px]">
+        // Keys on the switch are its own: the picker would take Enter as accepting the first row
+        // and forward Space to the query. Escape still closes the dialog by default.
+        <div
+          className="border-border text-muted-foreground flex items-center gap-3 border-t px-3 py-2 text-[11px]"
+          onKeyDown={(e) => e.stopPropagation()}
+        >
           <span className="min-w-0 flex-1">
             {fonts === null
               ? "Loading installed fonts…"

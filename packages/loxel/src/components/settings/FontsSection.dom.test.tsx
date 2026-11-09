@@ -49,11 +49,7 @@ function withLocalFonts(families: string[] | null) {
 }
 
 function openPicker(label: string): HTMLElement {
-  const row = screen.getByText(label).parentElement;
-  if (!row) throw new Error(`${label} row not found`);
-  const [pickerButton] = within(row).getAllByRole("button");
-  if (!pickerButton) throw new Error(`${label} picker button not found`);
-  fireEvent.click(pickerButton);
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}:`) }));
   const dialog = document.querySelector("dialog[open]");
   if (!(dialog instanceof HTMLElement)) throw new Error("Font picker did not open");
   return dialog;
@@ -89,6 +85,33 @@ describe("FontsSection", () => {
     expect(useSettingsStore.getState().fonts.code).toEqual({ family: "Menlo", size: 13 });
   });
 
+  test("keys on the Show all switch stay on it", async () => {
+    withLocalFonts(INSTALLED);
+    useSettingsStore.getState().updateFont("code", { family: "Menlo" });
+    render(<FontsSection />);
+    const dialog = openPicker("Code Font");
+    const toggle = await within(dialog).findByRole("switch");
+    fireEvent.keyDown(toggle, { key: "Enter" });
+    fireEvent.keyDown(toggle, { key: " " });
+    expect(dialog).toHaveAttribute("open");
+    expect(within(dialog).getByRole("textbox")).toHaveValue("");
+    expect(useSettingsStore.getState().fonts.code.family).toBe("Menlo");
+  });
+
+  test("the current font comes first, so Enter on opening keeps it", async () => {
+    withLocalFonts(INSTALLED);
+    useSettingsStore.getState().updateFont("code", { family: "Menlo" });
+    render(<FontsSection />);
+    const dialog = openPicker("Code Font");
+    await within(dialog).findByText("Courier New");
+    const names = within(dialog)
+      .getAllByRole("button")
+      .map((button) => button.textContent);
+    expect(names).toEqual(["Menlo", "JetBrains Mono (bundled)", "Courier New"]);
+    fireEvent.keyDown(within(dialog).getByRole("textbox"), { key: "Enter" });
+    expect(useSettingsStore.getState().fonts.code.family).toBe("Menlo");
+  });
+
   test("a typed name can be picked where fonts cannot be listed", async () => {
     withLocalFonts(null);
     render(<FontsSection />);
@@ -101,8 +124,7 @@ describe("FontsSection", () => {
 
   test("the terminal size follows the code size until set", () => {
     render(<FontsSection />);
-    const [, terminalSize] = screen.getAllByLabelText("Font size");
-    if (!terminalSize) throw new Error("Terminal size field not found");
+    const terminalSize = screen.getByLabelText("Terminal Font size");
     expect(terminalSize).toHaveAttribute("placeholder", "13");
     fireEvent.change(terminalSize, { target: { value: "16" } });
     fireEvent.blur(terminalSize);

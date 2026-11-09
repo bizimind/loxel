@@ -86,6 +86,7 @@ function FontRow({
         <button
           type="button"
           onClick={openPicker}
+          aria-label={`${label}: ${family ?? defaultLabel}`}
           className="border-input flex h-8 w-64 items-center truncate rounded-md border bg-[var(--surface-2)] px-3 text-left text-xs shadow-sm"
           style={
             family ? { fontFamily: `${quoteFontFamily(family)}, ${GENERIC_FAMILY[kind]}` } : {}
@@ -106,6 +107,7 @@ function FontRow({
         )}
         <FontSizeInput
           kind={kind}
+          label={`${label} size`}
           size={size}
           placeholder={follows ? String(codeSize) : undefined}
           onCommit={(next) => updateFont(kind, { size: next })}
@@ -135,11 +137,13 @@ function FontRow({
  */
 function FontSizeInput({
   kind,
+  label,
   size,
   placeholder,
   onCommit,
 }: {
   kind: FontKind;
+  label: string;
   size: number | null;
   placeholder?: string;
   onCommit: (size: number | null) => void;
@@ -158,6 +162,8 @@ function FontSizeInput({
     const value = Number.parseInt(local, 10);
     if (Number.isFinite(value) && value >= min && value <= max) {
       onCommit(value);
+      // Shows what was saved, such as 13 for "13.5", even when the size did not change.
+      setLocal(String(value));
     } else {
       setLocal(size === null ? "" : String(size));
     }
@@ -167,13 +173,14 @@ function FontSizeInput({
     <div className="flex items-center gap-1.5">
       <Input
         type="number"
-        aria-label="Font size"
+        aria-label={label}
         value={local}
         placeholder={placeholder}
         onChange={(e) => setLocal(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
+          // Blurring commits, once.
+          if (e.key === "Enter") e.currentTarget.blur();
         }}
         min={min}
         max={max}
